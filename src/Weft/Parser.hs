@@ -32,7 +32,7 @@ import Text.Megaparsec.Char
   ( alphaNumChar
   , char
   , eol
-  , letterChar
+  , lowerChar
   , space1
   , string
   , upperChar
@@ -47,13 +47,18 @@ import Weft.Diagnostic
   , singleDiagnostic
   )
 import Weft.Syntax
-  ( Decl (..)
+  ( ConstructorDecl (..)
+  , Decl (..)
   , Expr (..)
+  , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
+  , PatternBinder (..)
+  , Pattern (..)
   , Position (..)
   , SourceSpan (..)
   , Type (..)
+  , TypeDecl (..)
   , exprSpan
   , mergeSourceSpans
   )
@@ -61,7 +66,8 @@ import Weft.Syntax
 type Parser = Parsec Void Text
 
 data TopLevelItem
-  = TopSignature Text Type SourceSpan
+  = TopTypeDecl TypeDecl
+  | TopSignature Text Type SourceSpan
   | TopDecl Decl
 
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
@@ -82,13 +88,46 @@ moduleParser = do
 
 topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
-  try typeSignatureParser
+  try typeDeclParser
+    <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
+
+typeDeclParser :: Parser TopLevelItem
+typeDeclParser = do
+  start <- getSourcePos
+  keyword "type"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  constructors <- constructorDeclParser `sepBy1` symbol "|"
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopTypeDecl $
+    TypeDecl
+      { typeDeclName = name
+      , typeDeclSpan = makeSourceSpan start end
+      , typeDeclNameSpan = nameSpan
+      , typeDeclConstructors = constructors
+      }
+
+constructorDeclParser :: Parser ConstructorDecl
+constructorDeclParser = do
+  start <- getSourcePos
+  (nameSpan, name) <- locatedUpperIdentifier
+  fields <- many typeAtomParser
+  end <- getSourcePos
+  pure
+    ConstructorDecl
+      { constructorDeclName = name
+      , constructorDeclSpan = makeSourceSpan start end
+      , constructorDeclNameSpan = nameSpan
+      , constructorDeclFields = fields
+      }
 
 typeSignatureParser :: Parser TopLevelItem
 typeSignatureParser = do
   start <- getSourcePos
-  (_, name) <- locatedIdentifier
+  (_, name) <- locatedLowerIdentifier
   _ <- symbol ":"
   annotatedType <- typeParser
   end <- getSourcePos
@@ -99,8 +138,8 @@ typeSignatureParser = do
 declParser :: Parser Decl
 declParser = do
   start <- getSourcePos
-  (nameSpan, name) <- locatedIdentifier
-  params <- many identifier
+  (nameSpan, name) <- locatedLowerIdentifier
+  params <- many lowerIdentifier
   _ <- symbol "="
   body <- exprParser
   end <- getSourcePos
@@ -128,14 +167,59 @@ exprParser = do
 atomParser :: Parser Expr
 atomParser =
   parens exprParser
+    <|> matchParser
     <|> boolParser
     <|> intParser
     <|> stringParser
+    <|> constructorExprParser
     <|> variableParser
+
+matchParser :: Parser Expr
+matchParser = do
+  start <- getSourcePos
+  keyword "match"
+  subject <- exprParser
+  branches <- braces (matchBranchParser `sepBy1` symbolN ",")
+  end <- getSourcePos
+  pure (EMatch (makeSourceSpan start end) subject branches)
+
+matchBranchParser :: Parser MatchBranch
+matchBranchParser = do
+  start <- getSourcePos
+  pattern' <- patternParser
+  _ <- symbolN "->"
+  body <- exprParser
+  end <- getSourcePos
+  pure
+    MatchBranch
+      { matchBranchSpan = makeSourceSpan start end
+      , matchBranchPattern = pattern'
+      , matchBranchBody = body
+      }
+
+patternParser :: Parser Pattern
+patternParser = do
+  (constructorSpan, constructorName) <- locatedUpperIdentifierN
+  binders <- many patternBinderParser
+  pure (PConstructor constructorSpan constructorName binders)
+
+patternBinderParser :: Parser PatternBinder
+patternBinderParser = do
+  (binderSpan, binderName) <- locatedLowerIdentifier
+  pure
+    PatternBinder
+      { patternBinderName = binderName
+      , patternBinderSpan = binderSpan
+      }
 
 variableParser :: Parser Expr
 variableParser = do
-  (span', name) <- locatedIdentifier
+  (span', name) <- locatedLowerIdentifier
+  pure (EVar span' name)
+
+constructorExprParser :: Parser Expr
+constructorExprParser = do
+  (span', name) <- locatedUpperIdentifier
   pure (EVar span' name)
 
 boolParser :: Parser Expr
@@ -164,6 +248,7 @@ typeAtomParser =
     <|> (keyword "Int" *> pure TInt)
     <|> (keyword "Str" *> pure TStr)
     <|> (keyword "Bool" *> pure TBool)
+    <|> (TNamed <$> upperIdentifier)
 
 moduleNameParser :: Parser Text
 moduleNameParser =
@@ -172,18 +257,31 @@ moduleNameParser =
   where
     moduleSegment = T.pack <$> ((:) <$> upperChar <*> many identTailChar)
 
-identifier :: Parser Text
-identifier = snd <$> locatedIdentifier
+lowerIdentifier :: Parser Text
+lowerIdentifier = snd <$> locatedLowerIdentifier
 
-locatedIdentifier :: Parser (SourceSpan, Text)
-locatedIdentifier = locatedLexeme identifierRaw
+upperIdentifier :: Parser Text
+upperIdentifier = snd <$> locatedUpperIdentifier
 
-identifierRaw :: Parser Text
-identifierRaw = do
-  name <- T.pack <$> ((:) <$> letterChar <*> many identTailChar)
+locatedLowerIdentifier :: Parser (SourceSpan, Text)
+locatedLowerIdentifier = locatedLexeme lowerIdentifierRaw
+
+locatedUpperIdentifier :: Parser (SourceSpan, Text)
+locatedUpperIdentifier = locatedLexeme upperIdentifierRaw
+
+locatedUpperIdentifierN :: Parser (SourceSpan, Text)
+locatedUpperIdentifierN = locatedLexemeWith scn upperIdentifierRaw
+
+lowerIdentifierRaw :: Parser Text
+lowerIdentifierRaw = do
+  name <- T.pack <$> ((:) <$> lowerChar <*> many identTailChar)
   when (name `elem` reservedWords) $
     fail ("reserved word " <> show name <> " cannot be used as an identifier")
   pure name
+
+upperIdentifierRaw :: Parser Text
+upperIdentifierRaw =
+  T.pack <$> ((:) <$> upperChar <*> many identTailChar)
 
 keyword :: Text -> Parser ()
 keyword word = lexeme (keywordRaw word)
@@ -211,18 +309,31 @@ lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
 
 locatedLexeme :: Parser a -> Parser (SourceSpan, a)
-locatedLexeme parser = do
+locatedLexeme = locatedLexemeWith sc
+
+locatedLexemeWith :: Parser () -> Parser a -> Parser (SourceSpan, a)
+locatedLexemeWith spaceConsumer parser = do
   start <- getSourcePos
   value <- parser
   end <- getSourcePos
-  sc
+  spaceConsumer
   pure (makeSourceSpan start end, value)
 
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
+symbolN :: Text -> Parser Text
+symbolN = L.symbol scn
+
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
+
+braces :: Parser a -> Parser a
+braces parser =
+  between openBrace closeBrace (scn *> parser <* scn)
+  where
+    openBrace = L.symbol scn "{"
+    closeBrace = L.symbol sc "}"
 
 sc :: Parser ()
 sc = L.space (void $ some (char ' ' <|> char '\t')) lineComment MP.empty
@@ -242,11 +353,12 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, items) = do
-  (decls, pendingSignatures) <- foldM step ([], Map.empty) items
+  (typeDecls, decls, pendingSignatures) <- foldM step ([], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
         { moduleName = name
+        , moduleTypeDecls = reverse typeDecls
         , moduleDecls = reverse decls
         }
     else
@@ -260,8 +372,10 @@ attachSignatures (name, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (decls, pendingSignatures) item =
+    step (typeDecls, decls, pendingSignatures) item =
       case item of
+        TopTypeDecl typeDecl ->
+          pure (typeDecl : typeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -274,7 +388,7 @@ attachSignatures (name, items) = do
                     [diagnosticRelated "previous signature" existingSpan]
                 ]
             Nothing ->
-              pure (decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
+              pure (typeDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
         TopDecl decl ->
           let annotationData = Map.lookup (declName decl) pendingSignatures
               updatedDecl =
@@ -287,7 +401,7 @@ attachSignatures (name, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (updatedDecl : decls, remaining)
+           in pure (typeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -307,6 +421,8 @@ toPosition pos =
 reservedWords :: [Text]
 reservedWords =
   [ "module"
+  , "type"
+  , "match"
   , "true"
   , "false"
   , "Int"

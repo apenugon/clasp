@@ -1,12 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Weft.Syntax
-  ( Decl (..)
+  ( ConstructorDecl (..)
+  , Decl (..)
   , Expr (..)
+  , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
+  , PatternBinder (..)
+  , Pattern (..)
   , Position (..)
   , SourceSpan (..)
+  , TypeDecl (..)
   , Type (..)
   , exprSpan
   , mergeSourceSpans
@@ -56,7 +61,24 @@ instance ToJSON SourceSpan where
 
 data Module = Module
   { moduleName :: ModuleName
+  , moduleTypeDecls :: [TypeDecl]
   , moduleDecls :: [Decl]
+  }
+  deriving (Eq, Show)
+
+data TypeDecl = TypeDecl
+  { typeDeclName :: Text
+  , typeDeclSpan :: SourceSpan
+  , typeDeclNameSpan :: SourceSpan
+  , typeDeclConstructors :: [ConstructorDecl]
+  }
+  deriving (Eq, Show)
+
+data ConstructorDecl = ConstructorDecl
+  { constructorDeclName :: Text
+  , constructorDeclSpan :: SourceSpan
+  , constructorDeclNameSpan :: SourceSpan
+  , constructorDeclFields :: [Type]
   }
   deriving (Eq, Show)
 
@@ -75,8 +97,25 @@ data Type
   = TInt
   | TStr
   | TBool
+  | TNamed Text
   | TFunction [Type] Type
   deriving (Eq, Ord, Show)
+
+data PatternBinder = PatternBinder
+  { patternBinderName :: Text
+  , patternBinderSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data Pattern = PConstructor SourceSpan Text [PatternBinder]
+  deriving (Eq, Show)
+
+data MatchBranch = MatchBranch
+  { matchBranchSpan :: SourceSpan
+  , matchBranchPattern :: Pattern
+  , matchBranchBody :: Expr
+  }
+  deriving (Eq, Show)
 
 data Expr
   = EVar SourceSpan Text
@@ -84,6 +123,7 @@ data Expr
   | EString SourceSpan Text
   | EBool SourceSpan Bool
   | ECall SourceSpan Expr [Expr]
+  | EMatch SourceSpan Expr [MatchBranch]
   deriving (Eq, Show)
 
 exprSpan :: Expr -> SourceSpan
@@ -98,6 +138,8 @@ exprSpan expr =
     EBool span' _ ->
       span'
     ECall span' _ _ ->
+      span'
+    EMatch span' _ _ ->
       span'
 
 mergeSourceSpans :: SourceSpan -> SourceSpan -> SourceSpan
@@ -117,6 +159,8 @@ renderType typ =
       "Str"
     TBool ->
       "Bool"
+    TNamed name ->
+      name
     TFunction args result ->
       T.intercalate " -> " (fmap renderAtomicType (args <> [result]))
 

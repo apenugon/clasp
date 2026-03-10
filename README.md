@@ -8,7 +8,7 @@ This repository currently contains:
 - A v0 language spec and build roadmap
 - A benchmark harness scaffold for measuring agent performance
 - A Nix-based Haskell development environment
-- The first compiler scaffold, exposed as the `weftc` executable, with parsing, checking, and JavaScript emission
+- The first compiler scaffold, exposed as the `weftc` executable, with parsing, checking, algebraic data types, pattern matching, and JavaScript emission
 
 ## Quick Start
 
@@ -18,6 +18,7 @@ cabal build
 cabal run weftc -- parse examples/hello.weft
 cabal run weftc -- check examples/hello.weft
 cabal run weftc -- check examples/hello.weft --json
+cabal run weftc -- check examples/status.weft
 cabal run weftc -- compile examples/hello.weft -o examples/hello.js
 cabal test
 ```
@@ -32,3 +33,4 @@ cabal test
 - `app/Main.hs`: CLI entrypoint
 - `src/Weft`: compiler modules
 - `examples/hello.weft`: sample source file
+- `examples/status.weft`: algebraic-data-type and match example
