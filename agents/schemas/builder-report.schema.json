@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clasp Builder Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "files_touched",
+    "tests_run",
+    "residual_risks"
+  ],
+  "properties": {
+    "summary": { "type": "string" },
+    "files_touched": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tests_run": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "residual_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
