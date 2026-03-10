@@ -18,4 +18,4 @@ const server = serveCompiledModule(compiled, {
   port: Number(process.env.PORT ?? "3001")
 });
 
-console.log(`Weft lead app listening on http://localhost:${server.port}`);
+console.log(`Clasp lead app listening on http://localhost:${server.port}`);

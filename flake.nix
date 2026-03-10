@@ -1,5 +1,5 @@
 {
-  description = "Weft compiler and language workspace";
+  description = "Clasp compiler and language workspace";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -20,7 +20,7 @@
     in
     {
       packages = forAllSystems ({ pkgs }: {
-        default = pkgs.haskellPackages.callCabal2nix "weft-compiler" ./. { };
+        default = pkgs.haskellPackages.callCabal2nix "clasp-compiler" ./. { };
       });
 
       devShells = forAllSystems ({ pkgs }: {

@@ -1,4 +1,5 @@
 dist-newstyle/
+dist/
 result
 *.hi
 *.o
@@ -6,6 +7,16 @@ result
 *.chs.h
 *.dyn_hi
 *.dyn_o
+*.prof
+*.hp
+*.eventlog
+.ghc.environment.*
+cabal.project.local
+.direnv/
+.envrc.local
+.DS_Store
+*.swp
+*.swo
 benchmarks/results/*
 benchmarks/workspaces/*
 !benchmarks/results/.gitkeep

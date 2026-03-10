@@ -1,8 +1,8 @@
-# Weft: AI-Native Universal Programming Language
+# Clasp: AI-Native Universal Programming Language
 
 ## Name
 
-The language is called `Weft`.
+The language is called `Clasp`.
 
 The name reflects the core design goal:
 
@@ -71,7 +71,7 @@ That means things like:
 
 ### Canonical source and explain mode
 
-`Weft` should have one canonical source language, not separate human and AI languages.
+`Clasp` should have one canonical source language, not separate human and AI languages.
 
 The canonical source should be:
 
@@ -82,10 +82,10 @@ The canonical source should be:
 
 Human readability should be supported through projections and renderers, not by forcing the source language itself to carry extra verbosity.
 
-So `Weft` should eventually support tools like:
+So `Clasp` should eventually support tools like:
 
-- `weft fmt` for canonical compact formatting
-- `weft explain` or a similar mode that expands syntax and diagnostics into a more human-readable form
+- `clasp fmt` for canonical compact formatting
+- `clasp explain` or a similar mode that expands syntax and diagnostics into a more human-readable form
 - AST- or IR-aware pretty renderers for docs, code review, and debugging
 
 The important constraint is that these are views over one language, not multiple peer syntaxes that can drift apart.
@@ -103,7 +103,7 @@ The language should include:
 
 This is one of the most important constraints for AI-generated code. The compiler should reject as many invalid states and interface mismatches as possible.
 
-Weft should aim for Haskell-grade safety as an outcome, without requiring Haskell-grade complexity in everyday usage.
+Clasp should aim for Haskell-grade safety as an outcome, without requiring Haskell-grade complexity in everyday usage.
 
 In practical terms, that means:
 
@@ -118,7 +118,7 @@ For long-running programs, this matters even more. Workflows, agents, and backgr
 
 Informative diagnostics are part of the type-system design, not a separate concern.
 
-Weft should aim for compiler errors that are:
+Clasp should aim for compiler errors that are:
 
 - precise about the location and source of the mismatch
 - explicit about expected versus actual shapes
@@ -157,7 +157,7 @@ The important design goal is not just shared types, but a shared source of truth
 
 ### Imperative surface, typed core
 
-`Weft` does not need to stay human-facing functional in its final source form.
+`Clasp` does not need to stay human-facing functional in its final source form.
 
 For adoption, it is probably better if the surface language feels more imperative and product-oriented:
 
@@ -188,7 +188,7 @@ One language everywhere should mean:
 - One package system
 - One set of contracts for data, actions, and workflows
 
-The main win is that application code does not have to constantly cross hand-maintained type boundaries between frontend and backend, or between workflow code and agent code. Everything inside the Weft world should use the same definitions.
+The main win is that application code does not have to constantly cross hand-maintained type boundaries between frontend and backend, or between workflow code and agent code. Everything inside the Clasp world should use the same definitions.
 
 This applies to:
 
@@ -217,7 +217,7 @@ Those boundaries include:
 - LLM responses
 - External tool results
 
-So the correct Weft model is not "there are no boundaries." The correct model is:
+So the correct Clasp model is not "there are no boundaries." The correct model is:
 
 - There should be no duplicated manual type definitions across the system
 - There are still real trust boundaries where untrusted data enters the typed world
@@ -240,7 +240,7 @@ The runtime should automatically execute those generated checks only when values
 
 That means:
 
-- Internal typed Weft code should not keep re-validating already trusted values
+- Internal typed Clasp code should not keep re-validating already trusted values
 - Untrusted inputs should be validated automatically before they become typed values
 - Once validation succeeds, the program can treat the value as a normal typed value
 
@@ -248,9 +248,9 @@ This is not like a garbage collector. A better model is automatic boundary enfor
 
 ### LLMs and agents as typed but untrusted edges
 
-LLM and agent systems are one of the strongest reasons to design Weft this way.
+LLM and agent systems are one of the strongest reasons to design Clasp this way.
 
-Weft should allow developers to declare:
+Clasp should allow developers to declare:
 
 - Expected model input structures
 - Expected output schemas
@@ -265,15 +265,15 @@ The right flow is:
 - A prompt or action declares an expected schema
 - The compiler derives the validator
 - The runtime applies the validator automatically
-- The result becomes either a trusted typed Weft value or a typed failure
+- The result becomes either a trusted typed Clasp value or a typed failure
 
-So LLM support in Weft should feel native and strongly typed, while still preserving the reality that model outputs are probabilistic external data.
+So LLM support in Clasp should feel native and strongly typed, while still preserving the reality that model outputs are probabilistic external data.
 
 ### Long-running programs
 
 For durable workflows, agents, and long-lived systems, type safety is necessary but not sufficient.
 
-Weft should also support:
+Clasp should also support:
 
 - Typed persisted workflow state
 - Versioned schemas
@@ -286,7 +286,7 @@ This is how "one language everywhere" remains safe over time instead of only at 
 
 ### Hot swap and self-update
 
-`Weft` should be designed for supervised hot swapping and self-update, especially for long-running agents and workflows.
+`Clasp` should be designed for supervised hot swapping and self-update, especially for long-running agents and workflows.
 
 That means the language and runtime should eventually support:
 
@@ -376,7 +376,7 @@ The right backend strategy is:
 - a shared typed core and lowered IR beneath that
 - future native backends, potentially including LLVM-oriented code generation, once the language semantics are stable enough to justify them
 
-That means Weft should not be designed as "a JavaScript-flavored language forever." It should be designed as a language with multiple emitters sharing one semantic core.
+That means Clasp should not be designed as "a JavaScript-flavored language forever." It should be designed as a language with multiple emitters sharing one semantic core.
 
 ### 9. Shared UI and state model
 

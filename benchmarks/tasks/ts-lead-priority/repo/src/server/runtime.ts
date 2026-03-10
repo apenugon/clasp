@@ -1,18 +1,32 @@
-export function installRuntime(bindings) {
-  const previous = globalThis.__claspRuntime ?? {};
-  globalThis.__claspRuntime = {
-    ...previous,
-    ...bindings
-  };
+declare const Bun:
+  | {
+      serve(options: {
+        port: number;
+        fetch(request: Request): Response | Promise<Response>;
+      }): {
+        port: number;
+        stop(force?: boolean): void;
+      };
+    }
+  | undefined;
+
+export interface JsonRoute<I, O> {
+  method: string;
+  path: string;
+  decodeRequest(body: string): I;
+  encodeResponse(value: O): string;
+  handler(input: I): O | Promise<O>;
 }
 
-export function serveCompiledModule(compiledModule, options = {}) {
-  if (typeof Bun === "undefined" || typeof Bun.serve !== "function") {
-    throw new Error("serveCompiledModule requires Bun.");
+export function serveRoutes(
+  routes: JsonRoute<unknown, unknown>[],
+  options: { port?: number } = {}
+) {
+  if (!Bun || typeof Bun.serve !== "function") {
+    throw new Error("serveRoutes requires Bun.");
   }
 
-  const routes = compiledModule.__claspRoutes ?? [];
-  const port = options.port ?? 3001;
+  const port = options.port ?? 3301;
 
   return Bun.serve({
     port,
@@ -24,7 +38,7 @@ export function serveCompiledModule(compiledModule, options = {}) {
       );
 
       if (!route) {
-        return jsonResponse(404, { error: "not_found", path: url.pathname });
+        return jsonResponse(404, { error: "not_found" });
       }
 
       const rawBody =
@@ -67,7 +81,7 @@ export function serveCompiledModule(compiledModule, options = {}) {
   });
 }
 
-function jsonResponse(status, payload) {
+function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
@@ -76,6 +90,6 @@ function jsonResponse(status, payload) {
   });
 }
 
-function errorMessage(error) {
+function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

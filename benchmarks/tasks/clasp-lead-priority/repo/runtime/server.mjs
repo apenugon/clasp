@@ -12,7 +12,7 @@ export function serveCompiledModule(compiledModule, options = {}) {
   }
 
   const routes = compiledModule.__claspRoutes ?? [];
-  const port = options.port ?? 3001;
+  const port = options.port ?? 3301;
 
   return Bun.serve({
     port,
@@ -24,7 +24,7 @@ export function serveCompiledModule(compiledModule, options = {}) {
       );
 
       if (!route) {
-        return jsonResponse(404, { error: "not_found", path: url.pathname });
+        return jsonResponse(404, { error: "not_found" });
       }
 
       const rawBody =

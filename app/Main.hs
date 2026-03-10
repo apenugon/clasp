@@ -10,8 +10,8 @@ import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Weft.Compiler (checkEntry, compileEntry, parseSource)
-import Weft.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
+import Clasp.Compiler (checkEntry, compileEntry, parseSource)
+import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
   = Pretty
@@ -115,8 +115,8 @@ writeFailure format err =
 usage :: String
 usage =
   unlines
-    [ "weftc usage:"
-    , "  weftc parse <input.weft> [--json]"
-    , "  weftc check <input.weft> [--json]"
-    , "  weftc compile <input.weft> [-o output.js] [--json]"
+    [ "claspc usage:"
+    , "  claspc parse <input.clasp> [--json]"
+    , "  claspc check <input.clasp> [--json]"
+    , "  claspc compile <input.clasp> [-o output.js] [--json]"
     ]

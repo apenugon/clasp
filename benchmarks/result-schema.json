@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Weft Benchmark Result",
+  "title": "Clasp Benchmark Result",
   "type": "object",
   "required": [
     "taskId",
@@ -68,6 +68,28 @@
       },
       "additionalProperties": false
     },
+    "harnessUsage": {
+      "type": "object",
+      "required": [
+        "provider",
+        "agentLogFile",
+        "inputTokens",
+        "cachedInputTokens",
+        "outputTokens",
+        "uncachedInputTokens",
+        "uncachedTotal"
+      ],
+      "properties": {
+        "provider": { "type": "string" },
+        "agentLogFile": { "type": "string" },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "uncachedInputTokens": { "type": "integer", "minimum": 0 },
+        "uncachedTotal": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "verification": {
       "type": "object",
       "required": [
@@ -90,4 +112,3 @@
   },
   "additionalProperties": true
 }
-

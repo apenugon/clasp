@@ -1,8 +1,0 @@
-module Main
-
-hello = "Hello from Weft"
-
-id : Str -> Str
-id v = v
-
-main = id hello

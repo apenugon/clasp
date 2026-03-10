@@ -1,8 +1,8 @@
 # Benchmarks
 
-This directory contains the first benchmark harness scaffold for `Weft`.
+This directory contains the first benchmark harness scaffold for `Clasp`.
 
-The goal is to measure whether AI coding harnesses perform better on realistic software tasks when the target project is written in `Weft` rather than a baseline language.
+The goal is to measure whether AI coding harnesses perform better on realistic software tasks when the target project is written in `Clasp` rather than a baseline language.
 
 ## Layout
 
@@ -59,21 +59,36 @@ node benchmarks/run-benchmark.mjs run ts-shared-priority \
   --agent-command "your-harness-command-here"
 ```
 
+Summarize recorded runs by task, harness, and model:
+
+```sh
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
+```
+
+Run a repeated Codex sample set with a consistent harness wrapper:
+
+```sh
+bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
+```
+
 The runner is harness-agnostic on purpose. It standardizes task prep, verification, and result recording without hard-coding one vendor CLI.
 
 The runner itself is plain ESM and can be executed with either `node` or `bun`. It exports a few environment variables into prepare, verify, and run commands:
 
-- `WEFT_PROJECT_ROOT`
-- `WEFT_BENCHMARK_ROOT`
-- `WEFT_BENCHMARK_TASK_ID`
-- `WEFT_BENCHMARK_WORKSPACE`
+- `CLASP_PROJECT_ROOT`
+- `CLASP_BENCHMARK_ROOT`
+- `CLASP_BENCHMARK_TASK_ID`
+- `CLASP_BENCHMARK_WORKSPACE`
 
-That lets Weft task repos compile against the current compiler without hard-coded local paths. The existing TypeScript task manifests still use `npm` on purpose, because the public benchmark story should avoid changing both the language and the surrounding runtime/tooling at the same time.
+That lets Clasp task repos compile against the current compiler without hard-coded local paths. The existing TypeScript task manifests still use `npm` on purpose, because the public benchmark story should avoid changing both the language and the surrounding runtime/tooling at the same time.
+
+When a `codex` run writes `codex-run.jsonl` in the workspace, the runner now extracts token usage automatically from the final `turn.completed` event. The machine-readable result file records both the benchmark-normalized `tokenUsage` and raw provider counts under `harnessUsage`.
 
 ## Initial Tasks
 
 - `ts-shared-priority`: shared-type change across frontend and backend
 - `ts-agent-escalation`: structured agent-output validation with stricter boundary behavior
-- `weft-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
+- `ts-lead-priority`: shared-schema change across a typed route, decoders, and an LLM-shaped model boundary
+- `clasp-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
 
-The Weft task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.
+The Clasp task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.

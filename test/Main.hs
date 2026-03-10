@@ -22,14 +22,14 @@ import Test.Tasty.HUnit
   , assertFailure
   , testCase
   )
-import Weft.Compiler (checkEntry, checkSource, compileEntry, compileSource, parseSource)
-import Weft.Diagnostic
+import Clasp.Compiler (checkEntry, checkSource, compileEntry, compileSource, parseSource)
+import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
   , renderDiagnosticBundle
   , renderDiagnosticBundleJson
   )
-import Weft.Lower
+import Clasp.Lower
   ( LowerDecl (..)
   , LowerExpr (..)
   , LowerMatchBranch (..)
@@ -37,7 +37,7 @@ import Weft.Lower
   , LowerRecordField (..)
   , lowerModule
   )
-import Weft.Syntax
+import Clasp.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
@@ -62,7 +62,7 @@ main = defaultMain tests
 tests :: TestTree
 tests =
   testGroup
-    "weft-compiler"
+    "clasp-compiler"
     [ parserTests
     , checkerTests
     , diagnosticTests
@@ -146,6 +146,7 @@ parserTests =
           Left err ->
             assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
           Right modl -> do
+            assertEqual "service type decl count" 1 (length (moduleTypeDecls modl))
             case moduleForeignDecls modl of
               [foreignDecl] -> do
                 assertEqual "foreign name" "mockLeadSummaryModel" (foreignDeclName foreignDecl)
@@ -350,13 +351,16 @@ compileTests =
           Left err ->
             assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
-            assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $weftRuntime(\"mockLeadSummaryModel\")($0); }" `T.isInfixOf` emitted)
+            assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $claspRuntime(\"mockLeadSummaryModel\")($0); }" `T.isInfixOf` emitted)
+            assertBool "expected enum decoder" ("function $decode_LeadPriority" `T.isInfixOf` emitted)
+            assertBool "expected internal enum validator" ("function $validateInternal_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected record decoder" ("function $decode_LeadSummary" `T.isInfixOf` emitted)
-            assertBool "expected route registry" ("export const __weftRoutes" `T.isInfixOf` emitted)
+            assertBool "expected record encoder to validate internal values" ("function $encode_LeadSummary(value) { return JSON.stringify($serialize_LeadSummary($validateInternal_LeadSummary(value, \"value\"))); }" `T.isInfixOf` emitted)
+            assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
-          result <- checkEntry (root </> "Main.weft")
+          result <- checkEntry (root </> "Main.clasp")
           case result of
             Left err ->
               assertFailure ("expected imported project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -364,7 +368,7 @@ compileTests =
               pure ()
     , testCase "compileEntry compiles imported modules into one JS output" $
         withProjectFiles "compile-import-success" importSuccessFiles $ \root -> do
-          result <- compileEntry (root </> "Main.weft")
+          result <- compileEntry (root </> "Main.clasp")
           case result of
             Left err ->
               assertFailure ("expected imported project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -373,7 +377,7 @@ compileTests =
               assertBool "expected main export" ("export const main" `T.isInfixOf` emitted)
     , testCase "checkEntry reports missing imported modules" $
         withProjectFiles "import-missing" missingImportFiles $ \root -> do
-          result <- checkEntry (root </> "Main.weft")
+          result <- checkEntry (root </> "Main.clasp")
           assertHasCode "E_IMPORT_NOT_FOUND" result
     ]
 
@@ -467,7 +471,7 @@ helloSource =
   T.unlines
     [ "module Main"
     , ""
-    , "hello = \"Hello from Weft\""
+    , "hello = \"Hello from Clasp\""
     , ""
     , "id : Str -> Str"
     , "id v = v"
@@ -554,14 +558,17 @@ serviceSource =
   T.unlines
     [ "module Main"
     , ""
+    , "type LeadPriority = Low | Medium | High"
+    , ""
     , "record LeadRequest = {"
     , "  company : Str,"
-    , "  budget : Int"
+    , "  budget : Int,"
+    , "  priorityHint : LeadPriority"
     , "}"
     , ""
     , "record LeadSummary = {"
     , "  summary : Str,"
-    , "  priority : Str,"
+    , "  priority : LeadPriority,"
     , "  followUpRequired : Bool"
     , "}"
     , ""
@@ -573,7 +580,7 @@ serviceSource =
     , "encodedDefault : Str"
     , "encodedDefault = encode (LeadSummary {"
     , "  summary = \"ready\","
-    , "  priority = \"high\","
+    , "  priority = High,"
     , "  followUpRequired = true"
     , "})"
     , ""
@@ -670,13 +677,13 @@ duplicateBranchSource =
 
 importSuccessFiles :: [(FilePath, Text)]
 importSuccessFiles =
-  [ ("Main.weft", importSuccessMainSource)
-  , ("Shared/User.weft", sharedUserSource)
+  [ ("Main.clasp", importSuccessMainSource)
+  , ("Shared/User.clasp", sharedUserSource)
   ]
 
 missingImportFiles :: [(FilePath, Text)]
 missingImportFiles =
-  [ ("Main.weft", missingImportMainSource)
+  [ ("Main.clasp", missingImportMainSource)
   ]
 
 importSuccessMainSource :: Text
