@@ -89,6 +89,26 @@ For persuasive public results, keep:
 
 `Clasp` should be auditable at the benchmark layer too.
 
+### 6. Benchmark external-objective adaptation, not just file edits
+
+The strongest long-term benchmark for `Clasp` is not merely:
+
+- "can an agent patch the code?"
+
+It is:
+
+- "can an agent interpret typed external feedback, identify the affected domain objects and declarations, make a bounded change, and ship it safely?"
+
+That means the benchmark suite should eventually include tasks driven by:
+
+- conversion drops
+- false-positive or false-negative business decisions
+- support escalations
+- latency or cost pressure on key user flows
+- workflow failures tied to domain objects
+
+The language should be judged partly on whether it makes that loop more direct and less error-prone.
+
 ## Headline Metrics
 
 ### Harness uplift
@@ -163,6 +183,18 @@ This should cover:
 - tool inputs/outputs
 - LLM outputs
 
+### Privilege containment rate
+
+How often the system prevents a harness or workflow from performing side effects outside its declared authority.
+
+This should cover:
+
+- file writes outside allowed roots
+- unauthorized network access
+- unauthorized process execution
+- secret access without declared capability
+- tool invocations outside policy
+
 ### Workflow durability rate
 
 How often long-running workflows survive:
@@ -173,6 +205,16 @@ How often long-running workflows survive:
 - invalid external responses
 
 without human repair.
+
+### Degraded-mode success rate
+
+How often the system continues safely under partial failure by using:
+
+- fallback providers
+- bounded retries
+- degraded read-only or limited-function mode
+- operator handoff
+- rollback paths
 
 ### Schema drift resistance
 
@@ -189,6 +231,36 @@ How much of the project's data and contract surface is shared across:
 - apps
 
 This helps show whether `Clasp` actually delivers on "one language everywhere."
+
+### External-objective traceability
+
+How easily the system can map a runtime or market signal back to:
+
+- affected business objects
+- affected prompts and workflows
+- affected routes, policies, and tests
+- the declarations responsible for a given behavior
+
+This is important because future agent systems will increasingly operate on external outcomes rather than on file trees.
+
+### Goal-constrained adaptation rate
+
+How often the harness can take a typed external signal, make a change, and satisfy explicit product guardrails such as:
+
+- do not exceed a latency budget
+- do not increase false rejects above a threshold
+- do not exceed a token-spend limit
+- do not violate a workflow safety policy
+
+### Secret containment and redaction rate
+
+How often secrets and sensitive values are kept out of:
+
+- prompts
+- traces
+- logs
+- error payloads
+- unintended tool inputs
 
 ## Benchmark Harnesses
 
@@ -271,6 +343,8 @@ Tasks that stress typed AI interfaces:
 - define a new tool and wire it into an agent
 - recover from invalid model output
 - add a prompt-output contract and tests
+- prevent prompt or tool injection from escalating authority
+- preserve secret redaction through traces and tool calls
 
 ### Suite D: Durable workflow tasks
 
@@ -281,6 +355,8 @@ Tasks that stress long-running correctness:
 - maintain idempotency
 - migrate persisted state
 - recover from invalid queued data
+- survive provider outage with bounded degradation
+- trigger operator handoff or rollback safely
 
 ### Suite E: Bug-fix tasks
 
@@ -294,13 +370,48 @@ Tasks seeded with realistic defects:
 
 These are often more informative than greenfield feature tasks.
 
+### Suite F: Agent control-plane tasks
+
+Tasks that stress the operational layer around the code:
+
+- add or change a repository instruction block
+- tighten or relax a capability policy
+- add a typed command or hook
+- register a new external tool or provider
+- fix a broken verifier or permission mismatch
+- prevent an unauthorized side effect without blocking an allowed one
+- tighten secret or data-retention policy without breaking execution
+
+These tasks matter because current agent systems spend real effort in Markdown, JSON, shell, and settings files that are not part of the application language.
+
+### Suite G: External-objective adaptation tasks
+
+Tasks that begin from product or market feedback instead of from code-local change requests:
+
+- a lead-routing rule is harming enterprise conversion
+- a support escalation reveals a bad refund or triage path
+- an LLM classification is hurting a business KPI for a defined segment
+- a token-cost spike requires a safe prompt or routing adjustment
+- a workflow needs a guarded rollout based on explicit business constraints
+
+These tasks should require the harness to:
+
+- interpret the typed feedback signal
+- identify affected business objects and declarations
+- implement a bounded change
+- validate it against tests, evals, and rollout guardrails
+
 ## Benchmark Scenarios
 
 Each scenario should define:
 
 - repository starting state
 - task prompt
+- domain model and affected business objects
+- feedback signal or operational trigger when relevant
 - acceptance tests
+- eval and rollout guardrails where relevant
+- policy and security constraints
 - budget limit
 - time limit
 - allowed tools
@@ -340,6 +451,9 @@ Language and platform decisions should be judged against questions like:
 - Does this reduce total token spend?
 - Does this improve compile-time defect detection?
 - Does this reduce failures at trust boundaries?
+- Does this make external-objective-driven changes more direct and auditable?
+- Does this improve least-privilege enforcement and secret containment?
+- Does this improve recovery under partial failure without increasing unsafe behavior?
 
 If a feature is theoretically elegant but harms harness-level performance, that should count against it.
 
@@ -353,6 +467,10 @@ Over time, `Clasp` should aim to demonstrate:
 - better recovery from invalid LLM/tool outputs
 - better durability for long-running workflows
 - more shared definitions across frontend, backend, and agent systems
+- stronger control-plane leverage with fewer sidecar conventions
+- better traceability from external signals to the declarations that implement product behavior
+- stronger privilege containment and lower secret-leak risk
+- safer degraded-mode behavior under model, tool, or provider failure
 
 ## Immediate Next Step
 
@@ -362,6 +480,7 @@ The first benchmark implementation should be simple:
 2. Build a small but realistic benchmark repo in `TypeScript`.
 3. Mirror the same benchmark scenarios in early `Clasp` as the language matures.
 4. Record intervention count, tokens, time-to-green, and compile-time catches.
-5. Expand into workflow and LLM boundary tests as soon as schemas and validation land.
+5. Expand into workflow, control-plane, and LLM boundary tests as soon as schemas and validation land.
+6. Add external-objective adaptation scenarios once the language can express typed feedback, goals, and rollout gates.
 
 The point is to start measuring early, even before `Clasp` is feature-complete.

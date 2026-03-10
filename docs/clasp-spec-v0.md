@@ -46,7 +46,9 @@ It does not yet include:
 - Effects
 - Dedicated schema syntax separate from records
 - Workflows
-- Rich LLM-specific syntax beyond foreign/runtime boundaries
+- Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
+- External-objective declarations such as goals, metrics, experiments, and rollout policies
+- Rich LLM-specific syntax beyond foreign/runtime boundaries, including typed prompt functions and provider strategies
 
 Those features remain part of the language direction, but they should be layered onto a stable front-end rather than mixed into the first parser/emitter prototype.
 

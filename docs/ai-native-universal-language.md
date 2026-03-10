@@ -427,6 +427,19 @@ The language should support:
 - Multimodal inputs and outputs
 - Model/provider abstraction without hiding important differences
 
+This should absorb the strongest ideas from systems like `BAML` rather than forcing `Clasp` users into a second schema and prompt DSL.
+
+In practice that means:
+
+- Prompt-as-function declarations with normal typed inputs and outputs
+- Structured output validation derived from the same schema system used elsewhere
+- Typed streaming, including partial and incremental object materialization
+- Provider/client strategies such as fallback, retries, round-robin, and budget policies
+- Generated clients and UI-facing bindings from the same model declarations
+- A constrained dynamic-schema mechanism for cases where part of the output contract is chosen at runtime
+
+`Clasp` should interoperate with external systems like `BAML`, but it should not need a separate prompt-language universe just to express these semantics.
+
 ### 12. First-class agents and workflows
 
 Agents should be represented as structured workflows, not just loops around a chat completion call.
@@ -442,6 +455,70 @@ The language should support:
 - Idempotency
 - Compensation and rollback patterns
 - Human-in-the-loop checkpoints
+
+## Agent Control Plane
+
+Serious agent systems already rely on a control plane outside the programming language:
+
+- Repo memory and instructions
+- Permission policies
+- Tool registries
+- Commands and task entrypoints
+- Hooks and event handlers
+- Subagent definitions
+- Verifier gates
+- Machine-readable traces
+
+If `Clasp` leaves those concerns as a permanent mix of Markdown, YAML, JSON, and shell, it gives up much of the advantage it is trying to earn.
+
+### Small semantic core, rich declarative platform
+
+`Clasp` should keep the expression and type core small.
+
+The better structure is:
+
+- A small semantic core for values, types, schemas, effects, modules, and workflows
+- A set of compiler-known declarative platform constructs for the agent control plane
+- A deterministic projection pipeline that emits docs, manifests, wrappers, traces, and runtime metadata
+
+That keeps the language law small while still making the platform first-class.
+
+### First-class control-plane declarations
+
+The platform should eventually support declarations such as:
+
+- `guide` for repository memory and instruction inheritance
+- `policy` for permissions, approvals, and capability boundaries
+- `command` for typed workflow entrypoints and operator actions
+- `hook` for event-driven automation
+- `agent` for named subagents with bounded authority
+- `toolserver` for external tool and MCP-style integrations
+- `verify` for repo-native success criteria and gated checks
+- `trace` for standard execution and audit events
+
+These declarations should:
+
+- live in normal modules
+- import the same business types and schemas as application code
+- participate in the same package graph
+- be validated by the compiler rather than interpreted as untyped sidecars
+
+### Why a language can matter here
+
+This infrastructure can absolutely be built around other languages.
+
+`TypeScript`, `Rust`, and `Python` can all support some combination of schemas, hooks, agent configs, and generated tooling.
+
+So `Clasp` only earns the right to exist if it reduces entropy by making these concerns share one model:
+
+- one schema system across product code, tools, prompts, workflows, and evals
+- one module graph for code and control-plane declarations
+- one compiler that understands both product semantics and operational metadata
+- one capability model for effects, permissions, and tool authority
+- one canonical source form for stable context, low-noise diffs, and reliable caching
+- one diagnostics and trace protocol for both humans and agents
+
+If `Clasp` does not do that, the same control-plane infrastructure can be bolted onto an existing language and the case for a new language becomes much weaker.
 
 ### 13. Evals as a built-in concept
 
@@ -473,6 +550,101 @@ The platform should capture:
 
 This should make agent runs inspectable and replayable.
 
+### Tooling products should consume first-class artifacts
+
+Products like a playground, prompt inspector, eval runner, or trace browser should be official and excellent, but they do not need to be part of the semantic core.
+
+What should be first-class instead is the data they depend on:
+
+- Prompt IR
+- Eval declarations
+- Trace and event schemas
+- Capability graphs
+- Deterministic fixtures and snapshots
+- Provider strategy metadata
+- Projection metadata back to source spans and declarations
+
+That design keeps the core language small while making advanced tooling straightforward to build and keep correct.
+
+## External-Objective-Native Adaptation
+
+The long-term goal for agent systems is not merely to edit files faster.
+
+Agents will increasingly be asked to change software in response to:
+
+- Market feedback
+- Conversion data
+- Support escalations
+- Sales notes
+- Quality regressions
+- Safety incidents
+- Cost and latency pressure
+
+Those signals are expressed in business terms, not file paths.
+
+More generally, they are expressed in external terms rather than code terms.
+
+So `Clasp` should be designed so agents can operate on domain objects, policies, and real-world targets as the stable substrate of the system.
+
+Business objects are one especially important subset of this broader class, but the same model should also cover:
+
+- safety objectives
+- compliance requirements
+- operational reliability targets
+- latency and cost budgets
+- scientific or product-quality metrics
+- human approval and escalation policies
+
+### Business objects should be first-class
+
+The platform should eventually support first-class domain constructs such as:
+
+- entities and records that represent durable business objects
+- events that describe state transitions and external feedback
+- metrics and goals tied to those objects and flows
+- experiments and rollouts for bounded behavior changes
+- policy and guardrail declarations tied to external outcomes
+
+### Feedback should be typed against domain objects
+
+The same schema system should model:
+
+- request and response contracts
+- persisted state
+- workflow state
+- tool inputs and outputs
+- model outputs
+- market feedback and operational events
+
+That gives the compiler and runtime a shared way to answer:
+
+- which business objects are affected
+- which routes, prompts, workflows, and policies touch them
+- which tests, evals, and rollout rules should gate changes
+
+### Mental model
+
+The working loop should look like:
+
+- external feedback or target
+- typed domain signal
+- affected business object, policy surface, or workflow
+- affected declarations
+- candidate change
+- eval
+- rollout
+- new feedback
+
+Or in one line:
+
+`external feedback or target -> typed domain signal -> affected business object, policy surface, or workflow -> affected declarations -> candidate change -> eval -> rollout -> new feedback`
+
+The compiler and tooling should eventually make it easy to answer questions like:
+
+"This drop in enterprise lead conversion touches these business objects, these prompts, these routes, these policies, and these tests."
+
+If `Clasp` cannot answer that kind of question directly from its semantic model, agents remain file editors rather than operators acting on external objectives.
+
 ## Verification and Trust
 
 ### 15. More than type safety
@@ -502,7 +674,44 @@ Code should receive explicit authority to:
 
 Ambient authority is a poor fit for autonomous systems.
 
-### 17. Reproducible builds and execution
+Least privilege should be the default, not an afterthought.
+
+That means:
+
+- capabilities should be explicit on workflows, commands, hooks, prompts, and tool integrations
+- file, network, process, secret, and model authority should be separately grantable
+- approval boundaries should be part of the semantic model, not shell wrapper behavior
+- capability narrowing should be easy and capability escalation should be deliberate and auditable
+
+### Secrets, provenance, and data handling
+
+`Clasp` should treat secrets and untrusted data as semantically distinct classes of values.
+
+At a minimum, the platform should support:
+
+- opaque secret values that are non-loggable and non-serializable by default
+- provenance metadata for values that came from users, tools, models, files, queues, or external services
+- policy hooks for redaction, retention, and disclosure
+- clear separation between trusted instructions, untrusted content, and executable authority
+
+This matters for both classical security and agent-specific risks such as prompt injection, tool misuse, and accidental secret exfiltration.
+
+### 17. Robust failure semantics
+
+Security is not enough if systems fail chaotically under pressure.
+
+The language and platform should make it straightforward to model:
+
+- explicit failure and absence types
+- deadlines, cancellation, and timeout propagation
+- retries with bounded policy and backoff
+- circuit breakers and degraded-mode fallbacks
+- idempotent actions and compensating actions
+- operator handoff and kill-switch paths
+
+Robustness should be expressed in program semantics, not hidden in ad hoc helper libraries.
+
+### 18. Reproducible builds and execution
 
 The system should have:
 
@@ -515,9 +724,17 @@ The system should have:
 
 This is necessary for debugging and trust.
 
+Where possible, the toolchain should also preserve provenance for:
+
+- compiler version
+- dependency graph
+- emitted artifacts
+- prompt, model, and eval versions
+- policy and capability versions
+
 ## Tooling Optimized for AI
 
-### 18. Machine-readable everything
+### 19. Machine-readable everything
 
 The compiler and tooling should expose:
 
@@ -525,16 +742,20 @@ The compiler and tooling should expose:
 - ASTs
 - Symbol graphs
 - Type information
+- Prompt and workflow IR
+- Trace schemas and execution events
+- Capability graphs
+- Projection manifests for docs, CLIs, hooks, and tool integrations
 - Semantic diffs
 - Refactoring APIs
 
 AI systems should work against the semantic model of the codebase, not scrape error strings.
 
-### 19. Canonical formatting and low-noise diffs
+### 20. Canonical formatting and low-noise diffs
 
 Formatting should be mandatory and stable. The language should minimize stylistic churn so both humans and AI can focus on behavioral changes.
 
-### 20. Fast incremental compilation
+### 21. Fast incremental compilation
 
 If the language is meant for iterative AI-human collaboration, the feedback loop has to be fast:
 
@@ -552,6 +773,10 @@ These are not optional if the goal is a serious universal language:
 - First-class streaming for UI, server responses, and model outputs
 - Offline-first support and sync semantics for mobile and edge cases
 - Data lineage and privacy controls for AI features
+- Secret classification, redaction, and provenance-aware policy enforcement
+- Business-object graphs, metrics, goals, and rollout metadata
+- Safe rollout, rollback, and kill-switch semantics for automated changes
+- Resource budgets for time, cost, model usage, and side-effectful operations
 - Built-in versioning and migration support for schemas, workflows, and prompts
 - Excellent FFI so the language can adopt existing ecosystems instead of waiting for replacements
 - A clear deploy model for web, backend, workers, and apps
@@ -564,6 +789,13 @@ These are not optional if the goal is a serious universal language:
 - Hiding side effects behind convenience APIs
 - Requiring separate languages for frontend, backend, and agents
 - Making LLM support a thin SDK layer instead of part of the language model
+- Treating the agent control plane as permanent sidecar YAML, Markdown, and shell glue
+- Pushing core agent-platform semantics into ad hoc macros or metaprogramming
+- Letting business feedback stay disconnected from the declarations that implement the business
+- Giving autonomous code ambient access to files, network, tools, or secrets
+- Treating prompt and tool injection as merely application-layer concerns instead of language and runtime concerns
+- Allowing secret-bearing or untrusted values to flow into logs, traces, or prompts by default
+- Encoding retries, rollbacks, and kill switches only as framework convention
 - Sacrificing interoperability for purity
 
 ## Bottom Line
