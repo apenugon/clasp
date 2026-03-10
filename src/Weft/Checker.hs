@@ -1,15 +1,33 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Weft.Checker
-  ( TypeEnv
-  , checkModule
+  ( checkModule
   ) where
 
-import Control.Monad (foldM, unless, when)
+import Control.Monad (foldM, unless, when, zipWithM_)
+import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad.State.Strict
+  ( MonadState
+  , State
+  , gets
+  , modify'
+  , runState
+  )
+import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Weft.Core
+  ( CoreDecl (..)
+  , CoreExpr (..)
+  , CoreMatchBranch (..)
+  , CoreModule (..)
+  , CoreParam (..)
+  , CorePattern (..)
+  , CorePatternBinder (..)
+  )
 import Weft.Diagnostic
   ( DiagnosticBundle
   , DiagnosticRelated
@@ -30,11 +48,17 @@ import Weft.Syntax
   , Type (..)
   , TypeDecl (..)
   , exprSpan
-  , renderType
   )
 
-type TypeEnv = Map.Map Text Type
+type DeclTypeEnv = Map.Map Text Type
 type TypeDeclEnv = Map.Map Text TypeDecl
+type DeclMap = Map.Map Text Decl
+
+data ModuleContext = ModuleContext
+  { contextTypeDeclEnv :: TypeDeclEnv
+  , contextConstructorEnv :: ConstructorEnv
+  , contextDeclMap :: DeclMap
+  }
 
 data ConstructorInfo = ConstructorInfo
   { constructorInfoTypeName :: Text
@@ -43,11 +67,84 @@ data ConstructorInfo = ConstructorInfo
 
 type ConstructorEnv = Map.Map Text ConstructorInfo
 
-data InferError
-  = DeferredName Text SourceSpan
-  | FatalError DiagnosticBundle
+data InferType
+  = IInt
+  | IStr
+  | IBool
+  | INamed Text
+  | IFunction [InferType] InferType
+  | IVar Int
+  deriving (Eq, Ord, Show)
 
-checkModule :: Module -> Either DiagnosticBundle TypeEnv
+data InferState = InferState
+  { inferNextTypeVar :: Int
+  , inferSubstitution :: Map.Map Int InferType
+  }
+
+data InferFailure
+  = InferDeferredName Text SourceSpan
+  | InferDiagnostic DiagnosticBundle
+
+newtype InferM a = InferM
+  { unInferM :: ExceptT InferFailure (State InferState) a
+  }
+  deriving (Functor, Applicative, Monad, MonadError InferFailure, MonadState InferState)
+
+data DraftDecl = DraftDecl
+  { draftDeclName :: Text
+  , draftDeclType :: InferType
+  , draftDeclParams :: [DraftParam]
+  , draftDeclBody :: DraftExpr
+  }
+
+data DraftParam = DraftParam
+  { draftParamName :: Text
+  , draftParamType :: InferType
+  }
+
+data DraftExpr = DraftExpr
+  { draftExprSpan :: SourceSpan
+  , draftExprType :: InferType
+  , draftExprNode :: DraftExprNode
+  }
+
+data DraftExprNode
+  = DraftVar Text
+  | DraftInt Integer
+  | DraftString Text
+  | DraftBool Bool
+  | DraftCall DraftExpr [DraftExpr]
+  | DraftMatch DraftExpr [DraftMatchBranch]
+
+data DraftMatchBranch = DraftMatchBranch
+  { draftMatchBranchSpan :: SourceSpan
+  , draftMatchBranchPattern :: DraftPattern
+  , draftMatchBranchBody :: DraftExpr
+  }
+
+data DraftPattern = DraftConstructorPattern SourceSpan Text [DraftPatternBinder]
+
+data DraftPatternBinder = DraftPatternBinder
+  { draftPatternBinderName :: Text
+  , draftPatternBinderSpan :: SourceSpan
+  , draftPatternBinderType :: InferType
+  }
+
+data MatchResultAccumulator = MatchResultAccumulator
+  { accumulatorExpectedTypeName :: Maybe Text
+  , accumulatorSeenBranches :: Map.Map Text MatchBranch
+  , accumulatorFirstBranchType :: Maybe (InferType, MatchBranch)
+  , accumulatorDraftBranches :: [DraftMatchBranch]
+  }
+
+data UnifyContext = UnifyContext
+  { unifyCode :: Text
+  , unifySummary :: Text
+  , unifyPrimarySpan :: SourceSpan
+  , unifyRelated :: [DiagnosticRelated]
+  }
+
+checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       decls = moduleDecls modl
@@ -58,31 +155,25 @@ checkModule modl = do
 
   constructorEnv <- buildConstructorEnv typeDecls
   ensureUniqueDecls decls constructorEnv
-  ensureFunctionAnnotations decls
+  mapM_ ensureUniqueParams decls
 
-  let annotatedDeclEnv =
-        Map.fromList
-          [ (declName decl, annotatedType)
-          | decl <- decls
-          , Just annotatedType <- [declAnnotation decl]
-          ]
-      constructorTypeEnv =
-        Map.map constructorInfoType constructorEnv
-      initialTermEnv =
-        Map.union annotatedDeclEnv constructorTypeEnv
-      declMap = Map.fromList [(declName decl, decl) | decl <- decls]
+  let ctx =
+        ModuleContext
+          { contextTypeDeclEnv = typeDeclEnv
+          , contextConstructorEnv = constructorEnv
+          , contextDeclMap = Map.fromList [(declName decl, decl) | decl <- decls]
+          }
 
-  inferredDeclEnv <-
-    inferValueDecls
-      typeDeclEnv
-      constructorEnv
-      declMap
-      initialTermEnv
-      annotatedDeclEnv
+  declTypeEnv <- inferDeclTypes ctx decls
+  let termEnv = Map.union declTypeEnv (Map.map constructorInfoType constructorEnv)
 
-  let checkedTermEnv = Map.union inferredDeclEnv constructorTypeEnv
-  mapM_ (checkDecl typeDeclEnv constructorEnv declMap checkedTermEnv) decls
-  pure inferredDeclEnv
+  coreDecls <- traverse (checkDecl ctx termEnv) decls
+  pure
+    CoreModule
+      { coreModuleName = moduleName modl
+      , coreModuleTypeDecls = typeDecls
+      , coreModuleDecls = coreDecls
+      }
 
 ensureUniqueTypeDecls :: [TypeDecl] -> Either DiagnosticBundle ()
 ensureUniqueTypeDecls = go Map.empty
@@ -202,53 +293,51 @@ ensureUniqueDecls decls constructorEnv = go Map.empty decls
             Nothing ->
               go (Map.insert (declName decl) decl seen) rest
 
-ensureFunctionAnnotations :: [Decl] -> Either DiagnosticBundle ()
-ensureFunctionAnnotations decls =
-  case missing of
-    [] ->
-      pure ()
-    _ ->
-      Left . diagnosticBundle $
-        [ diagnostic
-            "E_MISSING_ANNOTATION"
-            ("Function declaration `" <> declName decl <> "` requires a type annotation.")
-            (Just (declNameSpan decl))
-            ["Add a declaration signature such as `name : Str -> Str` above the definition."]
-            []
-        | decl <- missing
-        ]
+ensureUniqueParams :: Decl -> Either DiagnosticBundle ()
+ensureUniqueParams decl = go Map.empty (declParams decl)
   where
-    missing =
-      [ decl
-      | decl <- decls
-      , not (null (declParams decl))
-      , isNothing (declAnnotation decl)
-      ]
+    go _ [] = pure ()
+    go seen (paramName : rest) =
+      case Map.lookup paramName seen of
+        Just _ ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_PARAM"
+                ("Duplicate parameter `" <> paramName <> "` in declaration `" <> declName decl <> "`.")
+                (Just (declNameSpan decl))
+                ["Each parameter name may only appear once within a function declaration."]
+                []
+            ]
+        Nothing ->
+          go (Map.insert paramName () seen) rest
 
-inferValueDecls ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  Either DiagnosticBundle TypeEnv
-inferValueDecls typeDeclEnv constructorEnv declMap initialTermEnv initialDeclEnv = loop pendingDecls initialDeclEnv initialTermEnv
+inferDeclTypes :: ModuleContext -> [Decl] -> Either DiagnosticBundle DeclTypeEnv
+inferDeclTypes ctx decls = loop pendingDecls annotatedDeclEnv initialTermEnv
   where
+    annotatedDeclEnv =
+      Map.fromList
+        [ (declName decl, annotatedType)
+        | decl <- decls
+        , Just annotatedType <- [declAnnotation decl]
+        ]
+    constructorTypeEnv =
+      Map.map constructorInfoType (contextConstructorEnv ctx)
+    initialTermEnv =
+      Map.union annotatedDeclEnv constructorTypeEnv
     pendingDecls =
       [ decl
-      | decl <- Map.elems declMap
-      , null (declParams decl)
-      , isNothing (declAnnotation decl)
+      | decl <- decls
+      , declAnnotation decl == Nothing
       ]
 
-    loop [] declEnv _ = pure declEnv
-    loop pending declEnv termEnv = do
-      (nextPending, nextDeclEnv, nextTermEnv, progressed) <- foldM (attemptDecl termEnv) ([], declEnv, termEnv, False) pending
+    loop [] declTypeEnv _ = pure declTypeEnv
+    loop pending declTypeEnv termEnv = do
+      (nextPending, nextDeclTypeEnv, nextTermEnv, progressed) <- foldM (attemptDecl termEnv) ([], declTypeEnv, termEnv, False) pending
       if null nextPending
-        then pure nextDeclEnv
+        then pure nextDeclTypeEnv
         else
           if progressed
-            then loop (reverse nextPending) nextDeclEnv nextTermEnv
+            then loop (reverse nextPending) nextDeclTypeEnv nextTermEnv
             else
               case reverse nextPending of
                 unresolvedDecl : _ ->
@@ -257,340 +346,195 @@ inferValueDecls typeDeclEnv constructorEnv declMap initialTermEnv initialDeclEnv
                       "E_CANNOT_INFER"
                       ("Could not infer the type of `" <> declName unresolvedDecl <> "`.")
                       (declNameSpan unresolvedDecl)
-                      ["Add an explicit type annotation or reorder dependent declarations."]
+                      ["Add an explicit type annotation or break the dependency cycle."]
                 [] ->
-                  pure nextDeclEnv
+                  pure nextDeclTypeEnv
 
-    attemptDecl termEnv (remaining, declEnvAcc, termEnvAcc, progressed) decl =
-      case inferExpr typeDeclEnv constructorEnv declMap termEnv Map.empty (declBody decl) of
+    attemptDecl termEnv (remaining, declTypeEnvAcc, termEnvAcc, progressed) decl =
+      case inferDeclType ctx termEnv decl of
+        Left (InferDeferredName _ _) ->
+          pure (decl : remaining, declTypeEnvAcc, termEnvAcc, progressed)
+        Left (InferDiagnostic err) ->
+          Left err
         Right inferredType ->
           pure
             ( remaining
-            , Map.insert (declName decl) inferredType declEnvAcc
+            , Map.insert (declName decl) inferredType declTypeEnvAcc
             , Map.insert (declName decl) inferredType termEnvAcc
             , True
             )
-        Left (DeferredName _ _) ->
-          pure (decl : remaining, declEnvAcc, termEnvAcc, progressed)
-        Left (FatalError err) ->
-          Left err
 
-checkDecl :: TypeDeclEnv -> ConstructorEnv -> Map.Map Text Decl -> TypeEnv -> Decl -> Either DiagnosticBundle ()
-checkDecl typeDeclEnv constructorEnv declMap env decl =
-  case (declParams decl, declAnnotation decl) of
-    ([], Nothing) -> do
-      _ <- inferExprOrFatal typeDeclEnv constructorEnv declMap env Map.empty (declBody decl)
-      pure ()
-    ([], Just annotatedType) -> do
-      actualType <- inferExprOrFatal typeDeclEnv constructorEnv declMap env Map.empty (declBody decl)
-      ensureTypeMatches (Just decl) (exprSpan (declBody decl)) annotatedType actualType
-    (params, Just annotatedType) -> do
-      (argTypes, resultType) <- expectFunctionAnnotation decl params annotatedType
-      localEnv <- bindParams params argTypes
-      actualType <- inferExprOrFatal typeDeclEnv constructorEnv declMap env localEnv (declBody decl)
-      ensureTypeMatches (Just decl) (exprSpan (declBody decl)) resultType actualType
-    (_, Nothing) ->
-      pure ()
+inferDeclType :: ModuleContext -> DeclTypeEnv -> Decl -> Either InferFailure Type
+inferDeclType ctx termEnv decl = do
+  (draftDecl, inferState) <- runInferAction (inferDeclDraft ctx termEnv decl Nothing)
+  first InferDiagnostic (freezeInferTypeForDecl decl inferState (draftDeclType draftDecl))
 
-expectFunctionAnnotation :: Decl -> [Text] -> Type -> Either DiagnosticBundle ([Type], Type)
-expectFunctionAnnotation decl params annotatedType =
-  case annotatedType of
-    TFunction argTypes resultType -> do
-      when (length argTypes /= length params) $
-        Left . diagnosticBundle $
-          [ diagnostic
-              "E_ARITY_MISMATCH"
-              ("Type annotation for `" <> declName decl <> "` does not match the declared parameter count.")
-              (declAnnotationSpan decl)
-              [ "Expected "
-                  <> T.pack (show (length params))
-                  <> " parameter types but got "
-                  <> T.pack (show (length argTypes))
-                  <> "."
-              ]
-              [diagnosticRelated "declaration" (declNameSpan decl)]
-          ]
-      pure (argTypes, resultType)
-    _ ->
-      Left . diagnosticBundle $
-        [ diagnostic
-            "E_ARITY_MISMATCH"
-            ("Declaration `" <> declName decl <> "` has parameters but a non-function annotation.")
-            (declAnnotationSpan decl)
-            ["Use a function type such as `Str -> Str`."]
-            [diagnosticRelated "declaration" (declNameSpan decl)]
-        ]
-
-bindParams :: [Text] -> [Type] -> Either DiagnosticBundle TypeEnv
-bindParams params argTypes =
-  pure (Map.fromList (zip params argTypes))
-
-inferExprOrFatal ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  Expr ->
-  Either DiagnosticBundle Type
-inferExprOrFatal typeDeclEnv constructorEnv declMap env localEnv expr =
-  case inferExpr typeDeclEnv constructorEnv declMap env localEnv expr of
-    Right inferredType ->
-      Right inferredType
-    Left (DeferredName deferredName deferredSpan) ->
+checkDecl :: ModuleContext -> DeclTypeEnv -> Decl -> Either DiagnosticBundle CoreDecl
+checkDecl ctx termEnv decl = do
+  expectedType <-
+    case Map.lookup (declName decl) termEnv of
+      Just declType ->
+        pure declType
+      Nothing ->
+        Left $
+          singleDiagnosticAt
+            "E_INTERNAL"
+            ("Missing checked type for `" <> declName decl <> "`.")
+            (declNameSpan decl)
+            ["The module checker did not retain a final type for this declaration."]
+  case runInferAction (inferDeclDraft ctx termEnv decl (Just expectedType)) of
+    Left (InferDeferredName deferredName deferredSpan) ->
       Left $
         singleDiagnosticAt
           "E_CANNOT_INFER"
           ("Could not resolve the type of `" <> deferredName <> "` yet.")
           deferredSpan
           ["Add an explicit annotation to break the dependency chain."]
-    Left (FatalError err) ->
+    Left (InferDiagnostic err) ->
       Left err
+    Right (draftDecl, inferState) ->
+      freezeDraftDecl decl inferState draftDecl
 
-inferExpr ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  Expr ->
-  Either InferError Type
-inferExpr typeDeclEnv constructorEnv declMap env localEnv expr =
+inferDeclDraft :: ModuleContext -> DeclTypeEnv -> Decl -> Maybe Type -> InferM DraftDecl
+inferDeclDraft ctx termEnv decl maybeExpectedType = do
+  let name = declName decl
+      params = declParams decl
+  case maybeExpectedType of
+    Just expectedType ->
+      inferExpectedDecl ctx termEnv decl name params expectedType
+    Nothing ->
+      inferUnannotatedDecl ctx termEnv decl name params
+
+inferExpectedDecl :: ModuleContext -> DeclTypeEnv -> Decl -> Text -> [Text] -> Type -> InferM DraftDecl
+inferExpectedDecl ctx termEnv decl name params expectedType =
+  case params of
+    [] -> do
+      body <- inferExpr ctx termEnv Map.empty (declBody decl)
+      unify
+        ( UnifyContext
+            { unifyCode = "E_TYPE_MISMATCH"
+            , unifySummary = "Type mismatch."
+            , unifyPrimarySpan = exprSpan (declBody decl)
+            , unifyRelated = annotationRelated decl
+            }
+        )
+        (draftExprType body)
+        (typeToInferType expectedType)
+      pure
+        DraftDecl
+          { draftDeclName = name
+          , draftDeclType = typeToInferType expectedType
+          , draftDeclParams = []
+          , draftDeclBody = body
+          }
+    _ ->
+      case expectedType of
+        TFunction argTypes resultType ->
+          if length argTypes /= length params
+            then
+              throwDiagnostic . diagnosticBundle $
+                [ diagnostic
+                    "E_ARITY_MISMATCH"
+                    ("Type annotation for `" <> declName decl <> "` does not match the declared parameter count.")
+                    (declAnnotationSpan decl)
+                    [ "Expected "
+                        <> T.pack (show (length params))
+                        <> " parameter types but got "
+                        <> T.pack (show (length argTypes))
+                        <> "."
+                    ]
+                    [diagnosticRelated "declaration" (declNameSpan decl)]
+                ]
+            else do
+              let draftParams = zipWith DraftParam params (fmap typeToInferType argTypes)
+                  localEnv = Map.fromList (zip params (fmap draftParamType draftParams))
+              body <- inferExpr ctx termEnv localEnv (declBody decl)
+              unify
+                ( UnifyContext
+                    { unifyCode = "E_TYPE_MISMATCH"
+                    , unifySummary = "Type mismatch."
+                    , unifyPrimarySpan = exprSpan (declBody decl)
+                    , unifyRelated = annotationRelated decl
+                    }
+                )
+                (draftExprType body)
+                (typeToInferType resultType)
+              pure
+                DraftDecl
+                  { draftDeclName = name
+                  , draftDeclType = typeToInferType expectedType
+                  , draftDeclParams = draftParams
+                  , draftDeclBody = body
+                  }
+        _ ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_ARITY_MISMATCH"
+                ("Declaration `" <> declName decl <> "` has parameters but a non-function annotation.")
+                (declAnnotationSpan decl)
+                ["Use a function type such as `Str -> Str`."]
+                [diagnosticRelated "declaration" (declNameSpan decl)]
+            ]
+
+inferUnannotatedDecl :: ModuleContext -> DeclTypeEnv -> Decl -> Text -> [Text] -> InferM DraftDecl
+inferUnannotatedDecl ctx termEnv decl name params =
+  case params of
+    [] -> do
+      body <- inferExpr ctx termEnv Map.empty (declBody decl)
+      pure
+        DraftDecl
+          { draftDeclName = name
+          , draftDeclType = draftExprType body
+          , draftDeclParams = []
+          , draftDeclBody = body
+          }
+    _ -> do
+      paramTypes <- traverse (const freshTypeVar) params
+      let draftParams = zipWith DraftParam params paramTypes
+          localEnv = Map.fromList (zip params paramTypes)
+      body <- inferExpr ctx termEnv localEnv (declBody decl)
+      pure
+        DraftDecl
+          { draftDeclName = name
+          , draftDeclType = IFunction paramTypes (draftExprType body)
+          , draftDeclParams = draftParams
+          , draftDeclBody = body
+          }
+
+inferExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> Expr -> InferM DraftExpr
+inferExpr ctx termEnv localEnv expr =
   case expr of
     EVar span' name ->
       case Map.lookup name localEnv of
         Just localType ->
-          Right localType
+          pure (DraftExpr span' localType (DraftVar name))
         Nothing ->
-          case Map.lookup name env of
+          case Map.lookup name termEnv of
             Just topLevelType ->
-              Right topLevelType
+              pure (DraftExpr span' (typeToInferType topLevelType) (DraftVar name))
             Nothing ->
-              if Map.member name declMap
-                then Left (DeferredName name span')
+              if Map.member name (contextDeclMap ctx)
+                then throwError (InferDeferredName name span')
                 else
-                  Left . FatalError $
+                  throwDiagnostic $
                     singleDiagnosticAt
                       "E_UNBOUND_NAME"
                       ("Unknown name `" <> name <> "`.")
                       span'
                       ["Introduce a declaration or fix the spelling of the reference."]
-    EInt _ _ ->
-      Right TInt
-    EString _ _ ->
-      Right TStr
-    EBool _ _ ->
-      Right TBool
+    EInt span' value ->
+      pure (DraftExpr span' IInt (DraftInt value))
+    EString span' value ->
+      pure (DraftExpr span' IStr (DraftString value))
+    EBool span' value ->
+      pure (DraftExpr span' IBool (DraftBool value))
     ECall callSpan fn args -> do
-      fnType <- inferExpr typeDeclEnv constructorEnv declMap env localEnv fn
-      applyCall typeDeclEnv constructorEnv declMap env localEnv callSpan fn fnType args
-    EMatch matchSpan subject branches -> do
-      subjectType <- inferExpr typeDeclEnv constructorEnv declMap env localEnv subject
-      inferMatch typeDeclEnv constructorEnv declMap env localEnv matchSpan subjectType branches
-
-inferMatch ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  SourceSpan ->
-  Type ->
-  [MatchBranch] ->
-  Either InferError Type
-inferMatch typeDeclEnv constructorEnv declMap env localEnv matchSpan subjectType branches =
-  case subjectType of
-    TNamed typeName ->
-      case Map.lookup typeName typeDeclEnv of
-        Just typeDecl -> do
-          resultType <- inferMatchBranches typeDeclEnv constructorEnv declMap env localEnv typeDecl branches
-          ensureExhaustiveMatch typeDecl branches matchSpan
-          pure resultType
-        Nothing ->
-          Left . FatalError $
-            singleDiagnosticAt
-              "E_UNKNOWN_TYPE"
-              ("Unknown type `" <> typeName <> "`.")
-              matchSpan
-              ["Declare the type before matching on it."]
-    _ ->
-      Left . FatalError $
-        diagnosticBundle
-          [ diagnostic
-              "E_MATCH_SUBJECT"
-              "Match expressions require an algebraic data type subject."
-              (Just matchSpan)
-              ["Expected a named sum type but got " <> renderType subjectType <> "."]
-              []
-          ]
-
-inferMatchBranches ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  TypeDecl ->
-  [MatchBranch] ->
-  Either InferError Type
-inferMatchBranches typeDeclEnv constructorEnv declMap env localEnv typeDecl branches = do
-  (_, firstBranchType) <- foldM step (Map.empty, Nothing) branches
-  case firstBranchType of
-    Just (typ, _) ->
-      pure typ
-    Nothing ->
-      Left . FatalError $
-        diagnosticBundle
-          [ diagnostic
-              "E_EMPTY_MATCH"
-              "Match expressions require at least one branch."
-              (Just (typeDeclSpan typeDecl))
-              ["Add branches for each constructor in the matched type."]
-              []
-          ]
-  where
-    step (seenConstructors, firstType) branch = do
-      (constructorName, fieldTypes) <- resolveBranchPattern typeDecl branch
-      case Map.lookup constructorName seenConstructors of
-        Just previousBranch ->
-          Left . FatalError $
-            diagnosticBundle
-              [ diagnostic
-                  "E_DUPLICATE_MATCH_BRANCH"
-                  ("Duplicate match branch for constructor `" <> constructorName <> "`.")
-                  (Just (matchBranchSpan branch))
-                  ["Each constructor may appear at most once in a match expression."]
-                  [diagnosticRelated "previous branch" (matchBranchSpan previousBranch)]
-              ]
-        Nothing ->
-          pure ()
-
-      binderEnv <- bindPatternFields branch fieldTypes
-      branchType <- inferExpr typeDeclEnv constructorEnv declMap env (Map.union binderEnv localEnv) (matchBranchBody branch)
-      case firstType of
-        Nothing ->
-          pure (Map.insert constructorName branch seenConstructors, Just (branchType, branch))
-        Just (expectedType, expectedBranch) ->
-          if branchType == expectedType
-            then pure (Map.insert constructorName branch seenConstructors, firstType)
-            else
-              Left . FatalError $
-                diagnosticBundle
-                  [ diagnostic
-                      "E_MATCH_RESULT_TYPE"
-                      "Match branches must all return the same type."
-                      (Just (matchBranchSpan branch))
-                      [ "Expected " <> renderType expectedType <> " but got " <> renderType branchType <> "." ]
-                      [diagnosticRelated "first branch" (matchBranchSpan expectedBranch)]
-                  ]
-
-    resolveBranchPattern expectedTypeDecl branch =
-      case matchBranchPattern branch of
-        PConstructor constructorSpan constructorName binders ->
-          case Map.lookup constructorName constructorEnv of
-            Nothing ->
-              Left . FatalError $
-                singleDiagnosticAt
-                  "E_UNKNOWN_CONSTRUCTOR"
-                  ("Unknown constructor `" <> constructorName <> "`.")
-                  constructorSpan
-                  ["Declare the constructor before using it in a match branch."]
-            Just constructorInfo ->
-              if constructorInfoTypeName constructorInfo /= typeDeclName expectedTypeDecl
-                then
-                  Left . FatalError $
-                    diagnosticBundle
-                      [ diagnostic
-                          "E_PATTERN_TYPE_MISMATCH"
-                          ("Constructor `" <> constructorName <> "` does not belong to type `" <> typeDeclName expectedTypeDecl <> "`.")
-                          (Just constructorSpan)
-                          ["Use a constructor declared by the matched type."]
-                          [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
-                      ]
-                else
-                  let fieldTypes = constructorDeclFields (constructorInfoDecl constructorInfo)
-                   in if length binders /= length fieldTypes
-                        then
-                          Left . FatalError $
-                            diagnosticBundle
-                              [ diagnostic
-                                  "E_PATTERN_ARITY"
-                                  ("Pattern for `" <> constructorName <> "` binds the wrong number of fields.")
-                                  (Just constructorSpan)
-                                  [ "Expected "
-                                      <> T.pack (show (length fieldTypes))
-                                      <> " binders but got "
-                                      <> T.pack (show (length binders))
-                                      <> "."
-                                  ]
-                                  [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
-                              ]
-                        else
-                          Right (constructorName, fieldTypes)
-
-    bindPatternFields branch fieldTypes =
-      case matchBranchPattern branch of
-        PConstructor _ _ binders -> do
-          ensureUniquePatternBinders binders
-          pure (Map.fromList (zip (fmap patternBinderName binders) fieldTypes))
-
-ensureUniquePatternBinders :: [PatternBinder] -> Either InferError ()
-ensureUniquePatternBinders = go Map.empty
-  where
-    go _ [] = pure ()
-    go seen (binder : rest) =
-      case Map.lookup (patternBinderName binder) seen of
-        Just previousBinder ->
-          Left . FatalError $
-            diagnosticBundle
-              [ diagnostic
-                  "E_DUPLICATE_PATTERN_BINDER"
-                  ("Duplicate pattern binder `" <> patternBinderName binder <> "`.")
-                  (Just (patternBinderSpan binder))
-                  ["Each bound name may only appear once within a single match pattern."]
-                  [diagnosticRelated "previous binder" (patternBinderSpan previousBinder)]
-              ]
-        Nothing ->
-          go (Map.insert (patternBinderName binder) binder seen) rest
-
-ensureExhaustiveMatch :: TypeDecl -> [MatchBranch] -> SourceSpan -> Either InferError ()
-ensureExhaustiveMatch typeDecl branches matchSpan =
-  let expectedConstructors = fmap constructorDeclName (typeDeclConstructors typeDecl)
-      branchConstructors =
-        [ constructorName
-        | MatchBranch _ (PConstructor _ constructorName _) _ <- branches
-        ]
-      missingConstructors =
-        filter (`notElem` branchConstructors) expectedConstructors
-   in unless (null missingConstructors) $
-        Left . FatalError $
-          diagnosticBundle
-            [ diagnostic
-                "E_NONEXHAUSTIVE_MATCH"
-                "Match expression is missing constructors."
-                (Just matchSpan)
-                ["Add branches for: " <> T.intercalate ", " missingConstructors <> "."]
-                [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)]
-            ]
-
-applyCall ::
-  TypeDeclEnv ->
-  ConstructorEnv ->
-  Map.Map Text Decl ->
-  TypeEnv ->
-  TypeEnv ->
-  SourceSpan ->
-  Expr ->
-  Type ->
-  [Expr] ->
-  Either InferError Type
-applyCall typeDeclEnv constructorEnv declMap env localEnv callSpan fnExpr fnType args =
-  case fnType of
-    TFunction paramTypes resultType ->
-      if length paramTypes /= length args
-        then
-          Left . FatalError $
-            diagnosticBundle
+      fnExpr <- inferExpr ctx termEnv localEnv fn
+      resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
+      case resolvedFnType of
+        IFunction paramTypes _ ->
+          when (length paramTypes /= length args) $
+            throwDiagnostic . diagnosticBundle $
               [ diagnostic
                   "E_CALL_ARITY"
                   "Function call does not match the declared arity."
@@ -601,64 +545,583 @@ applyCall typeDeclEnv constructorEnv declMap env localEnv callSpan fnExpr fnType
                       <> T.pack (show (length args))
                       <> "."
                   ]
-                  (relatedForFunction fnExpr declMap constructorEnv)
+                  (relatedForFunction fn (contextDeclMap ctx) (contextConstructorEnv ctx))
               ]
-        else do
-          actualArgTypes <- traverse (inferExpr typeDeclEnv constructorEnv declMap env localEnv) args
-          mapM_ (uncurry (ensureArgumentTypeMatches fnExpr declMap constructorEnv)) (zip args (zip paramTypes actualArgTypes))
-          Right resultType
-    _ ->
-      Left . FatalError $
-        diagnosticBundle
+        IVar _ ->
+          pure ()
+        _ ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_NOT_A_FUNCTION"
+                "Tried to call a non-function value."
+                (Just callSpan)
+                ["Only function-typed values can be applied to arguments."]
+                []
+            ]
+      argExprs <- traverse (inferExpr ctx termEnv localEnv) args
+      expectedParamTypes <- traverse (const freshTypeVar) args
+      resultType <- freshTypeVar
+      unify
+        ( UnifyContext
+            { unifyCode = "E_NOT_A_FUNCTION"
+            , unifySummary = "Tried to call a non-function value."
+            , unifyPrimarySpan = callSpan
+            , unifyRelated = []
+            }
+        )
+        (draftExprType fnExpr)
+        (IFunction expectedParamTypes resultType)
+      zipWithM_
+        ( \argExpr expectedParamType ->
+            unify
+              ( UnifyContext
+                  { unifyCode = "E_TYPE_MISMATCH"
+                  , unifySummary = "Argument type does not match the function signature."
+                  , unifyPrimarySpan = draftExprSpan argExpr
+                  , unifyRelated = relatedForFunction fn (contextDeclMap ctx) (contextConstructorEnv ctx)
+                  }
+              )
+              (draftExprType argExpr)
+              expectedParamType
+        )
+        argExprs
+        expectedParamTypes
+      pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
+    EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
+
+inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
+inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
+  subjectExpr <- inferExpr ctx termEnv localEnv subject
+  subjectType <- resolveCurrentType (draftExprType subjectExpr)
+  initialExpectedTypeName <-
+    case subjectType of
+      INamed typeName ->
+        pure (Just typeName)
+      IVar _ ->
+        pure Nothing
+      _ ->
+        throwDiagnostic . diagnosticBundle $
           [ diagnostic
-              "E_NOT_A_FUNCTION"
-              "Tried to call a non-function value."
-              (Just callSpan)
-              ["Only function-typed values can be applied to arguments."]
+              "E_MATCH_SUBJECT"
+              "Match expressions require an algebraic data type subject."
+              (Just matchSpan)
+              ["Expected a named sum type but got " <> renderInferType subjectType <> "."]
               []
           ]
 
-ensureTypeMatches :: Maybe Decl -> SourceSpan -> Type -> Type -> Either DiagnosticBundle ()
-ensureTypeMatches declContext primarySpan expected actual =
-  when (expected /= actual) $
-    Left . diagnosticBundle $
-      [ diagnostic
-          "E_TYPE_MISMATCH"
-          "Type mismatch."
-          (Just primarySpan)
-          ["Expected " <> renderType expected <> " but got " <> renderType actual <> "."]
-          (annotationRelated declContext)
-      ]
+  accumulator <-
+    foldM
+      (inferMatchBranch ctx termEnv localEnv)
+      (MatchResultAccumulator initialExpectedTypeName Map.empty Nothing [])
+      branches
 
-ensureArgumentTypeMatches :: Expr -> Map.Map Text Decl -> ConstructorEnv -> Expr -> (Type, Type) -> Either InferError ()
-ensureArgumentTypeMatches fnExpr declMap constructorEnv argExpr (expected, actual) =
-  when (expected /= actual) $
-    Left . FatalError $
-      diagnosticBundle
+  expectedTypeName <-
+    case accumulatorExpectedTypeName accumulator of
+      Just typeName ->
+        pure typeName
+      Nothing ->
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_EMPTY_MATCH"
+              "Match expressions require at least one branch."
+              (Just matchSpan)
+              ["Add branches for each constructor in the matched type."]
+              []
+          ]
+
+  unify
+    ( UnifyContext
+        { unifyCode = "E_MATCH_SUBJECT"
+        , unifySummary = "Match expressions require an algebraic data type subject."
+        , unifyPrimarySpan = matchSpan
+        , unifyRelated = []
+        }
+    )
+    (draftExprType subjectExpr)
+    (INamed expectedTypeName)
+
+  typeDecl <-
+    case Map.lookup expectedTypeName (contextTypeDeclEnv ctx) of
+      Just resolvedTypeDecl ->
+        pure resolvedTypeDecl
+      Nothing ->
+        throwDiagnostic $
+          singleDiagnosticAt
+            "E_UNKNOWN_TYPE"
+            ("Unknown type `" <> expectedTypeName <> "`.")
+            matchSpan
+            ["Declare the type before matching on it."]
+
+  ensureExhaustiveMatch typeDecl (accumulatorSeenBranches accumulator) matchSpan
+
+  resultType <-
+    case accumulatorFirstBranchType accumulator of
+      Just (branchType, _) ->
+        pure branchType
+      Nothing ->
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_EMPTY_MATCH"
+              "Match expressions require at least one branch."
+              (Just matchSpan)
+              ["Add branches for each constructor in the matched type."]
+              []
+          ]
+
+  pure
+    ( DraftExpr
+        matchSpan
+        resultType
+        (DraftMatch subjectExpr (accumulatorDraftBranches accumulator))
+    )
+
+inferMatchBranch ::
+  ModuleContext ->
+  DeclTypeEnv ->
+  Map.Map Text InferType ->
+  MatchResultAccumulator ->
+  MatchBranch ->
+  InferM MatchResultAccumulator
+inferMatchBranch ctx termEnv localEnv accumulator branch = do
+  (constructorName, constructorTypeName, draftPattern) <-
+    resolveBranchPattern ctx (accumulatorExpectedTypeName accumulator) branch
+
+  case Map.lookup constructorName (accumulatorSeenBranches accumulator) of
+    Just previousBranch ->
+      throwDiagnostic . diagnosticBundle $
         [ diagnostic
-            "E_TYPE_MISMATCH"
-            "Argument type does not match the function signature."
-            (Just (exprSpan argExpr))
-            ["Expected " <> renderType expected <> " but got " <> renderType actual <> "."]
-            (relatedForFunction fnExpr declMap constructorEnv)
+            "E_DUPLICATE_MATCH_BRANCH"
+            ("Duplicate match branch for constructor `" <> constructorName <> "`.")
+            (Just (matchBranchSpan branch))
+            ["Each constructor may appear at most once in a match expression."]
+            [diagnosticRelated "previous branch" (matchBranchSpan previousBranch)]
         ]
+    Nothing ->
+      pure ()
 
-annotationRelated :: Maybe Decl -> [DiagnosticRelated]
-annotationRelated Nothing = []
-annotationRelated (Just decl) =
+  let binderEnv =
+        Map.fromList
+          [ (draftPatternBinderName binder, draftPatternBinderType binder)
+          | binder <- patternBinders draftPattern
+          ]
+
+  branchBody <- inferExpr ctx termEnv (Map.union binderEnv localEnv) (matchBranchBody branch)
+
+  nextFirstBranchType <-
+    case accumulatorFirstBranchType accumulator of
+      Nothing ->
+        pure (Just (draftExprType branchBody, branch))
+      Just (expectedBranchType, expectedBranch) -> do
+        unify
+          ( UnifyContext
+              { unifyCode = "E_MATCH_RESULT_TYPE"
+              , unifySummary = "Match branches must all return the same type."
+              , unifyPrimarySpan = matchBranchSpan branch
+              , unifyRelated = [diagnosticRelated "first branch" (matchBranchSpan expectedBranch)]
+              }
+          )
+          expectedBranchType
+          (draftExprType branchBody)
+        pure (accumulatorFirstBranchType accumulator)
+
+  let nextExpectedTypeName =
+        case accumulatorExpectedTypeName accumulator of
+          Just existingTypeName ->
+            Just existingTypeName
+          Nothing ->
+            Just constructorTypeName
+
+  pure
+    MatchResultAccumulator
+      { accumulatorExpectedTypeName = nextExpectedTypeName
+      , accumulatorSeenBranches = Map.insert constructorName branch (accumulatorSeenBranches accumulator)
+      , accumulatorFirstBranchType = nextFirstBranchType
+      , accumulatorDraftBranches =
+          accumulatorDraftBranches accumulator
+            <> [ DraftMatchBranch
+                   { draftMatchBranchSpan = matchBranchSpan branch
+                   , draftMatchBranchPattern = draftPattern
+                   , draftMatchBranchBody = branchBody
+                   }
+               ]
+      }
+
+resolveBranchPattern ::
+  ModuleContext ->
+  Maybe Text ->
+  MatchBranch ->
+  InferM (Text, Text, DraftPattern)
+resolveBranchPattern ctx maybeExpectedTypeName branch =
+  case matchBranchPattern branch of
+    PConstructor constructorSpan constructorName binders ->
+      case Map.lookup constructorName (contextConstructorEnv ctx) of
+        Nothing ->
+          throwDiagnostic $
+            singleDiagnosticAt
+              "E_UNKNOWN_CONSTRUCTOR"
+              ("Unknown constructor `" <> constructorName <> "`.")
+              constructorSpan
+              ["Declare the constructor before using it in a match branch."]
+        Just constructorInfo -> do
+          let actualTypeName = constructorInfoTypeName constructorInfo
+          case maybeExpectedTypeName of
+            Just expectedTypeName ->
+              when (expectedTypeName /= actualTypeName) $
+                throwDiagnostic . diagnosticBundle $
+                  [ diagnostic
+                      "E_PATTERN_TYPE_MISMATCH"
+                      ("Constructor `" <> constructorName <> "` does not belong to type `" <> expectedTypeName <> "`.")
+                      (Just constructorSpan)
+                      ["Use a constructor declared by the matched type."]
+                      [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+                  ]
+            Nothing ->
+              pure ()
+          let fieldTypes = fmap typeToInferType (constructorDeclFields (constructorInfoDecl constructorInfo))
+          when (length binders /= length fieldTypes) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_PATTERN_ARITY"
+                  ("Pattern for `" <> constructorName <> "` binds the wrong number of fields.")
+                  (Just constructorSpan)
+                  [ "Expected "
+                      <> T.pack (show (length fieldTypes))
+                      <> " binders but got "
+                      <> T.pack (show (length binders))
+                      <> "."
+                  ]
+                  [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+              ]
+          ensureUniquePatternBinders binders
+          let draftBinders =
+                zipWith
+                  ( \binder binderType ->
+                      DraftPatternBinder
+                        { draftPatternBinderName = patternBinderName binder
+                        , draftPatternBinderSpan = patternBinderSpan binder
+                        , draftPatternBinderType = binderType
+                        }
+                  )
+                  binders
+                  fieldTypes
+          pure
+            ( constructorName
+            , actualTypeName
+            , DraftConstructorPattern constructorSpan constructorName draftBinders
+            )
+
+patternBinders :: DraftPattern -> [DraftPatternBinder]
+patternBinders pattern' =
+  case pattern' of
+    DraftConstructorPattern _ _ binders ->
+      binders
+
+ensureUniquePatternBinders :: [PatternBinder] -> InferM ()
+ensureUniquePatternBinders = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (binder : rest) =
+      case Map.lookup (patternBinderName binder) seen of
+        Just previousBinder ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_PATTERN_BINDER"
+                ("Duplicate pattern binder `" <> patternBinderName binder <> "`.")
+                (Just (patternBinderSpan binder))
+                ["Each bound name may only appear once within a single match pattern."]
+                [diagnosticRelated "previous binder" (patternBinderSpan previousBinder)]
+            ]
+        Nothing ->
+          go (Map.insert (patternBinderName binder) binder seen) rest
+
+ensureExhaustiveMatch :: TypeDecl -> Map.Map Text MatchBranch -> SourceSpan -> InferM ()
+ensureExhaustiveMatch typeDecl seenBranches matchSpan =
+  let expectedConstructors = fmap constructorDeclName (typeDeclConstructors typeDecl)
+      missingConstructors =
+        filter (`Map.notMember` seenBranches) expectedConstructors
+   in unless (null missingConstructors) $
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_NONEXHAUSTIVE_MATCH"
+              "Match expression is missing constructors."
+              (Just matchSpan)
+              ["Add branches for: " <> T.intercalate ", " missingConstructors <> "."]
+              [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)]
+          ]
+
+freezeDraftDecl :: Decl -> InferState -> DraftDecl -> Either DiagnosticBundle CoreDecl
+freezeDraftDecl decl inferState draftDecl = do
+  declType <- freezeInferTypeForDecl decl inferState (draftDeclType draftDecl)
+  params <- traverse (freezeDraftParam decl inferState) (draftDeclParams draftDecl)
+  body <- freezeDraftExpr decl inferState (draftDeclBody draftDecl)
+  pure
+    CoreDecl
+      { coreDeclName = draftDeclName draftDecl
+      , coreDeclType = declType
+      , coreDeclParams = params
+      , coreDeclBody = body
+      }
+
+freezeDraftParam :: Decl -> InferState -> DraftParam -> Either DiagnosticBundle CoreParam
+freezeDraftParam decl inferState draftParam = do
+  paramType <- freezeInferTypeForDecl decl inferState (draftParamType draftParam)
+  pure
+    CoreParam
+      { coreParamName = draftParamName draftParam
+      , coreParamType = paramType
+      }
+
+freezeDraftExpr :: Decl -> InferState -> DraftExpr -> Either DiagnosticBundle CoreExpr
+freezeDraftExpr decl inferState draftExpr =
+  case draftExprNode draftExpr of
+    DraftVar name -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      pure (CVar (draftExprSpan draftExpr) exprType name)
+    DraftInt value ->
+      pure (CInt (draftExprSpan draftExpr) value)
+    DraftString value ->
+      pure (CString (draftExprSpan draftExpr) value)
+    DraftBool value ->
+      pure (CBool (draftExprSpan draftExpr) value)
+    DraftCall fn args -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenFn <- freezeDraftExpr decl inferState fn
+      frozenArgs <- traverse (freezeDraftExpr decl inferState) args
+      pure (CCall (draftExprSpan draftExpr) exprType frozenFn frozenArgs)
+    DraftMatch subject branches -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenSubject <- freezeDraftExpr decl inferState subject
+      frozenBranches <- traverse (freezeDraftMatchBranch decl inferState) branches
+      pure (CMatch (draftExprSpan draftExpr) exprType frozenSubject frozenBranches)
+
+freezeDraftMatchBranch :: Decl -> InferState -> DraftMatchBranch -> Either DiagnosticBundle CoreMatchBranch
+freezeDraftMatchBranch decl inferState branch = do
+  frozenPattern <- freezeDraftPattern decl inferState (draftMatchBranchPattern branch)
+  frozenBody <- freezeDraftExpr decl inferState (draftMatchBranchBody branch)
+  pure
+    CoreMatchBranch
+      { coreMatchBranchSpan = draftMatchBranchSpan branch
+      , coreMatchBranchPattern = frozenPattern
+      , coreMatchBranchBody = frozenBody
+      }
+
+freezeDraftPattern :: Decl -> InferState -> DraftPattern -> Either DiagnosticBundle CorePattern
+freezeDraftPattern decl inferState pattern' =
+  case pattern' of
+    DraftConstructorPattern span' constructorName binders -> do
+      frozenBinders <- traverse (freezeDraftPatternBinder decl inferState) binders
+      pure (CConstructorPattern span' constructorName frozenBinders)
+
+freezeDraftPatternBinder :: Decl -> InferState -> DraftPatternBinder -> Either DiagnosticBundle CorePatternBinder
+freezeDraftPatternBinder decl inferState binder = do
+  binderType <- freezeInferTypeForDecl decl inferState (draftPatternBinderType binder)
+  pure
+    CorePatternBinder
+      { corePatternBinderName = draftPatternBinderName binder
+      , corePatternBinderSpan = draftPatternBinderSpan binder
+      , corePatternBinderType = binderType
+      }
+
+freezeInferTypeForDecl :: Decl -> InferState -> InferType -> Either DiagnosticBundle Type
+freezeInferTypeForDecl decl inferState inferType =
+  case inferTypeToType inferState inferType of
+    Left unresolvedVars ->
+      Left $
+        singleDiagnosticAt
+          "E_CANNOT_INFER"
+          ("Could not infer the type of `" <> declName decl <> "`.")
+          (declNameSpan decl)
+          ["Remaining unconstrained type variables: " <> T.intercalate ", " (fmap renderTypeVar unresolvedVars) <> "."]
+    Right typ ->
+      Right typ
+
+inferTypeToType :: InferState -> InferType -> Either [Int] Type
+inferTypeToType inferState inferType =
+  case resolveInferType (inferSubstitution inferState) inferType of
+    IInt ->
+      Right TInt
+    IStr ->
+      Right TStr
+    IBool ->
+      Right TBool
+    INamed name ->
+      Right (TNamed name)
+    IFunction args result ->
+      TFunction <$> traverse (inferTypeToType inferState) args <*> inferTypeToType inferState result
+    IVar varId ->
+      Left [varId]
+
+typeToInferType :: Type -> InferType
+typeToInferType typ =
+  case typ of
+    TInt ->
+      IInt
+    TStr ->
+      IStr
+    TBool ->
+      IBool
+    TNamed name ->
+      INamed name
+    TFunction args result ->
+      IFunction (fmap typeToInferType args) (typeToInferType result)
+
+freshTypeVar :: InferM InferType
+freshTypeVar = do
+  nextVar <- gets inferNextTypeVar
+  modify' (\state -> state {inferNextTypeVar = nextVar + 1})
+  pure (IVar nextVar)
+
+resolveCurrentType :: InferType -> InferM InferType
+resolveCurrentType inferType =
+  gets (\state -> resolveInferType (inferSubstitution state) inferType)
+
+resolveInferType :: Map.Map Int InferType -> InferType -> InferType
+resolveInferType substitution inferType =
+  case inferType of
+    IInt ->
+      IInt
+    IStr ->
+      IStr
+    IBool ->
+      IBool
+    INamed name ->
+      INamed name
+    IFunction args result ->
+      IFunction (fmap (resolveInferType substitution) args) (resolveInferType substitution result)
+    IVar varId ->
+      case Map.lookup varId substitution of
+        Just substitutedType ->
+          resolveInferType substitution substitutedType
+        Nothing ->
+          IVar varId
+
+unify :: UnifyContext -> InferType -> InferType -> InferM ()
+unify context leftType rightType = do
+  resolvedLeft <- resolveCurrentType leftType
+  resolvedRight <- resolveCurrentType rightType
+  case (resolvedLeft, resolvedRight) of
+    (IVar leftVar, IVar rightVar)
+      | leftVar == rightVar ->
+          pure ()
+    (IVar leftVar, _) ->
+      bindTypeVar context leftVar resolvedRight
+    (_, IVar rightVar) ->
+      bindTypeVar context rightVar resolvedLeft
+    (IInt, IInt) ->
+      pure ()
+    (IStr, IStr) ->
+      pure ()
+    (IBool, IBool) ->
+      pure ()
+    (INamed leftName, INamed rightName)
+      | leftName == rightName ->
+          pure ()
+    (IFunction leftArgs leftResult, IFunction rightArgs rightResult)
+      | length leftArgs == length rightArgs -> do
+          zipWithM_ (unify context) leftArgs rightArgs
+          unify context leftResult rightResult
+    _ ->
+      throwTypeMismatch context resolvedLeft resolvedRight
+
+bindTypeVar :: UnifyContext -> Int -> InferType -> InferM ()
+bindTypeVar context varId inferType = do
+  resolvedType <- resolveCurrentType inferType
+  if resolvedType == IVar varId
+    then pure ()
+    else
+      if occursInType varId resolvedType
+        then
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_INFINITE_TYPE"
+                "Type inference produced an infinite type."
+                (Just (unifyPrimarySpan context))
+                ["This expression would require " <> renderTypeVar varId <> " to contain itself."]
+                (unifyRelated context)
+            ]
+        else modify' (\state -> state {inferSubstitution = Map.insert varId resolvedType (inferSubstitution state)})
+
+occursInType :: Int -> InferType -> Bool
+occursInType varId inferType =
+  case inferType of
+    IInt ->
+      False
+    IStr ->
+      False
+    IBool ->
+      False
+    INamed _ ->
+      False
+    IFunction args result ->
+      any (occursInType varId) args || occursInType varId result
+    IVar otherVarId ->
+      varId == otherVarId
+
+throwTypeMismatch :: UnifyContext -> InferType -> InferType -> InferM ()
+throwTypeMismatch context expectedType actualType =
+  throwDiagnostic . diagnosticBundle $
+    [ diagnostic
+        (unifyCode context)
+        (unifySummary context)
+        (Just (unifyPrimarySpan context))
+        ["Expected " <> renderInferType expectedType <> " but got " <> renderInferType actualType <> "."]
+        (unifyRelated context)
+    ]
+
+renderInferType :: InferType -> Text
+renderInferType inferType =
+  case inferType of
+    IInt ->
+      "Int"
+    IStr ->
+      "Str"
+    IBool ->
+      "Bool"
+    INamed name ->
+      name
+    IFunction args result ->
+      T.intercalate " -> " (fmap renderAtomicInferType (args <> [result]))
+    IVar varId ->
+      renderTypeVar varId
+
+renderAtomicInferType :: InferType -> Text
+renderAtomicInferType inferType =
+  case inferType of
+    IFunction _ _ ->
+      "(" <> renderInferType inferType <> ")"
+    _ ->
+      renderInferType inferType
+
+renderTypeVar :: Int -> Text
+renderTypeVar varId =
+  "t" <> T.pack (show varId)
+
+runInferAction :: InferM a -> Either InferFailure (a, InferState)
+runInferAction action =
+  case runState (runExceptT (unInferM action)) (InferState 0 Map.empty) of
+    (Left err, _) ->
+      Left err
+    (Right result, inferState) ->
+      Right (result, inferState)
+
+throwDiagnostic :: DiagnosticBundle -> InferM a
+throwDiagnostic = throwError . InferDiagnostic
+
+annotationRelated :: Decl -> [DiagnosticRelated]
+annotationRelated decl =
   case declAnnotationSpan decl of
     Just annotationSpan ->
       [diagnosticRelated "type annotation" annotationSpan]
     Nothing ->
       [diagnosticRelated "declaration" (declNameSpan decl)]
 
-relatedForFunction :: Expr -> Map.Map Text Decl -> ConstructorEnv -> [DiagnosticRelated]
+relatedForFunction :: Expr -> DeclMap -> ConstructorEnv -> [DiagnosticRelated]
 relatedForFunction fnExpr declMap constructorEnv =
   case fnExpr of
     EVar _ name ->
       case Map.lookup name declMap of
         Just decl ->
-          annotationRelated (Just decl)
+          annotationRelated decl
         Nothing ->
           case Map.lookup name constructorEnv of
             Just constructorInfo ->

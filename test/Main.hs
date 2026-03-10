@@ -115,6 +115,12 @@ checkerTests =
             assertFailure ("expected adt source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "infers constructor and match-driven function types" $
+        case checkSource "inferred" inferredFunctionSource of
+          Left err ->
+            assertFailure ("expected inferred source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -124,8 +130,14 @@ checkerTests =
             assertEqual "primary column" (Just 8) (positionColumn . sourceSpanStart <$> diagnosticPrimarySpan err)
           Right _ ->
             assertFailure "expected undefined-name failure"
-    , testCase "reports missing function annotations" $
-        assertHasCode "E_MISSING_ANNOTATION" (checkSource "bad" missingAnnotationSource)
+    , testCase "reports ambiguous function inference" $
+        case checkSource "bad" ambiguousFunctionSource of
+          Left bundle -> do
+            err <- expectFirstDiagnostic bundle
+            assertEqual "code" "E_CANNOT_INFER" (diagnosticCode err)
+            assertEqual "primary line" (Just 3) (positionLine . sourceSpanStart <$> diagnosticPrimarySpan err)
+          Right _ ->
+            assertFailure "expected ambiguous inference failure"
     , testCase "reports type mismatches with the argument span" $
         case checkSource "bad" mismatchSource of
           Left bundle -> do
@@ -191,6 +203,13 @@ compileTests =
             assertBool "expected constructor function" ("export function Busy" `T.isInfixOf` emitted)
             assertBool "expected nullary constructor" ("export const Idle" `T.isInfixOf` emitted)
             assertBool "expected switch for match" ("switch ($match" `T.isInfixOf` emitted)
+    , testCase "compile preserves inferred functions" $
+        case compileSource "inferred" inferredFunctionSource of
+          Left err ->
+            assertFailure ("expected compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected inferred function export" ("export function makeBusy" `T.isInfixOf` emitted)
+            assertBool "expected inferred matcher export" ("export function describe" `T.isInfixOf` emitted)
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -279,12 +298,30 @@ unboundNameSource =
     , "main = missing"
     ]
 
-missingAnnotationSource :: Text
-missingAnnotationSource =
+ambiguousFunctionSource :: Text
+ambiguousFunctionSource =
   T.unlines
     [ "module Main"
     , ""
     , "identity value = value"
+    ]
+
+inferredFunctionSource :: Text
+inferredFunctionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Status = Idle | Busy Str"
+    , ""
+    , "makeBusy note = Busy note"
+    , ""
+    , "describe status = match status {"
+    , "  Idle -> \"idle\","
+    , "  Busy note -> note"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = describe (makeBusy \"loading\")"
     ]
 
 mismatchSource :: Text

@@ -24,13 +24,15 @@ It includes:
 - Function application
 - Match expressions over constructors
 - Minimal name resolution and typechecking
+- A typed core IR produced by checking
+- Local inference for declarations whose types are constrained enough by usage
 - Exhaustiveness checking for constructor matches
 - Structured diagnostic codes
 - JavaScript code generation
 
 It does not yet include:
 
-- Full type inference
+- Full module-wide polymorphic inference
 - Records
 - Type parameters
 - Nested patterns
@@ -90,6 +92,24 @@ main = describe (Busy "loading")
 
 This example is intentionally more readable than the eventual target surface may be. Later versions of `Weft` should be evaluated for whether some of this ceremony can be removed without harming agent success rates.
 
+An unannotated function can now typecheck when the body constrains it enough:
+
+```weft
+module Main
+
+type Status = Idle | Busy Str
+
+makeBusy note = Busy note
+
+describe status = match status {
+  Idle -> "idle",
+  Busy note -> note
+}
+
+main : Str
+main = describe (makeBusy "loading")
+```
+
 ## Grammar
 
 ```text
@@ -134,15 +154,16 @@ Notes:
 - Function application compiles to JavaScript function calls.
 - Match expressions compile to a JavaScript `switch` over constructor tags.
 - Boolean, integer, string, and variable references map directly to JavaScript equivalents.
-- Functions currently require declaration-level type signatures.
-- The checker currently rejects duplicate declarations, unknown names, unknown types, annotation arity mismatches, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, and simple type mismatches before code generation.
+- Declarations may omit type signatures when local inference can resolve all parameter and result types.
+- Ambiguous declarations still require explicit signatures.
+- The checker currently rejects duplicate declarations, duplicate parameters, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, and simple type mismatches before code generation.
 
 ## Compiler Pipeline
 
-The initial compiler pipeline is:
+The current compiler pipeline is:
 
 ```text
-Source -> Parser -> AST -> JavaScript Emitter
+Source -> Parser -> AST -> Typed Core IR -> JavaScript Emitter
 ```
 
 The intended expanded pipeline is:
@@ -165,7 +186,7 @@ In other words, JavaScript is the first practical target, not the final architec
 
 Once `v0` is stable, the next additions should be:
 
-- Richer local inference so fewer declarations require explicit annotations
+- More complete inference, especially around higher-order code and future generic types
 - Records and type parameters
 - Richer pattern forms, including nested destructuring and wildcards
 - A schema definition form
