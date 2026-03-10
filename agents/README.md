@@ -13,6 +13,8 @@ The intended workflow is:
 4. If verification passes, the supervisor commits the task on `agents/autopilot` and moves to the next task.
 5. If verification fails repeatedly, the supervisor stops and leaves logs and reports in `.clasp-agents/`.
 
+The runtime logs and state live in `.clasp-agents/` inside the repo. The linked Git worktrees for the builder and verifier live outside the repo so Git does not confuse them with tracked content.
+
 Useful commands:
 
 ```sh
