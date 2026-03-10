@@ -17,7 +17,7 @@ if [[ -f "$pid_file" ]]; then
   rm -f "$pid_file"
 fi
 
-nohup bash "$project_root/scripts/clasp-autopilot.sh" >"$log_file" 2>&1 &
+setsid bash -lc "exec bash \"$project_root/scripts/clasp-autopilot.sh\"" >"$log_file" 2>&1 < /dev/null &
 pid=$!
 printf '%s\n' "$pid" > "$pid_file"
 echo "started autopilot pid=$pid log=$log_file"
