@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clasp.dev/agents/swarm/task.schema.json",
+  "title": "Clasp Swarm Task Manifest",
+  "description": "Canonical machine-readable metadata for a swarm task.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "goal",
+    "why",
+    "scope",
+    "likely_files",
+    "dependencies",
+    "acceptance",
+    "verification"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z]{2,3}-[0-9]{3}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "why": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "likely_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Upstream task IDs. Use an empty array when there are no dependencies.",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]{2,3}-[0-9]{3}$"
+      },
+      "uniqueItems": true
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "verification": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

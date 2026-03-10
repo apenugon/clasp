@@ -54,6 +54,10 @@ Every task file should include:
 - verification command
 - dependencies
 
+The canonical swarm task format lives in `agents/swarm/task-template.md`.
+Machine-readable task metadata should follow `agents/swarm/task.schema.json`.
+In JSON manifests, `dependencies` must be a JSON array of task IDs, with `[]` meaning no dependencies.
+
 Task sizing guidance:
 
 - `XS`: parser-only, emitter-only, docs-only, or test-only changes
