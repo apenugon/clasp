@@ -7,6 +7,7 @@ source "$project_root/scripts/clasp-swarm-common.sh"
 wave_name="${1:-$(clasp_swarm_default_wave)}"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
+allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
@@ -14,9 +15,10 @@ if [[ "${1:-}" == "--list-lanes" ]]; then
   exit 0
 fi
 
-if ! git -C "$project_root" diff --quiet --ignore-submodules --exit-code || \
-   ! git -C "$project_root" diff --cached --quiet --ignore-submodules --exit-code || \
-   [[ -n "$(git -C "$project_root" ls-files --others --exclude-standard)" ]]; then
+if [[ "$allow_dirty" != "1" ]] && \
+   { ! git -C "$project_root" diff --quiet --ignore-submodules --exit-code || \
+     ! git -C "$project_root" diff --cached --quiet --ignore-submodules --exit-code || \
+     [[ -n "$(git -C "$project_root" ls-files --others --exclude-standard)" ]]; }; then
   echo "refusing to start the swarm from a dirty repo; commit or stash changes first" >&2
   exit 1
 fi

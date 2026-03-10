@@ -36,3 +36,70 @@ clasp_swarm_lane_name() {
 clasp_swarm_wave_name() {
   basename "$(dirname "$1")"
 }
+
+clasp_swarm_task_key() {
+  local raw="${1##*/}"
+  raw="${raw%.md}"
+
+  if [[ "$raw" =~ ^([A-Z]{2,3}-[0-9]{3})($|-) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  return 1
+}
+
+clasp_swarm_completion_key() {
+  local raw="${1##*/}"
+  raw="${raw%.md}"
+  local key=""
+
+  if key="$(clasp_swarm_task_key "$raw" 2>/dev/null)"; then
+    printf '%s\n' "$key"
+  else
+    printf '%s\n' "$raw"
+  fi
+}
+
+clasp_swarm_completion_marker_exists() {
+  local markers_dir="$1"
+  local task_ref="$2"
+  local key
+
+  key="$(clasp_swarm_completion_key "$task_ref")"
+
+  if [[ -f "$markers_dir/$key" ]]; then
+    return 0
+  fi
+
+  compgen -G "$markers_dir/$key-*" >/dev/null 2>&1
+}
+
+clasp_swarm_normalize_completion_dir() {
+  local markers_dir="$1"
+  local path=""
+  local base=""
+  local key=""
+  local canonical_path=""
+
+  mkdir -p "$markers_dir"
+
+  shopt -s nullglob
+  for path in "$markers_dir"/*; do
+    [[ -f "$path" ]] || continue
+    base="$(basename "$path")"
+    key="$(clasp_swarm_completion_key "$base")"
+    canonical_path="$markers_dir/$key"
+
+    if [[ "$path" == "$canonical_path" ]]; then
+      continue
+    fi
+
+    if [[ -e "$canonical_path" ]]; then
+      rm -f "$path"
+    else
+      mv "$path" "$canonical_path"
+    fi
+  done
+  shopt -u nullglob
+}

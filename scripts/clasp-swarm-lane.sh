@@ -80,6 +80,10 @@ task_id_of() {
   basename "$1" .md
 }
 
+task_key_of() {
+  clasp_swarm_completion_key "$1"
+}
+
 task_branch_of() {
   local task_id="$1"
   printf '%s/%s/%s/%s\n' "$branch_prefix" "$wave_name" "$lane_name" "$task_id"
@@ -102,7 +106,7 @@ task_dependencies() {
 
 dependency_is_complete() {
   local dependency_id="$1"
-  [[ -f "$global_completed_root/$dependency_id" ]]
+  clasp_swarm_completion_marker_exists "$global_completed_root" "$dependency_id"
 }
 
 wait_for_dependencies() {
@@ -143,8 +147,11 @@ mark_completed() {
   local task_id="$1"
   local commit="$2"
   local stamp="$3"
-  printf '%s\t%s\n' "$stamp" "$commit" > "$completed_root/$task_id"
-  printf '%s\t%s\n' "$stamp" "$commit" > "$global_completed_root/$task_id"
+  local task_key
+
+  task_key="$(task_key_of "$task_id")"
+  printf '%s\t%s\n' "$stamp" "$commit" > "$completed_root/$task_key"
+  printf '%s\t%s\n' "$stamp" "$commit" > "$global_completed_root/$task_key"
 }
 
 mark_blocked() {
@@ -310,11 +317,13 @@ owns_runtime_state=1
 printf '%s\n' "$$" > "$pid_file"
 
 ensure_trunk_branch
+clasp_swarm_normalize_completion_dir "$completed_root"
+clasp_swarm_normalize_completion_dir "$global_completed_root"
 
 while IFS= read -r task_file; do
   task_id="$(task_id_of "$task_file")"
 
-  if [[ -f "$completed_root/$task_id" ]]; then
+  if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
     continue
   fi
 
