@@ -12,6 +12,8 @@ And evaluate it continuously against agent-harness benchmarks so language design
 
 The mistake to avoid is shipping a speculative vision instead of a working compiler.
 
+The proving ground that matters most is not a toy compiler demo. It is whether an agent can build and evolve a real moderate SaaS application faster in `Clasp` than in a baseline stack.
+
 ## Phase 0: Foundation
 
 - Finalize the language name and design direction
@@ -112,16 +114,19 @@ Exit criteria:
 ## Phase 8: Durable Workflows
 
 - Add workflow state modeling
+- Add an Erlang/BEAM-inspired isolation model for long-running workflow processes
 - Add typed checkpoint/resume support
 - Add idempotency and replay concepts
 - Add explicit side-effect capabilities
 - Add deadlines, cancellation, retry policy, and bounded backoff semantics
 - Add degraded-mode and operator-handoff semantics for partial failure
-- Add supervised module hot-swap and self-update semantics
+- Add supervisor trees, restart strategies, and mailbox-style coordination where needed
+- Add supervised module hot-swap and self-update semantics with dual-version upgrade windows and explicit state-upgrade handlers
 
 Exit criteria:
 
 - Long-running programs remain type-safe and replayable across restarts.
+- Hot upgrades follow supervised, BEAM-inspired handoff rules rather than arbitrary in-place mutation.
 
 ## Phase 9: AI-Native Platform
 
@@ -152,7 +157,59 @@ Exit criteria:
 
 - An agent can move from typed external feedback to a bounded code and rollout change without reconstructing the domain model from scratch on every task.
 
-## Phase 11: Mobile and Runtime Expansion
+## Phase 11: Moderate SaaS Dogfooding
+
+- Build one moderate SaaS application using only `Clasp` for application logic
+- Keep the first version intentionally database-free so the language, compiler, generated clients, trust boundaries, and workflows are the thing being tested
+- Use generated route clients, generated validation, and Clasp-defined workflows across the entire app surface
+- Add benchmark tasks that ask `Codex`, `Claude Code`, and future harnesses to add and modify real product features in that app
+
+Exit criteria:
+
+- A moderate SaaS app runs with frontend, backend, workers, and agent features written in `Clasp`
+- The app does not rely on TypeScript or Python for core product logic
+- Benchmark tasks now include app-level feature work, not just schema and compiler slices
+
+## Phase 12: Self-Hosted Compiler
+
+- Define the self-hosting subset of `Clasp`
+- Port the compiler gradually from Haskell to `Clasp`
+- Keep the first self-hosted compiler path running on `JS/Bun`
+- Add stage1 and stage2 bootstrap checks so the compiler can compile itself reproducibly
+
+Exit criteria:
+
+- The primary compiler implementation is written in `Clasp`
+- The Haskell compiler remains available as a bootstrap fallback
+- Bootstrap reproducibility checks pass for the self-hosted path
+
+## Phase 13: Native Backend and Bytecode Emission
+
+- Add a backend-oriented native IR beneath the lowered IR
+- Define a runtime ABI and data layout for native execution
+- Emit real backend-native bytecode or native-target IR instead of depending only on JavaScript for server workloads
+- Run the self-hosted compiler and backend services through the native path
+
+Exit criteria:
+
+- `Clasp` can run backend/compiler workloads without Bun
+- The native path shares the same front end and type system as the JS path
+- Backend benchmarks can compare JS/Bun and native execution on the same language implementation
+
+## Phase 14: SQLite Storage
+
+- Add a typed SQLite capability and connection model
+- Add typed schema/query/migration surfaces
+- Integrate persistence into the SaaS dogfood app
+- Benchmark persistence-bearing app changes, not just stateless features
+
+Exit criteria:
+
+- `Clasp` can connect to SQLite through a typed boundary
+- The SaaS dogfood app runs with real persistence
+- The benchmark suite includes database-backed product changes
+
+## Phase 15: Mobile and Runtime Expansion
 
 - Keep JavaScript as the first practical shared runtime
 - Add stronger support for app runtimes
@@ -173,12 +230,12 @@ The desired architecture is:
 - one type system
 - one typed core
 - one lowered IR
-- multiple emitters
+- multiple emitters, including a native backend path
 
 That makes a split strategy feasible later:
 
 - JavaScript for browser and app-adjacent runtimes
-- a native or LLVM-oriented backend for server workloads where that becomes worthwhile
+- real backend-native bytecode or an LLVM-oriented backend for server workloads where that becomes worthwhile
 
 The project should not commit to native codegen too early, but it should keep the path open deliberately.
 
@@ -204,6 +261,7 @@ The current implementation should focus on:
 - Building a small clean compiler around the typed core and lowered IR
 - Keeping the language surface intentionally tiny while expanding toward real app-building primitives
 - Using generated codecs, foreign bindings, and typed routes as the base for the first benchmarkable full-stack slice
+- Using the eventual moderate SaaS app as the primary design-pressure test for agent productivity
 - Avoiding premature complexity in effects or AI syntax before schemas, trust boundaries, operational control-plane semantics, and hot-swap semantics land
 
 ## Cross-Cutting Benchmark Track
@@ -215,6 +273,7 @@ Near-term benchmark work should include:
 - defining a benchmark harness around `Codex` and `Claude Code`
 - creating a baseline task suite in `TypeScript`
 - measuring intervention-free completion, total tokens, repair loops, and time-to-green
+- expanding into real app-building tasks on a moderate SaaS codebase, because that is the benchmark that matters most for `Clasp`
 - expanding later into trust-boundary, control-plane, workflow, LLM-output, and external-objective adaptation benchmarks
 - testing compact-syntax candidates against more verbose alternatives before committing to a final Clasp surface
 

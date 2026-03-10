@@ -1,0 +1,39 @@
+# BM-013 Add Compiler-Maintenance Benchmarks On The Hosted Self-Hosted Compiler Path
+
+## Goal
+
+Add compiler-maintenance benchmarks on the hosted self-hosted compiler path
+
+## Why
+
+The project needs a benchmark story that is reproducible, public, and grounded in real agent harness outcomes. This task belongs to the Benchmark Program track.
+
+## Scope
+
+- Implement `BM-013` as one narrow slice of work: Add compiler-maintenance benchmarks on the hosted self-hosted compiler path
+- Add or update regression coverage for the new behavior
+- Update docs or examples only where the new surface changes visible behavior
+- Avoid unrelated refactors or broad rewrites
+
+## Likely Files
+
+- `benchmarks/`
+- `examples/`
+- `docs/`
+- `scripts/`
+
+## Dependencies
+
+- `SH-010`
+
+## Acceptance
+
+- `BM-013` is implemented without breaking previously integrated tasks
+- Tests or regressions cover the new behavior
+- `bash scripts/verify-all.sh` passes
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```

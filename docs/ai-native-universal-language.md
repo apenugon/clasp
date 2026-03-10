@@ -288,12 +288,25 @@ This is how "one language everywhere" remains safe over time instead of only at 
 
 `Clasp` should be designed for supervised hot swapping and self-update, especially for long-running agents and workflows.
 
+The right semantic model here is closer to `Erlang` and the `BEAM` than to arbitrary live patching:
+
+- isolated long-running processes or workflows
+- supervisor-managed failure and restart
+- mailbox or message-driven coordination rather than shared mutable state
+- explicit upgrade handlers for state transition
+- a bounded period where old and new code versions can coexist
+- process draining and rollback rather than arbitrary in-place mutation
+
 That means the language and runtime should eventually support:
 
 - versioned modules
 - typed state snapshots and resumes
 - compatibility checks between old and new module versions
 - generated migrations where possible
+- explicit upgrade handlers for process or workflow state
+- supervisor-directed restart and rollback policies
+- mailbox-safe handoff semantics for long-running processes
+- a two-version window for old and new code during upgrade
 - explicit safe-to-swap points
 - rollback if activation fails
 
@@ -309,6 +322,8 @@ The safer model is:
 6. Keep rollback live until health checks pass.
 
 That approach is much more realistic for self-updating agents, durable workflows, and eventually robots or other embodied systems than trying to rewrite active logic at an arbitrary instruction boundary.
+
+In other words, the hot-swap semantics should be inspired more by `BEAM` operational semantics than by "edit the code that is currently executing."
 
 ### 5. Explicit effects and capabilities
 

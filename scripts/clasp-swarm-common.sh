@@ -6,7 +6,7 @@ clasp_swarm_project_root() {
 }
 
 clasp_swarm_default_wave() {
-  printf '%s\n' "wave1"
+  printf '%s\n' "${CLASP_SWARM_DEFAULT_WAVE:-full}"
 }
 
 clasp_swarm_wave_dir() {
