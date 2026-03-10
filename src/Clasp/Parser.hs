@@ -280,8 +280,7 @@ declParser = do
     }
 
 exprParser :: Parser Expr
-exprParser =
-  try letParser <|> comparisonExprParser
+exprParser = comparisonExprParser
 
 comparisonExprParser :: Parser Expr
 comparisonExprParser = do
@@ -305,7 +304,7 @@ applicationParser = do
 
 termParser :: Parser Expr
 termParser = do
-  baseExpr <- baseExprParser
+  baseExpr <- try letParser <|> baseExprParser
   fieldAccesses <- many fieldAccessSuffixParser
   pure (foldl applyFieldAccess baseExpr fieldAccesses)
 

@@ -279,6 +279,20 @@ parserTests =
                     assertFailure ("expected let expression, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "parses local let expressions in bare argument position" $
+        case parseSource "inline" letArgumentSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ECall _ (EVar _ "id") [ELet _ (LetBinding "value" _ _ (EInt _ 1)) (EVar _ "value")] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected bare let argument expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     ]
 
 checkerTests :: TestTree
@@ -953,6 +967,18 @@ letSource =
     , ""
     , "greeting : Str"
     , "greeting = let prefix = \"hello\" in let subject = \"world\" in join prefix subject"
+    ]
+
+letArgumentSource :: Text
+letArgumentSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "id : Int -> Int"
+    , "id value = value"
+    , ""
+    , "main : Int"
+    , "main = id let value = 1 in value"
     ]
 
 missingRecordFieldSource :: Text
