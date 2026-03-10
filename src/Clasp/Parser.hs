@@ -53,6 +53,7 @@ import Clasp.Syntax
   , Expr (..)
   , ForeignDecl (..)
   , ImportDecl (..)
+  , IntComparisonOp (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -280,8 +281,16 @@ declParser = do
 exprParser :: Parser Expr
 exprParser = do
   firstTerm <- applicationParser
-  remainingTerms <- many (symbol "==" *> applicationParser)
-  pure (foldl applyEqual firstTerm remainingTerms)
+  remainingTerms <- many ((,) <$> comparisonOperatorParser <*> applicationParser)
+  pure (foldl applyBinaryExpr firstTerm remainingTerms)
+
+comparisonOperatorParser :: Parser ComparisonOperator
+comparisonOperatorParser =
+  (symbol "==" *> pure ComparisonEqual)
+    <|> (symbol "<=" *> pure (ComparisonInt IntLessThanOrEqual))
+    <|> (symbol ">=" *> pure (ComparisonInt IntGreaterThanOrEqual))
+    <|> (symbol "<" *> pure (ComparisonInt IntLessThan))
+    <|> (symbol ">" *> pure (ComparisonInt IntGreaterThan))
 
 applicationParser :: Parser Expr
 applicationParser = do
@@ -497,9 +506,18 @@ applyFieldAccess :: Expr -> (SourceSpan, Text) -> Expr
 applyFieldAccess subject (fieldSpan, fieldName) =
   EFieldAccess (mergeSourceSpans (exprSpan subject) fieldSpan) subject fieldName
 
-applyEqual :: Expr -> Expr -> Expr
-applyEqual left right =
-  EEqual (mergeSourceSpans (exprSpan left) (exprSpan right)) left right
+data ComparisonOperator
+  = ComparisonEqual
+  | ComparisonInt IntComparisonOp
+
+applyBinaryExpr :: Expr -> (ComparisonOperator, Expr) -> Expr
+applyBinaryExpr left (operator, right) =
+  let span' = mergeSourceSpans (exprSpan left) (exprSpan right)
+   in case operator of
+        ComparisonEqual ->
+          EEqual span' left right
+        ComparisonInt intOperator ->
+          EIntCompare span' intOperator left right
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc

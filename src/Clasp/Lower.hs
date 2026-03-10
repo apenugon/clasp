@@ -26,6 +26,7 @@ import Clasp.Core
 import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl
+  , IntComparisonOp
   , ModuleName
   , RecordDecl
   , RouteDecl (..)
@@ -61,6 +62,7 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LEqual LowerExpr LowerExpr
+  | LIntCompare IntComparisonOp LowerExpr LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
@@ -139,6 +141,8 @@ lowerCoreExpr expr =
       LBool value
     CEqual _ left right ->
       LEqual (lowerCoreExpr left) (lowerCoreExpr right)
+    CIntCompare _ op left right ->
+      LIntCompare op (lowerCoreExpr left) (lowerCoreExpr right)
     CCall _ _ fn args ->
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->

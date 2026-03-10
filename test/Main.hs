@@ -43,6 +43,7 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , IntComparisonOp (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -184,6 +185,20 @@ parserTests =
                     assertFailure ("expected equality expression, got " <> show other)
               Nothing ->
                 assertFailure "expected sameInt declaration"
+    , testCase "parses integer comparison expressions" $
+        case parseSource "inline" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "lessThan" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EIntCompare _ IntLessThan (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected integer comparison expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected lessThan declaration"
     ]
 
 checkerTests :: TestTree
@@ -224,6 +239,12 @@ checkerTests =
         case checkSource "equality" equalitySource of
           Left err ->
             assertFailure ("expected equality source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts integer comparisons" $
+        case checkSource "comparisons" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected integer comparison source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -273,6 +294,8 @@ checkerTests =
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
     , testCase "rejects unsupported equality operands" $
         assertHasCode "E_EQUALITY_TYPE" (checkSource "bad" unsupportedEqualitySource)
+    , testCase "rejects non-integer comparison operands" $
+        assertHasCode "E_INT_COMPARISON_TYPE" (checkSource "bad" unsupportedIntComparisonSource)
     ]
 
 diagnosticTests :: TestTree
@@ -358,6 +381,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered sameStr declaration: " <> show other)
+    , testCase "lowering preserves integer comparison expressions" $
+        case lowerChecked "comparisons" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "greaterThanOrEqual" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LIntCompare IntGreaterThanOrEqual (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered greaterThanOrEqual declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -410,6 +443,13 @@ compileTests =
             assertFailure ("expected equality compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected strict equality" ("(left === right)" `T.isInfixOf` emitted)
+    , testCase "compile emits JavaScript integer comparisons" $
+        case compileSource "comparisons" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected integer comparison compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected less-than comparison" ("(left < right)" `T.isInfixOf` emitted)
+            assertBool "expected greater-than-or-equal comparison" ("(left >= right)" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -654,6 +694,24 @@ equalitySource =
     , "sameBool left right = left == right"
     ]
 
+integerComparisonSource :: Text
+integerComparisonSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "lessThan : Int -> Int -> Bool"
+    , "lessThan left right = left < right"
+    , ""
+    , "lessThanOrEqual : Int -> Int -> Bool"
+    , "lessThanOrEqual left right = left <= right"
+    , ""
+    , "greaterThan : Int -> Int -> Bool"
+    , "greaterThan left right = left > right"
+    , ""
+    , "greaterThanOrEqual : Int -> Int -> Bool"
+    , "greaterThanOrEqual left right = left >= right"
+    ]
+
 missingRecordFieldSource :: Text
 missingRecordFieldSource =
   T.unlines
@@ -751,6 +809,15 @@ unsupportedEqualitySource =
     , ""
     , "main : User -> User -> Bool"
     , "main left right = left == right"
+    ]
+
+unsupportedIntComparisonSource :: Text
+unsupportedIntComparisonSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "main : Str -> Str -> Bool"
+    , "main left right = left < right"
     ]
 
 importSuccessFiles :: [(FilePath, Text)]

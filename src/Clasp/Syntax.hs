@@ -6,6 +6,7 @@ module Clasp.Syntax
   , Expr (..)
   , ForeignDecl (..)
   , ImportDecl (..)
+  , IntComparisonOp (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -193,12 +194,20 @@ data RecordFieldExpr = RecordFieldExpr
   }
   deriving (Eq, Show)
 
+data IntComparisonOp
+  = IntLessThan
+  | IntLessThanOrEqual
+  | IntGreaterThan
+  | IntGreaterThanOrEqual
+  deriving (Eq, Ord, Show)
+
 data Expr
   = EVar SourceSpan Text
   | EInt SourceSpan Integer
   | EString SourceSpan Text
   | EBool SourceSpan Bool
   | EEqual SourceSpan Expr Expr
+  | EIntCompare SourceSpan IntComparisonOp Expr Expr
   | ECall SourceSpan Expr [Expr]
   | EMatch SourceSpan Expr [MatchBranch]
   | ERecord SourceSpan Text [RecordFieldExpr]
@@ -219,6 +228,8 @@ exprSpan expr =
     EBool span' _ ->
       span'
     EEqual span' _ _ ->
+      span'
+    EIntCompare span' _ _ _ ->
       span'
     ECall span' _ _ ->
       span'

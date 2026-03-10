@@ -17,6 +17,7 @@ import Clasp.Lower
 import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
+  , IntComparisonOp (..)
   , ModuleName (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
@@ -365,6 +366,10 @@ emitExpr counter expr =
       let (counterAfterLeft, leftText) = emitExpr counter left
           (counterAfterRight, rightText) = emitExpr counterAfterLeft right
        in (counterAfterRight, "(" <> leftText <> " === " <> rightText <> ")")
+    LIntCompare op left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " " <> emitIntComparisonOp op <> " " <> rightText <> ")")
     LCall fn args ->
       let (counterAfterFn, fnText) = emitExpr counter fn
           (counterAfterArgs, argTexts) = emitExprList counterAfterFn args
@@ -473,3 +478,15 @@ emitIdentifier = id
 emitStringLiteral :: Text -> Text
 emitStringLiteral value =
   T.pack (show (T.unpack value))
+
+emitIntComparisonOp :: IntComparisonOp -> Text
+emitIntComparisonOp op =
+  case op of
+    IntLessThan ->
+      "<"
+    IntLessThanOrEqual ->
+      "<="
+    IntGreaterThan ->
+      ">"
+    IntGreaterThanOrEqual ->
+      ">="

@@ -184,6 +184,7 @@ method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
 expr        ::= term term*
+              | term ("==" | "<" | "<=" | ">" | ">=") term
 term        ::= atom ("." lower-ident)*
 atom        ::= lower-ident
               | upper-ident
@@ -211,7 +212,8 @@ Notes:
 
 - Function application is left-associative.
 - Field access binds tighter than function application.
-- Operators are intentionally absent in `v0`.
+- `==` is available for `Int`, `Str`, and `Bool`.
+- `<`, `<=`, `>`, and `>=` are available for `Int`.
 - Declarations are expression-bodied only.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 

@@ -48,6 +48,7 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , IntComparisonOp
   , MatchBranch (..)
   , Module (..)
   , Pattern (..)
@@ -131,6 +132,7 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftEqual DraftExpr DraftExpr
+  | DraftIntCompare IntComparisonOp DraftExpr DraftExpr
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
@@ -854,6 +856,8 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EEqual equalSpan left right ->
       inferEqualityExpr ctx termEnv localEnv equalSpan left right
+    EIntCompare compareSpan op left right ->
+      inferIntComparisonExpr ctx termEnv localEnv compareSpan op left right
     ECall callSpan fn args -> do
       fnExpr <- inferExpr ctx termEnv localEnv fn
       resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
@@ -1082,6 +1086,32 @@ inferEqualityExpr ctx termEnv localEnv equalSpan left right = do
             ["Both operands must resolve to the same comparable primitive type."]
             []
         ]
+
+inferIntComparisonExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> IntComparisonOp -> Expr -> Expr -> InferM DraftExpr
+inferIntComparisonExpr ctx termEnv localEnv compareSpan op left right = do
+  leftExpr <- inferExpr ctx termEnv localEnv left
+  rightExpr <- inferExpr ctx termEnv localEnv right
+  unify
+    ( UnifyContext
+        { unifyCode = "E_INT_COMPARISON_TYPE"
+        , unifySummary = "Integer comparison operands must be Int."
+        , unifyPrimarySpan = draftExprSpan leftExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType leftExpr)
+    IInt
+  unify
+    ( UnifyContext
+        { unifyCode = "E_INT_COMPARISON_TYPE"
+        , unifySummary = "Integer comparison operands must be Int."
+        , unifyPrimarySpan = draftExprSpan rightExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType rightExpr)
+    IInt
+  pure (DraftExpr compareSpan IBool (DraftIntCompare op leftExpr rightExpr))
 
 inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
@@ -1595,6 +1625,10 @@ freezeDraftExpr ctx decl inferState draftExpr =
       frozenLeft <- freezeDraftExpr ctx decl inferState left
       frozenRight <- freezeDraftExpr ctx decl inferState right
       pure (CEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftIntCompare op left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CIntCompare (draftExprSpan draftExpr) op frozenLeft frozenRight)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenFn <- freezeDraftExpr ctx decl inferState fn

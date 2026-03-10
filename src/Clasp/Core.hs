@@ -15,6 +15,7 @@ module Clasp.Core
 import Data.Text (Text)
 import Clasp.Syntax
   ( ForeignDecl
+  , IntComparisonOp
   , ModuleName
   , RecordDecl
   , RouteDecl
@@ -76,6 +77,7 @@ data CoreExpr
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CEqual SourceSpan CoreExpr CoreExpr
+  | CIntCompare SourceSpan IntComparisonOp CoreExpr CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
@@ -96,6 +98,8 @@ coreExprType expr =
     CBool _ _ ->
       TBool
     CEqual _ _ _ ->
+      TBool
+    CIntCompare _ _ _ _ ->
       TBool
     CCall _ typ _ _ ->
       typ
