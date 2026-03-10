@@ -76,6 +76,13 @@ bash "$project_root/scripts/clasp-swarm-status.sh" >/dev/null
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/clasp-swarm-control.XXXXXX")"
 
 cleanup() {
+  if [[ -f "$tmpdir/background-pids.txt" ]]; then
+    while IFS= read -r pid; do
+      if [[ -n "$pid" ]]; then
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done < "$tmpdir/background-pids.txt"
+  fi
   rm -rf "$tmpdir"
 }
 
@@ -152,6 +159,20 @@ assert_file_size_at_least() {
 
   if (( actual_size < minimum_size )); then
     echo "expected $path to be at least $minimum_size bytes, got $actual_size" >&2
+    exit 1
+  fi
+}
+
+assert_json_value() {
+  local path="$1"
+  local expression="$2"
+  local expected_json="$3"
+  local actual_json
+
+  actual_json="$(node -e 'const fs=require("fs"); const [path, expression]=process.argv.slice(1); const data=JSON.parse(fs.readFileSync(path, "utf8")); const value=eval(expression); process.stdout.write(JSON.stringify(value));' "$path" "$expression")"
+
+  if [[ "$actual_json" != "$expected_json" ]]; then
+    echo "unexpected JSON value for $expression in $path: got $actual_json, want $expected_json" >&2
     exit 1
   fi
 }
@@ -441,6 +462,124 @@ run_autopilot_fixture() {
   ) >"$fixture_root/.test-state/autopilot-output.log" 2>&1
 }
 
+create_swarm_status_fixture() {
+  local fixture_root="$1"
+  local runner_pid
+
+  mkdir -p \
+    "$fixture_root/scripts" \
+    "$fixture_root/agents/swarm/testwave/01-active" \
+    "$fixture_root/agents/swarm/testwave/02-blocked" \
+    "$fixture_root/agents/swarm/testwave/03-idle" \
+    "$fixture_root/.clasp-swarm/testwave/01-active/completed" \
+    "$fixture_root/.clasp-swarm/testwave/01-active/blocked" \
+    "$fixture_root/.clasp-swarm/testwave/02-blocked/completed" \
+    "$fixture_root/.clasp-swarm/testwave/02-blocked/blocked" \
+    "$fixture_root/.clasp-swarm/testwave/03-idle/completed" \
+    "$fixture_root/.clasp-swarm/testwave/03-idle/blocked"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-status.sh" \
+    "$fixture_root/scripts/"
+
+  sleep 60 &
+  runner_pid="$!"
+  printf '%s\n' "$runner_pid" >> "$tmpdir/background-pids.txt"
+
+  printf '%s\n' "$runner_pid" > "$fixture_root/.clasp-swarm/testwave/01-active/pid"
+  printf 'SW-101\n' > "$fixture_root/.clasp-swarm/testwave/01-active/current-task.txt"
+  printf 'done\n' > "$fixture_root/.clasp-swarm/testwave/01-active/completed/SW-001"
+  printf 'done\n' > "$fixture_root/.clasp-swarm/testwave/01-active/completed/SW-002"
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/01-active/lane.log"
+line one
+line two
+line three
+line four
+line five
+line six
+EOF
+
+  printf '999999\n' > "$fixture_root/.clasp-swarm/testwave/02-blocked/pid"
+  printf 'done\n' > "$fixture_root/.clasp-swarm/testwave/02-blocked/completed/SW-003"
+  printf '{}\n' > "$fixture_root/.clasp-swarm/testwave/02-blocked/blocked/SW-004.json"
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/02-blocked/lane.log"
+blocked line one
+blocked line two
+EOF
+}
+
+test_swarm_status_reports_human_summary() {
+  local fixture_root="$tmpdir/swarm-status-human"
+  local output_file="$fixture_root/status.txt"
+
+  create_swarm_status_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    bash scripts/clasp-swarm-status.sh testwave
+  ) > "$output_file"
+
+  assert_contains "$output_file" "lane: 01-active"
+  assert_contains "$output_file" "  status: running"
+  assert_contains "$output_file" "  run state: active"
+  assert_contains "$output_file" "  current task: SW-101"
+  assert_contains "$output_file" "    line two"
+  assert_contains "$output_file" "    line six"
+  assert_not_contains "$output_file" "    line one"
+  assert_contains "$output_file" "lane: 02-blocked"
+  assert_contains "$output_file" "  status: stopped"
+  assert_contains "$output_file" "  run state: blocked"
+  assert_contains "$output_file" "  stale pid: 999999"
+  assert_contains "$output_file" "lane: 03-idle"
+  assert_contains "$output_file" "  run state: idle"
+  assert_contains "$output_file" "summary:"
+  assert_contains "$output_file" "  wave: testwave"
+  assert_contains "$output_file" "  lanes: 3"
+  assert_contains "$output_file" "  running lanes: 1"
+  assert_contains "$output_file" "  stopped lanes: 2"
+  assert_contains "$output_file" "  active lanes: 1"
+  assert_contains "$output_file" "  blocked lanes: 1"
+  assert_contains "$output_file" "  idle lanes: 1"
+  assert_contains "$output_file" "  completed tasks: 3"
+  assert_contains "$output_file" "  blocked tasks: 1"
+  assert_contains "$output_file" "  stale pid lanes: 1"
+}
+
+test_swarm_status_reports_machine_readable_summary() {
+  local fixture_root="$tmpdir/swarm-status-json"
+  local output_file="$fixture_root/status.json"
+
+  create_swarm_status_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    bash scripts/clasp-swarm-status.sh --json testwave
+  ) > "$output_file"
+
+  assert_json_value "$output_file" 'data.wave' '"testwave"'
+  assert_json_value "$output_file" 'data.summary.lane_count' '3'
+  assert_json_value "$output_file" 'data.summary.running_lanes' '1'
+  assert_json_value "$output_file" 'data.summary.blocked_lanes' '1'
+  assert_json_value "$output_file" 'data.summary.idle_lanes' '1'
+  assert_json_value "$output_file" 'data.summary.completed_tasks' '3'
+  assert_json_value "$output_file" 'data.summary.blocked_tasks' '1'
+  assert_json_value "$output_file" 'data.summary.stale_pid_lanes' '1'
+  assert_json_value "$output_file" 'data.lanes.map((lane) => lane.lane)' '["01-active","02-blocked","03-idle"]'
+  assert_json_value "$output_file" 'data.lanes[0].status' '"running"'
+  assert_json_value "$output_file" 'data.lanes[0].run_state' '"active"'
+  assert_json_value "$output_file" 'data.lanes[0].current_task' '"SW-101"'
+  assert_json_value "$output_file" 'data.lanes[0].completed_count' '2'
+  assert_json_value "$output_file" 'data.lanes[0].log_path.endsWith("/.clasp-swarm/testwave/01-active/lane.log")' 'true'
+  assert_json_value "$output_file" 'data.lanes[1].status' '"stopped"'
+  assert_json_value "$output_file" 'data.lanes[1].run_state' '"blocked"'
+  assert_json_value "$output_file" 'data.lanes[1].stale_pid' 'true'
+  assert_json_value "$output_file" 'data.lanes[1].blocked_count' '1'
+  assert_json_value "$output_file" 'data.lanes[2].run_state' '"idle"'
+  assert_json_value "$output_file" 'data.lanes[2].pid' 'null'
+  assert_json_value "$output_file" 'data.lanes[2].log_path' 'null'
+}
+
 test_autopilot_generates_workaround_and_retries_base_task() {
   local fixture_root="$tmpdir/autopilot-generated-workaround"
   local generated_task="$fixture_root/.clasp-agents/generated-tasks/0001-alpha--workaround.md"
@@ -549,5 +688,7 @@ EOF
 test_autopilot_generates_workaround_and_retries_base_task
 test_autopilot_resumes_existing_workaround_after_restart
 test_autopilot_skips_blocked_workaround_and_runs_later_tasks
+test_swarm_status_reports_human_summary
+test_swarm_status_reports_machine_readable_summary
 test_builder_prompt_is_literal_safe_and_streamed_via_stdin
 test_verifier_prompt_is_literal_safe_and_streamed_via_stdin

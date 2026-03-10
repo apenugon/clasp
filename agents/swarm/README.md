@@ -28,3 +28,8 @@ Canonical task metadata:
 - Start new task files from [`task-template.md`](./task-template.md).
 - Validate machine-readable task manifests against [`task.schema.json`](./task.schema.json).
 - In JSON manifests, `dependencies` is always an array of upstream task IDs; use `[]` when there are no dependencies.
+
+Supervisor status surface:
+
+- Run `scripts/clasp-swarm-status.sh [wave]` for the human-oriented lane and summary view.
+- Run `scripts/clasp-swarm-status.sh --json [wave]` for machine-readable lane status plus aggregate run-state counts.
