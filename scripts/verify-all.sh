@@ -9,6 +9,7 @@ nix develop -c bash -lc "
   bash scripts/test-swarm-control.sh
   cabal test
   cabal run claspc -- check examples/hello.clasp
+  cabal run claspc -- check examples/lists.clasp
   cabal run claspc -- check examples/status.clasp
   cabal run claspc -- check examples/records.clasp
   cabal run claspc -- check examples/lead-app/Main.clasp

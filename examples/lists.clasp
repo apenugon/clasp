@@ -1,0 +1,23 @@
+module Main
+
+record User = {
+  name : Str,
+  tags : [Str]
+}
+
+record Batch = {
+  users : [User],
+  highlights : [[Str]]
+}
+
+defaultBatch : Batch
+defaultBatch = Batch { users = [User { name = "Ada", tags = ["core", "lang"] }, User { name = "Grace", tags = ["compiler"] }], highlights = [["core", "language"], []] }
+
+decodeUsers : Str -> [User]
+decodeUsers raw = decode [User] raw
+
+batchJson : Str
+batchJson = encode defaultBatch
+
+main : Str
+main = batchJson

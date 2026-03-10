@@ -73,11 +73,31 @@ tests =
     , compileTests
     ]
 
+listExamplePath :: FilePath
+listExamplePath = "examples/lists.clasp"
+
 parserTests :: TestTree
 parserTests =
   testGroup
     "parser"
-    [ testCase "parses declaration annotations with spans" $
+    [ testCase "parses the list example module" $ do
+        source <- TIO.readFile listExamplePath
+        case parseSource listExamplePath source of
+          Left err ->
+            assertFailure ("expected list example parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertEqual "module name" (ModuleName "Main") (moduleName modl)
+            assertEqual "record decl count" 2 (length (moduleRecordDecls modl))
+            case findDecl "defaultBatch" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ERecord _ "Batch" _ ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected Batch record literal, got " <> show other)
+              Nothing ->
+                assertFailure "expected defaultBatch declaration"
+    , testCase "parses declaration annotations with spans" $
         case parseSource "inline" annotatedIdentitySource of
           Left err ->
             assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -250,7 +270,14 @@ checkerTests :: TestTree
 checkerTests =
   testGroup
     "checker"
-    [ testCase "accepts the example program" $
+    [ testCase "accepts the list example program" $ do
+        result <- checkEntry listExamplePath
+        case result of
+          Left err ->
+            assertFailure ("expected list example to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts the example program" $
         case checkSource "hello" helloSource of
           Left err ->
             assertFailure ("expected hello source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -483,7 +510,16 @@ compileTests :: TestTree
 compileTests =
   testGroup
     "compile"
-    [ testCase "compile emits JavaScript for a checked module" $
+    [ testCase "compileEntry emits JavaScript for the list example" $ do
+        result <- compileEntry listExamplePath
+        case result of
+          Left err ->
+            assertFailure ("expected list example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected list decoder helper" ("function $decodeList(validateElement)" `T.isInfixOf` emitted)
+            assertBool "expected encoded batch export" ("export const batchJson = $encode_Batch(defaultBatch);" `T.isInfixOf` emitted)
+            assertBool "expected nested list literal" ("highlights: [[\"core\", \"language\"], []]" `T.isInfixOf` emitted)
+    , testCase "compile emits JavaScript for a checked module" $
         case compileSource "hello" helloSource of
           Left err ->
             assertFailure ("expected compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
