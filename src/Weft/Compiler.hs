@@ -9,6 +9,7 @@ import Weft.Checker (checkModule)
 import Weft.Core (CoreModule)
 import Weft.Diagnostic (DiagnosticBundle)
 import Weft.Emit.JavaScript (emitModule)
+import Weft.Lower (lowerModule)
 import Weft.Parser (parseModule)
 import Weft.Syntax (Module)
 
@@ -23,4 +24,4 @@ checkSource path source = do
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do
   modl <- checkSource path source
-  pure (emitModule modl)
+  pure (emitModule (lowerModule modl))

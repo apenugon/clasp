@@ -25,6 +25,7 @@ It includes:
 - Match expressions over constructors
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
+- A lowered backend IR between checking and emission
 - Local inference for declarations whose types are constrained enough by usage
 - Exhaustiveness checking for constructor matches
 - Structured diagnostic codes
@@ -163,7 +164,7 @@ Notes:
 The current compiler pipeline is:
 
 ```text
-Source -> Parser -> AST -> Typed Core IR -> JavaScript Emitter
+Source -> Parser -> AST -> Typed Core IR -> Lowered IR -> JavaScript Emitter
 ```
 
 The intended expanded pipeline is:

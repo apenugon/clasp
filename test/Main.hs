@@ -20,6 +20,13 @@ import Weft.Diagnostic
   , renderDiagnosticBundle
   , renderDiagnosticBundleJson
   )
+import Weft.Lower
+  ( LowerDecl (..)
+  , LowerExpr (..)
+  , LowerMatchBranch (..)
+  , LowerModule (..)
+  , lowerModule
+  )
 import Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
@@ -45,6 +52,7 @@ tests =
     [ parserTests
     , checkerTests
     , diagnosticTests
+    , lowerTests
     , compileTests
     ]
 
@@ -185,6 +193,32 @@ diagnosticTests =
             assertFailure "expected duplicate declaration failure"
     ]
 
+lowerTests :: TestTree
+lowerTests =
+  testGroup
+    "lower"
+    [ testCase "lowering materializes constructors as declarations" $
+        case lowerChecked "adt" adtSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case lowerModuleDecls lowered of
+              LValueDecl "Idle" (LConstruct "Idle" []) : LFunctionDecl "Busy" ["$0"] (LConstruct "Busy" [LVar "$0"]) : _ ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered constructors: " <> show other)
+    , testCase "lowering preserves match branches as tag dispatch" $
+        case lowerChecked "adt" adtSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "describe" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["status"] (LMatch (LVar "status") [LowerMatchBranch "Idle" [] (LString "idle"), LowerMatchBranch "Busy" ["note"] (LVar "note")])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered describe declaration: " <> show other)
+    ]
+
 compileTests :: TestTree
 compileTests =
   testGroup
@@ -238,6 +272,24 @@ findDecl target =
     go (decl : rest)
       | declName decl == target = Just decl
       | otherwise = go rest
+
+findLowerDecl :: Text -> [LowerDecl] -> Maybe LowerDecl
+findLowerDecl target =
+  go
+  where
+    go [] = Nothing
+    go (decl : rest) =
+      case decl of
+        LValueDecl name _
+          | name == target -> Just decl
+        LFunctionDecl name _ _
+          | name == target -> Just decl
+        _ -> go rest
+
+lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
+lowerChecked path source = do
+  checked <- checkSource path source
+  pure (lowerModule checked)
 
 normalizeConstructors :: [ConstructorDecl] -> [ConstructorDecl]
 normalizeConstructors =

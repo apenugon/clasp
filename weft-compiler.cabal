@@ -30,6 +30,7 @@ library
       Weft.Core
       Weft.Diagnostic
       Weft.Emit.JavaScript
+      Weft.Lower
       Weft.Parser
       Weft.Syntax
 

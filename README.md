@@ -8,7 +8,7 @@ This repository currently contains:
 - A v0 language spec and build roadmap
 - A benchmark harness scaffold for measuring agent performance
 - A Nix-based Haskell development environment
-- The first compiler scaffold, exposed as the `weftc` executable, with parsing, a typed core IR, local type inference, algebraic data types, pattern matching, and JavaScript emission
+- The first compiler scaffold, exposed as the `weftc` executable, with parsing, a typed core IR, a lowered backend IR, local type inference, algebraic data types, pattern matching, and JavaScript emission
 
 ## Quick Start
 
