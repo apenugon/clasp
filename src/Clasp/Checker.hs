@@ -372,14 +372,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
         TBool ->
           pure ()
         TList elementType ->
-          Left . diagnosticBundle $
-            [ diagnostic
-                "E_SCHEMA_FIELD_TYPE"
-                ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> renderType (TList elementType) <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
-                (Just (recordFieldDeclSpan fieldDecl))
-                ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
-                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
-            ]
+          ensureSchemaFieldListType recordDecl fieldDecl elementType
         TNamed name ->
           unless (Map.member name recordDeclEnv || maybe False isJsonEnumTypeDecl (Map.lookup name typeDeclEnv)) $
             Left . diagnosticBundle $
@@ -387,7 +380,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                   "E_SCHEMA_FIELD_TYPE"
                   ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> name <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
                   (Just (recordFieldDeclSpan fieldDecl))
-                  ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
+                  ["Record fields currently support primitives, lists, nested record types, and nullary enum types only."]
                   [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
               ]
         TFunction _ _ ->
@@ -396,9 +389,38 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                 "E_SCHEMA_FIELD_TYPE"
                 ("Record `" <> recordDeclName recordDecl <> "` uses a function field for `" <> recordFieldDeclName fieldDecl <> "`.")
                 (Just (recordFieldDeclSpan fieldDecl))
-                ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
+                ["Record fields currently support primitives, lists, nested record types, and nullary enum types only."]
                 [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
             ]
+
+    ensureSchemaFieldListType recordDecl fieldDecl elementType =
+      case isSupportedSchemaFieldType elementType of
+        True ->
+          pure ()
+        False ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_SCHEMA_FIELD_TYPE"
+                ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> renderType (recordFieldDeclType fieldDecl) <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
+                (Just (recordFieldDeclSpan fieldDecl))
+                ["Record fields currently support primitives, lists, nested record types, and nullary enum types only."]
+                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+            ]
+
+    isSupportedSchemaFieldType typ =
+      case typ of
+        TInt ->
+          True
+        TStr ->
+          True
+        TBool ->
+          True
+        TList elementType ->
+          isSupportedSchemaFieldType elementType
+        TNamed name ->
+          Map.member name recordDeclEnv || maybe False isJsonEnumTypeDecl (Map.lookup name typeDeclEnv)
+        TFunction _ _ ->
+          False
 
     ensureRecordType routeDecl typeName primarySpan role =
       unless (Map.member typeName recordDeclEnv) $
@@ -1527,7 +1549,7 @@ inferTypeToJsonType ctx inferType =
     IBool ->
       Right TBool
     IList elementType ->
-      Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TList (inferTypeToTypeUnsafe elementType))))
+      TList <$> inferTypeToJsonType ctx elementType
     INamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Right (TNamed name)
@@ -1559,8 +1581,8 @@ jsonTypeSupportError ctx primarySpan typ =
       Nothing
     TBool ->
       Nothing
-    TList _ ->
-      Just (jsonTypeUnsupportedBundle Nothing typ)
+    TList elementType ->
+      jsonTypeSupportError ctx primarySpan elementType
     TNamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Nothing
@@ -1570,9 +1592,9 @@ jsonTypeSupportError ctx primarySpan typ =
           Just . diagnosticBundle $
               [ diagnostic
                   "E_JSON_TYPE"
-                  ("JSON codecs currently support record and primitive types, but got `" <> name <> "`.")
+                  ("JSON codecs currently support primitive, list, record, and nullary enum types, but got `" <> name <> "`.")
                   (Just primarySpan)
-                  ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+                  ["Use a primitive type, a list of supported JSON types, a record type, or a nullary enum type at the JSON boundary."]
                   []
               ]
     TFunction _ _ ->
@@ -1581,7 +1603,7 @@ jsonTypeSupportError ctx primarySpan typ =
             "E_JSON_TYPE"
             "JSON codecs do not support function values."
             (Just primarySpan)
-            ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+            ["Use a primitive type, a list of supported JSON types, a record type, or a nullary enum type at the JSON boundary."]
             []
         ]
 
@@ -1592,7 +1614,7 @@ jsonTypeUnsupportedBundle maybeContext typ =
         "E_JSON_TYPE"
         summary
         Nothing
-        ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+        ["Use a primitive type, a list of supported JSON types, a record type, or a nullary enum type at the JSON boundary."]
         []
     ]
   where
@@ -1607,7 +1629,7 @@ jsonTypeUnsupportedBundle maybeContext typ =
         TFunction _ _ ->
           prefix <> "JSON codecs do not support function values."
         _ ->
-          prefix <> "JSON codecs currently support record, primitive, and nullary enum types, but got `" <> renderType typ <> "`."
+          prefix <> "JSON codecs currently support primitive, list, record, and nullary enum types, but got `" <> renderType typ <> "`."
 
 isJsonEnumTypeDecl :: TypeDecl -> Bool
 isJsonEnumTypeDecl typeDecl =

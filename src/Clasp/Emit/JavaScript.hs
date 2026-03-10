@@ -79,6 +79,13 @@ emitRuntimePrelude =
   , "  return value;"
   , "}"
   , ""
+  , "function $claspExpectArray(value, path) {"
+  , "  if (!Array.isArray(value)) {"
+  , "    throw new Error(`${path} expected a List`);"
+  , "  }"
+  , "  return value;"
+  , "}"
+  , ""
   , "function $claspRequireField(objectValue, fieldName, path) {"
   , "  if (!Object.prototype.hasOwnProperty.call(objectValue, fieldName)) {"
   , "    throw new Error(`${path}.${fieldName} is missing`);"
@@ -86,16 +93,60 @@ emitRuntimePrelude =
   , "  return objectValue[fieldName];"
   , "}"
   , ""
+  , "function $validateList(validateElement) {"
+  , "  return function(value, path = \"value\") {"
+  , "    const arrayValue = $claspExpectArray(value, path);"
+  , "    return arrayValue.map((element, index) => validateElement(element, `${path}[${index}]`));"
+  , "  };"
+  , "}"
+  , ""
+  , "function $validateInternalList(validateElement) {"
+  , "  return function(value, path = \"value\") {"
+  , "    const arrayValue = $claspExpectArray(value, path);"
+  , "    return arrayValue.map((element, index) => validateElement(element, `${path}[${index}]`));"
+  , "  };"
+  , "}"
+  , ""
+  , "function $serializeList(serializeElement) {"
+  , "  return function(value) {"
+  , "    return value.map(element => serializeElement(element));"
+  , "  };"
+  , "}"
+  , ""
+  , "function $decodeList(validateElement) {"
+  , "  const validateListValue = $validateList(validateElement);"
+  , "  return function(jsonText) {"
+  , "    return validateListValue(JSON.parse(jsonText), \"value\");"
+  , "  };"
+  , "}"
+  , ""
+  , "function $encodeList(validateElement, serializeElement) {"
+  , "  const validateListValue = $validateInternalList(validateElement);"
+  , "  const serializeListValue = $serializeList(serializeElement);"
+  , "  return function(value) {"
+  , "    return JSON.stringify(serializeListValue(validateListValue(value, \"value\")));"
+  , "  };"
+  , "}"
+  , ""
   ]
 
 emitPrimitiveCodecHelpers :: [Text]
 emitPrimitiveCodecHelpers =
-  [ "function $decode_Int(jsonText) { return $claspExpectInt(JSON.parse(jsonText), \"value\"); }"
-  , "function $encode_Int(value) { return JSON.stringify($claspExpectInt(value, \"value\")); }"
-  , "function $decode_Str(jsonText) { return $claspExpectStr(JSON.parse(jsonText), \"value\"); }"
-  , "function $encode_Str(value) { return JSON.stringify($claspExpectStr(value, \"value\")); }"
-  , "function $decode_Bool(jsonText) { return $claspExpectBool(JSON.parse(jsonText), \"value\"); }"
-  , "function $encode_Bool(value) { return JSON.stringify($claspExpectBool(value, \"value\")); }"
+  [ "function $validate_Int(value, path = \"value\") { return $claspExpectInt(value, path); }"
+  , "function $validateInternal_Int(value, path = \"value\") { return $claspExpectInt(value, path); }"
+  , "function $serialize_Int(value) { return $claspExpectInt(value, \"value\"); }"
+  , "function $decode_Int(jsonText) { return $validate_Int(JSON.parse(jsonText), \"value\"); }"
+  , "function $encode_Int(value) { return JSON.stringify($serialize_Int($validateInternal_Int(value, \"value\"))); }"
+  , "function $validate_Str(value, path = \"value\") { return $claspExpectStr(value, path); }"
+  , "function $validateInternal_Str(value, path = \"value\") { return $claspExpectStr(value, path); }"
+  , "function $serialize_Str(value) { return $claspExpectStr(value, \"value\"); }"
+  , "function $decode_Str(jsonText) { return $validate_Str(JSON.parse(jsonText), \"value\"); }"
+  , "function $encode_Str(value) { return JSON.stringify($serialize_Str($validateInternal_Str(value, \"value\"))); }"
+  , "function $validate_Bool(value, path = \"value\") { return $claspExpectBool(value, path); }"
+  , "function $validateInternal_Bool(value, path = \"value\") { return $claspExpectBool(value, path); }"
+  , "function $serialize_Bool(value) { return $claspExpectBool(value, \"value\"); }"
+  , "function $decode_Bool(jsonText) { return $validate_Bool(JSON.parse(jsonText), \"value\"); }"
+  , "function $encode_Bool(value) { return JSON.stringify($serialize_Bool($validateInternal_Bool(value, \"value\"))); }"
   , ""
   ]
 
@@ -269,49 +320,61 @@ emitRouteMethod routeMethod =
 
 emitValidator :: Type -> Text -> Text -> Text
 emitValidator typ valueRef pathRef =
-  case typ of
-    TInt ->
-      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
-    TStr ->
-      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
-    TBool ->
-      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
-    TList _ ->
-      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
-    TNamed name ->
-      "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
-    TFunction _ _ ->
-      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+  emitValidatorRef typ <> "(" <> valueRef <> ", " <> pathRef <> ")"
 
 emitInternalValidator :: Type -> Text -> Text -> Text
 emitInternalValidator typ valueRef pathRef =
-  case typ of
-    TInt ->
-      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
-    TStr ->
-      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
-    TBool ->
-      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
-    TList _ ->
-      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
-    TNamed name ->
-      "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
-    TFunction _ _ ->
-      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+  emitInternalValidatorRef typ <> "(" <> valueRef <> ", " <> pathRef <> ")"
 
 emitSerializer :: Type -> Text -> Text
 emitSerializer typ valueRef =
+  emitSerializerRef typ <> "(" <> valueRef <> ")"
+
+emitValidatorRef :: Type -> Text
+emitValidatorRef typ =
   case typ of
     TInt ->
-      "$claspExpectInt(" <> valueRef <> ", \"value\")"
+      "$validate_Int"
     TStr ->
-      "$claspExpectStr(" <> valueRef <> ", \"value\")"
+      "$validate_Str"
     TBool ->
-      "$claspExpectBool(" <> valueRef <> ", \"value\")"
-    TList _ ->
-      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
+      "$validate_Bool"
+    TList elementType ->
+      "$validateList(" <> emitValidatorRef elementType <> ")"
     TNamed name ->
-      "$serialize_" <> name <> "(" <> valueRef <> ")"
+      "$validate_" <> name
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitInternalValidatorRef :: Type -> Text
+emitInternalValidatorRef typ =
+  case typ of
+    TInt ->
+      "$validateInternal_Int"
+    TStr ->
+      "$validateInternal_Str"
+    TBool ->
+      "$validateInternal_Bool"
+    TList elementType ->
+      "$validateInternalList(" <> emitInternalValidatorRef elementType <> ")"
+    TNamed name ->
+      "$validateInternal_" <> name
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitSerializerRef :: Type -> Text
+emitSerializerRef typ =
+  case typ of
+    TInt ->
+      "$serialize_Int"
+    TStr ->
+      "$serialize_Str"
+    TBool ->
+      "$serialize_Bool"
+    TList elementType ->
+      "$serializeList(" <> emitSerializerRef elementType <> ")"
+    TNamed name ->
+      "$serialize_" <> name
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 

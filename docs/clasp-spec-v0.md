@@ -228,8 +228,8 @@ Notes:
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
 - Record field access becomes JavaScript property access.
-- `decode` validates and decodes JSON text into a primitive or record type.
-- `encode` serializes a primitive or record value into JSON text.
+- `decode` validates and decodes JSON text into a primitive, list, record, or nullary enum type.
+- `encode` serializes a primitive, list, record, or nullary enum value into JSON text.
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Function application compiles to JavaScript function calls.
@@ -238,7 +238,7 @@ Notes:
 - Declarations may omit type signatures when local inference can resolve all parameter and result types.
 - Ambiguous declarations still require explicit signatures.
 - The current import loader resolves `Foo.Bar` to `Foo/Bar.clasp` relative to the entry module and flattens imported declarations into one checked module.
-- Records are currently restricted to primitive and nested-record fields so generated JSON codecs stay valid.
+- Records currently support primitive, list, nested-record, and nullary-enum fields so generated JSON codecs stay valid.
 - Foreign declarations are currently restricted to function capabilities.
 - Routes currently require record request and response types.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.

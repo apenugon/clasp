@@ -298,6 +298,12 @@ checkerTests =
             assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "accepts list JSON boundaries and list-valued record fields" $
+        case checkSource "json-lists" jsonListSource of
+          Left err ->
+            assertFailure ("expected list json source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -456,6 +462,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered names declaration: " <> show other)
+    , testCase "lowering uses higher-order codecs for list json boundaries" $
+        case lowerChecked "json-lists" jsonListSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "decodeUsers" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["raw"] (LCall (LCall (LVar "$decodeList") [LVar "$validate_User"]) [LVar "raw"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered decodeUsers declaration: " <> show other)
+            case findLowerDecl "encodeUsers" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["users"] (LCall (LCall (LVar "$encodeList") [LVar "$validateInternal_User", LVar "$serialize_User"]) [LVar "users"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered encodeUsers declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -521,6 +542,16 @@ compileTests =
             assertFailure ("expected list literal compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected array literal" ("export const names = [\"Ada\", \"Grace\"];" `T.isInfixOf` emitted)
+    , testCase "compile emits list JSON codecs for direct boundaries and record fields" $
+        case compileSource "json-lists" jsonListSource of
+          Left err ->
+            assertFailure ("expected list json compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected list decoder helper" ("function $decodeList(validateElement)" `T.isInfixOf` emitted)
+            assertBool "expected list validator in record codec" ("$validateList($validate_Str)(tagsValue, path + \".tags\")" `T.isInfixOf` emitted)
+            assertBool "expected list serializer in record codec" ("$serializeList($serialize_User)(value.users)" `T.isInfixOf` emitted)
+            assertBool "expected direct list decode lowering" ("export function decodeUsers(raw) { return $decodeList($validate_User)(raw); }" `T.isInfixOf` emitted)
+            assertBool "expected direct list encode lowering" ("export function encodeUsers(users) { return $encodeList($validateInternal_User, $serialize_User)(users); }" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -776,6 +807,40 @@ listLiteralSource =
     , ""
     , "pairs : [[Int]]"
     , "pairs = [[1, 2], [3, 4]]"
+    ]
+
+jsonListSource :: Text
+jsonListSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  tags : [Str]"
+    , "}"
+    , ""
+    , "record Payload = {"
+    , "  users : [User],"
+    , "  flags : [[Bool]]"
+    , "}"
+    , ""
+    , "decodeUsers : Str -> [User]"
+    , "decodeUsers raw = decode [User] raw"
+    , ""
+    , "encodeUsers : [User] -> Str"
+    , "encodeUsers users = encode users"
+    , ""
+    , "payload : Payload"
+    , "payload = Payload {"
+    , "  users = [User {"
+    , "    name = \"Ada\","
+    , "    tags = [\"core\", \"lang\"]"
+    , "  }],"
+    , "  flags = [[true, false], []]"
+    , "}"
+    , ""
+    , "encodedPayload : Str"
+    , "encodedPayload = encode payload"
     ]
 
 mixedListLiteralSource :: Text

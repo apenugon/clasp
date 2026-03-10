@@ -155,9 +155,9 @@ lowerCoreExpr expr =
     CFieldAccess _ _ subject fieldName ->
       LFieldAccess (lowerCoreExpr subject) fieldName
     CDecodeJson _ typ rawJson ->
-      LCall (LVar (codecDecodeName typ)) [lowerCoreExpr rawJson]
+      LCall (codecDecodeExpr typ) [lowerCoreExpr rawJson]
     CEncodeJson _ value ->
-      LCall (LVar (codecEncodeName (coreExprType value))) [lowerCoreExpr value]
+      LCall (codecEncodeExpr (coreExprType value)) [lowerCoreExpr value]
 
 lowerRecordField :: CoreRecordField -> LowerRecordField
 lowerRecordField field =
@@ -187,13 +187,69 @@ lowerRouteDecl routeDecl =
     , lowerRouteHandlerName = routeDeclHandlerName routeDecl
     }
 
-codecDecodeName :: Type -> Text
-codecDecodeName typ =
-  "$decode_" <> codecSuffix typ
+codecDecodeExpr :: Type -> LowerExpr
+codecDecodeExpr typ =
+  case typ of
+    TList elementType ->
+      LCall (LVar "$decodeList") [codecValidatorExpr elementType]
+    _ ->
+      LVar ("$decode_" <> codecSuffix typ)
 
-codecEncodeName :: Type -> Text
-codecEncodeName typ =
-  "$encode_" <> codecSuffix typ
+codecEncodeExpr :: Type -> LowerExpr
+codecEncodeExpr typ =
+  case typ of
+    TList elementType ->
+      LCall (LVar "$encodeList") [codecInternalValidatorExpr elementType, codecSerializerExpr elementType]
+    _ ->
+      LVar ("$encode_" <> codecSuffix typ)
+
+codecValidatorExpr :: Type -> LowerExpr
+codecValidatorExpr typ =
+  case typ of
+    TInt ->
+      LVar "$validate_Int"
+    TStr ->
+      LVar "$validate_Str"
+    TBool ->
+      LVar "$validate_Bool"
+    TList elementType ->
+      LCall (LVar "$validateList") [codecValidatorExpr elementType]
+    TNamed name ->
+      LVar ("$validate_" <> name)
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"
+
+codecInternalValidatorExpr :: Type -> LowerExpr
+codecInternalValidatorExpr typ =
+  case typ of
+    TInt ->
+      LVar "$validateInternal_Int"
+    TStr ->
+      LVar "$validateInternal_Str"
+    TBool ->
+      LVar "$validateInternal_Bool"
+    TList elementType ->
+      LCall (LVar "$validateInternalList") [codecInternalValidatorExpr elementType]
+    TNamed name ->
+      LVar ("$validateInternal_" <> name)
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"
+
+codecSerializerExpr :: Type -> LowerExpr
+codecSerializerExpr typ =
+  case typ of
+    TInt ->
+      LVar "$serialize_Int"
+    TStr ->
+      LVar "$serialize_Str"
+    TBool ->
+      LVar "$serialize_Bool"
+    TList elementType ->
+      LCall (LVar "$serializeList") [codecSerializerExpr elementType]
+    TNamed name ->
+      LVar ("$serialize_" <> name)
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"
 
 codecSuffix :: Type -> Text
 codecSuffix typ =
@@ -204,9 +260,9 @@ codecSuffix typ =
       "Str"
     TBool ->
       "Bool"
-    TList _ ->
-      error "lists are not JSON codec targets yet"
     TNamed name ->
       name
     TFunction _ _ ->
       error "functions are not JSON codec targets"
+    TList _ ->
+      error "lists use higher-order JSON codec helpers"
