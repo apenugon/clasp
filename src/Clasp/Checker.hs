@@ -89,6 +89,7 @@ data InferType
   = IInt
   | IStr
   | IBool
+  | IList InferType
   | INamed Text
   | IFunction [InferType] InferType
   | IVar Int
@@ -346,6 +347,8 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
           pure ()
         TBool ->
           pure ()
+        TList elementType ->
+          ensureKnownType primarySpan related elementType
         TNamed name ->
           unless (Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
             Left . diagnosticBundle $
@@ -367,6 +370,15 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
           pure ()
         TBool ->
           pure ()
+        TList elementType ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_SCHEMA_FIELD_TYPE"
+                ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> renderType (TList elementType) <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
+                (Just (recordFieldDeclSpan fieldDecl))
+                ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
+                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+            ]
         TNamed name ->
           unless (Map.member name recordDeclEnv || maybe False isJsonEnumTypeDecl (Map.lookup name typeDeclEnv)) $
             Left . diagnosticBundle $
@@ -1489,6 +1501,8 @@ inferTypeToJsonType ctx inferType =
       Right TStr
     IBool ->
       Right TBool
+    IList elementType ->
+      Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TList (inferTypeToTypeUnsafe elementType))))
     INamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Right (TNamed name)
@@ -1506,6 +1520,7 @@ inferTypeToJsonType ctx inferType =
         IInt -> TInt
         IStr -> TStr
         IBool -> TBool
+        IList elementType -> TList (inferTypeToTypeUnsafe elementType)
         INamed name -> TNamed name
         IFunction args result -> TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result)
         IVar _ -> TNamed "<unknown>"
@@ -1519,6 +1534,8 @@ jsonTypeSupportError ctx primarySpan typ =
       Nothing
     TBool ->
       Nothing
+    TList _ ->
+      Just (jsonTypeUnsupportedBundle Nothing typ)
     TNamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Nothing
@@ -1718,6 +1735,8 @@ inferTypeToType inferState inferType =
       Right TStr
     IBool ->
       Right TBool
+    IList elementType ->
+      TList <$> inferTypeToType inferState elementType
     INamed name ->
       Right (TNamed name)
     IFunction args result ->
@@ -1734,6 +1753,8 @@ typeToInferType typ =
       IStr
     TBool ->
       IBool
+    TList elementType ->
+      IList (typeToInferType elementType)
     TNamed name ->
       INamed name
     TFunction args result ->
@@ -1758,6 +1779,8 @@ resolveInferType substitution inferType =
       IStr
     IBool ->
       IBool
+    IList elementType ->
+      IList (resolveInferType substitution elementType)
     INamed name ->
       INamed name
     IFunction args result ->
@@ -1787,6 +1810,8 @@ unify context leftType rightType = do
       pure ()
     (IBool, IBool) ->
       pure ()
+    (IList leftElement, IList rightElement) ->
+      unify context leftElement rightElement
     (INamed leftName, INamed rightName)
       | leftName == rightName ->
           pure ()
@@ -1824,6 +1849,8 @@ occursInType varId inferType =
       False
     IBool ->
       False
+    IList elementType ->
+      occursInType varId elementType
     INamed _ ->
       False
     IFunction args result ->
@@ -1851,6 +1878,8 @@ renderInferType inferType =
       "Str"
     IBool ->
       "Bool"
+    IList elementType ->
+      "[" <> renderInferType elementType <> "]"
     INamed name ->
       name
     IFunction args result ->

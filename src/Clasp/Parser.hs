@@ -439,6 +439,7 @@ typeParser = do
 typeAtomParser :: Parser Type
 typeAtomParser =
   parens typeParser
+    <|> (TList <$> brackets typeParser)
     <|> (keyword "Int" *> pure TInt)
     <|> (keyword "Str" *> pure TStr)
     <|> (keyword "Bool" *> pure TBool)
@@ -548,6 +549,10 @@ braces parser =
   where
     openBrace = L.symbol scn "{"
     closeBrace = L.symbol sc "}"
+
+brackets :: Parser a -> Parser a
+brackets =
+  between (symbol "[") (symbol "]")
 
 sc :: Parser ()
 sc = L.space (void $ some (char ' ' <|> char '\t')) lineComment MP.empty

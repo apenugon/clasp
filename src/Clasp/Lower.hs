@@ -201,6 +201,8 @@ codecSuffix typ =
       "Str"
     TBool ->
       "Bool"
+    TList _ ->
+      error "lists are not JSON codec targets yet"
     TNamed name ->
       name
     TFunction _ _ ->

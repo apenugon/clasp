@@ -276,6 +276,8 @@ emitValidator typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList _ ->
+      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
     TNamed name ->
       "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
@@ -290,6 +292,8 @@ emitInternalValidator typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList _ ->
+      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
     TNamed name ->
       "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
@@ -304,6 +308,8 @@ emitSerializer typ valueRef =
       "$claspExpectStr(" <> valueRef <> ", \"value\")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", \"value\")"
+    TList _ ->
+      "(() => { throw new Error(\"Lists are not JSON serializable yet\"); })()"
     TNamed name ->
       "$serialize_" <> name <> "(" <> valueRef <> ")"
     TFunction _ _ ->

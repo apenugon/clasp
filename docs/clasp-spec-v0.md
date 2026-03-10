@@ -205,7 +205,7 @@ match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
 pattern     ::= upper-ident lower-ident*
 type        ::= type-atom ("->" type-atom)*
-type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "(" type ")"
+type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "[" type "]" | "(" type ")"
 ```
 
 Notes:
@@ -216,6 +216,8 @@ Notes:
 - `<`, `<=`, `>`, and `>=` are available for `Int`.
 - Declarations are expression-bodied only.
 - Constructor names and type names are currently uppercase; value names are lowercase.
+- List type syntax uses brackets, for example `[Int]` or `[[User]]`.
+- In the current implementation, list types are parsed into the syntax tree, while list typechecking and backend support land in later slices.
 
 ## Semantics
 

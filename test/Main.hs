@@ -51,6 +51,7 @@ import Clasp.Syntax
   , PatternBinder (..)
   , Position (..)
   , RecordDecl (..)
+  , RecordFieldDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
   , SourceSpan (..)
@@ -171,6 +172,36 @@ parserTests =
                     assertFailure ("expected decode expression, got " <> show other)
               Nothing ->
                 assertFailure "expected summarizeLead declaration"
+    , testCase "parses list types in signatures, constructors, records, and decode" $
+        case parseSource "inline" listTypeSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleTypeDecls modl of
+              [typeDecl] ->
+                assertEqual
+                  "constructors"
+                  [ConstructorDecl "Batch" dummySpan dummySpan [TList TInt, TList (TList TStr)]]
+                  (normalizeConstructors (typeDeclConstructors typeDecl))
+              other ->
+                assertFailure ("expected one type declaration, got " <> show (length other))
+            case moduleRecordDecls modl of
+              [recordDecl] ->
+                assertEqual
+                  "record field types"
+                  [TList (TNamed "User"), TList (TList TStr)]
+                  (fmap recordFieldDeclType (recordDeclFields recordDecl))
+              other ->
+                assertFailure ("expected one record declaration, got " <> show (length other))
+            case findDecl "decodeUsers" (moduleDecls modl) of
+              Just decl ->
+                case (declAnnotation decl, declBody decl) of
+                  (Just (TFunction [TStr] (TList (TNamed "User"))), EDecode _ (TList (TNamed "User")) (EVar _ "raw")) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected list-typed declaration and decode, got " <> show other)
+              Nothing ->
+                assertFailure "expected decodeUsers declaration"
     , testCase "parses equality expressions" $
         case parseSource "inline" equalitySource of
           Left err ->
@@ -677,6 +708,22 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+listTypeSource :: Text
+listTypeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Payload = Batch [Int] [[Str]]"
+    , ""
+    , "record UserGroup = {"
+    , "  members : [User],"
+    , "  labels : [[Str]]"
+    , "}"
+    , ""
+    , "decodeUsers : Str -> [User]"
+    , "decodeUsers raw = decode [User] raw"
     ]
 
 equalitySource :: Text
