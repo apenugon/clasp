@@ -27,7 +27,9 @@ Canonical task metadata:
 
 - Start new task files from [`task-template.md`](./task-template.md).
 - Validate machine-readable task manifests against [`task.schema.json`](./task.schema.json).
-- In JSON manifests, `dependencies` is always an array of upstream task IDs; use `[]` when there are no dependencies.
+- Use `## Batch` for a shared label when several tasks may run in parallel as one upstream batch.
+- Use `## Dependency Labels` when a task should wait for every task in one or more upstream batches.
+- In JSON manifests, `batch` is optional, `dependency_labels` is an array of batch labels, and `dependencies` is an array of upstream task IDs.
 
 Supervisor status surface:
 

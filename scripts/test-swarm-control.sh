@@ -23,16 +23,28 @@ agents_readme_path = project_root / "agents/README.md"
 plan_path = project_root / "docs/clasp-project-plan.md"
 
 schema = json.loads(schema_path.read_text())
+batch = schema["properties"]["batch"]
+assert batch["type"] == ["string", "null"]
+assert batch["pattern"] == "^[a-z0-9][a-z0-9._-]*$"
+dependency_labels = schema["properties"]["dependency_labels"]
+assert dependency_labels["type"] == "array"
+assert dependency_labels["items"]["pattern"] == "^[a-z0-9][a-z0-9._-]*$"
 deps = schema["properties"]["dependencies"]
 assert deps["type"] == "array"
 assert deps["items"]["pattern"] == "^[A-Z]{2,3}-[0-9]{3}$"
 
 template = template_path.read_text()
+assert '"batch": null' in template
+assert '"dependency_labels": []' in template
 assert '"dependencies": []' in template
 
 readme = readme_path.read_text()
 assert "./task-template.md" in readme
 assert "./task.schema.json" in readme
+assert "## Batch" in template
+assert "## Dependency Labels" in template
+assert "`batch` is optional" in readme
+assert "`dependency_labels` is an array of batch labels" in readme
 assert str(project_root) not in readme
 
 agents_readme = agents_readme_path.read_text()
@@ -44,7 +56,10 @@ assert "`agents/tasks/` remains only as the legacy coarse backlog" in agents_rea
 plan = plan_path.read_text()
 assert "agents/swarm/task-template.md" in plan
 assert "agents/swarm/task.schema.json" in plan
-assert "dependencies` must be a JSON array of task IDs, with `[]` meaning no dependencies" in plan
+assert "optional batch label" in plan
+assert "optional dependency labels" in plan
+assert "`dependency_labels` must be a JSON array of batch labels" in plan
+assert "`dependencies` must be a JSON array of task IDs, with `[]` meaning no dependencies" in plan
 PY
 
 mapfile -t lanes < <(bash "$project_root/scripts/clasp-swarm-start.sh" --list-lanes wave1)
@@ -607,6 +622,122 @@ EOF
   )
 }
 
+create_swarm_dependency_label_fixture() {
+  local fixture_root="$1"
+
+  mkdir -p \
+    "$fixture_root/scripts" \
+    "$fixture_root/agents/swarm/testwave/01-foundation-a" \
+    "$fixture_root/agents/swarm/testwave/02-foundation-b" \
+    "$fixture_root/agents/swarm/testwave/03-dependent" \
+    "$fixture_root/.test-state"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-lane.sh" \
+    "$fixture_root/scripts/"
+
+  cat <<'EOF' > "$fixture_root/AGENTS.md"
+# Fixture
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/swarm/testwave/01-foundation-a/0001-alpha.md"
+# SW-301
+
+## Batch
+
+- foundation
+
+## Dependency Labels
+
+## Dependencies
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/swarm/testwave/02-foundation-b/0002-beta.md"
+# SW-302
+
+## Batch
+
+- foundation
+
+## Dependency Labels
+
+## Dependencies
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/swarm/testwave/03-dependent/0003-gamma.md"
+# SW-303
+
+## Batch
+
+- follow-up
+
+## Dependency Labels
+
+- foundation
+
+## Dependencies
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-builder.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state_root="$project_root/.test-state"
+task_id="$(basename "$task_file" .md)"
+
+mkdir -p "$state_root"
+printf '%s\n' "$task_id" >> "$state_root/build-order.txt"
+
+if [[ "$task_id" == "0003-gamma" ]]; then
+  [[ -f "$project_root/.clasp-swarm/completed/0001-alpha" ]]
+  [[ -f "$project_root/.clasp-swarm/completed/0002-beta" ]]
+fi
+
+printf '%s\n' "$task_id" > "$workspace/$task_id.txt"
+printf '{"summary":"builder ok","files_touched":["%s.txt"],"tests_run":[],"residual_risks":[]}\n' "$task_id" > "$report_json"
+printf '{"event":"builder","task":"%s"}\n' "$task_id" > "$log_jsonl"
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-verifier.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+task_id="$(basename "$task_file" .md)"
+
+test -f "$workspace/$task_id.txt"
+diff -ruN "$baseline_workspace" "$workspace" > /dev/null || true
+printf '{"verdict":"pass","summary":"verifier ok","findings":[],"tests_run":["dependency-label fixture"],"follow_up":[]}\n' > "$report_json"
+printf '{"event":"verifier","task":"%s"}\n' "$task_id" > "$log_jsonl"
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/verify-all.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+EOF
+
+  chmod +x "$fixture_root"/scripts/clasp-*.sh "$fixture_root/scripts/verify-all.sh"
+
+  (
+    cd "$fixture_root"
+    git init >/dev/null
+    git config user.name "Clasp Test"
+    git config user.email "clasp-test@example.com"
+    git add .
+    git commit -m "fixture baseline" >/dev/null
+  )
+}
+
 test_swarm_status_reports_human_summary() {
   local fixture_root="$tmpdir/swarm-status-human"
   local output_file="$fixture_root/status.txt"
@@ -706,6 +837,71 @@ test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot() {
 
   if [[ "$(git -C "$fixture_root" show agents/swarm-trunk:tracked.txt)" != "verified contents" ]]; then
     echo "expected accepted snapshot to contain verified contents" >&2
+    exit 1
+  fi
+}
+
+test_swarm_dependency_labels_gate_downstream_batches() {
+  local fixture_root="$tmpdir/swarm-dependency-labels"
+  local gamma_wait_log="$fixture_root/.clasp-swarm/testwave/03-dependent/logs/0003-gamma.waiting.log"
+  local lane_pids=()
+  local pid=""
+
+  create_swarm_dependency_label_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    env CLASP_SWARM_DEPENDENCY_POLL_SECONDS=1 bash scripts/clasp-swarm-lane.sh agents/swarm/testwave/01-foundation-a
+  ) &
+  pid="$!"
+  lane_pids+=("$pid")
+  printf '%s\n' "$pid" >> "$tmpdir/background-pids.txt"
+
+  (
+    cd "$fixture_root"
+    env CLASP_SWARM_DEPENDENCY_POLL_SECONDS=1 bash scripts/clasp-swarm-lane.sh agents/swarm/testwave/02-foundation-b
+  ) &
+  pid="$!"
+  lane_pids+=("$pid")
+  printf '%s\n' "$pid" >> "$tmpdir/background-pids.txt"
+
+  (
+    cd "$fixture_root"
+    env CLASP_SWARM_DEPENDENCY_POLL_SECONDS=1 bash scripts/clasp-swarm-lane.sh agents/swarm/testwave/03-dependent
+  ) &
+  pid="$!"
+  lane_pids+=("$pid")
+  printf '%s\n' "$pid" >> "$tmpdir/background-pids.txt"
+
+  for _ in $(seq 1 20); do
+    if [[ -f "$gamma_wait_log" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  assert_file_exists "$gamma_wait_log"
+  assert_contains "$gamma_wait_log" "label:foundation"
+
+  for pid in "${lane_pids[@]}"; do
+    wait "$pid"
+  done
+
+  assert_file_exists "$fixture_root/.clasp-swarm/testwave/01-foundation-a/completed/0001-alpha"
+  assert_file_exists "$fixture_root/.clasp-swarm/testwave/02-foundation-b/completed/0002-beta"
+  assert_file_exists "$fixture_root/.clasp-swarm/testwave/03-dependent/completed/0003-gamma"
+  assert_file_exists "$fixture_root/.clasp-swarm/completed/0001-alpha"
+  assert_file_exists "$fixture_root/.clasp-swarm/completed/0002-beta"
+  assert_file_exists "$fixture_root/.clasp-swarm/completed/0003-gamma"
+  assert_file_not_exists "$gamma_wait_log"
+
+  mapfile -t build_order < "$fixture_root/.test-state/build-order.txt"
+  if [[ "${#build_order[@]}" -ne 3 ]]; then
+    echo "expected three build steps, got ${#build_order[@]}" >&2
+    exit 1
+  fi
+
+  if [[ "${build_order[2]}" != "0003-gamma" ]]; then
+    echo "expected dependent batch task to build last, got ${build_order[*]}" >&2
     exit 1
   fi
 }
@@ -821,5 +1017,6 @@ test_autopilot_skips_blocked_workaround_and_runs_later_tasks
 test_swarm_status_reports_human_summary
 test_swarm_status_reports_machine_readable_summary
 test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot
+test_swarm_dependency_labels_gate_downstream_batches
 test_builder_prompt_is_literal_safe_and_streamed_via_stdin
 test_verifier_prompt_is_literal_safe_and_streamed_via_stdin

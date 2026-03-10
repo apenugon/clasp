@@ -17,6 +17,14 @@ Explain why this slice matters now.
 
 - `path/to/file`
 
+## Batch
+
+<!-- Optional batch label for a set of tasks that may run in parallel before downstream work begins. -->
+
+## Dependency Labels
+
+<!-- Optional batch labels that must be fully complete before this task starts. -->
+
 ## Dependencies
 
 <!-- List upstream task IDs as bullet items. Leave this section empty when there are no dependencies. -->
@@ -47,6 +55,8 @@ bash scripts/verify-all.sh
   "likely_files": [
     "path/to/file"
   ],
+  "batch": null,
+  "dependency_labels": [],
   "dependencies": [],
   "acceptance": [
     "Describe the observable outcome."

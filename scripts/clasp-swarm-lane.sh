@@ -101,10 +101,62 @@ task_file_list() {
   find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
 }
 
+wave_task_file_list() {
+  while IFS= read -r wave_lane_dir; do
+    find "$wave_lane_dir" -maxdepth 1 -type f -name '*.md'
+  done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root") | sort
+}
+
+task_section_items() {
+  local task_file="$1"
+  local section_name="$2"
+  local in_section=0
+  local line=""
+  local item=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "## $section_name" ]]; then
+      in_section=1
+      continue
+    fi
+
+    if [[ "$in_section" == "1" && "$line" == '## '* ]]; then
+      break
+    fi
+
+    if [[ "$in_section" != "1" ]]; then
+      continue
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]*[-*][[:space:]]+(.+)$ ]]; then
+      item="${BASH_REMATCH[1]}"
+      item="${item%\`}"
+      item="${item#\`}"
+      item="${item#"${item%%[![:space:]]*}"}"
+      item="${item%"${item##*[![:space:]]}"}"
+      if [[ -n "$item" && ! "$item" =~ ^[Nn]one$ ]]; then
+        printf '%s\n' "$item"
+      fi
+    fi
+  done < "$task_file"
+}
+
 task_dependencies() {
   local task_file="$1"
 
-  sed -n '/^## Dependencies$/,/^## /p' "$task_file" | grep -oE '[A-Z]{2}-[0-9]{3}' || true
+  task_section_items "$task_file" "Dependencies" | grep -oE '^[A-Z]{2,3}-[0-9]{3}$' || true
+}
+
+task_batch_labels() {
+  local task_file="$1"
+
+  task_section_items "$task_file" "Batch" | grep -oE '^[a-z0-9][a-z0-9._-]*$' || true
+}
+
+task_dependency_labels() {
+  local task_file="$1"
+
+  task_section_items "$task_file" "Dependency Labels" | grep -oE '^[a-z0-9][a-z0-9._-]*$' || true
 }
 
 dependency_is_complete() {
@@ -112,16 +164,42 @@ dependency_is_complete() {
   [[ -f "$global_completed_root/$dependency_id" ]]
 }
 
+dependency_label_is_complete() {
+  local dependency_label="$1"
+  local matching_tasks=0
+  local wave_task_file
+  local batch_label
+  local dependency_task_id
+
+  while IFS= read -r wave_task_file; do
+    while IFS= read -r batch_label; do
+      if [[ "$batch_label" == "$dependency_label" ]]; then
+        matching_tasks=1
+        dependency_task_id="$(task_id_of "$wave_task_file")"
+        if ! dependency_is_complete "$dependency_task_id"; then
+          return 1
+        fi
+        break
+      fi
+    done < <(task_batch_labels "$wave_task_file")
+  done < <(wave_task_file_list)
+
+  [[ "$matching_tasks" == "1" ]]
+}
+
 wait_for_dependencies() {
   local task_file="$1"
   local task_id="$2"
   local waiting_log="$logs_root/$task_id.waiting.log"
   local deps=()
+  local dependency_labels=()
   local unmet=()
+  local dependency_label
 
   mapfile -t deps < <(task_dependencies "$task_file")
+  mapfile -t dependency_labels < <(task_dependency_labels "$task_file")
 
-  if [[ "${#deps[@]}" -eq 0 ]]; then
+  if [[ "${#deps[@]}" -eq 0 && "${#dependency_labels[@]}" -eq 0 ]]; then
     return 0
   fi
 
@@ -131,6 +209,12 @@ wait_for_dependencies() {
     for dependency_id in "${deps[@]}"; do
       if ! dependency_is_complete "$dependency_id"; then
         unmet+=("$dependency_id")
+      fi
+    done
+
+    for dependency_label in "${dependency_labels[@]}"; do
+      if ! dependency_label_is_complete "$dependency_label"; then
+        unmet+=("label:$dependency_label")
       fi
     done
 
@@ -361,7 +445,8 @@ integrate_task_branch() {
 
 ensure_trunk_branch() {
   if ! git -C "$project_root" show-ref --verify --quiet "refs/heads/$trunk_branch"; then
-    git -C "$project_root" branch "$trunk_branch" "$source_ref"
+    git -C "$project_root" branch "$trunk_branch" "$source_ref" >/dev/null 2>&1 || \
+      git -C "$project_root" show-ref --verify --quiet "refs/heads/$trunk_branch"
   fi
 }
 

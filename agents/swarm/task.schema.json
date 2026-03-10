@@ -12,9 +12,9 @@
     "why",
     "scope",
     "likely_files",
-    "dependencies",
     "acceptance",
-    "verification"
+    "verification",
+    "dependencies"
   ],
   "properties": {
     "id": {
@@ -48,6 +48,23 @@
         "minLength": 1
       },
       "minItems": 1
+    },
+    "batch": {
+      "description": "Optional parallel batch label. Downstream tasks may depend on this label instead of listing every task ID.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "dependency_labels": {
+      "type": "array",
+      "description": "Batch labels that must be fully complete before this task can start.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      },
+      "uniqueItems": true
     },
     "dependencies": {
       "type": "array",

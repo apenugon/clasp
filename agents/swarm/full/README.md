@@ -4,7 +4,7 @@ This wave materializes the full Clasp project backlog from `docs/clasp-project-p
 
 It is the intended default swarm target once the current `wave1` work is merged forward.
 
-The swarm waits for every dependency listed in a task file before starting that task.
+The swarm waits for every dependency task ID and dependency label listed in a task file before starting that task.
 
 Lanes in this wave:
 
@@ -30,4 +30,3 @@ Regenerate with:
 ```sh
 node scripts/materialize-full-backlog.mjs
 ```
-
