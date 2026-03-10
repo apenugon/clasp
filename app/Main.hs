@@ -10,7 +10,7 @@ import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Weft.Compiler (checkSource, compileSource, parseSource)
+import Weft.Compiler (checkEntry, compileEntry, parseSource)
 import Weft.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
@@ -63,8 +63,8 @@ runParse format inputPath = do
 
 runCheck :: OutputFormat -> FilePath -> IO ()
 runCheck format inputPath = do
-  source <- TIO.readFile inputPath
-  case checkSource inputPath source of
+  result <- checkEntry inputPath
+  case result of
     Left err -> do
       writeFailure format err
       exitFailure
@@ -83,8 +83,8 @@ runCheck format inputPath = do
 
 runCompile :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
 runCompile format inputPath outputPath = do
-  source <- TIO.readFile inputPath
-  case compileSource inputPath source of
+  result <- compileEntry inputPath
+  case result of
     Left err -> do
       writeFailure format err
       exitFailure

@@ -15,13 +15,17 @@ It is also intentionally bootstrap-oriented. The current syntax is meant to get 
 It includes:
 
 - A module header
+- File-level imports
 - Top-level type declarations
+- Top-level record declarations
 - Top-level declarations
 - Declaration-level type signatures
 - Nominal algebraic data types
+- Nominal records
 - Function definitions
 - Basic literals
 - Function application
+- Field access
 - Match expressions over constructors
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
@@ -34,7 +38,6 @@ It includes:
 It does not yet include:
 
 - Full module-wide polymorphic inference
-- Records
 - Type parameters
 - Nested patterns
 - Effects
@@ -71,8 +74,9 @@ The v0 compiler now implements a first slice of those features through nominal s
 Every `Weft` source file in `v0` has:
 
 1. A required module declaration
-2. Zero or more top-level type declarations
-3. One or more top-level declarations
+2. Zero or more file-level imports
+3. Zero or more top-level type or record declarations
+4. One or more top-level declarations
 
 Example:
 
@@ -111,27 +115,55 @@ main : Str
 main = describe (makeBusy "loading")
 ```
 
+Records and field access are also part of the current `v0` surface:
+
+```weft
+module Main
+
+record User = {
+  name : Str,
+  active : Bool
+}
+
+defaultUser = User {
+  name = "Ada",
+  active = true
+}
+
+showName user = user.name
+
+main : Str
+main = showName defaultUser
+```
+
 ## Grammar
 
 ```text
-module      ::= "module" module-name top-level*
+module      ::= "module" module-name import* top-level+
 module-name ::= segment ("." segment)*
 segment     ::= upper-ident
+import      ::= "import" module-name
 
-top-level   ::= type-decl | signature | decl
+top-level   ::= type-decl | record-decl | signature | decl
 type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
 constructor ::= upper-ident type-atom*
+record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
+record-field-decl ::= lower-ident ":" type
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
-expr        ::= atom atom*
+expr        ::= term term*
+term        ::= atom ("." lower-ident)*
 atom        ::= lower-ident
               | upper-ident
               | integer
               | string
               | "true"
               | "false"
+              | record-expr
               | match-expr
               | "(" expr ")"
+record-expr ::= upper-ident "{" record-field-expr ("," record-field-expr)* "}"
+record-field-expr ::= lower-ident "=" expr
 match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
 pattern     ::= upper-ident lower-ident*
@@ -142,6 +174,7 @@ type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "(" type ")"
 Notes:
 
 - Function application is left-associative.
+- Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
 - Constructor names and type names are currently uppercase; value names are lowercase.
@@ -152,12 +185,15 @@ Notes:
 - A declaration with parameters becomes a JavaScript `function`.
 - A nullary constructor becomes an exported tagged JavaScript object.
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
+- A record literal becomes a plain JavaScript object literal.
+- Record field access becomes JavaScript property access.
 - Function application compiles to JavaScript function calls.
 - Match expressions compile to a JavaScript `switch` over constructor tags.
 - Boolean, integer, string, and variable references map directly to JavaScript equivalents.
 - Declarations may omit type signatures when local inference can resolve all parameter and result types.
 - Ambiguous declarations still require explicit signatures.
-- The checker currently rejects duplicate declarations, duplicate parameters, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, and simple type mismatches before code generation.
+- The current import loader resolves `Foo.Bar` to `Foo/Bar.weft` relative to the entry module and flattens imported declarations into one checked module.
+- The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, and simple type mismatches before code generation.
 
 ## Compiler Pipeline
 
@@ -188,8 +224,10 @@ In other words, JavaScript is the first practical target, not the final architec
 Once `v0` is stable, the next additions should be:
 
 - More complete inference, especially around higher-order code and future generic types
-- Records and type parameters
+- Schemas, JSON codecs, and boundary validators
+- Multi-file namespace control beyond the current flattened import model
+- Type parameters
 - Richer pattern forms, including nested destructuring and wildcards
-- A schema definition form
+- Bun/runtime interop for backend and worker targets
 - Further diagnostic enrichment, including fix hints and normalization for agent-facing output
 - A path toward compact canonical syntax with human-facing explain renderers

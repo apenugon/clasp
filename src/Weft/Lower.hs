@@ -5,6 +5,7 @@ module Weft.Lower
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerRecordField (..)
   , lowerModule
   ) where
 
@@ -18,6 +19,7 @@ import Weft.Core
   , CoreParam (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreRecordField (..)
   )
 import Weft.Syntax
   ( ConstructorDecl (..)
@@ -36,6 +38,12 @@ data LowerDecl
   | LFunctionDecl Text [Text] LowerExpr
   deriving (Eq, Show)
 
+data LowerRecordField = LowerRecordField
+  { lowerRecordFieldName :: Text
+  , lowerRecordFieldValue :: LowerExpr
+  }
+  deriving (Eq, Show)
+
 data LowerExpr
   = LVar Text
   | LInt Integer
@@ -44,6 +52,8 @@ data LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
+  | LRecord [LowerRecordField]
+  | LFieldAccess LowerExpr Text
   deriving (Eq, Show)
 
 data LowerMatchBranch = LowerMatchBranch
@@ -105,6 +115,17 @@ lowerCoreExpr expr =
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->
       LMatch (lowerCoreExpr subject) (fmap lowerMatchBranch branches)
+    CRecord _ _ _ fields ->
+      LRecord (fmap lowerRecordField fields)
+    CFieldAccess _ _ subject fieldName ->
+      LFieldAccess (lowerCoreExpr subject) fieldName
+
+lowerRecordField :: CoreRecordField -> LowerRecordField
+lowerRecordField field =
+  LowerRecordField
+    { lowerRecordFieldName = coreRecordFieldName field
+    , lowerRecordFieldValue = lowerCoreExpr (coreRecordFieldValue field)
+    }
 
 lowerMatchBranch :: CoreMatchBranch -> LowerMatchBranch
 lowerMatchBranch branch =

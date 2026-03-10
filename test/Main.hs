@@ -2,9 +2,18 @@
 
 module Main (main) where
 
+import Control.Exception (finally)
+import Control.Monad (when)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as LT
+import System.Directory
+  ( createDirectoryIfMissing
+  , doesDirectoryExist
+  , removePathForcibly
+  )
+import System.FilePath ((</>), takeDirectory)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -13,7 +22,7 @@ import Test.Tasty.HUnit
   , assertFailure
   , testCase
   )
-import Weft.Compiler (checkSource, compileSource, parseSource)
+import Weft.Compiler (checkEntry, checkSource, compileEntry, compileSource, parseSource)
 import Weft.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
@@ -25,6 +34,7 @@ import Weft.Lower
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerRecordField (..)
   , lowerModule
   )
 import Weft.Syntax
@@ -37,6 +47,7 @@ import Weft.Syntax
   , Pattern (..)
   , PatternBinder (..)
   , Position (..)
+  , RecordDecl (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -105,6 +116,28 @@ parserTests =
                     assertFailure ("expected match expression, got " <> show other)
               Nothing ->
                 assertFailure "expected describe declaration"
+    , testCase "parses imports, records, and field access" $
+        case parseSource "inline" recordSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertEqual "import count" 1 (length (moduleImports modl))
+            assertEqual "record decl count" 1 (length (moduleRecordDecls modl))
+            case moduleRecordDecls modl of
+              [recordDecl] -> do
+                assertEqual "record name" "User" (recordDeclName recordDecl)
+                assertEqual "record field count" 2 (length (recordDeclFields recordDecl))
+              other ->
+                assertFailure ("expected one record declaration, got " <> show (length other))
+            case findDecl "showName" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EFieldAccess _ (EVar _ "user") "name" ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected field access, got " <> show other)
+              Nothing ->
+                assertFailure "expected showName declaration"
     ]
 
 checkerTests :: TestTree
@@ -127,6 +160,12 @@ checkerTests =
         case checkSource "inferred" inferredFunctionSource of
           Left err ->
             assertFailure ("expected inferred source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts record literals and field access" $
+        case checkSource "record" recordSource of
+          Left err ->
+            assertFailure ("expected record source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -163,6 +202,8 @@ checkerTests =
             assertEqual "one related span" 1 (length (diagnosticRelatedSpans err))
           Right _ ->
             assertFailure "expected duplicate declaration failure"
+    , testCase "rejects record literals with missing fields" $
+        assertHasCode "E_RECORD_MISSING_FIELDS" (checkSource "bad" missingRecordFieldSource)
     , testCase "reports non-exhaustive match expressions" $
         assertHasCode "E_NONEXHAUSTIVE_MATCH" (checkSource "bad" nonExhaustiveMatchSource)
     , testCase "rejects constructors from the wrong type" $
@@ -217,6 +258,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered describe declaration: " <> show other)
+    , testCase "lowering preserves records and field access" $
+        case lowerChecked "record" recordSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "showName" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["user"] (LFieldAccess (LVar "user") "name")) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered showName declaration: " <> show other)
+            case findLowerDecl "defaultUser" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LRecord [LowerRecordField "name" (LString "Ada"), LowerRecordField "active" (LBool True)])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -244,6 +300,34 @@ compileTests =
           Right emitted -> do
             assertBool "expected inferred function export" ("export function makeBusy" `T.isInfixOf` emitted)
             assertBool "expected inferred matcher export" ("export function describe" `T.isInfixOf` emitted)
+    , testCase "compile lowers records and field access to JavaScript" $
+        case compileSource "record" recordSource of
+          Left err ->
+            assertFailure ("expected compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected object literal" ("{ name: \"Ada\", active: true }" `T.isInfixOf` emitted)
+            assertBool "expected field access" ("(user).name" `T.isInfixOf` emitted)
+    , testCase "checkEntry resolves imported modules" $
+        withProjectFiles "import-success" importSuccessFiles $ \root -> do
+          result <- checkEntry (root </> "Main.weft")
+          case result of
+            Left err ->
+              assertFailure ("expected imported project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right _ ->
+              pure ()
+    , testCase "compileEntry compiles imported modules into one JS output" $
+        withProjectFiles "compile-import-success" importSuccessFiles $ \root -> do
+          result <- compileEntry (root </> "Main.weft")
+          case result of
+            Left err ->
+              assertFailure ("expected imported project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              assertBool "expected imported function export" ("export function formatUser" `T.isInfixOf` emitted)
+              assertBool "expected main export" ("export const main" `T.isInfixOf` emitted)
+    , testCase "checkEntry reports missing imported modules" $
+        withProjectFiles "import-missing" missingImportFiles $ \root -> do
+          result <- checkEntry (root </> "Main.weft")
+          assertHasCode "E_IMPORT_NOT_FOUND" result
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -290,6 +374,25 @@ lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do
   checked <- checkSource path source
   pure (lowerModule checked)
+
+withProjectFiles :: FilePath -> [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
+withProjectFiles fixtureName files action = do
+  let root = "dist/test-projects" </> fixtureName
+  cleanupProjectDir root
+  createDirectoryIfMissing True root
+  mapM_ (writeProjectFile root) files
+  action root `finally` cleanupProjectDir root
+
+writeProjectFile :: FilePath -> (FilePath, Text) -> IO ()
+writeProjectFile root (relativePath, content) = do
+  let absolutePath = root </> relativePath
+  createDirectoryIfMissing True (takeDirectory absolutePath)
+  TIO.writeFile absolutePath content
+
+cleanupProjectDir :: FilePath -> IO ()
+cleanupProjectDir root = do
+  exists <- doesDirectoryExist root
+  when exists (removePathForcibly root)
 
 normalizeConstructors :: [ConstructorDecl] -> [ConstructorDecl]
 normalizeConstructors =
@@ -376,6 +479,39 @@ inferredFunctionSource =
     , "main = describe (makeBusy \"loading\")"
     ]
 
+recordSource :: Text
+recordSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.User"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "defaultUser = User {"
+    , "  name = \"Ada\","
+    , "  active = true"
+    , "}"
+    , ""
+    , "showName user = user.name"
+    , ""
+    , "main : Str"
+    , "main = showName defaultUser"
+    ]
+
+missingRecordFieldSource :: Text
+missingRecordFieldSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = { name : Str, active : Bool }"
+    , ""
+    , "main = User { name = \"Ada\" }"
+    ]
+
 mismatchSource :: Text
 mismatchSource =
   T.unlines
@@ -437,4 +573,56 @@ duplicateBranchSource =
     , "  Idle -> \"still idle\","
     , "  Busy note -> note"
     , "}"
+    ]
+
+importSuccessFiles :: [(FilePath, Text)]
+importSuccessFiles =
+  [ ("Main.weft", importSuccessMainSource)
+  , ("Shared/User.weft", sharedUserSource)
+  ]
+
+missingImportFiles :: [(FilePath, Text)]
+missingImportFiles =
+  [ ("Main.weft", missingImportMainSource)
+  ]
+
+importSuccessMainSource :: Text
+importSuccessMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.User"
+    , ""
+    , "main : Str"
+    , "main = formatUser defaultUser"
+    ]
+
+sharedUserSource :: Text
+sharedUserSource =
+  T.unlines
+    [ "module Shared.User"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "defaultUser : User"
+    , "defaultUser = User {"
+    , "  name = \"Ada\","
+    , "  active = true"
+    , "}"
+    , ""
+    , "formatUser : User -> Str"
+    , "formatUser user = user.name"
+    ]
+
+missingImportMainSource :: Text
+missingImportMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.Missing"
+    , ""
+    , "main = 1"
     ]

@@ -8,12 +8,14 @@ module Weft.Core
   , CoreParam (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreRecordField (..)
   , coreExprType
   ) where
 
 import Data.Text (Text)
 import Weft.Syntax
   ( ModuleName
+  , RecordDecl
   , SourceSpan
   , Type (..)
   , TypeDecl
@@ -22,6 +24,7 @@ import Weft.Syntax
 data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
+  , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleDecls :: [CoreDecl]
   }
   deriving (Eq, Show)
@@ -57,6 +60,12 @@ data CoreMatchBranch = CoreMatchBranch
   }
   deriving (Eq, Show)
 
+data CoreRecordField = CoreRecordField
+  { coreRecordFieldName :: Text
+  , coreRecordFieldValue :: CoreExpr
+  }
+  deriving (Eq, Show)
+
 data CoreExpr
   = CVar SourceSpan Type Text
   | CInt SourceSpan Integer
@@ -64,6 +73,8 @@ data CoreExpr
   | CBool SourceSpan Bool
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
+  | CRecord SourceSpan Type Text [CoreRecordField]
+  | CFieldAccess SourceSpan Type CoreExpr Text
   deriving (Eq, Show)
 
 coreExprType :: CoreExpr -> Type
@@ -80,4 +91,8 @@ coreExprType expr =
     CCall _ typ _ _ ->
       typ
     CMatch _ typ _ _ ->
+      typ
+    CRecord _ typ _ _ ->
+      typ
+    CFieldAccess _ typ _ _ ->
       typ

@@ -4,18 +4,23 @@ module Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
   , PatternBinder (..)
   , Pattern (..)
   , Position (..)
+  , RecordDecl (..)
+  , RecordFieldDecl (..)
+  , RecordFieldExpr (..)
   , SourceSpan (..)
   , TypeDecl (..)
   , Type (..)
   , exprSpan
   , mergeSourceSpans
   , renderType
+  , splitModuleName
   ) where
 
 import Data.Aeson
@@ -30,6 +35,10 @@ newtype ModuleName = ModuleName
   { unModuleName :: Text
   }
   deriving (Eq, Ord, Show)
+
+splitModuleName :: ModuleName -> [Text]
+splitModuleName =
+  T.splitOn "." . unModuleName
 
 data Position = Position
   { positionLine :: Int
@@ -59,9 +68,17 @@ instance ToJSON SourceSpan where
       , "end" .= sourceSpanEnd span'
       ]
 
+data ImportDecl = ImportDecl
+  { importDeclModule :: ModuleName
+  , importDeclSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
 data Module = Module
   { moduleName :: ModuleName
+  , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
+  , moduleRecordDecls :: [RecordDecl]
   , moduleDecls :: [Decl]
   }
   deriving (Eq, Show)
@@ -79,6 +96,21 @@ data ConstructorDecl = ConstructorDecl
   , constructorDeclSpan :: SourceSpan
   , constructorDeclNameSpan :: SourceSpan
   , constructorDeclFields :: [Type]
+  }
+  deriving (Eq, Show)
+
+data RecordDecl = RecordDecl
+  { recordDeclName :: Text
+  , recordDeclSpan :: SourceSpan
+  , recordDeclNameSpan :: SourceSpan
+  , recordDeclFields :: [RecordFieldDecl]
+  }
+  deriving (Eq, Show)
+
+data RecordFieldDecl = RecordFieldDecl
+  { recordFieldDeclName :: Text
+  , recordFieldDeclSpan :: SourceSpan
+  , recordFieldDeclType :: Type
   }
   deriving (Eq, Show)
 
@@ -117,6 +149,13 @@ data MatchBranch = MatchBranch
   }
   deriving (Eq, Show)
 
+data RecordFieldExpr = RecordFieldExpr
+  { recordFieldExprName :: Text
+  , recordFieldExprSpan :: SourceSpan
+  , recordFieldExprValue :: Expr
+  }
+  deriving (Eq, Show)
+
 data Expr
   = EVar SourceSpan Text
   | EInt SourceSpan Integer
@@ -124,6 +163,8 @@ data Expr
   | EBool SourceSpan Bool
   | ECall SourceSpan Expr [Expr]
   | EMatch SourceSpan Expr [MatchBranch]
+  | ERecord SourceSpan Text [RecordFieldExpr]
+  | EFieldAccess SourceSpan Expr Text
   deriving (Eq, Show)
 
 exprSpan :: Expr -> SourceSpan
@@ -140,6 +181,10 @@ exprSpan expr =
     ECall span' _ _ ->
       span'
     EMatch span' _ _ ->
+      span'
+    ERecord span' _ _ ->
+      span'
+    EFieldAccess span' _ _ ->
       span'
 
 mergeSourceSpans :: SourceSpan -> SourceSpan -> SourceSpan

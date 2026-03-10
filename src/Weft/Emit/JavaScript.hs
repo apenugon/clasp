@@ -11,6 +11,7 @@ import Weft.Lower
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerRecordField (..)
   )
 import Weft.Syntax
   ( ModuleName (..)
@@ -87,6 +88,12 @@ emitExpr counter expr =
                   | (index, fieldText) <- zip [(0 :: Int) ..] fieldTexts
                   ]
        in (nextCounter, "{ " <> objectFields <> " }")
+    LRecord fields ->
+      let (nextCounter, fieldTexts) = emitRecordFields counter fields
+       in (nextCounter, "{ " <> T.intercalate ", " fieldTexts <> " }")
+    LFieldAccess subject fieldName ->
+      let (nextCounter, subjectText) = emitExpr counter subject
+       in (nextCounter, "(" <> subjectText <> ")." <> emitPropertyName fieldName)
     LMatch subject branches ->
       let (counterAfterSubject, subjectText) = emitExpr counter subject
           matchVar = "$match" <> T.pack (show counterAfterSubject)
@@ -113,6 +120,18 @@ emitExprList counter exprs =
     emitOne (nextCounter, rendered) expr =
       let (updatedCounter, renderedExpr) = emitExpr nextCounter expr
        in (updatedCounter, rendered <> [renderedExpr])
+
+emitRecordFields :: Int -> [LowerRecordField] -> (Int, [Text])
+emitRecordFields counter fields =
+  foldl emitOne (counter, []) fields
+  where
+    emitOne (nextCounter, rendered) field =
+      let (updatedCounter, fieldValueText) = emitExpr nextCounter (lowerRecordFieldValue field)
+          renderedField =
+            emitPropertyName (lowerRecordFieldName field)
+              <> ": "
+              <> fieldValueText
+       in (updatedCounter, rendered <> [renderedField])
 
 emitMatchBranches :: Int -> Text -> [LowerMatchBranch] -> (Int, [Text])
 emitMatchBranches counter matchVar branches =
@@ -149,6 +168,9 @@ emitMatchBranch counter matchVar branch =
 emitFieldName :: Int -> Text
 emitFieldName index =
   "$" <> T.pack (show index)
+
+emitPropertyName :: Text -> Text
+emitPropertyName = emitIdentifier
 
 emitIdentifier :: Text -> Text
 emitIdentifier = id

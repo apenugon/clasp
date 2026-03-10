@@ -22,6 +22,7 @@ import Text.Megaparsec
   , notFollowedBy
   , optional
   , parse
+  , sepBy
   , sepBy1
   , some
   , try
@@ -50,12 +51,16 @@ import Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
   , PatternBinder (..)
   , Pattern (..)
   , Position (..)
+  , RecordDecl (..)
+  , RecordFieldDecl (..)
+  , RecordFieldExpr (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -67,6 +72,7 @@ type Parser = Parsec Void Text
 
 data TopLevelItem
   = TopTypeDecl TypeDecl
+  | TopRecordDecl RecordDecl
   | TopSignature Text Type SourceSpan
   | TopDecl Decl
 
@@ -77,20 +83,68 @@ parseModule path source =
       (\bundle -> singleDiagnostic "E_PARSE" "Failed to parse source." [T.pack (errorBundlePretty bundle)])
       (parse (moduleParser <* eof) path source)
 
-moduleParser :: Parser (ModuleName, [TopLevelItem])
+moduleParser :: Parser (ModuleName, [ImportDecl], [TopLevelItem])
 moduleParser = do
   scn
   keyword "module"
   name <- moduleNameParser
   scn
+  imports <- many importParser
   items <- some topLevelItemParser
-  pure (ModuleName name, items)
+  pure (ModuleName name, imports, items)
+
+importParser :: Parser ImportDecl
+importParser = do
+  start <- getSourcePos
+  keyword "import"
+  importName <- moduleNameParser
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure
+    ImportDecl
+      { importDeclModule = ModuleName importName
+      , importDeclSpan = makeSourceSpan start end
+      }
 
 topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
-  try typeDeclParser
+  try recordDeclParser
+    <|> try typeDeclParser
     <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
+
+recordDeclParser :: Parser TopLevelItem
+recordDeclParser = do
+  start <- getSourcePos
+  keyword "record"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  fields <- braces (recordFieldDeclParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopRecordDecl $
+    RecordDecl
+      { recordDeclName = name
+      , recordDeclSpan = makeSourceSpan start end
+      , recordDeclNameSpan = nameSpan
+      , recordDeclFields = fields
+      }
+
+recordFieldDeclParser :: Parser RecordFieldDecl
+recordFieldDeclParser = do
+  start <- getSourcePos
+  (_, fieldName) <- locatedLowerIdentifierN
+  _ <- symbolN ":"
+  fieldType <- typeParser
+  end <- getSourcePos
+  pure
+    RecordFieldDecl
+      { recordFieldDeclName = fieldName
+      , recordFieldDeclSpan = makeSourceSpan start end
+      , recordFieldDeclType = fieldType
+      }
 
 typeDeclParser :: Parser TopLevelItem
 typeDeclParser = do
@@ -157,20 +211,27 @@ declParser = do
 
 exprParser :: Parser Expr
 exprParser = do
-  atoms <- some atomParser
-  case atoms of
-    firstAtom : remainingAtoms ->
-      pure (foldl applyExpr firstAtom remainingAtoms)
+  terms <- some termParser
+  case terms of
+    firstTerm : remainingTerms ->
+      pure (foldl applyExpr firstTerm remainingTerms)
     [] ->
-      fail "expected at least one expression atom"
+      fail "expected at least one expression term"
 
-atomParser :: Parser Expr
-atomParser =
+termParser :: Parser Expr
+termParser = do
+  baseExpr <- baseExprParser
+  fieldAccesses <- many fieldAccessSuffixParser
+  pure (foldl applyFieldAccess baseExpr fieldAccesses)
+
+baseExprParser :: Parser Expr
+baseExprParser =
   parens exprParser
     <|> matchParser
     <|> boolParser
     <|> intParser
     <|> stringParser
+    <|> try recordExprParser
     <|> constructorExprParser
     <|> variableParser
 
@@ -211,6 +272,33 @@ patternBinderParser = do
       { patternBinderName = binderName
       , patternBinderSpan = binderSpan
       }
+
+recordExprParser :: Parser Expr
+recordExprParser = do
+  start <- getSourcePos
+  (_, recordName) <- locatedUpperIdentifier
+  fields <- braces (recordFieldExprParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  pure (ERecord (makeSourceSpan start end) recordName fields)
+
+recordFieldExprParser :: Parser RecordFieldExpr
+recordFieldExprParser = do
+  start <- getSourcePos
+  (_, fieldName) <- locatedLowerIdentifierN
+  _ <- symbolN "="
+  fieldValue <- exprParser
+  end <- getSourcePos
+  pure
+    RecordFieldExpr
+      { recordFieldExprName = fieldName
+      , recordFieldExprSpan = makeSourceSpan start end
+      , recordFieldExprValue = fieldValue
+      }
+
+fieldAccessSuffixParser :: Parser (SourceSpan, Text)
+fieldAccessSuffixParser = do
+  _ <- char '.'
+  locatedLexemeWith sc lowerIdentifierRaw
 
 variableParser :: Parser Expr
 variableParser = do
@@ -266,6 +354,9 @@ upperIdentifier = snd <$> locatedUpperIdentifier
 locatedLowerIdentifier :: Parser (SourceSpan, Text)
 locatedLowerIdentifier = locatedLexeme lowerIdentifierRaw
 
+locatedLowerIdentifierN :: Parser (SourceSpan, Text)
+locatedLowerIdentifierN = locatedLexemeWith scn lowerIdentifierRaw
+
 locatedUpperIdentifier :: Parser (SourceSpan, Text)
 locatedUpperIdentifier = locatedLexeme upperIdentifierRaw
 
@@ -304,6 +395,10 @@ applyExpr fn arg =
           ECall callSpan target (args <> [arg])
         _ ->
           ECall callSpan fn [arg]
+
+applyFieldAccess :: Expr -> (SourceSpan, Text) -> Expr
+applyFieldAccess subject (fieldSpan, fieldName) =
+  EFieldAccess (mergeSourceSpans (exprSpan subject) fieldSpan) subject fieldName
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
@@ -351,14 +446,16 @@ buildFunctionType :: [Type] -> Type
 buildFunctionType [singleType] = singleType
 buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
-attachSignatures :: (ModuleName, [TopLevelItem]) -> Either DiagnosticBundle Module
-attachSignatures (name, items) = do
-  (typeDecls, decls, pendingSignatures) <- foldM step ([], [], Map.empty) items
+attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
+attachSignatures (name, imports, items) = do
+  (typeDecls, recordDecls, decls, pendingSignatures) <- foldM step ([], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
         { moduleName = name
+        , moduleImports = imports
         , moduleTypeDecls = reverse typeDecls
+        , moduleRecordDecls = reverse recordDecls
         , moduleDecls = reverse decls
         }
     else
@@ -372,10 +469,12 @@ attachSignatures (name, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, decls, pendingSignatures)
+        TopRecordDecl recordDecl ->
+          pure (typeDecls, recordDecl : recordDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -388,7 +487,7 @@ attachSignatures (name, items) = do
                     [diagnosticRelated "previous signature" existingSpan]
                 ]
             Nothing ->
-              pure (typeDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
+              pure (typeDecls, recordDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
         TopDecl decl ->
           let annotationData = Map.lookup (declName decl) pendingSignatures
               updatedDecl =
@@ -401,7 +500,7 @@ attachSignatures (name, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -421,7 +520,9 @@ toPosition pos =
 reservedWords :: [Text]
 reservedWords =
   [ "module"
+  , "import"
   , "type"
+  , "record"
   , "match"
   , "true"
   , "false"

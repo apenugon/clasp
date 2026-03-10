@@ -27,6 +27,7 @@ import Weft.Core
   , CoreParam (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreRecordField (..)
   )
 import Weft.Diagnostic
   ( DiagnosticBundle
@@ -44,6 +45,9 @@ import Weft.Syntax
   , Module (..)
   , Pattern (..)
   , PatternBinder (..)
+  , RecordDecl (..)
+  , RecordFieldDecl (..)
+  , RecordFieldExpr (..)
   , SourceSpan
   , Type (..)
   , TypeDecl (..)
@@ -52,10 +56,12 @@ import Weft.Syntax
 
 type DeclTypeEnv = Map.Map Text Type
 type TypeDeclEnv = Map.Map Text TypeDecl
+type RecordDeclEnv = Map.Map Text RecordDecl
 type DeclMap = Map.Map Text Decl
 
 data ModuleContext = ModuleContext
   { contextTypeDeclEnv :: TypeDeclEnv
+  , contextRecordDeclEnv :: RecordDeclEnv
   , contextConstructorEnv :: ConstructorEnv
   , contextDeclMap :: DeclMap
   }
@@ -115,6 +121,8 @@ data DraftExprNode
   | DraftBool Bool
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
+  | DraftRecord Text [DraftRecordField]
+  | DraftFieldAccess DraftExpr Text
 
 data DraftMatchBranch = DraftMatchBranch
   { draftMatchBranchSpan :: SourceSpan
@@ -128,6 +136,11 @@ data DraftPatternBinder = DraftPatternBinder
   { draftPatternBinderName :: Text
   , draftPatternBinderSpan :: SourceSpan
   , draftPatternBinderType :: InferType
+  }
+
+data DraftRecordField = DraftRecordField
+  { draftRecordFieldName :: Text
+  , draftRecordFieldValue :: DraftExpr
   }
 
 data MatchResultAccumulator = MatchResultAccumulator
@@ -147,11 +160,15 @@ data UnifyContext = UnifyContext
 checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
+      recordDecls = moduleRecordDecls modl
       decls = moduleDecls modl
 
   ensureUniqueTypeDecls typeDecls
+  ensureUniqueRecordDecls recordDecls
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
-  ensureKnownTypes typeDeclEnv typeDecls decls
+      recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+  ensureDistinctNamedTypes typeDeclEnv recordDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls
 
   constructorEnv <- buildConstructorEnv typeDecls
   ensureUniqueDecls decls constructorEnv
@@ -160,6 +177,7 @@ checkModule modl = do
   let ctx =
         ModuleContext
           { contextTypeDeclEnv = typeDeclEnv
+          , contextRecordDeclEnv = recordDeclEnv
           , contextConstructorEnv = constructorEnv
           , contextDeclMap = Map.fromList [(declName decl, decl) | decl <- decls]
           }
@@ -172,6 +190,7 @@ checkModule modl = do
     CoreModule
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
+      , coreModuleRecordDecls = recordDecls
       , coreModuleDecls = coreDecls
       }
 
@@ -193,9 +212,46 @@ ensureUniqueTypeDecls = go Map.empty
         Nothing ->
           go (Map.insert (typeDeclName typeDecl) typeDecl seen) rest
 
-ensureKnownTypes :: TypeDeclEnv -> [TypeDecl] -> [Decl] -> Either DiagnosticBundle ()
-ensureKnownTypes typeDeclEnv typeDecls decls = do
+ensureUniqueRecordDecls :: [RecordDecl] -> Either DiagnosticBundle ()
+ensureUniqueRecordDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (recordDecl : rest) =
+      case Map.lookup (recordDeclName recordDecl) seen of
+        Just previousRecordDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_RECORD"
+                ("Duplicate record declaration for `" <> recordDeclName recordDecl <> "`.")
+                (Just (recordDeclNameSpan recordDecl))
+                ["Each record name may only be declared once."]
+                [diagnosticRelated "previous record declaration" (recordDeclNameSpan previousRecordDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (recordDeclName recordDecl) recordDecl seen) rest
+
+ensureDistinctNamedTypes :: TypeDeclEnv -> [RecordDecl] -> Either DiagnosticBundle ()
+ensureDistinctNamedTypes typeDeclEnv =
+  mapM_ checkRecord
+  where
+    checkRecord recordDecl =
+      case Map.lookup (recordDeclName recordDecl) typeDeclEnv of
+        Just previousTypeDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_TYPE_NAME"
+                ("Record `" <> recordDeclName recordDecl <> "` conflicts with an existing type declaration.")
+                (Just (recordDeclNameSpan recordDecl))
+                ["Type and record declarations currently share the same named type namespace."]
+                [diagnosticRelated "type declaration" (typeDeclNameSpan previousTypeDecl)]
+            ]
+        Nothing ->
+          pure ()
+
+ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [Decl] -> Either DiagnosticBundle ()
+ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls = do
   mapM_ checkTypeDecl typeDecls
+  mapM_ checkRecordDecl recordDecls
   mapM_ checkDeclAnnotation decls
   where
     checkTypeDecl typeDecl =
@@ -205,6 +261,17 @@ ensureKnownTypes typeDeclEnv typeDecls decls = do
       mapM_
         (ensureKnownType (constructorDeclSpan constructorDecl) [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)])
         (constructorDeclFields constructorDecl)
+
+    checkRecordDecl recordDecl = do
+      ensureUniqueRecordFields recordDecl
+      mapM_
+        ( \fieldDecl ->
+            ensureKnownType
+              (recordFieldDeclSpan fieldDecl)
+              [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+              (recordFieldDeclType fieldDecl)
+        )
+        (recordDeclFields recordDecl)
 
     checkDeclAnnotation decl =
       case declAnnotation decl of
@@ -225,7 +292,7 @@ ensureKnownTypes typeDeclEnv typeDecls decls = do
         TBool ->
           pure ()
         TNamed name ->
-          unless (Map.member name typeDeclEnv) $
+          unless (Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
             Left . diagnosticBundle $
               [ diagnostic
                   "E_UNKNOWN_TYPE"
@@ -236,6 +303,24 @@ ensureKnownTypes typeDeclEnv typeDecls decls = do
               ]
         TFunction args result ->
           mapM_ (ensureKnownType primarySpan related) (args <> [result])
+
+ensureUniqueRecordFields :: RecordDecl -> Either DiagnosticBundle ()
+ensureUniqueRecordFields recordDecl = go Map.empty (recordDeclFields recordDecl)
+  where
+    go _ [] = pure ()
+    go seen (fieldDecl : rest) =
+      case Map.lookup (recordFieldDeclName fieldDecl) seen of
+        Just previousFieldDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_RECORD_FIELD"
+                ("Duplicate field `" <> recordFieldDeclName fieldDecl <> "` in record `" <> recordDeclName recordDecl <> "`.")
+                (Just (recordFieldDeclSpan fieldDecl))
+                ["Each record field may only appear once."]
+                [diagnosticRelated "previous field" (recordFieldDeclSpan previousFieldDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (recordFieldDeclName fieldDecl) fieldDecl seen) rest
 
 buildConstructorEnv :: [TypeDecl] -> Either DiagnosticBundle ConstructorEnv
 buildConstructorEnv = foldM addTypeDecl Map.empty
@@ -587,7 +672,105 @@ inferExpr ctx termEnv localEnv expr =
         argExprs
         expectedParamTypes
       pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
+    ERecord recordSpan recordName fields ->
+      inferRecordExpr ctx termEnv localEnv recordSpan recordName fields
+    EFieldAccess accessSpan subject fieldName ->
+      inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName
     EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
+
+inferRecordExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [RecordFieldExpr] -> InferM DraftExpr
+inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
+  case Map.lookup recordName (contextRecordDeclEnv ctx) of
+    Nothing ->
+      throwDiagnostic $
+        singleDiagnosticAt
+          "E_UNKNOWN_RECORD"
+          ("Unknown record `" <> recordName <> "`.")
+          recordSpan
+          ["Declare the record before constructing it."]
+    Just recordDecl -> do
+      ensureUniqueRecordExprFields fields
+      let expectedFields = recordDeclFields recordDecl
+          expectedFieldNames = fmap recordFieldDeclName expectedFields
+          actualFieldNames = fmap recordFieldExprName fields
+          missingFields = filter (`notElem` actualFieldNames) expectedFieldNames
+          extraFields = filter (`notElem` expectedFieldNames) actualFieldNames
+      unless (null missingFields) $
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_RECORD_MISSING_FIELDS"
+              ("Record literal for `" <> recordName <> "` is missing fields.")
+              (Just recordSpan)
+              ["Add fields for: " <> T.intercalate ", " missingFields <> "."]
+              [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+          ]
+      unless (null extraFields) $
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_RECORD_UNKNOWN_FIELDS"
+              ("Record literal for `" <> recordName <> "` includes unknown fields.")
+              (Just recordSpan)
+              ["Remove fields: " <> T.intercalate ", " extraFields <> "."]
+              [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+          ]
+      let fieldTypeMap =
+            Map.fromList
+              [ (recordFieldDeclName fieldDecl, typeToInferType (recordFieldDeclType fieldDecl))
+              | fieldDecl <- expectedFields
+              ]
+      draftFields <-
+        traverse
+          ( \fieldExpr -> do
+              fieldValue <- inferExpr ctx termEnv localEnv (recordFieldExprValue fieldExpr)
+              case Map.lookup (recordFieldExprName fieldExpr) fieldTypeMap of
+                Just expectedFieldType ->
+                  unify
+                    ( UnifyContext
+                        { unifyCode = "E_TYPE_MISMATCH"
+                        , unifySummary = "Record field type does not match the declaration."
+                        , unifyPrimarySpan = recordFieldExprSpan fieldExpr
+                        , unifyRelated = [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+                        }
+                    )
+                    (draftExprType fieldValue)
+                    expectedFieldType
+                Nothing ->
+                  pure ()
+              pure
+                DraftRecordField
+                  { draftRecordFieldName = recordFieldExprName fieldExpr
+                  , draftRecordFieldValue = fieldValue
+                  }
+          )
+          fields
+      pure
+        ( DraftExpr
+            recordSpan
+            (INamed recordName)
+            (DraftRecord recordName draftFields)
+        )
+
+inferFieldAccessExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> Text -> InferM DraftExpr
+inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName = do
+  subjectExpr <- inferExpr ctx termEnv localEnv subject
+  recordDecl <- resolveFieldAccessRecord ctx accessSpan fieldName (draftExprType subjectExpr)
+  case lookupRecordField fieldName recordDecl of
+    Just fieldDecl ->
+      pure
+        ( DraftExpr
+            accessSpan
+            (typeToInferType (recordFieldDeclType fieldDecl))
+            (DraftFieldAccess subjectExpr fieldName)
+        )
+    Nothing ->
+      throwDiagnostic . diagnosticBundle $
+        [ diagnostic
+            "E_UNKNOWN_FIELD"
+            ("Record `" <> recordDeclName recordDecl <> "` does not define field `" <> fieldName <> "`.")
+            (Just accessSpan)
+            ["Use one of the declared record fields."]
+            [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+        ]
 
 inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
@@ -596,7 +779,20 @@ inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
   initialExpectedTypeName <-
     case subjectType of
       INamed typeName ->
-        pure (Just typeName)
+        if Map.member typeName (contextTypeDeclEnv ctx)
+          then pure (Just typeName)
+          else
+            if Map.member typeName (contextRecordDeclEnv ctx)
+              then
+                throwDiagnostic . diagnosticBundle $
+                  [ diagnostic
+                      "E_MATCH_SUBJECT"
+                      "Match expressions require an algebraic data type subject."
+                      (Just matchSpan)
+                      ["Record type `" <> typeName <> "` does not support constructor matching."]
+                      []
+                  ]
+              else pure (Just typeName)
       IVar _ ->
         pure Nothing
       _ ->
@@ -834,6 +1030,99 @@ ensureUniquePatternBinders = go Map.empty
         Nothing ->
           go (Map.insert (patternBinderName binder) binder seen) rest
 
+ensureUniqueRecordExprFields :: [RecordFieldExpr] -> InferM ()
+ensureUniqueRecordExprFields = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (fieldExpr : rest) =
+      case Map.lookup (recordFieldExprName fieldExpr) seen of
+        Just previousFieldExpr ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_RECORD_FIELD_EXPR"
+                ("Duplicate field `" <> recordFieldExprName fieldExpr <> "` in record literal.")
+                (Just (recordFieldExprSpan fieldExpr))
+                ["Each record field may only be set once."]
+                [diagnosticRelated "previous field" (recordFieldExprSpan previousFieldExpr)]
+            ]
+        Nothing ->
+          go (Map.insert (recordFieldExprName fieldExpr) fieldExpr seen) rest
+
+lookupRecordField :: Text -> RecordDecl -> Maybe RecordFieldDecl
+lookupRecordField fieldName recordDecl =
+  go (recordDeclFields recordDecl)
+  where
+    go [] = Nothing
+    go (fieldDecl : rest)
+      | recordFieldDeclName fieldDecl == fieldName = Just fieldDecl
+      | otherwise = go rest
+
+resolveFieldAccessRecord :: ModuleContext -> SourceSpan -> Text -> InferType -> InferM RecordDecl
+resolveFieldAccessRecord ctx accessSpan fieldName subjectType = do
+  resolvedSubjectType <- resolveCurrentType subjectType
+  case resolvedSubjectType of
+    INamed typeName ->
+      case Map.lookup typeName (contextRecordDeclEnv ctx) of
+        Just recordDecl ->
+          pure recordDecl
+        Nothing ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_FIELD_ACCESS"
+                "Field access requires a record value."
+                (Just accessSpan)
+                ["Expected a record type but got `" <> typeName <> "`."]
+                []
+            ]
+    IVar _ ->
+      case recordsWithField ctx fieldName of
+        [] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_UNKNOWN_FIELD"
+                ("Unknown field `" <> fieldName <> "`.")
+                (Just accessSpan)
+                ["Declare the field on a record or fix the field name."]
+                []
+            ]
+        [recordDecl] -> do
+          unify
+            ( UnifyContext
+                { unifyCode = "E_FIELD_ACCESS"
+                , unifySummary = "Field access requires a record value."
+                , unifyPrimarySpan = accessSpan
+                , unifyRelated = [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+                }
+            )
+            resolvedSubjectType
+            (INamed (recordDeclName recordDecl))
+          pure recordDecl
+        candidates ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_CANNOT_INFER"
+                ("Could not infer which record defines field `" <> fieldName <> "`.")
+                (Just accessSpan)
+                ["Candidate records: " <> T.intercalate ", " (fmap recordDeclName candidates) <> "."]
+                []
+            ]
+    _ ->
+      throwDiagnostic . diagnosticBundle $
+        [ diagnostic
+            "E_FIELD_ACCESS"
+            "Field access requires a record value."
+            (Just accessSpan)
+            ["Expected a record type but got " <> renderInferType resolvedSubjectType <> "."]
+            []
+        ]
+
+recordsWithField :: ModuleContext -> Text -> [RecordDecl]
+recordsWithField ctx fieldName =
+  filter (hasField fieldName) (Map.elems (contextRecordDeclEnv ctx))
+  where
+    hasField target recordDecl =
+      any ((== target) . recordFieldDeclName) (recordDeclFields recordDecl)
+
 ensureExhaustiveMatch :: TypeDecl -> Map.Map Text MatchBranch -> SourceSpan -> InferM ()
 ensureExhaustiveMatch typeDecl seenBranches matchSpan =
   let expectedConstructors = fmap constructorDeclName (typeDeclConstructors typeDecl)
@@ -893,6 +1182,14 @@ freezeDraftExpr decl inferState draftExpr =
       frozenSubject <- freezeDraftExpr decl inferState subject
       frozenBranches <- traverse (freezeDraftMatchBranch decl inferState) branches
       pure (CMatch (draftExprSpan draftExpr) exprType frozenSubject frozenBranches)
+    DraftRecord recordName fields -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenFields <- traverse (freezeDraftRecordField decl inferState) fields
+      pure (CRecord (draftExprSpan draftExpr) exprType recordName frozenFields)
+    DraftFieldAccess subject fieldName -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenSubject <- freezeDraftExpr decl inferState subject
+      pure (CFieldAccess (draftExprSpan draftExpr) exprType frozenSubject fieldName)
 
 freezeDraftMatchBranch :: Decl -> InferState -> DraftMatchBranch -> Either DiagnosticBundle CoreMatchBranch
 freezeDraftMatchBranch decl inferState branch = do
@@ -920,6 +1217,15 @@ freezeDraftPatternBinder decl inferState binder = do
       { corePatternBinderName = draftPatternBinderName binder
       , corePatternBinderSpan = draftPatternBinderSpan binder
       , corePatternBinderType = binderType
+      }
+
+freezeDraftRecordField :: Decl -> InferState -> DraftRecordField -> Either DiagnosticBundle CoreRecordField
+freezeDraftRecordField decl inferState field = do
+  frozenValue <- freezeDraftExpr decl inferState (draftRecordFieldValue field)
+  pure
+    CoreRecordField
+      { coreRecordFieldName = draftRecordFieldName field
+      , coreRecordFieldValue = frozenValue
       }
 
 freezeInferTypeForDecl :: Decl -> InferState -> InferType -> Either DiagnosticBundle Type

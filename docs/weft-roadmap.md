@@ -163,9 +163,10 @@ The project should benchmark syntax candidates with real agent harnesses before 
 The current implementation should focus on:
 
 - Getting the bootstrap environment right
-- Building a small clean compiler
-- Keeping the language surface intentionally tiny
-- Avoiding premature complexity in types, effects, or AI syntax
+- Building a small clean compiler around the typed core and lowered IR
+- Keeping the language surface intentionally tiny while expanding toward real app-building primitives
+- Using records and multi-file imports as the base for the next full-stack slice
+- Avoiding premature complexity in effects or AI syntax before schemas and trust boundaries land
 
 ## Cross-Cutting Benchmark Track
 
