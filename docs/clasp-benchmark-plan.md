@@ -8,6 +8,10 @@ The core benchmark question is:
 
 How much does using `Clasp` improve end-to-end performance for existing agent harnesses such as `Codex` and `Claude Code` on realistic software tasks?
 
+The most important concrete proving ground should become:
+
+How much faster can an agent build and evolve a moderate SaaS application in `Clasp` than in a baseline stack?
+
 ## Primary Thesis
 
 The strongest public claim for `Clasp` is not:
@@ -59,6 +63,8 @@ The benchmark suite should focus on tasks that require:
 - handling runtime boundaries
 - working with LLM outputs and tools
 - surviving failures and retries
+
+The highest-value benchmark family should be built around a moderate SaaS app that exercises real product flows rather than isolated compiler or schema exercises.
 
 ### 4. Keep comparisons fair
 
@@ -127,6 +133,16 @@ Examples:
 - time-to-green reduction
 
 This is the clearest way to answer: "How much better does `Codex` or `Claude Code` perform when the project is written in Clasp?"
+
+### App feature throughput
+
+This should become the product-facing benchmark headline.
+
+Definition:
+
+- the rate at which a harness can add, modify, and safely ship real product features in the moderate SaaS dogfood app
+
+This is the clearest answer to whether `Clasp` is actually a better medium for agent-built applications rather than only a nicer research compiler.
 
 ### Intervention-free completion rate
 
@@ -356,6 +372,10 @@ Tasks that stress long-running correctness:
 - migrate persisted state
 - recover from invalid queued data
 - survive provider outage with bounded degradation
+- upgrade through a supervised hot-swap with explicit state migration
+- drain old code versions while the new version warms up
+- trigger rollback when upgrade health checks fail
+- preserve mailbox or message-driven workflow semantics across upgrade boundaries
 - trigger operator handoff or rollback safely
 
 ### Suite E: Bug-fix tasks

@@ -32,6 +32,7 @@ runs_root="$runtime_root/runs"
 completed_root="$runtime_root/completed"
 blocked_root="$runtime_root/blocked"
 logs_root="$runtime_root/logs"
+global_completed_root="$project_root/.clasp-swarm/completed"
 current_task_file="$runtime_root/current-task.txt"
 pid_file="$runtime_root/pid"
 lock_file="$runtime_root/lane.lock"
@@ -43,6 +44,7 @@ retry_limit="${CLASP_SWARM_RETRY_LIMIT:-2}"
 builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-900}"
 verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-600}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
+dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
 owns_runtime_state=0
 
 mkdir -p \
@@ -52,6 +54,7 @@ mkdir -p \
   "$completed_root" \
   "$blocked_root" \
   "$logs_root" \
+  "$global_completed_root" \
   "$(dirname "$merge_lock_file")"
 
 cleanup() {
@@ -91,11 +94,57 @@ task_file_list() {
   find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
 }
 
+task_dependencies() {
+  local task_file="$1"
+
+  sed -n '/^## Dependencies$/,/^## /p' "$task_file" | grep -oE '[A-Z]{2}-[0-9]{3}' || true
+}
+
+dependency_is_complete() {
+  local dependency_id="$1"
+  [[ -f "$global_completed_root/$dependency_id" ]]
+}
+
+wait_for_dependencies() {
+  local task_file="$1"
+  local task_id="$2"
+  local waiting_log="$logs_root/$task_id.waiting.log"
+  local deps=()
+  local unmet=()
+
+  mapfile -t deps < <(task_dependencies "$task_file")
+
+  if [[ "${#deps[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  while true; do
+    unmet=()
+
+    for dependency_id in "${deps[@]}"; do
+      if ! dependency_is_complete "$dependency_id"; then
+        unmet+=("$dependency_id")
+      fi
+    done
+
+    if [[ "${#unmet[@]}" -eq 0 ]]; then
+      rm -f "$waiting_log"
+      return 0
+    fi
+
+    printf '%s waiting on %s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "${unmet[*]}" > "$waiting_log"
+    sleep "$dependency_poll_seconds"
+  done
+}
+
 mark_completed() {
   local task_id="$1"
   local commit="$2"
   local stamp="$3"
   printf '%s\t%s\n' "$stamp" "$commit" > "$completed_root/$task_id"
+  printf '%s\t%s\n' "$stamp" "$commit" > "$global_completed_root/$task_id"
 }
 
 mark_blocked() {
@@ -275,6 +324,7 @@ while IFS= read -r task_file; do
   fi
 
   printf '%s\n' "$task_id" > "$current_task_file"
+  wait_for_dependencies "$task_file" "$task_id"
   attempt=1
   feedback_file=""
   task_branch="$(task_branch_of "$task_id")"

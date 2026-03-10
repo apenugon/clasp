@@ -126,13 +126,15 @@ Exit criteria:
 
 Outcome:
 
-- Clasp can model long-running workflows with checkpointing, replay, controlled hot-swap, and bounded self-update
+- Clasp can model long-running workflows with checkpointing, replay, controlled hot-swap, and bounded self-update using BEAM-inspired supervision and upgrade semantics
 
 Exit criteria:
 
 - checkpoint/resume works
 - module compatibility checks exist
 - hot-swap is supervised rather than arbitrary
+- supervisor and upgrade-handler semantics exist for long-running processes or workflows
+- old and new code versions can coexist briefly during controlled upgrade handoff
 
 ### M6: AI-Native Platform
 
@@ -155,6 +157,54 @@ Exit criteria:
 
 - metrics, goals, rollouts, and rollback gates are first-class enough to benchmark
 
+### M8: Moderate SaaS App Without A Database
+
+Outcome:
+
+- one moderate SaaS application is built primarily in `Clasp`, using generated routes, generated validation, and shared type/schema definitions across the entire app surface
+
+Exit criteria:
+
+- a frontend, backend, worker or workflow path, and AI feature all run from one `Clasp` codebase
+- the app relies on in-memory or file-backed state rather than a database so the language surface itself is the thing being tested
+- benchmark tasks now include real app feature work rather than only compiler and schema slices
+
+### M9: Hosted Self-Hosted Compiler
+
+Outcome:
+
+- the primary compiler implementation is written in `Clasp` and runs through the `JS/Bun` path
+
+Exit criteria:
+
+- the parser, checker, and emitter are ported enough for a real compiler path in `Clasp`
+- bootstrap stage checks pass
+- Haskell remains only as the bootstrap fallback
+
+### M10: Native Backend And Bytecode Emission
+
+Outcome:
+
+- Clasp emits a real backend-native bytecode or native-target IR path for server and compiler workloads
+
+Exit criteria:
+
+- a backend-oriented native IR and runtime ABI exist
+- the compiler and backend demos can run without Bun
+- the same front end and type system drive both JS and native backends
+
+### M11: SQLite Storage
+
+Outcome:
+
+- Clasp has a typed SQLite boundary and the SaaS app can persist real state
+
+Exit criteria:
+
+- typed connection, query, and migration surfaces exist
+- the SaaS app runs with SQLite-backed persistence
+- persistence-bearing app benchmarks land
+
 ## Dependency Order
 
 The high-level dependency chain should be:
@@ -168,7 +218,11 @@ The high-level dependency chain should be:
 7. Durable workflows and hot-swap
 8. AI-native provider/tool/eval features
 9. External-objective adaptation
-10. Expanded benchmarks across all layers
+10. Moderate SaaS app dogfooding and app-level benchmarks
+11. Hosted self-hosting
+12. Native backend and bytecode emission
+13. SQLite persistence
+14. Expanded benchmarks across all layers
 
 Parallelism guidance:
 
@@ -176,6 +230,9 @@ Parallelism guidance:
 - diagnostics and benchmark tasks can usually run alongside core compiler work
 - control-plane work should begin only after schema and trust-boundary foundations are credible
 - workflow and hot-swap work should begin only after control-plane and type-boundary machinery exist
+- the moderate SaaS app should begin only after the full-stack and trust-boundary layers are real enough to carry product logic
+- self-hosting should begin only after the language is comfortable enough to express compiler code without constant workaround churn
+- the native backend should trail the hosted self-hosting path rather than compete with it too early
 
 ## Full Backlog
 
@@ -271,16 +328,19 @@ Parallelism guidance:
 
 ### Track 6: Durable Workflows and Hot Swap
 
-- `WF-001` Add workflow declaration syntax and typed state modeling.
+- `WF-001` Add workflow declaration syntax and typed state modeling for isolated long-running processes.
 - `WF-002` Add checkpoint/resume primitives.
-- `WF-003` Add replay and idempotency semantics.
+- `WF-003` Add replay and idempotency semantics for message-driven workflows.
 - `WF-004` Add deadlines, cancellation, retries, and bounded backoff.
-- `WF-005` Add degraded-mode and operator-handoff semantics.
-- `WF-006` Add module version identifiers and compatibility metadata.
-- `WF-007` Add state migration hooks for hot-swap boundaries.
-- `WF-008` Add supervised module hot-swap protocol.
-- `WF-009` Add self-update handoff rules for long-running agents.
-- `WF-010` Build a demo workflow that survives restart and controlled module replacement.
+- `WF-005` Add degraded-mode and operator-handoff semantics under supervision.
+- `WF-006` Add module version identifiers, upgrade windows, and compatibility metadata.
+- `WF-007` Add state migration hooks and explicit upgrade handlers for hot-swap boundaries.
+- `WF-008` Add supervised module hot-swap protocol with a bounded old/new version overlap.
+- `WF-009` Add self-update handoff, draining, and rollback rules for long-running agents.
+- `WF-010` Add supervisor hierarchy declarations and restart strategies inspired by Erlang/BEAM.
+- `WF-011` Add mailbox or message-queue semantics for long-running workflow processes.
+- `WF-012` Add health-gated upgrade activation and rollback triggers.
+- `WF-013` Build a demo workflow that survives restart and controlled module replacement under supervision.
 
 ### Track 7: AI-Native Platform
 
@@ -316,10 +376,60 @@ Parallelism guidance:
 - `BM-005` Add trust-boundary rejection benchmarks.
 - `BM-006` Add control-plane and permission-containment benchmarks.
 - `BM-007` Add workflow durability and replay benchmarks.
-- `BM-008` Add hot-swap and self-update benchmarks.
+- `BM-008` Add hot-swap and self-update benchmarks, including supervised upgrades, rollback, and version-drain behavior.
 - `BM-009` Add syntax-form A/B benchmarks for compact vs more verbose surfaces.
 - `BM-010` Add external-objective adaptation benchmarks.
 - `BM-011` Add benchmark result packaging and reproducible run manifests.
+- `BM-012` Add benchmark tasks on the moderate SaaS app that measure real product-feature throughput.
+- `BM-013` Add compiler-maintenance benchmarks on the hosted self-hosted compiler path.
+- `BM-014` Add backend compile-time and runtime benchmarks comparing JS/Bun and the native backend.
+- `BM-015` Add SQLite-backed product-change benchmarks on the dogfood app.
+
+### Track 10: SaaS Dogfooding
+
+- `SA-001` Define the moderate SaaS app scope and product surface, explicitly without a database in the first version.
+- `SA-002` Add in-memory or file-backed app state primitives suitable for the dogfood app.
+- `SA-003` Build the core shared domain types, routes, and generated clients for the dogfood app.
+- `SA-004` Build the primary user-facing flows in Clasp across frontend and backend.
+- `SA-005` Add one worker or workflow-driven product path in the app.
+- `SA-006` Add one AI-assisted product feature in the app using typed model and tool boundaries.
+- `SA-007` Add deterministic seeded app fixtures for local development and benchmarks.
+- `SA-008` Add full end-to-end tests for the moderate SaaS app.
+- `SA-009` Package the app so an agent can build and modify it from one Clasp codebase.
+- `SA-010` Use the app as the main public benchmark proving ground against TypeScript baselines.
+
+### Track 11: Self-Hosting
+
+- `SH-001` Define the self-hosting subset of Clasp and the boundary between bootstrap and primary compiler implementations.
+- `SH-002` Add the standard-library surface needed by compiler code written in Clasp.
+- `SH-003` Port formatter and diagnostic rendering helpers to Clasp.
+- `SH-004` Port module loading and package-resolution logic to Clasp.
+- `SH-005` Port the parser to Clasp.
+- `SH-006` Port lowered IR helpers and the JavaScript emitter to Clasp.
+- `SH-007` Port checker and type-inference logic to Clasp.
+- `SH-008` Build the hosted Clasp compiler in Clasp and run it through JS/Bun.
+- `SH-009` Add stage0/stage1/stage2 bootstrap reproducibility checks.
+- `SH-010` Switch the primary compiler implementation to Clasp while retaining the Haskell bootstrap fallback.
+
+### Track 12: Native Backend And Bytecode
+
+- `NB-001` Define a backend-native IR below the current lowered IR.
+- `NB-002` Define runtime ABI and data-layout rules for the native backend.
+- `NB-003` Emit a first native bytecode or native-target IR path for compiler workloads.
+- `NB-004` Add a minimal native runtime suitable for compiler and backend execution.
+- `NB-005` Add code generation for functions, ADTs, records, and control flow on the native path.
+- `NB-006` Add native support for the JSON and runtime-boundary features needed by the compiler and SaaS app.
+- `NB-007` Run the self-hosted compiler through the native backend.
+- `NB-008` Benchmark JS/Bun against the native backend on compiler and backend workloads.
+
+### Track 13: SQLite Storage
+
+- `DB-001` Define the SQLite capability, permission model, and trust boundary.
+- `DB-002` Add a typed SQLite connection/runtime surface.
+- `DB-003` Add typed query and row-mapping support.
+- `DB-004` Add schema migration and compatibility hooks for SQLite-backed apps.
+- `DB-005` Integrate SQLite into the dogfood SaaS app.
+- `DB-006` Add persistence-bearing benchmarks and failure-mode tests.
 
 ## Suggested Dispatch Waves
 
@@ -361,7 +471,7 @@ Reason:
 
 Dispatch after Wave 3:
 
-- `WF-001` through `WF-010`
+- `WF-001` through `WF-013`
 - `BM-007`, `BM-008`
 
 Reason:
@@ -379,6 +489,50 @@ Dispatch after Wave 4:
 Reason:
 
 - this is where Clasp either proves the broader thesis or collapses into being "just another typed language"
+
+### Wave 6: Dogfood The Actual App
+
+Dispatch after Wave 5:
+
+- `SA-001` through `SA-010`
+- `BM-012`
+
+Reason:
+
+- the benchmark that matters most is whether agents can build and evolve a real product in Clasp faster than in a baseline stack
+
+### Wave 7: Hosted Self-Hosting
+
+Dispatch after Wave 6:
+
+- `SH-001` through `SH-010`
+- `BM-013`
+
+Reason:
+
+- once Clasp can carry a real app, it is credible to ask it to carry its own compiler
+
+### Wave 8: Native Backend
+
+Dispatch after Wave 7:
+
+- `NB-001` through `NB-008`
+- `BM-014`
+
+Reason:
+
+- native backend work becomes much more tractable once the hosted self-hosting path is proven
+
+### Wave 9: SQLite And Persistence
+
+Dispatch after Wave 8:
+
+- `DB-001` through `DB-006`
+- `BM-015`
+
+Reason:
+
+- SQLite should be the first persistence milestone after the stateless or in-memory app path is already credible
 
 ## Immediate Recommendation
 
