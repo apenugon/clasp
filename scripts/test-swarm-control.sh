@@ -72,3 +72,297 @@ for lane_dir in "${default_lanes[@]}"; do
 done
 
 bash "$project_root/scripts/clasp-swarm-status.sh" >/dev/null
+
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/clasp-swarm-control.XXXXXX")"
+
+cleanup() {
+  rm -rf "$tmpdir"
+}
+
+trap cleanup EXIT
+
+assert_file_exists() {
+  local path="$1"
+
+  if [[ ! -e "$path" ]]; then
+    echo "expected file to exist: $path" >&2
+    exit 1
+  fi
+}
+
+assert_file_not_exists() {
+  local path="$1"
+
+  if [[ -e "$path" ]]; then
+    echo "expected file to be absent: $path" >&2
+    exit 1
+  fi
+}
+
+assert_contains() {
+  local path="$1"
+  local pattern="$2"
+
+  if ! grep -Fq "$pattern" "$path"; then
+    echo "expected '$pattern' in $path" >&2
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local path="$1"
+  local pattern="$2"
+
+  if grep -Fq "$pattern" "$path"; then
+    echo "did not expect '$pattern' in $path" >&2
+    exit 1
+  fi
+}
+
+assert_lines_equal() {
+  local path="$1"
+  shift
+  local expected=("$@")
+  local actual=()
+
+  mapfile -t actual < "$path"
+
+  if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
+    echo "unexpected line count in $path: got ${#actual[@]}, want ${#expected[@]}" >&2
+    printf 'actual lines:\n' >&2
+    printf '  %s\n' "${actual[@]}" >&2
+    exit 1
+  fi
+
+  local index
+  for index in "${!expected[@]}"; do
+    if [[ "${actual[$index]}" != "${expected[$index]}" ]]; then
+      echo "unexpected line $((index + 1)) in $path: got '${actual[$index]}', want '${expected[$index]}'" >&2
+      exit 1
+    fi
+  done
+}
+
+create_autopilot_fixture() {
+  local fixture_root="$1"
+
+  mkdir -p "$fixture_root/scripts" "$fixture_root/agents/tasks" "$fixture_root/.test-state"
+
+  cp \
+    "$project_root/scripts/clasp-autopilot.sh" \
+    "$project_root/scripts/clasp-autopilot-start.sh" \
+    "$project_root/scripts/clasp-autopilot-status.sh" \
+    "$project_root/scripts/clasp-autopilot-stop.sh" \
+    "$fixture_root/scripts/"
+
+  cat <<'EOF' > "$fixture_root/AGENTS.md"
+# Fixture
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-builder.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+feedback_file="${5:-}"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state_root="$project_root/.test-state"
+task_id="$(basename "$task_file" .md)"
+
+mkdir -p "$state_root"
+printf '%s\n' "$task_id" >> "$state_root/build-order.txt"
+
+if [[ "$task_id" == "0001-alpha--workaround" ]]; then
+  if [[ -f "$state_root/require-generated-workaround" ]]; then
+    grep -Fq "# 0001-alpha--workaround" "$task_file"
+    grep -Fq "Verifier Summary" "$task_file"
+    grep -Fq "Alpha verification failed." "$task_file"
+    grep -Fq "Recent verifier log lines:" "$task_file"
+  fi
+
+  if [[ -f "$state_root/require-preseeded-workaround" ]]; then
+    grep -Fq "Preseeded workaround task." "$task_file"
+  fi
+fi
+
+if [[ -n "$feedback_file" ]]; then
+  printf '%s\n' "$feedback_file" >> "$state_root/feedback-files.txt"
+fi
+
+printf '{"summary":"builder ok","files_touched":[],"tests_run":[],"residual_risks":[]}\n' > "$report_json"
+printf '{"event":"builder","task":"%s","workspace":"%s"}\n' "$task_id" "$workspace" > "$log_jsonl"
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-verifier.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state_root="$project_root/.test-state"
+task_id="$(basename "$task_file" .md)"
+
+mkdir -p "$state_root"
+printf '%s\n' "$task_id" >> "$state_root/verify-order.txt"
+printf '{"event":"verifier","task":"%s","workspace":"%s","baseline":"%s"}\n' \
+  "$task_id" \
+  "$workspace" \
+  "$baseline_workspace" > "$log_jsonl"
+
+case "$task_id" in
+  0001-alpha)
+    if [[ -f "$state_root/workaround-complete" ]]; then
+      printf '{"verdict":"pass","summary":"Alpha verified.","findings":[],"tests_run":["retry alpha"],"follow_up":[]}\n' > "$report_json"
+    else
+      printf '{"verdict":"fail","summary":"Alpha verification failed.","findings":["Need a smaller follow-up.","Recent verifier log lines:\\nalpha root cause"],"tests_run":["attempt alpha"],"follow_up":["Split the change."]}\n' > "$report_json"
+    fi
+    ;;
+  0001-alpha--workaround)
+    : > "$state_root/workaround-complete"
+    printf '{"verdict":"pass","summary":"Workaround verified.","findings":[],"tests_run":["workaround coverage"],"follow_up":[]}\n' > "$report_json"
+    ;;
+  0002-beta)
+    printf '{"verdict":"pass","summary":"Beta verified.","findings":[],"tests_run":["beta coverage"],"follow_up":[]}\n' > "$report_json"
+    ;;
+  0003-gamma)
+    printf '{"verdict":"pass","summary":"Gamma verified.","findings":[],"tests_run":["gamma coverage"],"follow_up":[]}\n' > "$report_json"
+    ;;
+  *)
+    echo "unexpected task id: $task_id" >&2
+    exit 1
+    ;;
+esac
+EOF
+
+  chmod +x "$fixture_root"/scripts/clasp-*.sh
+}
+
+run_autopilot_fixture() {
+  local fixture_root="$1"
+  shift
+
+  (
+    cd "$fixture_root"
+    env \
+      CLASP_AUTOPILOT_RETRY_LIMIT=1 \
+      CLASP_AUTOPILOT_ALLOW_DIRTY_ROOT=1 \
+      "$@" \
+      bash scripts/clasp-autopilot.sh
+  ) >"$fixture_root/.test-state/autopilot-output.log" 2>&1
+}
+
+test_autopilot_generates_workaround_and_retries_base_task() {
+  local fixture_root="$tmpdir/autopilot-generated-workaround"
+  local generated_task="$fixture_root/.clasp-agents/generated-tasks/0001-alpha--workaround.md"
+
+  create_autopilot_fixture "$fixture_root"
+  : > "$fixture_root/.test-state/require-generated-workaround"
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0001-alpha.md"
+# Alpha
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0002-beta.md"
+# Beta
+EOF
+
+  run_autopilot_fixture "$fixture_root"
+
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0001-alpha"
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0002-beta"
+  assert_file_not_exists "$fixture_root/.clasp-agents/blocked/0001-alpha.json"
+  assert_file_not_exists "$generated_task"
+  assert_file_not_exists "$fixture_root/.clasp-agents/current-task.txt"
+  assert_file_not_exists "$fixture_root/.clasp-agents/autopilot.pid"
+  assert_lines_equal \
+    "$fixture_root/.test-state/build-order.txt" \
+    "0001-alpha" \
+    "0001-alpha--workaround" \
+    "0001-alpha" \
+    "0002-beta"
+}
+
+test_autopilot_resumes_existing_workaround_after_restart() {
+  local fixture_root="$tmpdir/autopilot-resume-workaround"
+
+  create_autopilot_fixture "$fixture_root"
+  : > "$fixture_root/.test-state/require-preseeded-workaround"
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0001-alpha.md"
+# Alpha
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0002-beta.md"
+# Beta
+EOF
+
+  mkdir -p "$fixture_root/.clasp-agents/blocked" "$fixture_root/.clasp-agents/generated-tasks"
+  cat <<'EOF' > "$fixture_root/.clasp-agents/blocked/0001-alpha.json"
+{"verdict":"fail","summary":"Seeded blocked report","findings":["Existing failure"],"tests_run":[],"follow_up":[]}
+EOF
+
+  cat <<'EOF' > "$fixture_root/.clasp-agents/generated-tasks/0001-alpha--workaround.md"
+# 0001-alpha--workaround
+
+Preseeded workaround task.
+EOF
+
+  run_autopilot_fixture "$fixture_root"
+
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0001-alpha"
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0002-beta"
+  assert_file_not_exists "$fixture_root/.clasp-agents/blocked/0001-alpha.json"
+  assert_file_not_exists "$fixture_root/.clasp-agents/generated-tasks/0001-alpha--workaround.md"
+  assert_lines_equal \
+    "$fixture_root/.test-state/build-order.txt" \
+    "0001-alpha--workaround" \
+    "0001-alpha" \
+    "0002-beta"
+}
+
+test_autopilot_skips_blocked_workaround_and_runs_later_tasks() {
+  local fixture_root="$tmpdir/autopilot-blocked-workaround"
+
+  create_autopilot_fixture "$fixture_root"
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0002-beta.md"
+# Beta
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/tasks/0003-gamma.md"
+# Gamma
+EOF
+
+  mkdir -p "$fixture_root/.clasp-agents/blocked" "$fixture_root/.clasp-agents/generated-tasks"
+  cat <<'EOF' > "$fixture_root/.clasp-agents/blocked/0001-alpha--workaround.json"
+{"verdict":"fail","summary":"Blocked workaround","findings":["Still blocked"],"tests_run":[],"follow_up":[]}
+EOF
+
+  cat <<'EOF' > "$fixture_root/.clasp-agents/generated-tasks/0001-alpha--workaround.md"
+# 0001-alpha--workaround
+
+Blocked workaround task.
+EOF
+
+  run_autopilot_fixture "$fixture_root"
+
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0002-beta"
+  assert_file_exists "$fixture_root/.clasp-agents/completed/0003-gamma"
+  assert_file_exists "$fixture_root/.clasp-agents/blocked/0001-alpha--workaround.json"
+  assert_lines_equal \
+    "$fixture_root/.test-state/build-order.txt" \
+    "0002-beta" \
+    "0003-gamma"
+  assert_contains "$fixture_root/.test-state/autopilot-output.log" "workaround task 0001-alpha--workaround is blocked; leaving it blocked and continuing"
+}
+
+test_autopilot_generates_workaround_and_retries_base_task
+test_autopilot_resumes_existing_workaround_after_restart
+test_autopilot_skips_blocked_workaround_and_runs_later_tasks
