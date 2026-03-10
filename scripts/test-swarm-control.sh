@@ -19,6 +19,7 @@ project_root = pathlib.Path(sys.argv[1])
 schema_path = project_root / "agents/swarm/task.schema.json"
 template_path = project_root / "agents/swarm/task-template.md"
 readme_path = project_root / "agents/swarm/README.md"
+agents_readme_path = project_root / "agents/README.md"
 plan_path = project_root / "docs/clasp-project-plan.md"
 
 schema = json.loads(schema_path.read_text())
@@ -33,6 +34,12 @@ readme = readme_path.read_text()
 assert "./task-template.md" in readme
 assert "./task.schema.json" in readme
 assert str(project_root) not in readme
+
+agents_readme = agents_readme_path.read_text()
+assert "The canonical backlog now lives under `agents/swarm/`." in agents_readme
+assert "`agents/swarm/task-template.md`" in agents_readme
+assert "`agents/swarm/task.schema.json`" in agents_readme
+assert "`agents/tasks/` remains only as the legacy coarse backlog" in agents_readme
 
 plan = plan_path.read_text()
 assert "agents/swarm/task-template.md" in plan

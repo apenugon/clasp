@@ -1,13 +1,14 @@
-# Clasp Autopilot
+# Clasp Agents
 
-This directory defines the task queue and schemas for the long-running builder/verifier subagent pair.
+This directory holds the repo's agent task backlogs and report schemas.
 
-There are currently two agent paths in the repo:
+The canonical backlog now lives under `agents/swarm/`. New work should start from:
 
-1. `agents/tasks/` for the older single-supervisor autopilot path
-2. `agents/swarm/` for the newer worktree-and-branch-based swarm path
+- `agents/swarm/task-template.md`
+- `agents/swarm/task.schema.json`
+- one of the lane directories in `agents/swarm/wave1/` or `agents/swarm/full/`
 
-The long-term direction is the swarm path, because it allows:
+The swarm path is the default, because it allows:
 
 - one branch per task
 - one worktree per active agent
@@ -15,7 +16,17 @@ The long-term direction is the swarm path, because it allows:
 - a rebase and final verification gate before integration
 - a dedicated integration trunk branch separate from the user's working branch
 
-The intended workflow is:
+`agents/tasks/` remains only as the legacy coarse backlog for the older single-supervisor autopilot scripts. It is not the source of truth for new swarm tasks.
+
+The swarm workflow is:
+
+1. `scripts/clasp-swarm-start.sh` launches one supervisor per lane.
+2. Each lane reads granular task files from `agents/swarm/<wave>/<lane>/`.
+3. The builder subagent implements one task in its dedicated worktree.
+4. The verifier reruns the task against a clean baseline worktree.
+5. The merge gate advances `agents/swarm-trunk` only after the verification command passes.
+
+The older autopilot workflow is still available for compatibility:
 
 1. `scripts/clasp-autopilot-start.sh` launches a background supervisor.
 2. The supervisor creates or resumes the rolling branch `agents/autopilot`.
@@ -41,4 +52,4 @@ bash scripts/clasp-swarm-status.sh wave1
 bash scripts/clasp-swarm-stop.sh wave1
 ```
 
-Task files are ordered lexicographically and should stay small enough to be completed in a single focused change.
+Swarm task files are ordered lexicographically within each lane and should stay small enough to be completed in a single focused change.
