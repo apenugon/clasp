@@ -46,6 +46,9 @@ verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-600}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
 dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
 owns_runtime_state=0
+active_task_worktree=""
+active_baseline_worktree=""
+active_accepted_snapshot_worktree=""
 
 mkdir -p \
   "$runtime_root" \
@@ -58,6 +61,10 @@ mkdir -p \
   "$(dirname "$merge_lock_file")"
 
 cleanup() {
+  remove_worktree_if_present "${active_accepted_snapshot_worktree:-}"
+  remove_worktree_if_present "${active_baseline_worktree:-}"
+  remove_worktree_if_present "${active_task_worktree:-}"
+
   if [[ "$owns_runtime_state" == "1" ]]; then
     rm -f "$current_task_file" "$pid_file"
   fi
@@ -161,11 +168,36 @@ clear_blocked() {
 remove_worktree_if_present() {
   local worktree_path="$1"
 
+  if [[ -z "$worktree_path" ]]; then
+    return 0
+  fi
+
   if git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $worktree_path"; then
     git -C "$project_root" worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
   fi
 
   rm -rf "$worktree_path"
+}
+
+garbage_collect_stale_runs() {
+  local run_dir
+  local scratch_root
+
+  for scratch_root in "$worktrees_root"/*; do
+    if [[ -d "$scratch_root" ]]; then
+      remove_worktree_if_present "$scratch_root"
+    fi
+  done
+
+  for run_dir in "$runs_root"/*; do
+    if [[ ! -d "$run_dir" ]]; then
+      continue
+    fi
+
+    remove_worktree_if_present "$run_dir/baseline-worktree"
+    remove_worktree_if_present "$run_dir/accepted-snapshot"
+    rmdir "$run_dir" >/dev/null 2>&1 || true
+  done
 }
 
 prepare_task_worktree() {
@@ -279,6 +311,7 @@ integrate_task_branch() {
   local status=0
 
   accepted_snapshot_worktree="$run_dir/accepted-snapshot"
+  active_accepted_snapshot_worktree="$accepted_snapshot_worktree"
 
   exec 8>"$merge_lock_file"
   flock 8
@@ -322,6 +355,7 @@ integrate_task_branch() {
   fi
 
   remove_worktree_if_present "$accepted_snapshot_worktree"
+  active_accepted_snapshot_worktree=""
   return "$status"
 }
 
@@ -341,6 +375,7 @@ owns_runtime_state=1
 printf '%s\n' "$$" > "$pid_file"
 
 ensure_trunk_branch
+garbage_collect_stale_runs
 
 while IFS= read -r task_file; do
   task_id="$(task_id_of "$task_file")"
@@ -364,7 +399,9 @@ while IFS= read -r task_file; do
     run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     run_dir="$runs_root/$run_stamp-$task_id-attempt$attempt"
     task_worktree="$(prepare_task_worktree "$task_id")"
+    active_task_worktree="$task_worktree"
     baseline_worktree="$run_dir/baseline-worktree"
+    active_baseline_worktree="$baseline_worktree"
     builder_report="$run_dir/builder-report.json"
     builder_log="$run_dir/builder-log.jsonl"
     verifier_report="$run_dir/verifier-report.json"
@@ -392,6 +429,9 @@ while IFS= read -r task_file; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      active_baseline_worktree=""
+      remove_worktree_if_present "$task_worktree"
+      active_task_worktree=""
       attempt=$((attempt + 1))
       continue
     fi
@@ -418,6 +458,9 @@ while IFS= read -r task_file; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      active_baseline_worktree=""
+      remove_worktree_if_present "$task_worktree"
+      active_task_worktree=""
       attempt=$((attempt + 1))
       continue
     fi
@@ -428,6 +471,9 @@ while IFS= read -r task_file; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      active_baseline_worktree=""
+      remove_worktree_if_present "$task_worktree"
+      active_task_worktree=""
       attempt=$((attempt + 1))
       continue
     fi
@@ -437,7 +483,9 @@ while IFS= read -r task_file; do
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       clear_blocked "$task_id"
       remove_worktree_if_present "$baseline_worktree"
+      active_baseline_worktree=""
       remove_worktree_if_present "$task_worktree"
+      active_task_worktree=""
       git -C "$project_root" branch -D "$task_branch" >/dev/null 2>&1 || true
       break
     else
@@ -452,6 +500,9 @@ while IFS= read -r task_file; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      active_baseline_worktree=""
+      remove_worktree_if_present "$task_worktree"
+      active_task_worktree=""
       attempt=$((attempt + 1))
       continue
     fi

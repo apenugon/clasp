@@ -511,11 +511,15 @@ EOF
 
 create_swarm_merge_fixture() {
   local fixture_root="$1"
+  local stale_run_dir="$fixture_root/.clasp-swarm/testwave/01-merge/runs/19990101T000000Z-0001-merge-attempt1"
+  local stale_task_worktree
 
   mkdir -p \
     "$fixture_root/scripts" \
     "$fixture_root/agents/swarm/testwave/01-merge" \
-    "$fixture_root/.test-state"
+    "$fixture_root/.test-state" \
+    "$stale_run_dir/baseline-worktree" \
+    "$stale_run_dir/accepted-snapshot"
 
   cp \
     "$project_root/scripts/clasp-swarm-common.sh" \
@@ -586,6 +590,12 @@ grep -Fxq "verified contents" tracked.txt
 EOF
 
   chmod +x "$fixture_root"/scripts/clasp-*.sh "$fixture_root/scripts/verify-all.sh"
+
+  stale_task_worktree="$(cd "$fixture_root/.." && pwd)/.clasp-agent-worktrees/$(basename "$fixture_root")/testwave/01-merge/stale-task"
+  mkdir -p "$stale_task_worktree"
+  printf 'stale\n' > "$stale_task_worktree/orphan.txt"
+  printf 'stale baseline\n' > "$stale_run_dir/baseline-worktree/orphan.txt"
+  printf 'stale snapshot\n' > "$stale_run_dir/accepted-snapshot/orphan.txt"
 
   (
     cd "$fixture_root"
@@ -670,16 +680,29 @@ test_swarm_status_reports_machine_readable_summary() {
 
 test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot() {
   local fixture_root="$tmpdir/swarm-merge-gate"
+  local stale_run_dir="$fixture_root/.clasp-swarm/testwave/01-merge/runs/19990101T000000Z-0001-merge-attempt1"
+  local lane_worktrees_root
+  local latest_run_dir
 
   create_swarm_merge_fixture "$fixture_root"
+
+  lane_worktrees_root="$(cd "$fixture_root/.." && pwd)/.clasp-agent-worktrees/$(basename "$fixture_root")/testwave/01-merge"
 
   (
     cd "$fixture_root"
     bash scripts/clasp-swarm-lane.sh agents/swarm/testwave/01-merge
   )
 
+  latest_run_dir="$(find "$fixture_root/.clasp-swarm/testwave/01-merge/runs" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+
   assert_file_exists "$fixture_root/.clasp-swarm/testwave/01-merge/completed/0001-merge"
   assert_contains "$fixture_root/.test-state/verify-all-cwds.txt" "/accepted-snapshot"
+  assert_file_not_exists "$stale_run_dir/baseline-worktree"
+  assert_file_not_exists "$stale_run_dir/accepted-snapshot"
+  assert_file_not_exists "$lane_worktrees_root/stale-task"
+  assert_file_not_exists "$lane_worktrees_root/0001-merge"
+  assert_file_exists "$latest_run_dir/builder-report.json"
+  assert_file_exists "$latest_run_dir/verifier-report.json"
 
   if [[ "$(git -C "$fixture_root" show agents/swarm-trunk:tracked.txt)" != "verified contents" ]]; then
     echo "expected accepted snapshot to contain verified contents" >&2
