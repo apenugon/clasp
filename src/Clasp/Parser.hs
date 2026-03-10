@@ -54,6 +54,7 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , ImportDecl (..)
   , IntComparisonOp (..)
+  , LetBinding (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -279,7 +280,11 @@ declParser = do
     }
 
 exprParser :: Parser Expr
-exprParser = do
+exprParser =
+  try letParser <|> comparisonExprParser
+
+comparisonExprParser :: Parser Expr
+comparisonExprParser = do
   firstTerm <- applicationParser
   remainingTerms <- many ((,) <$> comparisonOperatorParser <*> applicationParser)
   pure (foldl applyBinaryExpr firstTerm remainingTerms)
@@ -294,12 +299,9 @@ comparisonOperatorParser =
 
 applicationParser :: Parser Expr
 applicationParser = do
-  terms <- some termParser
-  case terms of
-    firstTerm : remainingTerms ->
-      pure (foldl applyExpr firstTerm remainingTerms)
-    [] ->
-      fail "expected at least one expression term"
+  firstTerm <- termParser
+  remainingTerms <- many (try (notFollowedBy (keywordRaw "in") *> termParser))
+  pure (foldl applyExpr firstTerm remainingTerms)
 
 termParser :: Parser Expr
 termParser = do
@@ -320,6 +322,29 @@ baseExprParser =
     <|> try recordExprParser
     <|> constructorExprParser
     <|> variableParser
+
+letParser :: Parser Expr
+letParser = do
+  start <- getSourcePos
+  keyword "let"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  value <- exprParser
+  bindingEnd <- getSourcePos
+  keyword "in"
+  body <- exprParser
+  end <- getSourcePos
+  pure
+    ( ELet
+        (makeSourceSpan start end)
+        LetBinding
+          { letBindingName = name
+          , letBindingSpan = makeSourceSpan start bindingEnd
+          , letBindingNameSpan = nameSpan
+          , letBindingValue = value
+          }
+        body
+    )
 
 matchParser :: Parser Expr
 matchParser = do
@@ -666,6 +691,8 @@ reservedWords =
   , "decode"
   , "encode"
   , "match"
+  , "let"
+  , "in"
   , "true"
   , "false"
   , "Int"

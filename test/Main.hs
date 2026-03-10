@@ -44,6 +44,7 @@ import Clasp.Syntax
   , Expr (..)
   , ForeignDecl (..)
   , IntComparisonOp (..)
+  , LetBinding (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -264,6 +265,20 @@ parserTests =
                     assertFailure ("expected integer comparison expression, got " <> show other)
               Nothing ->
                 assertFailure "expected lessThan declaration"
+    , testCase "parses local let expressions" $
+        case parseSource "inline" letSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "greeting" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ELet _ (LetBinding "prefix" _ _ (EString _ "hello")) (ELet _ (LetBinding "subject" _ _ (EString _ "world")) (ECall _ (EVar _ "join") [EVar _ "prefix", EVar _ "subject"])) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected let expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
     ]
 
 checkerTests :: TestTree
@@ -926,6 +941,18 @@ integerComparisonSource =
     , ""
     , "greaterThanOrEqual : Int -> Int -> Bool"
     , "greaterThanOrEqual left right = left >= right"
+    ]
+
+letSource :: Text
+letSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "join : Str -> Str -> Str"
+    , "join left right = left"
+    , ""
+    , "greeting : Str"
+    , "greeting = let prefix = \"hello\" in let subject = \"world\" in join prefix subject"
     ]
 
 missingRecordFieldSource :: Text

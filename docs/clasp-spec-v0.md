@@ -28,6 +28,7 @@ It includes:
 - Basic literals
 - Function application
 - Field access
+- Local `let ... in ...` expressions
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Minimal name resolution and typechecking
@@ -141,6 +142,18 @@ main : Str
 main = showName defaultUser
 ```
 
+Local bindings can be introduced with `let` expressions:
+
+```clasp
+module Main
+
+join : Str -> Str -> Str
+join left right = left
+
+greeting : Str
+greeting = let prefix = "hello" in let subject = "world" in join prefix subject
+```
+
 The first backend-boundary slice is also part of `v0`:
 
 ```clasp
@@ -192,11 +205,13 @@ atom        ::= lower-ident
               | string
               | "true"
               | "false"
+              | let-expr
               | decode-expr
               | encode-expr
               | record-expr
               | match-expr
               | "(" expr ")"
+let-expr    ::= "let" lower-ident "=" expr "in" expr
 decode-expr ::= "decode" type-atom expr
 encode-expr ::= "encode" expr
 record-expr ::= upper-ident "{" record-field-expr ("," record-field-expr)* "}"
@@ -215,6 +230,7 @@ Notes:
 - `==` is available for `Int`, `Str`, and `Bool`.
 - `<`, `<=`, `>`, and `>=` are available for `Int`.
 - Declarations are expression-bodied only.
+- `let` currently binds a single local name; multiple locals are expressed by nesting.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 - List type syntax uses brackets, for example `[Int]` or `[[User]]`.
 - List literals use brackets, for example `[]`, `[1, 2]`, or `[[1], [2, 3]]`.

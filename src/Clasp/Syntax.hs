@@ -7,6 +7,7 @@ module Clasp.Syntax
   , ForeignDecl (..)
   , ImportDecl (..)
   , IntComparisonOp (..)
+  , LetBinding (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -167,6 +168,14 @@ data MatchBranch = MatchBranch
   }
   deriving (Eq, Show)
 
+data LetBinding = LetBinding
+  { letBindingName :: Text
+  , letBindingSpan :: SourceSpan
+  , letBindingNameSpan :: SourceSpan
+  , letBindingValue :: Expr
+  }
+  deriving (Eq, Show)
+
 data RouteMethod
   = RouteGet
   | RoutePost
@@ -211,6 +220,7 @@ data Expr
   | EEqual SourceSpan Expr Expr
   | EIntCompare SourceSpan IntComparisonOp Expr Expr
   | ECall SourceSpan Expr [Expr]
+  | ELet SourceSpan LetBinding Expr
   | EMatch SourceSpan Expr [MatchBranch]
   | ERecord SourceSpan Text [RecordFieldExpr]
   | EFieldAccess SourceSpan Expr Text
@@ -236,6 +246,8 @@ exprSpan expr =
     EIntCompare span' _ _ _ ->
       span'
     ECall span' _ _ ->
+      span'
+    ELet span' _ _ ->
       span'
     EMatch span' _ _ ->
       span'

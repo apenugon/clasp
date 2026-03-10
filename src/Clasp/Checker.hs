@@ -954,6 +954,13 @@ inferExpr ctx termEnv localEnv expr =
         argExprs
         expectedParamTypes
       pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
+    ELet letSpan _ _ ->
+      throwDiagnostic $
+        singleDiagnosticAt
+          "E_LET_NOT_YET_SUPPORTED"
+          "Local let expressions are not typechecked yet."
+          letSpan
+          ["Parsing support landed first; typechecking and lowering land in LG-006."]
     ERecord recordSpan recordName fields ->
       inferRecordExpr ctx termEnv localEnv recordSpan recordName fields
     EFieldAccess accessSpan subject fieldName ->
