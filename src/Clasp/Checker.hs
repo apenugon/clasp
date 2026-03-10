@@ -126,6 +126,7 @@ data DraftExprNode
   | DraftInt Integer
   | DraftString Text
   | DraftBool Bool
+  | DraftEqual DraftExpr DraftExpr
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
@@ -842,6 +843,8 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IStr (DraftString value))
     EBool span' value ->
       pure (DraftExpr span' IBool (DraftBool value))
+    EEqual equalSpan left right ->
+      inferEqualityExpr ctx termEnv localEnv equalSpan left right
     ECall callSpan fn args -> do
       fnExpr <- inferExpr ctx termEnv localEnv fn
       resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
@@ -1037,6 +1040,38 @@ inferEncodeExpr ctx termEnv localEnv encodeSpan value = do
       pure (DraftExpr encodeSpan IStr (DraftEncodeJson valueExpr))
     Left (Just bundle) ->
       throwDiagnostic bundle
+
+inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> Expr -> InferM DraftExpr
+inferEqualityExpr ctx termEnv localEnv equalSpan left right = do
+  leftExpr <- inferExpr ctx termEnv localEnv left
+  rightExpr <- inferExpr ctx termEnv localEnv right
+  unify
+    ( UnifyContext
+        { unifyCode = "E_EQUALITY_TYPE"
+        , unifySummary = "Equality operands must have the same type."
+        , unifyPrimarySpan = draftExprSpan rightExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType leftExpr)
+    (draftExprType rightExpr)
+  resolvedType <- resolveCurrentType (draftExprType leftExpr)
+  case resolvedType of
+    IInt ->
+      pure (DraftExpr equalSpan IBool (DraftEqual leftExpr rightExpr))
+    IStr ->
+      pure (DraftExpr equalSpan IBool (DraftEqual leftExpr rightExpr))
+    IBool ->
+      pure (DraftExpr equalSpan IBool (DraftEqual leftExpr rightExpr))
+    _ ->
+      throwDiagnostic . diagnosticBundle $
+        [ diagnostic
+            "E_EQUALITY_TYPE"
+            "Equality is only supported for Int, Str, and Bool."
+            (Just equalSpan)
+            ["Both operands must resolve to the same comparable primitive type."]
+            []
+        ]
 
 inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
@@ -1545,6 +1580,10 @@ freezeDraftExpr ctx decl inferState draftExpr =
       pure (CString (draftExprSpan draftExpr) value)
     DraftBool value ->
       pure (CBool (draftExprSpan draftExpr) value)
+    DraftEqual left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenFn <- freezeDraftExpr ctx decl inferState fn

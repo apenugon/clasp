@@ -60,6 +60,7 @@ data LowerExpr
   | LInt Integer
   | LString Text
   | LBool Bool
+  | LEqual LowerExpr LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
@@ -136,6 +137,8 @@ lowerCoreExpr expr =
       LString value
     CBool _ value ->
       LBool value
+    CEqual _ left right ->
+      LEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CCall _ _ fn args ->
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->

@@ -169,6 +169,20 @@ parserTests =
                     assertFailure ("expected decode expression, got " <> show other)
               Nothing ->
                 assertFailure "expected summarizeLead declaration"
+    , testCase "parses equality expressions" $
+        case parseSource "inline" equalitySource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "sameInt" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EEqual _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected equality expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected sameInt declaration"
     ]
 
 checkerTests :: TestTree
@@ -203,6 +217,12 @@ checkerTests =
         case checkSource "service" serviceSource of
           Left err ->
             assertFailure ("expected service source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts primitive equality" $
+        case checkSource "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -249,6 +269,8 @@ checkerTests =
         assertHasCode "E_PATTERN_TYPE_MISMATCH" (checkSource "bad" wrongConstructorSource)
     , testCase "rejects duplicate match branches" $
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
+    , testCase "rejects unsupported equality operands" $
+        assertHasCode "E_EQUALITY_TYPE" (checkSource "bad" unsupportedEqualitySource)
     ]
 
 diagnosticTests :: TestTree
@@ -312,6 +334,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
+    , testCase "lowering preserves equality expressions" $
+        case lowerChecked "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "sameStr" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LEqual (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered sameStr declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -358,6 +390,12 @@ compileTests =
             assertBool "expected record encoder to validate internal values" ("function $encode_LeadSummary(value) { return JSON.stringify($serialize_LeadSummary($validateInternal_LeadSummary(value, \"value\"))); }" `T.isInfixOf` emitted)
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
+    , testCase "compile emits JavaScript equality" $
+        case compileSource "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool "expected strict equality" ("(left === right)" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -587,6 +625,21 @@ serviceSource =
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     ]
 
+equalitySource :: Text
+equalitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "sameInt : Int -> Int -> Bool"
+    , "sameInt left right = left == right"
+    , ""
+    , "sameStr : Str -> Str -> Bool"
+    , "sameStr left right = left == right"
+    , ""
+    , "sameBool : Bool -> Bool -> Bool"
+    , "sameBool left right = left == right"
+    ]
+
 missingRecordFieldSource :: Text
 missingRecordFieldSource =
   T.unlines
@@ -673,6 +726,17 @@ duplicateBranchSource =
     , "  Idle -> \"still idle\","
     , "  Busy note -> note"
     , "}"
+    ]
+
+unsupportedEqualitySource :: Text
+unsupportedEqualitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = { name : Str }"
+    , ""
+    , "main : User -> User -> Bool"
+    , "main left right = left == right"
     ]
 
 importSuccessFiles :: [(FilePath, Text)]

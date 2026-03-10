@@ -361,6 +361,10 @@ emitExpr counter expr =
       (counter, "true")
     LBool False ->
       (counter, "false")
+    LEqual left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " === " <> rightText <> ")")
     LCall fn args ->
       let (counterAfterFn, fnText) = emitExpr counter fn
           (counterAfterArgs, argTexts) = emitExprList counterAfterFn args

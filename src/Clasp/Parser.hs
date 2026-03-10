@@ -279,6 +279,12 @@ declParser = do
 
 exprParser :: Parser Expr
 exprParser = do
+  firstTerm <- applicationParser
+  remainingTerms <- many (symbol "==" *> applicationParser)
+  pure (foldl applyEqual firstTerm remainingTerms)
+
+applicationParser :: Parser Expr
+applicationParser = do
   terms <- some termParser
   case terms of
     firstTerm : remainingTerms ->
@@ -490,6 +496,10 @@ applyExpr fn arg =
 applyFieldAccess :: Expr -> (SourceSpan, Text) -> Expr
 applyFieldAccess subject (fieldSpan, fieldName) =
   EFieldAccess (mergeSourceSpans (exprSpan subject) fieldSpan) subject fieldName
+
+applyEqual :: Expr -> Expr -> Expr
+applyEqual left right =
+  EEqual (mergeSourceSpans (exprSpan left) (exprSpan right)) left right
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc

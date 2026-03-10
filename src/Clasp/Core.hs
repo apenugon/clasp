@@ -75,6 +75,7 @@ data CoreExpr
   | CInt SourceSpan Integer
   | CString SourceSpan Text
   | CBool SourceSpan Bool
+  | CEqual SourceSpan CoreExpr CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
@@ -93,6 +94,8 @@ coreExprType expr =
     CString _ _ ->
       TStr
     CBool _ _ ->
+      TBool
+    CEqual _ _ _ ->
       TBool
     CCall _ typ _ _ ->
       typ

@@ -198,6 +198,7 @@ data Expr
   | EInt SourceSpan Integer
   | EString SourceSpan Text
   | EBool SourceSpan Bool
+  | EEqual SourceSpan Expr Expr
   | ECall SourceSpan Expr [Expr]
   | EMatch SourceSpan Expr [MatchBranch]
   | ERecord SourceSpan Text [RecordFieldExpr]
@@ -216,6 +217,8 @@ exprSpan expr =
     EString span' _ ->
       span'
     EBool span' _ ->
+      span'
+    EEqual span' _ _ ->
       span'
     ECall span' _ _ ->
       span'
