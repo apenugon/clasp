@@ -22,3 +22,4 @@ benchmarks/workspaces/*
 !benchmarks/results/.gitkeep
 !benchmarks/workspaces/.gitkeep
 /.clasp-agents/
+/.clasp-swarm/
