@@ -3,14 +3,19 @@
 module Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
+  , DiagnosticFixHint (..)
   , DiagnosticRelated (..)
   , diagnostic
   , diagnosticBundle
+  , diagnosticFixHint
   , diagnosticRelated
+  , diagnosticWithFixHints
   , renderDiagnosticBundle
   , renderDiagnosticBundleJson
   , singleDiagnostic
   , singleDiagnosticAt
+  , singleDiagnosticAtWithFixHints
+  , singleDiagnosticWithFixHints
   ) where
 
 import Data.Aeson
@@ -33,12 +38,20 @@ data DiagnosticRelated = DiagnosticRelated
   }
   deriving (Eq, Show)
 
+data DiagnosticFixHint = DiagnosticFixHint
+  { fixHintKind :: Text
+  , fixHintMessage :: Text
+  , fixHintValues :: [Text]
+  }
+  deriving (Eq, Show)
+
 data Diagnostic = Diagnostic
   { diagnosticCode :: Text
   , diagnosticSummary :: Text
   , diagnosticPrimarySpan :: Maybe SourceSpan
   , diagnosticDetails :: [Text]
   , diagnosticRelatedSpans :: [DiagnosticRelated]
+  , diagnosticFixHints :: [DiagnosticFixHint]
   }
   deriving (Eq, Show)
 
@@ -48,7 +61,14 @@ newtype DiagnosticBundle = DiagnosticBundle
   deriving (Eq, Show)
 
 diagnostic :: Text -> Text -> Maybe SourceSpan -> [Text] -> [DiagnosticRelated] -> Diagnostic
-diagnostic = Diagnostic
+diagnostic code summary primarySpan details related =
+  Diagnostic code summary primarySpan details related []
+
+diagnosticWithFixHints :: Text -> Text -> Maybe SourceSpan -> [Text] -> [DiagnosticRelated] -> [DiagnosticFixHint] -> Diagnostic
+diagnosticWithFixHints = Diagnostic
+
+diagnosticFixHint :: Text -> Text -> [Text] -> DiagnosticFixHint
+diagnosticFixHint = DiagnosticFixHint
 
 diagnosticRelated :: Text -> SourceSpan -> DiagnosticRelated
 diagnosticRelated = DiagnosticRelated
@@ -60,9 +80,17 @@ singleDiagnostic :: Text -> Text -> [Text] -> DiagnosticBundle
 singleDiagnostic code summary details =
   DiagnosticBundle [diagnostic code summary Nothing details []]
 
+singleDiagnosticWithFixHints :: Text -> Text -> [Text] -> [DiagnosticFixHint] -> DiagnosticBundle
+singleDiagnosticWithFixHints code summary details fixHints =
+  DiagnosticBundle [diagnosticWithFixHints code summary Nothing details [] fixHints]
+
 singleDiagnosticAt :: Text -> Text -> SourceSpan -> [Text] -> DiagnosticBundle
 singleDiagnosticAt code summary primarySpan details =
   DiagnosticBundle [diagnostic code summary (Just primarySpan) details []]
+
+singleDiagnosticAtWithFixHints :: Text -> Text -> SourceSpan -> [Text] -> [DiagnosticFixHint] -> DiagnosticBundle
+singleDiagnosticAtWithFixHints code summary primarySpan details fixHints =
+  DiagnosticBundle [diagnosticWithFixHints code summary (Just primarySpan) details [] fixHints]
 
 renderDiagnosticBundle :: DiagnosticBundle -> Text
 renderDiagnosticBundle (DiagnosticBundle errs) =
@@ -82,6 +110,7 @@ renderDiagnostic err =
     [ renderHeader err
     ]
       <> fmap ("- " <>) (diagnosticDetails err)
+      <> fmap renderFixHint (diagnosticFixHints err)
       <> fmap renderRelated (diagnosticRelatedSpans err)
 
 renderHeader :: Diagnostic -> Text
@@ -95,6 +124,24 @@ renderHeader err =
 renderRelated :: DiagnosticRelated -> Text
 renderRelated related =
   "- related " <> relatedMessage related <> ": " <> renderSourceSpan (relatedSpan related)
+
+renderFixHint :: DiagnosticFixHint -> Text
+renderFixHint fixHint =
+  "- hint "
+    <> fixHintKind fixHint
+    <> ": "
+    <> fixHintMessage fixHint
+    <> renderFixHintValues (fixHintValues fixHint)
+
+renderFixHintValues :: [Text] -> Text
+renderFixHintValues values =
+  case values of
+    [] ->
+      ""
+    _ ->
+      " ["
+        <> T.intercalate ", " values
+        <> "]"
 
 renderSourceSpan :: SourceSpan -> Text
 renderSourceSpan span' =
@@ -117,6 +164,14 @@ instance ToJSON DiagnosticRelated where
       , "span" .= relatedSpan related
       ]
 
+instance ToJSON DiagnosticFixHint where
+  toJSON fixHint =
+    object
+      [ "kind" .= fixHintKind fixHint
+      , "message" .= fixHintMessage fixHint
+      , "values" .= fixHintValues fixHint
+      ]
+
 instance ToJSON Diagnostic where
   toJSON err =
     object
@@ -125,4 +180,5 @@ instance ToJSON Diagnostic where
       , "primarySpan" .= diagnosticPrimarySpan err
       , "details" .= diagnosticDetails err
       , "related" .= diagnosticRelatedSpans err
+      , "fixHints" .= diagnosticFixHints err
       ]

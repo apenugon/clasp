@@ -33,11 +33,15 @@ import Clasp.Core
   )
 import Clasp.Diagnostic
   ( DiagnosticBundle
+  , Diagnostic
   , DiagnosticRelated
   , diagnostic
   , diagnosticBundle
+  , diagnosticFixHint
   , diagnosticRelated
   , singleDiagnosticAt
+  , singleDiagnosticAtWithFixHints
+  , diagnosticWithFixHints
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
@@ -608,11 +612,12 @@ inferDeclTypes ctx decls = loop pendingDecls annotatedDeclEnv initialTermEnv
               case reverse nextPending of
                 unresolvedDecl : _ ->
                   Left $
-                    singleDiagnosticAt
+                    singleDiagnosticAtWithFixHints
                       "E_CANNOT_INFER"
                       ("Could not infer the type of `" <> declName unresolvedDecl <> "`.")
                       (declNameSpan unresolvedDecl)
                       ["Add an explicit type annotation or break the dependency cycle."]
+                      [diagnosticFixHint "add_type_annotation" "Add an explicit type annotation for this declaration." [declName unresolvedDecl]]
                 [] ->
                   pure nextDeclTypeEnv
 
@@ -651,11 +656,12 @@ checkDecl ctx termEnv decl = do
   case runInferAction (inferDeclDraft ctx termEnv decl (Just expectedType)) of
     Left (InferDeferredName deferredName deferredSpan) ->
       Left $
-        singleDiagnosticAt
+        singleDiagnosticAtWithFixHints
           "E_CANNOT_INFER"
           ("Could not resolve the type of `" <> deferredName <> "` yet.")
           deferredSpan
           ["Add an explicit annotation to break the dependency chain."]
+          [diagnosticFixHint "add_type_annotation" "Add an explicit type annotation to break the dependency chain." [deferredName]]
     Left (InferDiagnostic err) ->
       Left err
     Right (draftDecl, inferState) ->
@@ -832,11 +838,14 @@ inferExpr ctx termEnv localEnv expr =
                 then throwError (InferDeferredName name span')
                 else
                   throwDiagnostic $
-                    singleDiagnosticAt
+                    singleDiagnosticAtWithFixHints
                       "E_UNBOUND_NAME"
                       ("Unknown name `" <> name <> "`.")
                       span'
                       ["Introduce a declaration or fix the spelling of the reference."]
+                      [ diagnosticFixHint "declare_name" "Add a declaration for the missing name." [name]
+                      , diagnosticFixHint "replace_name" "Replace the reference with an in-scope name if this is a typo." [name]
+                      ]
     EInt span' value ->
       pure (DraftExpr span' IInt (DraftInt value))
     EString span' value ->
@@ -933,12 +942,13 @@ inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
           extraFields = filter (`notElem` expectedFieldNames) actualFieldNames
       unless (null missingFields) $
         throwDiagnostic . diagnosticBundle $
-          [ diagnostic
+          [ diagnosticWithRecordFixHints
               "E_RECORD_MISSING_FIELDS"
               ("Record literal for `" <> recordName <> "` is missing fields.")
               (Just recordSpan)
               ["Add fields for: " <> T.intercalate ", " missingFields <> "."]
               [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+              missingFields
           ]
       unless (null extraFields) $
         throwDiagnostic . diagnosticBundle $
@@ -1538,12 +1548,13 @@ ensureExhaustiveMatch typeDecl seenBranches matchSpan =
         filter (`Map.notMember` seenBranches) expectedConstructors
    in unless (null missingConstructors) $
         throwDiagnostic . diagnosticBundle $
-          [ diagnostic
+          [ diagnosticWithMatchFixHints
               "E_NONEXHAUSTIVE_MATCH"
               "Match expression is missing constructors."
               (Just matchSpan)
               ["Add branches for: " <> T.intercalate ", " missingConstructors <> "."]
               [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)]
+              missingConstructors
           ]
 
 freezeDraftDecl :: ModuleContext -> Decl -> InferState -> DraftDecl -> Either DiagnosticBundle CoreDecl
@@ -1655,11 +1666,12 @@ freezeInferTypeForDecl decl inferState inferType =
   case inferTypeToType inferState inferType of
     Left unresolvedVars ->
       Left $
-        singleDiagnosticAt
+        singleDiagnosticAtWithFixHints
           "E_CANNOT_INFER"
           ("Could not infer the type of `" <> declName decl <> "`.")
           (declNameSpan decl)
           ["Remaining unconstrained type variables: " <> T.intercalate ", " (fmap renderTypeVar unresolvedVars) <> "."]
+          [diagnosticFixHint "add_type_annotation" "Add an explicit type annotation for this declaration." [declName decl]]
     Right typ ->
       Right typ
 
@@ -1874,6 +1886,26 @@ relatedForHandler handlerName declMap foreignDeclEnv =
           [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
         Nothing ->
           []
+
+diagnosticWithRecordFixHints :: Text -> Text -> Maybe SourceSpan -> [Text] -> [DiagnosticRelated] -> [Text] -> Diagnostic
+diagnosticWithRecordFixHints code summary primarySpan details related missingFields =
+  diagnosticWithFixHints
+    code
+    summary
+    primarySpan
+    details
+    related
+    [diagnosticFixHint "add_record_fields" "Add the missing record fields to this literal." missingFields]
+
+diagnosticWithMatchFixHints :: Text -> Text -> Maybe SourceSpan -> [Text] -> [DiagnosticRelated] -> [Text] -> Diagnostic
+diagnosticWithMatchFixHints code summary primarySpan details related missingConstructors =
+  diagnosticWithFixHints
+    code
+    summary
+    primarySpan
+    details
+    related
+    [diagnosticFixHint "add_match_branches" "Add branches for the missing constructors." missingConstructors]
 
 constructorInfoType :: ConstructorInfo -> Type
 constructorInfoType constructorInfo =

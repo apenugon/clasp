@@ -26,6 +26,7 @@ import Clasp.Compiler (checkEntry, checkSource, compileEntry, compileSource, par
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
+  , DiagnosticFixHint (..)
   , renderDiagnosticBundle
   , renderDiagnosticBundleJson
   )
@@ -232,6 +233,7 @@ checkerTests =
             assertEqual "code" "E_UNBOUND_NAME" (diagnosticCode err)
             assertEqual "primary line" (Just 3) (positionLine . sourceSpanStart <$> diagnosticPrimarySpan err)
             assertEqual "primary column" (Just 8) (positionColumn . sourceSpanStart <$> diagnosticPrimarySpan err)
+            assertEqual "fix hint kinds" ["declare_name", "replace_name"] (fmap fixHintKind (diagnosticFixHints err))
           Right _ ->
             assertFailure "expected undefined-name failure"
     , testCase "reports ambiguous function inference" $
@@ -284,6 +286,8 @@ diagnosticTests =
             assertBool "expected code in json" ("\"code\":\"E_UNBOUND_NAME\"" `T.isInfixOf` jsonText)
             assertBool "expected primary span in json" ("\"primarySpan\"" `T.isInfixOf` jsonText)
             assertBool "expected file in json" ("\"file\":\"bad\"" `T.isInfixOf` jsonText)
+            assertBool "expected fix hints in json" ("\"fixHints\"" `T.isInfixOf` jsonText)
+            assertBool "expected declare-name fix hint in json" ("\"kind\":\"declare_name\"" `T.isInfixOf` jsonText)
           Right _ ->
             assertFailure "expected json diagnostic failure"
     , testCase "pretty rendering includes related locations" $
@@ -293,6 +297,16 @@ diagnosticTests =
             assertBool "expected related marker" ("related previous declaration" `T.isInfixOf` rendered)
           Right _ ->
             assertFailure "expected duplicate declaration failure"
+    , testCase "non-exhaustive matches expose missing constructors as fix hints" $
+        case checkSource "bad" nonExhaustiveMatchSource of
+          Left bundle -> do
+            err <- expectFirstDiagnostic bundle
+            assertEqual
+              "match fix hint"
+              [DiagnosticFixHint "add_match_branches" "Add branches for the missing constructors." ["Busy"]]
+              (diagnosticFixHints err)
+          Right _ ->
+            assertFailure "expected non-exhaustive match failure"
     ]
 
 lowerTests :: TestTree

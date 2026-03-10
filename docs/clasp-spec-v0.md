@@ -273,5 +273,5 @@ Once `v0` is stable, the next additions should be:
 - Richer pattern forms, including nested destructuring and wildcards
 - Stronger Bun/runtime interop and eventually non-JS server runtimes
 - Typed workflows, hot-swap checkpoints, and self-update compatibility rules
-- Further diagnostic enrichment, including fix hints and normalization for agent-facing output
+- Further diagnostic enrichment, including richer fix-hint coverage and normalization for agent-facing output
 - A path toward compact canonical syntax with human-facing explain renderers
