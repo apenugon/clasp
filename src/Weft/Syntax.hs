@@ -4,6 +4,7 @@ module Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ForeignDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -14,6 +15,8 @@ module Weft.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RouteDecl (..)
+  , RouteMethod (..)
   , SourceSpan (..)
   , TypeDecl (..)
   , Type (..)
@@ -79,6 +82,8 @@ data Module = Module
   , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
+  , moduleForeignDecls :: [ForeignDecl]
+  , moduleRouteDecls :: [RouteDecl]
   , moduleDecls :: [Decl]
   }
   deriving (Eq, Show)
@@ -125,6 +130,17 @@ data Decl = Decl
   }
   deriving (Eq, Show)
 
+data ForeignDecl = ForeignDecl
+  { foreignDeclName :: Text
+  , foreignDeclSpan :: SourceSpan
+  , foreignDeclNameSpan :: SourceSpan
+  , foreignDeclAnnotationSpan :: SourceSpan
+  , foreignDeclType :: Type
+  , foreignDeclRuntimeName :: Text
+  , foreignDeclRuntimeSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
 data Type
   = TInt
   | TStr
@@ -149,6 +165,27 @@ data MatchBranch = MatchBranch
   }
   deriving (Eq, Show)
 
+data RouteMethod
+  = RouteGet
+  | RoutePost
+  deriving (Eq, Ord, Show)
+
+data RouteDecl = RouteDecl
+  { routeDeclName :: Text
+  , routeDeclSpan :: SourceSpan
+  , routeDeclNameSpan :: SourceSpan
+  , routeDeclMethod :: RouteMethod
+  , routeDeclPath :: Text
+  , routeDeclPathSpan :: SourceSpan
+  , routeDeclRequestType :: Text
+  , routeDeclRequestTypeSpan :: SourceSpan
+  , routeDeclResponseType :: Text
+  , routeDeclResponseTypeSpan :: SourceSpan
+  , routeDeclHandlerName :: Text
+  , routeDeclHandlerSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
 data RecordFieldExpr = RecordFieldExpr
   { recordFieldExprName :: Text
   , recordFieldExprSpan :: SourceSpan
@@ -165,6 +202,8 @@ data Expr
   | EMatch SourceSpan Expr [MatchBranch]
   | ERecord SourceSpan Text [RecordFieldExpr]
   | EFieldAccess SourceSpan Expr Text
+  | EDecode SourceSpan Type Expr
+  | EEncode SourceSpan Expr
   deriving (Eq, Show)
 
 exprSpan :: Expr -> SourceSpan
@@ -185,6 +224,10 @@ exprSpan expr =
     ERecord span' _ _ ->
       span'
     EFieldAccess span' _ _ ->
+      span'
+    EDecode span' _ _ ->
+      span'
+    EEncode span' _ ->
       span'
 
 mergeSourceSpans :: SourceSpan -> SourceSpan -> SourceSpan

@@ -1,0 +1,10 @@
+{
+  "id": "weft-lead-priority",
+  "title": "Add priority hint across shared Weft schemas, route validation, and LLM-shaped output",
+  "suite": "llm-boundary-fullstack",
+  "language": "weft",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

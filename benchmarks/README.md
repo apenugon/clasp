@@ -61,11 +61,19 @@ node benchmarks/run-benchmark.mjs run ts-shared-priority \
 
 The runner is harness-agnostic on purpose. It standardizes task prep, verification, and result recording without hard-coding one vendor CLI.
 
-The runner itself is plain ESM and can be executed with either `node` or `bun`. The task manifests currently use `npm` for baseline setup and verification on purpose, because the public benchmark story should avoid changing both the language and the surrounding runtime/tooling at the same time.
+The runner itself is plain ESM and can be executed with either `node` or `bun`. It exports a few environment variables into prepare, verify, and run commands:
+
+- `WEFT_PROJECT_ROOT`
+- `WEFT_BENCHMARK_ROOT`
+- `WEFT_BENCHMARK_TASK_ID`
+- `WEFT_BENCHMARK_WORKSPACE`
+
+That lets Weft task repos compile against the current compiler without hard-coded local paths. The existing TypeScript task manifests still use `npm` on purpose, because the public benchmark story should avoid changing both the language and the surrounding runtime/tooling at the same time.
 
 ## Initial Tasks
 
 - `ts-shared-priority`: shared-type change across frontend and backend
 - `ts-agent-escalation`: structured agent-output validation with stricter boundary behavior
+- `weft-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
 
-These are baseline `TypeScript` tasks meant to establish the first comparison lane for future `Weft` benchmarks.
+The Weft task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.

@@ -6,6 +6,7 @@ module Weft.Lower
   , LowerMatchBranch (..)
   , LowerModule (..)
   , LowerRecordField (..)
+  , LowerRoute (..)
   , lowerModule
   ) where
 
@@ -20,15 +21,24 @@ import Weft.Core
   , CorePattern (..)
   , CorePatternBinder (..)
   , CoreRecordField (..)
+  , coreExprType
   )
 import Weft.Syntax
   ( ConstructorDecl (..)
+  , ForeignDecl
   , ModuleName
   , TypeDecl (..)
+  , RecordDecl
+  , RouteDecl (..)
+  , RouteMethod
+  , Type (..)
   )
 
 data LowerModule = LowerModule
   { lowerModuleName :: ModuleName
+  , lowerModuleRecordDecls :: [RecordDecl]
+  , lowerModuleForeignDecls :: [ForeignDecl]
+  , lowerModuleRoutes :: [LowerRoute]
   , lowerModuleDecls :: [LowerDecl]
   }
   deriving (Eq, Show)
@@ -63,10 +73,23 @@ data LowerMatchBranch = LowerMatchBranch
   }
   deriving (Eq, Show)
 
+data LowerRoute = LowerRoute
+  { lowerRouteName :: Text
+  , lowerRouteMethod :: RouteMethod
+  , lowerRoutePath :: Text
+  , lowerRouteRequestTypeName :: Text
+  , lowerRouteResponseTypeName :: Text
+  , lowerRouteHandlerName :: Text
+  }
+  deriving (Eq, Show)
+
 lowerModule :: CoreModule -> LowerModule
 lowerModule modl =
   LowerModule
     { lowerModuleName = coreModuleName modl
+    , lowerModuleRecordDecls = coreModuleRecordDecls modl
+    , lowerModuleForeignDecls = coreModuleForeignDecls modl
+    , lowerModuleRoutes = fmap lowerRouteDecl (coreModuleRouteDecls modl)
     , lowerModuleDecls =
         concatMap lowerTypeDeclConstructors (coreModuleTypeDecls modl)
           <> fmap lowerCoreDecl (coreModuleDecls modl)
@@ -119,6 +142,10 @@ lowerCoreExpr expr =
       LRecord (fmap lowerRecordField fields)
     CFieldAccess _ _ subject fieldName ->
       LFieldAccess (lowerCoreExpr subject) fieldName
+    CDecodeJson _ typ rawJson ->
+      LCall (LVar (codecDecodeName typ)) [lowerCoreExpr rawJson]
+    CEncodeJson _ value ->
+      LCall (LVar (codecEncodeName (coreExprType value))) [lowerCoreExpr value]
 
 lowerRecordField :: CoreRecordField -> LowerRecordField
 lowerRecordField field =
@@ -136,3 +163,36 @@ lowerMatchBranch branch =
         , lowerMatchBranchBinders = fmap corePatternBinderName binders
         , lowerMatchBranchBody = lowerCoreExpr (coreMatchBranchBody branch)
         }
+
+lowerRouteDecl :: RouteDecl -> LowerRoute
+lowerRouteDecl routeDecl =
+  LowerRoute
+    { lowerRouteName = routeDeclName routeDecl
+    , lowerRouteMethod = routeDeclMethod routeDecl
+    , lowerRoutePath = routeDeclPath routeDecl
+    , lowerRouteRequestTypeName = routeDeclRequestType routeDecl
+    , lowerRouteResponseTypeName = routeDeclResponseType routeDecl
+    , lowerRouteHandlerName = routeDeclHandlerName routeDecl
+    }
+
+codecDecodeName :: Type -> Text
+codecDecodeName typ =
+  "$decode_" <> codecSuffix typ
+
+codecEncodeName :: Type -> Text
+codecEncodeName typ =
+  "$encode_" <> codecSuffix typ
+
+codecSuffix :: Type -> Text
+codecSuffix typ =
+  case typ of
+    TInt ->
+      "Int"
+    TStr ->
+      "Str"
+    TBool ->
+      "Bool"
+    TNamed name ->
+      name
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"

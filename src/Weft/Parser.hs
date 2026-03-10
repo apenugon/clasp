@@ -51,6 +51,7 @@ import Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ForeignDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -61,6 +62,8 @@ import Weft.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RouteDecl (..)
+  , RouteMethod (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -73,6 +76,8 @@ type Parser = Parsec Void Text
 data TopLevelItem
   = TopTypeDecl TypeDecl
   | TopRecordDecl RecordDecl
+  | TopForeignDecl ForeignDecl
+  | TopRouteDecl RouteDecl
   | TopSignature Text Type SourceSpan
   | TopDecl Decl
 
@@ -109,10 +114,73 @@ importParser = do
 
 topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
-  try recordDeclParser
+  try foreignDeclParser
+    <|> try routeDeclParser
+    <|> try recordDeclParser
     <|> try typeDeclParser
     <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
+
+foreignDeclParser :: Parser TopLevelItem
+foreignDeclParser = do
+  start <- getSourcePos
+  keyword "foreign"
+  (nameSpan, name) <- locatedLowerIdentifier
+  annotationStart <- getSourcePos
+  _ <- symbol ":"
+  foreignType <- typeParser
+  annotationEnd <- getSourcePos
+  _ <- symbol "="
+  (runtimeSpan, runtimeName) <- locatedStringLiteral
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopForeignDecl $
+    ForeignDecl
+      { foreignDeclName = name
+      , foreignDeclSpan = makeSourceSpan start end
+      , foreignDeclNameSpan = nameSpan
+      , foreignDeclAnnotationSpan = makeSourceSpan annotationStart annotationEnd
+      , foreignDeclType = foreignType
+      , foreignDeclRuntimeName = runtimeName
+      , foreignDeclRuntimeSpan = runtimeSpan
+      }
+
+routeDeclParser :: Parser TopLevelItem
+routeDeclParser = do
+  start <- getSourcePos
+  keyword "route"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  method <- routeMethodParser
+  (pathSpan, routePath) <- locatedStringLiteral
+  (requestTypeSpan, requestTypeName) <- locatedUpperIdentifier
+  _ <- symbol "->"
+  (responseTypeSpan, responseTypeName) <- locatedUpperIdentifier
+  (handlerSpan, handlerName) <- locatedLowerIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopRouteDecl $
+    RouteDecl
+      { routeDeclName = name
+      , routeDeclSpan = makeSourceSpan start end
+      , routeDeclNameSpan = nameSpan
+      , routeDeclMethod = method
+      , routeDeclPath = routePath
+      , routeDeclPathSpan = pathSpan
+      , routeDeclRequestType = requestTypeName
+      , routeDeclRequestTypeSpan = requestTypeSpan
+      , routeDeclResponseType = responseTypeName
+      , routeDeclResponseTypeSpan = responseTypeSpan
+      , routeDeclHandlerName = handlerName
+      , routeDeclHandlerSpan = handlerSpan
+      }
+
+routeMethodParser :: Parser RouteMethod
+routeMethodParser =
+  (keyword "GET" *> pure RouteGet)
+    <|> (keyword "POST" *> pure RoutePost)
 
 recordDeclParser :: Parser TopLevelItem
 recordDeclParser = do
@@ -227,6 +295,8 @@ termParser = do
 baseExprParser :: Parser Expr
 baseExprParser =
   parens exprParser
+    <|> decodeParser
+    <|> encodeParser
     <|> matchParser
     <|> boolParser
     <|> intParser
@@ -257,6 +327,23 @@ matchBranchParser = do
       , matchBranchPattern = pattern'
       , matchBranchBody = body
       }
+
+decodeParser :: Parser Expr
+decodeParser = do
+  start <- getSourcePos
+  keyword "decode"
+  targetType <- typeAtomParser
+  rawJson <- exprParser
+  end <- getSourcePos
+  pure (EDecode (makeSourceSpan start end) targetType rawJson)
+
+encodeParser :: Parser Expr
+encodeParser = do
+  start <- getSourcePos
+  keyword "encode"
+  value <- exprParser
+  end <- getSourcePos
+  pure (EEncode (makeSourceSpan start end) value)
 
 patternParser :: Parser Pattern
 patternParser = do
@@ -322,8 +409,12 @@ intParser = do
 
 stringParser :: Parser Expr
 stringParser = do
-  (span', value) <- locatedLexeme (T.pack <$> (char '"' *> manyTill L.charLiteral (char '"')))
+  (span', value) <- locatedStringLiteral
   pure (EString span' value)
+
+locatedStringLiteral :: Parser (SourceSpan, Text)
+locatedStringLiteral =
+  locatedLexeme (T.pack <$> (char '"' *> manyTill L.charLiteral (char '"')))
 
 typeParser :: Parser Type
 typeParser = do
@@ -448,7 +539,7 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, decls, pendingSignatures) <- foldM step ([], [], [], Map.empty) items
+  (typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures) <- foldM step ([], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -456,6 +547,8 @@ attachSignatures (name, imports, items) = do
         , moduleImports = imports
         , moduleTypeDecls = reverse typeDecls
         , moduleRecordDecls = reverse recordDecls
+        , moduleForeignDecls = reverse foreignDecls
+        , moduleRouteDecls = reverse routeDecls
         , moduleDecls = reverse decls
         }
     else
@@ -469,12 +562,16 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopForeignDecl foreignDecl ->
+          pure (typeDecls, recordDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+        TopRouteDecl routeDecl ->
+          pure (typeDecls, recordDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -487,7 +584,7 @@ attachSignatures (name, imports, items) = do
                     [diagnosticRelated "previous signature" existingSpan]
                 ]
             Nothing ->
-              pure (typeDecls, recordDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
+              pure (typeDecls, recordDecls, foreignDecls, routeDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
         TopDecl decl ->
           let annotationData = Map.lookup (declName decl) pendingSignatures
               updatedDecl =
@@ -500,7 +597,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -523,6 +620,10 @@ reservedWords =
   , "import"
   , "type"
   , "record"
+  , "foreign"
+  , "route"
+  , "decode"
+  , "encode"
   , "match"
   , "true"
   , "false"

@@ -15,6 +15,7 @@ import Control.Monad.State.Strict
   , runState
   )
 import Data.Bifunctor (first)
+import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -28,6 +29,7 @@ import Weft.Core
   , CorePattern (..)
   , CorePatternBinder (..)
   , CoreRecordField (..)
+  , coreExprType
   )
 import Weft.Diagnostic
   ( DiagnosticBundle
@@ -41,6 +43,7 @@ import Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ForeignDecl (..)
   , MatchBranch (..)
   , Module (..)
   , Pattern (..)
@@ -48,20 +51,24 @@ import Weft.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RouteDecl (..)
   , SourceSpan
   , Type (..)
   , TypeDecl (..)
   , exprSpan
+  , renderType
   )
 
 type DeclTypeEnv = Map.Map Text Type
 type TypeDeclEnv = Map.Map Text TypeDecl
 type RecordDeclEnv = Map.Map Text RecordDecl
+type ForeignDeclEnv = Map.Map Text ForeignDecl
 type DeclMap = Map.Map Text Decl
 
 data ModuleContext = ModuleContext
   { contextTypeDeclEnv :: TypeDeclEnv
   , contextRecordDeclEnv :: RecordDeclEnv
+  , contextForeignDeclEnv :: ForeignDeclEnv
   , contextConstructorEnv :: ConstructorEnv
   , contextDeclMap :: DeclMap
   }
@@ -123,6 +130,8 @@ data DraftExprNode
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
   | DraftFieldAccess DraftExpr Text
+  | DraftDecodeJson Type DraftExpr
+  | DraftEncodeJson DraftExpr
 
 data DraftMatchBranch = DraftMatchBranch
   { draftMatchBranchSpan :: SourceSpan
@@ -161,6 +170,8 @@ checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       recordDecls = moduleRecordDecls modl
+      foreignDecls = moduleForeignDecls modl
+      routeDecls = moduleRouteDecls modl
       decls = moduleDecls modl
 
   ensureUniqueTypeDecls typeDecls
@@ -168,29 +179,37 @@ checkModule modl = do
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
       recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls
+  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls routeDecls
 
   constructorEnv <- buildConstructorEnv typeDecls
-  ensureUniqueDecls decls constructorEnv
+  ensureUniqueForeignDecls foreignDecls decls constructorEnv
+  ensureUniqueDecls decls foreignDecls constructorEnv
+  ensureUniqueRoutes routeDecls
   mapM_ ensureUniqueParams decls
 
-  let ctx =
+  let foreignDeclEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDecl) | foreignDecl <- foreignDecls]
+      ctx =
         ModuleContext
           { contextTypeDeclEnv = typeDeclEnv
           , contextRecordDeclEnv = recordDeclEnv
+          , contextForeignDeclEnv = foreignDeclEnv
           , contextConstructorEnv = constructorEnv
           , contextDeclMap = Map.fromList [(declName decl, decl) | decl <- decls]
           }
 
   declTypeEnv <- inferDeclTypes ctx decls
-  let termEnv = Map.union declTypeEnv (Map.map constructorInfoType constructorEnv)
+  let foreignTypeEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDeclType foreignDecl) | foreignDecl <- foreignDecls]
+      termEnv = Map.unions [declTypeEnv, foreignTypeEnv, Map.map constructorInfoType constructorEnv]
 
+  traverse_ (checkRouteDecl ctx termEnv) routeDecls
   coreDecls <- traverse (checkDecl ctx termEnv) decls
   pure
     CoreModule
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
       , coreModuleRecordDecls = recordDecls
+      , coreModuleForeignDecls = foreignDecls
+      , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls
       }
 
@@ -248,11 +267,13 @@ ensureDistinctNamedTypes typeDeclEnv =
         Nothing ->
           pure ()
 
-ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [Decl] -> Either DiagnosticBundle ()
-ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls = do
+ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [RouteDecl] -> Either DiagnosticBundle ()
+ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls routeDecls = do
   mapM_ checkTypeDecl typeDecls
   mapM_ checkRecordDecl recordDecls
+  mapM_ checkForeignDecl foreignDecls
   mapM_ checkDeclAnnotation decls
+  mapM_ checkRouteDeclTypes routeDecls
   where
     checkTypeDecl typeDecl =
       mapM_ (checkConstructorFields typeDecl) (typeDeclConstructors typeDecl)
@@ -266,10 +287,14 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls = do
       ensureUniqueRecordFields recordDecl
       mapM_
         ( \fieldDecl ->
-            ensureKnownType
-              (recordFieldDeclSpan fieldDecl)
-              [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
-              (recordFieldDeclType fieldDecl)
+            do
+              ensureKnownType
+                (recordFieldDeclSpan fieldDecl)
+                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+                (recordFieldDeclType fieldDecl)
+              ensureSchemaFieldType
+                recordDecl
+                fieldDecl
         )
         (recordDeclFields recordDecl)
 
@@ -282,6 +307,29 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls = do
             annotation
         Nothing ->
           pure ()
+
+    checkForeignDecl foreignDecl =
+      do
+        ensureKnownType
+          (foreignDeclAnnotationSpan foreignDecl)
+          [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+          (foreignDeclType foreignDecl)
+        case foreignDeclType foreignDecl of
+          TFunction _ _ ->
+            pure ()
+          _ ->
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_FOREIGN_TYPE"
+                  ("Foreign declaration `" <> foreignDeclName foreignDecl <> "` must be a function capability.")
+                  (Just (foreignDeclAnnotationSpan foreignDecl))
+                  ["Use an explicit function type for foreign runtime bindings."]
+                  [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+              ]
+
+    checkRouteDeclTypes routeDecl = do
+      ensureRecordType routeDecl (routeDeclRequestType routeDecl) (routeDeclRequestTypeSpan routeDecl) "request"
+      ensureRecordType routeDecl (routeDeclResponseType routeDecl) (routeDeclResponseTypeSpan routeDecl) "response"
 
     ensureKnownType primarySpan related typ =
       case typ of
@@ -304,6 +352,45 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls decls = do
         TFunction args result ->
           mapM_ (ensureKnownType primarySpan related) (args <> [result])
 
+    ensureSchemaFieldType recordDecl fieldDecl =
+      case recordFieldDeclType fieldDecl of
+        TInt ->
+          pure ()
+        TStr ->
+          pure ()
+        TBool ->
+          pure ()
+        TNamed name ->
+          unless (Map.member name recordDeclEnv) $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_SCHEMA_FIELD_TYPE"
+                  ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> name <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
+                  (Just (recordFieldDeclSpan fieldDecl))
+                  ["Record fields currently support primitive types and nested record types only."]
+                  [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+              ]
+        TFunction _ _ ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_SCHEMA_FIELD_TYPE"
+                ("Record `" <> recordDeclName recordDecl <> "` uses a function field for `" <> recordFieldDeclName fieldDecl <> "`.")
+                (Just (recordFieldDeclSpan fieldDecl))
+                ["Record fields currently support primitive types and nested record types only."]
+                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+            ]
+
+    ensureRecordType routeDecl typeName primarySpan role =
+      unless (Map.member typeName recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_ROUTE_TYPE"
+              ("Route `" <> routeDeclName routeDecl <> "` must use a record type for its " <> role <> " body.")
+              (Just primarySpan)
+              ["Declare `" <> typeName <> "` as a record before using it in a route."]
+              []
+          ]
+
 ensureUniqueRecordFields :: RecordDecl -> Either DiagnosticBundle ()
 ensureUniqueRecordFields recordDecl = go Map.empty (recordDeclFields recordDecl)
   where
@@ -321,6 +408,81 @@ ensureUniqueRecordFields recordDecl = go Map.empty (recordDeclFields recordDecl)
             ]
         Nothing ->
           go (Map.insert (recordFieldDeclName fieldDecl) fieldDecl seen) rest
+
+ensureUniqueForeignDecls :: [ForeignDecl] -> [Decl] -> ConstructorEnv -> Either DiagnosticBundle ()
+ensureUniqueForeignDecls foreignDecls decls constructorEnv = go Map.empty foreignDecls
+  where
+    declEnv = Map.fromList [(declName decl, decl) | decl <- decls]
+
+    go _ [] = pure ()
+    go seen (foreignDecl : rest) =
+      case Map.lookup (foreignDeclName foreignDecl) seen of
+        Just previousForeignDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_FOREIGN"
+                ("Duplicate foreign declaration for `" <> foreignDeclName foreignDecl <> "`.")
+                (Just (foreignDeclNameSpan foreignDecl))
+                ["Each foreign declaration name may only be declared once."]
+                [diagnosticRelated "previous foreign declaration" (foreignDeclNameSpan previousForeignDecl)]
+            ]
+        Nothing ->
+          case Map.lookup (foreignDeclName foreignDecl) declEnv of
+            Just decl ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_DUPLICATE_TERM"
+                    ("Foreign declaration `" <> foreignDeclName foreignDecl <> "` collides with declaration `" <> foreignDeclName foreignDecl <> "`.")
+                    (Just (foreignDeclNameSpan foreignDecl))
+                    ["Choose a different top-level name or rename the foreign declaration."]
+                    [diagnosticRelated "declaration" (declNameSpan decl)]
+                ]
+            Nothing ->
+              case Map.lookup (foreignDeclName foreignDecl) constructorEnv of
+                Just constructorInfo ->
+                  Left . diagnosticBundle $
+                    [ diagnostic
+                        "E_DUPLICATE_TERM"
+                        ("Foreign declaration `" <> foreignDeclName foreignDecl <> "` collides with constructor `" <> foreignDeclName foreignDecl <> "`.")
+                        (Just (foreignDeclNameSpan foreignDecl))
+                        ["Choose a different top-level name or rename the foreign declaration."]
+                        [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+                    ]
+                Nothing ->
+                  go (Map.insert (foreignDeclName foreignDecl) foreignDecl seen) rest
+
+ensureUniqueRoutes :: [RouteDecl] -> Either DiagnosticBundle ()
+ensureUniqueRoutes = go Map.empty Map.empty
+  where
+    go _ _ [] = pure ()
+    go seenNames seenEndpoints (routeDecl : rest) =
+      case Map.lookup (routeDeclName routeDecl) seenNames of
+        Just previousRouteDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_ROUTE"
+                ("Duplicate route declaration for `" <> routeDeclName routeDecl <> "`.")
+                (Just (routeDeclNameSpan routeDecl))
+                ["Each route name may only be declared once."]
+                [diagnosticRelated "previous route declaration" (routeDeclNameSpan previousRouteDecl)]
+            ]
+        Nothing ->
+          let endpointKey = (routeDeclMethod routeDecl, routeDeclPath routeDecl)
+           in case Map.lookup endpointKey seenEndpoints of
+                Just previousRouteDecl ->
+                  Left . diagnosticBundle $
+                    [ diagnostic
+                        "E_DUPLICATE_ROUTE_ENDPOINT"
+                        ("Duplicate route endpoint `" <> routeDeclPath routeDecl <> "`.")
+                        (Just (routeDeclPathSpan routeDecl))
+                        ["Each method and path pair may only be declared once."]
+                        [diagnosticRelated "previous route declaration" (routeDeclPathSpan previousRouteDecl)]
+                    ]
+                Nothing ->
+                  go
+                    (Map.insert (routeDeclName routeDecl) routeDecl seenNames)
+                    (Map.insert endpointKey routeDecl seenEndpoints)
+                    rest
 
 buildConstructorEnv :: [TypeDecl] -> Either DiagnosticBundle ConstructorEnv
 buildConstructorEnv = foldM addTypeDecl Map.empty
@@ -349,9 +511,11 @@ buildConstructorEnv = foldM addTypeDecl Map.empty
                 }
               env
 
-ensureUniqueDecls :: [Decl] -> ConstructorEnv -> Either DiagnosticBundle ()
-ensureUniqueDecls decls constructorEnv = go Map.empty decls
+ensureUniqueDecls :: [Decl] -> [ForeignDecl] -> ConstructorEnv -> Either DiagnosticBundle ()
+ensureUniqueDecls decls foreignDecls constructorEnv = go Map.empty decls
   where
+    foreignDeclEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDecl) | foreignDecl <- foreignDecls]
+
     go _ [] = pure ()
     go seen (decl : rest) =
       case Map.lookup (declName decl) seen of
@@ -376,7 +540,18 @@ ensureUniqueDecls decls constructorEnv = go Map.empty decls
                     [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
                 ]
             Nothing ->
-              go (Map.insert (declName decl) decl seen) rest
+              case Map.lookup (declName decl) foreignDeclEnv of
+                Just foreignDecl ->
+                  Left . diagnosticBundle $
+                    [ diagnostic
+                        "E_DUPLICATE_TERM"
+                        ("Declaration `" <> declName decl <> "` collides with foreign declaration `" <> declName decl <> "`.")
+                        (Just (declNameSpan decl))
+                        ["Choose a different top-level name or rename the foreign declaration."]
+                        [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+                    ]
+                Nothing ->
+                  go (Map.insert (declName decl) decl seen) rest
 
 ensureUniqueParams :: Decl -> Either DiagnosticBundle ()
 ensureUniqueParams decl = go Map.empty (declParams decl)
@@ -405,10 +580,15 @@ inferDeclTypes ctx decls = loop pendingDecls annotatedDeclEnv initialTermEnv
         | decl <- decls
         , Just annotatedType <- [declAnnotation decl]
         ]
+    foreignTypeEnv =
+      Map.fromList
+        [ (foreignDeclName foreignDecl, foreignDeclType foreignDecl)
+        | foreignDecl <- Map.elems (contextForeignDeclEnv ctx)
+        ]
     constructorTypeEnv =
       Map.map constructorInfoType (contextConstructorEnv ctx)
     initialTermEnv =
-      Map.union annotatedDeclEnv constructorTypeEnv
+      Map.unions [annotatedDeclEnv, foreignTypeEnv, constructorTypeEnv]
     pendingDecls =
       [ decl
       | decl <- decls
@@ -478,7 +658,56 @@ checkDecl ctx termEnv decl = do
     Left (InferDiagnostic err) ->
       Left err
     Right (draftDecl, inferState) ->
-      freezeDraftDecl decl inferState draftDecl
+      freezeDraftDecl ctx decl inferState draftDecl
+
+checkRouteDecl :: ModuleContext -> DeclTypeEnv -> RouteDecl -> Either DiagnosticBundle ()
+checkRouteDecl ctx termEnv routeDecl =
+  case Map.lookup (routeDeclHandlerName routeDecl) termEnv of
+    Nothing ->
+      Left $
+        singleDiagnosticAt
+          "E_UNKNOWN_ROUTE_HANDLER"
+          ("Unknown route handler `" <> routeDeclHandlerName routeDecl <> "`.")
+          (routeDeclHandlerSpan routeDecl)
+          ["Declare the handler before using it in a route."]
+    Just handlerType ->
+      case handlerType of
+        TFunction [TNamed requestName] (TNamed responseName)
+          | requestName == routeDeclRequestType routeDecl
+          , responseName == routeDeclResponseType routeDecl ->
+              pure ()
+          | otherwise ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_ROUTE_HANDLER_TYPE"
+                    ("Route handler `" <> routeDeclHandlerName routeDecl <> "` does not match the route schema.")
+                    (Just (routeDeclHandlerSpan routeDecl))
+                    [ "Expected "
+                        <> routeDeclRequestType routeDecl
+                        <> " -> "
+                        <> routeDeclResponseType routeDecl
+                        <> " but got "
+                        <> renderType handlerType
+                        <> "."
+                    ]
+                    (relatedForHandler (routeDeclHandlerName routeDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
+                ]
+        _ ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_ROUTE_HANDLER_TYPE"
+                ("Route handler `" <> routeDeclHandlerName routeDecl <> "` must be a function from request record to response record.")
+                (Just (routeDeclHandlerSpan routeDecl))
+                [ "Expected "
+                    <> routeDeclRequestType routeDecl
+                    <> " -> "
+                    <> routeDeclResponseType routeDecl
+                    <> " but got "
+                    <> renderType handlerType
+                    <> "."
+                ]
+                (relatedForHandler (routeDeclHandlerName routeDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
+            ]
 
 inferDeclDraft :: ModuleContext -> DeclTypeEnv -> Decl -> Maybe Type -> InferM DraftDecl
 inferDeclDraft ctx termEnv decl maybeExpectedType = do
@@ -630,7 +859,7 @@ inferExpr ctx termEnv localEnv expr =
                       <> T.pack (show (length args))
                       <> "."
                   ]
-                  (relatedForFunction fn (contextDeclMap ctx) (contextConstructorEnv ctx))
+                  (relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx))
               ]
         IVar _ ->
           pure ()
@@ -663,7 +892,7 @@ inferExpr ctx termEnv localEnv expr =
                   { unifyCode = "E_TYPE_MISMATCH"
                   , unifySummary = "Argument type does not match the function signature."
                   , unifyPrimarySpan = draftExprSpan argExpr
-                  , unifyRelated = relatedForFunction fn (contextDeclMap ctx) (contextConstructorEnv ctx)
+                  , unifyRelated = relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx)
                   }
               )
               (draftExprType argExpr)
@@ -676,6 +905,10 @@ inferExpr ctx termEnv localEnv expr =
       inferRecordExpr ctx termEnv localEnv recordSpan recordName fields
     EFieldAccess accessSpan subject fieldName ->
       inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName
+    EDecode decodeSpan targetType rawJson ->
+      inferDecodeExpr ctx termEnv localEnv decodeSpan targetType rawJson
+    EEncode encodeSpan value ->
+      inferEncodeExpr ctx termEnv localEnv encodeSpan value
     EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
 
 inferRecordExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [RecordFieldExpr] -> InferM DraftExpr
@@ -771,6 +1004,39 @@ inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName = do
             ["Use one of the declared record fields."]
             [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
         ]
+
+inferDecodeExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Type -> Expr -> InferM DraftExpr
+inferDecodeExpr ctx termEnv localEnv decodeSpan targetType rawJson = do
+  ensureJsonTypeSupported ctx decodeSpan targetType
+  rawJsonExpr <- inferExpr ctx termEnv localEnv rawJson
+  unify
+    ( UnifyContext
+        { unifyCode = "E_JSON_DECODE"
+        , unifySummary = "JSON decode expects a string input."
+        , unifyPrimarySpan = draftExprSpan rawJsonExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType rawJsonExpr)
+    IStr
+  pure
+    ( DraftExpr
+        decodeSpan
+        (typeToInferType targetType)
+        (DraftDecodeJson targetType rawJsonExpr)
+    )
+
+inferEncodeExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> InferM DraftExpr
+inferEncodeExpr ctx termEnv localEnv encodeSpan value = do
+  valueExpr <- inferExpr ctx termEnv localEnv value
+  resolvedValueType <- resolveCurrentType (draftExprType valueExpr)
+  case inferTypeToJsonType ctx resolvedValueType of
+    Right _ ->
+      pure (DraftExpr encodeSpan IStr (DraftEncodeJson valueExpr))
+    Left Nothing ->
+      pure (DraftExpr encodeSpan IStr (DraftEncodeJson valueExpr))
+    Left (Just bundle) ->
+      throwDiagnostic bundle
 
 inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
@@ -1123,6 +1389,105 @@ recordsWithField ctx fieldName =
     hasField target recordDecl =
       any ((== target) . recordFieldDeclName) (recordDeclFields recordDecl)
 
+ensureJsonTypeSupported :: ModuleContext -> SourceSpan -> Type -> InferM ()
+ensureJsonTypeSupported ctx primarySpan typ =
+  case jsonTypeSupportError ctx primarySpan typ of
+    Just err ->
+      throwDiagnostic err
+    Nothing ->
+      pure ()
+
+ensureJsonTypeSupportedType :: ModuleContext -> SourceSpan -> Type -> Either DiagnosticBundle ()
+ensureJsonTypeSupportedType ctx primarySpan typ =
+  case jsonTypeSupportError ctx primarySpan typ of
+    Just err ->
+      Left err
+    Nothing ->
+      Right ()
+
+inferTypeToJsonType :: ModuleContext -> InferType -> Either (Maybe DiagnosticBundle) Type
+inferTypeToJsonType ctx inferType =
+  case inferType of
+    IInt ->
+      Right TInt
+    IStr ->
+      Right TStr
+    IBool ->
+      Right TBool
+    INamed name
+      | Map.member name (contextRecordDeclEnv ctx) ->
+          Right (TNamed name)
+      | otherwise ->
+          Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TNamed name)))
+    IFunction args result ->
+      Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result))))
+    IVar _ ->
+      Left Nothing
+  where
+    inferTypeToTypeUnsafe current =
+      case current of
+        IInt -> TInt
+        IStr -> TStr
+        IBool -> TBool
+        INamed name -> TNamed name
+        IFunction args result -> TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result)
+        IVar _ -> TNamed "<unknown>"
+
+jsonTypeSupportError :: ModuleContext -> SourceSpan -> Type -> Maybe DiagnosticBundle
+jsonTypeSupportError ctx primarySpan typ =
+  case typ of
+    TInt ->
+      Nothing
+    TStr ->
+      Nothing
+    TBool ->
+      Nothing
+    TNamed name
+      | Map.member name (contextRecordDeclEnv ctx) ->
+          Nothing
+      | otherwise ->
+          Just . diagnosticBundle $
+              [ diagnostic
+                  "E_JSON_TYPE"
+                  ("JSON codecs currently support record and primitive types, but got `" <> name <> "`.")
+                  (Just primarySpan)
+                  ["Use a record type or a primitive type at the JSON boundary."]
+                  []
+              ]
+    TFunction _ _ ->
+      Just . diagnosticBundle $
+        [ diagnostic
+            "E_JSON_TYPE"
+            "JSON codecs do not support function values."
+            (Just primarySpan)
+            ["Use a record type or a primitive type at the JSON boundary."]
+            []
+        ]
+
+jsonTypeUnsupportedBundle :: Maybe Text -> Type -> DiagnosticBundle
+jsonTypeUnsupportedBundle maybeContext typ =
+  diagnosticBundle
+    [ diagnostic
+        "E_JSON_TYPE"
+        summary
+        Nothing
+        ["Use a record type or a primitive type at the JSON boundary."]
+        []
+    ]
+  where
+    prefix =
+      case maybeContext of
+        Just label ->
+          label <> " "
+        Nothing ->
+          ""
+    summary =
+      case typ of
+        TFunction _ _ ->
+          prefix <> "JSON codecs do not support function values."
+        _ ->
+          prefix <> "JSON codecs currently support record and primitive types, but got `" <> renderType typ <> "`."
+
 ensureExhaustiveMatch :: TypeDecl -> Map.Map Text MatchBranch -> SourceSpan -> InferM ()
 ensureExhaustiveMatch typeDecl seenBranches matchSpan =
   let expectedConstructors = fmap constructorDeclName (typeDeclConstructors typeDecl)
@@ -1138,11 +1503,11 @@ ensureExhaustiveMatch typeDecl seenBranches matchSpan =
               [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)]
           ]
 
-freezeDraftDecl :: Decl -> InferState -> DraftDecl -> Either DiagnosticBundle CoreDecl
-freezeDraftDecl decl inferState draftDecl = do
+freezeDraftDecl :: ModuleContext -> Decl -> InferState -> DraftDecl -> Either DiagnosticBundle CoreDecl
+freezeDraftDecl ctx decl inferState draftDecl = do
   declType <- freezeInferTypeForDecl decl inferState (draftDeclType draftDecl)
   params <- traverse (freezeDraftParam decl inferState) (draftDeclParams draftDecl)
-  body <- freezeDraftExpr decl inferState (draftDeclBody draftDecl)
+  body <- freezeDraftExpr ctx decl inferState (draftDeclBody draftDecl)
   pure
     CoreDecl
       { coreDeclName = draftDeclName draftDecl
@@ -1160,8 +1525,8 @@ freezeDraftParam decl inferState draftParam = do
       , coreParamType = paramType
       }
 
-freezeDraftExpr :: Decl -> InferState -> DraftExpr -> Either DiagnosticBundle CoreExpr
-freezeDraftExpr decl inferState draftExpr =
+freezeDraftExpr :: ModuleContext -> Decl -> InferState -> DraftExpr -> Either DiagnosticBundle CoreExpr
+freezeDraftExpr ctx decl inferState draftExpr =
   case draftExprNode draftExpr of
     DraftVar name -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
@@ -1174,27 +1539,37 @@ freezeDraftExpr decl inferState draftExpr =
       pure (CBool (draftExprSpan draftExpr) value)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
-      frozenFn <- freezeDraftExpr decl inferState fn
-      frozenArgs <- traverse (freezeDraftExpr decl inferState) args
+      frozenFn <- freezeDraftExpr ctx decl inferState fn
+      frozenArgs <- traverse (freezeDraftExpr ctx decl inferState) args
       pure (CCall (draftExprSpan draftExpr) exprType frozenFn frozenArgs)
     DraftMatch subject branches -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
-      frozenSubject <- freezeDraftExpr decl inferState subject
-      frozenBranches <- traverse (freezeDraftMatchBranch decl inferState) branches
+      frozenSubject <- freezeDraftExpr ctx decl inferState subject
+      frozenBranches <- traverse (freezeDraftMatchBranch ctx decl inferState) branches
       pure (CMatch (draftExprSpan draftExpr) exprType frozenSubject frozenBranches)
     DraftRecord recordName fields -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
-      frozenFields <- traverse (freezeDraftRecordField decl inferState) fields
+      frozenFields <- traverse (freezeDraftRecordField ctx decl inferState) fields
       pure (CRecord (draftExprSpan draftExpr) exprType recordName frozenFields)
     DraftFieldAccess subject fieldName -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
-      frozenSubject <- freezeDraftExpr decl inferState subject
+      frozenSubject <- freezeDraftExpr ctx decl inferState subject
       pure (CFieldAccess (draftExprSpan draftExpr) exprType frozenSubject fieldName)
+    DraftDecodeJson targetType rawJson -> do
+      frozenRawJson <- freezeDraftExpr ctx decl inferState rawJson
+      pure (CDecodeJson (draftExprSpan draftExpr) targetType frozenRawJson)
+    DraftEncodeJson value -> do
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      case ensureJsonTypeSupportedType ctx (draftExprSpan draftExpr) (coreExprType frozenValue) of
+        Left err ->
+          Left err
+        Right () ->
+          pure (CEncodeJson (draftExprSpan draftExpr) frozenValue)
 
-freezeDraftMatchBranch :: Decl -> InferState -> DraftMatchBranch -> Either DiagnosticBundle CoreMatchBranch
-freezeDraftMatchBranch decl inferState branch = do
+freezeDraftMatchBranch :: ModuleContext -> Decl -> InferState -> DraftMatchBranch -> Either DiagnosticBundle CoreMatchBranch
+freezeDraftMatchBranch ctx decl inferState branch = do
   frozenPattern <- freezeDraftPattern decl inferState (draftMatchBranchPattern branch)
-  frozenBody <- freezeDraftExpr decl inferState (draftMatchBranchBody branch)
+  frozenBody <- freezeDraftExpr ctx decl inferState (draftMatchBranchBody branch)
   pure
     CoreMatchBranch
       { coreMatchBranchSpan = draftMatchBranchSpan branch
@@ -1219,9 +1594,9 @@ freezeDraftPatternBinder decl inferState binder = do
       , corePatternBinderType = binderType
       }
 
-freezeDraftRecordField :: Decl -> InferState -> DraftRecordField -> Either DiagnosticBundle CoreRecordField
-freezeDraftRecordField decl inferState field = do
-  frozenValue <- freezeDraftExpr decl inferState (draftRecordFieldValue field)
+freezeDraftRecordField :: ModuleContext -> Decl -> InferState -> DraftRecordField -> Either DiagnosticBundle CoreRecordField
+freezeDraftRecordField ctx decl inferState field = do
+  frozenValue <- freezeDraftExpr ctx decl inferState (draftRecordFieldValue field)
   pure
     CoreRecordField
       { coreRecordFieldName = draftRecordFieldName field
@@ -1421,21 +1796,37 @@ annotationRelated decl =
     Nothing ->
       [diagnosticRelated "declaration" (declNameSpan decl)]
 
-relatedForFunction :: Expr -> DeclMap -> ConstructorEnv -> [DiagnosticRelated]
-relatedForFunction fnExpr declMap constructorEnv =
+relatedForFunction :: Expr -> DeclMap -> ForeignDeclEnv -> ConstructorEnv -> [DiagnosticRelated]
+relatedForFunction fnExpr declMap foreignDeclEnv constructorEnv =
   case fnExpr of
     EVar _ name ->
       case Map.lookup name declMap of
         Just decl ->
           annotationRelated decl
         Nothing ->
-          case Map.lookup name constructorEnv of
-            Just constructorInfo ->
-              [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+          case Map.lookup name foreignDeclEnv of
+            Just foreignDecl ->
+              [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
             Nothing ->
-              []
+              case Map.lookup name constructorEnv of
+                Just constructorInfo ->
+                  [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+                Nothing ->
+                  []
     _ ->
       []
+
+relatedForHandler :: Text -> DeclMap -> ForeignDeclEnv -> [DiagnosticRelated]
+relatedForHandler handlerName declMap foreignDeclEnv =
+  case Map.lookup handlerName declMap of
+    Just decl ->
+      annotationRelated decl
+    Nothing ->
+      case Map.lookup handlerName foreignDeclEnv of
+        Just foreignDecl ->
+          [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+        Nothing ->
+          []
 
 constructorInfoType :: ConstructorInfo -> Type
 constructorInfoType constructorInfo =

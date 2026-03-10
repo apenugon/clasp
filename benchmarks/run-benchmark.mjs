@@ -43,7 +43,7 @@ async function prepareCommand(taskId, args) {
   const options = parseOptions(args);
   const workspace = resolveWorkspace(task.id, options.workspace);
 
-  await prepareWorkspace(task, workspace);
+  await prepareWorkspace(task, workspace, benchmarkEnv(task, workspace));
 
   console.log(`Prepared ${task.id}`);
   console.log(`Workspace: ${workspace}`);
@@ -54,9 +54,10 @@ async function verifyCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
   const workspace = resolveWorkspace(task.id, options.workspace);
+  const env = benchmarkEnv(task, workspace);
 
   const startedAt = new Date();
-  const verification = await runProcess(task.verify, workspace);
+  const verification = await runProcess(task.verify, workspace, env);
   const finishedAt = new Date();
   const result = buildResult(task, options, startedAt, finishedAt, verification);
   const resultPath = await writeResult(result);
@@ -73,8 +74,9 @@ async function runCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
   const workspace = resolveWorkspace(task.id, options.workspace);
+  const env = benchmarkEnv(task, workspace);
 
-  await prepareWorkspace(task, workspace);
+  await prepareWorkspace(task, workspace, env);
 
   if (!options.agentCommand) {
     throw new Error("run requires --agent-command");
@@ -83,12 +85,10 @@ async function runCommand(taskId, args) {
   const promptPath = path.join(task.dir, task.prompt);
   const startedAt = new Date();
   await runShellCommand(options.agentCommand, workspace, {
-    ...process.env,
-    WEFT_BENCHMARK_TASK_ID: task.id,
-    WEFT_BENCHMARK_PROMPT_FILE: promptPath,
-    WEFT_BENCHMARK_WORKSPACE: workspace
+    ...env,
+    WEFT_BENCHMARK_PROMPT_FILE: promptPath
   });
-  const verification = await runProcess(task.verify, workspace);
+  const verification = await runProcess(task.verify, workspace, env);
   const finishedAt = new Date();
   const result = buildResult(task, options, startedAt, finishedAt, verification);
   const resultPath = await writeResult(result);
@@ -101,7 +101,7 @@ async function runCommand(taskId, args) {
   }
 }
 
-async function prepareWorkspace(task, workspace) {
+async function prepareWorkspace(task, workspace, env) {
   await mkdir(path.dirname(workspace), { recursive: true });
   await cp(path.join(task.dir, task.repo), workspace, {
     recursive: true,
@@ -109,7 +109,7 @@ async function prepareWorkspace(task, workspace) {
   });
 
   for (const command of task.prepare) {
-    const result = await runProcess(command, workspace);
+    const result = await runProcess(command, workspace, env);
     if (result.exitCode !== 0) {
       throw new Error(`prepare command failed: ${command.join(" ")}`);
     }
@@ -187,6 +187,16 @@ async function loadTask(taskId) {
   };
 }
 
+function benchmarkEnv(task, workspace) {
+  return {
+    ...process.env,
+    WEFT_PROJECT_ROOT: path.resolve("."),
+    WEFT_BENCHMARK_ROOT: benchmarkRoot,
+    WEFT_BENCHMARK_TASK_ID: task.id,
+    WEFT_BENCHMARK_WORKSPACE: workspace
+  };
+}
+
 function resolveWorkspace(taskId, suppliedWorkspace) {
   return path.resolve(suppliedWorkspace ?? path.join(benchmarkRoot, "workspaces", taskId));
 }
@@ -227,12 +237,12 @@ function parseNumber(value) {
   return parsed;
 }
 
-async function runProcess(command, cwd) {
+async function runProcess(command, cwd, env = process.env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command[0], command.slice(1), {
       cwd,
       stdio: "inherit",
-      env: process.env
+      env
     });
 
     child.on("error", reject);
@@ -273,4 +283,3 @@ function usage() {
 }
 
 await main();
-

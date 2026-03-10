@@ -155,6 +155,28 @@ This removes a major source of duplication across full-stack systems.
 
 The important design goal is not just shared types, but a shared source of truth. Frontend, backend, mobile, workers, workflows, and agents should all derive their contracts from the same definitions rather than manually copying shapes across layers.
 
+### Imperative surface, typed core
+
+`Weft` does not need to stay human-facing functional in its final source form.
+
+For adoption, it is probably better if the surface language feels more imperative and product-oriented:
+
+- local variables
+- assignment where appropriate
+- block syntax
+- explicit early return
+- loops or iterator sugar
+- async-style control flow
+
+That does not require giving up the stronger type model.
+
+The right architecture is:
+
+- an imperative or hybrid surface language for day-to-day authoring
+- a smaller typed core underneath that remains easier to analyze, verify, and compile
+
+So the long-term goal should be mainstream ergonomics at the source level without giving up the semantic rigor that makes the language valuable for agents.
+
 ## Type System and Trust Boundaries
 
 ### Shared types everywhere
@@ -261,6 +283,32 @@ Weft should also support:
 - Explicit checkpoint and resume points
 
 This is how "one language everywhere" remains safe over time instead of only at initial compile time.
+
+### Hot swap and self-update
+
+`Weft` should be designed for supervised hot swapping and self-update, especially for long-running agents and workflows.
+
+That means the language and runtime should eventually support:
+
+- versioned modules
+- typed state snapshots and resumes
+- compatibility checks between old and new module versions
+- generated migrations where possible
+- explicit safe-to-swap points
+- rollback if activation fails
+
+Even the “core module” should be replaceable in principle, but not through arbitrary in-place mutation.
+
+The safer model is:
+
+1. Reach a verified handoff point.
+2. Snapshot typed state and capabilities.
+3. Load the new version beside the old one.
+4. Validate compatibility and warm it up.
+5. Switch authority.
+6. Keep rollback live until health checks pass.
+
+That approach is much more realistic for self-updating agents, durable workflows, and eventually robots or other embodied systems than trying to rewrite active logic at an arbitrary instruction boundary.
 
 ### 5. Explicit effects and capabilities
 

@@ -14,8 +14,10 @@ module Weft.Core
 
 import Data.Text (Text)
 import Weft.Syntax
-  ( ModuleName
+  ( ForeignDecl
+  , ModuleName
   , RecordDecl
+  , RouteDecl
   , SourceSpan
   , Type (..)
   , TypeDecl
@@ -25,6 +27,8 @@ data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
+  , coreModuleForeignDecls :: [ForeignDecl]
+  , coreModuleRouteDecls :: [RouteDecl]
   , coreModuleDecls :: [CoreDecl]
   }
   deriving (Eq, Show)
@@ -75,6 +79,8 @@ data CoreExpr
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
   | CFieldAccess SourceSpan Type CoreExpr Text
+  | CDecodeJson SourceSpan Type CoreExpr
+  | CEncodeJson SourceSpan CoreExpr
   deriving (Eq, Show)
 
 coreExprType :: CoreExpr -> Type
@@ -96,3 +102,7 @@ coreExprType expr =
       typ
     CFieldAccess _ typ _ _ ->
       typ
+    CDecodeJson _ typ _ ->
+      typ
+    CEncodeJson _ _ ->
+      TStr

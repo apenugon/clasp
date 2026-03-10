@@ -18,14 +18,17 @@ It includes:
 - File-level imports
 - Top-level type declarations
 - Top-level record declarations
+- Top-level foreign capability declarations
+- Top-level route declarations
 - Top-level declarations
 - Declaration-level type signatures
 - Nominal algebraic data types
-- Nominal records
+- Nominal records used as the first schema-bearing product types
 - Function definitions
 - Basic literals
 - Function application
 - Field access
+- JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
@@ -41,9 +44,9 @@ It does not yet include:
 - Type parameters
 - Nested patterns
 - Effects
-- Schemas
+- Dedicated schema syntax separate from records
 - Workflows
-- LLM-specific syntax
+- Rich LLM-specific syntax beyond foreign/runtime boundaries
 
 Those features remain part of the language direction, but they should be layered onto a stable front-end rather than mixed into the first parser/emitter prototype.
 
@@ -75,7 +78,7 @@ Every `Weft` source file in `v0` has:
 
 1. A required module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type or record declarations
+3. Zero or more top-level type, record, foreign, or route declarations
 4. One or more top-level declarations
 
 Example:
@@ -136,6 +139,30 @@ main : Str
 main = showName defaultUser
 ```
 
+The first backend-boundary slice is also part of `v0`:
+
+```weft
+module Main
+
+record LeadRequest = {
+  company : Str,
+  budget : Int
+}
+
+record LeadSummary = {
+  summary : Str,
+  priority : Str,
+  followUpRequired : Bool
+}
+
+foreign mockLeadSummaryModel : LeadRequest -> Str = "mockLeadSummaryModel"
+
+summarizeLead : LeadRequest -> LeadSummary
+summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)
+
+route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
+```
+
 ## Grammar
 
 ```text
@@ -144,11 +171,14 @@ module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name
 
-top-level   ::= type-decl | record-decl | signature | decl
+top-level   ::= type-decl | record-decl | foreign-decl | route-decl | signature | decl
 type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
 constructor ::= upper-ident type-atom*
 record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
 record-field-decl ::= lower-ident ":" type
+foreign-decl ::= "foreign" lower-ident ":" type "=" string
+route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ident lower-ident
+method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
 expr        ::= term term*
@@ -159,9 +189,13 @@ atom        ::= lower-ident
               | string
               | "true"
               | "false"
+              | decode-expr
+              | encode-expr
               | record-expr
               | match-expr
               | "(" expr ")"
+decode-expr ::= "decode" type-atom expr
+encode-expr ::= "encode" expr
 record-expr ::= upper-ident "{" record-field-expr ("," record-field-expr)* "}"
 record-field-expr ::= lower-ident "=" expr
 match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
@@ -187,13 +221,20 @@ Notes:
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
 - Record field access becomes JavaScript property access.
+- `decode` validates and decodes JSON text into a primitive or record type.
+- `encode` serializes a primitive or record value into JSON text.
+- Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
+- Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Function application compiles to JavaScript function calls.
 - Match expressions compile to a JavaScript `switch` over constructor tags.
 - Boolean, integer, string, and variable references map directly to JavaScript equivalents.
 - Declarations may omit type signatures when local inference can resolve all parameter and result types.
 - Ambiguous declarations still require explicit signatures.
 - The current import loader resolves `Foo.Bar` to `Foo/Bar.weft` relative to the entry module and flattens imported declarations into one checked module.
-- The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, and simple type mismatches before code generation.
+- Records are currently restricted to primitive and nested-record fields so generated JSON codecs stay valid.
+- Foreign declarations are currently restricted to function capabilities.
+- Routes currently require record request and response types.
+- The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.
 
 ## Compiler Pipeline
 
@@ -224,10 +265,11 @@ In other words, JavaScript is the first practical target, not the final architec
 Once `v0` is stable, the next additions should be:
 
 - More complete inference, especially around higher-order code and future generic types
-- Schemas, JSON codecs, and boundary validators
+- Dedicated schema syntax once records no longer need to carry the entire boundary story alone
 - Multi-file namespace control beyond the current flattened import model
 - Type parameters
 - Richer pattern forms, including nested destructuring and wildcards
-- Bun/runtime interop for backend and worker targets
+- Stronger Bun/runtime interop and eventually non-JS server runtimes
+- Typed workflows, hot-swap checkpoints, and self-update compatibility rules
 - Further diagnostic enrichment, including fix hints and normalization for agent-facing output
 - A path toward compact canonical syntax with human-facing explain renderers

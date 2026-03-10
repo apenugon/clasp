@@ -87,6 +87,7 @@ Exit criteria:
 - Generate validators, encoders, and decoders from schemas
 - Auto-run generated validation at runtime trust boundaries
 - Model LLM outputs and tool results as typed but untrusted inputs
+- Start designing versioned state handoff for future hot swapping
 
 Exit criteria:
 
@@ -98,6 +99,7 @@ Exit criteria:
 - Add typed checkpoint/resume support
 - Add idempotency and replay concepts
 - Add explicit side-effect capabilities
+- Add supervised module hot-swap and self-update semantics
 
 Exit criteria:
 
@@ -165,8 +167,8 @@ The current implementation should focus on:
 - Getting the bootstrap environment right
 - Building a small clean compiler around the typed core and lowered IR
 - Keeping the language surface intentionally tiny while expanding toward real app-building primitives
-- Using records and multi-file imports as the base for the next full-stack slice
-- Avoiding premature complexity in effects or AI syntax before schemas and trust boundaries land
+- Using generated codecs, foreign bindings, and typed routes as the base for the first benchmarkable full-stack slice
+- Avoiding premature complexity in effects or AI syntax before schemas, trust boundaries, and hot-swap semantics land
 
 ## Cross-Cutting Benchmark Track
 

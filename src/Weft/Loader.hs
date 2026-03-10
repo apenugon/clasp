@@ -138,5 +138,7 @@ combineModules entryModule state =
         , moduleImports = []
         , moduleTypeDecls = concatMap moduleTypeDecls (importedModules <> [entryModule])
         , moduleRecordDecls = concatMap moduleRecordDecls (importedModules <> [entryModule])
+        , moduleForeignDecls = concatMap moduleForeignDecls (importedModules <> [entryModule])
+        , moduleRouteDecls = concatMap moduleRouteDecls (importedModules <> [entryModule])
         , moduleDecls = concatMap moduleDecls (importedModules <> [entryModule])
         }

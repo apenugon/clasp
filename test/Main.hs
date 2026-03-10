@@ -41,6 +41,7 @@ import Weft.Syntax
   ( ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
+  , ForeignDecl (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -48,6 +49,8 @@ import Weft.Syntax
   , PatternBinder (..)
   , Position (..)
   , RecordDecl (..)
+  , RouteDecl (..)
+  , RouteMethod (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -138,6 +141,33 @@ parserTests =
                     assertFailure ("expected field access, got " <> show other)
               Nothing ->
                 assertFailure "expected showName declaration"
+    , testCase "parses foreign declarations, routes, and json boundaries" $
+        case parseSource "inline" serviceSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleForeignDecls modl of
+              [foreignDecl] -> do
+                assertEqual "foreign name" "mockLeadSummaryModel" (foreignDeclName foreignDecl)
+                assertEqual "foreign runtime name" "mockLeadSummaryModel" (foreignDeclRuntimeName foreignDecl)
+              other ->
+                assertFailure ("expected one foreign declaration, got " <> show (length other))
+            case moduleRouteDecls modl of
+              [routeDecl] -> do
+                assertEqual "route name" "summarizeLeadRoute" (routeDeclName routeDecl)
+                assertEqual "route method" RoutePost (routeDeclMethod routeDecl)
+                assertEqual "route path" "/lead/summary" (routeDeclPath routeDecl)
+              other ->
+                assertFailure ("expected one route declaration, got " <> show (length other))
+            case findDecl "summarizeLead" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EDecode _ (TNamed "LeadSummary") (ECall _ (EVar _ "mockLeadSummaryModel") [EVar _ "lead"]) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected decode expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected summarizeLead declaration"
     ]
 
 checkerTests :: TestTree
@@ -166,6 +196,12 @@ checkerTests =
         case checkSource "record" recordSource of
           Left err ->
             assertFailure ("expected record source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts foreign declarations, routes, and json boundaries" $
+        case checkSource "service" serviceSource of
+          Left err ->
+            assertFailure ("expected service source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -204,6 +240,8 @@ checkerTests =
             assertFailure "expected duplicate declaration failure"
     , testCase "rejects record literals with missing fields" $
         assertHasCode "E_RECORD_MISSING_FIELDS" (checkSource "bad" missingRecordFieldSource)
+    , testCase "rejects route handlers with the wrong response type" $
+        assertHasCode "E_ROUTE_HANDLER_TYPE" (checkSource "bad" wrongRouteHandlerSource)
     , testCase "reports non-exhaustive match expressions" $
         assertHasCode "E_NONEXHAUSTIVE_MATCH" (checkSource "bad" nonExhaustiveMatchSource)
     , testCase "rejects constructors from the wrong type" $
@@ -307,6 +345,15 @@ compileTests =
           Right emitted -> do
             assertBool "expected object literal" ("{ name: \"Ada\", active: true }" `T.isInfixOf` emitted)
             assertBool "expected field access" ("(user).name" `T.isInfixOf` emitted)
+    , testCase "compile emits runtime bindings, codecs, and route metadata" $
+        case compileSource "service" serviceSource of
+          Left err ->
+            assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $weftRuntime(\"mockLeadSummaryModel\")($0); }" `T.isInfixOf` emitted)
+            assertBool "expected record decoder" ("function $decode_LeadSummary" `T.isInfixOf` emitted)
+            assertBool "expected route registry" ("export const __weftRoutes" `T.isInfixOf` emitted)
+            assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.weft")
@@ -502,6 +549,37 @@ recordSource =
     , "main = showName defaultUser"
     ]
 
+serviceSource :: Text
+serviceSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int"
+    , "}"
+    , ""
+    , "record LeadSummary = {"
+    , "  summary : Str,"
+    , "  priority : Str,"
+    , "  followUpRequired : Bool"
+    , "}"
+    , ""
+    , "foreign mockLeadSummaryModel : LeadRequest -> Str = \"mockLeadSummaryModel\""
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)"
+    , ""
+    , "encodedDefault : Str"
+    , "encodedDefault = encode (LeadSummary {"
+    , "  summary = \"ready\","
+    , "  priority = \"high\","
+    , "  followUpRequired = true"
+    , "})"
+    , ""
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
 missingRecordFieldSource :: Text
 missingRecordFieldSource =
   T.unlines
@@ -510,6 +588,21 @@ missingRecordFieldSource =
     , "record User = { name : Str, active : Bool }"
     , ""
     , "main = User { name = \"Ada\" }"
+    ]
+
+wrongRouteHandlerSource :: Text
+wrongRouteHandlerSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = { company : Str }"
+    , "record LeadSummary = { summary : Str }"
+    , "record LeadAck = { ok : Bool }"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadAck"
+    , "summarizeLead lead = LeadAck { ok = true }"
+    , ""
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     ]
 
 mismatchSource :: Text

@@ -1,0 +1,13 @@
+module Shared.Lead
+
+record LeadRequest = {
+  company : Str,
+  contact : Str,
+  budget : Int
+}
+
+record LeadSummary = {
+  summary : Str,
+  priority : Str,
+  followUpRequired : Bool
+}
