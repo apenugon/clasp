@@ -175,6 +175,33 @@ remove_worktree_if_present() {
   rm -rf "$worktree_path"
 }
 
+clear_git_worktree_locks() {
+  rm -f "$project_root/.git/index.lock"
+  find "$project_root/.git/worktrees" -maxdepth 2 -type f -name 'index.lock' -delete 2>/dev/null || true
+}
+
+prepare_git_worktree() {
+  local add_args=("$@")
+  local attempt=1
+  local max_attempts=3
+
+  while (( attempt <= max_attempts )); do
+    git -C "$project_root" worktree prune >/dev/null 2>&1 || true
+    clear_git_worktree_locks
+
+    if git -C "$project_root" worktree add "${add_args[@]}" >/dev/null; then
+      return 0
+    fi
+
+    if (( attempt == max_attempts )); then
+      return 1
+    fi
+
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+}
+
 prepare_task_worktree() {
   local task_id="$1"
   local task_branch
@@ -185,7 +212,7 @@ prepare_task_worktree() {
 
   remove_worktree_if_present "$task_worktree"
 
-  git -C "$project_root" worktree add --force -B "$task_branch" "$task_worktree" "$trunk_branch" >/dev/null
+  prepare_git_worktree --force -B "$task_branch" "$task_worktree" "$trunk_branch"
 
   printf '%s\n' "$task_worktree"
 }
@@ -194,7 +221,7 @@ prepare_baseline_worktree() {
   local baseline_worktree="$1"
 
   remove_worktree_if_present "$baseline_worktree"
-  git -C "$project_root" worktree add --detach "$baseline_worktree" "$trunk_branch" >/dev/null
+  prepare_git_worktree --detach "$baseline_worktree" "$trunk_branch"
 }
 
 commit_task_changes() {
@@ -341,14 +368,45 @@ while IFS= read -r task_file; do
   while (( attempt <= retry_limit )); do
     run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     run_dir="$runs_root/$run_stamp-$task_id-attempt$attempt"
-    task_worktree="$(prepare_task_worktree "$task_id")"
-    baseline_worktree="$run_dir/baseline-worktree"
     builder_report="$run_dir/builder-report.json"
     builder_log="$run_dir/builder-log.jsonl"
     verifier_report="$run_dir/verifier-report.json"
     verifier_log="$run_dir/verifier-log.jsonl"
     mkdir -p "$run_dir"
-    prepare_baseline_worktree "$baseline_worktree"
+    baseline_worktree="$run_dir/baseline-worktree"
+
+    if task_worktree="$(prepare_task_worktree "$task_id" 2>>"$builder_log")"; then
+      :
+    else
+      worktree_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Task worktree preparation failed before the builder could run." \
+        "$builder_log" \
+        "$task_id" \
+        "worktree-prep" \
+        "$worktree_exit"
+      feedback_file="$verifier_report"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    if prepare_baseline_worktree "$baseline_worktree" 2>>"$builder_log"; then
+      :
+    else
+      baseline_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Baseline worktree preparation failed before the builder could run." \
+        "$builder_log" \
+        "$task_id" \
+        "baseline-prep" \
+        "$baseline_exit"
+      remove_worktree_if_present "$task_worktree"
+      feedback_file="$verifier_report"
+      attempt=$((attempt + 1))
+      continue
+    fi
 
     if run_with_timeout "$builder_timeout_seconds" \
       bash "$project_root/scripts/clasp-builder.sh" \
