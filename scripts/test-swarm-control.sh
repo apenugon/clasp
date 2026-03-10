@@ -103,7 +103,7 @@ assert_contains() {
   local path="$1"
   local pattern="$2"
 
-  if ! grep -Fq "$pattern" "$path"; then
+  if ! grep -Fq -- "$pattern" "$path"; then
     echo "expected '$pattern' in $path" >&2
     exit 1
   fi
@@ -113,7 +113,7 @@ assert_not_contains() {
   local path="$1"
   local pattern="$2"
 
-  if grep -Fq "$pattern" "$path"; then
+  if grep -Fq -- "$pattern" "$path"; then
     echo "did not expect '$pattern' in $path" >&2
     exit 1
   fi
@@ -141,6 +141,189 @@ assert_lines_equal() {
       exit 1
     fi
   done
+}
+
+assert_file_size_at_least() {
+  local path="$1"
+  local minimum_size="$2"
+  local actual_size
+
+  actual_size="$(wc -c < "$path" | tr -d ' ')"
+
+  if (( actual_size < minimum_size )); then
+    echo "expected $path to be at least $minimum_size bytes, got $actual_size" >&2
+    exit 1
+  fi
+}
+
+create_fake_codex() {
+  local fixture_root="$1"
+
+  mkdir -p "$fixture_root/fake-bin" "$fixture_root/.test-state"
+
+  cat <<'EOF' > "$fixture_root/fake-bin/codex"
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${CLASP_FAKE_CODEX_STATE_DIR:?}"
+call_id="${CLASP_FAKE_CODEX_CALL_ID:?}"
+args_file="$state_dir/$call_id.args"
+prompt_file="$state_dir/$call_id.prompt"
+
+printf '%s\n' "$@" > "$args_file"
+cat > "$prompt_file"
+
+output_file=""
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" == "-o" ]]; then
+    output_file="$arg"
+    break
+  fi
+  previous="$arg"
+done
+
+if [[ -z "$output_file" ]]; then
+  echo "fake codex expected -o <output-file>" >&2
+  exit 1
+fi
+
+case "$call_id" in
+  builder)
+    printf '{"summary":"builder ok","files_touched":[],"tests_run":[],"residual_risks":[]}\n' > "$output_file"
+    ;;
+  verifier)
+    printf '{"verdict":"pass","summary":"verifier ok","findings":[],"tests_run":[],"follow_up":[]}\n' > "$output_file"
+    ;;
+  *)
+    echo "unexpected fake codex call id: $call_id" >&2
+    exit 1
+    ;;
+esac
+EOF
+
+  chmod +x "$fixture_root/fake-bin/codex"
+}
+
+run_prompt_script_with_fake_codex() {
+  local fixture_root="$1"
+  local call_id="$2"
+  shift 2
+
+  (
+    cd "$project_root"
+    env \
+      PATH="$fixture_root/fake-bin:$PATH" \
+      CLASP_FAKE_CODEX_STATE_DIR="$fixture_root/.test-state" \
+      CLASP_FAKE_CODEX_CALL_ID="$call_id" \
+      "$@"
+  )
+}
+
+test_builder_prompt_is_literal_safe_and_streamed_via_stdin() {
+  local fixture_root="$tmpdir/builder-prompt"
+  local workspace="$fixture_root/workspace"
+  local task_file="$fixture_root/task.md"
+  local feedback_file="$fixture_root/feedback.json"
+  local report_json="$fixture_root/report.json"
+  local log_jsonl="$fixture_root/log.jsonl"
+  local prompt_file="$fixture_root/.test-state/builder.prompt"
+  local args_file="$fixture_root/.test-state/builder.args"
+  local interpolation_marker="$fixture_root/marker-builder"
+  local huge_payload
+
+  mkdir -p "$workspace"
+  create_fake_codex "$fixture_root"
+  huge_payload="$(printf 'builder payload %.0s' $(seq 1 14000))"
+
+  cat <<EOF > "$task_file"
+# SW-003 Builder Prompt Test
+
+Literal shell text must survive:
+\$(touch "$interpolation_marker")
+\`touch "$interpolation_marker"\`
+$huge_payload
+EOF
+
+  cat <<EOF > "$feedback_file"
+{"summary":"prior verifier said \$(touch \"$interpolation_marker\")","findings":["first finding with \`touch \"$interpolation_marker\"\`","$huge_payload"],"follow_up":["keep the prompt file path literal"]}
+EOF
+
+  run_prompt_script_with_fake_codex \
+    "$fixture_root" \
+    builder \
+    bash "$project_root/scripts/clasp-builder.sh" \
+    "$task_file" \
+    "$workspace" \
+    "$report_json" \
+    "$log_jsonl" \
+    "$feedback_file"
+
+  assert_file_exists "$report_json"
+  assert_file_exists "$log_jsonl"
+  assert_file_exists "$prompt_file"
+  assert_file_exists "$args_file"
+  assert_file_not_exists "$interpolation_marker"
+  assert_contains "$prompt_file" '$(touch "'
+  assert_contains "$prompt_file" '`touch "'
+  assert_contains "$prompt_file" "Verifier feedback from the previous attempt:"
+  assert_contains "$prompt_file" "Task:"
+  assert_contains "$args_file" "exec"
+  assert_contains "$args_file" "-"
+  assert_contains "$args_file" "--output-schema"
+  assert_not_contains "$args_file" "builder payload builder payload builder payload"
+  assert_file_size_at_least "$prompt_file" 200000
+}
+
+test_verifier_prompt_is_literal_safe_and_streamed_via_stdin() {
+  local fixture_root="$tmpdir/verifier-prompt"
+  local workspace="$fixture_root/workspace"
+  local baseline_workspace="$fixture_root/baseline \$(touch marker-verifier)"
+  local task_file="$fixture_root/task.md"
+  local report_json="$fixture_root/report.json"
+  local log_jsonl="$fixture_root/log.jsonl"
+  local prompt_file="$fixture_root/.test-state/verifier.prompt"
+  local args_file="$fixture_root/.test-state/verifier.args"
+  local interpolation_marker="$fixture_root/marker-verifier"
+  local huge_payload
+
+  mkdir -p "$workspace" "$baseline_workspace"
+  create_fake_codex "$fixture_root"
+  huge_payload="$(printf 'verifier payload %.0s' $(seq 1 14000))"
+
+  cat <<EOF > "$task_file"
+# SW-003 Verifier Prompt Test
+
+Literal shell text must survive:
+\$(touch "$interpolation_marker")
+\`touch "$interpolation_marker"\`
+$huge_payload
+EOF
+
+  run_prompt_script_with_fake_codex \
+    "$fixture_root" \
+    verifier \
+    bash "$project_root/scripts/clasp-verifier.sh" \
+    "$task_file" \
+    "$workspace" \
+    "$baseline_workspace" \
+    "$report_json" \
+    "$log_jsonl"
+
+  assert_file_exists "$report_json"
+  assert_file_exists "$log_jsonl"
+  assert_file_exists "$prompt_file"
+  assert_file_exists "$args_file"
+  assert_file_not_exists "$interpolation_marker"
+  assert_contains "$prompt_file" "Baseline workspace: $baseline_workspace"
+  assert_contains "$prompt_file" '$(touch "'
+  assert_contains "$prompt_file" '`touch "'
+  assert_contains "$prompt_file" "Task:"
+  assert_contains "$args_file" "exec"
+  assert_contains "$args_file" "-"
+  assert_contains "$args_file" "--output-schema"
+  assert_not_contains "$args_file" "verifier payload verifier payload verifier payload"
+  assert_file_size_at_least "$prompt_file" 220000
 }
 
 create_autopilot_fixture() {
@@ -366,3 +549,5 @@ EOF
 test_autopilot_generates_workaround_and_retries_base_task
 test_autopilot_resumes_existing_workaround_after_restart
 test_autopilot_skips_blocked_workaround_and_runs_later_tasks
+test_builder_prompt_is_literal_safe_and_streamed_via_stdin
+test_verifier_prompt_is_literal_safe_and_streamed_via_stdin
