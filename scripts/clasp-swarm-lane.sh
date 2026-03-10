@@ -259,39 +259,70 @@ archive_task_state() {
   printf '%s\n' "$task_branch" > "$run_dir/task-branch.txt"
 }
 
+workspace_is_clean() {
+  local workspace="$1"
+
+  git -C "$workspace" diff --quiet --ignore-submodules --exit-code && \
+    git -C "$workspace" diff --cached --quiet --ignore-submodules --exit-code && \
+    [[ -z "$(git -C "$workspace" ls-files --others --exclude-standard)" ]]
+}
+
 integrate_task_branch() {
   local task_worktree="$1"
-  local run_dir="$2"
+  local baseline_worktree="$2"
+  local run_dir="$3"
   local integration_log="$run_dir/integration.log"
   local old_trunk
   local task_head
+  local baseline_head
+  local accepted_snapshot_worktree
+  local status=0
+
+  accepted_snapshot_worktree="$run_dir/accepted-snapshot"
 
   exec 8>"$merge_lock_file"
   flock 8
 
   old_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
+  baseline_head="$(git -C "$baseline_worktree" rev-parse HEAD)"
+  remove_worktree_if_present "$accepted_snapshot_worktree"
+  git -C "$project_root" worktree add --detach "$accepted_snapshot_worktree" "$old_trunk" >/dev/null
 
-  {
+  if {
     task_head="$(git -C "$task_worktree" rev-parse HEAD)"
 
-    if [[ "$task_head" != "$old_trunk" ]]; then
-      git -C "$task_worktree" rebase "$trunk_branch"
-      (
-        cd "$task_worktree"
-        bash scripts/verify-all.sh
-      )
-      task_head="$(git -C "$task_worktree" rev-parse HEAD)"
-      git -C "$project_root" merge-base --is-ancestor "$old_trunk" "$task_head"
-      git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
-    else
-      (
-        cd "$task_worktree"
-        bash scripts/verify-all.sh
-      )
+    if ! workspace_is_clean "$task_worktree"; then
+      echo "task workspace changed after verification; refusing integration" >&2
+      exit 1
     fi
 
+    if [[ "$task_head" != "$baseline_head" ]]; then
+      git -C "$project_root" diff --binary "$baseline_head" "$task_head" | \
+        git -C "$accepted_snapshot_worktree" apply --index --binary --3way
+      git -C "$accepted_snapshot_worktree" \
+        -c user.name="Clasp Swarm" \
+        -c user.email="swarm@local" \
+        commit -m "[$lane_name] $task_id" >/dev/null
+    fi
+
+    (
+      cd "$accepted_snapshot_worktree"
+      bash scripts/verify-all.sh
+    )
+
+    git -C "$project_root" update-ref \
+      "refs/heads/$trunk_branch" \
+      "$(git -C "$accepted_snapshot_worktree" rev-parse HEAD)" \
+      "$old_trunk"
     printf '%s\n' "$(git -C "$project_root" rev-parse "$trunk_branch")"
-  } >"$integration_log" 2>&1
+  } >"$integration_log" 2>&1; then
+    :
+  else
+    status="$?"
+  fi
+
+  remove_worktree_if_present "$accepted_snapshot_worktree"
+  return "$status"
 }
 
 ensure_trunk_branch() {
@@ -391,20 +422,21 @@ while IFS= read -r task_file; do
       continue
     fi
 
-    remove_worktree_if_present "$baseline_worktree"
     verdict="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(data.verdict);' "$verifier_report")"
 
     if [[ "$verdict" != "pass" ]]; then
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
+      remove_worktree_if_present "$baseline_worktree"
       attempt=$((attempt + 1))
       continue
     fi
 
-    if integrate_task_branch "$task_worktree" "$run_dir"; then
+    if integrate_task_branch "$task_worktree" "$baseline_worktree" "$run_dir"; then
       integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       clear_blocked "$task_id"
+      remove_worktree_if_present "$baseline_worktree"
       remove_worktree_if_present "$task_worktree"
       git -C "$project_root" branch -D "$task_branch" >/dev/null 2>&1 || true
       break
@@ -419,6 +451,7 @@ while IFS= read -r task_file; do
         "$merge_exit"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
+      remove_worktree_if_present "$baseline_worktree"
       attempt=$((attempt + 1))
       continue
     fi

@@ -509,6 +509,94 @@ blocked line two
 EOF
 }
 
+create_swarm_merge_fixture() {
+  local fixture_root="$1"
+
+  mkdir -p \
+    "$fixture_root/scripts" \
+    "$fixture_root/agents/swarm/testwave/01-merge" \
+    "$fixture_root/.test-state"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-lane.sh" \
+    "$fixture_root/scripts/"
+
+  cat <<'EOF' > "$fixture_root/AGENTS.md"
+# Fixture
+EOF
+
+  cat <<'EOF' > "$fixture_root/agents/swarm/testwave/01-merge/0001-merge.md"
+# SW-201
+
+## Dependencies
+
+EOF
+
+  cat <<'EOF' > "$fixture_root/tracked.txt"
+baseline contents
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-builder.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+
+cat <<'EOF2' > "$workspace/tracked.txt"
+verified contents
+EOF2
+
+printf '{"summary":"builder ok","files_touched":["tracked.txt"],"tests_run":[],"residual_risks":[]}\n' > "$report_json"
+printf '{"event":"builder"}\n' > "$log_jsonl"
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/clasp-verifier.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+
+diff -ruN "$baseline_workspace" "$workspace" > /dev/null || true
+printf '{"verdict":"pass","summary":"verifier ok","findings":[],"tests_run":["swarm merge fixture"],"follow_up":[]}\n' > "$report_json"
+printf '{"event":"verifier"}\n' > "$log_jsonl"
+EOF
+
+  cat <<'EOF' > "$fixture_root/scripts/verify-all.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+state_root="$project_root/.test-state"
+
+mkdir -p "$state_root"
+pwd >> "$state_root/verify-all-cwds.txt"
+
+if [[ "$(basename "$PWD")" != "accepted-snapshot" ]]; then
+  echo "expected final verification to run from accepted-snapshot, got $PWD" >&2
+  exit 1
+fi
+
+grep -Fxq "verified contents" tracked.txt
+EOF
+
+  chmod +x "$fixture_root"/scripts/clasp-*.sh "$fixture_root/scripts/verify-all.sh"
+
+  (
+    cd "$fixture_root"
+    git init >/dev/null
+    git config user.name "Clasp Test"
+    git config user.email "clasp-test@example.com"
+    git add .
+    git commit -m "fixture baseline" >/dev/null
+  )
+}
+
 test_swarm_status_reports_human_summary() {
   local fixture_root="$tmpdir/swarm-status-human"
   local output_file="$fixture_root/status.txt"
@@ -578,6 +666,25 @@ test_swarm_status_reports_machine_readable_summary() {
   assert_json_value "$output_file" 'data.lanes[2].run_state' '"idle"'
   assert_json_value "$output_file" 'data.lanes[2].pid' 'null'
   assert_json_value "$output_file" 'data.lanes[2].log_path' 'null'
+}
+
+test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot() {
+  local fixture_root="$tmpdir/swarm-merge-gate"
+
+  create_swarm_merge_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    bash scripts/clasp-swarm-lane.sh agents/swarm/testwave/01-merge
+  )
+
+  assert_file_exists "$fixture_root/.clasp-swarm/testwave/01-merge/completed/0001-merge"
+  assert_contains "$fixture_root/.test-state/verify-all-cwds.txt" "/accepted-snapshot"
+
+  if [[ "$(git -C "$fixture_root" show agents/swarm-trunk:tracked.txt)" != "verified contents" ]]; then
+    echo "expected accepted snapshot to contain verified contents" >&2
+    exit 1
+  fi
 }
 
 test_autopilot_generates_workaround_and_retries_base_task() {
@@ -690,5 +797,6 @@ test_autopilot_resumes_existing_workaround_after_restart
 test_autopilot_skips_blocked_workaround_and_runs_later_tasks
 test_swarm_status_reports_human_summary
 test_swarm_status_reports_machine_readable_summary
+test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot
 test_builder_prompt_is_literal_safe_and_streamed_via_stdin
 test_verifier_prompt_is_literal_safe_and_streamed_via_stdin

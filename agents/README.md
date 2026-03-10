@@ -13,7 +13,7 @@ The swarm path is the default, because it allows:
 - one branch per task
 - one worktree per active agent
 - parallel lanes without shared mutable workspaces
-- a rebase and final verification gate before integration
+- an accepted-snapshot merge gate that reapplies only verified workspace changes before final verification
 - a dedicated integration trunk branch separate from the user's working branch
 
 `agents/tasks/` remains only as the legacy coarse backlog for the older single-supervisor autopilot scripts. It is not the source of truth for new swarm tasks.
