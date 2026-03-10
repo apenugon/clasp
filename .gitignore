@@ -1,0 +1,12 @@
+dist-newstyle/
+result
+*.hi
+*.o
+*.chi
+*.chs.h
+*.dyn_hi
+*.dyn_o
+benchmarks/results/*
+benchmarks/workspaces/*
+!benchmarks/results/.gitkeep
+!benchmarks/workspaces/.gitkeep
