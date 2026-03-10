@@ -159,6 +159,17 @@ task_dependency_labels() {
   task_section_items "$task_file" "Dependency Labels" | grep -oE '^[a-z0-9][a-z0-9._-]*$' || true
 }
 
+task_family_of() {
+  local task_id="$1"
+
+  if [[ "$task_id" =~ ^([A-Za-z]{2,3})-[0-9]{3}$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  printf '%s\n' "${task_id%%-*}"
+}
+
 dependency_is_complete() {
   local dependency_id="$1"
   [[ -f "$global_completed_root/$dependency_id" ]]
@@ -247,6 +258,59 @@ mark_blocked() {
 clear_blocked() {
   local task_id="$1"
   rm -f "$blocked_root/$task_id.json"
+}
+
+attempt_timed_out() {
+  local exit_code="$1"
+  [[ "$exit_code" == "124" || "$exit_code" == "137" ]]
+}
+
+record_attempt_metrics() {
+  local run_dir="$1"
+  local task_id="$2"
+  local attempt_number="$3"
+  local started_epoch="$4"
+  local finished_epoch="$5"
+  local outcome="$6"
+  local phase="$7"
+  local timed_out="$8"
+  local metrics_file="$run_dir/metrics.json"
+  local duration_seconds=$((finished_epoch - started_epoch))
+
+  node - <<'EOF' "$metrics_file" "$wave_name" "$lane_name" "$task_id" "$(task_family_of "$task_id")" "$attempt_number" "$started_epoch" "$finished_epoch" "$duration_seconds" "$outcome" "$phase" "$timed_out"
+const fs = require("fs");
+const [
+  metricsPath,
+  waveName,
+  laneName,
+  taskId,
+  taskFamily,
+  attemptNumber,
+  startedEpoch,
+  finishedEpoch,
+  durationSeconds,
+  outcome,
+  phase,
+  timedOut,
+] = process.argv.slice(2);
+
+const toIso = (epochSeconds) => new Date(Number(epochSeconds) * 1000).toISOString();
+const payload = {
+  wave: waveName,
+  lane: laneName,
+  task_id: taskId,
+  task_family: taskFamily,
+  attempt: Number(attemptNumber),
+  started_at: toIso(startedEpoch),
+  finished_at: toIso(finishedEpoch),
+  duration_seconds: Number(durationSeconds),
+  outcome,
+  phase,
+  timed_out: timedOut === "1",
+};
+
+fs.writeFileSync(metricsPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+EOF
 }
 
 remove_worktree_if_present() {
@@ -483,6 +547,7 @@ while IFS= read -r task_file; do
   while (( attempt <= retry_limit )); do
     run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     run_dir="$runs_root/$run_stamp-$task_id-attempt$attempt"
+    attempt_started_epoch="$(date -u +%s)"
     task_worktree="$(prepare_task_worktree "$task_id")"
     active_task_worktree="$task_worktree"
     baseline_worktree="$run_dir/baseline-worktree"
@@ -504,6 +569,7 @@ while IFS= read -r task_file; do
       :
     else
       builder_exit="$?"
+      attempt_finished_epoch="$(date -u +%s)"
       write_failure_report \
         "$verifier_report" \
         "Builder subagent infrastructure failed before verification could run." \
@@ -511,6 +577,12 @@ while IFS= read -r task_file; do
         "$task_id" \
         "builder" \
         "$builder_exit"
+      if attempt_timed_out "$builder_exit"; then
+        timed_out=1
+      else
+        timed_out=0
+      fi
+      record_attempt_metrics "$run_dir" "$task_id" "$attempt" "$attempt_started_epoch" "$attempt_finished_epoch" "fail" "builder" "$timed_out"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
@@ -533,6 +605,7 @@ while IFS= read -r task_file; do
       :
     else
       verifier_exit="$?"
+      attempt_finished_epoch="$(date -u +%s)"
       write_failure_report \
         "$verifier_report" \
         "Verifier subagent infrastructure failed before a verdict was produced." \
@@ -540,6 +613,12 @@ while IFS= read -r task_file; do
         "$task_id" \
         "verifier" \
         "$verifier_exit"
+      if attempt_timed_out "$verifier_exit"; then
+        timed_out=1
+      else
+        timed_out=0
+      fi
+      record_attempt_metrics "$run_dir" "$task_id" "$attempt" "$attempt_started_epoch" "$attempt_finished_epoch" "fail" "verifier" "$timed_out"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
@@ -553,6 +632,8 @@ while IFS= read -r task_file; do
     verdict="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(data.verdict);' "$verifier_report")"
 
     if [[ "$verdict" != "pass" ]]; then
+      attempt_finished_epoch="$(date -u +%s)"
+      record_attempt_metrics "$run_dir" "$task_id" "$attempt" "$attempt_started_epoch" "$attempt_finished_epoch" "fail" "verifier" "0"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
@@ -564,6 +645,8 @@ while IFS= read -r task_file; do
     fi
 
     if integrate_task_branch "$task_worktree" "$baseline_worktree" "$run_dir"; then
+      attempt_finished_epoch="$(date -u +%s)"
+      record_attempt_metrics "$run_dir" "$task_id" "$attempt" "$attempt_started_epoch" "$attempt_finished_epoch" "pass" "complete" "0"
       integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       clear_blocked "$task_id"
@@ -575,6 +658,7 @@ while IFS= read -r task_file; do
       break
     else
       merge_exit="$?"
+      attempt_finished_epoch="$(date -u +%s)"
       write_failure_report \
         "$verifier_report" \
         "Merge gate or final verification failed before the task could be integrated." \
@@ -582,6 +666,12 @@ while IFS= read -r task_file; do
         "$task_id" \
         "merge-gate" \
         "$merge_exit"
+      if attempt_timed_out "$merge_exit"; then
+        timed_out=1
+      else
+        timed_out=0
+      fi
+      record_attempt_metrics "$run_dir" "$task_id" "$attempt" "$attempt_started_epoch" "$attempt_finished_epoch" "fail" "merge-gate" "$timed_out"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"

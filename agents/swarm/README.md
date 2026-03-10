@@ -35,3 +35,5 @@ Supervisor status surface:
 
 - Run `scripts/clasp-swarm-status.sh [wave]` for the human-oriented lane and summary view.
 - Run `scripts/clasp-swarm-status.sh --json [wave]` for machine-readable lane status plus aggregate run-state counts.
+- Run `scripts/clasp-swarm-summary.sh [wave]` for pass rate, timeout rate, and mean time grouped by task family.
+- Run `scripts/clasp-swarm-summary.sh --json [wave]` for the same task-family metrics in machine-readable form.

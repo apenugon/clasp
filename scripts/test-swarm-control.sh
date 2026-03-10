@@ -6,6 +6,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n \
   "$project_root/scripts/clasp-swarm-common.sh" \
   "$project_root/scripts/clasp-swarm-lane.sh" \
+  "$project_root/scripts/clasp-swarm-summary.sh" \
   "$project_root/scripts/clasp-swarm-start.sh" \
   "$project_root/scripts/clasp-swarm-status.sh" \
   "$project_root/scripts/clasp-swarm-stop.sh"
@@ -524,6 +525,88 @@ blocked line two
 EOF
 }
 
+create_swarm_summary_fixture() {
+  local fixture_root="$1"
+
+  mkdir -p \
+    "$fixture_root/scripts" \
+    "$fixture_root/agents/swarm/testwave/01-core" \
+    "$fixture_root/agents/swarm/testwave/02-app" \
+    "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T010101Z-SW-001-attempt1" \
+    "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T020202Z-SW-002-attempt1" \
+    "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T030303Z-SW-002-attempt2" \
+    "$fixture_root/.clasp-swarm/testwave/02-app/runs/20260310T040404Z-LG-001-attempt1"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-summary.sh" \
+    "$fixture_root/scripts/"
+
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T010101Z-SW-001-attempt1/metrics.json"
+{
+  "wave": "testwave",
+  "lane": "01-core",
+  "task_id": "SW-001",
+  "task_family": "SW",
+  "attempt": 1,
+  "started_at": "2026-03-10T01:01:01.000Z",
+  "finished_at": "2026-03-10T01:01:31.000Z",
+  "duration_seconds": 30,
+  "outcome": "pass",
+  "phase": "complete",
+  "timed_out": false
+}
+EOF
+
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T020202Z-SW-002-attempt1/metrics.json"
+{
+  "wave": "testwave",
+  "lane": "01-core",
+  "task_id": "SW-002",
+  "task_family": "SW",
+  "attempt": 1,
+  "started_at": "2026-03-10T02:02:02.000Z",
+  "finished_at": "2026-03-10T02:03:02.000Z",
+  "duration_seconds": 60,
+  "outcome": "fail",
+  "phase": "builder",
+  "timed_out": true
+}
+EOF
+
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/01-core/runs/20260310T030303Z-SW-002-attempt2/metrics.json"
+{
+  "wave": "testwave",
+  "lane": "01-core",
+  "task_id": "SW-002",
+  "task_family": "SW",
+  "attempt": 2,
+  "started_at": "2026-03-10T03:03:03.000Z",
+  "finished_at": "2026-03-10T03:03:48.000Z",
+  "duration_seconds": 45,
+  "outcome": "pass",
+  "phase": "complete",
+  "timed_out": false
+}
+EOF
+
+  cat <<'EOF' > "$fixture_root/.clasp-swarm/testwave/02-app/runs/20260310T040404Z-LG-001-attempt1/metrics.json"
+{
+  "wave": "testwave",
+  "lane": "02-app",
+  "task_id": "LG-001",
+  "task_family": "LG",
+  "attempt": 1,
+  "started_at": "2026-03-10T04:04:04.000Z",
+  "finished_at": "2026-03-10T04:05:34.000Z",
+  "duration_seconds": 90,
+  "outcome": "pass",
+  "phase": "complete",
+  "timed_out": false
+}
+EOF
+}
+
 create_swarm_merge_fixture() {
   local fixture_root="$1"
   local stale_run_dir="$fixture_root/.clasp-swarm/testwave/01-merge/runs/19990101T000000Z-0001-merge-attempt1"
@@ -809,6 +892,59 @@ test_swarm_status_reports_machine_readable_summary() {
   assert_json_value "$output_file" 'data.lanes[2].log_path' 'null'
 }
 
+test_swarm_summary_reports_human_metrics_by_task_family() {
+  local fixture_root="$tmpdir/swarm-summary-human"
+  local output_file="$fixture_root/summary.txt"
+
+  create_swarm_summary_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    bash scripts/clasp-swarm-summary.sh testwave
+  ) > "$output_file"
+
+  assert_contains "$output_file" "wave: testwave"
+  assert_contains "$output_file" "family: LG"
+  assert_contains "$output_file" "  attempts: 1"
+  assert_contains "$output_file" "  pass rate: 100.0%"
+  assert_contains "$output_file" "  timeout rate: 0.0%"
+  assert_contains "$output_file" "  mean time: 90.0s"
+  assert_contains "$output_file" "family: SW"
+  assert_contains "$output_file" "  attempts: 3"
+  assert_contains "$output_file" "  unique tasks: 2"
+  assert_contains "$output_file" "  pass rate: 66.7%"
+  assert_contains "$output_file" "  timeout rate: 33.3%"
+  assert_contains "$output_file" "  mean time: 45.0s"
+  assert_contains "$output_file" "  phases: builder, complete"
+}
+
+test_swarm_summary_reports_machine_readable_metrics_by_task_family() {
+  local fixture_root="$tmpdir/swarm-summary-json"
+  local output_file="$fixture_root/summary.json"
+
+  create_swarm_summary_fixture "$fixture_root"
+
+  (
+    cd "$fixture_root"
+    bash scripts/clasp-swarm-summary.sh --json testwave
+  ) > "$output_file"
+
+  assert_json_value "$output_file" 'data.wave' '"testwave"'
+  assert_json_value "$output_file" 'data.families.map((family) => family.task_family)' '["LG","SW"]'
+  assert_json_value "$output_file" 'data.families[0].attempts' '1'
+  assert_json_value "$output_file" 'data.families[0].pass_rate' '1'
+  assert_json_value "$output_file" 'data.families[0].timeout_rate' '0'
+  assert_json_value "$output_file" 'data.families[0].mean_time_seconds' '90'
+  assert_json_value "$output_file" 'data.families[1].attempts' '3'
+  assert_json_value "$output_file" 'data.families[1].unique_tasks' '2'
+  assert_json_value "$output_file" 'data.families[1].passed_attempts' '2'
+  assert_json_value "$output_file" 'data.families[1].timed_out_attempts' '1'
+  assert_json_value "$output_file" 'data.families[1].pass_rate' '0.6666666666666666'
+  assert_json_value "$output_file" 'data.families[1].timeout_rate' '0.3333333333333333'
+  assert_json_value "$output_file" 'data.families[1].mean_time_seconds' '45'
+  assert_json_value "$output_file" 'data.families[1].phases' '["builder","complete"]'
+}
+
 test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot() {
   local fixture_root="$tmpdir/swarm-merge-gate"
   local stale_run_dir="$fixture_root/.clasp-swarm/testwave/01-merge/runs/19990101T000000Z-0001-merge-attempt1"
@@ -1016,6 +1152,8 @@ test_autopilot_resumes_existing_workaround_after_restart
 test_autopilot_skips_blocked_workaround_and_runs_later_tasks
 test_swarm_status_reports_human_summary
 test_swarm_status_reports_machine_readable_summary
+test_swarm_summary_reports_human_metrics_by_task_family
+test_swarm_summary_reports_machine_readable_metrics_by_task_family
 test_swarm_merge_gate_copies_verified_changes_into_accepted_snapshot
 test_swarm_dependency_labels_gate_downstream_batches
 test_builder_prompt_is_literal_safe_and_streamed_via_stdin
