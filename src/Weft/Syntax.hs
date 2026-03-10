@@ -5,10 +5,19 @@ module Weft.Syntax
   , Expr (..)
   , Module (..)
   , ModuleName (..)
+  , Position (..)
+  , SourceSpan (..)
   , Type (..)
+  , exprSpan
+  , mergeSourceSpans
   , renderType
   ) where
 
+import Data.Aeson
+  ( ToJSON (toJSON)
+  , object
+  , (.=)
+  )
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -16,6 +25,34 @@ newtype ModuleName = ModuleName
   { unModuleName :: Text
   }
   deriving (Eq, Ord, Show)
+
+data Position = Position
+  { positionLine :: Int
+  , positionColumn :: Int
+  }
+  deriving (Eq, Ord, Show)
+
+instance ToJSON Position where
+  toJSON position =
+    object
+      [ "line" .= positionLine position
+      , "column" .= positionColumn position
+      ]
+
+data SourceSpan = SourceSpan
+  { sourceSpanFile :: Text
+  , sourceSpanStart :: Position
+  , sourceSpanEnd :: Position
+  }
+  deriving (Eq, Ord, Show)
+
+instance ToJSON SourceSpan where
+  toJSON span' =
+    object
+      [ "file" .= sourceSpanFile span'
+      , "start" .= sourceSpanStart span'
+      , "end" .= sourceSpanEnd span'
+      ]
 
 data Module = Module
   { moduleName :: ModuleName
@@ -25,6 +62,9 @@ data Module = Module
 
 data Decl = Decl
   { declName :: Text
+  , declSpan :: SourceSpan
+  , declNameSpan :: SourceSpan
+  , declAnnotationSpan :: Maybe SourceSpan
   , declAnnotation :: Maybe Type
   , declParams :: [Text]
   , declBody :: Expr
@@ -39,12 +79,34 @@ data Type
   deriving (Eq, Ord, Show)
 
 data Expr
-  = EVar Text
-  | EInt Integer
-  | EString Text
-  | EBool Bool
-  | ECall Expr [Expr]
+  = EVar SourceSpan Text
+  | EInt SourceSpan Integer
+  | EString SourceSpan Text
+  | EBool SourceSpan Bool
+  | ECall SourceSpan Expr [Expr]
   deriving (Eq, Show)
+
+exprSpan :: Expr -> SourceSpan
+exprSpan expr =
+  case expr of
+    EVar span' _ ->
+      span'
+    EInt span' _ ->
+      span'
+    EString span' _ ->
+      span'
+    EBool span' _ ->
+      span'
+    ECall span' _ _ ->
+      span'
+
+mergeSourceSpans :: SourceSpan -> SourceSpan -> SourceSpan
+mergeSourceSpans left right =
+  SourceSpan
+    { sourceSpanFile = sourceSpanFile left
+    , sourceSpanStart = sourceSpanStart left
+    , sourceSpanEnd = sourceSpanEnd right
+    }
 
 renderType :: Type -> Text
 renderType typ =

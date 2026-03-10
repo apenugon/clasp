@@ -41,17 +41,17 @@ emitDecl decl
 emitExpr :: Expr -> Text
 emitExpr expr =
   case expr of
-    EVar name ->
+    EVar _ name ->
       emitIdentifier name
-    EInt value ->
+    EInt _ value ->
       T.pack (show value)
-    EString value ->
+    EString _ value ->
       T.pack (show (T.unpack value))
-    EBool True ->
+    EBool _ True ->
       "true"
-    EBool False ->
+    EBool _ False ->
       "false"
-    ECall fn args ->
+    ECall _ fn args ->
       emitExpr fn
         <> "("
         <> T.intercalate ", " (fmap emitExpr args)
@@ -59,4 +59,3 @@ emitExpr expr =
 
 emitIdentifier :: Text -> Text
 emitIdentifier = id
-

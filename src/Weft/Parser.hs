@@ -12,9 +12,11 @@ import qualified Data.Text as T
 import Data.Void (Void)
 import Text.Megaparsec
   ( Parsec
+  , SourcePos
   , between
   , eof
   , errorBundlePretty
+  , getSourcePos
   , many
   , manyTill
   , notFollowedBy
@@ -36,8 +38,12 @@ import Text.Megaparsec.Char
   , upperChar
   )
 import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Pos (unPos)
 import Weft.Diagnostic
   ( DiagnosticBundle
+  , diagnostic
+  , diagnosticBundle
+  , diagnosticRelated
   , singleDiagnostic
   )
 import Weft.Syntax
@@ -45,13 +51,17 @@ import Weft.Syntax
   , Expr (..)
   , Module (..)
   , ModuleName (..)
+  , Position (..)
+  , SourceSpan (..)
   , Type (..)
+  , exprSpan
+  , mergeSourceSpans
   )
 
 type Parser = Parsec Void Text
 
 data TopLevelItem
-  = TopSignature Text Type
+  = TopSignature Text Type SourceSpan
   | TopDecl Decl
 
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
@@ -77,23 +87,30 @@ topLevelItemParser =
 
 typeSignatureParser :: Parser TopLevelItem
 typeSignatureParser = do
-  name <- identifier
+  start <- getSourcePos
+  (_, name) <- locatedIdentifier
   _ <- symbol ":"
   annotatedType <- typeParser
+  end <- getSourcePos
   _ <- optional eol
   scn
-  pure (TopSignature name annotatedType)
+  pure (TopSignature name annotatedType (makeSourceSpan start end))
 
 declParser :: Parser Decl
 declParser = do
-  name <- identifier
+  start <- getSourcePos
+  (nameSpan, name) <- locatedIdentifier
   params <- many identifier
   _ <- symbol "="
   body <- exprParser
+  end <- getSourcePos
   _ <- optional eol
   scn
   pure Decl
     { declName = name
+    , declSpan = makeSourceSpan start end
+    , declNameSpan = nameSpan
+    , declAnnotationSpan = Nothing
     , declAnnotation = Nothing
     , declParams = params
     , declBody = body
@@ -114,18 +131,27 @@ atomParser =
     <|> boolParser
     <|> intParser
     <|> stringParser
-    <|> (EVar <$> identifier)
+    <|> variableParser
+
+variableParser :: Parser Expr
+variableParser = do
+  (span', name) <- locatedIdentifier
+  pure (EVar span' name)
 
 boolParser :: Parser Expr
 boolParser =
-  (keyword "true" *> pure (EBool True))
-    <|> (keyword "false" *> pure (EBool False))
+  locatedKeywordExpr "true" (\span' -> EBool span' True)
+    <|> locatedKeywordExpr "false" (\span' -> EBool span' False)
 
 intParser :: Parser Expr
-intParser = EInt <$> lexeme L.decimal
+intParser = do
+  (span', value) <- locatedLexeme L.decimal
+  pure (EInt span' value)
 
 stringParser :: Parser Expr
-stringParser = EString . T.pack <$> lexeme (char '"' *> manyTill L.charLiteral (char '"'))
+stringParser = do
+  (span', value) <- locatedLexeme (T.pack <$> (char '"' *> manyTill L.charLiteral (char '"')))
+  pure (EString span' value)
 
 typeParser :: Parser Type
 typeParser = do
@@ -147,35 +173,50 @@ moduleNameParser =
     moduleSegment = T.pack <$> ((:) <$> upperChar <*> many identTailChar)
 
 identifier :: Parser Text
-identifier = lexeme . try $ do
+identifier = snd <$> locatedIdentifier
+
+locatedIdentifier :: Parser (SourceSpan, Text)
+locatedIdentifier = locatedLexeme identifierRaw
+
+identifierRaw :: Parser Text
+identifierRaw = do
   name <- T.pack <$> ((:) <$> letterChar <*> many identTailChar)
   when (name `elem` reservedWords) $
     fail ("reserved word " <> show name <> " cannot be used as an identifier")
   pure name
 
 keyword :: Text -> Parser ()
-keyword word = lexeme . try $ do
+keyword word = lexeme (keywordRaw word)
+
+keywordRaw :: Text -> Parser ()
+keywordRaw word = do
   void (string word)
   notFollowedBy identTailChar
 
-reservedWords :: [Text]
-reservedWords =
-  [ "module"
-  , "true"
-  , "false"
-  , "Int"
-  , "Str"
-  , "Bool"
-  ]
+locatedKeywordExpr :: Text -> (SourceSpan -> Expr) -> Parser Expr
+locatedKeywordExpr word constructor = do
+  (span', _) <- locatedLexeme (keywordRaw word)
+  pure (constructor span')
 
 applyExpr :: Expr -> Expr -> Expr
 applyExpr fn arg =
-  case fn of
-    ECall target args -> ECall target (args <> [arg])
-    _ -> ECall fn [arg]
+  let callSpan = mergeSourceSpans (exprSpan fn) (exprSpan arg)
+   in case fn of
+        ECall _ target args ->
+          ECall callSpan target (args <> [arg])
+        _ ->
+          ECall callSpan fn [arg]
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
+
+locatedLexeme :: Parser a -> Parser (SourceSpan, a)
+locatedLexeme parser = do
+  start <- getSourcePos
+  value <- parser
+  end <- getSourcePos
+  sc
+  pure (makeSourceSpan start end, value)
 
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
@@ -209,27 +250,66 @@ attachSignatures (name, items) = do
         , moduleDecls = reverse decls
         }
     else
-      let orphanNames = T.intercalate ", " (Map.keys pendingSignatures)
-       in Left $
-            singleDiagnostic
-              "E_ORPHAN_SIGNATURE"
-              "Found type signatures without matching declarations."
-              ["Missing declarations for: " <> orphanNames <> "."]
+      Left . diagnosticBundle $
+        [ diagnostic
+            "E_ORPHAN_SIGNATURE"
+            ("Found a type signature for `" <> sigName <> "` without a matching declaration.")
+            (Just signatureSpan)
+            ["Add a matching declaration or remove the signature."]
+            []
+        | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
+        ]
   where
     step (decls, pendingSignatures) item =
       case item of
-        TopSignature sigName sigType ->
-          if Map.member sigName pendingSignatures
-            then
-              Left $
-                singleDiagnostic
-                  "E_DUPLICATE_SIGNATURE"
-                  ("Duplicate type signature for `" <> sigName <> "`.")
-                  ["Keep only one type signature per declaration."]
-            else
-              pure (decls, Map.insert sigName sigType pendingSignatures)
+        TopSignature sigName sigType signatureSpan ->
+          case Map.lookup sigName pendingSignatures of
+            Just (_, existingSpan) ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_DUPLICATE_SIGNATURE"
+                    ("Duplicate type signature for `" <> sigName <> "`.")
+                    (Just signatureSpan)
+                    ["Keep only one type signature per declaration."]
+                    [diagnosticRelated "previous signature" existingSpan]
+                ]
+            Nothing ->
+              pure (decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
         TopDecl decl ->
-          let annotation = Map.lookup (declName decl) pendingSignatures
-              updatedDecl = decl {declAnnotation = annotation}
+          let annotationData = Map.lookup (declName decl) pendingSignatures
+              updatedDecl =
+                case annotationData of
+                  Just (annotation, annotationSpan) ->
+                    decl
+                      { declAnnotation = Just annotation
+                      , declAnnotationSpan = Just annotationSpan
+                      }
+                  Nothing ->
+                    decl
               remaining = Map.delete (declName decl) pendingSignatures
            in pure (updatedDecl : decls, remaining)
+
+makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
+makeSourceSpan start end =
+  SourceSpan
+    { sourceSpanFile = T.pack (MP.sourceName start)
+    , sourceSpanStart = toPosition start
+    , sourceSpanEnd = toPosition end
+    }
+
+toPosition :: SourcePos -> Position
+toPosition pos =
+  Position
+    { positionLine = unPos (MP.sourceLine pos)
+    , positionColumn = unPos (MP.sourceColumn pos)
+    }
+
+reservedWords :: [Text]
+reservedWords =
+  [ "module"
+  , "true"
+  , "false"
+  , "Int"
+  , "Str"
+  , "Bool"
+  ]

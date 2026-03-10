@@ -2,68 +2,121 @@
 
 module Main (main) where
 
+import Data.Aeson (object, (.=))
+import Data.Aeson.Text (encodeToLazyText)
 import qualified Data.Text.IO as TIO
+import qualified Data.Text.Lazy.IO as LTIO
 import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
 import Weft.Compiler (checkSource, compileSource, parseSource)
-import Weft.Diagnostic (renderDiagnosticBundle)
+import Weft.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
+
+data OutputFormat
+  = Pretty
+  | Json
 
 main :: IO ()
 main = do
-  args <- getArgs
+  rawArgs <- getArgs
+  let (format, args) = parseOutputFormat rawArgs
   case args of
     ["parse", inputPath] ->
-      runParse inputPath
+      runParse format inputPath
     ["check", inputPath] ->
-      runCheck inputPath
+      runCheck format inputPath
     ["compile", inputPath] ->
-      runCompile inputPath Nothing
+      runCompile format inputPath Nothing
     ["compile", inputPath, "-o", outputPath] ->
-      runCompile inputPath (Just outputPath)
+      runCompile format inputPath (Just outputPath)
     ["compile", "-o", outputPath, inputPath] ->
-      runCompile inputPath (Just outputPath)
+      runCompile format inputPath (Just outputPath)
     _ ->
       die usage
 
-runParse :: FilePath -> IO ()
-runParse inputPath = do
+parseOutputFormat :: [String] -> (OutputFormat, [String])
+parseOutputFormat args =
+  if "--json" `elem` args
+    then (Json, filter (/= "--json") args)
+    else (Pretty, args)
+
+runParse :: OutputFormat -> FilePath -> IO ()
+runParse format inputPath = do
   source <- TIO.readFile inputPath
   case parseSource inputPath source of
     Left err -> do
-      TIO.hPutStrLn stderr (renderDiagnosticBundle err)
+      writeFailure format err
       exitFailure
     Right ast ->
-      print ast
+      case format of
+        Pretty ->
+          print ast
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("parse" :: String)
+                , "input" .= inputPath
+                ]
 
-runCheck :: FilePath -> IO ()
-runCheck inputPath = do
+runCheck :: OutputFormat -> FilePath -> IO ()
+runCheck format inputPath = do
   source <- TIO.readFile inputPath
   case checkSource inputPath source of
     Left err -> do
-      TIO.hPutStrLn stderr (renderDiagnosticBundle err)
+      writeFailure format err
       exitFailure
     Right _ ->
-      hPutStrLn stderr ("Checked " <> inputPath)
+      case format of
+        Pretty ->
+          hPutStrLn stderr ("Checked " <> inputPath)
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("check" :: String)
+                , "input" .= inputPath
+                ]
 
-runCompile :: FilePath -> Maybe FilePath -> IO ()
-runCompile inputPath outputPath = do
+runCompile :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
+runCompile format inputPath outputPath = do
   source <- TIO.readFile inputPath
   case compileSource inputPath source of
     Left err -> do
-      TIO.hPutStrLn stderr (renderDiagnosticBundle err)
+      writeFailure format err
       exitFailure
     Right js -> do
       let resolvedOutput = maybe (replaceExtension inputPath "js") id outputPath
       TIO.writeFile resolvedOutput js
-      hPutStrLn stderr ("Wrote " <> resolvedOutput)
+      case format of
+        Pretty ->
+          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("compile" :: String)
+                , "input" .= inputPath
+                , "output" .= resolvedOutput
+                ]
+
+writeFailure :: OutputFormat -> DiagnosticBundle -> IO ()
+writeFailure format err =
+  case format of
+    Pretty ->
+      TIO.hPutStrLn stderr (renderDiagnosticBundle err)
+    Json ->
+      LTIO.hPutStrLn stderr (renderDiagnosticBundleJson err)
 
 usage :: String
 usage =
   unlines
     [ "weftc usage:"
-    , "  weftc parse <input.weft>"
-    , "  weftc check <input.weft>"
-    , "  weftc compile <input.weft> [-o output.js]"
+    , "  weftc parse <input.weft> [--json]"
+    , "  weftc check <input.weft> [--json]"
+    , "  weftc compile <input.weft> [-o output.js] [--json]"
     ]

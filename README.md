@@ -17,6 +17,7 @@ nix develop
 cabal build
 cabal run weftc -- parse examples/hello.weft
 cabal run weftc -- check examples/hello.weft
+cabal run weftc -- check examples/hello.weft --json
 cabal run weftc -- compile examples/hello.weft -o examples/hello.js
 cabal test
 ```

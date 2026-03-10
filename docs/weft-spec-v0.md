@@ -148,5 +148,5 @@ Once `v0` is stable, the next additions should be:
 - Records and algebraic data types
 - Exhaustive pattern matching
 - A schema definition form
-- Richer structured diagnostics with spans and related locations
+- Further diagnostic enrichment, including fix hints and normalization for agent-facing output
 - A path toward compact canonical syntax with human-facing explain renderers
