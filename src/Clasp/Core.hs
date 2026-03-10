@@ -76,6 +76,7 @@ data CoreExpr
   | CInt SourceSpan Integer
   | CString SourceSpan Text
   | CBool SourceSpan Bool
+  | CList SourceSpan Type [CoreExpr]
   | CEqual SourceSpan CoreExpr CoreExpr
   | CIntCompare SourceSpan IntComparisonOp CoreExpr CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
@@ -97,6 +98,8 @@ coreExprType expr =
       TStr
     CBool _ _ ->
       TBool
+    CList _ typ _ ->
+      typ
     CEqual _ _ _ ->
       TBool
     CIntCompare _ _ _ _ ->

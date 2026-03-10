@@ -207,6 +207,7 @@ data Expr
   | EInt SourceSpan Integer
   | EString SourceSpan Text
   | EBool SourceSpan Bool
+  | EList SourceSpan [Expr]
   | EEqual SourceSpan Expr Expr
   | EIntCompare SourceSpan IntComparisonOp Expr Expr
   | ECall SourceSpan Expr [Expr]
@@ -227,6 +228,8 @@ exprSpan expr =
     EString span' _ ->
       span'
     EBool span' _ ->
+      span'
+    EList span' _ ->
       span'
     EEqual span' _ _ ->
       span'

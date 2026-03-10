@@ -61,6 +61,7 @@ data LowerExpr
   | LInt Integer
   | LString Text
   | LBool Bool
+  | LList [LowerExpr]
   | LEqual LowerExpr LowerExpr
   | LIntCompare IntComparisonOp LowerExpr LowerExpr
   | LCall LowerExpr [LowerExpr]
@@ -139,6 +140,8 @@ lowerCoreExpr expr =
       LString value
     CBool _ value ->
       LBool value
+    CList _ _ elements ->
+      LList (fmap lowerCoreExpr elements)
     CEqual _ left right ->
       LEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CIntCompare _ op left right ->

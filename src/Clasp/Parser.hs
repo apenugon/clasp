@@ -313,6 +313,7 @@ baseExprParser =
     <|> decodeParser
     <|> encodeParser
     <|> matchParser
+    <|> listExprParser
     <|> boolParser
     <|> intParser
     <|> stringParser
@@ -342,6 +343,13 @@ matchBranchParser = do
       , matchBranchPattern = pattern'
       , matchBranchBody = body
       }
+
+listExprParser :: Parser Expr
+listExprParser = do
+  start <- getSourcePos
+  elements <- brackets (exprParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  pure (EList (makeSourceSpan start end) elements)
 
 decodeParser :: Parser Expr
 decodeParser = do

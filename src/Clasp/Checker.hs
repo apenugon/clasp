@@ -132,6 +132,7 @@ data DraftExprNode
   | DraftInt Integer
   | DraftString Text
   | DraftBool Bool
+  | DraftList [DraftExpr]
   | DraftEqual DraftExpr DraftExpr
   | DraftIntCompare IntComparisonOp DraftExpr DraftExpr
   | DraftCall DraftExpr [DraftExpr]
@@ -866,6 +867,8 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IStr (DraftString value))
     EBool span' value ->
       pure (DraftExpr span' IBool (DraftBool value))
+    EList listSpan elements ->
+      inferListExpr ctx termEnv localEnv listSpan elements
     EEqual equalSpan left right ->
       inferEqualityExpr ctx termEnv localEnv equalSpan left right
     EIntCompare compareSpan op left right ->
@@ -1066,6 +1069,28 @@ inferEncodeExpr ctx termEnv localEnv encodeSpan value = do
       pure (DraftExpr encodeSpan IStr (DraftEncodeJson valueExpr))
     Left (Just bundle) ->
       throwDiagnostic bundle
+
+inferListExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> [Expr] -> InferM DraftExpr
+inferListExpr ctx termEnv localEnv listSpan elements = do
+  elementType <- freshTypeVar
+  draftElements <-
+    traverse
+      ( \element -> do
+          draftElement <- inferExpr ctx termEnv localEnv element
+          unify
+            ( UnifyContext
+                { unifyCode = "E_LIST_ELEMENT_TYPE"
+                , unifySummary = "List elements must all have the same type."
+                , unifyPrimarySpan = draftExprSpan draftElement
+                , unifyRelated = []
+                }
+            )
+            (draftExprType draftElement)
+            elementType
+          pure draftElement
+      )
+      elements
+  pure (DraftExpr listSpan (IList elementType) (DraftList draftElements))
 
 inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> Expr -> InferM DraftExpr
 inferEqualityExpr ctx termEnv localEnv equalSpan left right = do
@@ -1638,6 +1663,10 @@ freezeDraftExpr ctx decl inferState draftExpr =
       pure (CString (draftExprSpan draftExpr) value)
     DraftBool value ->
       pure (CBool (draftExprSpan draftExpr) value)
+    DraftList elements -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenElements <- traverse (freezeDraftExpr ctx decl inferState) elements
+      pure (CList (draftExprSpan draftExpr) exprType frozenElements)
     DraftEqual left right -> do
       frozenLeft <- freezeDraftExpr ctx decl inferState left
       frozenRight <- freezeDraftExpr ctx decl inferState right

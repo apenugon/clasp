@@ -368,6 +368,9 @@ emitExpr counter expr =
       (counter, "true")
     LBool False ->
       (counter, "false")
+    LList elements ->
+      let (nextCounter, elementTexts) = emitExprList counter elements
+       in (nextCounter, "[" <> T.intercalate ", " elementTexts <> "]")
     LEqual left right ->
       let (counterAfterLeft, leftText) = emitExpr counter left
           (counterAfterRight, rightText) = emitExpr counterAfterLeft right

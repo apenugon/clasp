@@ -217,7 +217,8 @@ Notes:
 - Declarations are expression-bodied only.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 - List type syntax uses brackets, for example `[Int]` or `[[User]]`.
-- In the current implementation, list types are parsed into the syntax tree, while list typechecking and backend support land in later slices.
+- List literals use brackets, for example `[]`, `[1, 2]`, or `[[1], [2, 3]]`.
+- List literals are homogeneous: every element must have the same type, and an empty list needs surrounding type information such as an annotation.
 
 ## Semantics
 

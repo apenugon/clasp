@@ -202,6 +202,20 @@ parserTests =
                     assertFailure ("expected list-typed declaration and decode, got " <> show other)
               Nothing ->
                 assertFailure "expected decodeUsers declaration"
+    , testCase "parses list literals" $
+        case parseSource "inline" listLiteralSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "names" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EList _ [EString _ "Ada", EString _ "Grace"] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected list literal, got " <> show other)
+              Nothing ->
+                assertFailure "expected names declaration"
     , testCase "parses equality expressions" $
         case parseSource "inline" equalitySource of
           Left err ->
@@ -278,6 +292,12 @@ checkerTests =
             assertFailure ("expected integer comparison source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "accepts homogeneous list literals" $
+        case checkSource "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -327,6 +347,10 @@ checkerTests =
         assertHasCode "E_EQUALITY_TYPE" (checkSource "bad" unsupportedEqualitySource)
     , testCase "rejects non-integer comparison operands" $
         assertHasCode "E_INT_COMPARISON_TYPE" (checkSource "bad" unsupportedIntComparisonSource)
+    , testCase "rejects mixed-type list literals" $
+        assertHasCode "E_LIST_ELEMENT_TYPE" (checkSource "bad" mixedListLiteralSource)
+    , testCase "rejects unconstrained empty list literals" $
+        assertHasCode "E_CANNOT_INFER" (checkSource "bad" emptyListLiteralSource)
     ]
 
 diagnosticTests :: TestTree
@@ -422,6 +446,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered greaterThanOrEqual declaration: " <> show other)
+    , testCase "lowering preserves list literals" $
+        case lowerChecked "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "names" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LList [LString "Ada", LString "Grace"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered names declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -481,6 +515,12 @@ compileTests =
           Right emitted -> do
             assertBool "expected less-than comparison" ("(left < right)" `T.isInfixOf` emitted)
             assertBool "expected greater-than-or-equal comparison" ("(left >= right)" `T.isInfixOf` emitted)
+    , testCase "compile emits JavaScript arrays for list literals" $
+        case compileSource "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list literal compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool "expected array literal" ("export const names = [\"Ada\", \"Grace\"];" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -724,6 +764,34 @@ listTypeSource =
     , ""
     , "decodeUsers : Str -> [User]"
     , "decodeUsers raw = decode [User] raw"
+    ]
+
+listLiteralSource :: Text
+listLiteralSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "names : [Str]"
+    , "names = [\"Ada\", \"Grace\"]"
+    , ""
+    , "pairs : [[Int]]"
+    , "pairs = [[1, 2], [3, 4]]"
+    ]
+
+mixedListLiteralSource :: Text
+mixedListLiteralSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "bad = [1, \"two\"]"
+    ]
+
+emptyListLiteralSource :: Text
+emptyListLiteralSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "empty = []"
     ]
 
 equalitySource :: Text
