@@ -1,13 +1,75 @@
 module Shared.Lead
 
-record LeadRequest = {
+record Empty = {}
+
+type LeadPriority = Low | Medium | High
+
+type ReviewStatus = New | Reviewed
+
+record LeadIntake = {
   company : Str,
   contact : Str,
   budget : Int
 }
 
+record LeadReview = {
+  leadId : Str,
+  note : Str
+}
+
 record LeadSummary = {
   summary : Str,
-  priority : Str,
+  priority : LeadPriority,
   followUpRequired : Bool
 }
+
+record LeadRecord = {
+  leadId : Str,
+  company : Str,
+  contact : Str,
+  summary : Str,
+  priority : LeadPriority,
+  followUpRequired : Bool,
+  reviewStatus : ReviewStatus,
+  reviewNote : Str
+}
+
+record InboxSnapshot = {
+  headline : Str,
+  primaryLeadLabel : Str,
+  secondaryLeadLabel : Str
+}
+
+renderLandingPage : InboxSnapshot -> Page
+renderLandingPage inbox = page "Lead inbox" (styled "lead_shell" (element "main" (append (element "h1" (text "Lead inbox")) (append (element "p" (text "Capture a lead, score it once, and review it on the server.")) (append intakeSection (append (element "h2" (text inbox.headline)) (append (inboxLinks inbox) (element "p" (link "/inbox" (text "Open the inbox page"))))))))))
+
+renderInboxPage : InboxSnapshot -> Page
+renderInboxPage inbox = page "Inbox" (styled "lead_shell" (element "main" (append (element "h1" (text inbox.headline)) (append (element "p" (text "Open a seeded lead or create a new one from the intake page.")) (append (inboxLinks inbox) (element "p" (link "/" (text "Back to intake"))))))))
+
+renderLeadPage : LeadRecord -> Page
+renderLeadPage lead = page lead.company (styled "lead_shell" (element "main" (append (element "h1" (text lead.company)) (append (element "p" (text lead.contact)) (append (priorityView lead.priority) (append (element "p" (text lead.summary)) (append (reviewStatusView lead) (append (reviewForm lead) (element "p" (link "/inbox" (text "Back to inbox")))))))))))
+
+intakeForm : View
+intakeForm = form "POST" "/leads" (element "section" (append (element "label" (append (text "Company") (input "company" "text" ""))) (append (element "label" (append (text "Contact") (input "contact" "text" ""))) (append (element "label" (append (text "Budget") (input "budget" "number" ""))) (submit "Create lead")))))
+
+intakeSection : View
+intakeSection = element "section" (append (element "h2" (text "New lead")) intakeForm)
+
+inboxLinks : InboxSnapshot -> View
+inboxLinks inbox = element "nav" (append (element "p" (link "/lead/primary" (text inbox.primaryLeadLabel))) (element "p" (link "/lead/secondary" (text inbox.secondaryLeadLabel))))
+
+priorityView : LeadPriority -> View
+priorityView priority = match priority {
+  Low -> element "p" (text "Priority: low"),
+  Medium -> element "p" (text "Priority: medium"),
+  High -> element "p" (text "Priority: high")
+}
+
+reviewStatusView : LeadRecord -> View
+reviewStatusView lead = match lead.reviewStatus {
+  New -> element "section" (append (element "p" (text "Review status: new")) (element "p" (text "Add an internal note before handing this lead off."))),
+  Reviewed -> element "section" (append (element "p" (text "Review status: reviewed")) (element "p" (text lead.reviewNote)))
+}
+
+reviewForm : LeadRecord -> View
+reviewForm lead = form "POST" "/review" (element "section" (append (input "leadId" "hidden" lead.leadId) (append (element "label" (append (text "Review note") (input "note" "text" lead.reviewNote))) (submit "Save review"))))

@@ -15,7 +15,7 @@ import Control.Monad.State.Strict
   , runState
   )
 import Data.Bifunctor (first)
-import Data.Char (isAsciiLower, isDigit)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -133,6 +133,10 @@ data DraftExprNode
   | DraftViewAppend DraftExpr DraftExpr
   | DraftViewElement Text DraftExpr
   | DraftViewStyled Text DraftExpr
+  | DraftViewLink Text DraftExpr
+  | DraftViewForm Text Text DraftExpr
+  | DraftViewInput Text Text DraftExpr
+  | DraftViewSubmit DraftExpr
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
@@ -191,7 +195,7 @@ isBuiltinTypeName name =
 
 isBuiltinViewFunctionName :: Text -> Bool
 isBuiltinViewFunctionName name =
-  name `elem` ["page", "text", "append", "element", "styled", hostClassBuiltinName, hostStyleBuiltinName]
+  name `elem` ["page", "text", "append", "element", "styled", "link", "form", "input", "submit", hostClassBuiltinName, hostStyleBuiltinName]
 
 isSafeViewTag :: Text -> Bool
 isSafeViewTag tag =
@@ -203,6 +207,23 @@ isSafeStyleRef :: Text -> Bool
 isSafeStyleRef styleRef =
   not (T.null styleRef)
     && T.all (\char -> isAsciiLower char || isDigit char || char == '-' || char == '_') styleRef
+
+isSafeNavigationTarget :: Text -> Bool
+isSafeNavigationTarget target =
+  not (T.null target)
+    && T.head target == '/'
+    && T.all (\char -> isAsciiLower char || isAsciiUpper char || isDigit char || char `elem` ['/', '-', '_', '?', '&', '=', '#', '.']) target
+
+isSafeFormMethod :: Text -> Bool
+isSafeFormMethod method = method `elem` ["GET", "POST"]
+
+isSafeFieldName :: Text -> Bool
+isSafeFieldName fieldName =
+  not (T.null fieldName)
+    && T.all (\char -> isAsciiLower char || isAsciiUpper char || isDigit char || char == '_') fieldName
+
+isSafeInputKind :: Text -> Bool
+isSafeInputKind inputKind = inputKind `elem` ["text", "number", "hidden"]
 
 checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
@@ -1056,6 +1077,110 @@ inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
             ]
         _ ->
           throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "link" ->
+      case args of
+        [EString _ href, childExpr] -> do
+          unless (isSafeNavigationTarget href) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_LINK_TARGET"
+                  ("Invalid link target `" <> href <> "`.")
+                  (Just callSpan)
+                  ["Use an absolute in-app path such as `/inbox` or `/lead?leadId=lead-1`."]
+                  []
+              ]
+          draftChild <- inferExpr ctx termEnv localEnv childExpr
+          unifyViewBuiltinArg "link child" draftChild (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewLink href draftChild))
+        [_, _] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_VIEW_LINK_TARGET"
+                "Link targets must be string literals."
+                (Just callSpan)
+                ["Use `link \"/lead?leadId=lead-1\" child` so the compiler can validate navigation."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "form" ->
+      case args of
+        [EString _ method, EString _ action, childExpr] -> do
+          unless (isSafeFormMethod method) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_FORM_METHOD"
+                  ("Invalid form method `" <> method <> "`.")
+                  (Just callSpan)
+                  ["Use `GET` or `POST` so the default server renderer can preserve request semantics."]
+                  []
+              ]
+          unless (isSafeNavigationTarget action) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_LINK_TARGET"
+                  ("Invalid form action `" <> action <> "`.")
+                  (Just callSpan)
+                  ["Use an absolute in-app path such as `/leads` or `/review`."]
+                  []
+              ]
+          draftChild <- inferExpr ctx termEnv localEnv childExpr
+          unifyViewBuiltinArg "form child" draftChild (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewForm method action draftChild))
+        [_, _, _] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_VIEW_FORM_METHOD"
+                "Form methods and actions must be string literals."
+                (Just callSpan)
+                ["Use `form \"POST\" \"/leads\" child` so the compiler can validate the submission target."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 3 (length args)
+    "input" ->
+      case args of
+        [EString _ fieldName, EString _ inputKind, valueExpr] -> do
+          unless (isSafeFieldName fieldName) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_INPUT"
+                  ("Invalid input field name `" <> fieldName <> "`.")
+                  (Just callSpan)
+                  ["Use letters, digits, and underscores in generated form field names."]
+                  []
+              ]
+          unless (isSafeInputKind inputKind) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_INPUT"
+                  ("Unsupported input kind `" <> inputKind <> "`.")
+                  (Just callSpan)
+                  ["Use `text`, `number`, or `hidden` in the safe default renderer."]
+                  []
+              ]
+          draftValue <- inferExpr ctx termEnv localEnv valueExpr
+          unifyViewBuiltinArg "input value" draftValue IStr
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewInput fieldName inputKind draftValue))
+        [_, _, _] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_VIEW_INPUT"
+                "Input field names and kinds must be string literals."
+                (Just callSpan)
+                ["Use `input \"company\" \"text\" companyName` style calls."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 3 (length args)
+    "submit" ->
+      case args of
+        [labelExpr] -> do
+          draftLabel <- inferExpr ctx termEnv localEnv labelExpr
+          unifyViewBuiltinArg "submit label" draftLabel IStr
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewSubmit draftLabel))
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 1 (length args)
     name
       | name == hostClassBuiltinName || name == hostStyleBuiltinName ->
           throwDiagnostic . diagnosticBundle $
@@ -1753,6 +1878,18 @@ freezeDraftExpr ctx decl inferState draftExpr =
     DraftViewStyled styleRef child -> do
       frozenChild <- freezeDraftExpr ctx decl inferState child
       pure (CViewStyled (draftExprSpan draftExpr) styleRef frozenChild)
+    DraftViewLink href child -> do
+      frozenChild <- freezeDraftExpr ctx decl inferState child
+      pure (CViewLink (draftExprSpan draftExpr) href frozenChild)
+    DraftViewForm method action child -> do
+      frozenChild <- freezeDraftExpr ctx decl inferState child
+      pure (CViewForm (draftExprSpan draftExpr) method action frozenChild)
+    DraftViewInput fieldName inputKind value -> do
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      pure (CViewInput (draftExprSpan draftExpr) fieldName inputKind frozenValue)
+    DraftViewSubmit label -> do
+      frozenLabel <- freezeDraftExpr ctx decl inferState label
+      pure (CViewSubmit (draftExprSpan draftExpr) frozenLabel)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenFn <- freezeDraftExpr ctx decl inferState fn

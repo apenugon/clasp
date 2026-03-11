@@ -115,6 +115,23 @@ emitRuntimePrelude =
   , "      $claspExpectStr($claspRequireField(objectValue, \"styleRef\", path), `${path}.styleRef`);"
   , "      $claspExpectView($claspRequireField(objectValue, \"child\", path), `${path}.child`);"
   , "      return objectValue;"
+  , "    case \"link\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"href\", path), `${path}.href`);"
+  , "      $claspExpectView($claspRequireField(objectValue, \"child\", path), `${path}.child`);"
+  , "      return objectValue;"
+  , "    case \"form\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"method\", path), `${path}.method`);"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"action\", path), `${path}.action`);"
+  , "      $claspExpectView($claspRequireField(objectValue, \"child\", path), `${path}.child`);"
+  , "      return objectValue;"
+  , "    case \"input\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"fieldName\", path), `${path}.fieldName`);"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"inputKind\", path), `${path}.inputKind`);"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"value\", path), `${path}.value`);"
+  , "      return objectValue;"
+  , "    case \"submit\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"label\", path), `${path}.label`);"
+  , "      return objectValue;"
   , "    default:"
   , "      throw new Error(`${path} expected a View value`);"
   , "  }"
@@ -143,6 +160,14 @@ emitRuntimePrelude =
   , "      return `<${checkedView.tag}>${$claspRenderView(checkedView.child)}</${checkedView.tag}>`;"
   , "    case \"styled\":"
   , "      return `<div data-clasp-style=${JSON.stringify($claspExpectStr(checkedView.styleRef, \"view.styleRef\"))}>${$claspRenderView(checkedView.child)}</div>`;"
+  , "    case \"link\":"
+  , "      return `<a href=\"${$claspEscapeHtml($claspExpectStr(checkedView.href, \"view.href\"))}\">${$claspRenderView(checkedView.child)}</a>`;"
+  , "    case \"form\":"
+  , "      return `<form method=\"${$claspEscapeHtml($claspExpectStr(checkedView.method, \"view.method\"))}\" action=\"${$claspEscapeHtml($claspExpectStr(checkedView.action, \"view.action\"))}\">${$claspRenderView(checkedView.child)}</form>`;"
+  , "    case \"input\":"
+  , "      return `<input name=\"${$claspEscapeHtml($claspExpectStr(checkedView.fieldName, \"view.fieldName\"))}\" type=\"${$claspEscapeHtml($claspExpectStr(checkedView.inputKind, \"view.inputKind\"))}\" value=\"${$claspEscapeHtml($claspExpectStr(checkedView.value, \"view.value\"))}\">`;"
+  , "    case \"submit\":"
+  , "      return `<button type=\"submit\">${$claspEscapeHtml($claspExpectStr(checkedView.label, \"view.label\"))}</button>`;"
   , "    default:"
   , "      throw new Error(\"Unknown View node\");"
   , "  }"
@@ -527,6 +552,24 @@ emitExpr counter expr =
        in ( nextCounter
           , "{ $kind: \"styled\", styleRef: " <> emitStringLiteral styleRef <> ", child: " <> childText <> " }"
           )
+    LViewLink href child ->
+      let (nextCounter, childText) = emitExpr counter child
+       in ( nextCounter
+          , "{ $kind: \"link\", href: " <> emitStringLiteral href <> ", child: " <> childText <> " }"
+          )
+    LViewForm method action child ->
+      let (nextCounter, childText) = emitExpr counter child
+       in ( nextCounter
+          , "{ $kind: \"form\", method: " <> emitStringLiteral method <> ", action: " <> emitStringLiteral action <> ", child: " <> childText <> " }"
+          )
+    LViewInput fieldName inputKind value ->
+      let (nextCounter, valueText) = emitExpr counter value
+       in ( nextCounter
+          , "{ $kind: \"input\", fieldName: " <> emitStringLiteral fieldName <> ", inputKind: " <> emitStringLiteral inputKind <> ", value: " <> valueText <> " }"
+          )
+    LViewSubmit label ->
+      let (nextCounter, labelText) = emitExpr counter label
+       in (nextCounter, "{ $kind: \"submit\", label: " <> labelText <> " }")
     LCall fn args ->
       let (counterAfterFn, fnText) = emitExpr counter fn
           (counterAfterArgs, argTexts) = emitExprList counterAfterFn args

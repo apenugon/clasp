@@ -81,6 +81,10 @@ data CoreExpr
   | CViewAppend SourceSpan CoreExpr CoreExpr
   | CViewElement SourceSpan Text CoreExpr
   | CViewStyled SourceSpan Text CoreExpr
+  | CViewLink SourceSpan Text CoreExpr
+  | CViewForm SourceSpan Text Text CoreExpr
+  | CViewInput SourceSpan Text Text CoreExpr
+  | CViewSubmit SourceSpan CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
@@ -111,6 +115,14 @@ coreExprType expr =
     CViewElement _ _ _ ->
       TNamed "View"
     CViewStyled _ _ _ ->
+      TNamed "View"
+    CViewLink _ _ _ ->
+      TNamed "View"
+    CViewForm _ _ _ _ ->
+      TNamed "View"
+    CViewInput _ _ _ _ ->
+      TNamed "View"
+    CViewSubmit _ _ ->
       TNamed "View"
     CCall _ typ _ _ ->
       typ

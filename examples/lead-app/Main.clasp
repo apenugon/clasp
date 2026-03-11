@@ -2,12 +2,52 @@ module Main
 
 import Shared.Lead
 
-foreign mockLeadSummaryModel : LeadRequest -> Str = "mockLeadSummaryModel"
+foreign mockLeadSummaryModel : LeadIntake -> Str = "mockLeadSummaryModel"
+foreign storeLead : LeadIntake -> LeadSummary -> Str = "storeLead"
+foreign loadInbox : Empty -> Str = "loadInbox"
+foreign loadPrimaryLead : Empty -> Str = "loadPrimaryLead"
+foreign loadSecondaryLead : Empty -> Str = "loadSecondaryLead"
+foreign reviewLead : LeadReview -> Str = "reviewLead"
 
-summarizeLead : LeadRequest -> LeadSummary
-summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)
+summarizeLead : LeadIntake -> LeadSummary
+summarizeLead intake = decode LeadSummary (mockLeadSummaryModel intake)
 
-route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
+createLead : LeadIntake -> LeadRecord
+createLead intake = decode LeadRecord (storeLead intake (summarizeLead intake))
 
-main : Str
-main = "Lead server ready"
+inboxSnapshot : Empty -> InboxSnapshot
+inboxSnapshot req = decode InboxSnapshot (loadInbox req)
+
+primaryLead : Empty -> LeadRecord
+primaryLead req = decode LeadRecord (loadPrimaryLead req)
+
+secondaryLead : Empty -> LeadRecord
+secondaryLead req = decode LeadRecord (loadSecondaryLead req)
+
+reviewedLead : LeadReview -> LeadRecord
+reviewedLead review = decode LeadRecord (reviewLead review)
+
+landingPage : Empty -> Page
+landingPage req = renderLandingPage (inboxSnapshot req)
+
+inboxPage : Empty -> Page
+inboxPage req = renderInboxPage (inboxSnapshot req)
+
+primaryLeadPage : Empty -> Page
+primaryLeadPage req = renderLeadPage (primaryLead req)
+
+secondaryLeadPage : Empty -> Page
+secondaryLeadPage req = renderLeadPage (secondaryLead req)
+
+createLeadPage : LeadIntake -> Page
+createLeadPage intake = renderLeadPage (createLead intake)
+
+reviewLeadPage : LeadReview -> Page
+reviewLeadPage review = renderLeadPage (reviewedLead review)
+
+route landingRoute = GET "/" Empty -> Page landingPage
+route inboxRoute = GET "/inbox" Empty -> Page inboxPage
+route primaryLeadRoute = GET "/lead/primary" Empty -> Page primaryLeadPage
+route secondaryLeadRoute = GET "/lead/secondary" Empty -> Page secondaryLeadPage
+route createLeadRoute = POST "/leads" LeadIntake -> Page createLeadPage
+route reviewLeadRoute = POST "/review" LeadReview -> Page reviewLeadPage

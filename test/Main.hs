@@ -275,6 +275,8 @@ checkerTests =
         assertHasCode "E_UNSAFE_VIEW_ESCAPE" (checkSource "bad" hostClassSource)
     , testCase "rejects raw host style escapes in safe views" $
         assertHasCode "E_UNSAFE_VIEW_ESCAPE" (checkSource "bad" hostStyleSource)
+    , testCase "rejects unsafe link targets in safe views" $
+        assertHasCode "E_VIEW_LINK_TARGET" (checkSource "bad" unsafeLinkSource)
     ]
 
 diagnosticTests :: TestTree
@@ -353,6 +355,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered page declaration: " <> show other)
+    , testCase "lowering preserves interactive page primitives" $
+        case lowerChecked "interactive" interactivePageSource of
+          Left err ->
+            assertFailure ("expected interactive page lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "home" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["req"] (LPage (LString "Inbox") (LViewAppend (LViewLink "/lead/primary" _) (LViewForm "POST" "/leads" _)))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered interactive page declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -409,6 +421,15 @@ compileTests =
             assertBool "expected view renderer" ("function $claspRenderView" `T.isInfixOf` emitted)
             assertBool "expected page response kind" ("responseKind: \"page\"" `T.isInfixOf` emitted)
             assertBool "expected page route encoder" ("encodeResponse: $render_Page" `T.isInfixOf` emitted)
+    , testCase "compile emits link and form renderers for interactive pages" $
+        case compileSource "interactive" interactivePageSource of
+          Left err ->
+            assertFailure ("expected interactive page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected link renderer" ("case \"link\":" `T.isInfixOf` emitted)
+            assertBool "expected form renderer" ("case \"form\":" `T.isInfixOf` emitted)
+            assertBool "expected input renderer" ("case \"input\":" `T.isInfixOf` emitted)
+            assertBool "expected submit renderer" ("case \"submit\":" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -461,6 +482,22 @@ compileTests =
                 "expected query decode, form decode, and invalid form failure"
                 "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"value.quantity expected an Int\"}"
                 runtimeOutput
+    , testCase "lead inbox app supports intake, inbox, detail, and invalid form flows" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected landing, create, inbox, detail, review, and invalid form behavior"
+              "{\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"value.budget expected an Int\"}"
+              runtimeOutput
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -713,6 +750,19 @@ pageSource =
     , "route homeRoute = GET \"/inbox\" Empty -> Page home"
     ]
 
+interactivePageSource :: Text
+interactivePageSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "home : Empty -> Page"
+    , "home req = page \"Inbox\" (append (link \"/lead/primary\" (text \"Open lead\")) (form \"POST\" \"/leads\" (append (input \"company\" \"text\" \"\") (submit \"Save\"))))"
+    , ""
+    , "route homeRoute = GET \"/\" Empty -> Page home"
+    ]
+
 unsafeScriptSource :: Text
 unsafeScriptSource =
   T.unlines
@@ -748,6 +798,19 @@ hostStyleSource =
     , ""
     , "bad : Empty -> Page"
     , "bad req = page \"Inbox\" (hostStyle \"display:none\" (text \"hello\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
+unsafeLinkSource :: Text
+unsafeLinkSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (link \"javascript:alert(1)\" (text \"bad\"))"
     , ""
     , "route badRoute = GET \"/bad\" Empty -> Page bad"
     ]
@@ -986,4 +1049,123 @@ pageFormRuntimeScript compiledPath runtimePath =
     , "  invalidMessage = error instanceof Error ? error.message : String(error);"
     , "}"
     , "console.log(JSON.stringify({ query: queryPayload, form: formPayload, html, invalid: invalidMessage }));"
+    ]
+
+leadInboxRuntimeScript :: FilePath -> FilePath -> Text
+leadInboxRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { installRuntime, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const leads = ["
+    , "  {"
+    , "    leadId: 'lead-2',"
+    , "    company: 'Northwind Studio',"
+    , "    contact: 'Morgan Lee',"
+    , "    summary: 'Northwind Studio is ready for a design-system migration this quarter.',"
+    , "    priority: 'medium',"
+    , "    followUpRequired: true,"
+    , "    reviewStatus: 'reviewed',"
+    , "    reviewNote: 'Confirmed budget window and asked for a migration timeline.'"
+    , "  },"
+    , "  {"
+    , "    leadId: 'lead-1',"
+    , "    company: 'Acme Labs',"
+    , "    contact: 'Jordan Kim',"
+    , "    summary: 'Acme Labs is exploring an internal AI pilot for support operations.',"
+    , "    priority: 'high',"
+    , "    followUpRequired: true,"
+    , "    reviewStatus: 'new',"
+    , "    reviewNote: ''"
+    , "  }"
+    , "];"
+    , "installRuntime({"
+    , "  mockLeadSummaryModel(intake) {"
+    , "    const priority = intake.budget >= 50000 ? 'High' : intake.budget >= 20000 ? 'Medium' : 'Low';"
+    , "    return JSON.stringify({"
+    , "      summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,"
+    , "      priority: priority.toLowerCase(),"
+    , "      followUpRequired: intake.budget >= 20000"
+    , "    });"
+    , "  },"
+    , "  storeLead(intake, summary) {"
+    , "    const lead = {"
+    , "      leadId: `lead-${leads.length + 1}`,"
+    , "      company: intake.company,"
+    , "      contact: intake.contact,"
+    , "      summary: summary.summary,"
+    , "      priority: summary.priority?.$tag?.toLowerCase() ?? 'low',"
+    , "      followUpRequired: summary.followUpRequired,"
+    , "      reviewStatus: 'new',"
+    , "      reviewNote: ''"
+    , "    };"
+    , "    leads.unshift(lead);"
+    , "    return JSON.stringify(lead);"
+    , "  },"
+    , "  loadInbox() {"
+    , "    return JSON.stringify({"
+    , "      headline: 'Priority inbox',"
+    , "      primaryLeadLabel: `${leads[0].company} (${leads[0].priority.toLowerCase()})`,"
+    , "      secondaryLeadLabel: `${(leads[1] ?? leads[0]).company} (${(leads[1] ?? leads[0]).priority.toLowerCase()})`"
+    , "    });"
+    , "  },"
+    , "  loadPrimaryLead() {"
+    , "    return JSON.stringify(leads[0]);"
+    , "  },"
+    , "  loadSecondaryLead() {"
+    , "    return JSON.stringify(leads[1] ?? leads[0]);"
+    , "  },"
+    , "  reviewLead(review) {"
+    , "    const lead = leads.find((candidate) => candidate.leadId === review.leadId);"
+    , "    if (!lead) { throw new Error(`Unknown lead: ${review.leadId}`); }"
+    , "    lead.reviewStatus = 'reviewed';"
+    , "    lead.reviewNote = review.note;"
+    , "    return JSON.stringify(lead);"
+    , "  }"
+    , "});"
+    , "const route = (name) => {"
+    , "  const found = compiledModule.__claspRoutes.find((candidate) => candidate.name === name);"
+    , "  if (!found) { throw new Error(`missing route ${name}`); }"
+    , "  return found;"
+    , "};"
+    , "const landingRoute = route('landingRoute');"
+    , "const inboxRoute = route('inboxRoute');"
+    , "const primaryLeadRoute = route('primaryLeadRoute');"
+    , "const createLeadRoute = route('createLeadRoute');"
+    , "const reviewLeadRoute = route('reviewLeadRoute');"
+    , "const landingHtml = landingRoute.encodeResponse(await landingRoute.handler({}));"
+    , "const createRequest = new Request('http://example.test/leads', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'company=SynthSpeak&contact=Ada+Lovelace&budget=65000'"
+    , "});"
+    , "const createPayload = createLeadRoute.decodeRequest(await requestPayloadJson(createLeadRoute, createRequest));"
+    , "const createdHtml = createLeadRoute.encodeResponse(await createLeadRoute.handler(createPayload));"
+    , "const inboxHtml = inboxRoute.encodeResponse(await inboxRoute.handler({}));"
+    , "const detailHtml = primaryLeadRoute.encodeResponse(await primaryLeadRoute.handler({}));"
+    , "const reviewRequest = new Request('http://example.test/review', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'leadId=lead-3&note=Call+tomorrow'"
+    , "});"
+    , "const reviewPayload = reviewLeadRoute.decodeRequest(await requestPayloadJson(reviewLeadRoute, reviewRequest));"
+    , "const reviewHtml = reviewLeadRoute.encodeResponse(await reviewLeadRoute.handler(reviewPayload));"
+    , "const invalidRequest = new Request('http://example.test/leads', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'company=SynthSpeak&contact=Ada+Lovelace&budget=oops'"
+    , "});"
+    , "let invalidMessage = null;"
+    , "try {"
+    , "  createLeadRoute.decodeRequest(await requestPayloadJson(createLeadRoute, invalidRequest));"
+    , "} catch (error) {"
+    , "  invalidMessage = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  landingHasForm: landingHtml.includes('action=\"/leads\"'),"
+    , "  createdHasLead: createdHtml.includes('SynthSpeak') && createdHtml.includes('Ada Lovelace'),"
+    , "  inboxHasLink: inboxHtml.includes('href=\"/lead/primary\"') && inboxHtml.includes('SynthSpeak (high)'),"
+    , "  detailHasLead: detailHtml.includes('SynthSpeak') && detailHtml.includes('Priority: high'),"
+    , "  reviewHasNote: reviewHtml.includes('Call tomorrow') && reviewHtml.includes('Review status: reviewed'),"
+    , "  invalid: invalidMessage"
+    , "}));"
     ]

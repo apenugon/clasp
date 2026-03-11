@@ -66,6 +66,10 @@ data LowerExpr
   | LViewAppend LowerExpr LowerExpr
   | LViewElement Text LowerExpr
   | LViewStyled Text LowerExpr
+  | LViewLink Text LowerExpr
+  | LViewForm Text Text LowerExpr
+  | LViewInput Text Text LowerExpr
+  | LViewSubmit LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
@@ -154,6 +158,14 @@ lowerCoreExpr expr =
       LViewElement tag (lowerCoreExpr child)
     CViewStyled _ styleRef child ->
       LViewStyled styleRef (lowerCoreExpr child)
+    CViewLink _ href child ->
+      LViewLink href (lowerCoreExpr child)
+    CViewForm _ method action child ->
+      LViewForm method action (lowerCoreExpr child)
+    CViewInput _ fieldName inputKind value ->
+      LViewInput fieldName inputKind (lowerCoreExpr value)
+    CViewSubmit _ label ->
+      LViewSubmit (lowerCoreExpr label)
     CCall _ _ fn args ->
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->
