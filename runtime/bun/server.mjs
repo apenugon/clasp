@@ -54,7 +54,10 @@ export function serveCompiledModule(compiledModule, options = {}) {
         return new Response(route.encodeResponse(result), {
           status: 200,
           headers: {
-            "content-type": "application/json"
+            "content-type":
+              route.responseKind === "page"
+                ? "text/html; charset=utf-8"
+                : "application/json"
           }
         });
       } catch (error) {

@@ -60,6 +60,12 @@ data LowerExpr
   | LInt Integer
   | LString Text
   | LBool Bool
+  | LPage LowerExpr LowerExpr
+  | LViewEmpty
+  | LViewText LowerExpr
+  | LViewAppend LowerExpr LowerExpr
+  | LViewElement Text LowerExpr
+  | LViewStyled Text LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
@@ -136,6 +142,18 @@ lowerCoreExpr expr =
       LString value
     CBool _ value ->
       LBool value
+    CPage _ title body ->
+      LPage (lowerCoreExpr title) (lowerCoreExpr body)
+    CViewEmpty _ ->
+      LViewEmpty
+    CViewText _ value ->
+      LViewText (lowerCoreExpr value)
+    CViewAppend _ left right ->
+      LViewAppend (lowerCoreExpr left) (lowerCoreExpr right)
+    CViewElement _ tag child ->
+      LViewElement tag (lowerCoreExpr child)
+    CViewStyled _ styleRef child ->
+      LViewStyled styleRef (lowerCoreExpr child)
     CCall _ _ fn args ->
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->

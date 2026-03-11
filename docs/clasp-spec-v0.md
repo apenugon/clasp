@@ -30,6 +30,7 @@ It includes:
 - Field access
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
+- Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
 - A lowered backend IR between checking and emission
@@ -236,6 +237,9 @@ Notes:
 - Records are currently restricted to primitive and nested-record fields so generated JSON codecs stay valid.
 - Foreign declarations are currently restricted to function capabilities.
 - Routes currently require record request and response types.
+- Routes may also return compiler-known `Page` values, which emit inert HTML rather than JSON.
+- `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`.
+- Safe views escape text content, reject raw `script`/`style` tags, and keep styling explicit through `styled` references instead of raw host `class` or `style` strings.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.
 
 ## Compiler Pipeline

@@ -20,6 +20,7 @@ common common-options
     , filepath >= 1.4 && < 1.6
     , megaparsec >= 9.6 && < 10
     , mtl >= 2.3 && < 2.4
+    , process >= 1.6 && < 1.7
     , text >= 2.0 && < 2.2
 
 library
