@@ -109,3 +109,38 @@ clasp_swarm_normalize_completion_dir() {
   done
   shopt -u nullglob
 }
+
+clasp_swarm_latest_task_run_dir() {
+  local runs_root="$1"
+  local task_ref="$2"
+  local key=""
+  local latest=""
+
+  key="$(clasp_swarm_completion_key "$task_ref")"
+
+  if [[ ! -d "$runs_root" ]]; then
+    return 0
+  fi
+
+  latest="$(
+    find "$runs_root" -maxdepth 1 -mindepth 1 -type d -name "*-$key-*" | sort | tail -n 1
+  )"
+
+  if [[ -n "$latest" ]]; then
+    printf '%s\n' "$latest"
+  fi
+}
+
+clasp_swarm_task_run_attempt() {
+  local run_dir="$1"
+  local base=""
+
+  base="$(basename "$run_dir")"
+
+  if [[ "$base" =~ -attempt([0-9]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  return 1
+}

@@ -76,6 +76,14 @@ run_with_timeout() {
   fi
 }
 
+run_lane_subprocess() {
+  local timeout_seconds="$1"
+  shift
+
+  run_with_timeout "$timeout_seconds" \
+    bash -c 'exec 9>&-; exec "$@"' _ "$@"
+}
+
 task_id_of() {
   basename "$1" .md
 }
@@ -96,6 +104,144 @@ task_worktree_of() {
 
 task_file_list() {
   find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
+}
+
+task_worktree_registered() {
+  local task_worktree="$1"
+
+  git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $task_worktree"
+}
+
+next_attempt_number_for_task() {
+  local task_id="$1"
+  local latest_run=""
+  local latest_attempt=""
+
+  latest_run="$(clasp_swarm_latest_task_run_dir "$runs_root" "$task_id")"
+
+  if [[ -z "$latest_run" ]]; then
+    printf '1\n'
+    return 0
+  fi
+
+  if latest_attempt="$(clasp_swarm_task_run_attempt "$latest_run" 2>/dev/null)"; then
+    printf '%s\n' "$((latest_attempt + 1))"
+  else
+    printf '1\n'
+  fi
+}
+
+resume_feedback_file=""
+
+resume_incomplete_run() {
+  local task_file="$1"
+  local task_id="$2"
+  local task_branch="$3"
+  local run_dir=""
+  local builder_report=""
+  local verifier_report=""
+  local verifier_log=""
+  local baseline_worktree=""
+  local task_worktree=""
+  local verifier_exit=""
+  local baseline_exit=""
+  local merge_exit=""
+  local verdict=""
+  local integrated_commit=""
+
+  resume_feedback_file=""
+  run_dir="$(clasp_swarm_latest_task_run_dir "$runs_root" "$task_id")"
+
+  if [[ -z "$run_dir" ]]; then
+    return 1
+  fi
+
+  builder_report="$run_dir/builder-report.json"
+  verifier_report="$run_dir/verifier-report.json"
+  verifier_log="$run_dir/verifier-log.jsonl"
+  baseline_worktree="$run_dir/baseline-worktree"
+  task_worktree="$(task_worktree_of "$task_id")"
+
+  if [[ ! -f "$builder_report" || -f "$verifier_report" ]]; then
+    return 1
+  fi
+
+  if ! task_worktree_registered "$task_worktree"; then
+    return 1
+  fi
+
+  echo "resuming $task_id from $(basename "$run_dir")" >&2
+
+  if prepare_baseline_worktree "$baseline_worktree" 2>>"$verifier_log"; then
+    :
+  else
+    baseline_exit="$?"
+    write_failure_report \
+      "$verifier_report" \
+      "Baseline worktree preparation failed while resuming verification." \
+      "$verifier_log" \
+      "$task_id" \
+      "baseline-prep" \
+      "$baseline_exit"
+    archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+    resume_feedback_file="$verifier_report"
+    return 2
+  fi
+
+  commit_task_changes "$task_worktree" "$task_id"
+
+  if run_lane_subprocess "$verifier_timeout_seconds" \
+    bash "$project_root/scripts/clasp-verifier.sh" \
+    "$task_file" \
+    "$task_worktree" \
+    "$baseline_worktree" \
+    "$verifier_report" \
+    "$verifier_log"; then
+    :
+  else
+    verifier_exit="$?"
+    write_failure_report \
+      "$verifier_report" \
+      "Verifier subagent infrastructure failed while resuming a completed builder run." \
+      "$verifier_log" \
+      "$task_id" \
+      "verifier" \
+      "$verifier_exit"
+    archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+    resume_feedback_file="$verifier_report"
+    remove_worktree_if_present "$baseline_worktree"
+    return 2
+  fi
+
+  remove_worktree_if_present "$baseline_worktree"
+  verdict="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(data.verdict);' "$verifier_report")"
+
+  if [[ "$verdict" != "pass" ]]; then
+    archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+    resume_feedback_file="$verifier_report"
+    return 2
+  fi
+
+  if integrate_task_branch "$task_worktree" "$run_dir"; then
+    integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
+    mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    clear_blocked "$task_id"
+    remove_worktree_if_present "$task_worktree"
+    git -C "$project_root" branch -D "$task_branch" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  merge_exit="$?"
+  write_failure_report \
+    "$verifier_report" \
+    "Merge gate or final verification failed before the resumed task could be integrated." \
+    "$run_dir/integration.log" \
+    "$task_id" \
+    "merge-gate" \
+    "$merge_exit"
+  archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+  resume_feedback_file="$verifier_report"
+  return 2
 }
 
 task_dependencies() {
@@ -361,9 +507,17 @@ while IFS= read -r task_file; do
 
   printf '%s\n' "$task_id" > "$current_task_file"
   wait_for_dependencies "$task_file" "$task_id"
-  attempt=1
-  feedback_file=""
   task_branch="$(task_branch_of "$task_id")"
+  feedback_file=""
+  attempt="$(next_attempt_number_for_task "$task_id")"
+
+  if resume_incomplete_run "$task_file" "$task_id" "$task_branch"; then
+    continue
+  fi
+
+  if [[ -n "$resume_feedback_file" ]]; then
+    feedback_file="$resume_feedback_file"
+  fi
 
   while (( attempt <= retry_limit )); do
     run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -408,7 +562,7 @@ while IFS= read -r task_file; do
       continue
     fi
 
-    if run_with_timeout "$builder_timeout_seconds" \
+    if run_lane_subprocess "$builder_timeout_seconds" \
       bash "$project_root/scripts/clasp-builder.sh" \
       "$task_file" \
       "$task_worktree" \
@@ -434,7 +588,7 @@ while IFS= read -r task_file; do
 
     commit_task_changes "$task_worktree" "$task_id"
 
-    if run_with_timeout "$verifier_timeout_seconds" \
+    if run_lane_subprocess "$verifier_timeout_seconds" \
       bash "$project_root/scripts/clasp-verifier.sh" \
       "$task_file" \
       "$task_worktree" \
