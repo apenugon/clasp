@@ -7,10 +7,12 @@ It replaces the earlier mixed-stack benchmark draft with a true vertical slice.
 The target is a benchmark-ready lead-inbox SaaS mini app in both `Clasp` and `TypeScript` with:
 
 - a browser-runnable app a human can click through locally
-- server-rendered HTML pages
+- SSR-first pages built from compiler-owned view/page semantics
 - shared domain contracts
 - typed routes and form handling
 - generated validation
 - in-memory state
 - one AI-shaped boundary
 - mirrored benchmark repos and prompts
+
+The `Clasp` side should not hard-code an `SSR-only` or string-template-only foundation. The goal is a minimal page model that still leaves room for later client/server placement decisions, reactive islands, and rich host-JavaScript interop.

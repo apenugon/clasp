@@ -36,6 +36,13 @@ It should include:
 
 For the first benchmark, frontend credibility comes from real pages and click-through behavior, not from introducing a large SPA framework.
 
+The implementation should be `SSR-first`, not `SSR-only`. The first HTML/page layer should remain compiler-known so later versions can:
+
+- decide what stays on the server
+- decide what can run on the client
+- add reactive client islands or hydration boundaries
+- keep using full host-JavaScript capabilities behind typed boundaries
+
 This is still intentionally below the full long-term product scope. It does not need:
 
 - auth
@@ -63,8 +70,9 @@ These tasks force cross-layer changes while staying small enough for repeated ha
 This slice needs a short critical path of language and runtime features:
 
 - list support for inbox-style payloads and stored lead collections
-- minimal HTML templating or view composition support with safe escaping
-- page/runtime support for returning HTML and handling form-style GET/POST flows
+- a compiler-known view/page surface that lowers into a dedicated rendering model rather than opaque foreign HTML helpers
+- SSR-first page/runtime support for returning HTML and handling form-style GET/POST flows
+- enough placement or capability structure that later compiler passes can reason about server-only, client-only, or island-style behavior
 - a concrete lead-inbox app scaffold with in-memory state, HTML pages, and one AI boundary
 - mirrored benchmark repos and prompts for `Clasp` and `TypeScript`
 
@@ -75,10 +83,10 @@ It does not require waiting for the full schema/control-plane/workflow roadmap.
 The focused swarm wave for this benchmark should execute these tasks in order:
 
 - `FB-001` Add list types, literals, and JSON-boundary support for inbox-style payloads.
-- `FB-002` Add minimal HTML templating/view primitives and JavaScript emission for server-rendered pages.
-- `FB-003` Add runtime support for HTML responses and form-style page flows.
+- `FB-002` Add compiler-known view/page primitives and lowering for SSR-first rendering.
+- `FB-003` Add runtime support for page responses, form actions, and future client/server placement.
 - `FB-004` Define the clickable lead-inbox benchmark slice and mirrored repo contract.
-- `FB-005` Build the Clasp lead-inbox app with server-rendered inbox/detail/intake flows and one AI boundary.
+- `FB-005` Build the Clasp lead-inbox app with compiler-owned pages, server-rendered inbox/detail/intake flows, and one AI boundary.
 - `FB-006` Build the mirrored TypeScript lead-inbox baseline with the same click-through flows.
 - `FB-007` Add mirrored benchmark tasks and prompts for the clickable lead-inbox slice.
 
@@ -89,5 +97,6 @@ This benchmark becomes credible when:
 - the same lead-inbox tasks run against mirrored `Clasp` and `TypeScript` repos
 - both repos boot into a browser-runnable app that a human can click through locally
 - the tasks cross frontend templates, backend logic, shared contracts, validation boundaries, and client-visible behavior
+- the `Clasp` rendering model remains compiler-owned enough to support later SSR/CSR placement and reactive client behavior
 - the benchmark harness can measure intervention-free completion, token cost, repair loops, and time-to-green
 - the story is clearly closer to a real product change than to a toy schema patch

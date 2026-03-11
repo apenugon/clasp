@@ -12,6 +12,7 @@ The first credible benchmark needs a real app slice with human-visible frontend 
 
 - Add a small lead-inbox app in `Clasp` using in-memory state and the existing AI-shaped summary or prioritization boundary.
 - Serve a minimal but real browser flow: intake form, inbox page, and one clickable lead detail or review page.
+- Build that flow on the compiler-owned page/view semantics from `FB-002` and `FB-003`, not on ad hoc foreign HTML helpers.
 - Reuse shared contracts and generated validation rather than hand-coded glue.
 - Add or update regression coverage for app startup, one click-through happy path, and one invalid-boundary or invalid-form path.
 - Avoid database work, auth, client-side framework work, or workflow durability in this task.

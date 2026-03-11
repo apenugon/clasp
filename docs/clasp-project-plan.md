@@ -113,7 +113,8 @@ Outcome:
 
 Exit criteria:
 
-- minimal HTML/page rendering support lands
+- a compiler-owned HTML/page rendering model lands with SSR-first emission
+- the page/runtime foundation preserves a path to later client-side reactivity and placement decisions
 - schemas expand past the current record-only boundary story
 - one end-to-end demo app runs from shared contracts and serves real pages
 
