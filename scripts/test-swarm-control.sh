@@ -23,6 +23,10 @@ bash -lc "
   source '$project_root/scripts/clasp-swarm-common.sh'
   [[ \$(clasp_swarm_task_key 'SW-001-do-something.md') == 'SW-001' ]]
   [[ \$(clasp_swarm_task_key 'agents/swarm/full/02-core-language/LG-019-type-inference.md') == 'LG-019' ]]
+  clasp_swarm_retry_limit_is_bounded '2'
+  ! clasp_swarm_retry_limit_is_bounded '0'
+  ! clasp_swarm_retry_limit_is_bounded '-1'
+  ! clasp_swarm_retry_limit_is_bounded 'forever'
 " >/dev/null
 
 runs_root="$(mktemp -d)"

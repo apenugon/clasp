@@ -40,7 +40,7 @@ merge_lock_file="$project_root/.clasp-swarm/merge.lock"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 branch_prefix="${CLASP_SWARM_BRANCH_PREFIX:-agents/swarm}"
-retry_limit="${CLASP_SWARM_RETRY_LIMIT:-2}"
+retry_limit="${CLASP_SWARM_RETRY_LIMIT:-0}"
 builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-900}"
 verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-600}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
@@ -519,7 +519,13 @@ while IFS= read -r task_file; do
     feedback_file="$resume_feedback_file"
   fi
 
-  while (( attempt <= retry_limit )); do
+  while true; do
+    if clasp_swarm_retry_limit_is_bounded "$retry_limit" && (( attempt > retry_limit )); then
+      mark_blocked "$task_id" "$feedback_file"
+      echo "lane $lane_name blocked on $task_id after $retry_limit attempts" >&2
+      break 2
+    fi
+
     run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     run_dir="$runs_root/$run_stamp-$task_id-attempt$attempt"
     builder_report="$run_dir/builder-report.json"
@@ -645,9 +651,4 @@ while IFS= read -r task_file; do
     fi
   done
 
-  if (( attempt > retry_limit )); then
-    mark_blocked "$task_id" "$feedback_file"
-    echo "lane $lane_name blocked on $task_id after $retry_limit attempts" >&2
-    break
-  fi
 done < <(task_file_list)

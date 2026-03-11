@@ -144,3 +144,9 @@ clasp_swarm_task_run_attempt() {
 
   return 1
 }
+
+clasp_swarm_retry_limit_is_bounded() {
+  local retry_limit="$1"
+
+  [[ "$retry_limit" =~ ^[0-9]+$ ]] && (( retry_limit > 0 ))
+}
