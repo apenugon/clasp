@@ -1,8 +1,8 @@
-# BM-006 Add Control-Plane And Permission-Containment Benchmarks
+# BM-018 Add Boundary-Transport Benchmarks Comparing JSON And Generated Binary Projections On The Same Schema Model
 
 ## Goal
 
-Add control-plane and permission-containment benchmarks
+Add boundary-transport benchmarks comparing `JSON` and generated binary projections on the same schema model
 
 ## Why
 
@@ -10,7 +10,7 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Scope
 
-- Implement `BM-006` as one narrow slice of work: Add control-plane and permission-containment benchmarks
+- Implement `BM-018` as one narrow slice of work: Add boundary-transport benchmarks comparing `JSON` and generated binary projections on the same schema model
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -24,11 +24,11 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Dependencies
 
-- `CP-009`
+- `BM-017`
 
 ## Acceptance
 
-- `BM-006` is implemented without breaking previously integrated tasks
+- `BM-018` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

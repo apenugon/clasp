@@ -6,11 +6,11 @@ Integrate SQLite into the dogfood SaaS app
 
 ## Why
 
-SQLite is the first storage backend after the app and language surfaces are already credible. The dogfood app should consume the compiler-owned storage model directly rather than layering a separate ORM-shaped abstraction back in. This task belongs to the SQLite Storage track.
+SQLite is the first persistence milestone after the app and language surfaces are already credible. This task belongs to the SQLite Storage track.
 
 ## Scope
 
-- Implement `DB-005` as one narrow slice of work: integrate SQLite into the dogfood SaaS app through the compiler-owned storage surface.
+- Implement `DB-005` as one narrow slice of work: Integrate SQLite into the dogfood SaaS app
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

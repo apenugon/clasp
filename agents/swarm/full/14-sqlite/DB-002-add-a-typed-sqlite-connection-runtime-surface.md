@@ -6,11 +6,11 @@ Add a typed SQLite connection/runtime surface
 
 ## Why
 
-SQLite is the first storage backend after the app and language surfaces are already credible. The connection surface should serve a compiler-owned storage model rather than a conventional ORM wrapper. This task belongs to the SQLite Storage track.
+SQLite is the first persistence milestone after the app and language surfaces are already credible. This task belongs to the SQLite Storage track.
 
 ## Scope
 
-- Implement `DB-002` as one narrow slice of work: add a typed SQLite connection/runtime surface for compiler-owned storage capabilities.
+- Implement `DB-002` as one narrow slice of work: Add a typed SQLite connection/runtime surface
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

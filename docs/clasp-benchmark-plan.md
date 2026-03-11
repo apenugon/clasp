@@ -35,6 +35,8 @@ It should:
 - keep the `Clasp` frontend on a compiler-owned view/page model so future SSR/CSR placement and client interactivity remain tractable
 - keep the default `Clasp` SSR renderer safe and inert, with future client-side JavaScript introduced through explicit client modules, islands, or typed host interop rather than arbitrary raw script output
 - include one AI/model or tool boundary that exercises typed untrusted input handling
+- keep the schema model transport-neutral so later benchmark rounds can compare `JSON` and generated binary transports without redefining the app contracts
+- emit machine-readable page/action or UI-flow artifacts where possible so agents are not forced to rely only on browser scraping
 - prefer tasks that can later grow into constrained-value, state-transition, and storage-correctness benchmarks without changing the product surface entirely
 - include at least one explicit interop edge to a host runtime, library, storage engine, or provider SDK
 - ship against real tests and task acceptance criteria rather than hand-waved correctness
@@ -154,6 +156,25 @@ while interoperating cleanly with:
 - host UI runtimes
 
 This is the more honest path to covering most software-building agent work, and it should be reflected in the benchmark suites.
+
+### 8. Benchmark semantic artifacts against raw-text workflows
+
+`Clasp` should not only be benchmarked as source code.
+
+It should also be benchmarked as a supplier of machine-readable artifacts such as:
+
+- context graphs
+- UI/action graphs
+- structured diagnostics
+- semantic edit or refactor operations
+- boundary manifests
+
+Later benchmark rounds should compare:
+
+- text-only and browser-scraping workflows
+- semantic-artifact-assisted workflows
+
+That is the honest way to test whether the language is actually reducing agent work rather than just moving complexity around.
 
 ## Headline Metrics
 

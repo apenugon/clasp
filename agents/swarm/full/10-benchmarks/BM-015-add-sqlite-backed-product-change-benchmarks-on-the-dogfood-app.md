@@ -11,7 +11,6 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 ## Scope
 
 - Implement `BM-015` as one narrow slice of work: Add SQLite-backed product-change benchmarks on the dogfood app
-- Focus the tasks on realistic schema, query, migration, and mutation changes rather than only superficial CRUD wiring
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

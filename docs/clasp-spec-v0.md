@@ -48,6 +48,7 @@ It does not yet include:
 - Workflows
 - Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
 - External-objective declarations such as goals, metrics, experiments, and rollout policies
+- Compiler-emitted context graphs over declarations, capabilities, traces, and external-objective structure
 - Rich LLM-specific syntax beyond foreign/runtime boundaries, including typed prompt functions and provider strategies
 
 Those features remain part of the language direction, but they should be layered onto a stable front-end rather than mixed into the first parser/emitter prototype.

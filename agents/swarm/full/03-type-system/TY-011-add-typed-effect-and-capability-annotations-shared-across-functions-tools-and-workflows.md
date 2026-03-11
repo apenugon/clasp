@@ -2,42 +2,36 @@
 
 ## Goal
 
-Add typed effect and capability annotations shared across functions, tools, and workflows.
+Add typed effect and capability annotations shared across functions, tools, and workflows
 
 ## Why
 
-Clasp needs one coherent static model for authority-bearing behavior if it is going to become the default system language for software-building agents. This task belongs to the Type System And Diagnostics track.
+Clasp needs stronger typing and more useful diagnostics than mainstream baseline stacks if the language thesis is going to hold up. This task belongs to the Type System And Diagnostics track.
 
 ## Scope
 
-- Implement `TY-011` as one narrow slice of work: add typed effect and capability annotations shared across functions, tools, and workflows.
-- Keep the first slice small and semantic: syntax, checking, and machine-readable representation are in scope; a complete runtime enforcement story is not.
-- Ensure the annotations can be reused later by workflow, tool, and policy features instead of inventing separate capability models per subsystem.
-- Add or update regression coverage for parsing, checking, and diagnostic behavior.
-- Update docs or examples only where the new surface changes visible behavior.
+- Implement `TY-011` as one narrow slice of work: Add typed effect and capability annotations shared across functions, tools, and workflows
+- Add or update regression coverage for the new behavior
+- Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
 
 ## Likely Files
 
-- `src/Clasp/Syntax.hs`
-- `src/Clasp/Parser.hs`
-- `src/Clasp/Checker.hs`
 - `src/Clasp/Core.hs`
+- `src/Clasp/Checker.hs`
 - `src/Clasp/Diagnostic.hs`
+- `src/Clasp/Lower.hs`
 - `test/Main.hs`
 - `docs/clasp-spec-v0.md`
-- `docs/ai-native-universal-language.md`
 
 ## Dependencies
 
-- `TY-003`
+- `TY-010`
 
 ## Acceptance
 
-- One typed annotation model exists for authority-bearing behavior across ordinary functions, tools, and workflows.
-- The checker rejects inconsistent or ill-formed effect and capability annotations with structured diagnostics.
-- Machine-readable compiler output preserves the annotations for later control-plane and workflow phases.
-- Tests or regressions cover the new behavior.
+- `TY-011` is implemented without breaking previously integrated tasks
+- Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 
 ## Verification

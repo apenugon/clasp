@@ -6,11 +6,11 @@ Add persistence-bearing benchmarks and failure-mode tests
 
 ## Why
 
-SQLite is the first storage backend after the app and language surfaces are already credible. The benchmark story needs persistence-bearing tasks that expose storage correctness and failure modes, not just CRUD shape changes. This task belongs to the SQLite Storage track.
+SQLite is the first persistence milestone after the app and language surfaces are already credible. This task belongs to the SQLite Storage track.
 
 ## Scope
 
-- Implement `DB-006` as one narrow slice of work: add persistence-bearing benchmarks and failure-mode tests for the compiler-owned storage model.
+- Implement `DB-006` as one narrow slice of work: Add persistence-bearing benchmarks and failure-mode tests
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

@@ -135,6 +135,7 @@ Exit criteria:
 - both repos expose a browser-runnable click-through flow for the benchmark slice
 - benchmark tasks cross frontend templates, backend logic, shared contracts, and one AI/tool boundary
 - at least one interop edge is explicit and typed rather than ad hoc
+- the benchmark slice emits enough machine-readable UI, boundary, or context artifacts that agents are not limited to text search and browser scraping alone
 - benchmark outputs include intervention-free completion, total tokens, repair loops, and time-to-green
 - at least one public-ready benchmark summary can be reproduced
 
@@ -148,6 +149,7 @@ Exit criteria:
 
 - list/option/enum/nested schema codecs work
 - config, tool IO, and persisted state boundaries use generated validation
+- boundary schemas remain transport-neutral, with `JSON` as the first projection rather than the only long-term wire format
 - invariant or constrained-value checks can be declared once and enforced automatically at boundaries
 - provenance and secret-aware handling begin to exist
 
@@ -159,7 +161,7 @@ Outcome:
 
 Exit criteria:
 
-- Clasp can project machine-readable manifests and human docs from those declarations
+- Clasp can project executable machine manifests, machine protocol artifacts, and human docs from those declarations
 - runtime policy enforcement is generated from the same source of truth
 - static context-graph queries can resolve relevant declarations, capabilities, and policy gates
 
@@ -340,11 +342,12 @@ Critical path:
 - `TY-006` Add better related-location data for cross-module interface mismatches.
 - `TY-007` Add fix-suggestion metadata to machine-readable diagnostics.
 - `TY-008` Add JSON-schema-like projections for types and diagnostics where helpful to tools.
-- `TY-009` Add package-aware module resolution beyond the current flattened import model.
-- `TY-010` Add an LSP skeleton that surfaces diagnostics, formatting, and symbol lookup.
+- `TY-009` Add package-aware module resolution and stable module identity beyond the current flattened file-path model.
+- `TY-010` Add a compiler daemon and machine-native protocol, with LSP/editor adapters built on top.
 - `TY-011` Add typed effect and capability annotations shared across functions, tools, and workflows.
 - `TY-012` Add constrained or refinement-style value types for application-level invariants.
 - `TY-013` Add compiler-known typestate or state-machine declarations for UI, workflow, and domain transitions.
+- `TY-014` Add semantic edit and refactor operations over compiler-known declarations and schemas.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -362,6 +365,8 @@ Critical path:
 - `SC-012` Add secret-aware value wrappers and redaction rules.
 - `SC-013` Add typed distinctions between untrusted and trusted values at runtime boundaries.
 - `SC-014` Add invariant, precondition, and postcondition declarations tied to schemas and state transitions.
+- `SC-015` Add transport-neutral schema projections with stable field identity and schema fingerprints.
+- `SC-016` Add generated binary boundary codecs from schemas for efficient service, worker, and agent-to-agent transport.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
@@ -375,9 +380,11 @@ Critical path:
 - `FS-008` Define the React interop boundary for using generated Clasp code in frontend apps.
 - `FS-009` Define the React Native or Expo bridge path for future mobile reuse.
 - `FS-010` Add one mobile-adjacent demo that reuses shared Clasp business logic.
-- `FS-011` Define a stable host-interop contract for `JS`, native, storage, and provider-backed runtimes.
+- `FS-011` Define a stable host-interop contract with structured capability identities for `JS`, native, storage, and provider-backed runtimes.
 - `FS-012` Add a compiler-known style IR with design tokens, variants, target lowering, and explicit raw host-style escape hatches.
 - `FS-013` Add typed page actions, forms, redirects, and navigation contracts for full-stack app flows.
+- `FS-014` Add structured route identity plus typed path, query, form, and body declarations instead of raw string route edges.
+- `FS-015` Emit machine-readable UI, action, and navigation graph artifacts for page-driven app flows.
 
 ### Track 5: Control Plane Declarations
 
@@ -387,13 +394,13 @@ Critical path:
 - `CP-004` Design declarations for agents and agent roles.
 - `CP-005` Design declarations for tool servers and tool contracts.
 - `CP-006` Design declarations for verifier rules and merge gates.
-- `CP-007` Generate machine-readable manifests from control-plane declarations.
+- `CP-007` Generate executable machine manifests and protocol artifacts from control-plane declarations.
 - `CP-008` Generate human-readable docs from the same declarations.
 - `CP-009` Enforce file, network, process, and secret permissions from declared policy.
 - `CP-010` Add policy-decision traces and audit output.
 - `CP-011` Add approval and sandbox policy surfaces as typed configuration, not shell convention.
 - `CP-012` Build one repo-level Clasp control-plane demo that drives a real agent loop.
-- `CP-013` Emit a queryable context graph and expose a stable CLI/API surface for agents and tools.
+- `CP-013` Emit a queryable context graph and expose a stable machine protocol plus CLI/API adapters for agents and tools.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -455,6 +462,8 @@ Critical path:
 - `BM-015` Add SQLite-backed product-change benchmarks on the dogfood app.
 - `BM-016` Add mixed-stack semantic-layer benchmarks where `Clasp` interoperates with host runtimes.
 - `BM-017` Add end-to-end correctness benchmarks for invariants, state transitions, and storage-backed changes.
+- `BM-018` Add boundary-transport benchmarks comparing `JSON` and generated binary projections on the same schema model.
+- `BM-019` Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows.
 
 ### Track 10: SaaS Dogfooding
 
@@ -492,6 +501,7 @@ Critical path:
 - `NB-006` Add native support for the JSON and runtime-boundary features needed by the compiler and SaaS app.
 - `NB-007` Run the self-hosted compiler through the native backend.
 - `NB-008` Benchmark JS/Bun against the native backend on compiler and backend workloads.
+- `NB-009` Add native support for compiler-owned binary boundary codecs and efficient service transport.
 
 ### Track 13: SQLite Storage
 

@@ -86,10 +86,13 @@ Exit criteria:
 - Add name resolution
 - Add a minimal typechecker
 - Add boundary annotations where needed
+- Add stable package/module identity beyond the current file-path-oriented import story
 - Start shaping the type system toward ADTs and exhaustive matching
 - Add constrained or refinement-style value modeling for important application invariants
 - Build structured, high-signal compiler diagnostics instead of raw parser/type errors
 - Treat machine-readable diagnostics as the primary interface and human-oriented rendering as a derived view
+- Add semantic edit and refactor operations over compiler-known declarations rather than relying only on raw text patching
+- Make a machine-native compiler protocol the primary tooling surface, with CLI and editor adapters built on top
 
 Exit criteria:
 
@@ -98,14 +101,16 @@ Exit criteria:
 ## Phase 5: Full-Stack Core
 
 - Add schemas as a language-level construct
-- Add typed serialization and validation derivation
+- Add typed serialization, validation, and transport-projection derivation
 - Add typed route/service definitions
 - Start converging on one shared type universe for frontend/backend boundaries
+- Replace raw string route edges with structured route identity and typed path/query/body contracts
 - Add compiler-known page/view semantics and reserve a compiler-known styling path rather than freezing raw class strings as language law
 - Add typed actions, forms, redirects, and navigation contracts for page and app flows
+- Emit UI/action graph artifacts so agents can reason over product flows semantically rather than only through browser scraping
 - Add compiler-known state-transition or typestate surfaces where they prove benchmark value for app correctness
 - Add typed asset/head/style bundle declarations so UI outputs remain part of one semantic model
-- Formalize stable host interop contracts so the first benchmark can reuse existing ecosystems instead of waiting for rewrites
+- Formalize stable host interop contracts with structured capability identities so the first benchmark can reuse existing ecosystems without stringly binding drift
 
 Exit criteria:
 
@@ -117,6 +122,8 @@ Exit criteria:
 - Auto-run generated validation at runtime trust boundaries
 - Model LLM outputs and tool results as typed but untrusted inputs
 - Use one schema universe for HTTP payloads, tool IO, workflow state, config, and model outputs
+- Keep boundary schemas transport-neutral so `JSON` is a projection, not the permanent semantic model
+- Add binary boundary projections for efficient service, worker, and agent-to-agent communication once the schema model is stable enough
 - Add invariant, precondition, and postcondition declarations that can be checked statically where possible and enforced automatically at boundaries where necessary
 - Add provenance tracking and secret-aware value handling at trust boundaries
 - Start separating untrusted content from authority-bearing instructions and capabilities
@@ -130,7 +137,7 @@ Exit criteria:
 
 - Add compiler-known declarations for repo memory, permissions, commands, hooks, agents, tool servers, verification, and traces
 - Keep these declarations in the same module graph and type universe as application code
-- Generate human-readable docs, machine-readable manifests, CLI wrappers, and runtime config from the same source
+- Generate executable machine manifests, protocol artifacts, human-readable docs, CLI wrappers, and runtime config from the same source
 - Emit a static context graph over code, control-plane declarations, schemas, and capabilities
 - Enforce capability and approval policies from declared semantics instead of shell conventions
 - Add explicit sandbox and least-privilege policy surfaces for file, network, process, secret, and model authority
@@ -222,6 +229,7 @@ Exit criteria:
 - Add a backend-oriented native IR beneath the lowered IR
 - Define a runtime ABI and data layout for native execution
 - Emit real backend-native bytecode or native-target IR instead of depending only on JavaScript for server workloads
+- Support the same compiler-owned boundary projections on the native path, including later binary codecs where they matter for backend transport
 - Run the self-hosted compiler and backend services through the native path
 
 Exit criteria:
@@ -300,6 +308,8 @@ The current implementation should focus on:
 - Building a small clean compiler around the typed core and lowered IR
 - Keeping the language surface intentionally tiny while expanding toward real app-building primitives
 - Using generated codecs, foreign bindings, and typed routes as the base for the first benchmarkable full-stack slice
+- Keeping `JSON` as the first debug-friendly boundary format while preserving a path to later binary projections for high-volume boundaries
+- Moving toward machine-native compiler and platform protocols instead of treating CLI text and path conventions as the long-term primary interface
 - Prioritizing the minimum path to a benchmark-ready moderate SaaS slice over speculative platform breadth
 - Treating interoperability as part of the critical path, not an escape hatch
 - Using the eventual moderate SaaS app as the primary design-pressure test for agent productivity
@@ -317,6 +327,7 @@ Near-term benchmark work should include:
 - measuring intervention-free completion, total tokens, repair loops, and time-to-green
 - expanding into real app-building tasks on a moderate SaaS codebase, because that is the benchmark that matters most for `Clasp`
 - adding mixed-stack scenarios where `Clasp` is the primary semantic layer while `JS`, native, SQL, or provider runtimes remain behind typed boundaries
+- adding later benchmark variants that compare semantic compiler artifacts against raw text- and browser-only workflows
 - expanding later into trust-boundary, control-plane, workflow, LLM-output, and external-objective adaptation benchmarks
 - testing compact-syntax candidates against more verbose alternatives before committing to a final Clasp surface
 

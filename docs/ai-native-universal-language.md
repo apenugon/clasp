@@ -156,6 +156,29 @@ That means:
 
 In other words, diagnostics should be informative to agents by default and human-oriented when explicitly requested or rendered by tools.
 
+### Semantic edits and refactors as first-class compiler artifacts
+
+Agents should not be limited to raw text diffs forever.
+
+If the compiler already understands declarations, schemas, routes, workflows, capabilities, and UI structure, then it should eventually expose machine-writable edit operations over that model.
+
+That means things like:
+
+- renaming a declaration safely across modules
+- propagating a schema change through affected boundaries
+- updating a route contract and regenerating impacted clients
+- evolving a state transition or action contract
+- moving declarations while preserving semantic identity
+
+Those operations should come with:
+
+- explicit preconditions
+- affected-artifact summaries
+- conflict or fallback metadata
+- a stable machine format for proposed edits
+
+Human-readable patches can still be rendered from that result, but the semantic operation should be first-class.
+
 ### 4. First-class schemas
 
 Schemas should be a central language concept, not a library convention.
@@ -208,6 +231,19 @@ One language everywhere should mean:
 
 The main win is that application code does not have to constantly cross hand-maintained type boundaries between frontend and backend, or between workflow code and agent code. Everything inside the Clasp world should use the same definitions.
 
+### Stable module identity, not just filesystem paths
+
+Agents should not have to treat the repository layout as the primary semantic namespace.
+
+`Clasp` should move toward:
+
+- package-aware module identity
+- stable graph addresses for declarations and modules
+- imports that survive routine file moves and refactors
+- projection paths from semantic identity to filesystem layout, not the other way around
+
+File paths will still matter operationally, but they should not remain the only durable notion of identity in the language or tooling model.
+
 This applies to:
 
 - UI state
@@ -252,6 +288,7 @@ The compiler should automatically generate:
 - Serializers
 - Deserializers
 - Schema metadata
+- Transport-projection metadata and stable schema identities
 - Migration hooks where needed
 
 The runtime should automatically execute those generated checks only when values cross trust boundaries.
@@ -263,6 +300,16 @@ That means:
 - Once validation succeeds, the program can treat the value as a normal typed value
 
 This is not like a garbage collector. A better model is automatic boundary enforcement driven by compile-time schema derivation.
+
+That schema model should also stay transport-neutral.
+`JSON` is the right first boundary format for debugging, interop, and the first benchmark, but it should not become the permanent semantic foundation for every runtime boundary.
+The same compiler-owned schema should be able to project to:
+
+- `JSON` for web and human-inspectable boundaries
+- binary formats such as `protobuf`-compatible messages where compact transport matters
+- potentially a `Clasp`-native compact binary format later if that proves better for deterministic agent-to-agent or service-to-service communication
+
+The important part is that `Clasp` owns the schema and the boundary contract first, while wire formats remain generated projections rather than the source of truth.
 
 ### Prove what can be proved, make the rest explicit
 
@@ -547,6 +594,34 @@ The language or its standard platform should understand:
 
 These should not all be left to unrelated third-party frameworks.
 
+### Structured routes and host boundaries, not stringly edges
+
+Routes, host bindings, and foreign capabilities should not remain permanently modeled as raw strings.
+
+The stronger long-term shape is:
+
+- structured route identity
+- typed path, query, form, and body declarations
+- compiler-known handler and boundary metadata
+- structured host capability identifiers and binding manifests
+- explicit unsafe escapes where the compiler stops reasoning about the boundary
+
+That gives agents something stable to query and transform, and avoids treating string literals as the main representation of important runtime contracts.
+
+### UI graphs and action traces as first-class artifacts
+
+If `Clasp` owns pages, actions, forms, navigation, and later client placement, then it should emit machine-readable UI artifacts too.
+
+Those artifacts should cover at least:
+
+- page and component identity
+- action and form contracts
+- navigation edges
+- state and data dependencies
+- rendering or hydration boundaries where relevant
+
+That lets agents reason about product flows semantically instead of relying only on browser scraping or HTML inspection.
+
 ## AI, LLM, and Agent-Native Features
 
 ### 11. Typed model interactions
@@ -617,6 +692,22 @@ The better structure is:
 - A deterministic projection pipeline that emits docs, manifests, wrappers, traces, and runtime metadata
 
 That keeps the language law small while still making the platform first-class.
+
+### Machine protocols first, CLIs and docs as projections
+
+The primary interface to the compiler and platform should eventually be a stable machine protocol, not only a collection of human-oriented CLI commands.
+
+That protocol should support:
+
+- checking
+- compilation
+- graph queries
+- projection queries
+- semantic edit requests
+- refactor previews
+- diagnostics and trace retrieval
+
+CLI commands, browser tools, and human-readable docs should be projections over the same model. They are important, but they should not be the only durable interface agents can rely on.
 
 ### First-class control-plane declarations
 

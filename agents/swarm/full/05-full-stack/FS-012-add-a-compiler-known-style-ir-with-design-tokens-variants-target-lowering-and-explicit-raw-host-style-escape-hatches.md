@@ -1,8 +1,8 @@
-# FS-013 Add Typed Page Actions, Forms, Redirects, And Navigation Contracts For Full-Stack App Flows
+# FS-012 Add A Compiler-Known Style IR With Design Tokens, Variants, Target Lowering, And Explicit Raw Host-Style Escape Hatches
 
 ## Goal
 
-Add typed page actions, forms, redirects, and navigation contracts for full-stack app flows
+Add a compiler-known style IR with design tokens, variants, target lowering, and explicit raw host-style escape hatches
 
 ## Why
 
@@ -10,7 +10,7 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 ## Scope
 
-- Implement `FS-013` as one narrow slice of work: Add typed page actions, forms, redirects, and navigation contracts for full-stack app flows
+- Implement `FS-012` as one narrow slice of work: Add a compiler-known style IR with design tokens, variants, target lowering, and explicit raw host-style escape hatches
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -26,11 +26,11 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 ## Dependencies
 
-- `FS-012`
+- `FS-011`
 
 ## Acceptance
 
-- `FS-013` is implemented without breaking previously integrated tasks
+- `FS-012` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

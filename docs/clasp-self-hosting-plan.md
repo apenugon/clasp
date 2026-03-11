@@ -20,7 +20,7 @@ The migration becomes worthwhile once these conditions hold:
 - modules and package-aware resolution are stable enough for compiler code
 - ADTs, records, pattern matching, lists, and local control flow are comfortable enough to express compiler passes
 - `Option`, `Result`, and enough genericity exist for ordinary compiler data structures
-- file, path, JSON, text, and CLI support exist in the runtime
+- file, path, text, schema-projection, and machine-protocol support exist in the runtime
 - tests and bootstrap checks are strong enough to catch semantic drift
 
 In roadmap terms, this means:
@@ -33,11 +33,12 @@ In roadmap terms, this means:
 Before a serious self-hosting push, the repo should already have:
 
 - a stable typed core and lowered IR
-- package-aware module resolution
+- package-aware module resolution with stable module identity
 - a formatter and explain-mode path
+- a machine-native compiler protocol that can serve checking, graph queries, and projections
 - regression-heavy parser/checker/emitter tests
 - deterministic build outputs where practical
-- enough standard-library support for text processing, collections, filesystem access, JSON, and CLI behavior
+- enough standard-library support for text processing, collections, filesystem access, schema projections, and protocol-serving behavior
 
 ## Migration Order
 
@@ -48,6 +49,7 @@ Build the `Clasp` standard-library surface needed by compiler code:
 - text builders and parsing helpers
 - collections used by the compiler
 - file and path utilities
+- protocol and semantic-query helpers
 - structured diagnostics and rendering helpers
 - test helpers for golden files and round-trip checks
 

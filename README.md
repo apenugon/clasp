@@ -21,6 +21,7 @@ It is trying to make one idea real:
 - one shared type and schema system everywhere
 - generated validation at trust boundaries
 - a language surface optimized for agent reasoning, repair, and change propagation
+- machine-native compiler artifacts and protocol surfaces instead of text-only tooling by default
 
 Long term, `Clasp` is not trying to replace every low-level substrate. The aim is to become the default system language for most software-building agents while letting JavaScript, native code, databases, and provider SDKs live behind typed, auditable boundaries when that is the more practical choice.
 
@@ -68,6 +69,14 @@ Current implementation highlights:
 - generated JSON decode/encode validation for supported boundary types
 - JavaScript emission
 - Bun-backed demo runtime for route serving
+
+Long-term direction that matters for agents:
+
+- package/module identity beyond raw filesystem paths
+- structured host and route boundaries instead of stringly binding surfaces
+- compiler-emitted context, UI, and boundary artifacts that agents can query directly
+- semantic edit and refactor operations beyond raw text patching
+- a machine-native compiler protocol with human-facing CLI and docs as derived views
 
 ## Architecture
 

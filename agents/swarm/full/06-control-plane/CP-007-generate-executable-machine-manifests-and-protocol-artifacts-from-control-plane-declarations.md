@@ -1,8 +1,8 @@
-# CP-007 Generate Machine-Readable Manifests From Control-Plane Declarations
+# CP-007 Generate Executable Machine Manifests And Protocol Artifacts From Control-Plane Declarations
 
 ## Goal
 
-Generate machine-readable manifests from control-plane declarations
+Generate executable machine manifests and protocol artifacts from control-plane declarations
 
 ## Why
 
@@ -10,7 +10,7 @@ The agent platform only becomes real when permissions, commands, hooks, agents, 
 
 ## Scope
 
-- Implement `CP-007` as one narrow slice of work: Generate machine-readable manifests from control-plane declarations
+- Implement `CP-007` as one narrow slice of work: Generate executable machine manifests and protocol artifacts from control-plane declarations
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

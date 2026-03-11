@@ -1,8 +1,8 @@
-# SC-014 Add Invariant, Precondition, And Postcondition Declarations Tied To Schemas And State Transitions
+# SC-015 Add Transport-Neutral Schema Projections With Stable Field Identity And Schema Fingerprints
 
 ## Goal
 
-Add invariant, precondition, and postcondition declarations tied to schemas and state transitions
+Add transport-neutral schema projections with stable field identity and schema fingerprints
 
 ## Why
 
@@ -10,7 +10,7 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Scope
 
-- Implement `SC-014` as one narrow slice of work: Add invariant, precondition, and postcondition declarations tied to schemas and state transitions
+- Implement `SC-015` as one narrow slice of work: Add transport-neutral schema projections with stable field identity and schema fingerprints
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -27,11 +27,11 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Dependencies
 
-- `SC-013`
+- `SC-014`
 
 ## Acceptance
 
-- `SC-014` is implemented without breaking previously integrated tasks
+- `SC-015` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

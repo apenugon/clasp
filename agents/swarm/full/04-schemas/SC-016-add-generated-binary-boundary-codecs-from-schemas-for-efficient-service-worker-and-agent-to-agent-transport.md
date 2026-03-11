@@ -1,8 +1,8 @@
-# SC-014 Add Invariant, Precondition, And Postcondition Declarations Tied To Schemas And State Transitions
+# SC-016 Add Generated Binary Boundary Codecs From Schemas For Efficient Service, Worker, And Agent-To-Agent Transport
 
 ## Goal
 
-Add invariant, precondition, and postcondition declarations tied to schemas and state transitions
+Add generated binary boundary codecs from schemas for efficient service, worker, and agent-to-agent transport
 
 ## Why
 
@@ -10,7 +10,7 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Scope
 
-- Implement `SC-014` as one narrow slice of work: Add invariant, precondition, and postcondition declarations tied to schemas and state transitions
+- Implement `SC-016` as one narrow slice of work: Add generated binary boundary codecs from schemas for efficient service, worker, and agent-to-agent transport
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -27,11 +27,11 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Dependencies
 
-- `SC-013`
+- `SC-015`
 
 ## Acceptance
 
-- `SC-014` is implemented without breaking previously integrated tasks
+- `SC-016` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 
