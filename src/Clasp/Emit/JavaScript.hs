@@ -33,11 +33,12 @@ emitModule modl =
     ]
       <> emitRuntimePrelude
       <> emitPrimitiveCodecHelpers
+      <> emitRequestSchemaHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
-      <> emitRoutesExport (lowerModuleRoutes modl)
+      <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
 
 emitRuntimePrelude :: [Text]
 emitRuntimePrelude =
@@ -164,6 +165,56 @@ emitPrimitiveCodecHelpers =
   , "function $encode_Bool(value) { return JSON.stringify($claspExpectBool(value, \"value\")); }"
   , ""
   ]
+
+emitRequestSchemaHelpers :: [TypeDecl] -> [RecordDecl] -> [Text]
+emitRequestSchemaHelpers typeDecls recordDecls =
+  [ "const $claspSchema_Int = { kind: \"int\" };"
+  , "const $claspSchema_Str = { kind: \"str\" };"
+  , "const $claspSchema_Bool = { kind: \"bool\" };"
+  ]
+    <> concatMap emitTypeSchema typeDecls
+    <> concatMap emitRecordSchema recordDecls
+    <> [""]
+  where
+    emitTypeSchema typeDecl
+      | isJsonEnumTypeDecl typeDecl =
+          [ "const $claspSchema_" <> typeDeclName typeDecl <> " = { kind: \"enum\", name: " <> emitStringLiteral (typeDeclName typeDecl) <> " };"
+          ]
+      | otherwise =
+          []
+
+    emitRecordSchema recordDecl =
+      [ "const $claspSchema_" <> recordDeclName recordDecl <> " = {"
+      , "  kind: \"record\","
+      , "  name: " <> emitStringLiteral (recordDeclName recordDecl) <> ","
+      , "  fields: {"
+      ]
+        <> fmap emitRecordFieldSchema (recordDeclFields recordDecl)
+        <> [ "  }"
+           , "};"
+           ]
+
+    emitRecordFieldSchema fieldDecl =
+      "    "
+        <> recordFieldDeclName fieldDecl
+        <> ": "
+        <> emitRequestSchemaRef (recordFieldDeclType fieldDecl)
+        <> ","
+
+    emitRequestSchemaRef typ =
+      case typ of
+        TInt ->
+          "$claspSchema_Int"
+        TStr ->
+          "$claspSchema_Str"
+        TBool ->
+          "$claspSchema_Bool"
+        TNamed name ->
+          if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+            then "$claspSchema_" <> name
+            else "null"
+        TFunction _ _ ->
+          "null"
 
 emitTypeCodecHelpers :: TypeDecl -> [Text]
 emitTypeCodecHelpers typeDecl
@@ -305,8 +356,8 @@ foreignParams typ =
     _ ->
       []
 
-emitRoutesExport :: [LowerRoute] -> [Text]
-emitRoutesExport routes =
+emitRoutesExport :: [TypeDecl] -> [RecordDecl] -> [LowerRoute] -> [Text]
+emitRoutesExport typeDecls recordDecls routes =
   [ "export const __claspRoutes = ["
   ]
     <> concatMap emitRoute routes
@@ -329,6 +380,7 @@ emitRoutesExport routes =
       , "    method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
       , "    path: " <> emitStringLiteral (lowerRoutePath route) <> ","
       , "    requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
+      , "    requestSchema: " <> emitRouteRequestSchema (lowerRouteRequestTypeName route) <> ","
       , "    responseType: " <> emitStringLiteral (lowerRouteResponseTypeName route) <> ","
       , "    responseKind: " <> emitStringLiteral responseKind <> ","
       , "    handler: " <> emitIdentifier (lowerRouteHandlerName route) <> ","
@@ -336,6 +388,14 @@ emitRoutesExport routes =
       , "    encodeResponse: " <> responseEncoder
       , "  },"
       ]
+
+    emitRouteRequestSchema typeName
+      | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
+          "$claspSchema_" <> typeName
+      | any ((== typeName) . typeDeclName) typeDecls || any ((== typeName) . recordDeclName) recordDecls =
+          "$claspSchema_" <> typeName
+      | otherwise =
+          "null"
 
 emitRouteMethod :: RouteMethod -> Text
 emitRouteMethod routeMethod =

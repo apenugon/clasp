@@ -399,6 +399,7 @@ compileTests =
             assertBool "expected record encoder to validate internal values" ("function $encode_LeadSummary(value) { return JSON.stringify($serialize_LeadSummary($validateInternal_LeadSummary(value, \"value\"))); }" `T.isInfixOf` emitted)
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
+            assertBool "expected request schema metadata" ("requestSchema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
     , testCase "compile emits safe page rendering helpers and page route metadata" $
         case compileSource "page" pageSource of
           Left err ->
@@ -444,6 +445,22 @@ compileTests =
               assertBool "expected escaped subject" ("&lt;Quarterly &lt;review&gt;&gt;" `T.isInfixOf` renderedHtml)
               assertBool "expected escaped ampersand" ("Escaped &amp; archived" `T.isInfixOf` renderedHtml)
               assertBool "expected explicit style ref wrapper" ("data-clasp-style=\"inbox_shell\"" `T.isInfixOf` renderedHtml)
+    , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
+        withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+              runtimeOutput <- runNodeScript (pageFormRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+              assertEqual
+                "expected query decode, form decode, and invalid form failure"
+                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"value.quantity expected an Int\"}"
+                runtimeOutput
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -494,25 +511,30 @@ lowerChecked path source = do
 runNodeModule :: FilePath -> IO Text
 runNodeModule compiledPath = do
   absolutePath <- makeAbsolute compiledPath
+  runNodeScript $
+    T.pack . unlines $
+      [ "import * as compiledModule from " <> show ("file://" <> absolutePath) <> ";"
+      , "const route = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'inboxRoute');"
+      , "if (!route) { throw new Error('missing inboxRoute'); }"
+      , "const html = await route.encodeResponse(await route.handler({}));"
+      , "console.log(html);"
+      ]
+
+runNodeScript :: Text -> IO Text
+runNodeScript script = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
       "node"
       [ "--input-type=module"
       , "--eval"
-      , unlines
-          [ "import * as compiledModule from " <> show ("file://" <> absolutePath) <> ";"
-          , "const route = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'inboxRoute');"
-          , "if (!route) { throw new Error('missing inboxRoute'); }"
-          , "const html = await route.encodeResponse(await route.handler({}));"
-          , "console.log(html);"
-          ]
+      , T.unpack script
       ]
       ""
   case exitCode of
     ExitSuccess ->
       pure (T.strip (T.pack stdoutText))
     ExitFailure _ ->
-      assertFailure ("node render failed:\n" <> stderrText)
+      assertFailure ("node script failed:\n" <> stderrText)
 
 withProjectFiles :: FilePath -> [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
 withProjectFiles fixtureName files action = do
@@ -830,6 +852,11 @@ inboxPageFiles =
   , ("Shared/Inbox.clasp", sharedInboxSource)
   ]
 
+pageFormRuntimeFiles :: [(FilePath, Text)]
+pageFormRuntimeFiles =
+  [ ("Main.clasp", pageFormRuntimeSource)
+  ]
+
 missingImportFiles :: [(FilePath, Text)]
 missingImportFiles =
   [ ("Main.clasp", missingImportMainSource)
@@ -911,4 +938,52 @@ sharedInboxSource =
     , ""
     , "renderInbox : InboxData -> Page"
     , "renderInbox data = page data.headline (styled \"inbox_shell\" (element \"main\" (append (element \"h1\" (text data.headline)) (append (element \"article\" (text data.primarySubject)) (element \"article\" (text data.secondarySubject))))))"
+    ]
+
+pageFormRuntimeSource :: Text
+pageFormRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record OrderLookup = {"
+    , "  customerId : Str,"
+    , "  quantity : Int"
+    , "}"
+    , ""
+    , "orderPage : OrderLookup -> Page"
+    , "orderPage lookup = page \"Order\" (text lookup.customerId)"
+    , ""
+    , "route lookupRoute = GET \"/order\" OrderLookup -> Page orderPage"
+    , "route submitRoute = POST \"/order\" OrderLookup -> Page orderPage"
+    ]
+
+pageFormRuntimeScript :: FilePath -> FilePath -> Text
+pageFormRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const lookupRoute = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'lookupRoute');"
+    , "const submitRoute = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'submitRoute');"
+    , "if (!lookupRoute || !submitRoute) { throw new Error('missing routes'); }"
+    , "const queryRequest = new Request('http://example.test/order?customerId=00123&quantity=7', { method: 'GET' });"
+    , "const formRequest = new Request('http://example.test/order', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'customerId=00123&quantity=7'"
+    , "});"
+    , "const invalidFormRequest = new Request('http://example.test/order', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'customerId=00123&quantity=oops'"
+    , "});"
+    , "const queryPayload = lookupRoute.decodeRequest(await requestPayloadJson(lookupRoute, queryRequest));"
+    , "const formPayload = submitRoute.decodeRequest(await requestPayloadJson(submitRoute, formRequest));"
+    , "const html = submitRoute.encodeResponse(await submitRoute.handler(formPayload));"
+    , "let invalidMessage = null;"
+    , "try {"
+    , "  submitRoute.decodeRequest(await requestPayloadJson(submitRoute, invalidFormRequest));"
+    , "} catch (error) {"
+    , "  invalidMessage = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({ query: queryPayload, form: formPayload, html, invalid: invalidMessage }));"
     ]
