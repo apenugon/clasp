@@ -28,7 +28,9 @@ The current gaps are not just language features. The project also needs:
 
 - smaller, better-scoped agent tasks
 - stronger compiler and runtime semantics
+- stronger correctness semantics beyond plain structural typing
 - richer full-stack and AI-native surfaces
+- a native storage model rather than ORM-shaped wrappers
 - a better control-plane story
 - built-in context graphs rather than repository search as the main relevance mechanism
 - benchmark coverage broad enough to justify the language
@@ -41,7 +43,7 @@ It should be a benchmark-ready moderate SaaS slice where:
 
 - `Clasp` owns shared schemas, generated boundary validation, backend logic, generated clients, and one AI/tool boundary
 - the tasks require coordinated frontend, backend, and contract changes
-- the first compiler-owned page layer defaults to safe SSR output while leaving room for later explicit client modules or island-style interactivity
+- the first compiler-owned page and styling layer defaults to safe SSR output and typed styling semantics while leaving room for later explicit client modules or island-style interactivity
 - at least one host/runtime boundary remains in play so interoperability is being tested rather than wished into existence
 - the same scenarios run against a practical `TypeScript` baseline, with `Python` variants where orchestration-heavy comparisons are useful
 
@@ -115,6 +117,8 @@ Outcome:
 Exit criteria:
 
 - a compiler-owned HTML/page rendering model lands with SSR-first emission
+- the compiler-owned UI surface does not normalize raw host `class` or `style` strings as the default styling model
+- typed actions, forms, redirects, and navigation contracts exist for the benchmark slice or are one narrow task away
 - the page/runtime foundation preserves a path to later client-side reactivity and placement decisions without treating arbitrary active content as safe default page output
 - schemas expand past the current record-only boundary story
 - one end-to-end demo app runs from shared contracts and serves real pages
@@ -144,6 +148,7 @@ Exit criteria:
 
 - list/option/enum/nested schema codecs work
 - config, tool IO, and persisted state boundaries use generated validation
+- invariant or constrained-value checks can be declared once and enforced automatically at boundaries
 - provenance and secret-aware handling begin to exist
 
 ### M4: Control Plane in Clasp
@@ -230,15 +235,17 @@ Exit criteria:
 - the compiler and backend demos can run without Bun
 - the same front end and type system drive both JS and native backends
 
-### M11: SQLite Storage
+### M11: Native Storage With SQLite First
 
 Outcome:
 
-- Clasp has a typed SQLite boundary and the SaaS app can persist real state
+- Clasp has a language-native typed storage model with SQLite as the first backend, and the SaaS app can persist real state
 
 Exit criteria:
 
-- typed connection, query, and migration surfaces exist
+- typed connection, query, transaction, and migration surfaces exist
+- schema-derived storage constraints exist where the storage backend can enforce them
+- raw SQL remains an explicit unsafe or foreign boundary rather than the default query model
 - the SaaS app runs with SQLite-backed persistence
 - persistence-bearing app benchmarks land
 
@@ -336,6 +343,8 @@ Critical path:
 - `TY-009` Add package-aware module resolution beyond the current flattened import model.
 - `TY-010` Add an LSP skeleton that surfaces diagnostics, formatting, and symbol lookup.
 - `TY-011` Add typed effect and capability annotations shared across functions, tools, and workflows.
+- `TY-012` Add constrained or refinement-style value types for application-level invariants.
+- `TY-013` Add compiler-known typestate or state-machine declarations for UI, workflow, and domain transitions.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -352,13 +361,14 @@ Critical path:
 - `SC-011` Add provenance tracking for trust-boundary values.
 - `SC-012` Add secret-aware value wrappers and redaction rules.
 - `SC-013` Add typed distinctions between untrusted and trusted values at runtime boundaries.
+- `SC-014` Add invariant, precondition, and postcondition declarations tied to schemas and state transitions.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
 - `FS-001` Generate typed route clients from route declarations.
 - `FS-002` Add a browser/client runtime helper layer for generated route clients.
 - `FS-003` Build the first shared frontend-plus-backend demo app in Clasp.
-- `FS-004` Add static asset and app bundling strategy for generated JS output.
+- `FS-004` Add static asset, head, and style-bundle strategy for generated JS output.
 - `FS-005` Clean up the Bun runtime surface and formalize its generated binding contract.
 - `FS-006` Add worker/job runtime scaffolding using the same type and schema model.
 - `FS-007` Add auth/session primitives only if required by the first realistic demo app.
@@ -366,6 +376,8 @@ Critical path:
 - `FS-009` Define the React Native or Expo bridge path for future mobile reuse.
 - `FS-010` Add one mobile-adjacent demo that reuses shared Clasp business logic.
 - `FS-011` Define a stable host-interop contract for `JS`, native, storage, and provider-backed runtimes.
+- `FS-012` Add a compiler-known style IR with design tokens, variants, target lowering, and explicit raw host-style escape hatches.
+- `FS-013` Add typed page actions, forms, redirects, and navigation contracts for full-stack app flows.
 
 ### Track 5: Control Plane Declarations
 
@@ -442,6 +454,7 @@ Critical path:
 - `BM-014` Add backend compile-time and runtime benchmarks comparing JS/Bun and the native backend.
 - `BM-015` Add SQLite-backed product-change benchmarks on the dogfood app.
 - `BM-016` Add mixed-stack semantic-layer benchmarks where `Clasp` interoperates with host runtimes.
+- `BM-017` Add end-to-end correctness benchmarks for invariants, state transitions, and storage-backed changes.
 
 ### Track 10: SaaS Dogfooding
 
@@ -488,6 +501,9 @@ Critical path:
 - `DB-004` Add schema migration and compatibility hooks for SQLite-backed apps.
 - `DB-005` Integrate SQLite into the dogfood SaaS app.
 - `DB-006` Add persistence-bearing benchmarks and failure-mode tests.
+- `DB-007` Add schema-derived table declarations and generated database constraints.
+- `DB-008` Add typed transactions, isolation boundaries, and mutation semantics for storage effects.
+- `DB-009` Add explicit unsafe SQL escape hatches with typed row contracts and audit metadata.
 
 ## Suggested Dispatch Waves
 
@@ -585,12 +601,13 @@ Reason:
 
 Dispatch after Wave 8:
 
-- `DB-001` through `DB-006`
+- `DB-001` through `DB-009`
 - `BM-015`
+- `BM-017`
 
 Reason:
 
-- SQLite should be the first persistence milestone after the stateless or in-memory app path is already credible
+- SQLite should be the first storage backend for a language-native persistence model after the stateless or in-memory app path is already credible
 
 ## Immediate Recommendation
 

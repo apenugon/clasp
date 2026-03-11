@@ -264,6 +264,56 @@ That means:
 
 This is not like a garbage collector. A better model is automatic boundary enforcement driven by compile-time schema derivation.
 
+### Prove what can be proved, make the rest explicit
+
+The right correctness target for `Clasp` is not to pretend that every real app property can be solved statically.
+
+The right target is:
+
+- prove closed-world invariants at compile time where the program model is rich enough
+- generate runtime checks automatically where values cross open-world trust boundaries
+- make every remaining unproven assumption explicit in types, capabilities, storage boundaries, or effect surfaces
+
+This keeps the semantic model honest.
+Browsers, databases, users, clocks, networks, and models are still real runtime actors.
+But they should enter the system through typed, auditable surfaces rather than through unstructured escape hatches.
+
+### Refinement and constrained value types
+
+Shared schemas are necessary, but not sufficient for application correctness.
+
+The language should eventually support constrained or refinement-style value modeling for cases like:
+
+- non-empty strings
+- validated email or URL values
+- positive or bounded integers
+- money and unit-safe quantities
+- normalized IDs and strongly distinguished identifier types
+- value ranges that matter to UI, business logic, and storage alike
+
+Where possible, the compiler should prove these constraints statically.
+Where values arrive from external boundaries, the compiler should generate the corresponding validators automatically rather than relying on ad hoc user code.
+
+### Typestate and protocol correctness
+
+Many full-stack bugs are not simple shape mismatches.
+They are illegal state transitions.
+
+So `Clasp` should eventually support compiler-known state-machine or typestate declarations for:
+
+- UI and page flows
+- form and action submission lifecycles
+- business-object state transitions
+- workflow and job progression
+- tool and model interaction protocols
+
+This should let the compiler reject invalid transitions such as:
+
+- navigating to a page state that cannot exist yet
+- returning a review result for an object that was never submitted
+- reusing a completed one-shot token
+- applying an action that is illegal for the current state
+
 ### LLMs and agents as typed but untrusted edges
 
 LLM and agent systems are one of the strongest reasons to design Clasp this way.
@@ -301,6 +351,23 @@ Clasp should also support:
 - Explicit checkpoint and resume points
 
 This is how "one language everywhere" remains safe over time instead of only at initial compile time.
+
+### Native storage, not a wrapped ORM
+
+If `Clasp` is meant to provide end-to-end correctness across full-stack apps, storage should not stay as a library-shaped ORM bolted onto the side.
+
+The stronger model is:
+
+- one schema system for API, UI, workflow, and persisted data
+- compiler-known storage declarations that lower to a concrete backend
+- typed queries and row shapes
+- typed transactions and mutation boundaries
+- generated migrations and compatibility checks
+- generated database constraints from the same schema and invariant model where possible
+
+`SQLite` can be the first storage backend, but it should be the first backend for a language-native storage model, not just a nicer wrapper around handwritten SQL.
+
+Raw SQL should still exist, but only through explicit host or unsafe escape hatches with typed contracts.
 
 ### Hot swap and self-update
 
@@ -424,6 +491,7 @@ For true full-stack viability, the language should have a coherent way to expres
 - Async data loading
 - Streaming updates
 - Offline/cache behavior
+- Styling tokens, variants, and composition
 
 For mobile, the same language should either:
 
@@ -431,6 +499,38 @@ For mobile, the same language should either:
 - Drive a high-quality cross-platform UI runtime
 
 The important part is that application logic, types, schemas, permissions, and workflows are shared, even if rendering backends differ.
+
+UI structure should not be compiler-known while styling remains ambient string soup.
+If `Clasp` is meant to support compiler-managed SSR/CSR placement, cross-target UI reuse, and agent-friendly refactors, then styling semantics also need a compiler-owned model.
+
+### Compiler-known styling, not ambient class strings
+
+The long-term UI layer should treat styling more like typed data than like unstructured HTML attributes.
+
+That means:
+
+- first-class design tokens for color, spacing, typography, radius, layout, and motion
+- first-class variants for responsive breakpoints, pseudo-state, theme, and state-driven branches
+- composable style groups with stable identity in the semantic model
+- target-specific lowering so the same style intent can become CSS/classes on the web, style objects on native surfaces, or other host renderers
+- asset and head declarations that stay tied to the same semantic model as pages and components
+
+The default model should not be free-form `class` or raw `style` strings.
+
+Those raw host styling surfaces should still exist, but as explicit escape hatches such as:
+
+- typed handles to imported host styles
+- clearly marked `unsafe` or host-specific raw class/style escapes
+- foreign or host-module boundaries for cases where the compiler should stop reasoning about portability
+
+This matters for more than aesthetics.
+It is what enables:
+
+- deterministic extraction and dead-style elimination
+- safe refactors over styling as well as structure
+- future SSR/CSR and island placement decisions that can reason about style dependencies
+- cross-target reuse beyond the browser
+- lower cognitive load for agents compared with ad hoc class-string conventions
 
 ### 10. Full-stack primitives in the standard model
 
@@ -781,13 +881,19 @@ If `Clasp` cannot answer that kind of question directly from its semantic model,
 The language should support multiple layers of verification:
 
 - Static types
+- Refinement or constrained value checks
+- Typestate and transition validation
 - Preconditions and postconditions
 - Assertions
 - Schema validation
+- Generated storage constraints and migration compatibility checks
 - Property-based testing
 - Deterministic test fixtures
 - Permission checks
 - Workflow invariants
+- Information-flow and capability checks
+
+Where it materially improves product-level guarantees, the platform should also leave room for solver-backed invariant checking rather than limiting itself to syntax-directed type rules alone.
 
 ### 16. Capability-based security
 

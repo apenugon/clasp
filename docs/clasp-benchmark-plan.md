@@ -35,6 +35,7 @@ It should:
 - keep the `Clasp` frontend on a compiler-owned view/page model so future SSR/CSR placement and client interactivity remain tractable
 - keep the default `Clasp` SSR renderer safe and inert, with future client-side JavaScript introduced through explicit client modules, islands, or typed host interop rather than arbitrary raw script output
 - include one AI/model or tool boundary that exercises typed untrusted input handling
+- prefer tasks that can later grow into constrained-value, state-transition, and storage-correctness benchmarks without changing the product surface entirely
 - include at least one explicit interop edge to a host runtime, library, storage engine, or provider SDK
 - ship against real tests and task acceptance criteria rather than hand-waved correctness
 - run under `Codex` and `Claude Code` against mirrored `Clasp` and `TypeScript` repos, with `Python` variants where orchestration-heavy comparisons are useful
@@ -487,6 +488,17 @@ Tasks where `Clasp` owns the system model while host-specific pieces remain in o
 
 These tasks matter because the real adoption path is not substrate purity. It is making `Clasp` the primary semantic layer of a mixed system.
 
+### Suite I: Correctness and storage tasks
+
+Tasks that stress whether `Clasp` can prove more of the app before runtime:
+
+- add a constrained field and propagate it through forms, routes, storage, and model validation
+- forbid an illegal business-object state transition and update affected pages and actions
+- add a storage constraint or migration and keep query and mutation code correct
+- tighten a transaction or mutation rule without leaking raw SQL or ambient side effects
+
+These tasks matter because the strongest claim for `Clasp` is not just less glue. It is more compile-time and boundary-time correctness across the whole product stack.
+
 ## Benchmark Scenarios
 
 Each scenario should define:
@@ -538,6 +550,7 @@ Language and platform decisions should be judged against questions like:
 - Does this reduce total repair loops?
 - Does this reduce total token spend?
 - Does this improve compile-time defect detection?
+- Does this improve detection of illegal state transitions, invariant violations, and storage mismatches?
 - Does this reduce failures at trust boundaries?
 - Does this make external-objective-driven changes more direct and auditable?
 - Does this improve least-privilege enforcement and secret containment?
@@ -553,6 +566,7 @@ Over time, `Clasp` should aim to demonstrate:
 - higher intervention-free completion rates than baseline languages on full-stack AI-heavy tasks
 - lower total token cost for completing the same task
 - higher compile-time catch rates for cross-layer contract mistakes
+- higher catch rates for illegal state transitions, constrained-value violations, and storage-schema drift
 - better recovery from invalid LLM/tool outputs
 - better durability for long-running workflows
 - more shared definitions across frontend, backend, and agent systems

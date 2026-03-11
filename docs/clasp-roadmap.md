@@ -87,6 +87,7 @@ Exit criteria:
 - Add a minimal typechecker
 - Add boundary annotations where needed
 - Start shaping the type system toward ADTs and exhaustive matching
+- Add constrained or refinement-style value modeling for important application invariants
 - Build structured, high-signal compiler diagnostics instead of raw parser/type errors
 - Treat machine-readable diagnostics as the primary interface and human-oriented rendering as a derived view
 
@@ -100,11 +101,15 @@ Exit criteria:
 - Add typed serialization and validation derivation
 - Add typed route/service definitions
 - Start converging on one shared type universe for frontend/backend boundaries
+- Add compiler-known page/view semantics and reserve a compiler-known styling path rather than freezing raw class strings as language law
+- Add typed actions, forms, redirects, and navigation contracts for page and app flows
+- Add compiler-known state-transition or typestate surfaces where they prove benchmark value for app correctness
+- Add typed asset/head/style bundle declarations so UI outputs remain part of one semantic model
 - Formalize stable host interop contracts so the first benchmark can reuse existing ecosystems instead of waiting for rewrites
 
 Exit criteria:
 
-- A single `Clasp` codebase can define shared app types and compile them across layers.
+- A single `Clasp` codebase can define shared app types, UI structure, and style intent and compile them across layers.
 
 ## Phase 6: Trust Boundaries
 
@@ -112,6 +117,7 @@ Exit criteria:
 - Auto-run generated validation at runtime trust boundaries
 - Model LLM outputs and tool results as typed but untrusted inputs
 - Use one schema universe for HTTP payloads, tool IO, workflow state, config, and model outputs
+- Add invariant, precondition, and postcondition declarations that can be checked statically where possible and enforced automatically at boundaries where necessary
 - Add provenance tracking and secret-aware value handling at trust boundaries
 - Start separating untrusted content from authority-bearing instructions and capabilities
 - Start designing versioned state handoff for future hot swapping
@@ -189,7 +195,7 @@ Exit criteria:
 
 - Build one moderate SaaS application using only `Clasp` for application logic
 - Keep the first version intentionally database-free so the language, compiler, generated clients, trust boundaries, and workflows are the thing being tested
-- Use generated route clients, generated validation, and Clasp-defined workflows across the entire app surface
+- Use generated route clients, generated validation, compiler-owned page/view semantics, and compiler-owned styling semantics across the entire app surface
 - Add benchmark tasks that ask `Codex`, `Claude Code`, and future harnesses to add and modify real product features in that app
 
 Exit criteria:
@@ -224,16 +230,21 @@ Exit criteria:
 - The native path shares the same front end and type system as the JS path
 - Backend benchmarks can compare JS/Bun and native execution on the same language implementation
 
-## Phase 14: SQLite Storage
+## Phase 14: Native Storage With SQLite First
 
+- Add a language-native storage model with `SQLite` as the first backend
 - Add a typed SQLite capability and connection model
-- Add typed schema/query/migration surfaces
+- Add typed schema/query/transaction/migration surfaces
+- Generate database constraints from `Clasp` schemas and invariants where possible
+- Keep raw SQL behind explicit unsafe or foreign boundaries rather than as the default query surface
 - Integrate persistence into the SaaS dogfood app
 - Benchmark persistence-bearing app changes, not just stateless features
 
 Exit criteria:
 
-- `Clasp` can connect to SQLite through a typed boundary
+- `Clasp` can connect to SQLite through a typed storage boundary
+- schema-derived query, transaction, migration, and constraint surfaces exist
+- raw SQL exists only through explicit unsafe or foreign boundaries
 - The SaaS dogfood app runs with real persistence
 - The benchmark suite includes database-backed product changes
 

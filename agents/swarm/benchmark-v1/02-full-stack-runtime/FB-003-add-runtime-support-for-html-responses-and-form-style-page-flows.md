@@ -14,6 +14,7 @@ The runtime contract also needs to preserve a credible path to later client-side
 - Implement one narrow slice of work: add runtime support for returning page responses from compiled modules built on the compiler-known view/page model.
 - Support the minimal routing and request handling needed for page loads, link navigation, and form-style POST flows in the first benchmark app.
 - Keep page handlers and action boundaries explicit enough that later tooling can reason about server-only versus browser-facing behavior.
+- Preserve a path for page responses to carry compiler-owned style assets or style manifests later instead of assuming all styling lives in ad hoc host class strings.
 - Add one example or regression path that serves a page, handles a form submission, and returns an updated page.
 - Keep the runtime surface small and benchmark-oriented.
 - Preserve a clear interop path to richer browser APIs or host-JavaScript helpers through typed boundaries, with future client-side JavaScript flowing through explicit client modules, islands, or equivalent runtime declarations rather than arbitrary inline scripts.
@@ -35,7 +36,7 @@ The runtime contract also needs to preserve a credible path to later client-side
 
 - Compiled `Clasp` apps can return page responses through the runtime using the compiler-owned view/page model.
 - One page flow covering load, submit, and re-render works end to end.
-- The runtime contract preserves a credible path to later client-side placement or reactive islands instead of forcing all page logic into opaque server-only strings or unrestricted inline script output.
+- The runtime contract preserves a credible path to later client-side placement, reactive islands, and compiler-owned style asset lowering instead of forcing all page logic into opaque server-only strings, unrestricted inline script output, or raw host class-string conventions.
 - Tests or regressions cover the happy path and one invalid input path.
 - `bash scripts/verify-all.sh` passes.
 

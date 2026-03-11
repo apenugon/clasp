@@ -6,11 +6,11 @@ Add schema migration and compatibility hooks for SQLite-backed apps
 
 ## Why
 
-SQLite is the first persistence milestone after the app and language surfaces are already credible. This task belongs to the SQLite Storage track.
+SQLite is the first storage backend after the app and language surfaces are already credible. Migration handling should be driven by the same schema and invariant model as the rest of the app. This task belongs to the SQLite Storage track.
 
 ## Scope
 
-- Implement `DB-004` as one narrow slice of work: Add schema migration and compatibility hooks for SQLite-backed apps
+- Implement `DB-004` as one narrow slice of work: add schema migration and compatibility hooks for SQLite-backed apps from compiler-known storage metadata.
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
