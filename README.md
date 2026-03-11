@@ -17,10 +17,12 @@
 
 It is trying to make one idea real:
 
-- one language across frontend, backend, workers, and eventually apps
+- one semantic layer across frontend, backend, workers, and eventually apps
 - one shared type and schema system everywhere
 - generated validation at trust boundaries
 - a language surface optimized for agent reasoning, repair, and change propagation
+
+Long term, `Clasp` is not trying to replace every low-level substrate. The aim is to become the default system language for most software-building agents while letting JavaScript, native code, databases, and provider SDKs live behind typed, auditable boundaries when that is the more practical choice.
 
 This repository is the public `v0.01` release.
 
@@ -133,6 +135,7 @@ The bar is:
 - shared schema changes propagate more cleanly
 - boundary failures are caught automatically
 - one codebase can span more of the stack
+- Clasp can act as the primary semantic layer of a real system without forcing every specialized component to be rewritten in Clasp first
 
 If that does not hold up across more tasks and more harnesses, the project should be reconsidered.
 
@@ -169,6 +172,7 @@ bun examples/lead-app/server.mjs
 The immediate priorities are:
 
 - stronger schemas and boundary typing
+- a first credible benchmark on a moderate SaaS slice rather than more toy compiler-only wins
 - more realistic full-stack benchmark tasks
 - more benchmark repetitions and more harnesses
 - frontend/app model evolution
@@ -183,3 +187,4 @@ It would mean:
 - a full-stack language shaped for agent workflows instead of human-only ergonomics
 - a codebase where shared types and generated boundaries remove entire classes of glue code
 - an environment where agents spend less effort navigating mismatched schemas and more effort solving product problems
+- a plausible default language for most software-building agents, even when specialized runtimes remain behind typed boundaries

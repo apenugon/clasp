@@ -72,7 +72,13 @@ clasp_swarm_completion_marker_exists() {
     return 0
   fi
 
-  compgen -G "$markers_dir/$key-*" >/dev/null 2>&1
+  local matches=()
+
+  shopt -s nullglob
+  matches=("$markers_dir/$key-"*)
+  shopt -u nullglob
+
+  [[ "${#matches[@]}" -gt 0 ]]
 }
 
 clasp_swarm_normalize_completion_dir() {

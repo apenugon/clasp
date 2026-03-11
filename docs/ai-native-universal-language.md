@@ -35,6 +35,24 @@ The best AI-oriented language would be:
 
 The deeper goal is not merely "AI can write it." The goal is that the language itself reduces the number of places where types, schemas, workflows, and permissions can drift apart.
 
+## Scope Of "Universal"
+
+`Universal` should not mean every workload and every low-level component must be implemented directly in `Clasp`.
+
+It should mean:
+
+- `Clasp` is the primary semantic layer for most software-building agent work
+- application logic, schemas, boundaries, workflows, policies, and AI/tool interactions share one compiler-known model
+- specialized host ecosystems can remain behind typed, auditable foreign boundaries without turning the overall system into ad hoc glue
+
+Non-goals for early universality:
+
+- kernels, drivers, firmware, and hard real-time loops
+- GPU kernels and heavy numerical or scientific compute
+- host-locked engine or platform internals where `Clasp` is not the control layer
+
+The bar is not "replace every substrate." The bar is "be the default system language for most agent-built software systems."
+
 ## Core Attributes
 
 ### 1. Small, regular grammar
@@ -353,7 +371,7 @@ Agent systems are much easier to debug when behavior can be replayed and reasone
 
 ## One Language Everywhere
 
-This should be a non-negotiable design goal.
+This should be a non-negotiable design goal within the software-building domain.
 
 The language should be usable across:
 
@@ -364,6 +382,8 @@ The language should be usable across:
 - CLI tools
 - Mobile apps
 - Agent runtimes
+
+Coverage should be measured at the system layer, not by forcing every dependency, kernel, or host runtime to be rewritten in `Clasp`. The important test is whether the system's shared semantics live in one language and whether foreign edges stay typed and auditable.
 
 The right interpretation is not "one runtime everywhere." It is "one language, one type system, one package system, one tooling surface, multiple compilation targets."
 
@@ -518,6 +538,97 @@ These declarations should:
 - participate in the same package graph
 - be validated by the compiler rather than interpreted as untyped sidecars
 
+### Built-in context graphs
+
+`Clasp` should emit first-class context graphs from the same semantic model used for checking, code generation, policy enforcement, and tracing.
+
+These graphs should not be:
+
+- a separate hand-maintained knowledge base
+- a sidecar index built by scraping source text
+- an editor-only feature disconnected from runtime behavior
+
+They should be compiler-emitted artifacts that can be queried by agents, tools, runtimes, and operator-facing products.
+
+The purpose is simple:
+
+- let agents ask "what is relevant to this change?" without scanning the whole repository
+- let external signals map directly to affected declarations
+- let prompts and task contexts be built from the smallest valid semantic neighborhood
+- let review, eval, rollout, and permission checks run as graph queries instead of heuristics
+
+### Context graph layers
+
+`Clasp` should eventually emit at least three related graph layers:
+
+- a static context graph for modules, declarations, schemas, capabilities, and ownership structure
+- a runtime execution graph for traces, side effects, failures, retries, approvals, and state transitions
+- an objective graph for domain objects, metrics, goals, policies, experiments, and rollouts
+
+These layers should share stable identifiers so a runtime event can be traced back to:
+
+- source declarations
+- controlling policies
+- affected business or domain objects
+- tests, evals, and rollout gates
+
+### Context graph nodes
+
+Useful graph node kinds should include:
+
+- module
+- declaration
+- type
+- schema
+- route
+- workflow
+- prompt
+- model client
+- tool
+- agent
+- command
+- hook
+- policy
+- capability
+- verifier rule
+- test
+- eval
+- benchmark scenario
+- domain object
+- domain event
+- metric
+- goal
+- experiment
+- rollout
+- runtime trace event
+
+### Context graph edges
+
+Useful graph edge kinds should include:
+
+- `imports`
+- `declares`
+- `uses`
+- `validates`
+- `encodes`
+- `decodes`
+- `invokes_tool`
+- `calls_model`
+- `requires_capability`
+- `reads`
+- `writes`
+- `emits`
+- `handles`
+- `traces_to`
+- `gated_by`
+- `measured_by`
+- `affects`
+- `owned_by`
+- `rolls_out_with`
+- `rolls_back_to`
+
+The exact vocabulary can evolve, but the important constraint is that edge semantics should come from compiler and runtime knowledge rather than being guessed from names or comments.
+
 ### Why a language can matter here
 
 This infrastructure can absolutely be built around other languages.
@@ -575,6 +686,7 @@ What should be first-class instead is the data they depend on:
 - Eval declarations
 - Trace and event schemas
 - Capability graphs
+- Context graphs
 - Deterministic fixtures and snapshots
 - Provider strategy metadata
 - Projection metadata back to source spans and declarations
@@ -636,6 +748,8 @@ That gives the compiler and runtime a shared way to answer:
 - which business objects are affected
 - which routes, prompts, workflows, and policies touch them
 - which tests, evals, and rollout rules should gate changes
+
+This should be implemented through graph queries over compiler-emitted semantic artifacts, not through ad hoc repository search.
 
 ### Mental model
 
@@ -756,6 +870,7 @@ The compiler and tooling should expose:
 - Structured diagnostics
 - ASTs
 - Symbol graphs
+- Context graphs
 - Type information
 - Prompt and workflow IR
 - Trace schemas and execution events
@@ -765,6 +880,16 @@ The compiler and tooling should expose:
 - Refactoring APIs
 
 AI systems should work against the semantic model of the codebase, not scrape error strings.
+
+Context graphs are one of the clearest expressions of that rule.
+
+They should let tools answer questions such as:
+
+- what declarations are relevant to this runtime failure?
+- what is the smallest safe context for this prompt or task?
+- what capabilities can this workflow exercise?
+- what tests, evals, and policies gate this rollout?
+- what external objective does this change affect?
 
 ### 20. Canonical formatting and low-noise diffs
 
@@ -781,7 +906,7 @@ If the language is meant for iterative AI-human collaboration, the feedback loop
 
 ## Additional Attributes Worth Adding
 
-These are not optional if the goal is a serious universal language:
+These are not optional if the goal is a serious universal system language for software-building agents:
 
 - Cost awareness for model usage, including budgets and policy limits
 - Latency awareness for real-time UI and agent workflows
@@ -789,6 +914,7 @@ These are not optional if the goal is a serious universal language:
 - Offline-first support and sync semantics for mobile and edge cases
 - Data lineage and privacy controls for AI features
 - Secret classification, redaction, and provenance-aware policy enforcement
+- Built-in context-graph emission and queryability across static, runtime, and objective layers
 - Business-object graphs, metrics, goals, and rollout metadata
 - Safe rollout, rollback, and kill-switch semantics for automated changes
 - Resource budgets for time, cost, model usage, and side-effectful operations
@@ -810,6 +936,7 @@ These are not optional if the goal is a serious universal language:
 - Giving autonomous code ambient access to files, network, tools, or secrets
 - Treating prompt and tool injection as merely application-layer concerns instead of language and runtime concerns
 - Allowing secret-bearing or untrusted values to flow into logs, traces, or prompts by default
+- Building a separate sidecar context graph that can drift from compiler and runtime semantics
 - Encoding retries, rollbacks, and kill switches only as framework convention
 - Sacrificing interoperability for purity
 
@@ -824,5 +951,6 @@ It should be:
 - One capability and verification model everywhere
 - One tooling model for humans and AI systems
 - Multiple runtimes and compilation targets underneath
+- Strong enough interoperability that specialized runtimes can stay behind typed boundaries instead of blocking adoption
 
 The strongest version of this idea is a language that treats application logic, UI state, workflows, schemas, model interactions, evals, and permissions as part of one coherent system rather than as separate stacks glued together by conventions.

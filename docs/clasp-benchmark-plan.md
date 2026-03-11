@@ -24,6 +24,20 @@ The stronger claim is:
 
 This benchmark program should be designed to prove or falsify that claim.
 
+## First Credible Benchmark
+
+The first public benchmark likely to change minds should be a benchmark-ready moderate SaaS slice, not a toy repo.
+
+It should:
+
+- require coordinated product changes across frontend, backend, shared contracts, and validation boundaries
+- include one AI/model or tool boundary that exercises typed untrusted input handling
+- include at least one explicit interop edge to a host runtime, library, storage engine, or provider SDK
+- ship against real tests and task acceptance criteria rather than hand-waved correctness
+- run under `Codex` and `Claude Code` against mirrored `Clasp` and `TypeScript` repos, with `Python` variants where orchestration-heavy comparisons are useful
+
+This is the first benchmark that can credibly demonstrate whether `Clasp` should become the default semantic layer for software-building agents.
+
 ## Benchmark Principles
 
 ### 1. Benchmark the harness, not just the language
@@ -114,6 +128,27 @@ That means the benchmark suite should eventually include tasks driven by:
 - workflow failures tied to domain objects
 
 The language should be judged partly on whether it makes that loop more direct and less error-prone.
+
+### 7. Benchmark Clasp as the semantic layer, not as a purity contest
+
+A strong result for `Clasp` does not require every line of the system to be written in `Clasp`.
+
+What matters is whether `Clasp` can own:
+
+- shared schemas and contracts
+- trust-boundary validation
+- backend and workflow logic
+- generated clients and tool interfaces
+- policy and agent-control semantics where they apply
+
+while interoperating cleanly with:
+
+- `JavaScript` or `TypeScript` packages
+- native libraries or storage engines
+- model-provider SDKs
+- host UI runtimes
+
+This is the more honest path to covering most software-building agent work, and it should be reflected in the benchmark suites.
 
 ## Headline Metrics
 
@@ -247,6 +282,18 @@ How much of the project's data and contract surface is shared across:
 - apps
 
 This helps show whether `Clasp` actually delivers on "one language everywhere."
+
+### Context-resolution efficiency
+
+How effectively the harness can reach the minimum relevant context for a task or failure.
+
+This should consider:
+
+- how many files or declarations the harness had to inspect
+- whether a compiler-emitted context graph reduced irrelevant scanning
+- whether prompts and task context could be built from a smaller semantic neighborhood
+
+This matters because a language that emits good context graphs should reduce wasted exploration, token spend, and repair-loop drift.
 
 ### External-objective traceability
 
@@ -404,6 +451,8 @@ Tasks that stress the operational layer around the code:
 
 These tasks matter because current agent systems spend real effort in Markdown, JSON, shell, and settings files that are not part of the application language.
 
+These tasks should also measure whether the harness can navigate through compiler-emitted context graphs rather than broad repository search.
+
 ### Suite G: External-objective adaptation tasks
 
 Tasks that begin from product or market feedback instead of from code-local change requests:
@@ -421,6 +470,19 @@ These tasks should require the harness to:
 - implement a bounded change
 - validate it against tests, evals, and rollout guardrails
 
+These tasks are especially good places to test objective-graph queries rather than file-oriented search behavior.
+
+### Suite H: Mixed-stack semantic-layer tasks
+
+Tasks where `Clasp` owns the system model while host-specific pieces remain in other runtimes:
+
+- change a shared contract and preserve a `JS` UI bridge
+- swap or upgrade a provider SDK behind a typed model/tool boundary
+- adapt a storage or native helper boundary without leaking untyped behavior into app logic
+- keep a benchmark repo credible by reusing a practical host runtime rather than reimplementing everything in `Clasp` first
+
+These tasks matter because the real adoption path is not substrate purity. It is making `Clasp` the primary semantic layer of a mixed system.
+
 ## Benchmark Scenarios
 
 Each scenario should define:
@@ -429,6 +491,7 @@ Each scenario should define:
 - task prompt
 - domain model and affected business objects
 - feedback signal or operational trigger when relevant
+- whether a context graph is available to the harness and in what form
 - acceptance tests
 - eval and rollout guardrails where relevant
 - policy and security constraints
@@ -452,6 +515,7 @@ Each run should record:
 - intervention count
 - total tokens
 - wall-clock time
+- context-resolution path or graph-query artifacts when available
 - compile/test failures
 - generated trace artifacts
 
@@ -474,6 +538,7 @@ Language and platform decisions should be judged against questions like:
 - Does this make external-objective-driven changes more direct and auditable?
 - Does this improve least-privilege enforcement and secret containment?
 - Does this improve recovery under partial failure without increasing unsafe behavior?
+- Does this reduce irrelevant repository scanning by making semantic context easier to resolve?
 
 If a feature is theoretically elegant but harms harness-level performance, that should count against it.
 
@@ -491,16 +556,19 @@ Over time, `Clasp` should aim to demonstrate:
 - better traceability from external signals to the declarations that implement product behavior
 - stronger privilege containment and lower secret-leak risk
 - safer degraded-mode behavior under model, tool, or provider failure
+- smaller, more relevant task context through compiler-emitted context graphs
+- stronger performance as the primary semantic layer of a mixed-stack system, not just in all-Clasp toy environments
 
 ## Immediate Next Step
 
 The first benchmark implementation should be simple:
 
 1. Pick `Codex` and `Claude Code` as the primary harnesses.
-2. Build a small but realistic benchmark repo in `TypeScript`.
-3. Mirror the same benchmark scenarios in early `Clasp` as the language matures.
-4. Record intervention count, tokens, time-to-green, and compile-time catches.
-5. Expand into workflow, control-plane, and LLM boundary tests as soon as schemas and validation land.
-6. Add external-objective adaptation scenarios once the language can express typed feedback, goals, and rollout gates.
+2. Build a benchmark-ready moderate SaaS slice in `TypeScript` with shared contracts, frontend and backend changes, and one AI/tool boundary.
+3. Mirror the same slice in early `Clasp`, allowing explicit interop edges where that keeps the comparison honest.
+4. Define a small set of real product-change tasks rather than only schema microbenchmarks.
+5. Record intervention count, tokens, time-to-green, compile-time catches, and context-resolution behavior.
+6. Expand into workflow, control-plane, and LLM boundary tests as soon as schemas and validation land.
+7. Add external-objective adaptation scenarios once the language can express typed feedback, goals, and rollout gates.
 
 The point is to start measuring early, even before `Clasp` is feature-complete.

@@ -30,7 +30,29 @@ The current gaps are not just language features. The project also needs:
 - stronger compiler and runtime semantics
 - richer full-stack and AI-native surfaces
 - a better control-plane story
+- built-in context graphs rather than repository search as the main relevance mechanism
 - benchmark coverage broad enough to justify the language
+
+## First Credible Benchmark Target
+
+The first public proof point should not wait for the entire long-term platform.
+
+It should be a benchmark-ready moderate SaaS slice where:
+
+- `Clasp` owns shared schemas, generated boundary validation, backend logic, generated clients, and one AI/tool boundary
+- the tasks require coordinated frontend, backend, and contract changes
+- at least one host/runtime boundary remains in play so interoperability is being tested rather than wished into existence
+- the same scenarios run against a practical `TypeScript` baseline, with `Python` variants where orchestration-heavy comparisons are useful
+
+It should not wait for:
+
+- full control-plane completeness
+- durable hot-swap and self-update semantics
+- self-hosting
+- native backend work
+- SQLite-backed persistence
+
+That benchmark is the earliest result likely to persuade other people that `Clasp` is more than an interesting compiler prototype.
 
 ## Swarm Operating Model
 
@@ -95,6 +117,20 @@ Exit criteria:
 - schemas expand past the current record-only boundary story
 - one end-to-end demo app runs from shared contracts
 
+### M2.5: First Credible Benchmark
+
+Outcome:
+
+- one benchmark-ready moderate SaaS slice proves whether agents can ship real feature changes more effectively in `Clasp` than in a baseline stack
+
+Exit criteria:
+
+- mirrored `Clasp` and baseline repos exist for the benchmark slice
+- benchmark tasks cross frontend, backend, shared contracts, and one AI/tool boundary
+- at least one interop edge is explicit and typed rather than ad hoc
+- benchmark outputs include intervention-free completion, total tokens, repair loops, and time-to-green
+- at least one public-ready benchmark summary can be reproduced
+
 ### M3: Trust-Boundary Platform
 
 Outcome:
@@ -111,18 +147,19 @@ Exit criteria:
 
 Outcome:
 
-- repo memory, permissions, commands, hooks, agents, verifier rules, and traces are first-class declarations in Clasp
+- repo memory, permissions, commands, hooks, agents, verifier rules, traces, and static context graphs are first-class artifacts in Clasp
 
 Exit criteria:
 
 - Clasp can project machine-readable manifests and human docs from those declarations
 - runtime policy enforcement is generated from the same source of truth
+- static context-graph queries can resolve relevant declarations, capabilities, and policy gates
 
 ### M5: Durable Self-Updating Workflows
 
 Outcome:
 
-- Clasp can model long-running workflows with checkpointing, replay, controlled hot-swap, and bounded self-update using BEAM-inspired supervision and upgrade semantics
+- Clasp can model long-running workflows with checkpointing, replay, controlled hot-swap, bounded self-update, and runtime execution-graph semantics using BEAM-inspired supervision and upgrade semantics
 
 Exit criteria:
 
@@ -136,7 +173,7 @@ Exit criteria:
 
 Outcome:
 
-- Clasp expresses typed prompts, tool interfaces, provider strategies, eval hooks, and safe model boundaries natively
+- Clasp expresses typed prompts, tool interfaces, provider strategies, eval hooks, safe model boundaries, and graph-addressable AI context natively
 
 Exit criteria:
 
@@ -147,11 +184,12 @@ Exit criteria:
 
 Outcome:
 
-- Clasp can map typed runtime or business feedback back to code, prompts, policies, and rollout logic
+- Clasp can map typed runtime or external feedback back to code, prompts, policies, rollout logic, and objective-graph structure
 
 Exit criteria:
 
 - metrics, goals, rollouts, and rollback gates are first-class enough to benchmark
+- objective-graph queries can connect external signals to affected declarations, tests, evals, and rollout gates
 
 ### M8: Moderate SaaS App Without A Database
 
@@ -210,25 +248,42 @@ The high-level dependency chain should be:
 3. Better diagnostics and formatting
 4. Richer schemas and trust boundaries
 5. Full-stack route clients and app runtime
-6. Control-plane declarations
-7. Durable workflows and hot-swap
-8. AI-native provider/tool/eval features
-9. External-objective adaptation
-10. Moderate SaaS app dogfooding and app-level benchmarks
-11. Hosted self-hosting
-12. Native backend and bytecode emission
-13. SQLite persistence
-14. Expanded benchmarks across all layers
+6. First credible benchmark on a moderate SaaS slice
+7. Control-plane declarations
+8. Static context-graph emission and queryability
+9. Durable workflows and hot-swap
+10. AI-native provider/tool/eval features
+11. External-objective adaptation
+12. Moderate SaaS app dogfooding and app-level benchmarks
+13. Hosted self-hosting
+14. Native backend and bytecode emission
+15. SQLite persistence
+16. Expanded benchmarks across all layers
 
 Parallelism guidance:
 
 - parser/checker/emitter slices can run in parallel only when they touch disjoint features
 - diagnostics and benchmark tasks can usually run alongside core compiler work
 - control-plane work should begin only after schema and trust-boundary foundations are credible
+- context-graph work should begin as soon as declarations, schemas, and capabilities are stable enough to emit useful identifiers and edges
 - workflow and hot-swap work should begin only after control-plane and type-boundary machinery exist
 - the moderate SaaS app should begin only after the full-stack and trust-boundary layers are real enough to carry product logic
+- the first credible benchmark should cut across tracks 1, 3, 4, 7, 9, and 10 before later platform layers become dominant
 - self-hosting should begin only after the language is comfortable enough to express compiler code without constant workaround churn
 - the native backend should trail the hosted self-hosting path rather than compete with it too early
+
+## Critical Path To The First Credible Benchmark
+
+The first benchmark that matters should be built from a narrow cross-track slice rather than from the entire roadmap.
+
+Critical path:
+
+- core ergonomics that make app code comfortable enough to write and modify
+- schemas and trust boundaries that prevent contract drift from being benchmark noise
+- generated route clients and runtime helpers that let one codebase span client and server concerns
+- explicit interop boundaries so `Clasp` can coexist with practical host runtimes during the first benchmark
+- one moderate SaaS slice that agents can actually evolve under test
+- benchmark packaging that measures product-feature throughput rather than compiler microbenchmarks alone
 
 ## Full Backlog
 
@@ -277,6 +332,7 @@ Parallelism guidance:
 - `TY-008` Add JSON-schema-like projections for types and diagnostics where helpful to tools.
 - `TY-009` Add package-aware module resolution beyond the current flattened import model.
 - `TY-010` Add an LSP skeleton that surfaces diagnostics, formatting, and symbol lookup.
+- `TY-011` Add typed effect and capability annotations shared across functions, tools, and workflows.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -306,6 +362,7 @@ Parallelism guidance:
 - `FS-008` Define the React interop boundary for using generated Clasp code in frontend apps.
 - `FS-009` Define the React Native or Expo bridge path for future mobile reuse.
 - `FS-010` Add one mobile-adjacent demo that reuses shared Clasp business logic.
+- `FS-011` Define a stable host-interop contract for `JS`, native, storage, and provider-backed runtimes.
 
 ### Track 5: Control Plane Declarations
 
@@ -321,6 +378,7 @@ Parallelism guidance:
 - `CP-010` Add policy-decision traces and audit output.
 - `CP-011` Add approval and sandbox policy surfaces as typed configuration, not shell convention.
 - `CP-012` Build one repo-level Clasp control-plane demo that drives a real agent loop.
+- `CP-013` Emit a queryable context graph and expose a stable CLI/API surface for agents and tools.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -380,6 +438,7 @@ Parallelism guidance:
 - `BM-013` Add compiler-maintenance benchmarks on the hosted self-hosted compiler path.
 - `BM-014` Add backend compile-time and runtime benchmarks comparing JS/Bun and the native backend.
 - `BM-015` Add SQLite-backed product-change benchmarks on the dogfood app.
+- `BM-016` Add mixed-stack semantic-layer benchmarks where `Clasp` interoperates with host runtimes.
 
 ### Track 10: SaaS Dogfooding
 

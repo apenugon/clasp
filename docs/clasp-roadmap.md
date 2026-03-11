@@ -14,6 +14,27 @@ The mistake to avoid is shipping a speculative vision instead of a working compi
 
 The proving ground that matters most is not a toy compiler demo. It is whether an agent can build and evolve a real moderate SaaS application faster in `Clasp` than in a baseline stack.
 
+## First Credible Benchmark
+
+The first public proof point should not be a toy compiler demo or a syntax-only microbenchmark.
+
+It should be a moderate SaaS slice where:
+
+- `Clasp` owns shared schemas, generated boundary validation, backend logic, generated clients, and one AI/tool boundary
+- the agent must make coordinated product changes across multiple layers
+- at least one host/runtime boundary remains in play so interoperability is being tested rather than assumed away
+- the same scenarios run against a practical `TypeScript` baseline and, where useful, a `Python` orchestration baseline
+
+This first credible benchmark should not wait for:
+
+- full control-plane completeness
+- durable hot-swap and self-update semantics
+- self-hosting
+- native backend work
+- SQLite-backed persistence
+
+Those later layers still matter, but they should build on top of an earlier product-level proof that `Clasp` improves agent throughput on realistic work.
+
 ## Phase 0: Foundation
 
 - Finalize the language name and design direction
@@ -79,6 +100,7 @@ Exit criteria:
 - Add typed serialization and validation derivation
 - Add typed route/service definitions
 - Start converging on one shared type universe for frontend/backend boundaries
+- Formalize stable host interop contracts so the first benchmark can reuse existing ecosystems instead of waiting for rewrites
 
 Exit criteria:
 
@@ -103,6 +125,7 @@ Exit criteria:
 - Add compiler-known declarations for repo memory, permissions, commands, hooks, agents, tool servers, verification, and traces
 - Keep these declarations in the same module graph and type universe as application code
 - Generate human-readable docs, machine-readable manifests, CLI wrappers, and runtime config from the same source
+- Emit a static context graph over code, control-plane declarations, schemas, and capabilities
 - Enforce capability and approval policies from declared semantics instead of shell conventions
 - Add explicit sandbox and least-privilege policy surfaces for file, network, process, secret, and model authority
 - Make audit trails and policy decisions part of standard trace output
@@ -110,6 +133,7 @@ Exit criteria:
 Exit criteria:
 
 - A repository can declare its agent memory, permissions, tool interfaces, commands, hooks, and verifier rules in `Clasp` and have them enforced and projected from one source of truth.
+- Static context-graph queries can resolve relevant declarations, policies, and capabilities without repository-wide text search.
 
 ## Phase 8: Durable Workflows
 
@@ -118,6 +142,7 @@ Exit criteria:
 - Add typed checkpoint/resume support
 - Add idempotency and replay concepts
 - Add explicit side-effect capabilities
+- Extend context-graph emission with runtime execution edges for workflow state transitions, failures, retries, and handoffs
 - Add deadlines, cancellation, retry policy, and bounded backoff semantics
 - Add degraded-mode and operator-handoff semantics for partial failure
 - Add supervisor trees, restart strategies, and mailbox-style coordination where needed
@@ -136,6 +161,7 @@ Exit criteria:
 - Add provider strategies such as fallback, retry, round-robin, and budget policy
 - Add tool declarations
 - Add tracing and eval hooks
+- Extend context graphs with prompt, tool, model, eval, and capability edges suitable for prompt-building and inspector tooling
 - Add a constrained dynamic-schema facility for runtime-selected output shapes
 - Add prompt-injection-resistant separation between content, tool authority, and policy
 - Add secret-redaction and provenance rules for prompts, traces, and tool calls
@@ -150,12 +176,14 @@ Exit criteria:
 - Add first-class domain-object, event, metric, goal, experiment, and rollout concepts where they prove benchmark value
 - Make runtime feedback traceable back to affected routes, prompts, workflows, policies, and tests
 - Support typed ingestion of market, operational, safety, compliance, and other external feedback
+- Extend context graphs with objective-layer nodes and edges for domain objects, metrics, goals, experiments, and rollouts
 - Make eval and rollout gates expressible in terms of external outcomes rather than code-only correctness
 - Add safe rollout, automatic rollback, and kill-switch semantics for bounded autonomous change
 
 Exit criteria:
 
 - An agent can move from typed external feedback to a bounded code and rollout change without reconstructing the domain model from scratch on every task.
+- Objective-graph queries can connect external signals to affected declarations, policies, tests, evals, and rollout gates.
 
 ## Phase 11: Moderate SaaS Dogfooding
 
@@ -261,8 +289,11 @@ The current implementation should focus on:
 - Building a small clean compiler around the typed core and lowered IR
 - Keeping the language surface intentionally tiny while expanding toward real app-building primitives
 - Using generated codecs, foreign bindings, and typed routes as the base for the first benchmarkable full-stack slice
+- Prioritizing the minimum path to a benchmark-ready moderate SaaS slice over speculative platform breadth
+- Treating interoperability as part of the critical path, not an escape hatch
 - Using the eventual moderate SaaS app as the primary design-pressure test for agent productivity
 - Avoiding premature complexity in effects or AI syntax before schemas, trust boundaries, operational control-plane semantics, and hot-swap semantics land
+- Not blocking the first credible benchmark on control-plane completeness, hot-swap, self-hosting, native backend work, or SQLite
 
 ## Cross-Cutting Benchmark Track
 
@@ -274,6 +305,7 @@ Near-term benchmark work should include:
 - creating a baseline task suite in `TypeScript`
 - measuring intervention-free completion, total tokens, repair loops, and time-to-green
 - expanding into real app-building tasks on a moderate SaaS codebase, because that is the benchmark that matters most for `Clasp`
+- adding mixed-stack scenarios where `Clasp` is the primary semantic layer while `JS`, native, SQL, or provider runtimes remain behind typed boundaries
 - expanding later into trust-boundary, control-plane, workflow, LLM-output, and external-objective adaptation benchmarks
 - testing compact-syntax candidates against more verbose alternatives before committing to a final Clasp surface
 
