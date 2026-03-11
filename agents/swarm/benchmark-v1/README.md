@@ -16,3 +16,5 @@ The target is a benchmark-ready lead-inbox SaaS mini app in both `Clasp` and `Ty
 - mirrored benchmark repos and prompts
 
 The `Clasp` side should not hard-code an `SSR-only` or string-template-only foundation. The goal is a minimal page model that still leaves room for later client/server placement decisions, reactive islands, and rich host-JavaScript interop.
+
+That first renderer should still default to safe inert SSR HTML. Future client-side JavaScript should come through explicit client modules, islands, or typed host interop rather than arbitrary raw script output inside compiler-owned page templates.

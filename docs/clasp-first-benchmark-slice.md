@@ -43,6 +43,8 @@ The implementation should be `SSR-first`, not `SSR-only`. The first HTML/page la
 - add reactive client islands or hydration boundaries
 - keep using full host-JavaScript capabilities behind typed boundaries
 
+The safe default renderer should emit inert SSR HTML, not arbitrary active content. Inline event handlers, raw `<script>` tags, and similar executable output should only arrive later through an explicit client-module, island, or clearly marked unsafe escape hatch.
+
 This is still intentionally below the full long-term product scope. It does not need:
 
 - auth
@@ -71,7 +73,7 @@ This slice needs a short critical path of language and runtime features:
 
 - list support for inbox-style payloads and stored lead collections
 - a compiler-known view/page surface that lowers into a dedicated rendering model rather than opaque foreign HTML helpers
-- SSR-first page/runtime support for returning HTML and handling form-style GET/POST flows
+- SSR-first page/runtime support for returning safe HTML and handling form-style GET/POST flows
 - enough placement or capability structure that later compiler passes can reason about server-only, client-only, or island-style behavior
 - a concrete lead-inbox app scaffold with in-memory state, HTML pages, and one AI boundary
 - mirrored benchmark repos and prompts for `Clasp` and `TypeScript`
@@ -97,6 +99,6 @@ This benchmark becomes credible when:
 - the same lead-inbox tasks run against mirrored `Clasp` and `TypeScript` repos
 - both repos boot into a browser-runnable app that a human can click through locally
 - the tasks cross frontend templates, backend logic, shared contracts, validation boundaries, and client-visible behavior
-- the `Clasp` rendering model remains compiler-owned enough to support later SSR/CSR placement and reactive client behavior
+- the `Clasp` rendering model remains compiler-owned enough to support later SSR/CSR placement and reactive client behavior while keeping safe SSR as the default page-rendering mode
 - the benchmark harness can measure intervention-free completion, token cost, repair loops, and time-to-green
 - the story is clearly closer to a real product change than to a toy schema patch

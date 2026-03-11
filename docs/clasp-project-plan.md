@@ -41,6 +41,7 @@ It should be a benchmark-ready moderate SaaS slice where:
 
 - `Clasp` owns shared schemas, generated boundary validation, backend logic, generated clients, and one AI/tool boundary
 - the tasks require coordinated frontend, backend, and contract changes
+- the first compiler-owned page layer defaults to safe SSR output while leaving room for later explicit client modules or island-style interactivity
 - at least one host/runtime boundary remains in play so interoperability is being tested rather than wished into existence
 - the same scenarios run against a practical `TypeScript` baseline, with `Python` variants where orchestration-heavy comparisons are useful
 
@@ -114,7 +115,7 @@ Outcome:
 Exit criteria:
 
 - a compiler-owned HTML/page rendering model lands with SSR-first emission
-- the page/runtime foundation preserves a path to later client-side reactivity and placement decisions
+- the page/runtime foundation preserves a path to later client-side reactivity and placement decisions without treating arbitrary active content as safe default page output
 - schemas expand past the current record-only boundary story
 - one end-to-end demo app runs from shared contracts and serves real pages
 

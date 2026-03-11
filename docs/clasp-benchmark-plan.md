@@ -33,6 +33,7 @@ It should:
 - require coordinated product changes across frontend, backend, shared contracts, and validation boundaries
 - boot into a browser-runnable app where a human can click through the core flow in both the `Clasp` and baseline variants
 - keep the `Clasp` frontend on a compiler-owned view/page model so future SSR/CSR placement and client interactivity remain tractable
+- keep the default `Clasp` SSR renderer safe and inert, with future client-side JavaScript introduced through explicit client modules, islands, or typed host interop rather than arbitrary raw script output
 - include one AI/model or tool boundary that exercises typed untrusted input handling
 - include at least one explicit interop edge to a host runtime, library, storage engine, or provider SDK
 - ship against real tests and task acceptance criteria rather than hand-waved correctness

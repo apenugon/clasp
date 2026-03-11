@@ -16,7 +16,7 @@ The runtime contract also needs to preserve a credible path to later client-side
 - Keep page handlers and action boundaries explicit enough that later tooling can reason about server-only versus browser-facing behavior.
 - Add one example or regression path that serves a page, handles a form submission, and returns an updated page.
 - Keep the runtime surface small and benchmark-oriented.
-- Preserve a clear interop path to richer browser APIs or host-JavaScript helpers through typed boundaries.
+- Preserve a clear interop path to richer browser APIs or host-JavaScript helpers through typed boundaries, with future client-side JavaScript flowing through explicit client modules, islands, or equivalent runtime declarations rather than arbitrary inline scripts.
 - Avoid introducing a large asset pipeline, SPA router, or hydration framework in this task.
 
 ## Likely Files
@@ -35,7 +35,7 @@ The runtime contract also needs to preserve a credible path to later client-side
 
 - Compiled `Clasp` apps can return page responses through the runtime using the compiler-owned view/page model.
 - One page flow covering load, submit, and re-render works end to end.
-- The runtime contract preserves a credible path to later client-side placement or reactive islands instead of forcing all page logic into opaque server-only strings.
+- The runtime contract preserves a credible path to later client-side placement or reactive islands instead of forcing all page logic into opaque server-only strings or unrestricted inline script output.
 - Tests or regressions cover the happy path and one invalid input path.
 - `bash scripts/verify-all.sh` passes.
 
