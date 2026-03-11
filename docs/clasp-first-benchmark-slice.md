@@ -22,14 +22,19 @@ The next benchmark should stay in that domain and make it more product-shaped ra
 
 ## Product Shape
 
-The benchmark slice should model a small lead inbox with:
+The benchmark slice should model a small lead inbox that a human can open in a browser and click through locally.
 
-- lead intake through a typed route
-- shared lead domain types used on both server and client-facing code
+It should include:
+
+- a server-rendered HTML intake form for creating leads
+- a server-rendered inbox page that lists stored leads
+- at least one clickable lead detail or review page
+- shared lead domain types used across server logic, HTML views, and AI-boundary code
 - generated validation at request and model boundaries
 - in-memory state for stored leads
-- a host-rendered inbox consumer or generated-client consumer
 - one AI-shaped summary/prioritization boundary
+
+For the first benchmark, frontend credibility comes from real pages and click-through behavior, not from introducing a large SPA framework.
 
 This is still intentionally below the full long-term product scope. It does not need:
 
@@ -39,6 +44,7 @@ This is still intentionally below the full long-term product scope. It does not 
 - SQLite persistence
 - self-hosting
 - native backend support
+- a client-side framework
 
 ## First Benchmark Tasks
 
@@ -46,9 +52,9 @@ The first public benchmark tasks on this slice should look like product work, no
 
 Good first tasks:
 
-1. Add a new lead field such as `segment` across intake, storage, inbox rendering, and model output validation.
-2. Add a review state or inbox badge that changes server behavior and client rendering from one shared contract.
-3. Tighten a boundary rule so invalid model output or invalid request data is rejected while preserving the happy path.
+1. Add a new lead field such as `segment` across the intake form, storage, inbox page, detail page, and model output validation.
+2. Add a review state or inbox badge that changes server behavior and page rendering from one shared contract.
+3. Tighten a boundary rule so invalid model output or invalid form input is rejected while preserving the happy path.
 
 These tasks force cross-layer changes while staying small enough for repeated harness runs.
 
@@ -57,9 +63,9 @@ These tasks force cross-layer changes while staying small enough for repeated ha
 This slice needs a short critical path of language and runtime features:
 
 - list support for inbox-style payloads and stored lead collections
-- route-client generation so the client-side consumer shares the same route surface
-- a small browser/client runtime helper for generated clients
-- a concrete lead-inbox app scaffold with in-memory state and one AI boundary
+- minimal HTML templating or view composition support with safe escaping
+- page/runtime support for returning HTML and handling form-style GET/POST flows
+- a concrete lead-inbox app scaffold with in-memory state, HTML pages, and one AI boundary
 - mirrored benchmark repos and prompts for `Clasp` and `TypeScript`
 
 It does not require waiting for the full schema/control-plane/workflow roadmap.
@@ -69,18 +75,19 @@ It does not require waiting for the full schema/control-plane/workflow roadmap.
 The focused swarm wave for this benchmark should execute these tasks in order:
 
 - `FB-001` Add list types, literals, and JSON-boundary support for inbox-style payloads.
-- `FB-002` Generate typed JavaScript route clients from route declarations.
-- `FB-003` Add a browser/client runtime helper for generated route clients.
-- `FB-004` Define the lead-inbox benchmark slice and mirrored repo contract.
-- `FB-005` Build the Clasp lead-inbox server slice with in-memory state and one AI boundary.
-- `FB-006` Add a host-rendered inbox consumer driven by generated route clients.
-- `FB-007` Add mirrored benchmark tasks and prompts for the lead-inbox slice.
+- `FB-002` Add minimal HTML templating/view primitives and JavaScript emission for server-rendered pages.
+- `FB-003` Add runtime support for HTML responses and form-style page flows.
+- `FB-004` Define the clickable lead-inbox benchmark slice and mirrored repo contract.
+- `FB-005` Build the Clasp lead-inbox app with server-rendered inbox/detail/intake flows and one AI boundary.
+- `FB-006` Build the mirrored TypeScript lead-inbox baseline with the same click-through flows.
+- `FB-007` Add mirrored benchmark tasks and prompts for the clickable lead-inbox slice.
 
 ## Success Criteria
 
 This benchmark becomes credible when:
 
 - the same lead-inbox tasks run against mirrored `Clasp` and `TypeScript` repos
-- the tasks cross server logic, shared contracts, validation boundaries, and client-visible behavior
+- both repos boot into a browser-runnable app that a human can click through locally
+- the tasks cross frontend templates, backend logic, shared contracts, validation boundaries, and client-visible behavior
 - the benchmark harness can measure intervention-free completion, token cost, repair loops, and time-to-green
 - the story is clearly closer to a real product change than to a toy schema patch

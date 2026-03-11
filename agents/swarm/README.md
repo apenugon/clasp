@@ -23,3 +23,4 @@ Wave directories:
 - `full/`: full materialized project backlog and the default swarm target
 - `wave1/`: initial swarm-infrastructure and core-language slices
 - `benchmark-v0/`: focused critical path to the first credible lead-inbox benchmark
+- `benchmark-v1/`: clickable vertical-slice benchmark with HTML templating and browser-runnable flows in both repos

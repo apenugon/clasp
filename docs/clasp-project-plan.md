@@ -109,13 +109,13 @@ Exit criteria:
 
 Outcome:
 
-- one Clasp codebase can define shared data, typed routes, generated clients, and one small browser-plus-backend app
+- one Clasp codebase can define shared data, typed routes, HTML views, and one small browser-plus-backend app that a human can click through
 
 Exit criteria:
 
-- route client generation lands
+- minimal HTML/page rendering support lands
 - schemas expand past the current record-only boundary story
-- one end-to-end demo app runs from shared contracts
+- one end-to-end demo app runs from shared contracts and serves real pages
 
 ### M2.5: First Credible Benchmark
 
@@ -126,7 +126,8 @@ Outcome:
 Exit criteria:
 
 - mirrored `Clasp` and baseline repos exist for the benchmark slice
-- benchmark tasks cross frontend, backend, shared contracts, and one AI/tool boundary
+- both repos expose a browser-runnable click-through flow for the benchmark slice
+- benchmark tasks cross frontend templates, backend logic, shared contracts, and one AI/tool boundary
 - at least one interop edge is explicit and typed rather than ad hoc
 - benchmark outputs include intervention-free completion, total tokens, repair loops, and time-to-green
 - at least one public-ready benchmark summary can be reproduced

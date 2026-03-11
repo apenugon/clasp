@@ -31,6 +31,7 @@ The first public benchmark likely to change minds should be a benchmark-ready mo
 It should:
 
 - require coordinated product changes across frontend, backend, shared contracts, and validation boundaries
+- boot into a browser-runnable app where a human can click through the core flow in both the `Clasp` and baseline variants
 - include one AI/model or tool boundary that exercises typed untrusted input handling
 - include at least one explicit interop edge to a host runtime, library, storage engine, or provider SDK
 - ship against real tests and task acceptance criteria rather than hand-waved correctness
@@ -73,6 +74,7 @@ The benchmark suite should focus on tasks that require:
 
 - changing multiple files
 - crossing frontend/backend boundaries
+- changing page rendering or click-through user flows
 - interacting with schemas
 - handling runtime boundaries
 - working with LLM outputs and tools
