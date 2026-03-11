@@ -15,6 +15,7 @@ import Control.Monad.State.Strict
   , runState
   )
 import Data.Bifunctor (first)
+import Data.Char (isAsciiLower, isDigit)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -126,6 +127,12 @@ data DraftExprNode
   | DraftInt Integer
   | DraftString Text
   | DraftBool Bool
+  | DraftPage DraftExpr DraftExpr
+  | DraftViewEmpty
+  | DraftViewText DraftExpr
+  | DraftViewAppend DraftExpr DraftExpr
+  | DraftViewElement Text DraftExpr
+  | DraftViewStyled Text DraftExpr
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
@@ -165,6 +172,37 @@ data UnifyContext = UnifyContext
   , unifyPrimarySpan :: SourceSpan
   , unifyRelated :: [DiagnosticRelated]
   }
+
+pageTypeName :: Text
+pageTypeName = "Page"
+
+viewTypeName :: Text
+viewTypeName = "View"
+
+hostClassBuiltinName :: Text
+hostClassBuiltinName = "hostClass"
+
+hostStyleBuiltinName :: Text
+hostStyleBuiltinName = "hostStyle"
+
+isBuiltinTypeName :: Text -> Bool
+isBuiltinTypeName name =
+  name == pageTypeName || name == viewTypeName
+
+isBuiltinViewFunctionName :: Text -> Bool
+isBuiltinViewFunctionName name =
+  name `elem` ["page", "text", "append", "element", "styled", hostClassBuiltinName, hostStyleBuiltinName]
+
+isSafeViewTag :: Text -> Bool
+isSafeViewTag tag =
+  not (T.null tag)
+    && T.all (\char -> isAsciiLower char || isDigit char || char == '-') tag
+    && tag `notElem` ["script", "style"]
+
+isSafeStyleRef :: Text -> Bool
+isSafeStyleRef styleRef =
+  not (T.null styleRef)
+    && T.all (\char -> isAsciiLower char || isDigit char || char == '-' || char == '_') styleRef
 
 checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
@@ -329,7 +367,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
 
     checkRouteDeclTypes routeDecl = do
       ensureRecordType routeDecl (routeDeclRequestType routeDecl) (routeDeclRequestTypeSpan routeDecl) "request"
-      ensureRecordType routeDecl (routeDeclResponseType routeDecl) (routeDeclResponseTypeSpan routeDecl) "response"
+      ensureResponseType routeDecl (routeDeclResponseType routeDecl) (routeDeclResponseTypeSpan routeDecl)
 
     ensureKnownType primarySpan related typ =
       case typ of
@@ -340,7 +378,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
         TBool ->
           pure ()
         TNamed name ->
-          unless (Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
+          unless (isBuiltinTypeName name || Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
             Left . diagnosticBundle $
               [ diagnostic
                   "E_UNKNOWN_TYPE"
@@ -388,6 +426,17 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
               ("Route `" <> routeDeclName routeDecl <> "` must use a record type for its " <> role <> " body.")
               (Just primarySpan)
               ["Declare `" <> typeName <> "` as a record before using it in a route."]
+              []
+          ]
+
+    ensureResponseType routeDecl typeName primarySpan =
+      unless (typeName == pageTypeName || Map.member typeName recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_ROUTE_TYPE"
+              ("Route `" <> routeDeclName routeDecl <> "` must use a record type or Page for its response body.")
+              (Just primarySpan)
+              ["Declare `" <> typeName <> "` as a record or return `Page` from the route."]
               []
           ]
 
@@ -819,7 +868,9 @@ inferExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> Expr -> I
 inferExpr ctx termEnv localEnv expr =
   case expr of
     EVar span' name ->
-      case Map.lookup name localEnv of
+      if name == "empty" && Map.notMember name localEnv && Map.notMember name termEnv
+        then pure (DraftExpr span' (INamed viewTypeName) DraftViewEmpty)
+        else case Map.lookup name localEnv of
         Just localType ->
           pure (DraftExpr span' localType (DraftVar name))
         Nothing ->
@@ -842,65 +893,15 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IStr (DraftString value))
     EBool span' value ->
       pure (DraftExpr span' IBool (DraftBool value))
-    ECall callSpan fn args -> do
-      fnExpr <- inferExpr ctx termEnv localEnv fn
-      resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
-      case resolvedFnType of
-        IFunction paramTypes _ ->
-          when (length paramTypes /= length args) $
-            throwDiagnostic . diagnosticBundle $
-              [ diagnostic
-                  "E_CALL_ARITY"
-                  "Function call does not match the declared arity."
-                  (Just callSpan)
-                  [ "Expected "
-                      <> T.pack (show (length paramTypes))
-                      <> " arguments but got "
-                      <> T.pack (show (length args))
-                      <> "."
-                  ]
-                  (relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx))
-              ]
-        IVar _ ->
-          pure ()
+    ECall callSpan fn args ->
+      case fn of
+        EVar _ name
+          | isBuiltinViewFunctionName name
+          , Map.notMember name localEnv
+          , Map.notMember name termEnv ->
+              inferBuiltinViewCall ctx termEnv localEnv callSpan name args
         _ ->
-          throwDiagnostic . diagnosticBundle $
-            [ diagnostic
-                "E_NOT_A_FUNCTION"
-                "Tried to call a non-function value."
-                (Just callSpan)
-                ["Only function-typed values can be applied to arguments."]
-                []
-            ]
-      argExprs <- traverse (inferExpr ctx termEnv localEnv) args
-      expectedParamTypes <- traverse (const freshTypeVar) args
-      resultType <- freshTypeVar
-      unify
-        ( UnifyContext
-            { unifyCode = "E_NOT_A_FUNCTION"
-            , unifySummary = "Tried to call a non-function value."
-            , unifyPrimarySpan = callSpan
-            , unifyRelated = []
-            }
-        )
-        (draftExprType fnExpr)
-        (IFunction expectedParamTypes resultType)
-      zipWithM_
-        ( \argExpr expectedParamType ->
-            unify
-              ( UnifyContext
-                  { unifyCode = "E_TYPE_MISMATCH"
-                  , unifySummary = "Argument type does not match the function signature."
-                  , unifyPrimarySpan = draftExprSpan argExpr
-                  , unifyRelated = relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx)
-                  }
-              )
-              (draftExprType argExpr)
-              expectedParamType
-        )
-        argExprs
-        expectedParamTypes
-      pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
+          inferRegularCall ctx termEnv localEnv callSpan fn args
     ERecord recordSpan recordName fields ->
       inferRecordExpr ctx termEnv localEnv recordSpan recordName fields
     EFieldAccess accessSpan subject fieldName ->
@@ -910,6 +911,194 @@ inferExpr ctx termEnv localEnv expr =
     EEncode encodeSpan value ->
       inferEncodeExpr ctx termEnv localEnv encodeSpan value
     EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
+
+inferRegularCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
+inferRegularCall ctx termEnv localEnv callSpan fn args = do
+  fnExpr <- inferExpr ctx termEnv localEnv fn
+  resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
+  case resolvedFnType of
+    IFunction paramTypes _ ->
+      when (length paramTypes /= length args) $
+        throwDiagnostic . diagnosticBundle $
+          [ diagnostic
+              "E_CALL_ARITY"
+              "Function call does not match the declared arity."
+              (Just callSpan)
+              [ "Expected "
+                  <> T.pack (show (length paramTypes))
+                  <> " arguments but got "
+                  <> T.pack (show (length args))
+                  <> "."
+              ]
+              (relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx))
+          ]
+    IVar _ ->
+      pure ()
+    _ ->
+      throwDiagnostic . diagnosticBundle $
+        [ diagnostic
+            "E_NOT_A_FUNCTION"
+            "Tried to call a non-function value."
+            (Just callSpan)
+            ["Only function-typed values can be applied to arguments."]
+            []
+        ]
+  argExprs <- traverse (inferExpr ctx termEnv localEnv) args
+  expectedParamTypes <- traverse (const freshTypeVar) args
+  resultType <- freshTypeVar
+  unify
+    ( UnifyContext
+        { unifyCode = "E_NOT_A_FUNCTION"
+        , unifySummary = "Tried to call a non-function value."
+        , unifyPrimarySpan = callSpan
+        , unifyRelated = []
+        }
+    )
+    (draftExprType fnExpr)
+    (IFunction expectedParamTypes resultType)
+  zipWithM_
+    ( \argExpr expectedParamType ->
+        unify
+          ( UnifyContext
+              { unifyCode = "E_TYPE_MISMATCH"
+              , unifySummary = "Argument type does not match the function signature."
+              , unifyPrimarySpan = draftExprSpan argExpr
+              , unifyRelated = relatedForFunction fn (contextDeclMap ctx) (contextForeignDeclEnv ctx) (contextConstructorEnv ctx)
+              }
+          )
+          (draftExprType argExpr)
+          expectedParamType
+    )
+    argExprs
+    expectedParamTypes
+  pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
+
+inferBuiltinViewCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
+inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
+  case builtinName of
+    "page" ->
+      case args of
+        [titleExpr, bodyExpr] -> do
+          draftTitle <- inferExpr ctx termEnv localEnv titleExpr
+          draftBody <- inferExpr ctx termEnv localEnv bodyExpr
+          unifyViewBuiltinArg "page title" draftTitle IStr
+          unifyViewBuiltinArg "page body" draftBody (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed pageTypeName) (DraftPage draftTitle draftBody))
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "text" ->
+      case args of
+        [valueExpr] -> do
+          draftValue <- inferExpr ctx termEnv localEnv valueExpr
+          unifyViewBuiltinArg "text value" draftValue IStr
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewText draftValue))
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 1 (length args)
+    "append" ->
+      case args of
+        [leftExpr, rightExpr] -> do
+          draftLeft <- inferExpr ctx termEnv localEnv leftExpr
+          draftRight <- inferExpr ctx termEnv localEnv rightExpr
+          unifyViewBuiltinArg "append left child" draftLeft (INamed viewTypeName)
+          unifyViewBuiltinArg "append right child" draftRight (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewAppend draftLeft draftRight))
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "element" ->
+      case args of
+        [EString _ tagName, childExpr] -> do
+          unless (isSafeViewTag tagName) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_TAG"
+                  ("Unsafe or unsupported HTML tag `" <> tagName <> "` in safe view rendering.")
+                  (Just callSpan)
+                  ["Use an inert lowercase tag such as `div`, `section`, `h1`, or `p`."]
+                  []
+              ]
+          draftChild <- inferExpr ctx termEnv localEnv childExpr
+          unifyViewBuiltinArg "element child" draftChild (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewElement tagName draftChild))
+        [_, _] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_VIEW_TAG"
+                "View element tags must be string literals."
+                (Just callSpan)
+                ["Use `element \"div\" child` style calls so the compiler can validate the tag."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "styled" ->
+      case args of
+        [EString _ styleRef, childExpr] -> do
+          unless (isSafeStyleRef styleRef) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_VIEW_STYLE_REF"
+                  ("Invalid style reference `" <> styleRef <> "`.")
+                  (Just callSpan)
+                  ["Use lowercase letters, digits, `-`, and `_` in explicit style references."]
+                  []
+              ]
+          draftChild <- inferExpr ctx termEnv localEnv childExpr
+          unifyViewBuiltinArg "styled child" draftChild (INamed viewTypeName)
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewStyled styleRef draftChild))
+        [_, _] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_VIEW_STYLE_REF"
+                "Style references must be string literals."
+                (Just callSpan)
+                ["Use `styled \"inbox_shell\" child` so the compiler can keep styling explicit."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 2 (length args)
+    name
+      | name == hostClassBuiltinName || name == hostStyleBuiltinName ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_UNSAFE_VIEW_ESCAPE"
+                ("`" <> name <> "` is not available in the safe default page renderer.")
+                (Just callSpan)
+                ["Use `styled` with an explicit style reference instead of raw host class or style strings."]
+                []
+            ]
+    _ ->
+      inferRegularCall ctx termEnv localEnv callSpan (EVar callSpan builtinName) args
+
+unifyViewBuiltinArg :: Text -> DraftExpr -> InferType -> InferM ()
+unifyViewBuiltinArg _ draftExpr expectedType =
+  unify
+    ( UnifyContext
+        { unifyCode = "E_TYPE_MISMATCH"
+        , unifySummary = "View primitive argument has the wrong type."
+        , unifyPrimarySpan = draftExprSpan draftExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType draftExpr)
+    expectedType
+
+throwViewBuiltinArity :: SourceSpan -> Text -> Int -> Int -> InferM a
+throwViewBuiltinArity callSpan builtinName expectedArity actualArity =
+  throwDiagnostic . diagnosticBundle $
+    [ diagnostic
+        "E_CALL_ARITY"
+        "Function call does not match the declared arity."
+        (Just callSpan)
+        [ "Builtin `"
+            <> builtinName
+            <> "` expects "
+            <> T.pack (show expectedArity)
+            <> " arguments but got "
+            <> T.pack (show actualArity)
+            <> "."
+        ]
+        []
+    ]
 
 inferRecordExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [RecordFieldExpr] -> InferM DraftExpr
 inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
@@ -1545,6 +1734,25 @@ freezeDraftExpr ctx decl inferState draftExpr =
       pure (CString (draftExprSpan draftExpr) value)
     DraftBool value ->
       pure (CBool (draftExprSpan draftExpr) value)
+    DraftPage title body -> do
+      frozenTitle <- freezeDraftExpr ctx decl inferState title
+      frozenBody <- freezeDraftExpr ctx decl inferState body
+      pure (CPage (draftExprSpan draftExpr) frozenTitle frozenBody)
+    DraftViewEmpty ->
+      pure (CViewEmpty (draftExprSpan draftExpr))
+    DraftViewText value -> do
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      pure (CViewText (draftExprSpan draftExpr) frozenValue)
+    DraftViewAppend left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CViewAppend (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftViewElement tagName child -> do
+      frozenChild <- freezeDraftExpr ctx decl inferState child
+      pure (CViewElement (draftExprSpan draftExpr) tagName frozenChild)
+    DraftViewStyled styleRef child -> do
+      frozenChild <- freezeDraftExpr ctx decl inferState child
+      pure (CViewStyled (draftExprSpan draftExpr) styleRef frozenChild)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenFn <- freezeDraftExpr ctx decl inferState fn

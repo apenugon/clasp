@@ -33,11 +33,12 @@ emitModule modl =
     ]
       <> emitRuntimePrelude
       <> emitPrimitiveCodecHelpers
+      <> emitRequestSchemaHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
-      <> emitRoutesExport (lowerModuleRoutes modl)
+      <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
 
 emitRuntimePrelude :: [Text]
 emitRuntimePrelude =
@@ -85,6 +86,73 @@ emitRuntimePrelude =
   , "  return objectValue[fieldName];"
   , "}"
   , ""
+  , "function $claspEscapeHtml(text) {"
+  , "  return text"
+  , "    .replaceAll(\"&\", \"&amp;\")"
+  , "    .replaceAll(\"<\", \"&lt;\")"
+  , "    .replaceAll(\">\", \"&gt;\")"
+  , "    .replaceAll('\"', \"&quot;\")"
+  , "    .replaceAll(\"'\", \"&#39;\");"
+  , "}"
+  , ""
+  , "function $claspExpectView(value, path) {"
+  , "  const objectValue = $claspExpectObject(value, path);"
+  , "  const kind = $claspRequireField(objectValue, \"$kind\", path);"
+  , "  switch (kind) {"
+  , "    case \"empty\": return objectValue;"
+  , "    case \"text\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"text\", path), `${path}.text`);"
+  , "      return objectValue;"
+  , "    case \"append\":"
+  , "      $claspExpectView($claspRequireField(objectValue, \"left\", path), `${path}.left`);"
+  , "      $claspExpectView($claspRequireField(objectValue, \"right\", path), `${path}.right`);"
+  , "      return objectValue;"
+  , "    case \"element\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"tag\", path), `${path}.tag`);"
+  , "      $claspExpectView($claspRequireField(objectValue, \"child\", path), `${path}.child`);"
+  , "      return objectValue;"
+  , "    case \"styled\":"
+  , "      $claspExpectStr($claspRequireField(objectValue, \"styleRef\", path), `${path}.styleRef`);"
+  , "      $claspExpectView($claspRequireField(objectValue, \"child\", path), `${path}.child`);"
+  , "      return objectValue;"
+  , "    default:"
+  , "      throw new Error(`${path} expected a View value`);"
+  , "  }"
+  , "}"
+  , ""
+  , "function $claspExpectPage(value, path = \"value\") {"
+  , "  const objectValue = $claspExpectObject(value, path);"
+  , "  if ($claspRequireField(objectValue, \"$kind\", path) !== \"page\") {"
+  , "    throw new Error(`${path} expected a Page value`);"
+  , "  }"
+  , "  $claspExpectStr($claspRequireField(objectValue, \"title\", path), `${path}.title`);"
+  , "  $claspExpectView($claspRequireField(objectValue, \"body\", path), `${path}.body`);"
+  , "  return objectValue;"
+  , "}"
+  , ""
+  , "function $claspRenderView(view) {"
+  , "  const checkedView = $claspExpectView(view, \"view\");"
+  , "  switch (checkedView.$kind) {"
+  , "    case \"empty\":"
+  , "      return \"\";"
+  , "    case \"text\":"
+  , "      return $claspEscapeHtml(checkedView.text);"
+  , "    case \"append\":"
+  , "      return $claspRenderView(checkedView.left) + $claspRenderView(checkedView.right);"
+  , "    case \"element\":"
+  , "      return `<${checkedView.tag}>${$claspRenderView(checkedView.child)}</${checkedView.tag}>`;"
+  , "    case \"styled\":"
+  , "      return `<div data-clasp-style=${JSON.stringify($claspExpectStr(checkedView.styleRef, \"view.styleRef\"))}>${$claspRenderView(checkedView.child)}</div>`;"
+  , "    default:"
+  , "      throw new Error(\"Unknown View node\");"
+  , "  }"
+  , "}"
+  , ""
+  , "function $render_Page(value) {"
+  , "  const page = $claspExpectPage(value);"
+  , "  return \"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>\" + $claspEscapeHtml(page.title) + \"</title></head><body>\" + $claspRenderView(page.body) + \"</body></html>\";"
+  , "}"
+  , ""
   ]
 
 emitPrimitiveCodecHelpers :: [Text]
@@ -97,6 +165,56 @@ emitPrimitiveCodecHelpers =
   , "function $encode_Bool(value) { return JSON.stringify($claspExpectBool(value, \"value\")); }"
   , ""
   ]
+
+emitRequestSchemaHelpers :: [TypeDecl] -> [RecordDecl] -> [Text]
+emitRequestSchemaHelpers typeDecls recordDecls =
+  [ "const $claspSchema_Int = { kind: \"int\" };"
+  , "const $claspSchema_Str = { kind: \"str\" };"
+  , "const $claspSchema_Bool = { kind: \"bool\" };"
+  ]
+    <> concatMap emitTypeSchema typeDecls
+    <> concatMap emitRecordSchema recordDecls
+    <> [""]
+  where
+    emitTypeSchema typeDecl
+      | isJsonEnumTypeDecl typeDecl =
+          [ "const $claspSchema_" <> typeDeclName typeDecl <> " = { kind: \"enum\", name: " <> emitStringLiteral (typeDeclName typeDecl) <> " };"
+          ]
+      | otherwise =
+          []
+
+    emitRecordSchema recordDecl =
+      [ "const $claspSchema_" <> recordDeclName recordDecl <> " = {"
+      , "  kind: \"record\","
+      , "  name: " <> emitStringLiteral (recordDeclName recordDecl) <> ","
+      , "  fields: {"
+      ]
+        <> fmap emitRecordFieldSchema (recordDeclFields recordDecl)
+        <> [ "  }"
+           , "};"
+           ]
+
+    emitRecordFieldSchema fieldDecl =
+      "    "
+        <> recordFieldDeclName fieldDecl
+        <> ": "
+        <> emitRequestSchemaRef (recordFieldDeclType fieldDecl)
+        <> ","
+
+    emitRequestSchemaRef typ =
+      case typ of
+        TInt ->
+          "$claspSchema_Int"
+        TStr ->
+          "$claspSchema_Str"
+        TBool ->
+          "$claspSchema_Bool"
+        TNamed name ->
+          if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+            then "$claspSchema_" <> name
+            else "null"
+        TFunction _ _ ->
+          "null"
 
 emitTypeCodecHelpers :: TypeDecl -> [Text]
 emitTypeCodecHelpers typeDecl
@@ -238,25 +356,46 @@ foreignParams typ =
     _ ->
       []
 
-emitRoutesExport :: [LowerRoute] -> [Text]
-emitRoutesExport routes =
+emitRoutesExport :: [TypeDecl] -> [RecordDecl] -> [LowerRoute] -> [Text]
+emitRoutesExport typeDecls recordDecls routes =
   [ "export const __claspRoutes = ["
   ]
     <> concatMap emitRoute routes
     <> [ "];" ]
   where
     emitRoute route =
+      let responseEncoder =
+            case lowerRouteResponseTypeName route of
+              "Page" ->
+                "$render_Page"
+              responseTypeName ->
+                "$encode_" <> responseTypeName
+          responseKind =
+            case lowerRouteResponseTypeName route of
+              "Page" -> "page"
+              _ -> "json"
+       in
       [ "  {"
       , "    name: " <> emitStringLiteral (lowerRouteName route) <> ","
       , "    method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
       , "    path: " <> emitStringLiteral (lowerRoutePath route) <> ","
       , "    requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
+      , "    requestSchema: " <> emitRouteRequestSchema (lowerRouteRequestTypeName route) <> ","
       , "    responseType: " <> emitStringLiteral (lowerRouteResponseTypeName route) <> ","
+      , "    responseKind: " <> emitStringLiteral responseKind <> ","
       , "    handler: " <> emitIdentifier (lowerRouteHandlerName route) <> ","
       , "    decodeRequest: $decode_" <> lowerRouteRequestTypeName route <> ","
-      , "    encodeResponse: $encode_" <> lowerRouteResponseTypeName route
+      , "    encodeResponse: " <> responseEncoder
       , "  },"
       ]
+
+    emitRouteRequestSchema typeName
+      | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
+          "$claspSchema_" <> typeName
+      | any ((== typeName) . typeDeclName) typeDecls || any ((== typeName) . recordDeclName) recordDecls =
+          "$claspSchema_" <> typeName
+      | otherwise =
+          "null"
 
 emitRouteMethod :: RouteMethod -> Text
 emitRouteMethod routeMethod =
@@ -361,6 +500,33 @@ emitExpr counter expr =
       (counter, "true")
     LBool False ->
       (counter, "false")
+    LPage title body ->
+      let (counterAfterTitle, titleText) = emitExpr counter title
+          (counterAfterBody, bodyText) = emitExpr counterAfterTitle body
+       in ( counterAfterBody
+          , "{ $kind: \"page\", title: " <> titleText <> ", body: " <> bodyText <> " }"
+          )
+    LViewEmpty ->
+      (counter, "{ $kind: \"empty\" }")
+    LViewText value ->
+      let (nextCounter, valueText) = emitExpr counter value
+       in (nextCounter, "{ $kind: \"text\", text: " <> valueText <> " }")
+    LViewAppend left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in ( counterAfterRight
+          , "{ $kind: \"append\", left: " <> leftText <> ", right: " <> rightText <> " }"
+          )
+    LViewElement tagName child ->
+      let (nextCounter, childText) = emitExpr counter child
+       in ( nextCounter
+          , "{ $kind: \"element\", tag: " <> emitStringLiteral tagName <> ", child: " <> childText <> " }"
+          )
+    LViewStyled styleRef child ->
+      let (nextCounter, childText) = emitExpr counter child
+       in ( nextCounter
+          , "{ $kind: \"styled\", styleRef: " <> emitStringLiteral styleRef <> ", child: " <> childText <> " }"
+          )
     LCall fn args ->
       let (counterAfterFn, fnText) = emitExpr counter fn
           (counterAfterArgs, argTexts) = emitExprList counterAfterFn args

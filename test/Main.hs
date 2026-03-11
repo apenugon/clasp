@@ -11,9 +11,12 @@ import qualified Data.Text.Lazy as LT
 import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
+  , makeAbsolute
   , removePathForcibly
   )
+import System.Exit (ExitCode (..))
 import System.FilePath ((</>), takeDirectory)
+import System.Process (readProcessWithExitCode)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -169,6 +172,17 @@ parserTests =
                     assertFailure ("expected decode expression, got " <> show other)
               Nothing ->
                 assertFailure "expected summarizeLead declaration"
+    , testCase "parses compiler-known page types through the normal surface" $
+        case parseSource "inline" pageSource of
+          Left err ->
+            assertFailure ("expected page source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case (findDecl "home" (moduleDecls modl), moduleRouteDecls modl) of
+              (Just decl, [routeDecl]) -> do
+                assertEqual "page annotation" (Just (TFunction [TNamed "Empty"] (TNamed "Page"))) (declAnnotation decl)
+                assertEqual "page route response" "Page" (routeDeclResponseType routeDecl)
+              _ ->
+                assertFailure "expected page declaration and route"
     ]
 
 checkerTests :: TestTree
@@ -203,6 +217,12 @@ checkerTests =
         case checkSource "service" serviceSource of
           Left err ->
             assertFailure ("expected service source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts compiler-known page primitives" $
+        case checkSource "page" pageSource of
+          Left err ->
+            assertFailure ("expected page source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -249,6 +269,12 @@ checkerTests =
         assertHasCode "E_PATTERN_TYPE_MISMATCH" (checkSource "bad" wrongConstructorSource)
     , testCase "rejects duplicate match branches" $
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
+    , testCase "rejects active script tags in safe views" $
+        assertHasCode "E_VIEW_TAG" (checkSource "bad" unsafeScriptSource)
+    , testCase "rejects raw host class escapes in safe views" $
+        assertHasCode "E_UNSAFE_VIEW_ESCAPE" (checkSource "bad" hostClassSource)
+    , testCase "rejects raw host style escapes in safe views" $
+        assertHasCode "E_UNSAFE_VIEW_ESCAPE" (checkSource "bad" hostStyleSource)
     ]
 
 diagnosticTests :: TestTree
@@ -312,6 +338,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
+    , testCase "lowering preserves page and view primitives" $
+        case lowerChecked "page" pageSource of
+          Left err ->
+            assertFailure ("expected page lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "welcomeView" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LViewStyled "inbox_shell" _)) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered welcomeView declaration: " <> show other)
+            case findLowerDecl "home" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["req"] (LPage (LString "Inbox") (LVar "welcomeView"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered page declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -358,6 +399,16 @@ compileTests =
             assertBool "expected record encoder to validate internal values" ("function $encode_LeadSummary(value) { return JSON.stringify($serialize_LeadSummary($validateInternal_LeadSummary(value, \"value\"))); }" `T.isInfixOf` emitted)
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
+            assertBool "expected request schema metadata" ("requestSchema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+    , testCase "compile emits safe page rendering helpers and page route metadata" $
+        case compileSource "page" pageSource of
+          Left err ->
+            assertFailure ("expected page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected page renderer" ("function $render_Page" `T.isInfixOf` emitted)
+            assertBool "expected view renderer" ("function $claspRenderView" `T.isInfixOf` emitted)
+            assertBool "expected page response kind" ("responseKind: \"page\"" `T.isInfixOf` emitted)
+            assertBool "expected page route encoder" ("encodeResponse: $render_Page" `T.isInfixOf` emitted)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -379,6 +430,37 @@ compileTests =
         withProjectFiles "import-missing" missingImportFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
           assertHasCode "E_IMPORT_NOT_FOUND" result
+    , testCase "compileEntry renders an inbox-style shared page safely" $
+        withProjectFiles "render-inbox-page" inboxPageFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected inbox page project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              renderedHtml <- runNodeModule compiledPath
+              assertBool "expected doctype" ("<!DOCTYPE html>" `T.isInfixOf` renderedHtml)
+              assertBool "expected title" ("<title>Inbox</title>" `T.isInfixOf` renderedHtml)
+              assertBool "expected escaped subject" ("&lt;Quarterly &lt;review&gt;&gt;" `T.isInfixOf` renderedHtml)
+              assertBool "expected escaped ampersand" ("Escaped &amp; archived" `T.isInfixOf` renderedHtml)
+              assertBool "expected explicit style ref wrapper" ("data-clasp-style=\"inbox_shell\"" `T.isInfixOf` renderedHtml)
+    , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
+        withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+              runtimeOutput <- runNodeScript (pageFormRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+              assertEqual
+                "expected query decode, form decode, and invalid form failure"
+                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"value.quantity expected an Int\"}"
+                runtimeOutput
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -425,6 +507,34 @@ lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do
   checked <- checkSource path source
   pure (lowerModule checked)
+
+runNodeModule :: FilePath -> IO Text
+runNodeModule compiledPath = do
+  absolutePath <- makeAbsolute compiledPath
+  runNodeScript $
+    T.pack . unlines $
+      [ "import * as compiledModule from " <> show ("file://" <> absolutePath) <> ";"
+      , "const route = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'inboxRoute');"
+      , "if (!route) { throw new Error('missing inboxRoute'); }"
+      , "const html = await route.encodeResponse(await route.handler({}));"
+      , "console.log(html);"
+      ]
+
+runNodeScript :: Text -> IO Text
+runNodeScript script = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "node"
+      [ "--input-type=module"
+      , "--eval"
+      , T.unpack script
+      ]
+      ""
+  case exitCode of
+    ExitSuccess ->
+      pure (T.strip (T.pack stdoutText))
+    ExitFailure _ ->
+      assertFailure ("node script failed:\n" <> stderrText)
 
 withProjectFiles :: FilePath -> [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
 withProjectFiles fixtureName files action = do
@@ -587,6 +697,61 @@ serviceSource =
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     ]
 
+pageSource :: Text
+pageSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "welcomeView : View"
+    , "welcomeView = styled \"inbox_shell\" (element \"section\" (append (element \"h1\" (text \"Inbox\")) (element \"p\" (text \"Safe <markup>\"))))"
+    , ""
+    , "home : Empty -> Page"
+    , "home req = page \"Inbox\" welcomeView"
+    , ""
+    , "route homeRoute = GET \"/inbox\" Empty -> Page home"
+    ]
+
+unsafeScriptSource :: Text
+unsafeScriptSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (element \"script\" (text \"alert(1)\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
+hostClassSource :: Text
+hostClassSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (hostClass \"hero\" (text \"hello\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
+hostStyleSource :: Text
+hostStyleSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (hostStyle \"display:none\" (text \"hello\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
 missingRecordFieldSource :: Text
 missingRecordFieldSource =
   T.unlines
@@ -681,6 +846,17 @@ importSuccessFiles =
   , ("Shared/User.clasp", sharedUserSource)
   ]
 
+inboxPageFiles :: [(FilePath, Text)]
+inboxPageFiles =
+  [ ("Main.clasp", inboxPageMainSource)
+  , ("Shared/Inbox.clasp", sharedInboxSource)
+  ]
+
+pageFormRuntimeFiles :: [(FilePath, Text)]
+pageFormRuntimeFiles =
+  [ ("Main.clasp", pageFormRuntimeSource)
+  ]
+
 missingImportFiles :: [(FilePath, Text)]
 missingImportFiles =
   [ ("Main.clasp", missingImportMainSource)
@@ -725,4 +901,89 @@ missingImportMainSource =
     , "import Shared.Missing"
     , ""
     , "main = 1"
+    ]
+
+inboxPageMainSource :: Text
+inboxPageMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.Inbox"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "seed : InboxData"
+    , "seed = InboxData {"
+    , "  headline = \"Inbox\","
+    , "  primarySubject = \"<Quarterly <review>>\","
+    , "  secondarySubject = \"Escaped & archived\""
+    , "}"
+    , ""
+    , "inboxRouteHandler : Empty -> Page"
+    , "inboxRouteHandler req = renderInbox seed"
+    , ""
+    , "route inboxRoute = GET \"/inbox\" Empty -> Page inboxRouteHandler"
+    ]
+
+sharedInboxSource :: Text
+sharedInboxSource =
+  T.unlines
+    [ "module Shared.Inbox"
+    , ""
+    , "record InboxData = {"
+    , "  headline : Str,"
+    , "  primarySubject : Str,"
+    , "  secondarySubject : Str"
+    , "}"
+    , ""
+    , "renderInbox : InboxData -> Page"
+    , "renderInbox data = page data.headline (styled \"inbox_shell\" (element \"main\" (append (element \"h1\" (text data.headline)) (append (element \"article\" (text data.primarySubject)) (element \"article\" (text data.secondarySubject))))))"
+    ]
+
+pageFormRuntimeSource :: Text
+pageFormRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record OrderLookup = {"
+    , "  customerId : Str,"
+    , "  quantity : Int"
+    , "}"
+    , ""
+    , "orderPage : OrderLookup -> Page"
+    , "orderPage lookup = page \"Order\" (text lookup.customerId)"
+    , ""
+    , "route lookupRoute = GET \"/order\" OrderLookup -> Page orderPage"
+    , "route submitRoute = POST \"/order\" OrderLookup -> Page orderPage"
+    ]
+
+pageFormRuntimeScript :: FilePath -> FilePath -> Text
+pageFormRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const lookupRoute = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'lookupRoute');"
+    , "const submitRoute = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'submitRoute');"
+    , "if (!lookupRoute || !submitRoute) { throw new Error('missing routes'); }"
+    , "const queryRequest = new Request('http://example.test/order?customerId=00123&quantity=7', { method: 'GET' });"
+    , "const formRequest = new Request('http://example.test/order', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'customerId=00123&quantity=7'"
+    , "});"
+    , "const invalidFormRequest = new Request('http://example.test/order', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'customerId=00123&quantity=oops'"
+    , "});"
+    , "const queryPayload = lookupRoute.decodeRequest(await requestPayloadJson(lookupRoute, queryRequest));"
+    , "const formPayload = submitRoute.decodeRequest(await requestPayloadJson(submitRoute, formRequest));"
+    , "const html = submitRoute.encodeResponse(await submitRoute.handler(formPayload));"
+    , "let invalidMessage = null;"
+    , "try {"
+    , "  submitRoute.decodeRequest(await requestPayloadJson(submitRoute, invalidFormRequest));"
+    , "} catch (error) {"
+    , "  invalidMessage = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({ query: queryPayload, form: formPayload, html, invalid: invalidMessage }));"
     ]

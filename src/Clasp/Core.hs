@@ -75,6 +75,12 @@ data CoreExpr
   | CInt SourceSpan Integer
   | CString SourceSpan Text
   | CBool SourceSpan Bool
+  | CPage SourceSpan CoreExpr CoreExpr
+  | CViewEmpty SourceSpan
+  | CViewText SourceSpan CoreExpr
+  | CViewAppend SourceSpan CoreExpr CoreExpr
+  | CViewElement SourceSpan Text CoreExpr
+  | CViewStyled SourceSpan Text CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
@@ -94,6 +100,18 @@ coreExprType expr =
       TStr
     CBool _ _ ->
       TBool
+    CPage _ _ _ ->
+      TNamed "Page"
+    CViewEmpty _ ->
+      TNamed "View"
+    CViewText _ _ ->
+      TNamed "View"
+    CViewAppend _ _ _ ->
+      TNamed "View"
+    CViewElement _ _ _ ->
+      TNamed "View"
+    CViewStyled _ _ _ ->
+      TNamed "View"
     CCall _ typ _ _ ->
       typ
     CMatch _ typ _ _ ->
