@@ -150,3 +150,70 @@ clasp_swarm_retry_limit_is_bounded() {
 
   [[ "$retry_limit" =~ ^[0-9]+$ ]] && (( retry_limit > 0 ))
 }
+
+clasp_swarm_git_is_clean() {
+  local repo_root="$1"
+
+  git -C "$repo_root" diff --quiet --ignore-submodules --exit-code &&
+    git -C "$repo_root" diff --cached --quiet --ignore-submodules --exit-code &&
+    [[ -z "$(git -C "$repo_root" ls-files --others --exclude-standard)" ]]
+}
+
+clasp_swarm_current_branch() {
+  local repo_root="$1"
+
+  git -C "$repo_root" branch --show-current
+}
+
+clasp_swarm_reconcile_main_and_trunk() {
+  local repo_root="$1"
+  local main_branch="$2"
+  local trunk_branch="$3"
+  local main_head=""
+  local trunk_head=""
+  local current_branch=""
+
+  if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/$main_branch"; then
+    echo "missing main branch: $main_branch" >&2
+    return 1
+  fi
+
+  if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/$trunk_branch"; then
+    echo "missing trunk branch: $trunk_branch" >&2
+    return 1
+  fi
+
+  main_head="$(git -C "$repo_root" rev-parse "$main_branch")"
+  trunk_head="$(git -C "$repo_root" rev-parse "$trunk_branch")"
+
+  if [[ "$main_head" == "$trunk_head" ]]; then
+    printf '%s\n' "$main_head"
+    return 0
+  fi
+
+  if git -C "$repo_root" merge-base --is-ancestor "$trunk_head" "$main_head"; then
+    git -C "$repo_root" update-ref "refs/heads/$trunk_branch" "$main_head" "$trunk_head"
+    printf '%s\n' "$main_head"
+    return 0
+  fi
+
+  if git -C "$repo_root" merge-base --is-ancestor "$main_head" "$trunk_head"; then
+    current_branch="$(clasp_swarm_current_branch "$repo_root")"
+    if [[ "$current_branch" != "$main_branch" ]]; then
+      echo "cannot fast-forward $main_branch from $trunk_branch while checked out on $current_branch" >&2
+      return 1
+    fi
+
+    if ! clasp_swarm_git_is_clean "$repo_root"; then
+      echo "cannot fast-forward $main_branch from $trunk_branch with a dirty worktree" >&2
+      return 1
+    fi
+
+    git -C "$repo_root" merge --ff-only "$trunk_branch" >/dev/null
+    printf '%s\n' "$(git -C "$repo_root" rev-parse "$main_branch")"
+    return 0
+  fi
+
+  echo "$main_branch and $trunk_branch have diverged; reconcile them manually before continuing" >&2
+  return 1
+}

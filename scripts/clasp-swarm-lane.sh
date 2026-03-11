@@ -38,6 +38,7 @@ pid_file="$runtime_root/pid"
 lock_file="$runtime_root/lane.lock"
 merge_lock_file="$project_root/.clasp-swarm/merge.lock"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
+main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 branch_prefix="${CLASP_SWARM_BRANCH_PREFIX:-agents/swarm}"
 retry_limit="${CLASP_SWARM_RETRY_LIMIT:-0}"
@@ -171,6 +172,20 @@ resume_incomplete_run() {
   fi
 
   echo "resuming $task_id from $(basename "$run_dir")" >&2
+
+  if ! sync_trunk_with_main "$verifier_log"; then
+    verifier_exit="$?"
+    write_failure_report \
+      "$verifier_report" \
+      "Main/trunk reconciliation failed while resuming verification." \
+      "$verifier_log" \
+      "$task_id" \
+      "main-sync" \
+      "$verifier_exit"
+    archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+    resume_feedback_file="$verifier_report"
+    return 2
+  fi
 
   if prepare_baseline_worktree "$baseline_worktree" 2>>"$verifier_log"; then
     :
@@ -443,26 +458,28 @@ integrate_task_branch() {
   local task_worktree="$1"
   local run_dir="$2"
   local integration_log="$run_dir/integration.log"
+  local base_head
   local old_trunk
   local task_head
 
   exec 8>"$merge_lock_file"
   flock 8
 
-  old_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
-
   {
+    ensure_trunk_branch
+    clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
+    base_head="$(git -C "$project_root" rev-parse "$main_branch")"
+    old_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
     task_head="$(git -C "$task_worktree" rev-parse HEAD)"
 
-    if [[ "$task_head" != "$old_trunk" ]]; then
-      git -C "$task_worktree" rebase "$trunk_branch"
+    if [[ "$task_head" != "$base_head" ]]; then
+      git -C "$task_worktree" rebase "$main_branch"
       (
         cd "$task_worktree"
         bash scripts/verify-all.sh
       )
       task_head="$(git -C "$task_worktree" rev-parse HEAD)"
-      git -C "$project_root" merge-base --is-ancestor "$old_trunk" "$task_head"
-      git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
+      git -C "$project_root" merge-base --is-ancestor "$base_head" "$task_head"
     else
       (
         cd "$task_worktree"
@@ -470,7 +487,9 @@ integrate_task_branch() {
       )
     fi
 
-    printf '%s\n' "$(git -C "$project_root" rev-parse "$trunk_branch")"
+    git -C "$project_root" merge --ff-only "$task_head"
+    git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
+    printf '%s\n' "$(git -C "$project_root" rev-parse "$main_branch")"
   } >"$integration_log" 2>&1
 }
 
@@ -478,6 +497,18 @@ ensure_trunk_branch() {
   if ! git -C "$project_root" show-ref --verify --quiet "refs/heads/$trunk_branch"; then
     git -C "$project_root" branch "$trunk_branch" "$source_ref"
   fi
+}
+
+sync_trunk_with_main() {
+  local sync_log="${1:-/dev/null}"
+
+  exec 8>"$merge_lock_file"
+  flock 8
+
+  {
+    ensure_trunk_branch
+    clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
+  } >>"$sync_log" 2>&1
 }
 
 exec 9>"$lock_file"
@@ -534,6 +565,22 @@ while IFS= read -r task_file; do
     verifier_log="$run_dir/verifier-log.jsonl"
     mkdir -p "$run_dir"
     baseline_worktree="$run_dir/baseline-worktree"
+
+    if sync_trunk_with_main "$builder_log"; then
+      :
+    else
+      sync_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Main/trunk reconciliation failed before the builder could run." \
+        "$builder_log" \
+        "$task_id" \
+        "main-sync" \
+        "$sync_exit"
+      feedback_file="$verifier_report"
+      attempt=$((attempt + 1))
+      continue
+    fi
 
     if task_worktree="$(prepare_task_worktree "$task_id" 2>>"$builder_log")"; then
       :

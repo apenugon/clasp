@@ -6,6 +6,7 @@ source "$project_root/scripts/clasp-swarm-common.sh"
 
 wave_name="${1:-$(clasp_swarm_default_wave)}"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
+main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 
@@ -23,9 +24,17 @@ if [[ "$allow_dirty" != "1" ]] && \
   exit 1
 fi
 
+current_branch="$(clasp_swarm_current_branch "$project_root")"
+if [[ "$current_branch" != "$main_branch" ]]; then
+  echo "refusing to start the swarm unless the repo is checked out on $main_branch; current branch is $current_branch" >&2
+  exit 1
+fi
+
 if ! git -C "$project_root" show-ref --verify --quiet "refs/heads/$trunk_branch"; then
   git -C "$project_root" branch "$trunk_branch" "$source_ref"
 fi
+
+clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch" >/dev/null
 
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
