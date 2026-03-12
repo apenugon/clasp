@@ -2004,11 +2004,14 @@ compileTests =
             assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
             assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
             assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
+            assertBool "expected human-readable control-plane docs export" ("export const __claspControlPlaneDocs = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected control-plane contract docs entry" ("docs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
             assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane entry" ("controlPlane: __claspControlPlane" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract control plane docs entry" ("controlPlaneDocs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             let compiledPath = "dist/control-plane.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -2022,6 +2025,7 @@ compileTests =
                 , "const tool = compiledModule.__claspTools[0];"
                 , "const verifier = compiledModule.__claspVerifiers[0];"
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
+                , "const docs = compiledModule.__claspControlPlaneDocs;"
                 , "console.log(JSON.stringify({"
                 , "  guideExtends: guide.extends,"
                 , "  guideScope: guide.resolvedEntries.scope,"
@@ -2033,12 +2037,16 @@ compileTests =
                 , "  parsedSummary: tool.parseResult({ summary: 'done' }).summary,"
                 , "  verifierMethod: verifier.prepareRun({ query: 'check' }, 8).method,"
                 , "  mergeGatePlan: mergeGate.plan({ query: 'gate' }, 'trunk').map((request) => request.id).join(','),"
-                , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version"
+                , "  docsFormat: docs.format,"
+                , "  docsHasGuides: docs.markdown.includes('## Guides'),"
+                , "  docsHasHookEvent: docs.markdown.includes('worker.start'),"
+                , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
+                , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version"
                 , "}));"
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"bindingControlPlaneVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of

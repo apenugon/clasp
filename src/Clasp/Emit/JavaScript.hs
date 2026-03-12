@@ -1293,6 +1293,7 @@ emitControlPlaneExports modl =
     <> emitTools
     <> emitVerifiers
     <> emitMergeGates
+    <> emitControlPlaneDocs
     <> emitControlPlaneContract
   where
     typeDecls = lowerModuleTypeDecls modl
@@ -1556,6 +1557,15 @@ emitControlPlaneExports modl =
       , "  },"
       ]
 
+    emitControlPlaneDocs =
+      [ "export const __claspControlPlaneDocs = Object.freeze({"
+      , "  version: 1,"
+      , "  format: \"markdown\","
+      , "  markdown: " <> emitStringLiteral (renderControlPlaneDocsMarkdown modl)
+      , "});"
+      , ""
+      ]
+
     emitControlPlaneContract =
       [ "export const __claspControlPlane = Object.freeze({"
       , "  version: 1,"
@@ -1567,10 +1577,134 @@ emitControlPlaneExports modl =
       , "  toolServers: __claspToolServers,"
       , "  tools: __claspTools,"
       , "  verifiers: __claspVerifiers,"
-      , "  mergeGates: __claspMergeGates"
+      , "  mergeGates: __claspMergeGates,"
+      , "  docs: __claspControlPlaneDocs"
       , "});"
       , ""
       ]
+
+renderControlPlaneDocsMarkdown :: LowerModule -> Text
+renderControlPlaneDocsMarkdown modl =
+  T.unlines $
+    [ "# Control Plane Docs"
+    , ""
+    , "This document is generated from the same Clasp declarations as the executable control-plane manifests."
+    ]
+      <> renderDocsSection "Guides" (fmap renderGuideDoc (lowerModuleGuideDecls modl))
+      <> renderDocsSection "Policies" (fmap renderPolicyDoc (lowerModulePolicyDecls modl))
+      <> renderDocsSection "Agent Roles" (fmap renderAgentRoleDoc (lowerModuleAgentRoleDecls modl))
+      <> renderDocsSection "Agents" (fmap renderAgentDoc (lowerModuleAgentDecls modl))
+      <> renderDocsSection "Hooks" (fmap renderHookDoc (lowerModuleHookDecls modl))
+      <> renderDocsSection "Tool Servers" (fmap renderToolServerDoc (lowerModuleToolServerDecls modl))
+      <> renderDocsSection "Tools" (fmap renderToolDoc (lowerModuleToolDecls modl))
+      <> renderDocsSection "Verifiers" (fmap renderVerifierDoc (lowerModuleVerifierDecls modl))
+      <> renderDocsSection "Merge Gates" (fmap renderMergeGateDoc (lowerModuleMergeGateDecls modl))
+
+renderDocsSection :: Text -> [Text] -> [Text]
+renderDocsSection title entries =
+  [ ""
+  , "## " <> title
+  ]
+    <> case entries of
+      [] ->
+        [ ""
+        , "_None declared._"
+        ]
+      _ ->
+        [ ""
+        , T.intercalate "\n\n" entries
+        ]
+
+renderGuideDoc :: GuideDecl -> Text
+renderGuideDoc guideDecl =
+  T.unlines $
+    [ "### " <> guideDeclName guideDecl
+    , "- Extends: " <> maybe "none" id (guideDeclExtends guideDecl)
+    ]
+      <> case guideDeclEntries guideDecl of
+        [] ->
+          ["- Entries: none"]
+        entries ->
+          fmap renderGuideEntryDoc entries
+
+renderGuideEntryDoc :: GuideEntryDecl -> Text
+renderGuideEntryDoc entryDecl =
+  "- " <> guideEntryDeclName entryDecl <> ": " <> guideEntryDeclValue entryDecl
+
+renderPolicyDoc :: PolicyDecl -> Text
+renderPolicyDoc policyDecl =
+  let classifications = fmap policyClassificationDeclName (policyDeclAllowedClassifications policyDecl)
+      classificationSummary =
+        case classifications of
+          [] -> "none"
+          _ -> T.intercalate ", " classifications
+   in T.unlines
+        [ "### " <> policyDeclName policyDecl
+        , "- Allowed classifications: " <> classificationSummary
+        ]
+
+renderAgentRoleDoc :: AgentRoleDecl -> Text
+renderAgentRoleDoc agentRoleDecl =
+  T.unlines
+    [ "### " <> agentRoleDeclName agentRoleDecl
+    , "- Guide: " <> agentRoleDeclGuideName agentRoleDecl
+    , "- Policy: " <> agentRoleDeclPolicyName agentRoleDecl
+    ]
+
+renderAgentDoc :: AgentDecl -> Text
+renderAgentDoc agentDecl =
+  T.unlines
+    [ "### " <> agentDeclName agentDecl
+    , "- Role: " <> agentDeclRoleName agentDecl
+    ]
+
+renderHookDoc :: HookDecl -> Text
+renderHookDoc hookDecl =
+  T.unlines
+    [ "### " <> hookDeclName hookDecl
+    , "- Event: " <> hookTriggerDeclEvent (hookDeclTrigger hookDecl)
+    , "- Request: " <> hookDeclRequestType hookDecl
+    , "- Response: " <> hookDeclResponseType hookDecl
+    , "- Handler: " <> hookDeclHandlerName hookDecl
+    ]
+
+renderToolServerDoc :: ToolServerDecl -> Text
+renderToolServerDoc toolServerDecl =
+  T.unlines
+    [ "### " <> toolServerDeclName toolServerDecl
+    , "- Protocol: " <> toolServerDeclProtocol toolServerDecl
+    , "- Location: " <> toolServerDeclLocation toolServerDecl
+    , "- Policy: " <> toolServerDeclPolicyName toolServerDecl
+    ]
+
+renderToolDoc :: ToolDecl -> Text
+renderToolDoc toolDecl =
+  T.unlines
+    [ "### " <> toolDeclName toolDecl
+    , "- Server: " <> toolDeclServerName toolDecl
+    , "- Operation: " <> toolDeclOperation toolDecl
+    , "- Request: " <> toolDeclRequestType toolDecl
+    , "- Response: " <> toolDeclResponseType toolDecl
+    ]
+
+renderVerifierDoc :: VerifierDecl -> Text
+renderVerifierDoc verifierDecl =
+  T.unlines
+    [ "### " <> verifierDeclName verifierDecl
+    , "- Tool: " <> verifierDeclToolName verifierDecl
+    ]
+
+renderMergeGateDoc :: MergeGateDecl -> Text
+renderMergeGateDoc mergeGateDecl =
+  let verifierNames = fmap mergeGateVerifierRefName (mergeGateDeclVerifierRefs mergeGateDecl)
+      verifierSummary =
+        case verifierNames of
+          [] -> "none"
+          _ -> T.intercalate ", " verifierNames
+   in T.unlines
+        [ "### " <> mergeGateDeclName mergeGateDecl
+        , "- Verifiers: " <> verifierSummary
+        ]
 
 emitGeneratedBindingsExport :: [Text]
 emitGeneratedBindingsExport =
@@ -1590,7 +1724,8 @@ emitGeneratedBindingsExport =
   , "  uiGraph: __claspUiGraph,"
   , "  navigationGraph: __claspNavigationGraph,"
   , "  actionGraph: __claspActionGraph,"
-  , "  controlPlane: __claspControlPlane"
+  , "  controlPlane: __claspControlPlane,"
+  , "  controlPlaneDocs: __claspControlPlaneDocs"
   , "});"
   ]
 
