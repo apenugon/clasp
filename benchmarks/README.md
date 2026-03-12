@@ -103,4 +103,6 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner now ext
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
 
+The lead-segment pair should stay isomorphic at the acceptance surface: both tests drive one app-owned server entrypoint, and the Clasp variant should keep benchmark-only harness glue out of ordinary product-field propagation work.
+
 The Clasp task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.

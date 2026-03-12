@@ -11,7 +11,6 @@ Relevant files:
 - `Shared/Lead.clasp`: shared schema, rendering, and intended edit surface
 - `Main.clasp`: route wiring and foreign-boundary entry points
 - `server.mjs`: in-memory state and runtime bindings
-- `test/lead-app.test.mjs`: exact required click-through behavior
 - `scripts/verify.sh`: acceptance command
 
 Relevant Clasp syntax:

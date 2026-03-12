@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { installRuntime, serveCompiledModule } from "../runtime/server.mjs";
-
-const compiled = await import("../build/Main.js");
+import { createServer } from "../server.mjs";
 
 function toWirePriority(value) {
   if (typeof value === "string") {
@@ -36,84 +34,19 @@ async function request(port, path, init = {}) {
 }
 
 async function withServer(binding, callback) {
-  const leads = [
-    {
-      leadId: "lead-2",
-      company: "Northwind Studio",
-      contact: "Morgan Lee",
-      summary: "Northwind Studio is ready for a design-system migration this quarter.",
-      priority: "medium",
-      followUpRequired: true,
-      reviewStatus: "reviewed",
-      reviewNote: "Confirmed budget window and asked for a migration timeline."
-    },
-    {
-      leadId: "lead-1",
-      company: "Acme Labs",
-      contact: "Jordan Kim",
-      summary: "Acme Labs is exploring an internal AI pilot for support operations.",
-      priority: "high",
-      followUpRequired: true,
-      reviewStatus: "new",
-      reviewNote: ""
-    }
-  ];
-
-  installRuntime({
-    mockLeadSummaryModel: binding,
-    storeLead(intake, summary) {
-      const lead = {
-        leadId: `lead-${leads.length + 1}`,
-        company: intake.company,
-        contact: intake.contact,
-        summary: summary.summary,
-        priority: toWirePriority(summary.priority) ?? "low",
-        followUpRequired: summary.followUpRequired,
-        reviewStatus: "new",
-        reviewNote: ""
-      };
-
-      leads.unshift(lead);
-      return JSON.stringify(lead);
-    },
-    loadInbox() {
-      return JSON.stringify({
-        headline: "Priority inbox",
-        primaryLeadLabel: leadLabel(leads[0]),
-        secondaryLeadLabel: leadLabel(leads[1] ?? leads[0])
-      });
-    },
-    loadPrimaryLead() {
-      return JSON.stringify(leads[0]);
-    },
-    loadSecondaryLead() {
-      return JSON.stringify(leads[1] ?? leads[0]);
-    },
-    reviewLead(review) {
-      const lead = leads.find((candidate) => candidate.leadId === review.leadId);
-
-      if (!lead) {
-        throw new Error(`Unknown lead: ${review.leadId}`);
-      }
-
-      lead.reviewStatus = "reviewed";
-      lead.reviewNote = review.note;
-      return JSON.stringify(lead);
-    }
-  });
-
   const port = 4100 + Math.floor(Math.random() * 300);
-  const server = serveCompiledModule(compiled, { port });
+  const server = createServer(
+    {
+      mockLeadSummaryModel: binding
+    },
+    { port }
+  );
 
   try {
     await callback(port);
   } finally {
     server.stop(true);
   }
-}
-
-function leadLabel(lead) {
-  return `${lead.company} (${lead.priority})`;
 }
 
 await withServer((lead) => {

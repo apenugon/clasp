@@ -113,6 +113,7 @@ For product-slice benchmarks, fairness also means:
 - both variants are derived from runnable canonical baselines with the same visible flow
 - neither side gets the exact benchmark change pre-applied
 - the first clickable lead-inbox task family should stay mirrored around one small product change such as a lead segment threaded through intake, storage, rendering, and the model boundary
+- acceptance tests should exercise the same app-owned server surface on both sides, so the `Clasp` variant does not require benchmark-only test/runtime edits for ordinary field propagation
 
 ### 5. Publish raw traces when possible
 
