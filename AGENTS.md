@@ -31,5 +31,6 @@ The main implementation files are:
 
 - Treat each task as one focused feature slice.
 - Add or update tests with each behavior change.
+- When a task changes runtime behavior, trust boundaries, workflows, interop, page/app flows, or other user-visible execution surfaces, add or update at least one scenario-level or end-to-end verification path, not just a local regression.
 - Only update docs when visible language or runtime behavior changes.
 - If a task fails verification twice, prefer a narrower workaround over a broad redesign.

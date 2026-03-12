@@ -43,6 +43,7 @@ Rules:
 - Start with the file paths named in the task findings or follow-up before scanning anything else.
 - Avoid broad repo tours and repeated rereads of unrelated modules.
 - Update docs only if the task changes the visible language/runtime behavior.
+- If the task changes runtime behavior, trust boundaries, workflows, interop, or app-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path in addition to any local regression.
 - Before finishing, run `bash scripts/verify-all.sh`.
 
 Your final response must satisfy the provided JSON schema.

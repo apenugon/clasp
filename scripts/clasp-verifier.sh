@@ -39,6 +39,7 @@ Rules:
 - Use `diff -ruN "$baseline_workspace" .` to focus your review.
 - Prioritize reviewing the changed files before reading unrelated source.
 - If verification fails, explain the concrete defects or missing coverage.
+- Treat missing scenario-level or end-to-end verification for runtime, trust-boundary, workflow, interop, or app-surface changes as a real verification defect.
 
 Your final response must satisfy the provided JSON schema.
 

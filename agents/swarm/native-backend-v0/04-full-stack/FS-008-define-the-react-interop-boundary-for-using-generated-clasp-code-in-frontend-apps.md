@@ -12,6 +12,7 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 - Implement `FS-008` as one narrow slice of work: Define the React interop boundary for using generated Clasp code in frontend apps
 - Add or update regression coverage for the new behavior
+- If the task changes runtime behavior, trust boundaries, workflows, interop, or app/user-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
 
@@ -32,6 +33,7 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 - `FS-008` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
+- Runtime, boundary, workflow, interop, or app-surface changes are backed by scenario-level or end-to-end verification, not only a local unit-style regression
 - `bash scripts/verify-all.sh` passes
 
 ## Verification

@@ -356,6 +356,7 @@ for (const task of taskRecords) {
   content.push("## Scope", "");
   content.push(`- Implement \`${task.id}\` as one narrow slice of work: ${task.description}`);
   content.push("- Add or update regression coverage for the new behavior");
+  content.push("- If the task changes runtime behavior, trust boundaries, workflows, interop, or app/user-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path");
   content.push("- Update docs or examples only where the new surface changes visible behavior");
   content.push("- Avoid unrelated refactors or broad rewrites");
   content.push("", "## Likely Files", "");
@@ -373,6 +374,7 @@ for (const task of taskRecords) {
   content.push("", "## Acceptance", "");
   content.push(`- \`${task.id}\` is implemented without breaking previously integrated tasks`);
   content.push("- Tests or regressions cover the new behavior");
+  content.push("- Runtime, boundary, workflow, interop, or app-surface changes are backed by scenario-level or end-to-end verification, not only a local unit-style regression");
   content.push("- `bash scripts/verify-all.sh` passes");
   content.push("", "## Verification", "", "```sh", "bash scripts/verify-all.sh", "```", "");
 
