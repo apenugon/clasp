@@ -52,6 +52,15 @@ assert_files_match() {
   fi
 }
 
+assert_file_exists() {
+  local target="$1"
+
+  if [[ ! -f "$target" ]]; then
+    echo "expected file to exist: $target" >&2
+    return 1
+  fi
+}
+
 check_product_only_clasp_solution() {
   local task_id="clasp-lead-segment"
   local workspace="$workspace_root/$task_id-product-only"
@@ -67,8 +76,28 @@ check_product_only_clasp_solution() {
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
 
+check_nested_clasp_benchmark_prep() {
+  local task_id="clasp-lead-priority"
+  local workspace="$workspace_root/$task_id"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+
+  assert_file_exists "$workspace/benchmark-prep/Main.context.json"
+  assert_file_exists "$workspace/benchmark-prep/Main.air.json"
+  assert_file_exists "$workspace/benchmark-prep/Main.ui.json"
+  assert_file_exists "$workspace/LANGUAGE_GUIDE.md"
+
+  assert_contains "$workspace/benchmark-prep/Main.context.json" '"route:summarizeLeadRoute"'
+  assert_contains "$workspace/benchmark-prep/Main.air.json" '"record:LeadRequest"'
+  assert_contains "$workspace/benchmark-prep/Main.ui.json" '[]'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`app/Main.clasp`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.context.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`POST /lead/summary` request `LeadRequest` -> response `LeadSummary`'
+}
+
 check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
+check_nested_clasp_benchmark_prep
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'import { createServer } from "../server.mjs";'

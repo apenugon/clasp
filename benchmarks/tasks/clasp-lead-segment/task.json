@@ -4,6 +4,7 @@
   "suite": "clickable-lead-inbox",
   "language": "clasp",
   "repo": "repo",
+  "entry": "Main.clasp",
   "prompt": "prompt.md",
   "prepare": [],
   "verify": ["bash", "scripts/verify.sh"]

@@ -4,6 +4,7 @@
   "suite": "llm-boundary-fullstack",
   "language": "clasp",
   "repo": "repo",
+  "entry": "app/Main.clasp",
   "prompt": "prompt.md",
   "prepare": [],
   "verify": ["bash", "scripts/verify.sh"]

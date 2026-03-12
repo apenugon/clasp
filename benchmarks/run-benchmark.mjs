@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { cp, mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const benchmarkRoot = path.resolve("benchmarks");
 const tasksRoot = path.join(benchmarkRoot, "tasks");
@@ -121,6 +122,251 @@ async function prepareWorkspace(task, workspace, env) {
       throw new Error(`prepare command failed: ${command.join(" ")}`);
     }
   }
+
+  if (task.language === "clasp") {
+    await generateClaspBenchmarkPrep(task, workspace, env);
+  }
+}
+
+async function generateClaspBenchmarkPrep(task, workspace, env) {
+  const entryPath = await resolveClaspEntrypoint(task, workspace);
+  const prepRoot = path.join(workspace, "benchmark-prep");
+  const moduleName = path.basename(entryPath, ".clasp");
+  const contextPath = path.join(prepRoot, `${moduleName}.context.json`);
+  const airPath = path.join(prepRoot, `${moduleName}.air.json`);
+  const uiPath = path.join(prepRoot, `${moduleName}.ui.json`);
+
+  await mkdir(prepRoot, { recursive: true });
+  await runClaspCompilerCommand("context", entryPath, contextPath, env);
+  await runClaspCompilerCommand("air", entryPath, airPath, env);
+
+  const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
+  await writeFile(uiPath, JSON.stringify(uiGraph, null, 2) + "\n", "utf8");
+
+  const context = JSON.parse(await readFile(contextPath, "utf8"));
+  const air = JSON.parse(await readFile(airPath, "utf8"));
+  const guidePath = path.join(workspace, "LANGUAGE_GUIDE.md");
+  const guide = renderClaspLanguageGuide({
+    workspace,
+    entryPath,
+    prepRoot,
+    moduleName,
+    context,
+    air,
+    uiGraph
+  });
+
+  await writeFile(guidePath, guide, "utf8");
+}
+
+async function resolveClaspEntrypoint(task, workspace) {
+  const candidates = [];
+
+  if (typeof task.entry === "string" && task.entry.length > 0) {
+    candidates.push(task.entry);
+  }
+
+  candidates.push("Main.clasp", path.join("app", "Main.clasp"));
+
+  for (const candidate of candidates) {
+    const resolved = path.join(workspace, candidate);
+    if (await fileExists(resolved)) {
+      return resolved;
+    }
+  }
+
+  throw new Error(
+    `unable to locate Clasp entrypoint for ${task.id}; tried: ${candidates.join(", ")}`
+  );
+}
+
+async function runClaspCompilerCommand(command, inputPath, outputPath, env) {
+  const script = [
+    "set -euo pipefail",
+    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
+    `cabal run claspc -- ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null 2>/dev/null`
+  ].join(" && ");
+  const result = await runProcess(
+    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
+    env.CLASP_PROJECT_ROOT,
+    env
+  );
+
+  if (result.exitCode !== 0) {
+    throw new Error(`failed to generate Clasp ${command} artifact for ${inputPath}`);
+  }
+}
+
+async function renderClaspUiGraph(entryPath, prepRoot, env) {
+  const tempModulePath = path.join(prepRoot, ".benchmark-prep-ui.mjs");
+
+  try {
+    await runClaspCompilerCommand("compile", entryPath, tempModulePath, env);
+    const compiledModule = await import(`${pathToFileURL(tempModulePath).href}?t=${Date.now()}`);
+    return compiledModule.__claspUiGraph ?? [];
+  } finally {
+    await rm(tempModulePath, { force: true });
+  }
+}
+
+function renderClaspLanguageGuide({
+  workspace,
+  entryPath,
+  prepRoot,
+  moduleName,
+  context,
+  air,
+  uiGraph
+}) {
+  const sourceFiles = collectArtifactSourceFiles(workspace, context, air);
+  const routes = collectContextRoutes(context);
+  const foreignDecls = collectContextForeignDecls(context);
+  const artifactPaths = [
+    path.join(prepRoot, `${moduleName}.context.json`),
+    path.join(prepRoot, `${moduleName}.air.json`),
+    path.join(prepRoot, `${moduleName}.ui.json`)
+  ].map((targetPath) => path.relative(workspace, targetPath));
+
+  const lines = [
+    "# Clasp Workspace Guide",
+    "",
+    "This workspace includes compiler-generated benchmark prep artifacts under `benchmark-prep/`.",
+    "",
+    "## Where to start",
+    "",
+    `- Entry module: \`${path.relative(workspace, entryPath)}\``
+  ];
+
+  if (sourceFiles.length > 0) {
+    lines.push("- Clasp source files in the semantic pack:");
+    for (const sourceFile of sourceFiles) {
+      lines.push(`  - \`${sourceFile}\``);
+    }
+  }
+
+  lines.push("", "## Semantic pack");
+  lines.push("");
+  for (const artifactPath of artifactPaths) {
+    lines.push(`- \`${artifactPath}\``);
+  }
+
+  lines.push("", "## Routes and boundaries", "");
+
+  if (routes.length === 0) {
+    lines.push("- No typed routes were found in the generated context graph.");
+  } else {
+    for (const route of routes) {
+      lines.push(
+        `- \`${route.method} ${route.path}\` request \`${route.requestType}\` -> response \`${route.responseType}\``
+      );
+    }
+  }
+
+  if (foreignDecls.length === 0) {
+    lines.push("- No foreign runtime boundaries were found in the generated context graph.");
+  } else {
+    lines.push("- Foreign runtime boundaries:");
+    for (const foreignDecl of foreignDecls) {
+      lines.push(`  - \`${foreignDecl.name} : ${foreignDecl.type}\``);
+    }
+  }
+
+  lines.push("", "## UI graph", "");
+
+  if (uiGraph.length === 0) {
+    lines.push("- No page routes were exported in the compiled UI graph for this task.");
+  } else {
+    for (const page of uiGraph) {
+      lines.push(
+        `- \`${page.routeName}\` at \`${page.path}\`${page.title ? ` titled "${page.title}"` : ""}`
+      );
+    }
+  }
+
+  lines.push(
+    "",
+    "## Acceptance loop",
+    "",
+    "- Use `bash scripts/verify.sh` for the final check.",
+    "- Let `verify.sh` regenerate `build/Main.js`.",
+    "- Prefer the Clasp schema and route files before touching runtime glue."
+  );
+
+  return lines.join("\n") + "\n";
+}
+
+function collectArtifactSourceFiles(workspace, ...artifacts) {
+  const sourceFiles = new Set();
+
+  for (const artifact of artifacts) {
+    for (const filePath of collectArtifactFilePaths(artifact)) {
+      if (!filePath.endsWith(".clasp")) {
+        continue;
+      }
+      if (filePath.startsWith("<")) {
+        continue;
+      }
+
+      sourceFiles.add(path.relative(workspace, filePath));
+    }
+  }
+
+  return [...sourceFiles].sort((left, right) => left.localeCompare(right));
+}
+
+function collectArtifactFilePaths(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectArtifactFilePaths(entry));
+  }
+
+  if (value && typeof value === "object") {
+    const current = typeof value.file === "string" ? [value.file] : [];
+    return current.concat(
+      Object.values(value).flatMap((entry) => collectArtifactFilePaths(entry))
+    );
+  }
+
+  return [];
+}
+
+function collectContextRoutes(context) {
+  return (context.nodes ?? [])
+    .filter((node) => node.kind === "route")
+    .map((node) => {
+      const attrs = attrsToRecord(node.attrs);
+      return {
+        method: String(attrs.method ?? "UNKNOWN"),
+        path: String(attrs.path ?? "/"),
+        requestType: String(attrs.requestType ?? "Unknown"),
+        responseType: String(attrs.responseType ?? "Unknown")
+      };
+    });
+}
+
+function collectContextForeignDecls(context) {
+  return (context.nodes ?? [])
+    .filter((node) => node.kind === "foreign")
+    .map((node) => {
+      const attrs = attrsToRecord(node.attrs);
+      return {
+        name: String(attrs.name ?? "unknown"),
+        type: String(attrs.type ?? "Unknown")
+      };
+    });
+}
+
+function attrsToRecord(attrs) {
+  const record = {};
+
+  for (const attr of attrs ?? []) {
+    record[attr.name] = attr.value;
+  }
+
+  return record;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
 async function summarizeCommand(args) {
