@@ -22,17 +22,30 @@ import Clasp.Lower
   , lowerPageFlows
   )
 import Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ConstructorDecl (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , ModuleName (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteBoundaryDecl (..)
   , RouteMethod (..)
   , RoutePathDecl (..)
   , RoutePathParamDecl (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , VerifierDecl (..)
   )
 
 emitModule :: LowerModule -> Text
@@ -56,6 +69,7 @@ emitModule modl =
       <> emitRouteClientsExport (lowerModuleRoutes modl)
       <> emitSchemaRegistryExport (lowerModuleCodecTypes modl) (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> emitPlatformBridgesExport
+      <> emitControlPlaneExports modl
       <> emitGeneratedBindingsExport
 
 emitRuntimePrelude :: [Text]
@@ -1200,6 +1214,296 @@ emitPlatformBridgesExport =
   , "});"
   ]
 
+emitControlPlaneExports :: LowerModule -> [Text]
+emitControlPlaneExports modl =
+  emitGuides
+    <> emitPolicies
+    <> emitAgentRoles
+    <> emitAgents
+    <> emitHooks
+    <> emitToolServers
+    <> emitTools
+    <> emitVerifiers
+    <> emitMergeGates
+    <> emitControlPlaneContract
+  where
+    typeDecls = lowerModuleTypeDecls modl
+    recordDecls = lowerModuleRecordDecls modl
+    guides = lowerModuleGuideDecls modl
+    hooks = lowerModuleHookDecls modl
+    agentRoles = lowerModuleAgentRoleDecls modl
+    agents = lowerModuleAgentDecls modl
+    policies = lowerModulePolicyDecls modl
+    toolServers = lowerModuleToolServerDecls modl
+    tools = lowerModuleToolDecls modl
+    verifiers = lowerModuleVerifierDecls modl
+    mergeGates = lowerModuleMergeGateDecls modl
+
+    emitGuides =
+      [ "export const __claspGuides = ["
+      ]
+        <> concatMap emitGuide guides
+        <> [ "];"
+           , "const $claspGuideMap = Object.fromEntries(__claspGuides.map((guide) => [guide.name, guide]));"
+           , "function $claspResolveGuideEntries(name, seen = new Set()) {"
+           , "  const guide = $claspGuideMap[name];"
+           , "  if (!guide) {"
+           , "    throw new Error(`Unknown Clasp guide: ${name}`);"
+           , "  }"
+           , "  if (seen.has(name)) {"
+           , "    throw new Error(`Cyclic Clasp guide inheritance: ${name}`);"
+           , "  }"
+           , "  const resolved = guide.extends ? $claspResolveGuideEntries(guide.extends, new Set([...seen, name])) : {};"
+           , "  return Object.freeze({ ...resolved, ...guide.entries });"
+           , "}"
+           , "for (const guide of __claspGuides) {"
+           , "  guide.resolvedEntries = $claspResolveGuideEntries(guide.name);"
+           , "  Object.freeze(guide.entries);"
+           , "  Object.freeze(guide);"
+           , "}"
+           , ""
+           ]
+
+    emitGuide guideDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (guideDeclName guideDecl) <> ","
+      , "    id: " <> emitStringLiteral ("guide:" <> guideDeclName guideDecl) <> ","
+      , "    extends: " <> emitOptionalText (guideDeclExtends guideDecl) <> ","
+      , "    entries: {"
+      ]
+        <> concatMap emitGuideEntry (guideDeclEntries guideDecl)
+        <> [ "    }"
+           , "  },"
+           ]
+
+    emitGuideEntry entryDecl =
+      [ "      " <> emitPropertyName (guideEntryDeclName entryDecl) <> ": " <> emitStringLiteral (guideEntryDeclValue entryDecl) <> "," ]
+
+    emitPolicies =
+      [ "export const __claspPolicies = ["
+      ]
+        <> concatMap emitPolicy policies
+        <> [ "];"
+           , "const $claspPolicyMap = Object.fromEntries(__claspPolicies.map((policy) => [policy.name, policy]));"
+           , "for (const policy of __claspPolicies) { Object.freeze(policy.allowedClassifications); Object.freeze(policy); }"
+           , ""
+           ]
+
+    emitPolicy policyDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (policyDeclName policyDecl) <> ","
+      , "    id: " <> emitStringLiteral ("policy:" <> policyDeclName policyDecl) <> ","
+      , "    allowedClassifications: ["
+          <> T.intercalate ", " (fmap (emitStringLiteral . policyClassificationDeclName) (policyDeclAllowedClassifications policyDecl))
+          <> "]"
+      , "  },"
+      ]
+
+    emitAgentRoles =
+      [ "export const __claspAgentRoles = ["
+      ]
+        <> concatMap emitAgentRole agentRoles
+        <> [ "];"
+           , "const $claspAgentRoleMap = Object.fromEntries(__claspAgentRoles.map((role) => [role.name, role]));"
+           , "for (const role of __claspAgentRoles) {"
+           , "  role.guide = $claspGuideMap[role.guideName] ?? null;"
+           , "  role.policy = $claspPolicyMap[role.policyName] ?? null;"
+           , "  Object.freeze(role);"
+           , "}"
+           , ""
+           ]
+
+    emitAgentRole agentRoleDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (agentRoleDeclName agentRoleDecl) <> ","
+      , "    id: " <> emitStringLiteral (agentRoleDeclIdentity agentRoleDecl) <> ","
+      , "    guideName: " <> emitStringLiteral (agentRoleDeclGuideName agentRoleDecl) <> ","
+      , "    policyName: " <> emitStringLiteral (agentRoleDeclPolicyName agentRoleDecl)
+      , "  },"
+      ]
+
+    emitAgents =
+      [ "export const __claspAgents = ["
+      ]
+        <> concatMap emitAgent agents
+        <> [ "];"
+           , "for (const agent of __claspAgents) {"
+           , "  agent.role = $claspAgentRoleMap[agent.roleName] ?? null;"
+           , "  agent.guide = agent.role?.guide ?? null;"
+           , "  agent.policy = agent.role?.policy ?? null;"
+           , "  agent.instructions = agent.guide?.resolvedEntries ?? Object.freeze({});"
+           , "  Object.freeze(agent);"
+           , "}"
+           , ""
+           ]
+
+    emitAgent agentDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (agentDeclName agentDecl) <> ","
+      , "    id: " <> emitStringLiteral (agentDeclIdentity agentDecl) <> ","
+      , "    roleName: " <> emitStringLiteral (agentDeclRoleName agentDecl)
+      , "  },"
+      ]
+
+    emitHooks =
+      [ "export const __claspHooks = ["
+      ]
+        <> concatMap emitHook hooks
+        <> [ "];"
+           , "const $claspHookMap = Object.fromEntries(__claspHooks.map((hook) => [hook.name, hook]));"
+           , "for (const hook of __claspHooks) { Object.freeze(hook); }"
+           , ""
+           ]
+
+    emitHook hookDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (hookDeclName hookDecl) <> ","
+      , "    id: " <> emitStringLiteral (hookDeclIdentity hookDecl) <> ","
+      , "    event: " <> emitStringLiteral (hookTriggerDeclEvent (hookDeclTrigger hookDecl)) <> ","
+      , "    requestType: " <> emitStringLiteral (hookDeclRequestType hookDecl) <> ","
+      , "    requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (hookDeclRequestType hookDecl) <> ","
+      , "    responseType: " <> emitStringLiteral (hookDeclResponseType hookDecl) <> ","
+      , "    responseSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (hookDeclResponseType hookDecl) <> ","
+      , "    handler: " <> emitIdentifier (hookDeclHandlerName hookDecl) <> ","
+      , "    decodeRequest(value, path = \"request\") { return " <> emitHostDeserializer (TNamed (hookDeclRequestType hookDecl)) "value" "path" <> "; },"
+      , "    encodeRequest(value, path = \"request\") { return " <> emitHostSerializer (TNamed (hookDeclRequestType hookDecl)) "value" "path" <> "; },"
+      , "    parseRequest(jsonText) { return $decode_" <> hookDeclRequestType hookDecl <> "(jsonText); },"
+      , "    formatRequest(value) { return $encode_" <> hookDeclRequestType hookDecl <> "(value); },"
+      , "    decodeResponse(value, path = \"response\") { return " <> emitHostDeserializer (TNamed (hookDeclResponseType hookDecl)) "value" "path" <> "; },"
+      , "    encodeResponse(value, path = \"response\") { return " <> emitHostSerializer (TNamed (hookDeclResponseType hookDecl)) "value" "path" <> "; },"
+      , "    parseResponse(jsonText) { return $decode_" <> hookDeclResponseType hookDecl <> "(jsonText); },"
+      , "    formatResponse(value) { return $encode_" <> hookDeclResponseType hookDecl <> "(value); },"
+      , "    invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }"
+      , "  },"
+      ]
+
+    emitToolServers =
+      [ "export const __claspToolServers = ["
+      ]
+        <> concatMap emitToolServer toolServers
+        <> [ "];"
+           , "const $claspToolServerMap = Object.fromEntries(__claspToolServers.map((server) => [server.name, server]));"
+           , "for (const server of __claspToolServers) {"
+           , "  server.policy = $claspPolicyMap[server.policyName] ?? null;"
+           , "  Object.freeze(server);"
+           , "}"
+           , ""
+           ]
+
+    emitToolServer toolServerDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (toolServerDeclName toolServerDecl) <> ","
+      , "    id: " <> emitStringLiteral (toolServerDeclIdentity toolServerDecl) <> ","
+      , "    protocol: " <> emitStringLiteral (toolServerDeclProtocol toolServerDecl) <> ","
+      , "    location: " <> emitStringLiteral (toolServerDeclLocation toolServerDecl) <> ","
+      , "    policyName: " <> emitStringLiteral (toolServerDeclPolicyName toolServerDecl)
+      , "  },"
+      ]
+
+    emitTools =
+      [ "export const __claspTools = ["
+      ]
+        <> concatMap emitTool tools
+        <> [ "];"
+           , "const $claspToolMap = Object.fromEntries(__claspTools.map((tool) => [tool.name, tool]));"
+           , "for (const tool of __claspTools) {"
+           , "  tool.server = $claspToolServerMap[tool.serverName] ?? null;"
+           , "  Object.freeze(tool);"
+           , "}"
+           , ""
+           ]
+
+    emitTool toolDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (toolDeclName toolDecl) <> ","
+      , "    id: " <> emitStringLiteral (toolDeclIdentity toolDecl) <> ","
+      , "    serverName: " <> emitStringLiteral (toolDeclServerName toolDecl) <> ","
+      , "    operation: " <> emitStringLiteral (toolDeclOperation toolDecl) <> ","
+      , "    requestType: " <> emitStringLiteral (toolDeclRequestType toolDecl) <> ","
+      , "    requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (toolDeclRequestType toolDecl) <> ","
+      , "    responseType: " <> emitStringLiteral (toolDeclResponseType toolDecl) <> ","
+      , "    responseSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (toolDeclResponseType toolDecl) <> ","
+      , "    decodeRequest(value, path = \"params\") { return " <> emitHostDeserializer (TNamed (toolDeclRequestType toolDecl)) "value" "path" <> "; },"
+      , "    encodeRequest(value, path = \"params\") { return " <> emitHostSerializer (TNamed (toolDeclRequestType toolDecl)) "value" "path" <> "; },"
+      , "    parseRequest(jsonText) { return $decode_" <> toolDeclRequestType toolDecl <> "(jsonText); },"
+      , "    formatRequest(value) { return $encode_" <> toolDeclRequestType toolDecl <> "(value); },"
+      , "    decodeResponse(value, path = \"result\") { return " <> emitHostDeserializer (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
+      , "    encodeResponse(value, path = \"result\") { return " <> emitHostSerializer (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
+      , "    parseResponse(jsonText) { return $decode_" <> toolDeclResponseType toolDecl <> "(jsonText); },"
+      , "    formatResponse(value) { return $encode_" <> toolDeclResponseType toolDecl <> "(value); },"
+      , "    prepareCall(value, id = null) {"
+      , "      return { jsonrpc: \"2.0\", id, method: this.operation, params: this.encodeRequest(value) };"
+      , "    },"
+      , "    parseResult(payload) { return this.decodeResponse(payload); }"
+      , "  },"
+      ]
+
+    emitVerifiers =
+      [ "export const __claspVerifiers = ["
+      ]
+        <> concatMap emitVerifier verifiers
+        <> [ "];"
+           , "const $claspVerifierMap = Object.fromEntries(__claspVerifiers.map((verifier) => [verifier.name, verifier]));"
+           , "for (const verifier of __claspVerifiers) {"
+           , "  verifier.tool = $claspToolMap[verifier.toolName] ?? null;"
+           , "  Object.freeze(verifier);"
+           , "}"
+           , ""
+           ]
+
+    emitVerifier verifierDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (verifierDeclName verifierDecl) <> ","
+      , "    id: " <> emitStringLiteral (verifierDeclIdentity verifierDecl) <> ","
+      , "    toolName: " <> emitStringLiteral (verifierDeclToolName verifierDecl) <> ","
+      , "    prepareRun(value, id = null) { return this.tool.prepareCall(value, id); },"
+      , "    parseResult(payload) { return this.tool.parseResult(payload); }"
+      , "  },"
+      ]
+
+    emitMergeGates =
+      [ "export const __claspMergeGates = ["
+      ]
+        <> concatMap emitMergeGate mergeGates
+        <> [ "];"
+           , "for (const mergeGate of __claspMergeGates) {"
+           , "  mergeGate.verifiers = mergeGate.verifierNames.map((name) => $claspVerifierMap[name]).filter(Boolean);"
+           , "  Object.freeze(mergeGate.verifierNames);"
+           , "  Object.freeze(mergeGate.verifiers);"
+           , "  Object.freeze(mergeGate);"
+           , "}"
+           , ""
+           ]
+
+    emitMergeGate mergeGateDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (mergeGateDeclName mergeGateDecl) <> ","
+      , "    id: " <> emitStringLiteral (mergeGateDeclIdentity mergeGateDecl) <> ","
+      , "    verifierNames: ["
+          <> T.intercalate ", " (fmap (emitStringLiteral . mergeGateVerifierRefName) (mergeGateDeclVerifierRefs mergeGateDecl))
+          <> "],"
+      , "    plan(value, idSeed = this.name) {"
+      , "      return this.verifiers.map((verifier, index) => verifier.prepareRun(value, `${idSeed}:${index}`));"
+      , "    }"
+      , "  },"
+      ]
+
+    emitControlPlaneContract =
+      [ "export const __claspControlPlane = Object.freeze({"
+      , "  version: 1,"
+      , "  guides: __claspGuides,"
+      , "  hooks: __claspHooks,"
+      , "  agentRoles: __claspAgentRoles,"
+      , "  agents: __claspAgents,"
+      , "  policies: __claspPolicies,"
+      , "  toolServers: __claspToolServers,"
+      , "  tools: __claspTools,"
+      , "  verifiers: __claspVerifiers,"
+      , "  mergeGates: __claspMergeGates"
+      , "});"
+      , ""
+      ]
+
 emitGeneratedBindingsExport :: [Text]
 emitGeneratedBindingsExport =
   [ "export const __claspBindings = Object.freeze({"
@@ -1217,7 +1521,8 @@ emitGeneratedBindingsExport =
   , "  headStrategy: __claspHeadStrategy,"
   , "  uiGraph: __claspUiGraph,"
   , "  navigationGraph: __claspNavigationGraph,"
-  , "  actionGraph: __claspActionGraph"
+  , "  actionGraph: __claspActionGraph,"
+  , "  controlPlane: __claspControlPlane"
   , "});"
   ]
 

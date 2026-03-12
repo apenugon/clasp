@@ -24,33 +24,59 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Core
   ( CoreDecl (..)
+  , CoreAgentDecl (..)
+  , CoreAgentRoleDecl (..)
   , CoreExpr (..)
+  , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
+  , CorePolicyDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   , coreExprType
   )
 import Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl
+  , AgentRoleDecl
+  , ConstructorDecl (..)
   , ForeignDecl
+  , GuideDecl
+  , HookDecl
+  , MergeGateDecl
   , ModuleName
+  , PolicyDecl
   , RecordDecl
   , RouteBoundaryDecl
   , RouteDecl (..)
   , RouteMethod
   , RoutePathDecl
+  , ToolDecl
+  , ToolServerDecl
   , Type (..)
   , TypeDecl (..)
+  , VerifierDecl
   )
 
 data LowerModule = LowerModule
   { lowerModuleName :: ModuleName
   , lowerModuleTypeDecls :: [TypeDecl]
   , lowerModuleRecordDecls :: [RecordDecl]
+  , lowerModuleGuideDecls :: [GuideDecl]
+  , lowerModuleHookDecls :: [HookDecl]
+  , lowerModuleAgentRoleDecls :: [AgentRoleDecl]
+  , lowerModuleAgentDecls :: [AgentDecl]
+  , lowerModulePolicyDecls :: [PolicyDecl]
+  , lowerModuleToolServerDecls :: [ToolServerDecl]
+  , lowerModuleToolDecls :: [ToolDecl]
+  , lowerModuleVerifierDecls :: [VerifierDecl]
+  , lowerModuleMergeGateDecls :: [MergeGateDecl]
   , lowerModuleForeignDecls :: [ForeignDecl]
   , lowerModuleRoutes :: [LowerRoute]
   , lowerModuleCodecTypes :: [Type]
@@ -188,6 +214,15 @@ lowerModule modl =
     { lowerModuleName = coreModuleName modl
     , lowerModuleTypeDecls = coreModuleTypeDecls modl
     , lowerModuleRecordDecls = coreModuleRecordDecls modl
+    , lowerModuleGuideDecls = coreModuleGuideDecls modl
+    , lowerModuleHookDecls = fmap coreHookSourceDecl (coreModuleHookDecls modl)
+    , lowerModuleAgentRoleDecls = fmap coreAgentRoleSourceDecl (coreModuleAgentRoleDecls modl)
+    , lowerModuleAgentDecls = fmap coreAgentSourceDecl (coreModuleAgentDecls modl)
+    , lowerModulePolicyDecls = fmap corePolicySourceDecl (coreModulePolicyDecls modl)
+    , lowerModuleToolServerDecls = fmap coreToolServerSourceDecl (coreModuleToolServerDecls modl)
+    , lowerModuleToolDecls = fmap coreToolSourceDecl (coreModuleToolDecls modl)
+    , lowerModuleVerifierDecls = fmap coreVerifierSourceDecl (coreModuleVerifierDecls modl)
+    , lowerModuleMergeGateDecls = fmap coreMergeGateSourceDecl (coreModuleMergeGateDecls modl)
     , lowerModuleForeignDecls = coreModuleForeignDecls modl
     , lowerModuleRoutes = fmap lowerRouteDecl (coreModuleRouteDecls modl)
     , lowerModuleCodecTypes = collectModuleCodecTypes modl

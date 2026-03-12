@@ -1935,6 +1935,50 @@ compileTests =
             assertBool "expected generated binding contract platform bridges" ("platformBridges: __claspPlatformBridges," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
             assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
+    , testCase "compile emits executable control-plane manifests and protocol helpers" $
+        case compileSource "control-plane" controlPlaneSource of
+          Left err ->
+            assertFailure ("expected control-plane compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
+            assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
+            assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
+            assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
+            assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
+            assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract control plane entry" ("controlPlane: __claspControlPlane" `T.isInfixOf` emitted)
+            let compiledPath = "dist/control-plane.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const guide = compiledModule.__claspGuides[1];"
+                , "const agent = compiledModule.__claspAgents[0];"
+                , "const hook = compiledModule.__claspHooks[0];"
+                , "const tool = compiledModule.__claspTools[0];"
+                , "const verifier = compiledModule.__claspVerifiers[0];"
+                , "const mergeGate = compiledModule.__claspMergeGates[0];"
+                , "console.log(JSON.stringify({"
+                , "  guideExtends: guide.extends,"
+                , "  guideScope: guide.resolvedEntries.scope,"
+                , "  agentPolicy: agent.policy.name,"
+                , "  hookEvent: hook.event,"
+                , "  hookAccepted: hook.invoke({ workerId: 'worker-7' }).accepted,"
+                , "  toolMethod: tool.prepareCall({ query: 'search' }, 7).method,"
+                , "  toolParam: tool.prepareCall({ query: 'search' }, 7).params.query,"
+                , "  parsedSummary: tool.parseResult({ summary: 'done' }).summary,"
+                , "  verifierMethod: verifier.prepareRun({ query: 'check' }, 8).method,"
+                , "  mergeGatePlan: mergeGate.plan({ query: 'gate' }, 'trunk').map((request) => request.id).join(','),"
+                , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version"
+                , "}));"
+                ]
+            assertEqual
+              "expected executable control-plane runtime result"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"bindingControlPlaneVersion\":1}"
+              runtimeOutput
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->
@@ -2784,6 +2828,45 @@ verifierSource =
     , "record SearchResponse = { summary : Str }"
     , ""
     , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "verifier repoChecks = searchRepo"
+    , "mergegate trunk = repoChecks"
+    , ""
+    , "main = \"ok\""
+    ]
+
+controlPlaneSource :: Text
+controlPlaneSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record WorkerBoot = { workerId : Str }"
+    , "record HookAck = { accepted : Bool }"
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "bootstrapWorker : WorkerBoot -> HookAck"
+    , "bootstrapWorker req = HookAck { accepted = true }"
+    , ""
+    , "guide Repo = {"
+    , "  scope: \"Stay inside the current checkout.\""
+    , "}"
+    , ""
+    , "guide Worker extends Repo = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "role WorkerRole = guide: Worker, policy: SupportDisclosure"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
     , ""
     , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
     , ""
