@@ -4,10 +4,11 @@ This wave starts the full native-backend path from the earliest unmet prerequisi
 
 The objective is to drive `Clasp` through:
 
+- the SaaS dogfood chain that currently gates self-hosting
 - the remaining hosted self-hosting prerequisite chain
 - the native-backend path in `M10`
 
-The native track depends on `SH-010`, so this wave intentionally includes the self-hosting chain needed to unlock it.
+The native track depends on `SH-010`, and the self-hosting track depends on `SA-010`, so this wave intentionally includes the full prerequisite ladder needed to unlock native work.
 
 The `M10` outcome in the project plan is:
 
@@ -19,17 +20,30 @@ This wave uses canonical backlog task IDs directly.
 
 Lanes in this wave:
 
-- `01-self-hosting-foundation`
-- `02-self-hosting-frontend`
-- `03-hosted-self-host`
-- `04-native-ir`
-- `05-native-runtime`
-- `06-native-codegen`
-- `07-native-selfhost`
-- `08-native-benchmarks`
+- `01-saas-foundation`
+- `02-saas-product`
+- `03-saas-benchmark`
+- `04-self-hosting-foundation`
+- `05-self-hosting-frontend`
+- `06-hosted-self-host`
+- `07-native-ir`
+- `08-native-runtime`
+- `09-native-codegen`
+- `10-native-selfhost`
+- `11-native-benchmarks`
 
 Tasks in this wave:
 
+- `SA-001` moderate SaaS app scope and product surface
+- `SA-002` in-memory or file-backed app state primitives
+- `SA-003` core shared domain types, routes, and generated clients
+- `SA-004` primary user-facing flows across frontend and backend
+- `SA-005` one worker or workflow-driven product path
+- `SA-006` one AI-assisted product feature with typed model and tool boundaries
+- `SA-007` deterministic seeded app fixtures
+- `SA-008` end-to-end tests for the moderate SaaS app
+- `SA-009` package the app so an agent can build and modify it from one Clasp codebase
+- `SA-010` use the app as the main public benchmark proving ground against TypeScript baselines
 - `SH-001` self-hosting subset and bootstrap boundary
 - `SH-002` standard-library surface for compiler code written in `Clasp`
 - `SH-003` formatter and diagnostics helpers in `Clasp`
@@ -53,7 +67,17 @@ Tasks in this wave:
 
 Dependency flow:
 
-- `SH-001` starts immediately.
+- `SA-001` starts immediately.
+- `SA-002` builds on `SA-001`.
+- `SA-003` builds on `SA-002`.
+- `SA-004` builds on `SA-003`.
+- `SA-005` builds on `SA-004`.
+- `SA-006` builds on `SA-005`.
+- `SA-007` builds on `SA-006`.
+- `SA-008` builds on `SA-007`.
+- `SA-009` builds on `SA-008`.
+- `SA-010` builds on `SA-009`.
+- `SH-001` builds on `SA-010`.
 - `SH-002` builds on `SH-001`.
 - `SH-003` builds on `SH-002`.
 - `SH-004` builds on `SH-003`.
@@ -76,6 +100,7 @@ Dependency flow:
 
 Success for this wave means:
 
+- the moderate SaaS dogfood app and its benchmark proving-ground path are complete enough to unlock self-hosting
 - the hosted self-hosted compiler path is complete enough to act as the prerequisite for native work
 - `Clasp` has a real native execution path below the current lowered IR
 - backend and compiler workloads can run without Bun on the native path
@@ -83,4 +108,4 @@ Success for this wave means:
 - the self-hosted compiler can execute through the native backend
 - the repo has benchmark evidence comparing JS/Bun and native on the same workloads
 
-This wave is expected to be longer-running and less parallel than the recent benchmark-remediation waves because both the hosted self-hosting and native backend tracks are mostly long dependency chains.
+This wave is expected to be long-running and only lightly parallel because the SaaS dogfood, hosted self-hosting, and native backend tracks are all mostly long dependency chains.
