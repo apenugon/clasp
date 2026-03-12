@@ -38,6 +38,7 @@ data Diagnostic = Diagnostic
   , diagnosticSummary :: Text
   , diagnosticPrimarySpan :: Maybe SourceSpan
   , diagnosticDetails :: [Text]
+  , diagnosticFixHints :: [Text]
   , diagnosticRelatedSpans :: [DiagnosticRelated]
   }
   deriving (Eq, Show)
@@ -48,7 +49,8 @@ newtype DiagnosticBundle = DiagnosticBundle
   deriving (Eq, Show)
 
 diagnostic :: Text -> Text -> Maybe SourceSpan -> [Text] -> [DiagnosticRelated] -> Diagnostic
-diagnostic = Diagnostic
+diagnostic code summary primarySpan details related =
+  Diagnostic code summary primarySpan details (defaultFixHints code) related
 
 diagnosticRelated :: Text -> SourceSpan -> DiagnosticRelated
 diagnosticRelated = DiagnosticRelated
@@ -82,6 +84,7 @@ renderDiagnostic err =
     [ renderHeader err
     ]
       <> fmap ("- " <>) (diagnosticDetails err)
+      <> fmap ("- hint: " <>) (diagnosticFixHints err)
       <> fmap renderRelated (diagnosticRelatedSpans err)
 
 renderHeader :: Diagnostic -> Text
@@ -124,5 +127,111 @@ instance ToJSON Diagnostic where
       , "summary" .= diagnosticSummary err
       , "primarySpan" .= diagnosticPrimarySpan err
       , "details" .= diagnosticDetails err
+      , "fixHints" .= diagnosticFixHints err
       , "related" .= diagnosticRelatedSpans err
+      ]
+
+defaultFixHints :: Text -> [Text]
+defaultFixHints code =
+  case code of
+    "E_PARSE" ->
+      ["Check the syntax near the reported location and complete any missing delimiters, separators, or expressions."]
+    "E_ORPHAN_SIGNATURE" ->
+      ["Move the type signature so it appears directly above the declaration it annotates."]
+    "E_DUPLICATE_SIGNATURE" ->
+      ["Keep a single type signature for the declaration and remove the duplicate annotation."]
+    "E_UNBOUND_NAME" ->
+      ["Define the referenced name in scope, import it, or correct the spelling."]
+    "E_UNKNOWN_CONSTRUCTOR" ->
+      ["Use a constructor defined by the matched type, or correct the constructor name."]
+    "E_UNKNOWN_FIELD" ->
+      ["Use a field declared on the target record, or update the record type to include it."]
+    "E_UNKNOWN_GUIDE_PARENT" ->
+      ["Declare the parent guide before extending it, or correct the guide name."]
+    "E_UNKNOWN_POLICY" ->
+      ["Declare the referenced policy before use, or correct the policy name."]
+    "E_UNKNOWN_PROJECTION_SOURCE" ->
+      ["Point the projection at an existing record or route response type."]
+    "E_UNKNOWN_PROJECTION_FIELD" ->
+      ["Select a field that exists on the projection source, or update the source schema."]
+    "E_UNKNOWN_RECORD" ->
+      ["Use a declared record type, or rename the reference to an existing schema."]
+    "E_UNKNOWN_ROUTE_HANDLER" ->
+      ["Define the route handler first, or update the route to call an existing declaration."]
+    "E_UNKNOWN_TYPE" ->
+      ["Use a declared type name, or add the missing type declaration."]
+    "E_IMPORT_NOT_FOUND" ->
+      ["Create the imported module, or update the import path to an existing file."]
+    "E_IMPORT_NAME" ->
+      ["Make the imported module name match the file and import statement."]
+    "E_IMPORT_CYCLE" ->
+      ["Break the import cycle by extracting shared declarations into a separate module."]
+    "E_SEMANTIC_EDIT_TARGET" ->
+      ["Choose an existing declaration or schema as the semantic edit target."]
+    "E_SEMANTIC_EDIT_CONFLICT" ->
+      ["Pick a new name that does not collide with another declaration or schema in scope."]
+    "E_INTERNAL" ->
+      ["This indicates a compiler bug; reduce the input if possible and inspect the surrounding declarations."]
+    other
+      | "E_DUPLICATE_" `T.isPrefixOf` other ->
+          ["Rename or remove the duplicate definition so each name is declared only once in its scope."]
+      | other `elem` typeMismatchCodes ->
+          ["Align the expression and annotation types, or add annotations that make the intended types explicit."]
+      | other `elem` arityCodes ->
+          ["Update the call or pattern so the number of arguments matches the declared shape."]
+      | other `elem` fieldCodes ->
+          ["Make the record fields line up with the schema by adding missing fields and removing unknown ones."]
+      | other `elem` routeCodes ->
+          ["Make the route contract and handler agree on request and response shapes."]
+      | other `elem` viewCodes ->
+          ["Adjust the view so it only uses allowed tags, attributes, handlers, and route targets."]
+      | other `elem` jsonCodes ->
+          ["Update the schema or payload so the JSON shape matches the declared record fields and types."]
+      | otherwise ->
+          ["Review the diagnostic details and the highlighted code, then update the program to satisfy the reported constraint."]
+  where
+    typeMismatchCodes =
+      [ "E_ARITY_MISMATCH"
+      , "E_CANNOT_INFER"
+      , "E_DISCLOSURE_POLICY"
+      , "E_EMPTY_MATCH"
+      , "E_EQUALITY_OPERAND"
+      , "E_FIELD_ACCESS"
+      , "E_FOREIGN_TYPE"
+      , "E_GUIDE_CYCLE"
+      , "E_INFINITE_TYPE"
+      , "E_INTEGER_COMPARISON_OPERAND"
+      , "E_LIST_ITEM_TYPE"
+      , "E_MATCH_RESULT_TYPE"
+      , "E_MATCH_SUBJECT"
+      , "E_NONEXHAUSTIVE_MATCH"
+      , "E_NOT_A_FUNCTION"
+      , "E_PATTERN_TYPE_MISMATCH"
+      , "E_SCHEMA_FIELD_TYPE"
+      , "E_TYPE_MISMATCH"
+      ]
+    arityCodes =
+      [ "E_CALL_ARITY"
+      , "E_PATTERN_ARITY"
+      ]
+    fieldCodes =
+      [ "E_RECORD_MISSING_FIELDS"
+      , "E_RECORD_UNKNOWN_FIELDS"
+      ]
+    routeCodes =
+      [ "E_REDIRECT_TARGET"
+      , "E_ROUTE_HANDLER_TYPE"
+      , "E_ROUTE_TYPE"
+      ]
+    viewCodes =
+      [ "E_UNSAFE_VIEW_ESCAPE"
+      , "E_VIEW_FORM_METHOD"
+      , "E_VIEW_INPUT"
+      , "E_VIEW_LINK_TARGET"
+      , "E_VIEW_STYLE_REF"
+      , "E_VIEW_TAG"
+      ]
+    jsonCodes =
+      [ "E_JSON_DECODE"
+      , "E_JSON_TYPE"
       ]

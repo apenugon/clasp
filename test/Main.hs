@@ -765,6 +765,57 @@ diagnosticTests =
             assertBool "expected file in json" ("\"file\":\"bad\"" `T.isInfixOf` jsonText)
           Right _ ->
             assertFailure "expected json diagnostic failure"
+    , testCase "parse failures include dedicated fix hints in json" $
+        case parseSource "bad" parseFailureSource of
+          Left bundle -> do
+            let jsonText = LT.toStrict (renderDiagnosticBundleJson bundle)
+                expectedParseHint = "Check the syntax near the reported location and complete any missing delimiters, separators, or expressions."
+            jsonValue <- case eitherDecodeStrictText jsonText of
+              Left decodeErr ->
+                assertFailure ("expected diagnostic json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+              Just (Array diagnosticsJson) ->
+                case toList diagnosticsJson of
+                  firstDiagnostic : _ ->
+                    pure firstDiagnostic
+                  [] ->
+                    assertFailure "expected at least one diagnostic in json"
+              _ ->
+                assertFailure "expected diagnostics array in diagnostic json"
+            assertEqual "parse code" (Just (String "E_PARSE")) (lookupObjectKey "code" diagnosticValue)
+            case lookupObjectKey "fixHints" diagnosticValue of
+              Just (Array fixHintsJson) -> do
+                assertEqual "expected dedicated parse fix hint" [String expectedParseHint] (toList fixHintsJson)
+                assertBool
+                  "expected fix hint to stay distinct from megaparsec detail text"
+                  (all
+                    (\hintValue ->
+                        case hintValue of
+                          String hintText -> not ("unexpected" `T.isInfixOf` T.toLower hintText)
+                          _ -> False
+                    )
+                    (toList fixHintsJson)
+                  )
+              _ ->
+                assertFailure "expected fixHints array in diagnostic json"
+            case lookupObjectKey "details" diagnosticValue of
+              Just (Array detailsJson) ->
+                assertBool
+                  "expected parser details to retain megaparsec output"
+                  (any
+                    (\detailValue ->
+                        case detailValue of
+                          String detailText -> "unexpected" `T.isInfixOf` T.toLower detailText
+                          _ -> False
+                    )
+                    (toList detailsJson)
+                  )
+              _ ->
+                assertFailure "expected details array in diagnostic json"
+          Right _ ->
+            assertFailure "expected parse failure"
     , testCase "pretty rendering includes related locations" $
         case checkSource "bad" duplicateDeclSource of
           Left bundle -> do
@@ -2108,6 +2159,14 @@ unboundNameSource =
     [ "module Main"
     , ""
     , "main = missing"
+    ]
+
+parseFailureSource :: Text
+parseFailureSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "main ="
     ]
 
 ambiguousFunctionSource :: Text
