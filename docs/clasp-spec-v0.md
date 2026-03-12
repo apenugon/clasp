@@ -382,6 +382,7 @@ Notes:
 - `encode` serializes a primitive or record value into JSON text.
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
 - Foreign declarations also emit structured host-binding manifests plus generated host-binding adapters so host code can register schema-shaped implementations without hand-written runtime glue.
+- Foreign declarations also emit a versioned `__claspNativeInterop` manifest with generated binding-module references, capability identifiers, default `Rust` crate or native-library naming, and target-aware build descriptors for Bun, workers, and future mobile-native bridges.
 - Hook declarations bind a lifecycle trigger string to typed request/response schemas and a checked handler function.
 - Agent role declarations bind a reusable role to one guide and one policy declaration.
 - Agent declarations bind a named agent identity to a checked role declaration.
@@ -393,7 +394,7 @@ Notes:
 - Generated JavaScript modules also export versioned human-readable control-plane docs derived from the same declarations and bundled into the stable `__claspBindings` surface, including declared policy permission grants.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
-- Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
+- Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, native interop metadata, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
 - The Bun runtime also exposes a browser/client helper layer for generated route clients, plus server helpers that consume the generated binding contract for host-binding installation, asset serving, request decoding, and redirect-aware response handling.
 - The React runtime helper also exposes `createReactNativeBridge` and `createExpoBridge`, which turn compiler-owned `Page` and `View` values into stable mobile-friendly models without forcing React Native or Expo-specific rendering decisions into generated code.
 - Generated JavaScript modules also export `__claspSchemas`, a schema-contract registry with shared schema references, seed values, and host/JSON adapters that Bun worker runtimes can use to register typed jobs without re-declaring boundary shapes.

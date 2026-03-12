@@ -6,14 +6,40 @@ function bindingContractFor(compiledModule) {
     contract.kind === "clasp-generated-bindings" &&
     contract.version === 1
   ) {
-    return contract;
+    return {
+      ...contract,
+      nativeInterop:
+        contract.nativeInterop ??
+        compiledModule?.__claspNativeInterop ??
+        defaultNativeInterop(compiledModule?.__claspHostBindings ?? [])
+    };
   }
 
   return {
     kind: "clasp-generated-bindings",
     version: 1,
-    schemas: compiledModule?.__claspSchemas ?? {}
+    schemas: compiledModule?.__claspSchemas ?? {},
+    nativeInterop:
+      compiledModule?.__claspNativeInterop ??
+      defaultNativeInterop(compiledModule?.__claspHostBindings ?? [])
   };
+}
+
+function defaultNativeInterop(hostBindings) {
+  return Object.freeze({
+    version: 1,
+    abi: "clasp-native-v1",
+    supportedTargets: Object.freeze(["bun", "worker", "react-native", "expo"]),
+    bindings: Object.freeze((hostBindings ?? []).map((binding) => Object.freeze({
+      name: binding?.name ?? "binding",
+      runtimeName: binding?.runtimeName ?? binding?.name ?? "binding",
+      capability: Object.freeze({
+        id: `capability:foreign:${binding?.name ?? "binding"}`,
+        kind: "foreign-function",
+        runtimeName: binding?.runtimeName ?? binding?.name ?? "binding"
+      })
+    })))
+  });
 }
 
 export function schemaContractFor(compiledModule, typeName) {

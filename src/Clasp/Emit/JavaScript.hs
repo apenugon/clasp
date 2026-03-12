@@ -63,6 +63,7 @@ emitModule modl =
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
+      <> emitNativeInteropExport (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
       <> emitAssetHeadArtifacts modl
       <> emitPageFlowArtifacts (lowerPageFlows modl)
@@ -983,6 +984,73 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
             <> T.intercalate ", " params
             <> "]); }"
 
+emitNativeInteropExport :: [ForeignDecl] -> [Text]
+emitNativeInteropExport foreignDecls =
+  [ "export const __claspNativeInterop = Object.freeze({"
+  , "  version: 1,"
+  , "  abi: \"clasp-native-v1\","
+  , "  supportedTargets: Object.freeze([\"bun\", \"worker\", \"react-native\", \"expo\"]),"
+  , "  bindings: Object.freeze(["
+  ]
+    <> concatMap emitNativeInteropBinding foreignDecls
+    <> [ "  ])"
+       , "});"
+       , ""
+       ]
+  where
+    emitNativeInteropBinding foreignDecl =
+      let bindingKey = nativeInteropKey foreignDecl
+          crateName = "clasp_" <> bindingKey
+          nativeRoot = "native/" <> bindingKey
+          cargoManifest = nativeRoot <> "/Cargo.toml"
+          headerPath = nativeRoot <> "/include/" <> crateName <> ".h"
+          generatedModule = "generated/native/" <> bindingKey <> ".mjs"
+       in [ "    Object.freeze({"
+          , "      name: " <> emitStringLiteral (foreignDeclName foreignDecl) <> ","
+          , "      runtimeName: " <> emitStringLiteral (foreignDeclRuntimeName foreignDecl) <> ","
+          , "      capability: Object.freeze({"
+          , "        id: " <> emitStringLiteral ("capability:foreign:" <> foreignDeclName foreignDecl) <> ","
+          , "        kind: \"foreign-function\","
+          , "        runtimeName: " <> emitStringLiteral (foreignDeclRuntimeName foreignDecl)
+          , "      }),"
+          , "      generatedBinding: Object.freeze({"
+          , "        module: " <> emitStringLiteral generatedModule <> ","
+          , "        export: " <> emitStringLiteral (foreignDeclName foreignDecl)
+          , "      }),"
+          , "      rustCrate: Object.freeze({"
+          , "        crateName: " <> emitStringLiteral crateName <> ","
+          , "        manifestPath: " <> emitStringLiteral cargoManifest <> ","
+          , "        libName: " <> emitStringLiteral crateName <> ","
+          , "        entrySymbol: " <> emitStringLiteral (foreignDeclRuntimeName foreignDecl)
+          , "      }),"
+          , "      nativeLibrary: Object.freeze({"
+          , "        baseName: " <> emitStringLiteral crateName <> ","
+          , "        headerPath: " <> emitStringLiteral headerPath <> ","
+          , "        entrySymbol: " <> emitStringLiteral (foreignDeclRuntimeName foreignDecl)
+          , "      }),"
+          , "      targets: Object.freeze({"
+          , "        bun: Object.freeze({ runtime: \"bun\", loader: \"bun:ffi\", crateType: \"cdylib\", manifestPath: " <> emitStringLiteral cargoManifest <> " }),"
+          , "        worker: Object.freeze({ runtime: \"bun\", loader: \"bun:ffi\", crateType: \"cdylib\", manifestPath: " <> emitStringLiteral cargoManifest <> " }),"
+          , "        reactNative: Object.freeze({ runtime: \"react-native\", loader: \"turbo-module\", crateType: \"staticlib\", manifestPath: " <> emitStringLiteral cargoManifest <> " }),"
+          , "        expo: Object.freeze({ runtime: \"expo\", loader: \"expo-module\", crateType: \"staticlib\", manifestPath: " <> emitStringLiteral cargoManifest <> " })"
+          , "      })"
+          , "    }),"
+          ]
+
+nativeInteropKey :: ForeignDecl -> Text
+nativeInteropKey foreignDecl =
+  let rawName = foreignDeclName foreignDecl
+      lowered = T.toLower rawName
+      expanded = T.concatMap expandChar lowered
+      collapsed = T.intercalate "_" (filter (not . T.null) (T.splitOn "_" expanded))
+   in if T.null collapsed then "binding" else collapsed
+  where
+    expandChar ch
+      | ('a' <= ch && ch <= 'z') || ('0' <= ch && ch <= '9') =
+          T.singleton ch
+      | otherwise =
+          "_"
+
 emitPageFlowArtifacts :: [LowerPageFlow] -> [Text]
 emitPageFlowArtifacts pageFlows =
   [ "export const __claspUiGraph = ["
@@ -1781,6 +1849,7 @@ emitGeneratedBindingsExport =
   , "  kind: \"clasp-generated-bindings\","
   , "  version: 1,"
   , "  hostBindings: __claspHostBindings,"
+  , "  nativeInterop: __claspNativeInterop,"
   , "  routes: __claspRoutes,"
   , "  routeClients: __claspRouteClients,"
   , "  schemas: __claspSchemas,"

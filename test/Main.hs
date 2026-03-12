@@ -2053,6 +2053,10 @@ compileTests =
             assertBool "expected host binding manifest fromHost adapter" ("fromHost(value, path = \"value\")" `T.isInfixOf` emitted)
             assertBool "expected host binding manifest toHost adapter" ("toHost(value, path = \"result\")" `T.isInfixOf` emitted)
             assertBool "expected host binding manifest return type" ("returns: {" `T.isInfixOf` emitted)
+            assertBool "expected native interop manifest export" ("export const __claspNativeInterop = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected native interop capability id" ("id: \"capability:foreign:mockLeadSummaryModel\"" `T.isInfixOf` emitted)
+            assertBool "expected native interop rust crate metadata" ("crateName: \"clasp_mockleadsummarymodel\"" `T.isInfixOf` emitted)
+            assertBool "expected native interop bun target metadata" ("bun: Object.freeze({ runtime: \"bun\", loader: \"bun:ffi\", crateType: \"cdylib\", manifestPath: \"native/mockleadsummarymodel/Cargo.toml\" })" `T.isInfixOf` emitted)
             assertBool "expected enum decoder" ("function $decode_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected internal enum validator" ("function $validateInternal_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected record decoder" ("function $decode_LeadSummary" `T.isInfixOf` emitted)
@@ -2078,6 +2082,7 @@ compileTests =
             assertBool "expected generated binding contract version" ("version: 1," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract routes" ("routes: __claspRoutes," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract host bindings" ("hostBindings: __claspHostBindings," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract native interop" ("nativeInterop: __claspNativeInterop," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract schemas" ("schemas: __claspSchemas," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract platform bridges" ("platformBridges: __claspPlatformBridges," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
@@ -2421,6 +2426,21 @@ compileTests =
             assertEqual
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
+              runtimeOutput
+    , testCase "server runtime resolves target-aware native interop build plans" $
+        case compileSource "service-native-interop-runtime" serviceSource of
+          Left err ->
+            assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/service-native-interop-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (nativeInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected native interop contract and build plan"
+              "{\"abi\":\"clasp-native-v1\",\"supportedTargets\":[\"bun\",\"worker\",\"react-native\",\"expo\"],\"bindingName\":\"mockLeadSummaryModel\",\"capabilityId\":\"capability:foreign:mockLeadSummaryModel\",\"crateName\":\"lead_summary_bridge\",\"loader\":\"bun:ffi\",\"crateType\":\"cdylib\",\"manifestPath\":\"native/lead-summary/Cargo.toml\",\"artifactFileName\":\"liblead_summary_bridge.so\",\"cargoCommand\":[\"cargo\",\"build\",\"--manifest-path\",\"native/lead-summary/Cargo.toml\",\"--release\",\"--target\",\"x86_64-unknown-linux-gnu\"],\"capabilities\":[\"capability:foreign:mockLeadSummaryModel\",\"capability:ml:lead-summary\"]}"
               runtimeOutput
     , testCase "generated page route clients build query and form requests" $
         withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
@@ -4358,6 +4378,41 @@ workerJobRuntimeScript compiledPath runtimePath =
     , "  resultPriority: decoded.priority,"
     , "  resultFollowUpRequired: decoded.followUpRequired,"
     , "  invalid"
+    , "}));"
+    ]
+
+nativeInteropRuntimeScript :: FilePath -> FilePath -> Text
+nativeInteropRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { nativeInteropContractFor, resolveNativeInteropPlan } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const contract = nativeInteropContractFor(compiledModule);"
+    , "const plan = resolveNativeInteropPlan(compiledModule, {"
+    , "  target: 'bun',"
+    , "  targetTriple: 'x86_64-unknown-linux-gnu',"
+    , "  bindings: {"
+    , "    mockLeadSummaryModel: {"
+    , "      crateName: 'lead_summary_bridge',"
+    , "      libName: 'lead_summary_bridge',"
+    , "      manifestPath: 'native/lead-summary/Cargo.toml',"
+    , "      capabilities: ['capability:foreign:mockLeadSummaryModel', 'capability:ml:lead-summary']"
+    , "    }"
+    , "  }"
+    , "});"
+    , "const binding = contract.bindings[0];"
+    , "const bindingPlan = plan.bindings[0];"
+    , "console.log(JSON.stringify({"
+    , "  abi: contract.abi,"
+    , "  supportedTargets: contract.supportedTargets,"
+    , "  bindingName: binding.name,"
+    , "  capabilityId: binding.capability.id,"
+    , "  crateName: bindingPlan.crateName,"
+    , "  loader: bindingPlan.loader,"
+    , "  crateType: bindingPlan.crateType,"
+    , "  manifestPath: bindingPlan.manifestPath,"
+    , "  artifactFileName: bindingPlan.artifactFileName,"
+    , "  cargoCommand: bindingPlan.cargo.command,"
+    , "  capabilities: bindingPlan.capabilities"
     , "}));"
     ]
 
