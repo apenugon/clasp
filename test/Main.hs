@@ -2303,6 +2303,32 @@ compileTests =
               "expected executable control-plane runtime result"
               "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
+    , testCase "control-plane example drives one repo-level agent loop" $ do
+        result <- compileEntry ("examples" </> "control-plane" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected control-plane example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/control-plane/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "control-plane" </> "demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected repo-level control-plane demo loop result"
+                  "{\"agent\":\"builder\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"hookAccepted\":true,\"fileAllowed\":true,\"taskQueue\":\"Inspect the repo first, then run the merge gate.\",\"verificationGuide\":\"Run bash scripts/verify-all.sh before finishing.\",\"mergeGateRequest\":\"release:0\",\"steps\":[{\"step\":\"inspect\",\"requestId\":\"release:inspect\",\"method\":\"search_repo\",\"allowed\":true,\"summary\":\"src/Clasp/Compiler.hs\\ntest/Main.hs\"},{\"step\":\"verify\",\"requestId\":\"release:0\",\"method\":\"search_repo\",\"allowed\":true,\"summary\":\"verification:ok\"}]}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("control-plane demo script failed:\n" <> stderrText)
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->

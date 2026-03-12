@@ -14,9 +14,13 @@ nix develop -c bash -lc "
   cabal run claspc -- check examples/lists.clasp
   cabal run claspc -- check examples/let.clasp
   cabal run claspc -- check examples/project/Main.clasp
+  cabal run claspc -- check examples/control-plane/Main.clasp
   cabal run claspc -- check examples/lead-app/Main.clasp
   cabal run claspc -- check examples/support-console/Main.clasp
   cabal run claspc -- check examples/release-gate/Main.clasp
+  mkdir -p dist/control-plane
+  cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js
+  node examples/control-plane/demo.mjs dist/control-plane/Main.js >/dev/null
   export CLASP_PROJECT_ROOT=\"$project_root\"
   bash examples/lead-app-ts/scripts/verify.sh
   node benchmarks/run-benchmark.mjs list >/dev/null

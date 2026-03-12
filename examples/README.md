@@ -16,6 +16,8 @@ This directory has two kinds of examples:
 
 ## Richer Examples
 
+- [control-plane/Main.clasp](/home/akul/DevProjects/synthspeak/examples/control-plane/Main.clasp): a repo-level control-plane declaration set with guides, policies, hooks, tools, verifiers, and a merge gate for one builder loop
+- [control-plane/demo.mjs](/home/akul/DevProjects/synthspeak/examples/control-plane/demo.mjs): runs the compiled control-plane exports through one real agent loop with a simulated repo tool transport
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
 - [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage boundaries
@@ -39,6 +41,14 @@ Emit the context graph:
 
 ```sh
 cabal run claspc -- context examples/release-gate/Main.clasp
+```
+
+Run the control-plane demo after compiling `Main.clasp` into `dist/`:
+
+```sh
+mkdir -p dist/control-plane
+cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js
+node examples/control-plane/demo.mjs dist/control-plane/Main.js
 ```
 
 Run the browser demo:
