@@ -1,8 +1,8 @@
-# TY-014 Add Semantic Edit And Refactor Operations Over Compiler-Known Declarations And Schemas
+# TY-015 Add A Stable Compiler-Known Agent IR Or AIR With Graph Identity And Replay-Friendly Serialization
 
 ## Goal
 
-Add semantic edit and refactor operations over compiler-known declarations and schemas
+Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization
 
 ## Why
 
@@ -10,7 +10,7 @@ Clasp needs stronger typing and more useful diagnostics than mainstream baseline
 
 ## Scope
 
-- Implement `TY-014` as one narrow slice of work: Add semantic edit and refactor operations over compiler-known declarations and schemas
+- Implement `TY-015` as one narrow slice of work: Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -26,11 +26,11 @@ Clasp needs stronger typing and more useful diagnostics than mainstream baseline
 
 ## Dependencies
 
-- `TY-013`
+- `TY-014`
 
 ## Acceptance
 
-- `TY-014` is implemented without breaking previously integrated tasks
+- `TY-015` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

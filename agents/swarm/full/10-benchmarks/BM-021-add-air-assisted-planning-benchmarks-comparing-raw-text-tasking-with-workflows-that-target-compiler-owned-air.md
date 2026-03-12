@@ -1,8 +1,8 @@
-# BM-019 Add Semantic-Artifact Benchmarks Comparing Compiler-Assisted Workflows Against Raw Text And Browser-Only Workflows
+# BM-021 Add AIR-Assisted Planning Benchmarks Comparing Raw-Text Tasking With Workflows That Target Compiler-Owned AIR
 
 ## Goal
 
-Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows
+Add AIR-assisted planning benchmarks comparing raw-text tasking with workflows that target compiler-owned AIR
 
 ## Why
 
@@ -10,7 +10,7 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Scope
 
-- Implement `BM-019` as one narrow slice of work: Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows
+- Implement `BM-021` as one narrow slice of work: Add AIR-assisted planning benchmarks comparing raw-text tasking with workflows that target compiler-owned AIR
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -24,11 +24,11 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Dependencies
 
-- `BM-018`
+- `BM-020`
 
 ## Acceptance
 
-- `BM-019` is implemented without breaking previously integrated tasks
+- `BM-021` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

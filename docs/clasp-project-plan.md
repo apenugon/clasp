@@ -29,6 +29,8 @@ The current gaps are not just language features. The project also needs:
 - smaller, better-scoped agent tasks
 - stronger compiler and runtime semantics
 - stronger correctness semantics beyond plain structural typing
+- an explicit agent intermediate representation instead of runtime-specific planner JSON
+- stronger first-class authorization and provable data-access mediation
 - richer full-stack and AI-native surfaces
 - a native storage model rather than ORM-shaped wrappers
 - a better control-plane story
@@ -151,6 +153,7 @@ Exit criteria:
 - config, tool IO, and persisted state boundaries use generated validation
 - boundary schemas remain transport-neutral, with `JSON` as the first projection rather than the only long-term wire format
 - invariant or constrained-value checks can be declared once and enforced automatically at boundaries
+- protected values can carry data classification or disclosure constraints rather than being treated as ordinary fields
 - provenance and secret-aware handling begin to exist
 
 ### M4: Control Plane in Clasp
@@ -164,6 +167,7 @@ Exit criteria:
 - Clasp can project executable machine manifests, machine protocol artifacts, and human docs from those declarations
 - runtime policy enforcement is generated from the same source of truth
 - static context-graph queries can resolve relevant declarations, capabilities, and policy gates
+- app-facing authorization proofs and policy decisions are traceable through the same semantic model rather than hidden in framework middleware
 
 ### M5: Durable Self-Updating Workflows
 
@@ -189,6 +193,7 @@ Exit criteria:
 
 - one real agent app is built in Clasp
 - benchmark suites cover model/tool workflows, not just typed HTTP changes
+- a stable compiler-owned AIR exists so higher-level planners and generated workflows target one semantic representation before runtime execution
 
 ### M7: External-Objective Adaptation
 
@@ -348,6 +353,7 @@ Critical path:
 - `TY-012` Add constrained or refinement-style value types for application-level invariants.
 - `TY-013` Add compiler-known typestate or state-machine declarations for UI, workflow, and domain transitions.
 - `TY-014` Add semantic edit and refactor operations over compiler-known declarations and schemas.
+- `TY-015` Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -367,6 +373,7 @@ Critical path:
 - `SC-014` Add invariant, precondition, and postcondition declarations tied to schemas and state transitions.
 - `SC-015` Add transport-neutral schema projections with stable field identity and schema fingerprints.
 - `SC-016` Add generated binary boundary codecs from schemas for efficient service, worker, and agent-to-agent transport.
+- `SC-017` Add field-level data classifications and disclosure rules tied to schemas, policies, and projections.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
@@ -376,7 +383,7 @@ Critical path:
 - `FS-004` Add static asset, head, and style-bundle strategy for generated JS output.
 - `FS-005` Clean up the Bun runtime surface and formalize its generated binding contract.
 - `FS-006` Add worker/job runtime scaffolding using the same type and schema model.
-- `FS-007` Add auth/session primitives only if required by the first realistic demo app.
+- `FS-007` Add first-class auth/session, principal, tenant, and resource identity primitives for application code.
 - `FS-008` Define the React interop boundary for using generated Clasp code in frontend apps.
 - `FS-009` Define the React Native or Expo bridge path for future mobile reuse.
 - `FS-010` Add one mobile-adjacent demo that reuses shared Clasp business logic.
@@ -385,6 +392,7 @@ Critical path:
 - `FS-013` Add typed page actions, forms, redirects, and navigation contracts for full-stack app flows.
 - `FS-014` Add structured route identity plus typed path, query, form, and body declarations instead of raw string route edges.
 - `FS-015` Emit machine-readable UI, action, and navigation graph artifacts for page-driven app flows.
+- `FS-016` Add compiler-known authorization requirements and proof-carrying access for routes, pages, actions, queries, and tools.
 
 ### Track 5: Control Plane Declarations
 
@@ -432,6 +440,7 @@ Critical path:
 - `AI-010` Add constrained dynamic-schema support where runtime-selected output shapes are necessary.
 - `AI-011` Build one real Clasp agent app using typed tools and structured outputs.
 - `AI-012` Add interoperability shims for systems like `BAML` where that lowers adoption friction.
+- `AI-013` Add source-to-AIR and prompt-or-plan-to-AIR projection hooks for higher-level agent builders.
 
 ### Track 8: External-Objective Adaptation
 
@@ -464,6 +473,8 @@ Critical path:
 - `BM-017` Add end-to-end correctness benchmarks for invariants, state transitions, and storage-backed changes.
 - `BM-018` Add boundary-transport benchmarks comparing `JSON` and generated binary projections on the same schema model.
 - `BM-019` Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows.
+- `BM-020` Add authorization and data-access benchmarks proving protected reads, writes, and field disclosures require policy proofs.
+- `BM-021` Add AIR-assisted planning benchmarks comparing raw-text tasking with workflows that target compiler-owned AIR.
 
 ### Track 10: SaaS Dogfooding
 
@@ -514,6 +525,7 @@ Critical path:
 - `DB-007` Add schema-derived table declarations and generated database constraints.
 - `DB-008` Add typed transactions, isolation boundaries, and mutation semantics for storage effects.
 - `DB-009` Add explicit unsafe SQL escape hatches with typed row contracts and audit metadata.
+- `DB-010` Add policy-aware queries, mutations, and proof-gated row or field access for protected storage models.
 
 ## Suggested Dispatch Waves
 

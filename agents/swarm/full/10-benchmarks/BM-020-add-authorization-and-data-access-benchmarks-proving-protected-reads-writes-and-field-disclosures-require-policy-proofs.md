@@ -1,8 +1,8 @@
-# BM-019 Add Semantic-Artifact Benchmarks Comparing Compiler-Assisted Workflows Against Raw Text And Browser-Only Workflows
+# BM-020 Add Authorization And Data-Access Benchmarks Proving Protected Reads, Writes, And Field Disclosures Require Policy Proofs
 
 ## Goal
 
-Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows
+Add authorization and data-access benchmarks proving protected reads, writes, and field disclosures require policy proofs
 
 ## Why
 
@@ -10,7 +10,7 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Scope
 
-- Implement `BM-019` as one narrow slice of work: Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows
+- Implement `BM-020` as one narrow slice of work: Add authorization and data-access benchmarks proving protected reads, writes, and field disclosures require policy proofs
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -24,11 +24,11 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Dependencies
 
-- `BM-018`
+- `BM-019`
 
 ## Acceptance
 
-- `BM-019` is implemented without breaking previously integrated tasks
+- `BM-020` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

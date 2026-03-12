@@ -594,6 +594,38 @@ The language or its standard platform should understand:
 
 These should not all be left to unrelated third-party frameworks.
 
+### Authorization as compiler-known semantics, not middleware convention
+
+For the strongest guarantees, `Clasp` should go beyond generic RBAC helpers.
+
+The semantic model should eventually include things like:
+
+- principal identities
+- tenant or scope identities
+- resource identities
+- action identities
+- policy declarations over those identities
+- proof or witness values produced when runtime auth facts satisfy a policy
+
+That proof-carrying model should then apply across:
+
+- routes
+- page rendering
+- actions and form handlers
+- queries and mutations
+- tool calls
+- workflow steps
+
+The key guarantee is not "auth exists somewhere in the stack."
+
+The stronger guarantee is:
+
+- protected reads and writes require explicit policy mediation
+- protected fields cannot be rendered, queried, logged, traced, or sent to models without the right proof
+- bypasses are explicit unsafe or foreign boundaries rather than accidental omissions
+
+This is a much stronger target than framework middleware or stringly route guards, and it is a better fit for agent-built systems that need complete mediation and auditable authority.
+
 ### Structured routes and host boundaries, not stringly edges
 
 Routes, host bindings, and foreign capabilities should not remain permanently modeled as raw strings.
@@ -665,6 +697,40 @@ The language should support:
 - Idempotency
 - Compensation and rollback patterns
 - Human-in-the-loop checkpoints
+
+### `Clasp` as an agent intermediate representation
+
+`Clasp` should not only be a source language.
+
+It should also become a stable agent intermediate representation for higher-level systems such as:
+
+- natural-language goal compilers
+- prompt planners
+- GUI or app builders
+- semantic refactor tools
+- workflow synthesis systems
+
+That does not mean exposing the internal lowered backend IR directly.
+
+It means exposing a compiler-known AIR that preserves stable identities for:
+
+- schemas
+- routes
+- pages and actions
+- workflows
+- prompts
+- tools
+- policies
+- capabilities
+
+The important property is that source code, planner output, and generated app or agent structures can all converge on one semantic representation before execution.
+
+That gives the ecosystem:
+
+- replayable, serializable plans
+- one stable target for semantic edits and graph queries
+- less runtime-specific execution JSON
+- cleaner benchmarking of source-first versus AIR-assisted agent workflows
 
 ## Agent Control Plane
 
@@ -1008,6 +1074,8 @@ That means:
 - file, network, process, secret, and model authority should be separately grantable
 - approval boundaries should be part of the semantic model, not shell wrapper behavior
 - capability narrowing should be easy and capability escalation should be deliberate and auditable
+
+For application data, this should eventually combine with authorization proofs and data classification so least-privilege applies not only to tools and side effects, but also to which rows, fields, and UI projections code is allowed to touch.
 
 ### Secrets, provenance, and data handling
 

@@ -86,6 +86,7 @@ Exit criteria:
 - Add name resolution
 - Add a minimal typechecker
 - Add boundary annotations where needed
+- Start stabilizing a compiler-known semantic IR that can later serve as an agent-facing AIR rather than leaving plans and tool flows as ad hoc runtime JSON
 - Add stable package/module identity beyond the current file-path-oriented import story
 - Start shaping the type system toward ADTs and exhaustive matching
 - Add constrained or refinement-style value modeling for important application invariants
@@ -104,6 +105,8 @@ Exit criteria:
 - Add typed serialization, validation, and transport-projection derivation
 - Add typed route/service definitions
 - Start converging on one shared type universe for frontend/backend boundaries
+- Add first-class auth/session, principal, tenant, and resource identity primitives rather than leaving app auth as optional middleware glue
+- Add compiler-known authorization requirements and proof-carrying access surfaces for routes, pages, actions, queries, and tools
 - Replace raw string route edges with structured route identity and typed path/query/body contracts
 - Add compiler-known page/view semantics and reserve a compiler-known styling path rather than freezing raw class strings as language law
 - Add typed actions, forms, redirects, and navigation contracts for page and app flows
@@ -125,6 +128,7 @@ Exit criteria:
 - Keep boundary schemas transport-neutral so `JSON` is a projection, not the permanent semantic model
 - Add binary boundary projections for efficient service, worker, and agent-to-agent communication once the schema model is stable enough
 - Add invariant, precondition, and postcondition declarations that can be checked statically where possible and enforced automatically at boundaries where necessary
+- Add field-level data classification and disclosure rules so protected values cannot flow into pages, prompts, traces, or storage projections without explicit policy mediation
 - Add provenance tracking and secret-aware value handling at trust boundaries
 - Start separating untrusted content from authority-bearing instructions and capabilities
 - Start designing versioned state handoff for future hot swapping
@@ -140,6 +144,7 @@ Exit criteria:
 - Generate executable machine manifests, protocol artifacts, human-readable docs, CLI wrappers, and runtime config from the same source
 - Emit a static context graph over code, control-plane declarations, schemas, and capabilities
 - Enforce capability and approval policies from declared semantics instead of shell conventions
+- Make policy decisions and authorization proofs traceable back to principal, resource, action, and data-classification declarations
 - Add explicit sandbox and least-privilege policy surfaces for file, network, process, secret, and model authority
 - Make audit trails and policy decisions part of standard trace output
 
@@ -174,6 +179,7 @@ Exit criteria:
 - Add provider strategies such as fallback, retry, round-robin, and budget policy
 - Add tool declarations
 - Add tracing and eval hooks
+- Add a compiler-owned agent intermediate representation (`AIR`) that prompts, plans, tools, workflows, and source modules can all project into with stable identifiers and replayable serialization
 - Extend context graphs with prompt, tool, model, eval, and capability edges suitable for prompt-building and inspector tooling
 - Add a constrained dynamic-schema facility for runtime-selected output shapes
 - Add prompt-injection-resistant separation between content, tool authority, and policy
@@ -183,6 +189,7 @@ Exit criteria:
 Exit criteria:
 
 - `Clasp` can express a typed AI workflow without falling back to ad hoc SDK glue.
+- Higher-level planners or natural-language compilers can target one stable `Clasp` AIR instead of inventing bespoke execution JSON for each runtime.
 
 ## Phase 10: External-Objective Adaptation
 
@@ -243,6 +250,7 @@ Exit criteria:
 - Add a language-native storage model with `SQLite` as the first backend
 - Add a typed SQLite capability and connection model
 - Add typed schema/query/transaction/migration surfaces
+- Add policy-aware query and mutation surfaces so protected rows and fields require explicit authorization proofs instead of ambient data access
 - Generate database constraints from `Clasp` schemas and invariants where possible
 - Keep raw SQL behind explicit unsafe or foreign boundaries rather than as the default query surface
 - Integrate persistence into the SaaS dogfood app

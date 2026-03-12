@@ -6,13 +6,11 @@ Add a compiler daemon and machine-native protocol, with LSP/editor adapters buil
 
 ## Why
 
-Agents need a stable compiler-facing protocol for check, compile, graph query, projection, and edit operations. Human-facing CLI and editor integrations should be adapters over that protocol, not the only durable interface. This task belongs to the Type System And Diagnostics track.
+Clasp needs stronger typing and more useful diagnostics than mainstream baseline stacks if the language thesis is going to hold up. This task belongs to the Type System And Diagnostics track.
 
 ## Scope
 
 - Implement `TY-010` as one narrow slice of work: Add a compiler daemon and machine-native protocol, with LSP/editor adapters built on top
-- Keep the first slice small and benchmark-oriented: one long-lived compiler process and one machine-readable request/response path are enough.
-- Treat the protocol as the source of truth and the editor/LSP surface as a projection.
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites
@@ -33,7 +31,6 @@ Agents need a stable compiler-facing protocol for check, compile, graph query, p
 ## Acceptance
 
 - `TY-010` is implemented without breaking previously integrated tasks
-- At least one compiler capability is available over a stable machine-readable protocol without shelling out to text-oriented CLI parsing.
 - Tests or regressions cover the new behavior
 - `bash scripts/verify-all.sh` passes
 

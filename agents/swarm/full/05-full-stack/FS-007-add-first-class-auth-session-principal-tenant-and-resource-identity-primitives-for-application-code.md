@@ -1,8 +1,8 @@
-# FS-007 Add Auth/Session Primitives Only If Required By The First Realistic Demo App
+# FS-007 Add First-Class Auth/Session, Principal, Tenant, And Resource Identity Primitives For Application Code
 
 ## Goal
 
-Add auth/session primitives only if required by the first realistic demo app
+Add first-class auth/session, principal, tenant, and resource identity primitives for application code
 
 ## Why
 
@@ -10,7 +10,7 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 ## Scope
 
-- Implement `FS-007` as one narrow slice of work: Add auth/session primitives only if required by the first realistic demo app
+- Implement `FS-007` as one narrow slice of work: Add first-class auth/session, principal, tenant, and resource identity primitives for application code
 - Add or update regression coverage for the new behavior
 - Update docs or examples only where the new surface changes visible behavior
 - Avoid unrelated refactors or broad rewrites

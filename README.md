@@ -19,6 +19,7 @@ It is trying to make one idea real:
 
 - one semantic layer across frontend, backend, workers, and eventually apps
 - one shared type and schema system everywhere
+- one compiler-known source language and agent IR instead of ad hoc prompt/runtime glue
 - generated validation at trust boundaries
 - a language surface optimized for agent reasoning, repair, and change propagation
 - machine-native compiler artifacts and protocol surfaces instead of text-only tooling by default
@@ -74,6 +75,7 @@ Long-term direction that matters for agents:
 
 - package/module identity beyond raw filesystem paths
 - structured host and route boundaries instead of stringly binding surfaces
+- first-class authorization and data-access proofs instead of middleware-only auth assumptions
 - compiler-emitted context, UI, and boundary artifacts that agents can query directly
 - semantic edit and refactor operations beyond raw text patching
 - a machine-native compiler protocol with human-facing CLI and docs as derived views
