@@ -6,6 +6,7 @@ module Clasp.Lower
   , LowerMatchBranch (..)
   , LowerModule (..)
   , LowerRecordField (..)
+  , LowerRouteContract (..)
   , LowerRoute (..)
   , lowerModule
   ) where
@@ -21,6 +22,7 @@ import Clasp.Core
   , CorePattern (..)
   , CorePatternBinder (..)
   , CoreRecordField (..)
+  , CoreRouteContract (..)
   , coreExprType
   )
 import Clasp.Syntax
@@ -61,13 +63,14 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LPage LowerExpr LowerExpr
+  | LRedirect Text
   | LViewEmpty
   | LViewText LowerExpr
   | LViewAppend LowerExpr LowerExpr
   | LViewElement Text LowerExpr
   | LViewStyled Text LowerExpr
-  | LViewLink Text LowerExpr
-  | LViewForm Text Text LowerExpr
+  | LViewLink LowerRouteContract Text LowerExpr
+  | LViewForm LowerRouteContract Text Text LowerExpr
   | LViewInput Text Text LowerExpr
   | LViewSubmit LowerExpr
   | LCall LowerExpr [LowerExpr]
@@ -81,6 +84,16 @@ data LowerMatchBranch = LowerMatchBranch
   { lowerMatchBranchTag :: Text
   , lowerMatchBranchBinders :: [Text]
   , lowerMatchBranchBody :: LowerExpr
+  }
+  deriving (Eq, Show)
+
+data LowerRouteContract = LowerRouteContract
+  { lowerRouteContractName :: Text
+  , lowerRouteContractMethod :: Text
+  , lowerRouteContractPath :: Text
+  , lowerRouteContractRequestType :: Text
+  , lowerRouteContractResponseType :: Text
+  , lowerRouteContractResponseKind :: Text
   }
   deriving (Eq, Show)
 
@@ -148,6 +161,8 @@ lowerCoreExpr expr =
       LBool value
     CPage _ title body ->
       LPage (lowerCoreExpr title) (lowerCoreExpr body)
+    CRedirect _ targetPath ->
+      LRedirect targetPath
     CViewEmpty _ ->
       LViewEmpty
     CViewText _ value ->
@@ -158,10 +173,10 @@ lowerCoreExpr expr =
       LViewElement tag (lowerCoreExpr child)
     CViewStyled _ styleRef child ->
       LViewStyled styleRef (lowerCoreExpr child)
-    CViewLink _ href child ->
-      LViewLink href (lowerCoreExpr child)
-    CViewForm _ method action child ->
-      LViewForm method action (lowerCoreExpr child)
+    CViewLink _ routeContract href child ->
+      LViewLink (lowerRouteContract routeContract) href (lowerCoreExpr child)
+    CViewForm _ routeContract method action child ->
+      LViewForm (lowerRouteContract routeContract) method action (lowerCoreExpr child)
     CViewInput _ fieldName inputKind value ->
       LViewInput fieldName inputKind (lowerCoreExpr value)
     CViewSubmit _ label ->
@@ -205,6 +220,17 @@ lowerRouteDecl routeDecl =
     , lowerRouteRequestTypeName = routeDeclRequestType routeDecl
     , lowerRouteResponseTypeName = routeDeclResponseType routeDecl
     , lowerRouteHandlerName = routeDeclHandlerName routeDecl
+    }
+
+lowerRouteContract :: CoreRouteContract -> LowerRouteContract
+lowerRouteContract routeContract =
+  LowerRouteContract
+    { lowerRouteContractName = coreRouteContractName routeContract
+    , lowerRouteContractMethod = coreRouteContractMethod routeContract
+    , lowerRouteContractPath = coreRouteContractPath routeContract
+    , lowerRouteContractRequestType = coreRouteContractRequestType routeContract
+    , lowerRouteContractResponseType = coreRouteContractResponseType routeContract
+    , lowerRouteContractResponseKind = coreRouteContractResponseKind routeContract
     }
 
 codecDecodeName :: Type -> Text

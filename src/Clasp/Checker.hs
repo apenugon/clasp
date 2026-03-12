@@ -18,7 +18,7 @@ import Data.Bifunctor (first)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Core
@@ -32,6 +32,7 @@ import Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRouteContract (..)
   , coreExprType
   )
 import Clasp.Diagnostic
@@ -59,6 +60,7 @@ import Clasp.Syntax
   , ProjectionDecl (..)
   , ProjectionFieldDecl (..)
   , RouteDecl (..)
+  , RouteMethod (..)
   , Position (..)
   , SourceSpan (..)
   , Type (..)
@@ -79,6 +81,7 @@ data ModuleContext = ModuleContext
   , contextForeignDeclEnv :: ForeignDeclEnv
   , contextConstructorEnv :: ConstructorEnv
   , contextDeclMap :: DeclMap
+  , contextRouteDecls :: [RouteDecl]
   }
 
 data ConstructorInfo = ConstructorInfo
@@ -135,13 +138,14 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftPage DraftExpr DraftExpr
+  | DraftRedirect Text
   | DraftViewEmpty
   | DraftViewText DraftExpr
   | DraftViewAppend DraftExpr DraftExpr
   | DraftViewElement Text DraftExpr
   | DraftViewStyled Text DraftExpr
-  | DraftViewLink Text DraftExpr
-  | DraftViewForm Text Text DraftExpr
+  | DraftViewLink RouteDecl Text DraftExpr
+  | DraftViewForm RouteDecl Text Text DraftExpr
   | DraftViewInput Text Text DraftExpr
   | DraftViewSubmit DraftExpr
   | DraftCall DraftExpr [DraftExpr]
@@ -186,6 +190,9 @@ data UnifyContext = UnifyContext
 
 pageTypeName :: Text
 pageTypeName = "Page"
+
+redirectTypeName :: Text
+redirectTypeName = "Redirect"
 
 viewTypeName :: Text
 viewTypeName = "View"
@@ -270,11 +277,11 @@ isBuiltinRecordTypeName name = Map.member name builtinRecordDeclEnv
 
 isBuiltinTypeName :: Text -> Bool
 isBuiltinTypeName name =
-  name == pageTypeName || name == viewTypeName || isBuiltinRecordTypeName name
+  name `elem` [pageTypeName, redirectTypeName, viewTypeName] || isBuiltinRecordTypeName name
 
 isBuiltinViewFunctionName :: Text -> Bool
 isBuiltinViewFunctionName name =
-  name `elem` ["page", "text", "append", "element", "styled", "link", "form", "input", "submit", hostClassBuiltinName, hostStyleBuiltinName]
+  name `elem` ["page", "redirect", "text", "append", "element", "styled", "link", "form", "input", "submit", hostClassBuiltinName, hostStyleBuiltinName]
 
 isBuiltinAuthFunctionName :: Text -> Bool
 isBuiltinAuthFunctionName name =
@@ -307,6 +314,48 @@ isSafeFieldName fieldName =
 
 isSafeInputKind :: Text -> Bool
 isSafeInputKind inputKind = inputKind `elem` ["text", "number", "hidden"]
+
+normalizeNavigationTarget :: Text -> Text
+normalizeNavigationTarget target =
+  T.takeWhile (\char -> char /= '?' && char /= '#') target
+
+isRouteResponseKindAllowed :: [Text] -> RouteDecl -> Bool
+isRouteResponseKindAllowed allowedKinds routeDecl =
+  routeResponseKind routeDecl `elem` allowedKinds
+
+routeResponseKind :: RouteDecl -> Text
+routeResponseKind routeDecl
+  | routeDeclResponseType routeDecl == pageTypeName = "page"
+  | routeDeclResponseType routeDecl == redirectTypeName = "redirect"
+  | otherwise = "json"
+
+resolveNavigationRoute :: ModuleContext -> RouteMethod -> Text -> [Text] -> Maybe RouteDecl
+resolveNavigationRoute ctx routeMethod targetPath allowedResponseKinds =
+  listToMaybe $
+    filter
+      ( \routeDecl ->
+          routeDeclMethod routeDecl == routeMethod
+            && routeDeclPath routeDecl == normalizeNavigationTarget targetPath
+            && isRouteResponseKindAllowed allowedResponseKinds routeDecl
+      )
+      (contextRouteDecls ctx)
+
+freezeRouteContract :: RouteDecl -> CoreRouteContract
+freezeRouteContract routeDecl =
+  CoreRouteContract
+    { coreRouteContractName = routeDeclName routeDecl
+    , coreRouteContractMethod = emitRouteMethodText (routeDeclMethod routeDecl)
+    , coreRouteContractPath = routeDeclPath routeDecl
+    , coreRouteContractRequestType = routeDeclRequestType routeDecl
+    , coreRouteContractResponseType = routeDeclResponseType routeDecl
+    , coreRouteContractResponseKind = routeResponseKind routeDecl
+    }
+
+emitRouteMethodText :: RouteMethod -> Text
+emitRouteMethodText routeMethod =
+  case routeMethod of
+    RouteGet -> "GET"
+    RoutePost -> "POST"
 
 checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
@@ -342,6 +391,7 @@ checkModule modl = do
           , contextForeignDeclEnv = foreignDeclEnv
           , contextConstructorEnv = constructorEnv
           , contextDeclMap = Map.fromList [(declName decl, decl) | decl <- decls]
+          , contextRouteDecls = routeDecls
           }
 
   declTypeEnv <- inferDeclTypes ctx decls
@@ -709,13 +759,13 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
           ]
 
     ensureResponseType routeDecl typeName primarySpan =
-      unless (typeName == pageTypeName || Map.member typeName recordDeclEnv) $
+      unless (typeName `elem` [pageTypeName, redirectTypeName] || Map.member typeName recordDeclEnv) $
         Left . diagnosticBundle $
           [ diagnostic
               "E_ROUTE_TYPE"
-              ("Route `" <> routeDeclName routeDecl <> "` must use a record type or Page for its response body.")
+              ("Route `" <> routeDeclName routeDecl <> "` must use a record type, Page, or Redirect for its response body.")
               (Just primarySpan)
-              ["Declare `" <> typeName <> "` as a record or return `Page` from the route."]
+              ["Declare `" <> typeName <> "` as a record or return `Page` or `Redirect` from the route."]
               []
           ]
 
@@ -1269,6 +1319,41 @@ inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
           pure (DraftExpr callSpan (INamed pageTypeName) (DraftPage draftTitle draftBody))
         _ ->
           throwViewBuiltinArity callSpan builtinName 2 (length args)
+    "redirect" ->
+      case args of
+        [EString _ targetPath] -> do
+          unless (isSafeNavigationTarget targetPath) $
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_REDIRECT_TARGET"
+                  ("Invalid redirect target `" <> targetPath <> "`.")
+                  (Just callSpan)
+                  ["Use an absolute in-app path such as `/inbox` or `/lead/primary`."]
+                  []
+              ]
+          case resolveNavigationRoute ctx RouteGet targetPath ["page"] of
+            Nothing ->
+              throwDiagnostic . diagnosticBundle $
+                [ diagnostic
+                    "E_REDIRECT_TARGET"
+                    ("Redirect target `" <> normalizeNavigationTarget targetPath <> "` does not match any GET Page route.")
+                    (Just callSpan)
+                    ["Declare a GET route that returns `Page` before using it as a redirect target."]
+                    []
+                ]
+            Just _ ->
+              pure (DraftExpr callSpan (INamed redirectTypeName) (DraftRedirect targetPath))
+        [_] ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_REDIRECT_TARGET"
+                "Redirect targets must be string literals."
+                (Just callSpan)
+                ["Use `redirect \"/inbox\"` so the compiler can validate the destination route."]
+                []
+            ]
+        _ ->
+          throwViewBuiltinArity callSpan builtinName 1 (length args)
     "text" ->
       case args of
         [valueExpr] -> do
@@ -1351,9 +1436,22 @@ inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
                   ["Use an absolute in-app path such as `/inbox` or `/lead?leadId=lead-1`."]
                   []
               ]
+          routeDecl <-
+            case resolveNavigationRoute ctx RouteGet href ["page"] of
+              Nothing ->
+                throwDiagnostic . diagnosticBundle $
+                  [ diagnostic
+                      "E_VIEW_LINK_TARGET"
+                      ("Link target `" <> normalizeNavigationTarget href <> "` does not match any GET Page route.")
+                      (Just callSpan)
+                      ["Declare a GET route that returns `Page` before linking to it."]
+                      []
+                  ]
+              Just resolvedRoute ->
+                pure resolvedRoute
           draftChild <- inferExpr ctx termEnv localEnv childExpr
           unifyViewBuiltinArg "link child" draftChild (INamed viewTypeName)
-          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewLink href draftChild))
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewLink routeDecl href draftChild))
         [_, _] ->
           throwDiagnostic . diagnosticBundle $
             [ diagnostic
@@ -1386,9 +1484,27 @@ inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
                   ["Use an absolute in-app path such as `/leads` or `/review`."]
                   []
               ]
+          let routeMethod =
+                case method of
+                  "GET" -> RouteGet
+                  "POST" -> RoutePost
+                  _ -> RouteGet
+          routeDecl <-
+            case resolveNavigationRoute ctx routeMethod action ["page", "redirect"] of
+              Nothing ->
+                throwDiagnostic . diagnosticBundle $
+                  [ diagnostic
+                      "E_VIEW_FORM_METHOD"
+                      ("Form action `" <> normalizeNavigationTarget action <> "` does not match any " <> method <> " Page or Redirect route.")
+                      (Just callSpan)
+                      ["Declare a matching route that returns `Page` or `Redirect` before wiring it into a form."]
+                      []
+                  ]
+              Just resolvedRoute ->
+                pure resolvedRoute
           draftChild <- inferExpr ctx termEnv localEnv childExpr
           unifyViewBuiltinArg "form child" draftChild (INamed viewTypeName)
-          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewForm method action draftChild))
+          pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewForm routeDecl method action draftChild))
         [_, _, _] ->
           throwDiagnostic . diagnosticBundle $
             [ diagnostic
@@ -2241,6 +2357,8 @@ freezeDraftExpr ctx decl inferState draftExpr =
       frozenTitle <- freezeDraftExpr ctx decl inferState title
       frozenBody <- freezeDraftExpr ctx decl inferState body
       pure (CPage (draftExprSpan draftExpr) frozenTitle frozenBody)
+    DraftRedirect targetPath ->
+      pure (CRedirect (draftExprSpan draftExpr) targetPath)
     DraftViewEmpty ->
       pure (CViewEmpty (draftExprSpan draftExpr))
     DraftViewText value -> do
@@ -2256,12 +2374,12 @@ freezeDraftExpr ctx decl inferState draftExpr =
     DraftViewStyled styleRef child -> do
       frozenChild <- freezeDraftExpr ctx decl inferState child
       pure (CViewStyled (draftExprSpan draftExpr) styleRef frozenChild)
-    DraftViewLink href child -> do
+    DraftViewLink routeDecl href child -> do
       frozenChild <- freezeDraftExpr ctx decl inferState child
-      pure (CViewLink (draftExprSpan draftExpr) href frozenChild)
-    DraftViewForm method action child -> do
+      pure (CViewLink (draftExprSpan draftExpr) (freezeRouteContract routeDecl) href frozenChild)
+    DraftViewForm routeDecl method action child -> do
       frozenChild <- freezeDraftExpr ctx decl inferState child
-      pure (CViewForm (draftExprSpan draftExpr) method action frozenChild)
+      pure (CViewForm (draftExprSpan draftExpr) (freezeRouteContract routeDecl) method action frozenChild)
     DraftViewInput fieldName inputKind value -> do
       frozenValue <- freezeDraftExpr ctx decl inferState value
       pure (CViewInput (draftExprSpan draftExpr) fieldName inputKind frozenValue)

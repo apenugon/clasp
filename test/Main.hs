@@ -45,6 +45,7 @@ import Clasp.Lower
   , LowerMatchBranch (..)
   , LowerModule (..)
   , LowerRecordField (..)
+  , LowerRouteContract (..)
   , lowerModule
   )
 import Clasp.Syntax
@@ -341,6 +342,16 @@ checkerTests =
         assertHasCode "E_UNSAFE_VIEW_ESCAPE" (checkSource "bad" hostStyleSource)
     , testCase "rejects unsafe link targets in safe views" $
         assertHasCode "E_VIEW_LINK_TARGET" (checkSource "bad" unsafeLinkSource)
+    , testCase "rejects links that do not resolve to a GET page route" $
+        assertHasCode "E_VIEW_LINK_TARGET" (checkSource "bad" missingLinkRouteSource)
+    , testCase "rejects forms that do not resolve to a page or redirect route" $
+        assertHasCode "E_VIEW_FORM_METHOD" (checkSource "bad" missingFormRouteSource)
+    , testCase "accepts compiler-known redirects" $
+        case checkSource "redirect" redirectSource of
+          Left err ->
+            assertFailure ("expected redirect source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     ]
 
 diagnosticTests :: TestTree
@@ -490,10 +501,24 @@ lowerTests =
             assertFailure ("expected interactive page lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right lowered ->
             case findLowerDecl "home" (lowerModuleDecls lowered) of
-              Just (LFunctionDecl _ ["req"] (LPage (LString "Inbox") (LViewAppend (LViewLink "/lead/primary" _) (LViewForm "POST" "/leads" _)))) ->
+              Just
+                ( LFunctionDecl
+                    _ ["req"]
+                    (LPage (LString "Inbox") (LViewAppend (LViewLink (LowerRouteContract "leadRoute" "GET" "/lead/primary" "Empty" "Page" "page") "/lead/primary" _) (LViewForm (LowerRouteContract "createLeadRoute" "POST" "/leads" "LeadCreate" "Redirect" "redirect") "POST" "/leads" _)))
+                  ) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered interactive page declaration: " <> show other)
+    , testCase "lowering preserves redirect responses" $
+        case lowerChecked "redirect" redirectSource of
+          Left err ->
+            assertFailure ("expected redirect lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "submitLead" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["req"] (LRedirect "/inbox")) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered redirect declaration: " <> show other)
     , testCase "lowering preserves auth identity primitive field access" $
         case lowerChecked "auth" authIdentitySource of
           Left err ->
@@ -581,6 +606,16 @@ compileTests =
             assertBool "expected form renderer" ("case \"form\":" `T.isInfixOf` emitted)
             assertBool "expected input renderer" ("case \"input\":" `T.isInfixOf` emitted)
             assertBool "expected submit renderer" ("case \"submit\":" `T.isInfixOf` emitted)
+            assertBool "expected link contract attrs" ("data-clasp-route=" `T.isInfixOf` emitted)
+            assertBool "expected redirect contract metadata" ("responseKind: \"redirect\"" `T.isInfixOf` emitted)
+    , testCase "compile emits redirect helpers and redirect route metadata" $
+        case compileSource "redirect" redirectSource of
+          Left err ->
+            assertFailure ("expected redirect compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected redirect validator" ("function $claspExpectRedirect" `T.isInfixOf` emitted)
+            assertBool "expected redirect encoder" ("encodeResponse: $prepare_Redirect" `T.isInfixOf` emitted)
+            assertBool "expected redirect response kind" ("responseKind: \"redirect\"" `T.isInfixOf` emitted)
     , testCase "compile emits auth identity codecs and preserves nested field access" $
         case compileSource "auth" authIdentitySource of
           Left err ->
@@ -664,6 +699,22 @@ compileTests =
               assertEqual
                 "expected query decode, form decode, and invalid form failure"
                 "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
+                runtimeOutput
+    , testCase "runtime turns redirect route results into http redirects" $
+        withProjectFiles "page-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+              runtimeOutput <- runNodeScript (pageRedirectRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+              assertEqual
+                "expected redirect response contract"
+                "{\"status\":303,\"location\":\"/inbox\"}"
                 runtimeOutput
     , testCase "lead inbox app supports intake, inbox, detail, and invalid form flows" $ do
         result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
@@ -998,11 +1049,37 @@ interactivePageSource =
     [ "module Main"
     , ""
     , "record Empty = {}"
+    , "record LeadCreate = { company : Str }"
     , ""
     , "home : Empty -> Page"
     , "home req = page \"Inbox\" (append (link \"/lead/primary\" (text \"Open lead\")) (form \"POST\" \"/leads\" (append (input \"company\" \"text\" \"\") (submit \"Save\"))))"
     , ""
+    , "leadPage : Empty -> Page"
+    , "leadPage req = page \"Lead\" (text \"Primary\")"
+    , ""
+    , "createLead : LeadCreate -> Redirect"
+    , "createLead req = redirect \"/lead/primary\""
+    , ""
     , "route homeRoute = GET \"/\" Empty -> Page home"
+    , "route leadRoute = GET \"/lead/primary\" Empty -> Page leadPage"
+    , "route createLeadRoute = POST \"/leads\" LeadCreate -> Redirect createLead"
+    ]
+
+redirectSource :: Text
+redirectSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "inbox : Empty -> Page"
+    , "inbox req = page \"Inbox\" (text \"ok\")"
+    , ""
+    , "submitLead : Empty -> Redirect"
+    , "submitLead req = redirect \"/inbox\""
+    , ""
+    , "route inboxRoute = GET \"/inbox\" Empty -> Page inbox"
+    , "route submitLeadRoute = POST \"/submit\" Empty -> Redirect submitLead"
     ]
 
 authIdentitySource :: Text
@@ -1079,6 +1156,32 @@ unsafeLinkSource =
     , ""
     , "bad : Empty -> Page"
     , "bad req = page \"Inbox\" (link \"javascript:alert(1)\" (text \"bad\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
+missingLinkRouteSource :: Text
+missingLinkRouteSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (link \"/missing\" (text \"bad\"))"
+    , ""
+    , "route badRoute = GET \"/bad\" Empty -> Page bad"
+    ]
+
+missingFormRouteSource :: Text
+missingFormRouteSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "bad : Empty -> Page"
+    , "bad req = page \"Inbox\" (form \"POST\" \"/missing\" (submit \"Save\"))"
     , ""
     , "route badRoute = GET \"/bad\" Empty -> Page bad"
     ]
@@ -1186,6 +1289,11 @@ inboxPageFiles =
 pageFormRuntimeFiles :: [(FilePath, Text)]
 pageFormRuntimeFiles =
   [ ("Main.clasp", pageFormRuntimeSource)
+  ]
+
+pageRedirectRuntimeFiles :: [(FilePath, Text)]
+pageRedirectRuntimeFiles =
+  [ ("Main.clasp", redirectSource)
   ]
 
 missingImportFiles :: [(FilePath, Text)]
@@ -1317,6 +1425,17 @@ pageFormRuntimeScript compiledPath runtimePath =
     , "  invalidMessage = error instanceof Error ? error.message : String(error);"
     , "}"
     , "console.log(JSON.stringify({ query: queryPayload, form: formPayload, html, invalid: invalidMessage }));"
+    ]
+
+pageRedirectRuntimeScript :: FilePath -> FilePath -> Text
+pageRedirectRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { responseForRouteResult } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const submitRoute = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'submitLeadRoute');"
+    , "if (!submitRoute) { throw new Error('missing submitLeadRoute'); }"
+    , "const response = responseForRouteResult(submitRoute, await submitRoute.handler({}));"
+    , "console.log(JSON.stringify({ status: response.status, location: response.headers.get('location') }));"
     ]
 
 leadInboxRuntimeScript :: FilePath -> FilePath -> Text

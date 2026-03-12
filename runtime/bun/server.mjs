@@ -72,18 +72,27 @@ export function serveCompiledModule(compiledModule, options = {}) {
       }
 
       try {
-        return new Response(route.encodeResponse(result), {
-          status: 200,
-          headers: {
-            "content-type":
-              route.responseKind === "page"
-                ? "text/html; charset=utf-8"
-                : "application/json"
-          }
-        });
+        return responseForRouteResult(route, result);
       } catch (error) {
         return errorResponse(route, 500, "invalid_response", error);
       }
+    }
+  });
+}
+
+export function responseForRouteResult(route, result) {
+  if (route?.responseKind === "redirect") {
+    const redirect = route.encodeResponse(result);
+    return redirectResponse(redirect.status ?? 303, redirect.location);
+  }
+
+  return new Response(route.encodeResponse(result), {
+    status: 200,
+    headers: {
+      "content-type":
+        route?.responseKind === "page"
+          ? "text/html; charset=utf-8"
+          : "application/json"
     }
   });
 }
@@ -102,6 +111,15 @@ function textResponse(status, body) {
     status,
     headers: {
       "content-type": "text/plain; charset=utf-8"
+    }
+  });
+}
+
+function redirectResponse(status, location) {
+  return new Response("", {
+    status,
+    headers: {
+      location
     }
   });
 }

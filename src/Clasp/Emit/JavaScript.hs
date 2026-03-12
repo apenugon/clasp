@@ -13,6 +13,7 @@ import Clasp.Lower
   , LowerModule (..)
   , LowerRecordField (..)
   , LowerRoute (..)
+  , LowerRouteContract (..)
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
@@ -167,6 +168,33 @@ emitRuntimePrelude =
   , "  return objectValue;"
   , "}"
   , ""
+  , "function $claspExpectRedirect(value, path = \"value\") {"
+  , "  const objectValue = $claspExpectObject(value, path);"
+  , "  if ($claspRequireField(objectValue, \"$kind\", path) !== \"redirect\") {"
+  , "    throw new Error(`${path} expected a Redirect value`);"
+  , "  }"
+  , "  const location = $claspExpectStr($claspRequireField(objectValue, \"location\", path), `${path}.location`);"
+  , "  const status = $claspExpectInt(objectValue.status ?? 303, `${path}.status`);"
+  , "  return { $kind: \"redirect\", location, status };"
+  , "}"
+  , ""
+  , "function $prepare_Redirect(value) {"
+  , "  return $claspExpectRedirect(value, \"value\");"
+  , "}"
+  , ""
+  , "function $claspRenderFlowAttrs(contract, flowKind) {"
+  , "  if (!contract || typeof contract !== \"object\") {"
+  , "    return ` data-clasp-flow=\"${$claspEscapeHtml(flowKind)}\"`;"
+  , "  }"
+  , "  const routeName = typeof contract.routeName === \"string\" ? contract.routeName : \"\";"
+  , "  const routeMethod = typeof contract.method === \"string\" ? contract.method : \"\";"
+  , "  const routePath = typeof contract.path === \"string\" ? contract.path : \"\";"
+  , "  const requestType = typeof contract.requestType === \"string\" ? contract.requestType : \"\";"
+  , "  const responseType = typeof contract.responseType === \"string\" ? contract.responseType : \"\";"
+  , "  const responseKind = typeof contract.responseKind === \"string\" ? contract.responseKind : \"\";"
+  , "  return ` data-clasp-flow=\"${$claspEscapeHtml(flowKind)}\" data-clasp-route=\"${$claspEscapeHtml(routeName)}\" data-clasp-method=\"${$claspEscapeHtml(routeMethod)}\" data-clasp-path=\"${$claspEscapeHtml(routePath)}\" data-clasp-request-type=\"${$claspEscapeHtml(requestType)}\" data-clasp-response-type=\"${$claspEscapeHtml(responseType)}\" data-clasp-response-kind=\"${$claspEscapeHtml(responseKind)}\"`;"
+  , "}"
+  , ""
   , "function $claspRenderView(view) {"
   , "  const checkedView = $claspExpectView(view, \"view\");"
   , "  switch (checkedView.$kind) {"
@@ -181,9 +209,9 @@ emitRuntimePrelude =
   , "    case \"styled\":"
   , "      return `<div data-clasp-style=${JSON.stringify($claspExpectStr(checkedView.styleRef, \"view.styleRef\"))}>${$claspRenderView(checkedView.child)}</div>`;"
   , "    case \"link\":"
-  , "      return `<a href=\"${$claspEscapeHtml($claspExpectStr(checkedView.href, \"view.href\"))}\">${$claspRenderView(checkedView.child)}</a>`;"
+  , "      return `<a${$claspRenderFlowAttrs(checkedView.contract, \"navigation\")} href=\"${$claspEscapeHtml($claspExpectStr(checkedView.href, \"view.href\"))}\">${$claspRenderView(checkedView.child)}</a>`;"
   , "    case \"form\":"
-  , "      return `<form method=\"${$claspEscapeHtml($claspExpectStr(checkedView.method, \"view.method\"))}\" action=\"${$claspEscapeHtml($claspExpectStr(checkedView.action, \"view.action\"))}\">${$claspRenderView(checkedView.child)}</form>`;"
+  , "      return `<form${$claspRenderFlowAttrs(checkedView.contract, \"action\")} method=\"${$claspEscapeHtml($claspExpectStr(checkedView.method, \"view.method\"))}\" action=\"${$claspEscapeHtml($claspExpectStr(checkedView.action, \"view.action\"))}\">${$claspRenderView(checkedView.child)}</form>`;"
   , "    case \"input\":"
   , "      return `<input name=\"${$claspEscapeHtml($claspExpectStr(checkedView.fieldName, \"view.fieldName\"))}\" type=\"${$claspEscapeHtml($claspExpectStr(checkedView.inputKind, \"view.inputKind\"))}\" value=\"${$claspEscapeHtml($claspExpectStr(checkedView.value, \"view.value\"))}\">`;"
   , "    case \"submit\":"
@@ -208,6 +236,8 @@ emitPrimitiveCodecHelpers =
   , "function $encode_Str(value) { return JSON.stringify($claspExpectStr(value, \"value\")); }"
   , "function $decode_Bool(jsonText) { return $claspExpectBool(JSON.parse(jsonText), \"value\"); }"
   , "function $encode_Bool(value) { return JSON.stringify($claspExpectBool(value, \"value\")); }"
+  , "function $decode_Redirect(jsonText) { return $claspExpectRedirect(JSON.parse(jsonText), \"value\"); }"
+  , "function $encode_Redirect(value) { return JSON.stringify($claspExpectRedirect(value, \"value\")); }"
   , ""
   ]
 
@@ -470,11 +500,14 @@ emitRoutesExport typeDecls recordDecls routes =
             case lowerRouteResponseTypeName route of
               "Page" ->
                 "$render_Page"
+              "Redirect" ->
+                "$prepare_Redirect"
               responseTypeName ->
                 "$encode_" <> responseTypeName
           responseKind =
             case lowerRouteResponseTypeName route of
               "Page" -> "page"
+              "Redirect" -> "redirect"
               _ -> "json"
        in
       [ "  {"
@@ -666,6 +699,8 @@ emitExpr counter expr =
        in ( counterAfterBody
           , "{ $kind: \"page\", title: " <> titleText <> ", body: " <> bodyText <> " }"
           )
+    LRedirect targetPath ->
+      (counter, "{ $kind: \"redirect\", location: " <> emitStringLiteral targetPath <> ", status: 303 }")
     LViewEmpty ->
       (counter, "{ $kind: \"empty\" }")
     LViewText value ->
@@ -687,15 +722,15 @@ emitExpr counter expr =
        in ( nextCounter
           , "{ $kind: \"styled\", styleRef: " <> emitStringLiteral styleRef <> ", child: " <> childText <> " }"
           )
-    LViewLink href child ->
+    LViewLink routeContract href child ->
       let (nextCounter, childText) = emitExpr counter child
        in ( nextCounter
-          , "{ $kind: \"link\", href: " <> emitStringLiteral href <> ", child: " <> childText <> " }"
+          , "{ $kind: \"link\", contract: " <> emitRouteContractObject routeContract <> ", href: " <> emitStringLiteral href <> ", child: " <> childText <> " }"
           )
-    LViewForm method action child ->
+    LViewForm routeContract method action child ->
       let (nextCounter, childText) = emitExpr counter child
        in ( nextCounter
-          , "{ $kind: \"form\", method: " <> emitStringLiteral method <> ", action: " <> emitStringLiteral action <> ", child: " <> childText <> " }"
+          , "{ $kind: \"form\", contract: " <> emitRouteContractObject routeContract <> ", method: " <> emitStringLiteral method <> ", action: " <> emitStringLiteral action <> ", child: " <> childText <> " }"
           )
     LViewInput fieldName inputKind value ->
       let (nextCounter, valueText) = emitExpr counter value
@@ -747,6 +782,22 @@ emitExpr counter expr =
               , "})()"
               ]
           )
+
+emitRouteContractObject :: LowerRouteContract -> Text
+emitRouteContractObject routeContract =
+  "{ routeName: "
+    <> emitStringLiteral (lowerRouteContractName routeContract)
+    <> ", method: "
+    <> emitStringLiteral (lowerRouteContractMethod routeContract)
+    <> ", path: "
+    <> emitStringLiteral (lowerRouteContractPath routeContract)
+    <> ", requestType: "
+    <> emitStringLiteral (lowerRouteContractRequestType routeContract)
+    <> ", responseType: "
+    <> emitStringLiteral (lowerRouteContractResponseType routeContract)
+    <> ", responseKind: "
+    <> emitStringLiteral (lowerRouteContractResponseKind routeContract)
+    <> " }"
 
 emitExprList :: Int -> [LowerExpr] -> (Int, [Text])
 emitExprList counter exprs =

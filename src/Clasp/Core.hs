@@ -11,6 +11,7 @@ module Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRouteContract (..)
   , coreExprType
   ) where
 
@@ -87,19 +88,30 @@ data CoreRecordField = CoreRecordField
   }
   deriving (Eq, Show)
 
+data CoreRouteContract = CoreRouteContract
+  { coreRouteContractName :: Text
+  , coreRouteContractMethod :: Text
+  , coreRouteContractPath :: Text
+  , coreRouteContractRequestType :: Text
+  , coreRouteContractResponseType :: Text
+  , coreRouteContractResponseKind :: Text
+  }
+  deriving (Eq, Show)
+
 data CoreExpr
   = CVar SourceSpan Type Text
   | CInt SourceSpan Integer
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CPage SourceSpan CoreExpr CoreExpr
+  | CRedirect SourceSpan Text
   | CViewEmpty SourceSpan
   | CViewText SourceSpan CoreExpr
   | CViewAppend SourceSpan CoreExpr CoreExpr
   | CViewElement SourceSpan Text CoreExpr
   | CViewStyled SourceSpan Text CoreExpr
-  | CViewLink SourceSpan Text CoreExpr
-  | CViewForm SourceSpan Text Text CoreExpr
+  | CViewLink SourceSpan CoreRouteContract Text CoreExpr
+  | CViewForm SourceSpan CoreRouteContract Text Text CoreExpr
   | CViewInput SourceSpan Text Text CoreExpr
   | CViewSubmit SourceSpan CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
@@ -123,6 +135,8 @@ coreExprType expr =
       TBool
     CPage _ _ _ ->
       TNamed "Page"
+    CRedirect _ _ ->
+      TNamed "Redirect"
     CViewEmpty _ ->
       TNamed "View"
     CViewText _ _ ->
@@ -133,9 +147,9 @@ coreExprType expr =
       TNamed "View"
     CViewStyled _ _ _ ->
       TNamed "View"
-    CViewLink _ _ _ ->
+    CViewLink _ _ _ _ ->
       TNamed "View"
-    CViewForm _ _ _ _ ->
+    CViewForm _ _ _ _ _ ->
       TNamed "View"
     CViewInput _ _ _ _ ->
       TNamed "View"

@@ -332,6 +332,8 @@ buildExprGraph nodeId expr =
            in ( [("title", AirAttrNode titleId), ("body", AirAttrNode bodyId)]
               , buildExprGraph titleId title <> buildExprGraph bodyId body
               )
+        CRedirect _ targetPath ->
+          ([("targetPath", AirAttrText targetPath)], [])
         CViewEmpty _ ->
           ([], [])
         CViewText _ value ->
@@ -349,10 +351,10 @@ buildExprGraph nodeId expr =
         CViewStyled _ styleRef child ->
           let childId = exprChildId "child"
            in ([("styleRef", AirAttrText styleRef), ("child", AirAttrNode childId)], buildExprGraph childId child)
-        CViewLink _ href child ->
+        CViewLink _ _ href child ->
           let childId = exprChildId "child"
            in ([("href", AirAttrText href), ("child", AirAttrNode childId)], buildExprGraph childId child)
-        CViewForm _ method action child ->
+        CViewForm _ _ method action child ->
           let childId = exprChildId "child"
            in ([("method", AirAttrText method), ("action", AirAttrText action), ("child", AirAttrNode childId)], buildExprGraph childId child)
         CViewInput _ fieldName inputKind value ->
@@ -474,6 +476,7 @@ exprKind expr =
     CString {} -> "string"
     CBool {} -> "bool"
     CPage {} -> "page"
+    CRedirect {} -> "redirect"
     CViewEmpty {} -> "viewEmpty"
     CViewText {} -> "viewText"
     CViewAppend {} -> "viewAppend"
@@ -498,13 +501,14 @@ exprSpan expr =
     CString span' _ -> span'
     CBool span' _ -> span'
     CPage span' _ _ -> span'
+    CRedirect span' _ -> span'
     CViewEmpty span' -> span'
     CViewText span' _ -> span'
     CViewAppend span' _ _ -> span'
     CViewElement span' _ _ -> span'
     CViewStyled span' _ _ -> span'
-    CViewLink span' _ _ -> span'
-    CViewForm span' _ _ _ -> span'
+    CViewLink span' _ _ _ -> span'
+    CViewForm span' _ _ _ _ -> span'
     CViewInput span' _ _ _ -> span'
     CViewSubmit span' _ -> span'
     CCall span' _ _ _ -> span'
