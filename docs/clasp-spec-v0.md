@@ -31,6 +31,7 @@ It includes:
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
+- Compiler-known `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` primitives for shared application identity data
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
 - A stable AIR graph with compiler-known node identity and JSON serialization for tooling/replay
@@ -241,6 +242,7 @@ Notes:
 - Routes currently require record request and response types.
 - Routes may also return compiler-known `Page` values, which emit inert HTML rather than JSON.
 - `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`.
+- `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`.
 - Safe views escape text content, reject raw `script`/`style` tags, and keep styling explicit through `styled` references instead of raw host `class` or `style` strings.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.
 

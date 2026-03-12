@@ -190,6 +190,19 @@ parserTests =
                 assertEqual "page route response" "Page" (routeDeclResponseType routeDecl)
               _ ->
                 assertFailure "expected page declaration and route"
+    , testCase "parses compiler-known auth identity types through the normal surface" $
+        case parseSource "inline" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "sessionTenantId" (moduleDecls modl) of
+              Just decl ->
+                assertEqual
+                  "session field access annotation"
+                  (Just (TFunction [TNamed "AuthSession"] TStr))
+                  (declAnnotation decl)
+              Nothing ->
+                assertFailure "expected sessionTenantId declaration"
     ]
 
 checkerTests :: TestTree
@@ -230,6 +243,12 @@ checkerTests =
         case checkSource "page" pageSource of
           Left err ->
             assertFailure ("expected page source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
+    , testCase "accepts compiler-known auth identity primitives" $
+        case checkSource "auth" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
     , testCase "reports undefined names with a primary span" $
@@ -406,6 +425,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered interactive page declaration: " <> show other)
+    , testCase "lowering preserves auth identity primitive field access" $
+        case lowerChecked "auth" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "sessionTenantId" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["session"] (LFieldAccess (LFieldAccess (LVar "session") "tenant") "id")) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered auth identity declaration: " <> show other)
     ]
 
 compileTests :: TestTree
@@ -471,6 +500,38 @@ compileTests =
             assertBool "expected form renderer" ("case \"form\":" `T.isInfixOf` emitted)
             assertBool "expected input renderer" ("case \"input\":" `T.isInfixOf` emitted)
             assertBool "expected submit renderer" ("case \"submit\":" `T.isInfixOf` emitted)
+    , testCase "compile emits auth identity codecs and preserves nested field access" $
+        case compileSource "auth" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected auth session decoder" ("function $decode_AuthSession" `T.isInfixOf` emitted)
+            assertBool "expected principal schema" ("const $claspSchema_Principal" `T.isInfixOf` emitted)
+            assertBool "expected auth session constructor object" ("sessionId: \"sess-1\"" `T.isInfixOf` emitted)
+            assertBool "expected nested field access" ("((session).tenant).id" `T.isInfixOf` emitted)
+    , testCase "compile round-trips auth identity primitives through JSON codecs" $
+        case compileSource "auth" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/auth-identities.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            encoded <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const raw = compiledModule.encodeAudit(compiledModule.defaultAudit);"
+                , "const decoded = compiledModule.decodeAudit(raw);"
+                , "console.log(JSON.stringify({"
+                , "  sessionId: decoded.session.sessionId,"
+                , "  tenantId: compiledModule.sessionTenantId(decoded.session),"
+                , "  resource: decoded.resource.resourceType + ':' + decoded.resource.resourceId"
+                , "}));"
+                ]
+            assertBool "expected decoded auth session" ("\"sessionId\":\"sess-1\"" `T.isInfixOf` encoded)
+            assertBool "expected tenant id" ("\"tenantId\":\"tenant-1\"" `T.isInfixOf` encoded)
+            assertBool "expected resource identity" ("\"resource\":\"lead:lead-1\"" `T.isInfixOf` encoded)
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -811,6 +872,32 @@ interactivePageSource =
     , "home req = page \"Inbox\" (append (link \"/lead/primary\" (text \"Open lead\")) (form \"POST\" \"/leads\" (append (input \"company\" \"text\" \"\") (submit \"Save\"))))"
     , ""
     , "route homeRoute = GET \"/\" Empty -> Page home"
+    ]
+
+authIdentitySource :: Text
+authIdentitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record AuditEnvelope = {"
+    , "  session : AuthSession,"
+    , "  resource : ResourceIdentity"
+    , "}"
+    , ""
+    , "defaultAudit : AuditEnvelope"
+    , "defaultAudit = AuditEnvelope {"
+    , "  session = authSession \"sess-1\" (principal \"user-1\") (tenant \"tenant-1\") (resourceIdentity \"lead\" \"lead-1\"),"
+    , "  resource = resourceIdentity \"lead\" \"lead-1\""
+    , "}"
+    , ""
+    , "sessionTenantId : AuthSession -> Str"
+    , "sessionTenantId session = session.tenant.id"
+    , ""
+    , "encodeAudit : AuditEnvelope -> Str"
+    , "encodeAudit audit = encode audit"
+    , ""
+    , "decodeAudit : Str -> AuditEnvelope"
+    , "decodeAudit raw = decode AuditEnvelope raw"
     ]
 
 unsafeScriptSource :: Text

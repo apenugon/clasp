@@ -53,7 +53,8 @@ import Clasp.Syntax
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
   , RouteDecl (..)
-  , SourceSpan
+  , Position (..)
+  , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
   , exprSpan
@@ -183,19 +184,92 @@ pageTypeName = "Page"
 viewTypeName :: Text
 viewTypeName = "View"
 
+authSessionTypeName :: Text
+authSessionTypeName = "AuthSession"
+
+principalTypeName :: Text
+principalTypeName = "Principal"
+
+tenantTypeName :: Text
+tenantTypeName = "Tenant"
+
+resourceIdentityTypeName :: Text
+resourceIdentityTypeName = "ResourceIdentity"
+
+authSessionBuiltinName :: Text
+authSessionBuiltinName = "authSession"
+
+principalBuiltinName :: Text
+principalBuiltinName = "principal"
+
+tenantBuiltinName :: Text
+tenantBuiltinName = "tenant"
+
+resourceIdentityBuiltinName :: Text
+resourceIdentityBuiltinName = "resourceIdentity"
+
 hostClassBuiltinName :: Text
 hostClassBuiltinName = "hostClass"
 
 hostStyleBuiltinName :: Text
 hostStyleBuiltinName = "hostStyle"
 
+builtinSpan :: SourceSpan
+builtinSpan =
+  SourceSpan
+    { sourceSpanFile = "<builtin>"
+    , sourceSpanStart = Position 1 1
+    , sourceSpanEnd = Position 1 1
+    }
+
+builtinRecordFieldDecl :: Text -> Type -> RecordFieldDecl
+builtinRecordFieldDecl name typ =
+  RecordFieldDecl
+    { recordFieldDeclName = name
+    , recordFieldDeclSpan = builtinSpan
+    , recordFieldDeclType = typ
+    }
+
+builtinRecordDecl :: Text -> [(Text, Type)] -> RecordDecl
+builtinRecordDecl name fields =
+  RecordDecl
+    { recordDeclName = name
+    , recordDeclSpan = builtinSpan
+    , recordDeclNameSpan = builtinSpan
+    , recordDeclFields = fmap (uncurry builtinRecordFieldDecl) fields
+    }
+
+builtinRecordDecls :: [RecordDecl]
+builtinRecordDecls =
+  [ builtinRecordDecl principalTypeName [("id", TStr)]
+  , builtinRecordDecl tenantTypeName [("id", TStr)]
+  , builtinRecordDecl resourceIdentityTypeName [("resourceType", TStr), ("resourceId", TStr)]
+  , builtinRecordDecl
+      authSessionTypeName
+      [ ("sessionId", TStr)
+      , ("principal", TNamed principalTypeName)
+      , ("tenant", TNamed tenantTypeName)
+      , ("resource", TNamed resourceIdentityTypeName)
+      ]
+  ]
+
+builtinRecordDeclEnv :: RecordDeclEnv
+builtinRecordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- builtinRecordDecls]
+
+isBuiltinRecordTypeName :: Text -> Bool
+isBuiltinRecordTypeName name = Map.member name builtinRecordDeclEnv
+
 isBuiltinTypeName :: Text -> Bool
 isBuiltinTypeName name =
-  name == pageTypeName || name == viewTypeName
+  name == pageTypeName || name == viewTypeName || isBuiltinRecordTypeName name
 
 isBuiltinViewFunctionName :: Text -> Bool
 isBuiltinViewFunctionName name =
   name `elem` ["page", "text", "append", "element", "styled", "link", "form", "input", "submit", hostClassBuiltinName, hostStyleBuiltinName]
+
+isBuiltinAuthFunctionName :: Text -> Bool
+isBuiltinAuthFunctionName name =
+  name `elem` [authSessionBuiltinName, principalBuiltinName, tenantBuiltinName, resourceIdentityBuiltinName]
 
 isSafeViewTag :: Text -> Bool
 isSafeViewTag tag =
@@ -236,7 +310,7 @@ checkModule modl = do
   ensureUniqueTypeDecls typeDecls
   ensureUniqueRecordDecls recordDecls
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
-      recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+      recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
   ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls routeDecls
 
@@ -266,7 +340,7 @@ checkModule modl = do
     CoreModule
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
-      , coreModuleRecordDecls = recordDecls
+      , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleForeignDecls = foreignDecls
       , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls
@@ -277,7 +351,17 @@ ensureUniqueTypeDecls = go Map.empty
   where
     go _ [] = pure ()
     go seen (typeDecl : rest) =
-      case Map.lookup (typeDeclName typeDecl) seen of
+      if isBuiltinTypeName (typeDeclName typeDecl)
+        then
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_TYPE"
+                ("Type `" <> typeDeclName typeDecl <> "` conflicts with a compiler-known type.")
+                (Just (typeDeclNameSpan typeDecl))
+                ["Choose a different type name."]
+                []
+            ]
+        else case Map.lookup (typeDeclName typeDecl) seen of
         Just previousTypeDecl ->
           Left . diagnosticBundle $
             [ diagnostic
@@ -295,7 +379,17 @@ ensureUniqueRecordDecls = go Map.empty
   where
     go _ [] = pure ()
     go seen (recordDecl : rest) =
-      case Map.lookup (recordDeclName recordDecl) seen of
+      if isBuiltinRecordTypeName (recordDeclName recordDecl)
+        then
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_RECORD"
+                ("Record `" <> recordDeclName recordDecl <> "` conflicts with a compiler-known type.")
+                (Just (recordDeclNameSpan recordDecl))
+                ["Choose a different record name."]
+                []
+            ]
+        else case Map.lookup (recordDeclName recordDecl) seen of
         Just previousRecordDecl ->
           Left . diagnosticBundle $
             [ diagnostic
@@ -921,6 +1015,10 @@ inferExpr ctx termEnv localEnv expr =
           , Map.notMember name localEnv
           , Map.notMember name termEnv ->
               inferBuiltinViewCall ctx termEnv localEnv callSpan name args
+          | isBuiltinAuthFunctionName name
+          , Map.notMember name localEnv
+          , Map.notMember name termEnv ->
+              inferBuiltinAuthCall ctx termEnv localEnv callSpan name args
         _ ->
           inferRegularCall ctx termEnv localEnv callSpan fn args
     ERecord recordSpan recordName fields ->
@@ -1209,6 +1307,122 @@ unifyViewBuiltinArg _ draftExpr expectedType =
 
 throwViewBuiltinArity :: SourceSpan -> Text -> Int -> Int -> InferM a
 throwViewBuiltinArity callSpan builtinName expectedArity actualArity =
+  throwDiagnostic . diagnosticBundle $
+    [ diagnostic
+        "E_CALL_ARITY"
+        "Function call does not match the declared arity."
+        (Just callSpan)
+        [ "Builtin `"
+            <> builtinName
+            <> "` expects "
+            <> T.pack (show expectedArity)
+            <> " arguments but got "
+            <> T.pack (show actualArity)
+            <> "."
+        ]
+        []
+    ]
+
+inferBuiltinAuthCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
+inferBuiltinAuthCall ctx termEnv localEnv callSpan builtinName args =
+  case builtinName of
+    name
+      | name == principalBuiltinName ->
+          case args of
+            [idExpr] -> do
+              draftId <- inferExpr ctx termEnv localEnv idExpr
+              unifyBuiltinRecordArg "principal id" draftId IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed principalTypeName)
+                    ( DraftRecord
+                        principalTypeName
+                        [DraftRecordField "id" draftId]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 1 (length args)
+      | name == tenantBuiltinName ->
+          case args of
+            [idExpr] -> do
+              draftId <- inferExpr ctx termEnv localEnv idExpr
+              unifyBuiltinRecordArg "tenant id" draftId IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed tenantTypeName)
+                    ( DraftRecord
+                        tenantTypeName
+                        [DraftRecordField "id" draftId]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 1 (length args)
+      | name == resourceIdentityBuiltinName ->
+          case args of
+            [resourceTypeExpr, resourceIdExpr] -> do
+              draftResourceType <- inferExpr ctx termEnv localEnv resourceTypeExpr
+              draftResourceId <- inferExpr ctx termEnv localEnv resourceIdExpr
+              unifyBuiltinRecordArg "resource identity type" draftResourceType IStr
+              unifyBuiltinRecordArg "resource identity id" draftResourceId IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed resourceIdentityTypeName)
+                    ( DraftRecord
+                        resourceIdentityTypeName
+                        [ DraftRecordField "resourceType" draftResourceType
+                        , DraftRecordField "resourceId" draftResourceId
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 2 (length args)
+      | name == authSessionBuiltinName ->
+          case args of
+            [sessionIdExpr, principalExpr, tenantExpr, resourceExpr] -> do
+              draftSessionId <- inferExpr ctx termEnv localEnv sessionIdExpr
+              draftPrincipal <- inferExpr ctx termEnv localEnv principalExpr
+              draftTenant <- inferExpr ctx termEnv localEnv tenantExpr
+              draftResource <- inferExpr ctx termEnv localEnv resourceExpr
+              unifyBuiltinRecordArg "auth session id" draftSessionId IStr
+              unifyBuiltinRecordArg "auth session principal" draftPrincipal (INamed principalTypeName)
+              unifyBuiltinRecordArg "auth session tenant" draftTenant (INamed tenantTypeName)
+              unifyBuiltinRecordArg "auth session resource" draftResource (INamed resourceIdentityTypeName)
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed authSessionTypeName)
+                    ( DraftRecord
+                        authSessionTypeName
+                        [ DraftRecordField "sessionId" draftSessionId
+                        , DraftRecordField "principal" draftPrincipal
+                        , DraftRecordField "tenant" draftTenant
+                        , DraftRecordField "resource" draftResource
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 4 (length args)
+    _ ->
+      inferRegularCall ctx termEnv localEnv callSpan (EVar callSpan builtinName) args
+
+unifyBuiltinRecordArg :: Text -> DraftExpr -> InferType -> InferM ()
+unifyBuiltinRecordArg _ draftExpr expectedType =
+  unify
+    ( UnifyContext
+        { unifyCode = "E_TYPE_MISMATCH"
+        , unifySummary = "Builtin auth identity argument has the wrong type."
+        , unifyPrimarySpan = draftExprSpan draftExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType draftExpr)
+    expectedType
+
+throwBuiltinRecordArity :: SourceSpan -> Text -> Int -> Int -> InferM a
+throwBuiltinRecordArity callSpan builtinName expectedArity actualArity =
   throwDiagnostic . diagnosticBundle $
     [ diagnostic
         "E_CALL_ARITY"
