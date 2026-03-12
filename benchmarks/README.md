@@ -22,6 +22,11 @@ Each task includes:
 
 The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task.
 
+The canonical lead-inbox slice used to shape new benchmark tasks lives in:
+
+- `examples/lead-app`: `Clasp` baseline
+- `examples/lead-app-ts`: `TypeScript` baseline
+
 ## Commands
 
 List tasks:

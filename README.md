@@ -174,6 +174,10 @@ cabal run claspc -- check examples/lead-app/Main.clasp
 
 cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js
 bun examples/lead-app/server.mjs
+
+cd examples/lead-app-ts
+npm install
+npm run start
 ```
 
 ## Near-Term Direction
