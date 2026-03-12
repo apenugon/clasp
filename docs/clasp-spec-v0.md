@@ -149,6 +149,8 @@ differentFlag : Bool -> Bool -> Bool
 differentFlag left right = left != right
 ```
 
+Comparison binds tighter than equality, so `1 < 2 == 3 > 2` parses as `(1 < 2) == (3 > 2)`. Equality also remains restricted to concrete `Int`, `Str`, and `Bool` operands rather than unconstrained inferred values.
+
 Integer comparisons are currently available for `Int` values:
 
 ```clasp

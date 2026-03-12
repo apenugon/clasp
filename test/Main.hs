@@ -424,6 +424,37 @@ parserTests =
                     assertFailure ("expected greater-than-or-equal expression, got " <> show other)
               Nothing ->
                 assertFailure "expected isLatest declaration"
+    , testCase "parses operator precedence with comparisons tighter than equality" $
+        case parseSource "inline" operatorPrecedenceSource of
+          Left err ->
+            assertFailure ("expected operator precedence source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EEqual
+                    _
+                    (ELessThan _ (EInt _ 1) (EInt _ 2))
+                    (EGreaterThan _ (EInt _ 3) (EInt _ 2)) ->
+                      pure ()
+                  other ->
+                    assertFailure ("expected equality over comparison expressions, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
+    , testCase "parses equality operators as left-associative" $
+        case parseSource "inline" equalityAssociativitySource of
+          Left err ->
+            assertFailure ("expected equality associativity source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EEqual _ (EEqual _ (EBool _ True) (EBool _ False)) (EBool _ True) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected left-associated equality chain, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "parses the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case parseSource "examples/lists.clasp" source of
@@ -665,6 +696,10 @@ checkerTests =
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects equality over unsupported or mismatched types" $
         assertHasCode "E_EQUALITY_OPERAND" (checkSource "bad" badEqualitySource)
+    , testCase "rejects equality without primitive operand constraints" $
+        assertHasCode "E_EQUALITY_OPERAND" (checkSource "bad" unconstrainedEqualitySource)
+    , testCase "rejects invalid operator combinations after precedence is applied" $
+        assertHasCode "E_EQUALITY_OPERAND" (checkSource "bad" badOperatorCombinationSource)
     , testCase "rejects integer comparison over non-integer operands" $
         assertHasCode "E_INTEGER_COMPARISON_OPERAND" (checkSource "bad" badIntegerComparisonSource)
     , testCase "rejects active script tags in safe views" $
@@ -2357,6 +2392,24 @@ integerComparisonSource =
     , "main = isEarlier 3 5"
     ]
 
+operatorPrecedenceSource :: Text
+operatorPrecedenceSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "main : Bool"
+    , "main = 1 < 2 == 3 > 2"
+    ]
+
+equalityAssociativitySource :: Text
+equalityAssociativitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "main : Bool"
+    , "main = true == false == true"
+    ]
+
 letInMatchSource :: Text
 letInMatchSource =
   T.unlines
@@ -2388,6 +2441,23 @@ badEqualitySource =
     , ""
     , "badMixed : Bool"
     , "badMixed = 1 == \"1\""
+    ]
+
+unconstrainedEqualitySource :: Text
+unconstrainedEqualitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "same left right = left == right"
+    ]
+
+badOperatorCombinationSource :: Text
+badOperatorCombinationSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "bad : Bool"
+    , "bad = 1 == 2 < 3"
     ]
 
 badIntegerComparisonSource :: Text

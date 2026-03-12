@@ -1424,8 +1424,6 @@ inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
       pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
     IBool ->
       pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
-    IVar _ ->
-      pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
     _ ->
       throwDiagnostic . diagnosticBundle $
         [ diagnostic
