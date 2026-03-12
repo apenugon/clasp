@@ -5,6 +5,8 @@ module Clasp.Loader
   ) where
 
 import Control.Monad (foldM)
+import Data.List (find)
+import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -17,9 +19,12 @@ import Clasp.Diagnostic
   )
 import Clasp.Parser (parseModule)
 import Clasp.Syntax
-  ( ImportDecl (..)
+  ( ForeignDecl (..)
+  , ForeignPackageImport (..)
+  , ImportDecl (..)
   , Module (..)
   , ModuleName (..)
+  , SourceSpan (..)
   , splitModuleName
   )
 
@@ -43,7 +48,11 @@ loadEntryModule entryPath = do
           (LoadState Map.empty [])
           [moduleName entryModule]
           (moduleImports entryModule)
-      pure (fmap (combineModules entryModule) loadedImports)
+      case loadedImports of
+        Left err ->
+          pure (Left err)
+        Right state ->
+          enrichForeignPackageImports (combineModules entryModule state)
 
 loadImports :: FilePath -> LoadState -> [ModuleName] -> [ImportDecl] -> IO (Either DiagnosticBundle LoadState)
 loadImports projectRoot state stack imports =
@@ -152,3 +161,80 @@ combineModules entryModule state =
         , moduleRouteDecls = concatMap moduleRouteDecls (importedModules <> [entryModule])
         , moduleDecls = concatMap moduleDecls (importedModules <> [entryModule])
         }
+
+enrichForeignPackageImports :: Module -> IO (Either DiagnosticBundle Module)
+enrichForeignPackageImports modl = do
+  enrichedForeignDecls <- foldM enrichForeignDecl (Right []) (moduleForeignDecls modl)
+  pure $
+    fmap
+      (\foreignDecls -> modl {moduleForeignDecls = reverse foreignDecls})
+      enrichedForeignDecls
+
+enrichForeignDecl :: Either DiagnosticBundle [ForeignDecl] -> ForeignDecl -> IO (Either DiagnosticBundle [ForeignDecl])
+enrichForeignDecl acc foreignDecl =
+  case acc of
+    Left err ->
+      pure (Left err)
+    Right foreignDecls ->
+      case foreignDeclPackageImport foreignDecl of
+        Nothing ->
+          pure (Right (foreignDecl : foreignDecls))
+        Just packageImport -> do
+          signatureResult <- ingestDeclarationSignature foreignDecl packageImport
+          pure $
+            fmap
+              ( \signature ->
+                  foreignDecl
+                    { foreignDeclPackageImport =
+                        Just packageImport {foreignPackageImportSignature = Just signature}
+                    }
+                    : foreignDecls
+              )
+              signatureResult
+
+ingestDeclarationSignature :: ForeignDecl -> ForeignPackageImport -> IO (Either DiagnosticBundle Text)
+ingestDeclarationSignature foreignDecl packageImport = do
+  let declarationPath =
+        takeDirectory (T.unpack (sourceSpanFile (foreignDeclSpan foreignDecl)))
+          </> T.unpack (foreignPackageImportDeclarationPath packageImport)
+  declarationExists <- doesFileExist declarationPath
+  if not declarationExists
+    then
+      pure . Left . diagnosticBundle $
+        [ diagnostic
+            "E_FOREIGN_PACKAGE_DECLARATION_NOT_FOUND"
+            ("Could not find declaration file for foreign package import `" <> foreignDeclName foreignDecl <> "`.")
+            (Just (foreignPackageImportDeclarationSpan packageImport))
+            ["Expected to find " <> T.pack declarationPath <> "."]
+            []
+        ]
+    else do
+      declarationSource <- TIO.readFile declarationPath
+      case findDeclarationSignature (foreignDeclRuntimeName foreignDecl) declarationSource of
+        Nothing ->
+          pure . Left . diagnosticBundle $
+            [ diagnostic
+                "E_FOREIGN_PACKAGE_EXPORT_NOT_FOUND"
+                ("Could not find exported declaration `" <> foreignDeclRuntimeName foreignDecl <> "` in `" <> foreignPackageImportDeclarationPath packageImport <> "`.")
+                (Just (foreignPackageImportDeclarationSpan packageImport))
+                ["Export the requested symbol from the declaration file or update the foreign declaration runtime name."]
+                []
+            ]
+        Just signature ->
+          pure (Right signature)
+
+findDeclarationSignature :: Text -> Text -> Maybe Text
+findDeclarationSignature runtimeName declarationSource =
+  find matchesExport (T.lines declarationSource)
+  where
+    matchesExport line =
+      let stripped = T.strip line
+          signaturePrefix prefix =
+            (prefix <> runtimeName <> "(") `T.isPrefixOf` stripped
+       in or
+            [ signaturePrefix "export declare function "
+            , signaturePrefix "export function "
+            , signaturePrefix "declare function "
+            ]
+            || stripped == ("export {" <> runtimeName <> "};")
+            || stripped == ("export { " <> runtimeName <> " };")

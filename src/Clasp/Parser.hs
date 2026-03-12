@@ -58,6 +58,8 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , ForeignPackageImport (..)
+  , ForeignPackageImportKind (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
@@ -403,6 +405,7 @@ foreignDeclParser = do
   annotationEnd <- getSourcePos
   _ <- symbol "="
   (runtimeSpan, runtimeName) <- locatedStringLiteral
+  packageImport <- optional foreignPackageImportParser
   end <- getSourcePos
   _ <- optional eol
   scn
@@ -415,6 +418,29 @@ foreignDeclParser = do
       , foreignDeclType = foreignType
       , foreignDeclRuntimeName = runtimeName
       , foreignDeclRuntimeSpan = runtimeSpan
+      , foreignDeclPackageImport = packageImport
+      }
+
+foreignPackageImportParser :: Parser ForeignPackageImport
+foreignPackageImportParser = do
+  keyword "from"
+  kindStart <- getSourcePos
+  kind <-
+    (keyword "npm" >> pure ForeignPackageImportNpm)
+      <|> (keyword "typescript" >> pure ForeignPackageImportTypeScript)
+  kindEnd <- getSourcePos
+  (specifierSpan, specifier) <- locatedStringLiteral
+  keyword "declaration"
+  (declarationSpan, declarationPath) <- locatedStringLiteral
+  pure
+    ForeignPackageImport
+      { foreignPackageImportKind = kind
+      , foreignPackageImportKindSpan = makeSourceSpan kindStart kindEnd
+      , foreignPackageImportSpecifier = specifier
+      , foreignPackageImportSpecifierSpan = specifierSpan
+      , foreignPackageImportDeclarationPath = declarationPath
+      , foreignPackageImportDeclarationSpan = declarationSpan
+      , foreignPackageImportSignature = Nothing
       }
 
 toolServerDeclParser :: Parser TopLevelItem
@@ -1402,6 +1428,10 @@ reservedWords =
   , "projection"
   , "with"
   , "foreign"
+  , "from"
+  , "declaration"
+  , "npm"
+  , "typescript"
   , "route"
   , "decode"
   , "encode"

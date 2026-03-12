@@ -96,6 +96,8 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , ForeignPackageImport (..)
+  , ForeignPackageImportKind (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
@@ -423,6 +425,31 @@ parserTests =
                     assertFailure ("expected decode expression, got " <> show other)
               Nothing ->
                 assertFailure "expected summarizeLead declaration"
+    , testCase "parses package-backed foreign declarations" $
+        case parseSource "inline" packageForeignSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleForeignDecls modl of
+              [npmDecl, tsDecl] -> do
+                assertEqual "npm foreign name" "upperCase" (foreignDeclName npmDecl)
+                assertEqual
+                  "npm package import"
+                  ( Just
+                      ForeignPackageImport
+                        { foreignPackageImportKind = ForeignPackageImportNpm
+                        , foreignPackageImportKindSpan = dummySpan
+                        , foreignPackageImportSpecifier = "local-upper"
+                        , foreignPackageImportSpecifierSpan = dummySpan
+                        , foreignPackageImportDeclarationPath = "./node_modules/local-upper/index.d.ts"
+                        , foreignPackageImportDeclarationSpan = dummySpan
+                        , foreignPackageImportSignature = Nothing
+                        }
+                  )
+                  (fmap normalizeForeignPackageImport (foreignDeclPackageImport npmDecl))
+                assertEqual "typescript foreign runtime name" "formatLead" (foreignDeclRuntimeName tsDecl)
+              other ->
+                assertFailure ("expected two foreign declarations, got " <> show (length other))
     , testCase "parses compiler-known page types through the normal surface" $
         case parseSource "inline" pageSource of
           Left err ->
@@ -2448,6 +2475,46 @@ compileTests =
             Right emitted -> do
               assertBool "expected imported function export" ("export function formatUser" `T.isInfixOf` emitted)
               assertBool "expected main export" ("export const main" `T.isInfixOf` emitted)
+    , testCase "compileEntry emits package manifests and installs generated package adapters" $
+        withProjectFiles "package-import-runtime" packageImportFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected package-backed project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              assertBool "expected npm import emission" ("import { upperCase as $claspPackageBinding_upperCase } from \"local-upper\";" `T.isInfixOf` emitted)
+              assertBool "expected typescript import emission" ("import { formatLead as $claspPackageBinding_formatLead } from \"./support/formatLead.mjs\";" `T.isInfixOf` emitted)
+              assertBool "expected package imports export" ("export const __claspPackageImports = [" `T.isInfixOf` emitted)
+              assertBool "expected ingested npm signature" ("signature: \"export declare function upperCase(value: string): string;\"" `T.isInfixOf` emitted)
+              assertBool "expected package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` emitted)
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+              runtimeOutput <- runNodeScript (packageImportRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+              assertEqual
+                "expected package-backed foreign declarations to run through generated adapters"
+                "{\"packageKinds\":[\"npm\",\"typescript\"],\"upper\":\"HELLO ADA\",\"formatted\":\"Acme Labs:7\"}"
+                runtimeOutput
+    , testCase "checkEntry ingests package declaration signatures" $
+        withProjectFiles "package-import-signatures" packageImportFiles $ \root -> do
+          result <- checkEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected package-backed project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right modl ->
+              case coreModuleForeignDecls modl of
+                [npmDecl, tsDecl] -> do
+                  assertEqual
+                    "npm declaration signature"
+                    (Just "export declare function upperCase(value: string): string;")
+                    (foreignPackageImportSignature =<< foreignDeclPackageImport npmDecl)
+                  assertEqual
+                    "typescript declaration signature"
+                    (Just "export declare function formatLead(request: { company: string; budget: number }): string;")
+                    (foreignPackageImportSignature =<< foreignDeclPackageImport tsDecl)
+                other ->
+                  assertFailure ("expected two foreign declarations, got " <> show (length other))
     , testCase "checkEntry infers module names from headerless project files" $
         withProjectFiles "import-success-headerless" headerlessImportSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -2460,6 +2527,10 @@ compileTests =
         withProjectFiles "import-missing" missingImportFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
           assertHasCode "E_IMPORT_NOT_FOUND" result
+    , testCase "checkEntry reports missing package export declarations" $
+        withProjectFiles "package-import-missing-export" packageImportMissingExportFiles $ \root -> do
+          result <- checkEntry (root </> "Main.clasp")
+          assertHasCode "E_FOREIGN_PACKAGE_EXPORT_NOT_FOUND" result
     , testCase "compileEntry renders an inbox-style shared page safely" $
         withProjectFiles "render-inbox-page" inboxPageFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -2849,6 +2920,20 @@ lowerChecked path source = do
   checked <- checkSource path source
   pure (lowerModule checked)
 
+packageImportRuntimeScript :: FilePath -> FilePath -> Text
+packageImportRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { bindingContractFor, installCompiledModule } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const contract = bindingContractFor(compiledModule);"
+    , "installCompiledModule(compiledModule);"
+    , "console.log(JSON.stringify({"
+    , "  packageKinds: contract.packageImports.map((entry) => entry.kind).sort(),"
+    , "  upper: compiledModule.shout('hello ada'),"
+    , "  formatted: compiledModule.describe({ company: 'Acme Labs', budget: 7 })"
+    , "}));"
+    ]
+
 runNodeModule :: FilePath -> IO Text
 runNodeModule compiledPath = do
   absolutePath <- makeAbsolute compiledPath
@@ -2962,6 +3047,14 @@ normalizeGuideEntries =
 normalizePolicyPermissions :: [PolicyPermissionDecl] -> [PolicyPermissionDecl]
 normalizePolicyPermissions =
   fmap (\permissionDecl -> permissionDecl {policyPermissionDeclSpan = dummySpan})
+
+normalizeForeignPackageImport :: ForeignPackageImport -> ForeignPackageImport
+normalizeForeignPackageImport packageImport =
+  packageImport
+    { foreignPackageImportKindSpan = dummySpan
+    , foreignPackageImportSpecifierSpan = dummySpan
+    , foreignPackageImportDeclarationSpan = dummySpan
+    }
 
 dummySpan :: SourceSpan
 dummySpan =
@@ -3122,6 +3215,22 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+packageForeignSource :: Text
+packageForeignSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int"
+    , "}"
+    , ""
+    , "foreign upperCase : Str -> Str = \"upperCase\" from npm \"local-upper\" declaration \"./node_modules/local-upper/index.d.ts\""
+    , "foreign formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , ""
+    , "main = \"ok\""
     ]
 
 guideSource :: Text
@@ -4134,6 +4243,21 @@ headerlessImportSuccessFiles :: [(FilePath, Text)]
 headerlessImportSuccessFiles =
   [ ("Main.clasp", headerlessImportSuccessMainSource)
   , ("Shared/User.clasp", headerlessSharedUserSource)
+
+packageImportFiles :: [(FilePath, Text)]
+packageImportFiles =
+  [ ("Main.clasp", packageImportMainSource)
+  , ("support/formatLead.mjs", packageImportTsModuleSource)
+  , ("support/formatLead.d.ts", packageImportTsDeclarationSource)
+  , ("node_modules/local-upper/package.json", packageImportNpmPackageSource)
+  , ("node_modules/local-upper/index.mjs", packageImportNpmModuleSource)
+  , ("node_modules/local-upper/index.d.ts", packageImportNpmDeclarationSource)
+  ]
+
+packageImportMissingExportFiles :: [(FilePath, Text)]
+packageImportMissingExportFiles =
+  [ ("Main.clasp", packageImportMissingExportMainSource)
+  , ("node_modules/local-upper/index.d.ts", packageImportNpmDeclarationSource)
   ]
 
 inboxPageFiles :: [(FilePath, Text)]
@@ -4184,6 +4308,76 @@ headerlessImportSuccessMainSource =
     , ""
     , "main : Str"
     , "main = formatUser defaultUser"
+    ]
+
+packageImportMainSource :: Text
+packageImportMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int"
+    , "}"
+    , ""
+    , "foreign upperCase : Str -> Str = \"upperCase\" from npm \"local-upper\" declaration \"./node_modules/local-upper/index.d.ts\""
+    , "foreign formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , ""
+    , "shout : Str -> Str"
+    , "shout value = upperCase value"
+    , ""
+    , "describe : LeadRequest -> Str"
+    , "describe request = formatLead request"
+    , ""
+    , "main = \"ready\""
+    ]
+
+packageImportMissingExportMainSource :: Text
+packageImportMissingExportMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "foreign missing : Str -> Str = \"missing\" from npm \"local-upper\" declaration \"./node_modules/local-upper/index.d.ts\""
+    , ""
+    , "main = \"ready\""
+    ]
+
+packageImportTsModuleSource :: Text
+packageImportTsModuleSource =
+  T.unlines
+    [ "export function formatLead(request) {"
+    , "  return `${request.company}:${request.budget}`;"
+    , "}"
+    ]
+
+packageImportTsDeclarationSource :: Text
+packageImportTsDeclarationSource =
+  T.unlines
+    [ "export declare function formatLead(request: { company: string; budget: number }): string;"
+    ]
+
+packageImportNpmPackageSource :: Text
+packageImportNpmPackageSource =
+  T.unlines
+    [ "{"
+    , "  \"name\": \"local-upper\","
+    , "  \"type\": \"module\","
+    , "  \"exports\": \"./index.mjs\""
+    , "}"
+    ]
+
+packageImportNpmModuleSource :: Text
+packageImportNpmModuleSource =
+  T.unlines
+    [ "export function upperCase(value) {"
+    , "  return String(value).toUpperCase();"
+    , "}"
+    ]
+
+packageImportNpmDeclarationSource :: Text
+packageImportNpmDeclarationSource =
+  T.unlines
+    [ "export declare function upperCase(value: string): string;"
     ]
 
 sharedUserSource :: Text

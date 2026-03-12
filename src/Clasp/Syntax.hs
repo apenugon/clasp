@@ -9,6 +9,8 @@ module Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , ForeignPackageImport (..)
+  , ForeignPackageImportKind (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
@@ -365,6 +367,22 @@ data Decl = Decl
   }
   deriving (Eq, Show)
 
+data ForeignPackageImportKind
+  = ForeignPackageImportNpm
+  | ForeignPackageImportTypeScript
+  deriving (Eq, Show)
+
+data ForeignPackageImport = ForeignPackageImport
+  { foreignPackageImportKind :: ForeignPackageImportKind
+  , foreignPackageImportKindSpan :: SourceSpan
+  , foreignPackageImportSpecifier :: Text
+  , foreignPackageImportSpecifierSpan :: SourceSpan
+  , foreignPackageImportDeclarationPath :: Text
+  , foreignPackageImportDeclarationSpan :: SourceSpan
+  , foreignPackageImportSignature :: Maybe Text
+  }
+  deriving (Eq, Show)
+
 data ForeignDecl = ForeignDecl
   { foreignDeclName :: Text
   , foreignDeclSpan :: SourceSpan
@@ -373,6 +391,7 @@ data ForeignDecl = ForeignDecl
   , foreignDeclType :: Type
   , foreignDeclRuntimeName :: Text
   , foreignDeclRuntimeSpan :: SourceSpan
+  , foreignDeclPackageImport :: Maybe ForeignPackageImport
   }
   deriving (Eq, Show)
 

@@ -311,7 +311,8 @@ tool-decl ::= "tool" lower-ident "=" upper-ident string upper-ident "->" upper-i
 verifier-decl ::= "verifier" lower-ident "=" lower-ident
 mergegate-decl ::= "mergegate" lower-ident "=" lower-ident ("," lower-ident)*
 projection-decl ::= "projection" upper-ident "=" upper-ident "with" upper-ident "{" lower-ident ("," lower-ident)* "}"
-foreign-decl ::= "foreign" lower-ident ":" type "=" string
+foreign-decl ::= "foreign" lower-ident ":" type "=" string foreign-package-import?
+foreign-package-import ::= "from" ("npm" | "typescript") string "declaration" string
 route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ident lower-ident
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
@@ -386,6 +387,7 @@ Notes:
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
 - Foreign declarations also emit structured host-binding manifests plus generated host-binding adapters so host code can register schema-shaped implementations without hand-written runtime glue.
 - Foreign declarations also emit a versioned `__claspNativeInterop` manifest with generated binding-module references, capability identifiers, default `Rust` crate or native-library naming, and target-aware build descriptors for Bun, workers, and future mobile-native bridges.
+- Foreign declarations may also bind compiler-managed `npm` or `TypeScript` package exports; entry compilation ingests the referenced `.d.ts` export signature, records it in the emitted manifest, and exposes generated package-backed host adapters through the same runtime surface.
 - Hook declarations bind a lifecycle trigger string to typed request/response schemas and a checked handler function.
 - Agent role declarations bind a reusable role to one guide and one policy declaration.
 - Agent declarations bind a named agent identity to a checked role declaration.

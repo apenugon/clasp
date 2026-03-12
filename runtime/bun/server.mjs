@@ -30,6 +30,7 @@ export function bindingContractFor(compiledModule) {
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
       defaultNativeInterop(compiledModule?.__claspHostBindings ?? []),
+    packageImports: compiledModule?.__claspPackageImports ?? [],
     routes: compiledModule?.__claspRoutes ?? [],
     routeClients: compiledModule?.__claspRouteClients ?? [],
     schemas: compiledModule?.__claspSchemas ?? {},
@@ -286,7 +287,14 @@ export function installCompiledModule(compiledModule, implementations = {}) {
     throw new Error("installCompiledModule requires a generated Clasp module.");
   }
 
-  const runtimeBindings = compiledModule.__claspAdaptHostBindings(implementations);
+  const packageBindings =
+    typeof compiledModule.__claspPackageHostBindings === "function"
+      ? compiledModule.__claspPackageHostBindings()
+      : {};
+  const runtimeBindings = {
+    ...packageBindings,
+    ...compiledModule.__claspAdaptHostBindings(implementations)
+  };
   installRuntime(runtimeBindings);
   return runtimeBindings;
 }
