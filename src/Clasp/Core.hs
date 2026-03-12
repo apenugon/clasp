@@ -188,6 +188,9 @@ data CoreExpr
   | CGreaterThan SourceSpan CoreExpr CoreExpr
   | CGreaterThanOrEqual SourceSpan CoreExpr CoreExpr
   | CLet SourceSpan Type Text CoreExpr CoreExpr
+  | CMutableLet SourceSpan Type Text CoreExpr CoreExpr
+  | CAssign SourceSpan Type Text CoreExpr CoreExpr
+  | CFor SourceSpan Type Text CoreExpr CoreExpr CoreExpr
   | CPage SourceSpan CoreExpr CoreExpr
   | CRedirect SourceSpan Text
   | CViewEmpty SourceSpan
@@ -240,6 +243,12 @@ coreExprType expr =
     CGreaterThanOrEqual _ _ _ ->
       TBool
     CLet _ typ _ _ _ ->
+      typ
+    CMutableLet _ typ _ _ _ ->
+      typ
+    CAssign _ typ _ _ _ ->
+      typ
+    CFor _ typ _ _ _ _ ->
       typ
     CPage _ _ _ ->
       TNamed "Page"
@@ -352,6 +361,18 @@ renameDecl oldName newName modl
           CGreaterThanOrEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CLet span' typ name value body ->
           CLet span' typ name (renameDeclExpr boundNames value) (renameDeclExpr (Set.insert name boundNames) body)
+        CMutableLet span' typ name value body ->
+          CMutableLet span' typ name (renameDeclExpr boundNames value) (renameDeclExpr (Set.insert name boundNames) body)
+        CAssign span' typ name value body ->
+          CAssign span' typ name (renameDeclExpr boundNames value) (renameDeclExpr boundNames body)
+        CFor span' typ name iterable loopBody body ->
+          CFor
+            span'
+            typ
+            name
+            (renameDeclExpr boundNames iterable)
+            (renameDeclExpr (Set.insert name boundNames) loopBody)
+            (renameDeclExpr boundNames body)
         CCall span' typ fn args ->
           CCall span' typ (renameDeclExpr boundNames fn) (fmap (renameDeclExpr boundNames) args)
         CMatch span' typ subject branches ->
@@ -525,6 +546,12 @@ renameSchema oldName newName modl
           CGreaterThanOrEqual span' (renameExprTypes left) (renameExprTypes right)
         CLet span' typ name value body ->
           CLet span' (renameType typ) name (renameExprTypes value) (renameExprTypes body)
+        CMutableLet span' typ name value body ->
+          CMutableLet span' (renameType typ) name (renameExprTypes value) (renameExprTypes body)
+        CAssign span' typ name value body ->
+          CAssign span' (renameType typ) name (renameExprTypes value) (renameExprTypes body)
+        CFor span' typ name iterable loopBody body ->
+          CFor span' (renameType typ) name (renameExprTypes iterable) (renameExprTypes loopBody) (renameExprTypes body)
         CCall span' typ fn args ->
           CCall span' (renameType typ) (renameExprTypes fn) (fmap renameExprTypes args)
         CMatch span' typ subject branches ->

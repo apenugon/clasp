@@ -109,6 +109,9 @@ data LowerExpr
   | LGreaterThan LowerExpr LowerExpr
   | LGreaterThanOrEqual LowerExpr LowerExpr
   | LLet Text LowerExpr LowerExpr
+  | LMutableLet Text LowerExpr LowerExpr
+  | LAssign Text LowerExpr LowerExpr
+  | LFor Text LowerExpr LowerExpr LowerExpr
   | LPage LowerExpr LowerExpr
   | LRedirect Text
   | LViewEmpty
@@ -267,6 +270,12 @@ collectExprCodecTypes expr =
       collectExprCodecTypes left <> collectExprCodecTypes right
     CLet _ _ _ value body ->
       collectExprCodecTypes value <> collectExprCodecTypes body
+    CMutableLet _ _ _ value body ->
+      collectExprCodecTypes value <> collectExprCodecTypes body
+    CAssign _ _ _ value body ->
+      collectExprCodecTypes value <> collectExprCodecTypes body
+    CFor _ _ _ iterable loopBody body ->
+      collectExprCodecTypes iterable <> collectExprCodecTypes loopBody <> collectExprCodecTypes body
     CPage _ title body ->
       collectExprCodecTypes title <> collectExprCodecTypes body
     CRedirect _ _ ->
@@ -392,6 +401,12 @@ lowerCoreExpr expr =
       LGreaterThanOrEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CLet _ _ name value body ->
       LLet name (lowerCoreExpr value) (lowerCoreExpr body)
+    CMutableLet _ _ name value body ->
+      LMutableLet name (lowerCoreExpr value) (lowerCoreExpr body)
+    CAssign _ _ name value body ->
+      LAssign name (lowerCoreExpr value) (lowerCoreExpr body)
+    CFor _ _ name iterable loopBody body ->
+      LFor name (lowerCoreExpr iterable) (lowerCoreExpr loopBody) (lowerCoreExpr body)
     CPage _ title body ->
       LPage (lowerCoreExpr title) (lowerCoreExpr body)
     CRedirect _ targetPath ->
@@ -520,6 +535,16 @@ expandExpr declEnv subst visited expr =
     LLet name value body ->
       let value' = expandExpr declEnv subst visited value
        in expandExpr declEnv (Map.insert name value' subst) visited body
+    LMutableLet name value body ->
+      LMutableLet name (expandExpr declEnv subst visited value) (expandExpr declEnv subst visited body)
+    LAssign name value body ->
+      LAssign name (expandExpr declEnv subst visited value) (expandExpr declEnv subst visited body)
+    LFor name iterable loopBody body ->
+      LFor
+        name
+        (expandExpr declEnv subst visited iterable)
+        (expandExpr declEnv subst visited loopBody)
+        (expandExpr declEnv subst visited body)
     LPage title body ->
       LPage (expandExpr declEnv subst visited title) (expandExpr declEnv subst visited body)
     LRedirect targetPath ->
@@ -763,6 +788,12 @@ summarizeValue expr =
       summarizeValue left <> " >= " <> summarizeValue right
     LLet name _ body ->
       normalizeSummaryName name <> " = " <> summarizeValue body
+    LMutableLet name _ body ->
+      normalizeSummaryName name <> " = " <> summarizeValue body
+    LAssign name _ body ->
+      normalizeSummaryName name <> " = " <> summarizeValue body
+    LFor _ _ _ body ->
+      summarizeValue body
     LConstruct tag _ ->
       tag
     LCall fn _ ->

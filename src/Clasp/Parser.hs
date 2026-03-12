@@ -115,6 +115,7 @@ data BlockBinding
   = BlockLetBinding SourcePos SourceSpan Text Expr
   | BlockMutableLetBinding SourcePos SourceSpan Text Expr
   | BlockAssignBinding SourcePos SourceSpan Text Expr
+  | BlockForBinding SourcePos SourceSpan Text Expr Expr
 
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
 parseModule path source =
@@ -767,6 +768,7 @@ blockBindingParser :: Parser BlockBinding
 blockBindingParser = do
   try mutableBlockBindingParser
     <|> try immutableBlockBindingParser
+    <|> try forBlockBindingParser
     <|> assignmentBlockBindingParser
 
 mutableBlockBindingParser :: Parser BlockBinding
@@ -799,10 +801,70 @@ assignmentBlockBindingParser = do
   blockSeparatorParser
   pure (BlockAssignBinding start nameSpan name value)
 
+forBlockBindingParser :: Parser BlockBinding
+forBlockBindingParser = do
+  start <- getSourcePos
+  keywordN "for"
+  (nameSpan, name) <- locatedLowerIdentifier
+  keyword "in"
+  iterable <- forIterableExprParser
+  body <- blockExprParser
+  blockSeparatorParser
+  pure (BlockForBinding start nameSpan name iterable body)
+
 blockSeparatorParser :: Parser ()
 blockSeparatorParser =
   void (symbolN ";")
     <|> void (some eol *> scn)
+
+forIterableExprParser :: Parser Expr
+forIterableExprParser =
+  letExprParser <|> forEqualityExprParser
+
+forEqualityExprParser :: Parser Expr
+forEqualityExprParser = do
+  firstTerm <- forComparisonExprParser
+  rest <- many ((,) <$> equalityOperatorParser <*> forComparisonExprParser)
+  pure (foldl applyEqualityExpr firstTerm rest)
+
+forComparisonExprParser :: Parser Expr
+forComparisonExprParser = do
+  firstTerm <- forAppExprParser
+  rest <- optional ((,) <$> comparisonOperatorParser <*> forAppExprParser)
+  pure $
+    case rest of
+      Just comparison ->
+        applyComparisonExpr firstTerm comparison
+      Nothing ->
+        firstTerm
+
+forAppExprParser :: Parser Expr
+forAppExprParser = do
+  terms <- some (try forTermParser)
+  case terms of
+    firstTerm : remainingTerms ->
+      pure (foldl applyExpr firstTerm remainingTerms)
+    [] ->
+      fail "expected at least one expression term"
+
+forTermParser :: Parser Expr
+forTermParser = do
+  baseExpr <- forBaseExprParser
+  fieldAccesses <- many fieldAccessSuffixParser
+  pure (foldl applyFieldAccess baseExpr fieldAccesses)
+
+forBaseExprParser :: Parser Expr
+forBaseExprParser =
+  parens exprParser
+    <|> returnParser
+    <|> decodeParser
+    <|> encodeParser
+    <|> listExprParser
+    <|> boolParser
+    <|> intParser
+    <|> stringParser
+    <|> constructorExprParser
+    <|> variableParser
 
 returnParser :: Parser Expr
 returnParser = do
@@ -1032,6 +1094,8 @@ applyBlockBinding binding body =
       EMutableLet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
     BlockAssignBinding start nameSpan name value ->
       EAssign (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
+    BlockForBinding start nameSpan name iterable loopBody ->
+      EFor (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name iterable loopBody body
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
@@ -1215,6 +1279,7 @@ reservedWords =
   , "agent"
   , "let"
   , "mut"
+  , "for"
   , "in"
   , "type"
   , "record"

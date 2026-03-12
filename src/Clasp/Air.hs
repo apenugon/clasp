@@ -601,6 +601,31 @@ buildExprGraph nodeId expr =
            in ( [("name", AirAttrText name), ("value", AirAttrNode valueId), ("body", AirAttrNode bodyId)]
               , buildExprGraph valueId value <> buildExprGraph bodyId body
               )
+        CMutableLet _ _ name value body ->
+          let valueId = exprChildId "value"
+              bodyId = exprChildId "body"
+           in ( [("name", AirAttrText name), ("value", AirAttrNode valueId), ("body", AirAttrNode bodyId)]
+              , buildExprGraph valueId value <> buildExprGraph bodyId body
+              )
+        CAssign _ _ name value body ->
+          let valueId = exprChildId "value"
+              bodyId = exprChildId "body"
+           in ( [("name", AirAttrText name), ("value", AirAttrNode valueId), ("body", AirAttrNode bodyId)]
+              , buildExprGraph valueId value <> buildExprGraph bodyId body
+              )
+        CFor _ _ name iterable loopBody body ->
+          let iterableId = exprChildId "iterable"
+              loopBodyId = exprChildId "loopBody"
+              bodyId = exprChildId "body"
+           in ( [ ("name", AirAttrText name)
+                , ("iterable", AirAttrNode iterableId)
+                , ("loopBody", AirAttrNode loopBodyId)
+                , ("body", AirAttrNode bodyId)
+                ]
+              , buildExprGraph iterableId iterable
+                  <> buildExprGraph loopBodyId loopBody
+                  <> buildExprGraph bodyId body
+              )
         CPage _ title body ->
           let titleId = exprChildId "title"
               bodyId = exprChildId "body"
@@ -774,6 +799,9 @@ exprKind expr =
     CGreaterThan {} -> "greaterThan"
     CGreaterThanOrEqual {} -> "greaterThanOrEqual"
     CLet {} -> "let"
+    CMutableLet {} -> "mutableLet"
+    CAssign {} -> "assign"
+    CFor {} -> "for"
     CPage {} -> "page"
     CRedirect {} -> "redirect"
     CViewEmpty {} -> "viewEmpty"
@@ -808,6 +836,9 @@ exprSpan expr =
     CGreaterThan span' _ _ -> span'
     CGreaterThanOrEqual span' _ _ -> span'
     CLet span' _ _ _ _ -> span'
+    CMutableLet span' _ _ _ _ -> span'
+    CAssign span' _ _ _ _ -> span'
+    CFor span' _ _ _ _ _ -> span'
     CPage span' _ _ -> span'
     CRedirect span' _ -> span'
     CViewEmpty span' -> span'

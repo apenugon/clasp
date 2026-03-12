@@ -34,6 +34,7 @@ It includes:
 - Block expressions
 - Local `let` expressions
 - Early `return` expressions inside function bodies
+- Block-scoped `for` loops over list values
 - Equality operators for `Int`, `Str`, and `Bool`
 - Integer comparison operators for branching
 - Field access
@@ -153,6 +154,22 @@ greeting = {
   let mut message = "Ada";
   message = "Grace";
   message
+}
+```
+
+Blocks may also include `for` loops over list values. The loop binder is scoped to the loop body, the body result is ignored, and outer `let mut` locals can be updated from inside the loop:
+
+```clasp
+module Main
+
+pickLast : [Str] -> Str
+pickLast names = {
+  let mut current = "nobody";
+  for name in names {
+    current = name;
+    current
+  };
+  current
 }
 ```
 
@@ -297,10 +314,16 @@ method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
 block-expr  ::= "{" block-let* expr "}"
-block-let   ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr) block-separator
+block-let   ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr | "for" lower-ident "in" for-iterable-expr block-expr) block-separator
 block-separator ::= ";" | newline+
 let-expr    ::= "let" lower-ident "=" expr "in" expr
 expr        ::= let-expr | equality-expr
+for-iterable-expr ::= let-expr | for-equality-expr
+for-equality-expr ::= for-comparison-expr (("==" | "!=") for-comparison-expr)*
+for-comparison-expr ::= for-app-expr (("<" | "<=" | ">" | ">=") for-app-expr)?
+for-app-expr ::= for-term for-term*
+for-term    ::= for-atom ("." lower-ident)*
+for-atom    ::= lower-ident | upper-ident | integer | string | list-expr | "true" | "false" | decode-expr | encode-expr | return-expr | "(" expr ")"
 equality-expr ::= comparison-expr (("==" | "!=") comparison-expr)*
 comparison-expr ::= app-expr (("<" | "<=" | ">" | ">=") app-expr)?
 app-expr    ::= term term*
@@ -338,7 +361,7 @@ Notes:
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
-- Blocks return their final expression and may contain leading local `let` declarations or assignments to previously declared `let mut` locals.
+- Blocks return their final expression and may contain leading local `let` declarations, `for` loops over list values, or assignments to previously declared `let mut` locals.
 - `return` is only valid inside function bodies and exits the enclosing function immediately.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
@@ -376,6 +399,7 @@ Notes:
 - Generated JavaScript modules also export `__claspSchemas`, a schema-contract registry with shared schema references, seed values, and host/JSON adapters that Bun worker runtimes can use to register typed jobs without re-declaring boundary shapes.
 - Route declarations also emit compiler-owned `__claspSeededFixtures` entries so hosts can inspect stable request and response seed shapes for benchmark and dogfood surfaces.
 - Function application compiles to JavaScript function calls.
+- Block-scoped `for` loops compile to JavaScript `for...of` loops over checked list values.
 - Match expressions compile to a JavaScript `switch` over constructor tags.
 - Boolean, integer, string, and variable references map directly to JavaScript equivalents.
 - Declarations may omit type signatures when local inference can resolve all parameter and result types.

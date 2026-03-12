@@ -504,6 +504,23 @@ parserTests =
                     assertFailure ("expected mutable block assignment body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "parses for-loops over list values inside blocks" $
+        case parseSource "inline" loopIterationSource of
+          Left err ->
+            assertFailure ("expected loop iteration source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "pickLast" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EBlock blockSpan (EMutableLet _ binderSpan "current" (EString _ "nobody") (EFor _ loopBinder "name" (EVar _ "names") (EBlock _ (EAssign _ assignSpan "current" (EVar _ "name") (EVar _ "current"))) (EVar _ "current"))) -> do
+                    assertEqual "block starts on declaration line" 4 (positionLine (sourceSpanStart blockSpan))
+                    assertEqual "mutable binder line" 5 (positionLine (sourceSpanStart binderSpan))
+                    assertEqual "loop binder line" 6 (positionLine (sourceSpanStart loopBinder))
+                    assertEqual "assignment line" 7 (positionLine (sourceSpanStart assignSpan))
+                  other ->
+                    assertFailure ("expected parsed for-loop body, got " <> show other)
+              Nothing ->
+                assertFailure "expected pickLast declaration"
     , testCase "parses early return expressions inside function bodies" $
         case parseSource "inline" earlyReturnSource of
           Left err ->
@@ -838,14 +855,32 @@ checkerTests =
             case find ((== "greeting") . coreDeclName) (coreModuleDecls checked) of
               Just decl ->
                 case coreDeclBody decl of
-                  CLet _ outerType "message" (CString _ "Ada") (CLet _ innerType "message" (CString _ "Grace") (CVar _ bodyType "message")) -> do
+                  CMutableLet _ outerType "message" (CString _ "Ada") (CAssign _ innerType "message" (CString _ "Grace") (CVar _ bodyType "message")) -> do
                     assertEqual "outer let result type" TStr outerType
-                    assertEqual "inner let result type" TStr innerType
+                    assertEqual "assignment result type" TStr innerType
                     assertEqual "body variable type" TStr bodyType
                   other ->
-                    assertFailure ("expected checked mutable block assignment to lower to nested lets, got " <> show other)
+                    assertFailure ("expected checked mutable block assignment to preserve mutability, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "typechecks for-loops over list values while preserving outer mutable locals" $
+        case checkSource "for-loop" loopIterationSource of
+          Left err ->
+            assertFailure ("expected loop iteration source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "pickLast") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CMutableLet _ outerType "current" (CString _ "nobody") (CFor _ loopType "name" (CVar _ (TList TStr) "names") (CAssign _ innerType "current" (CVar _ TStr "name") (CVar _ bodyType "current")) (CVar _ resultType "current")) -> do
+                    assertEqual "outer let result type" TStr outerType
+                    assertEqual "loop result type" TStr loopType
+                    assertEqual "assignment result type" TStr innerType
+                    assertEqual "inner body variable type" TStr bodyType
+                    assertEqual "final variable type" TStr resultType
+                  other ->
+                    assertFailure ("expected checked for-loop expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected pickLast declaration"
     , testCase "typechecks early returns against the enclosing function result" $
         case checkSource "return" earlyReturnSource of
           Left err ->
@@ -973,6 +1008,8 @@ checkerTests =
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" immutableBlockAssignmentSource)
     , testCase "rejects assignment to names that are not mutable block locals" $
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" nonLocalAssignmentSource)
+    , testCase "rejects for-loops over non-list iterables" $
+        assertHasCode "E_FOR_ITERABLE" (checkSource "bad" invalidForIterableSource)
     , testCase "rejects return outside function bodies" $
         assertHasCode "E_RETURN_OUTSIDE_FUNCTION" (checkSource "bad" invalidEarlyReturnSource)
     , testCase "reports non-exhaustive match expressions" $
@@ -1569,10 +1606,20 @@ lowerTests =
             assertFailure ("expected mutable block assignment lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right lowered ->
             case findLowerDecl "greeting" (lowerModuleDecls lowered) of
-              Just (LValueDecl _ (LLet "message" (LString "Ada") (LLet "message" (LString "Grace") (LVar "message")))) ->
+              Just (LValueDecl _ (LMutableLet "message" (LString "Ada") (LAssign "message" (LString "Grace") (LVar "message")))) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered mutable block assignment declaration: " <> show other)
+    , testCase "lowering preserves for-loops over list values" $
+        case lowerChecked "for-loop" loopIterationSource of
+          Left err ->
+            assertFailure ("expected loop iteration lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "pickLast" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["names"] (LMutableLet "current" (LString "nobody") (LFor "name" (LVar "names") (LAssign "current" (LVar "name") (LVar "current")) (LVar "current")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered for-loop declaration: " <> show other)
     , testCase "lowering preserves early returns inside nested control flow" $
         case lowerChecked "return" earlyReturnSource of
           Left err ->
@@ -1853,8 +1900,8 @@ compileTests =
           Left err ->
             assertFailure ("expected mutable block assignment compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
-            assertBool "expected initial mutable binding emission" ("const message = \"Ada\";" `T.isInfixOf` emitted)
-            assertBool "expected rebound mutable binding emission" ("const message = \"Grace\";" `T.isInfixOf` emitted)
+            assertBool "expected initial mutable binding emission" ("let message = \"Ada\";" `T.isInfixOf` emitted)
+            assertBool "expected rebound mutable assignment emission" ("message = \"Grace\";" `T.isInfixOf` emitted)
             let compiledPath = "dist/mutable-block-assignment.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -1865,6 +1912,22 @@ compileTests =
                 , "console.log(compiledModule.greeting);"
                 ]
             assertEqual "expected mutable block assignment result" "Grace" runtimeOutput
+    , testCase "compile evaluates for-loops over list values" $
+        case compileSource "for-loop" loopIterationSource of
+          Left err ->
+            assertFailure ("expected for-loop compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected for-of emission" ("for (const name of names)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/for-loop.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.pickLast([\"Ada\", \"Grace\"]));"
+                ]
+            assertEqual "expected for-loop result" "Grace" runtimeOutput
     , testCase "compile implements early returns in function bodies" $
         case compileSource "return" earlyReturnSource of
           Left err ->
@@ -3394,6 +3457,22 @@ mutableBlockAssignmentSource =
     , "}"
     ]
 
+loopIterationSource :: Text
+loopIterationSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "pickLast : [Str] -> Str"
+    , "pickLast names = {"
+    , "  let mut current = \"nobody\";"
+    , "  for name in names {"
+    , "    current = name;"
+    , "    current"
+    , "  };"
+    , "  current"
+    , "}"
+    ]
+
 earlyReturnSource :: Text
 earlyReturnSource =
   T.unlines
@@ -3445,6 +3524,20 @@ nonLocalAssignmentSource =
     , "greeting = {"
     , "  message = \"Grace\";"
     , "  message"
+    , "}"
+    ]
+
+invalidForIterableSource :: Text
+invalidForIterableSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "greeting : Str"
+    , "greeting = {"
+    , "  for char in \"Ada\" {"
+    , "    char"
+    , "  };"
+    , "  \"done\""
     , "}"
     ]
 

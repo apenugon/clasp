@@ -188,6 +188,9 @@ data DraftExprNode
   | DraftGreaterThan DraftExpr DraftExpr
   | DraftGreaterThanOrEqual DraftExpr DraftExpr
   | DraftLet Text DraftExpr DraftExpr
+  | DraftMutableLet Text DraftExpr DraftExpr
+  | DraftAssign Text DraftExpr DraftExpr
+  | DraftFor Text DraftExpr DraftExpr DraftExpr
   | DraftPage DraftExpr DraftExpr
   | DraftRedirect Text
   | DraftViewEmpty
@@ -1827,7 +1830,7 @@ inferExpr ctx termEnv localEnv expr =
     EMutableLet letSpan _ binderName value body -> do
       valueExpr <- inferExpr ctx termEnv localEnv value
       bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (mutableLocalBinding (draftExprType valueExpr)) localEnv) body
-      pure (DraftExpr letSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
+      pure (DraftExpr letSpan (draftExprType bodyExpr) (DraftMutableLet binderName valueExpr bodyExpr))
     EAssign assignSpan targetSpan binderName value body ->
       case Map.lookup binderName localEnv of
         Just localBinding
@@ -1844,7 +1847,7 @@ inferExpr ctx termEnv localEnv expr =
                 (draftExprType valueExpr)
                 (localBindingType localBinding)
               bodyExpr <- inferExpr ctx termEnv (Map.insert binderName localBinding localEnv) body
-              pure (DraftExpr assignSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
+              pure (DraftExpr assignSpan (draftExprType bodyExpr) (DraftAssign binderName valueExpr bodyExpr))
           | otherwise ->
               throwDiagnostic $
                 singleDiagnosticAt
@@ -1859,6 +1862,22 @@ inferExpr ctx termEnv localEnv expr =
               ("Assignment target `" <> binderName <> "` is not a mutable local.")
               targetSpan
               ["Declare the name in the current block with `let mut " <> binderName <> " = ...;` before assigning to it."]
+    EFor loopSpan _ binderName iterable loopBody body -> do
+      itemType <- freshTypeVar
+      iterableExpr <- inferExpr ctx termEnv localEnv iterable
+      unify
+        ( UnifyContext
+            { unifyCode = "E_FOR_ITERABLE"
+            , unifySummary = "For-loops must iterate over list values."
+            , unifyPrimarySpan = exprSpan iterable
+            , unifyRelated = []
+            }
+        )
+        (draftExprType iterableExpr)
+        (IList itemType)
+      loopBodyExpr <- inferExpr ctx termEnv (Map.insert binderName (immutableLocalBinding itemType) localEnv) loopBody
+      bodyExpr <- inferExpr ctx termEnv localEnv body
+      pure (DraftExpr loopSpan (draftExprType bodyExpr) (DraftFor binderName iterableExpr loopBodyExpr bodyExpr))
     ECall callSpan fn args ->
       case fn of
         EVar _ name
@@ -3110,6 +3129,22 @@ freezeDraftExpr ctx decl inferState draftExpr =
       frozenValue <- freezeDraftExpr ctx decl inferState value
       frozenBody <- freezeDraftExpr ctx decl inferState body
       pure (CLet (draftExprSpan draftExpr) exprType name frozenValue frozenBody)
+    DraftMutableLet name value body -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      frozenBody <- freezeDraftExpr ctx decl inferState body
+      pure (CMutableLet (draftExprSpan draftExpr) exprType name frozenValue frozenBody)
+    DraftAssign name value body -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      frozenBody <- freezeDraftExpr ctx decl inferState body
+      pure (CAssign (draftExprSpan draftExpr) exprType name frozenValue frozenBody)
+    DraftFor name iterable loopBody body -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenIterable <- freezeDraftExpr ctx decl inferState iterable
+      frozenLoopBody <- freezeDraftExpr ctx decl inferState loopBody
+      frozenBody <- freezeDraftExpr ctx decl inferState body
+      pure (CFor (draftExprSpan draftExpr) exprType name frozenIterable frozenLoopBody frozenBody)
     DraftPage title body -> do
       frozenTitle <- freezeDraftExpr ctx decl inferState title
       frozenBody <- freezeDraftExpr ctx decl inferState body

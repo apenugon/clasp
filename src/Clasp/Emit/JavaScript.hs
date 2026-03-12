@@ -624,6 +624,12 @@ collectStyledRefsExpr expr =
       collectStyledRefsExpr fn <> concatMap collectStyledRefsExpr args
     LConstruct _ fields ->
       concatMap collectStyledRefsExpr fields
+    LMutableLet _ value body ->
+      collectStyledRefsExpr value <> collectStyledRefsExpr body
+    LAssign _ value body ->
+      collectStyledRefsExpr value <> collectStyledRefsExpr body
+    LFor _ iterable loopBody body ->
+      collectStyledRefsExpr iterable <> collectStyledRefsExpr loopBody <> collectStyledRefsExpr body
     LMatch subject branches ->
       collectStyledRefsExpr subject <> concatMap (collectStyledRefsExpr . lowerMatchBranchBody) branches
     LRecord fields ->
@@ -662,6 +668,12 @@ lowerExprContainsReturn expr =
       lowerExprContainsReturn left || lowerExprContainsReturn right
     LLet _ value body ->
       lowerExprContainsReturn value || lowerExprContainsReturn body
+    LMutableLet _ value body ->
+      lowerExprContainsReturn value || lowerExprContainsReturn body
+    LAssign _ value body ->
+      lowerExprContainsReturn value || lowerExprContainsReturn body
+    LFor _ iterable loopBody body ->
+      lowerExprContainsReturn iterable || lowerExprContainsReturn loopBody || lowerExprContainsReturn body
     LPage title body ->
       lowerExprContainsReturn title || lowerExprContainsReturn body
     LRedirect _ ->
@@ -2170,6 +2182,42 @@ emitExpr counter expr =
           , T.unlines
               [ "(() => {"
               , "  const " <> emitIdentifier name <> " = " <> valueText <> ";"
+              , "  return " <> bodyText <> ";"
+              , "})()"
+              ]
+          )
+    LMutableLet name value body ->
+      let (counterAfterValue, valueText) = emitExpr counter value
+          (counterAfterBody, bodyText) = emitExpr counterAfterValue body
+       in ( counterAfterBody
+          , T.unlines
+              [ "(() => {"
+              , "  let " <> emitIdentifier name <> " = " <> valueText <> ";"
+              , "  return " <> bodyText <> ";"
+              , "})()"
+              ]
+          )
+    LAssign name value body ->
+      let (counterAfterValue, valueText) = emitExpr counter value
+          (counterAfterBody, bodyText) = emitExpr counterAfterValue body
+       in ( counterAfterBody
+          , T.unlines
+              [ "(() => {"
+              , "  " <> emitIdentifier name <> " = " <> valueText <> ";"
+              , "  return " <> bodyText <> ";"
+              , "})()"
+              ]
+          )
+    LFor name iterable loopBody body ->
+      let (counterAfterIterable, iterableText) = emitExpr counter iterable
+          (counterAfterLoopBody, loopBodyText) = emitExpr counterAfterIterable loopBody
+          (counterAfterBody, bodyText) = emitExpr counterAfterLoopBody body
+       in ( counterAfterBody
+          , T.unlines
+              [ "(() => {"
+              , "  for (const " <> emitIdentifier name <> " of " <> iterableText <> ") {"
+              , "    " <> loopBodyText <> ";"
+              , "  }"
               , "  return " <> bodyText <> ";"
               , "})()"
               ]
