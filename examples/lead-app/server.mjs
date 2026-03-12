@@ -8,6 +8,7 @@ const leads = [
     contact: "Morgan Lee",
     summary: "Northwind Studio is ready for a design-system migration this quarter.",
     priority: "medium",
+    segment: "growth",
     followUpRequired: true,
     reviewStatus: "reviewed",
     reviewNote: "Confirmed budget window and asked for a migration timeline."
@@ -18,6 +19,7 @@ const leads = [
     contact: "Jordan Kim",
     summary: "Acme Labs is exploring an internal AI pilot for support operations.",
     priority: "high",
+    segment: "enterprise",
     followUpRequired: true,
     reviewStatus: "new",
     reviewNote: ""
@@ -32,6 +34,7 @@ installRuntime({
     return JSON.stringify({
       summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,
       priority: priority.toLowerCase(),
+      segment: intake.segment?.$tag?.toLowerCase() ?? "startup",
       followUpRequired: intake.budget >= 20000
     });
   },
@@ -42,6 +45,7 @@ installRuntime({
       contact: intake.contact,
       summary: summary.summary,
       priority: summary.priority?.$tag?.toLowerCase() ?? "low",
+      segment: summary.segment?.$tag?.toLowerCase() ?? "startup",
       followUpRequired: summary.followUpRequired,
       reviewStatus: "new",
       reviewNote: ""
@@ -83,5 +87,5 @@ const server = serveCompiledModule(compiled, {
 console.log(`Clasp lead app listening on http://localhost:${server.port}`);
 
 function leadLabel(lead) {
-  return `${lead.company} (${lead.priority.toLowerCase()})`;
+  return `${lead.company} (${lead.priority.toLowerCase()}, ${lead.segment.toLowerCase()})`;
 }

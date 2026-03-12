@@ -40,7 +40,7 @@ await withServer((lead) => {
   const landingHtml = await landing.text();
   assert.equal(landing.status, 200);
   assert.match(landingHtml, /<form method="POST" action="\/leads">/);
-  assert.match(landingHtml, /Open the inbox page/);
+  assert.match(landingHtml, /name="segment"/);
 
   const created = await request(port, "/leads", {
     method: "POST",

@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { createServer } from "../dist/server/main.js";
 
+function toWireSegment(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
 function formBody(fields) {
   return new URLSearchParams(fields).toString();
 }
@@ -32,6 +44,7 @@ await withServer((lead) => {
   return JSON.stringify({
     summary: `${lead.company} led by ${lead.contact} fits the ${priority} priority pipeline.`,
     priority,
+    segment: toWireSegment(lead.segment),
     followUpRequired: lead.budget >= 20000
   });
 }, async (port) => {
@@ -39,7 +52,7 @@ await withServer((lead) => {
   const landingHtml = await landing.text();
   assert.equal(landing.status, 200);
   assert.match(landingHtml, /<form method="POST" action="\/leads">/);
-  assert.match(landingHtml, /Open the inbox page/);
+  assert.match(landingHtml, /name="segment"/);
 
   const created = await request(port, "/leads", {
     method: "POST",
@@ -49,24 +62,25 @@ await withServer((lead) => {
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
-      budget: "75000"
+      budget: "75000",
+      segment: "enterprise"
     })
   });
   const createdHtml = await created.text();
   assert.equal(created.status, 200);
-  assert.match(createdHtml, /SynthSpeak/);
   assert.match(createdHtml, /Priority: high/);
+  assert.match(createdHtml, /Segment: enterprise/);
 
   const inbox = await request(port, "/inbox");
   const inboxHtml = await inbox.text();
   assert.equal(inbox.status, 200);
   assert.match(inboxHtml, /href="\/lead\/primary"/);
-  assert.match(inboxHtml, /SynthSpeak \(high\)/);
+  assert.match(inboxHtml, /SynthSpeak \(high, enterprise\)/);
 
   const primaryLead = await request(port, "/lead/primary");
   const primaryLeadHtml = await primaryLead.text();
   assert.equal(primaryLead.status, 200);
-  assert.match(primaryLeadHtml, /SynthSpeak/);
+  assert.match(primaryLeadHtml, /Segment: enterprise/);
 
   const reviewed = await request(port, "/review", {
     method: "POST",
@@ -88,6 +102,7 @@ await withServer((lead) =>
   JSON.stringify({
     summary: `${lead.company} led by ${lead.contact}`,
     priority: "medium",
+    segment: toWireSegment(lead.segment),
     followUpRequired: lead.budget >= 20000
   }),
 async (port) => {
@@ -99,7 +114,8 @@ async (port) => {
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
-      budget: "not-a-number"
+      budget: "not-a-number",
+      segment: "startup"
     })
   });
 
@@ -111,7 +127,33 @@ await withServer(() =>
   JSON.stringify({
     summary: "SynthSpeak led by Ava",
     priority: "urgent",
+    segment: "enterprise",
     followUpRequired: true
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "enterprise"
+    })
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(await response.text(), "priority must be one of: low, medium, high");
+});
+
+await withServer((lead) =>
+  JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact}`,
+    priority: "medium",
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
   }),
 async (port) => {
   const response = await request(port, "/leads", {
@@ -126,6 +168,56 @@ async (port) => {
     })
   });
 
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withServer((lead) =>
+  JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact}`,
+    priority: "medium",
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "global-5000"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withServer(() =>
+  JSON.stringify({
+    summary: "SynthSpeak led by Ava",
+    priority: "high",
+    segment: "global-5000",
+    followUpRequired: true
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "enterprise"
+    })
+  });
+
   assert.equal(response.status, 502);
-  assert.equal(await response.text(), "priority must be one of: low, medium, high");
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
 });

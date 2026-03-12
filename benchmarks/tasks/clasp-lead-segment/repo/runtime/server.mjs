@@ -61,20 +61,14 @@ export function serveCompiledModule(compiledModule, options = {}) {
       try {
         payload = route.decodeRequest(await requestPayloadJson(route, request));
       } catch (error) {
-        return jsonResponse(400, {
-          error: "invalid_request",
-          message: errorMessage(error)
-        });
+        return errorResponse(route, 400, "invalid_request", error);
       }
 
       let result;
       try {
         result = await route.handler(payload);
       } catch (error) {
-        return jsonResponse(502, {
-          error: "handler_failed",
-          message: errorMessage(error)
-        });
+        return errorResponse(route, 502, "handler_failed", error);
       }
 
       try {
@@ -88,10 +82,7 @@ export function serveCompiledModule(compiledModule, options = {}) {
           }
         });
       } catch (error) {
-        return jsonResponse(500, {
-          error: "invalid_response",
-          message: errorMessage(error)
-        });
+        return errorResponse(route, 500, "invalid_response", error);
       }
     }
   });
@@ -103,6 +94,28 @@ function jsonResponse(status, payload) {
     headers: {
       "content-type": "application/json"
     }
+  });
+}
+
+function textResponse(status, body) {
+  return new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/plain; charset=utf-8"
+    }
+  });
+}
+
+function errorResponse(route, status, code, error) {
+  const message = errorMessage(error);
+
+  if (route?.responseKind === "page") {
+    return textResponse(status, message);
+  }
+
+  return jsonResponse(status, {
+    error: code,
+    message
   });
 }
 

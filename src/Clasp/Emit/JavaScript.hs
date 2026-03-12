@@ -58,23 +58,28 @@ emitRuntimePrelude =
   , "  return value;"
   , "}"
   , ""
+  , "function $claspBoundaryLabel(path) {"
+  , "  const index = path.lastIndexOf(\".\");"
+  , "  return index >= 0 ? path.slice(index + 1) : path;"
+  , "}"
+  , ""
   , "function $claspExpectInt(value, path) {"
   , "  if (!Number.isInteger(value)) {"
-  , "    throw new Error(`${path} expected an Int`);"
+  , "    throw new Error(`${$claspBoundaryLabel(path)} must be an integer`);"
   , "  }"
   , "  return value;"
   , "}"
   , ""
   , "function $claspExpectStr(value, path) {"
   , "  if (typeof value !== \"string\") {"
-  , "    throw new Error(`${path} expected a Str`);"
+  , "    throw new Error(`${$claspBoundaryLabel(path)} must be a string`);"
   , "  }"
   , "  return value;"
   , "}"
   , ""
   , "function $claspExpectBool(value, path) {"
   , "  if (typeof value !== \"boolean\") {"
-  , "    throw new Error(`${path} expected a Bool`);"
+  , "    throw new Error(`${$claspBoundaryLabel(path)} must be a boolean`);"
   , "  }"
   , "  return value;"
   , "}"
@@ -245,11 +250,10 @@ emitTypeCodecHelpers :: TypeDecl -> [Text]
 emitTypeCodecHelpers typeDecl
   | isJsonEnumTypeDecl typeDecl =
       [ "function " <> validateName <> "(value, path = \"value\") {"
-      , "  const textValue = $claspExpectStr(value, path);"
-      , "  switch (textValue) {"
+      , "  switch (value) {"
       ]
         <> concatMap emitValidateCase constructors
-        <> [ "    default: throw new Error(`${path} expected one of: " <> expectedValues <> "`);"
+        <> [ "    default: throw new Error(`${$claspBoundaryLabel(path)} must be one of: " <> expectedValues <> "`);"
            , "  }"
            , "}"
            , "function " <> validateInternalName <> "(value, path = \"value\") {"
@@ -338,7 +342,7 @@ emitRecordCodecHelpers recordDecl =
     emitValidateField fieldDecl =
       let fieldName = recordFieldDeclName fieldDecl
           fieldPath = "path + " <> emitStringLiteral ("." <> fieldName)
-       in [ "  const " <> fieldName <> "Value = $claspRequireField(objectValue, " <> emitStringLiteral fieldName <> ", path);"
+       in [ "  const " <> fieldName <> "Value = objectValue[" <> emitStringLiteral fieldName <> "];"
           , "  const " <> fieldName <> " = " <> emitValidator (recordFieldDeclType fieldDecl) (fieldName <> "Value") fieldPath <> ";"
           ]
 

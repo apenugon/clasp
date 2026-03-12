@@ -19,6 +19,7 @@ function defaultBindings(): LeadBindings {
       return JSON.stringify({
         summary: `${intake.company} led by ${intake.contact} fits the ${priority} priority pipeline.`,
         priority,
+        segment: intake.segment,
         followUpRequired: intake.budget >= 20000
       });
     }

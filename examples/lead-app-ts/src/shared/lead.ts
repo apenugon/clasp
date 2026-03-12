@@ -1,4 +1,5 @@
 export type LeadPriority = "low" | "medium" | "high";
+export type LeadSegment = "startup" | "growth" | "enterprise";
 
 export type ReviewStatus = "new" | "reviewed";
 
@@ -6,11 +7,13 @@ export interface LeadIntake {
   company: string;
   contact: string;
   budget: number;
+  segment: LeadSegment;
 }
 
 export interface LeadSummary {
   summary: string;
   priority: LeadPriority;
+  segment: LeadSegment;
   followUpRequired: boolean;
 }
 
@@ -20,6 +23,7 @@ export interface LeadRecord {
   contact: string;
   summary: string;
   priority: LeadPriority;
+  segment: LeadSegment;
   followUpRequired: boolean;
   reviewStatus: ReviewStatus;
   reviewNote: string;
@@ -74,6 +78,14 @@ function expectPriority(record: JsonRecord, field: string): LeadPriority {
   throw new Error(`${field} must be one of: low, medium, high`);
 }
 
+function expectSegment(record: JsonRecord, field: string): LeadSegment {
+  const value = record[field];
+  if (value === "startup" || value === "growth" || value === "enterprise") {
+    return value;
+  }
+  throw new Error(`${field} must be one of: startup, growth, enterprise`);
+}
+
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -100,6 +112,7 @@ export function decodeLeadSummary(text: string): LeadSummary {
   return {
     summary: expectString(value, "summary"),
     priority: expectPriority(value, "priority"),
+    segment: expectSegment(value, "segment"),
     followUpRequired: expectBoolean(value, "followUpRequired")
   };
 }
@@ -116,7 +129,8 @@ export function decodeLeadIntakeForm(text: string): LeadIntake {
   return {
     company: expectString(value, "company"),
     contact: expectString(value, "contact"),
-    budget
+    budget,
+    segment: expectSegment(value, "segment")
   };
 }
 
@@ -145,6 +159,7 @@ export function decodeLeadRecord(text: string): LeadRecord {
     contact: expectString(value, "contact"),
     summary: expectString(value, "summary"),
     priority: expectPriority(value, "priority"),
+    segment: expectSegment(value, "segment"),
     followUpRequired: expectBoolean(value, "followUpRequired"),
     reviewStatus,
     reviewNote: expectString(value, "reviewNote")
@@ -166,7 +181,7 @@ export function escapeHtml(value: string): string {
 export function renderLandingPage(inbox: InboxSnapshot): string {
   return encodePage(
     "Lead inbox",
-    `<main data-app="lead-shell"><h1>Lead inbox</h1><p>Capture a lead, score it once, and review it on the server.</p><section><h2>New lead</h2><form method="POST" action="/leads"><label>Company<input name="company" type="text" value=""></label><label>Contact<input name="contact" type="text" value=""></label><label>Budget<input name="budget" type="number" value=""></label><button type="submit">Create lead</button></form></section><h2>${escapeHtml(inbox.headline)}</h2>${renderInboxLinks(inbox)}<p><a href="/inbox">Open the inbox page</a></p></main>`
+    `<main data-app="lead-shell"><h1>Lead inbox</h1><p>Capture a lead, score it once, and review it on the server.</p><section><h2>New lead</h2><form method="POST" action="/leads"><label>Company<input name="company" type="text" value=""></label><label>Contact<input name="contact" type="text" value=""></label><label>Budget<input name="budget" type="number" value=""></label><label>Segment<input name="segment" type="text" value=""></label><button type="submit">Create lead</button></form></section><h2>${escapeHtml(inbox.headline)}</h2>${renderInboxLinks(inbox)}<p><a href="/inbox">Open the inbox page</a></p></main>`
   );
 }
 
@@ -185,7 +200,7 @@ export function renderLeadPage(lead: LeadRecord): string {
 
   return encodePage(
     lead.company,
-    `<main data-app="lead-shell"><h1>${escapeHtml(lead.company)}</h1><p>${escapeHtml(lead.contact)}</p><p>Priority: ${escapeHtml(lead.priority)}</p><p>${escapeHtml(lead.summary)}</p>${reviewDetails}<form method="POST" action="/review"><input name="leadId" type="hidden" value="${escapeHtml(lead.leadId)}"><label>Review note<input name="note" type="text" value="${escapeHtml(lead.reviewNote)}"></label><button type="submit">Save review</button></form><p><a href="/inbox">Back to inbox</a></p></main>`
+    `<main data-app="lead-shell"><h1>${escapeHtml(lead.company)}</h1><p>${escapeHtml(lead.contact)}</p><p>Priority: ${escapeHtml(lead.priority)}</p><p>Segment: ${escapeHtml(lead.segment)}</p><p>${escapeHtml(lead.summary)}</p>${reviewDetails}<form method="POST" action="/review"><input name="leadId" type="hidden" value="${escapeHtml(lead.leadId)}"><label>Review note<input name="note" type="text" value="${escapeHtml(lead.reviewNote)}"></label><button type="submit">Save review</button></form><p><a href="/inbox">Back to inbox</a></p></main>`
   );
 }
 
@@ -194,5 +209,5 @@ function renderInboxLinks(inbox: InboxSnapshot): string {
 }
 
 export function leadLabel(lead: LeadRecord): string {
-  return `${lead.company} (${lead.priority})`;
+  return `${lead.company} (${lead.priority}, ${lead.segment})`;
 }

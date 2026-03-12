@@ -582,7 +582,7 @@ compileTests =
               runtimeOutput <- runNodeScript (pageFormRuntimeScript absoluteCompiledPath absoluteRuntimePath)
               assertEqual
                 "expected query decode, form decode, and invalid form failure"
-                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"value.quantity expected an Int\"}"
+                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
                 runtimeOutput
     , testCase "lead inbox app supports intake, inbox, detail, and invalid form flows" $ do
         result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
@@ -598,7 +598,7 @@ compileTests =
             runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected landing, create, inbox, detail, review, and invalid form behavior"
-              "{\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"value.budget expected an Int\"}"
+              "{\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
     ]
 
@@ -1200,6 +1200,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    contact: 'Morgan Lee',"
     , "    summary: 'Northwind Studio is ready for a design-system migration this quarter.',"
     , "    priority: 'medium',"
+    , "    segment: 'growth',"
     , "    followUpRequired: true,"
     , "    reviewStatus: 'reviewed',"
     , "    reviewNote: 'Confirmed budget window and asked for a migration timeline.'"
@@ -1210,6 +1211,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    contact: 'Jordan Kim',"
     , "    summary: 'Acme Labs is exploring an internal AI pilot for support operations.',"
     , "    priority: 'high',"
+    , "    segment: 'enterprise',"
     , "    followUpRequired: true,"
     , "    reviewStatus: 'new',"
     , "    reviewNote: ''"
@@ -1221,6 +1223,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    return JSON.stringify({"
     , "      summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,"
     , "      priority: priority.toLowerCase(),"
+    , "      segment: intake.segment?.$tag?.toLowerCase() ?? 'startup',"
     , "      followUpRequired: intake.budget >= 20000"
     , "    });"
     , "  },"
@@ -1231,6 +1234,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "      contact: intake.contact,"
     , "      summary: summary.summary,"
     , "      priority: summary.priority?.$tag?.toLowerCase() ?? 'low',"
+    , "      segment: summary.segment?.$tag?.toLowerCase() ?? 'startup',"
     , "      followUpRequired: summary.followUpRequired,"
     , "      reviewStatus: 'new',"
     , "      reviewNote: ''"
@@ -1241,8 +1245,8 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "  loadInbox() {"
     , "    return JSON.stringify({"
     , "      headline: 'Priority inbox',"
-    , "      primaryLeadLabel: `${leads[0].company} (${leads[0].priority.toLowerCase()})`,"
-    , "      secondaryLeadLabel: `${(leads[1] ?? leads[0]).company} (${(leads[1] ?? leads[0]).priority.toLowerCase()})`"
+    , "      primaryLeadLabel: `${leads[0].company} (${leads[0].priority.toLowerCase()}, ${leads[0].segment.toLowerCase()})`,"
+    , "      secondaryLeadLabel: `${(leads[1] ?? leads[0]).company} (${(leads[1] ?? leads[0]).priority.toLowerCase()}, ${(leads[1] ?? leads[0]).segment.toLowerCase()})`"
     , "    });"
     , "  },"
     , "  loadPrimaryLead() {"
@@ -1273,7 +1277,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "const createRequest = new Request('http://example.test/leads', {"
     , "  method: 'POST',"
     , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
-    , "  body: 'company=SynthSpeak&contact=Ada+Lovelace&budget=65000'"
+    , "  body: 'company=SynthSpeak&contact=Ada+Lovelace&budget=65000&segment=enterprise'"
     , "});"
     , "const createPayload = createLeadRoute.decodeRequest(await requestPayloadJson(createLeadRoute, createRequest));"
     , "const createdHtml = createLeadRoute.encodeResponse(await createLeadRoute.handler(createPayload));"
@@ -1298,10 +1302,10 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "  invalidMessage = error instanceof Error ? error.message : String(error);"
     , "}"
     , "console.log(JSON.stringify({"
-    , "  landingHasForm: landingHtml.includes('action=\"/leads\"'),"
+    , "  landingHasForm: landingHtml.includes('action=\"/leads\"') && landingHtml.includes('name=\"segment\"'),"
     , "  createdHasLead: createdHtml.includes('SynthSpeak') && createdHtml.includes('Ada Lovelace'),"
-    , "  inboxHasLink: inboxHtml.includes('href=\"/lead/primary\"') && inboxHtml.includes('SynthSpeak (high)'),"
-    , "  detailHasLead: detailHtml.includes('SynthSpeak') && detailHtml.includes('Priority: high'),"
+    , "  inboxHasLink: inboxHtml.includes('href=\"/lead/primary\"') && inboxHtml.includes('SynthSpeak (high, enterprise)'),"
+    , "  detailHasLead: detailHtml.includes('SynthSpeak') && detailHtml.includes('Priority: high') && detailHtml.includes('Segment: enterprise'),"
     , "  reviewHasNote: reviewHtml.includes('Call tomorrow') && reviewHtml.includes('Review status: reviewed'),"
     , "  invalid: invalidMessage"
     , "}));"

@@ -10,6 +10,7 @@ function createSeedLeads() {
       contact: "Morgan Lee",
       summary: "Northwind Studio is ready for a design-system migration this quarter.",
       priority: "medium",
+      segment: "growth",
       followUpRequired: true,
       reviewStatus: "reviewed",
       reviewNote: "Confirmed budget window and asked for a migration timeline."
@@ -20,6 +21,7 @@ function createSeedLeads() {
       contact: "Jordan Kim",
       summary: "Acme Labs is exploring an internal AI pilot for support operations.",
       priority: "high",
+      segment: "enterprise",
       followUpRequired: true,
       reviewStatus: "new",
       reviewNote: ""
@@ -39,6 +41,18 @@ function toWirePriority(value) {
   return undefined;
 }
 
+function toWireSegment(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
 function defaultMockLeadSummaryModel(intake) {
   const priority =
     intake.budget >= 50000 ? "High" : intake.budget >= 20000 ? "Medium" : "Low";
@@ -46,6 +60,7 @@ function defaultMockLeadSummaryModel(intake) {
   return JSON.stringify({
     summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,
     priority: priority.toLowerCase(),
+    segment: toWireSegment(intake.segment) ?? "startup",
     followUpRequired: intake.budget >= 20000
   });
 }
@@ -62,6 +77,7 @@ function createBindings({ mockLeadSummaryModel = defaultMockLeadSummaryModel } =
         contact: intake.contact,
         summary: summary.summary,
         priority: toWirePriority(summary.priority) ?? "low",
+        segment: toWireSegment(summary.segment) ?? "startup",
         followUpRequired: summary.followUpRequired,
         reviewStatus: "new",
         reviewNote: ""
@@ -103,7 +119,7 @@ export function createServer(bindings = {}, options = {}) {
 }
 
 function leadLabel(lead) {
-  return `${lead.company} (${lead.priority.toLowerCase()})`;
+  return `${lead.company} (${lead.priority.toLowerCase()}, ${lead.segment.toLowerCase()})`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

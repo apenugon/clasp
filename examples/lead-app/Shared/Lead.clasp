@@ -3,13 +3,15 @@ module Shared.Lead
 record Empty = {}
 
 type LeadPriority = Low | Medium | High
+type LeadSegment = Startup | Growth | Enterprise
 
 type ReviewStatus = New | Reviewed
 
 record LeadIntake = {
   company : Str,
   contact : Str,
-  budget : Int
+  budget : Int,
+  segment : LeadSegment
 }
 
 record LeadReview = {
@@ -20,6 +22,7 @@ record LeadReview = {
 record LeadSummary = {
   summary : Str,
   priority : LeadPriority,
+  segment : LeadSegment,
   followUpRequired : Bool
 }
 
@@ -29,6 +32,7 @@ record LeadRecord = {
   contact : Str,
   summary : Str,
   priority : LeadPriority,
+  segment : LeadSegment,
   followUpRequired : Bool,
   reviewStatus : ReviewStatus,
   reviewNote : Str
@@ -47,10 +51,10 @@ renderInboxPage : InboxSnapshot -> Page
 renderInboxPage inbox = page "Inbox" (styled "lead_shell" (element "main" (append (element "h1" (text inbox.headline)) (append (element "p" (text "Open a seeded lead or create a new one from the intake page.")) (append (inboxLinks inbox) (element "p" (link "/" (text "Back to intake"))))))))
 
 renderLeadPage : LeadRecord -> Page
-renderLeadPage lead = page lead.company (styled "lead_shell" (element "main" (append (element "h1" (text lead.company)) (append (element "p" (text lead.contact)) (append (priorityView lead.priority) (append (element "p" (text lead.summary)) (append (reviewStatusView lead) (append (reviewForm lead) (element "p" (link "/inbox" (text "Back to inbox")))))))))))
+renderLeadPage lead = page lead.company (styled "lead_shell" (element "main" (append (element "h1" (text lead.company)) (append (element "p" (text lead.contact)) (append (priorityView lead.priority) (append (segmentView lead.segment) (append (element "p" (text lead.summary)) (append (reviewStatusView lead) (append (reviewForm lead) (element "p" (link "/inbox" (text "Back to inbox"))))))))))))
 
 intakeForm : View
-intakeForm = form "POST" "/leads" (element "section" (append (element "label" (append (text "Company") (input "company" "text" ""))) (append (element "label" (append (text "Contact") (input "contact" "text" ""))) (append (element "label" (append (text "Budget") (input "budget" "number" ""))) (submit "Create lead")))))
+intakeForm = form "POST" "/leads" (element "section" (append (element "label" (append (text "Company") (input "company" "text" ""))) (append (element "label" (append (text "Contact") (input "contact" "text" ""))) (append (element "label" (append (text "Budget") (input "budget" "number" ""))) (append (element "label" (append (text "Segment") (input "segment" "text" ""))) (submit "Create lead"))))))
 
 intakeSection : View
 intakeSection = element "section" (append (element "h2" (text "New lead")) intakeForm)
@@ -63,6 +67,13 @@ priorityView priority = match priority {
   Low -> element "p" (text "Priority: low"),
   Medium -> element "p" (text "Priority: medium"),
   High -> element "p" (text "Priority: high")
+}
+
+segmentView : LeadSegment -> View
+segmentView segment = match segment {
+  Startup -> element "p" (text "Segment: startup"),
+  Growth -> element "p" (text "Segment: growth"),
+  Enterprise -> element "p" (text "Segment: enterprise")
 }
 
 reviewStatusView : LeadRecord -> View
