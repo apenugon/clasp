@@ -7,6 +7,21 @@ source "$project_root/scripts/clasp-swarm-common.sh"
 wave_name="${1:-$(clasp_swarm_default_wave)}"
 shutdown_wait_seconds="${CLASP_SWARM_STOP_WAIT_SECONDS:-10}"
 
+kill_descendants() {
+  local parent_pid="$1"
+  local child_pid=""
+
+  if ! command -v pgrep >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while IFS= read -r child_pid; do
+    [[ -n "$child_pid" ]] || continue
+    kill_descendants "$child_pid"
+    kill "$child_pid" >/dev/null 2>&1 || true
+  done < <(pgrep -P "$parent_pid" || true)
+}
+
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
   runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
@@ -20,11 +35,13 @@ while IFS= read -r lane_dir; do
   pid="$(cat "$pid_file")"
 
   if kill -0 "$pid" >/dev/null 2>&1; then
+    kill_descendants "$pid"
     kill "$pid"
     deadline=$((SECONDS + shutdown_wait_seconds))
 
     while kill -0 "$pid" >/dev/null 2>&1; do
       if (( SECONDS >= deadline )); then
+        kill_descendants "$pid"
         kill -9 "$pid" >/dev/null 2>&1 || true
         break
       fi

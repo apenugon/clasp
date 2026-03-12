@@ -71,9 +71,11 @@ run_with_timeout() {
   shift
 
   if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" "$@"
+    bash -c 'exec 9>&-; exec timeout --signal=TERM --kill-after=30s "${1}s" "${@:2}"' _ \
+      "$timeout_seconds" \
+      "$@"
   else
-    "$@"
+    bash -c 'exec 9>&-; exec "$@"' _ "$@"
   fi
 }
 
@@ -81,8 +83,7 @@ run_lane_subprocess() {
   local timeout_seconds="$1"
   shift
 
-  run_with_timeout "$timeout_seconds" \
-    bash -c 'exec 9>&-; exec "$@"' _ "$@"
+  run_with_timeout "$timeout_seconds" "$@"
 }
 
 task_id_of() {
