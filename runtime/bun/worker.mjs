@@ -172,7 +172,113 @@ export function createModuleHotSwapProtocol(
     },
     upgrade(workflowName, run, workflowOptions) {
       const plan = getWorkflowPlan(workflowName);
-      return plan.sourceWorkflow.upgrade(run, plan.targetWorkflow, workflowOptions);
+      return plan.sourceWorkflow.upgrade(
+        run,
+        plan.targetWorkflow,
+        normalizeHotSwapWorkflowUpgradeOptions(workflowOptions, "hotSwap.upgrade")
+      );
+    },
+    handoff(workflowName, run, operator, reason, handoffOptions = {}) {
+      const plan = getWorkflowPlan(workflowName);
+      const supervisor =
+        normalizeHotSwapLabel(
+          handoffOptions.supervisor,
+          "hotSwap.handoff.supervisor"
+        ) ?? defaultSupervisor;
+      const handedOffRun = plan.sourceWorkflow.handoff(run, operator, reason, {
+        supervisor,
+        updatedAt: normalizeHotSwapTimestamp(
+          handoffOptions.updatedAt,
+          "hotSwap.handoff.updatedAt"
+        )
+      });
+
+      return Object.freeze({
+        status: "handoff",
+        workflowName: plan.name,
+        supervisor,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        rollbackVersionId: sourceModule.versionId,
+        run: handedOffRun,
+        safeToSwap: true,
+        rollbackAvailable: true
+      });
+    },
+    drain(workflowName, run, drainOptions = {}) {
+      const plan = getWorkflowPlan(workflowName);
+      const supervisor =
+        normalizeHotSwapLabel(
+          drainOptions.supervisor,
+          "hotSwap.drain.supervisor"
+        ) ?? defaultSupervisor;
+      const updatedAt = normalizeHotSwapTimestamp(
+        drainOptions.updatedAt,
+        "hotSwap.drain.updatedAt"
+      );
+      const drainingRun =
+        run?.supervision?.status === "operator_handoff"
+          ? plan.sourceWorkflow.handoff(
+              run,
+              run.supervision.operator,
+              run.supervision.reason,
+              {
+                supervisor: supervisor ?? run.supervision.supervisor ?? null,
+                updatedAt: updatedAt ?? run.supervision.updatedAt ?? null
+              }
+            )
+          : plan.sourceWorkflow.handoff(
+              run,
+              normalizeHotSwapLabel(
+                drainOptions.operator,
+                "hotSwap.drain.operator"
+              ),
+              normalizeHotSwapLabel(
+                drainOptions.reason,
+                "hotSwap.drain.reason"
+              ),
+              { supervisor, updatedAt }
+            );
+
+      return Object.freeze({
+        status: "draining",
+        workflowName: plan.name,
+        supervisor: drainingRun.supervision.supervisor,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        drainingVersionId: sourceModule.versionId,
+        targetReady: true,
+        rollbackVersionId: sourceModule.versionId,
+        rollbackAvailable: true,
+        run: drainingRun
+      });
+    },
+    rollback(workflowName, run, workflowOptions = {}) {
+      const plan = getWorkflowPlan(workflowName);
+      const rollbackWorkflow = patchRollbackWorkflowCompatibility(
+        plan.sourceWorkflow,
+        plan.targetWorkflow.moduleVersionId
+      );
+      const rolledBack = plan.targetWorkflow.upgrade(
+        run,
+        rollbackWorkflow,
+        normalizeHotSwapWorkflowUpgradeOptions(workflowOptions, "hotSwap.rollback")
+      );
+
+      return Object.freeze({
+        status: "rolled_back",
+        workflowName: plan.name,
+        supervisor: rolledBack.run.supervision.supervisor,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        rollbackVersionId: sourceModule.versionId,
+        rollbackTargetVersionId: targetModule.versionId,
+        rollbackAvailable: false,
+        run: rolledBack.run,
+        migration: rolledBack.migration,
+        context: rolledBack.context,
+        handlers: rolledBack.handlers
+      });
     },
     begin(beginOptions = {}) {
       return Object.freeze({
@@ -276,6 +382,57 @@ function normalizeHotSwapTimestamp(value, path) {
   }
 
   return value;
+}
+
+function patchRollbackWorkflowCompatibility(workflow, acceptedModuleVersionId) {
+  const compatibleModuleVersionIds = Array.isArray(
+    workflow?.compatibility?.compatibleModuleVersionIds
+  )
+    ? workflow.compatibility.compatibleModuleVersionIds.filter(
+        (versionId) => typeof versionId === "string" && versionId !== ""
+      )
+    : [];
+
+  return Object.freeze({
+    ...workflow,
+    compatibility: Object.freeze({
+      ...(workflow?.compatibility ?? {}),
+      compatibleModuleVersionIds: Object.freeze([
+        ...new Set([...compatibleModuleVersionIds, acceptedModuleVersionId])
+      ])
+    })
+  });
+}
+
+function normalizeHotSwapWorkflowUpgradeOptions(options, path) {
+  const rawOptions = options && typeof options === "object" ? options : {};
+  const normalized = {};
+
+  if (rawOptions.migrateState !== undefined && rawOptions.migrateState !== null) {
+    if (typeof rawOptions.migrateState !== "function") {
+      throw new Error(`${path}.migrateState must be a function.`);
+    }
+
+    normalized.migrateState = rawOptions.migrateState;
+  }
+
+  if (rawOptions.prepare !== undefined && rawOptions.prepare !== null) {
+    if (typeof rawOptions.prepare !== "function") {
+      throw new Error(`${path}.prepare must be a function.`);
+    }
+
+    normalized.prepare = rawOptions.prepare;
+  }
+
+  if (rawOptions.activate !== undefined && rawOptions.activate !== null) {
+    if (typeof rawOptions.activate !== "function") {
+      throw new Error(`${path}.activate must be a function.`);
+    }
+
+    normalized.activate = rawOptions.activate;
+  }
+
+  return normalized;
 }
 
 export function createWorkerJob(compiledModule, options) {

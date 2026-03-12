@@ -2853,6 +2853,47 @@ compileTests =
                 assertEqual "upgraded target version tagged" (Just (Bool True)) (KeyMap.lookup "upgradedTargetVersionTagged" value)
               Right other ->
                 assertFailure ("expected JSON object from hot-swap runtime, got " <> show other)
+    , testCase "worker runtime exposes self-update handoff, draining, and rollback rules" $
+        case (compileSource "workflow-self-update-old" workflowSource, compileSource "workflow-self-update-new" workflowHotSwapTargetSource) of
+          (Left err, _) ->
+            assertFailure ("expected old workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (_, Left err) ->
+            assertFailure ("expected new workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (Right oldEmitted, Right newEmitted) -> do
+            let oldCompiledPath = "dist/test-projects/workflow-self-update-runtime/old-compiled.mjs"
+            let newCompiledPath = "dist/test-projects/workflow-self-update-runtime/new-compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+            TIO.writeFile oldCompiledPath oldEmitted
+            TIO.writeFile newCompiledPath newEmitted
+            absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+            absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowSelfUpdateRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected self-update runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "handoff status" (Just (String "handoff")) (KeyMap.lookup "handoffStatus" value)
+                assertEqual "handoff operator" (Just (String "release-bot")) (KeyMap.lookup "handoffOperator" value)
+                assertEqual "handoff reason" (Just (String "self-update")) (KeyMap.lookup "handoffReason" value)
+                assertEqual "handoff rollback available" (Just (Bool True)) (KeyMap.lookup "handoffRollbackAvailable" value)
+                assertEqual "draining status" (Just (String "draining")) (KeyMap.lookup "drainingStatus" value)
+                assertEqual "draining version tagged" (Just (Bool True)) (KeyMap.lookup "drainingVersionTagged" value)
+                assertEqual "draining supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "drainingSupervisor" value)
+                assertEqual "draining rollback available" (Just (Bool True)) (KeyMap.lookup "drainingRollbackAvailable" value)
+                assertEqual "upgraded status" (Just (String "upgraded")) (KeyMap.lookup "upgradedStatus" value)
+                assertEqual "upgraded count" (Just (Number 8)) (KeyMap.lookup "upgradedCount" value)
+                assertEqual "upgraded supervision" (Just (String "operator_handoff")) (KeyMap.lookup "upgradedSupervision" value)
+                assertEqual "rollback status" (Just (String "rolled_back")) (KeyMap.lookup "rollbackStatus" value)
+                assertEqual "rollback count" (Just (Number 5)) (KeyMap.lookup "rollbackCount" value)
+                assertEqual "rollback supervisor" (Just (String "RollbackSupervisor")) (KeyMap.lookup "rollbackSupervisor" value)
+                assertEqual "rollback source tagged" (Just (Bool True)) (KeyMap.lookup "rollbackSourceTagged" value)
+                assertEqual "rollback target tagged" (Just (Bool True)) (KeyMap.lookup "rollbackTargetTagged" value)
+                assertEqual "rollback handoff preserved" (Just (String "operator_handoff")) (KeyMap.lookup "rollbackSupervision" value)
+                assertEqual "rollback migration hook" (Just (Bool True)) (KeyMap.lookup "rollbackMigrationHook" value)
+                assertEqual "rollback activation hook" (Just (Bool True)) (KeyMap.lookup "rollbackActivationHook" value)
+              Right other ->
+                assertFailure ("expected JSON object from self-update runtime, got " <> show other)
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
           Left err ->
@@ -5428,6 +5469,96 @@ workflowHotSwapRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  upgradedCount: upgraded.run.state.count,"
     , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
     , "  upgradedTargetVersionTagged: upgraded.context.toModuleVersionId.startsWith('module:Main:')"
+    , "}));"
+    ]
+
+workflowSelfUpdateRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+workflowSelfUpdateRuntimeScript oldCompiledPath newCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as oldCompiledModule from " <> show ("file://" <> oldCompiledPath) <> ";"
+    , "import * as newCompiledModule from " <> show ("file://" <> newCompiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(oldCompiledModule);"
+    , "const sourceVersionId = oldCompiledModule.__claspModule.versionId;"
+    , "const patchedTargetModule = Object.freeze({"
+    , "  ...newCompiledModule.__claspModule,"
+    , "  upgradeWindow: Object.freeze({"
+    , "    ...newCompiledModule.__claspModule.upgradeWindow,"
+    , "    fromVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(newCompiledModule.__claspModule.upgradeWindow.fromVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "});"
+    , "const patchedTargetWorkflows = Object.freeze((newCompiledModule.__claspWorkflows ?? []).map((workflow) => Object.freeze({"
+    , "  ...workflow,"
+    , "  compatibility: Object.freeze({"
+    , "    ...workflow.compatibility,"
+    , "    compatibleModuleVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(workflow.compatibility?.compatibleModuleVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "})));"
+    , "const patchedTargetBindings = Object.freeze({"
+    , "  ...(newCompiledModule.__claspBindings ?? {}),"
+    , "  module: patchedTargetModule"
+    , "});"
+    , "const patchedTargetCompiledModule = Object.freeze({"
+    , "  ...newCompiledModule,"
+    , "  __claspModule: patchedTargetModule,"
+    , "  __claspWorkflows: patchedTargetWorkflows,"
+    , "  __claspBindings: patchedTargetBindings"
+    , "});"
+    , "const protocol = runtime.hotSwap(patchedTargetCompiledModule, { supervisor: 'UpgradeSupervisor' });"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const run = workflow.start(workflow.checkpoint({ count: 5 }), { deadlineAt: 100 });"
+    , "const handoff = protocol.handoff('CounterFlow', run, 'release-bot', 'self-update', { updatedAt: 1001 });"
+    , "const draining = protocol.drain('CounterFlow', handoff.run, { updatedAt: 1002 });"
+    , "const upgraded = protocol.upgrade('CounterFlow', draining.run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
+    , "const rolledBack = protocol.rollback('CounterFlow', upgraded.run, {"
+    , "  migrateState: (state) => ({ count: state.count - 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'RollbackSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
+    , "console.log(JSON.stringify({"
+    , "  handoffStatus: handoff.status,"
+    , "  handoffOperator: handoff.run.supervision.operator,"
+    , "  handoffReason: handoff.run.supervision.reason,"
+    , "  handoffRollbackAvailable: handoff.rollbackAvailable,"
+    , "  drainingStatus: draining.status,"
+    , "  drainingVersionTagged: draining.drainingVersionId.startsWith('module:Main:'),"
+    , "  drainingSupervisor: draining.supervisor,"
+    , "  drainingRollbackAvailable: draining.rollbackAvailable,"
+    , "  upgradedStatus: upgraded.status,"
+    , "  upgradedCount: upgraded.run.state.count,"
+    , "  upgradedSupervision: upgraded.run.supervision.status,"
+    , "  rollbackStatus: rolledBack.status,"
+    , "  rollbackCount: rolledBack.run.state.count,"
+    , "  rollbackSupervisor: rolledBack.run.supervision.supervisor,"
+    , "  rollbackSourceTagged: rolledBack.sourceVersionId.startsWith('module:Main:'),"
+    , "  rollbackTargetTagged: rolledBack.targetVersionId.startsWith('module:Main:'),"
+    , "  rollbackSupervision: rolledBack.run.supervision.status,"
+    , "  rollbackMigrationHook: rolledBack.handlers.migrateState,"
+    , "  rollbackActivationHook: rolledBack.handlers.activate"
     , "}));"
     ]
 
