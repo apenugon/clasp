@@ -1049,6 +1049,21 @@ compileTests =
               "expected json route client transport contract"
               "{\"method\":\"POST\",\"path\":\"/lead/summary\",\"href\":\"/lead/summary\",\"contentType\":\"application/json\",\"body\":\"{\\\"company\\\":\\\"Acme\\\",\\\"budget\\\":42,\\\"priorityHint\\\":\\\"high\\\"}\",\"parsedSummary\":\"Ready\",\"parsedPriority\":\"High\",\"parsedFollowUpRequired\":true}"
               runtimeOutput
+    , testCase "client runtime executes generated json route clients over fetch" $
+        case compileSource "service-client-runtime" serviceSource of
+          Left err ->
+            assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/service-client-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/client.mjs"
+            runtimeOutput <- runNodeScript (routeClientFetchRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected json route client fetch runtime contract"
+              "{\"preparedUrl\":\"https://app.example.test/lead/summary\",\"preparedCredentials\":\"same-origin\",\"fetchUrl\":\"https://app.example.test/lead/summary\",\"fetchMethod\":\"POST\",\"fetchContentType\":\"application/json\",\"fetchBody\":\"{\\\"company\\\":\\\"Acme\\\",\\\"budget\\\":42,\\\"priorityHint\\\":\\\"high\\\"}\",\"parsedSummary\":\"Queued\",\"parsedPriority\":\"Medium\",\"parsedFollowUpRequired\":false}"
+              runtimeOutput
     , testCase "generated page route clients build query and form requests" $
         withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -1079,6 +1094,31 @@ compileTests =
                 "expected redirect route client response contract"
                 "{\"method\":\"POST\",\"path\":\"/submit\",\"body\":\"\",\"redirect\":{\"status\":303,\"location\":\"/inbox\"}}"
                 runtimeOutput
+    , testCase "client runtime preserves page html and manual redirect parsing" $
+        withProjectFiles "route-client-browser-runtime" pageFormRuntimeFiles $ \pageRoot -> do
+          pageResult <- compileEntry (pageRoot </> "Main.clasp")
+          case pageResult of
+            Left err ->
+              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right pageEmitted -> do
+              let pageCompiledPath = pageRoot </> "compiled.mjs"
+              TIO.writeFile pageCompiledPath pageEmitted
+              absolutePageCompiledPath <- makeAbsolute pageCompiledPath
+              withProjectFiles "route-client-browser-redirect-runtime" pageRedirectRuntimeFiles $ \redirectRoot -> do
+                redirectResult <- compileEntry (redirectRoot </> "Main.clasp")
+                case redirectResult of
+                  Left err ->
+                    assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+                  Right redirectEmitted -> do
+                    let redirectCompiledPath = redirectRoot </> "compiled.mjs"
+                    TIO.writeFile redirectCompiledPath redirectEmitted
+                    absoluteRedirectCompiledPath <- makeAbsolute redirectCompiledPath
+                    absoluteRuntimePath <- makeAbsolute "runtime/bun/client.mjs"
+                    runtimeOutput <- runNodeScript (routeClientBrowserRuntimeScript absolutePageCompiledPath absoluteRedirectCompiledPath absoluteRuntimePath)
+                    assertEqual
+                      "expected page html fetch and manual redirect mode"
+                      "{\"pageUrl\":\"https://app.example.test/order?customerId=00123&quantity=7\",\"pageMethod\":\"GET\",\"pageHtml\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"redirectUrl\":\"https://app.example.test/submit\",\"redirectMode\":\"manual\",\"redirectLocation\":\"/inbox\",\"redirectStatus\":303}"
+                      runtimeOutput
     , testCase "runtime turns redirect route results into http redirects" $
         withProjectFiles "page-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -1974,6 +2014,47 @@ routeClientJsonRuntimeScript compiledPath =
     , "}));"
     ]
 
+routeClientFetchRuntimeScript :: FilePath -> FilePath -> Text
+routeClientFetchRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { callRouteClient, prepareRouteFetch } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const client = compiledModule.summarizeLeadRouteClient;"
+    , "const payload = { company: 'Acme', budget: 42, priorityHint: compiledModule.High };"
+    , "const prepared = prepareRouteFetch(client, payload, { baseUrl: 'https://app.example.test/root' });"
+    , "const calls = [];"
+    , "const parsed = await callRouteClient(client, payload, {"
+    , "  baseUrl: 'https://app.example.test/root',"
+    , "  fetch: async (url, init) => {"
+    , "    calls.push({"
+    , "      url,"
+    , "      method: init.method,"
+    , "      contentType: init.headers['content-type'] ?? null,"
+    , "      body: init.body ?? null"
+    , "    });"
+    , "    return new Response(JSON.stringify({"
+    , "      summary: 'Queued',"
+    , "      priority: 'medium',"
+    , "      followUpRequired: false"
+    , "    }), {"
+    , "      status: 200,"
+    , "      headers: { 'content-type': 'application/json' }"
+    , "    });"
+    , "  }"
+    , "});"
+    , "console.log(JSON.stringify({"
+    , "  preparedUrl: prepared.url,"
+    , "  preparedCredentials: prepared.init.credentials ?? null,"
+    , "  fetchUrl: calls[0]?.url ?? null,"
+    , "  fetchMethod: calls[0]?.method ?? null,"
+    , "  fetchContentType: calls[0]?.contentType ?? null,"
+    , "  fetchBody: calls[0]?.body ?? null,"
+    , "  parsedSummary: parsed.summary,"
+    , "  parsedPriority: parsed.priority?.$tag ?? parsed.priority,"
+    , "  parsedFollowUpRequired: parsed.followUpRequired"
+    , "}));"
+    ]
+
 routeClientPageRuntimeScript :: FilePath -> Text
 routeClientPageRuntimeScript compiledPath =
   T.pack . unlines $
@@ -2008,6 +2089,46 @@ routeClientRedirectRuntimeScript compiledPath =
     , "  path: request.path,"
     , "  body: request.body,"
     , "  redirect"
+    , "}));"
+    ]
+
+routeClientBrowserRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+routeClientBrowserRuntimeScript pageCompiledPath redirectCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as pageModule from " <> show ("file://" <> pageCompiledPath) <> ";"
+    , "import * as redirectModule from " <> show ("file://" <> redirectCompiledPath) <> ";"
+    , "import { createRouteClientRuntime, fetchRouteClient } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const pageCalls = [];"
+    , "const pageRuntime = createRouteClientRuntime({"
+    , "  baseUrl: 'https://app.example.test/app/',"
+    , "  fetch: async (url, init) => {"
+    , "    pageCalls.push({ url, method: init.method });"
+    , "    return new Response('<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Order</title></head><body>00123</body></html>', {"
+    , "      status: 200,"
+    , "      headers: { 'content-type': 'text/html; charset=utf-8' }"
+    , "    });"
+    , "  }"
+    , "});"
+    , "const pageHtml = await pageRuntime.call(pageModule.lookupRouteClient, { customerId: '00123', quantity: 7 });"
+    , "let redirectMode = null;"
+    , "const redirectResult = await fetchRouteClient(redirectModule.submitLeadRouteClient, {}, {"
+    , "  baseUrl: 'https://app.example.test/app/',"
+    , "  fetch: async (url, init) => {"
+    , "    redirectMode = init.redirect ?? null;"
+    , "    return new Response('', {"
+    , "      status: 303,"
+    , "      headers: { location: '/inbox' }"
+    , "    });"
+    , "  }"
+    , "});"
+    , "console.log(JSON.stringify({"
+    , "  pageUrl: pageCalls[0]?.url ?? null,"
+    , "  pageMethod: pageCalls[0]?.method ?? null,"
+    , "  pageHtml,"
+    , "  redirectUrl: redirectResult.url,"
+    , "  redirectMode,"
+    , "  redirectLocation: redirectResult.data.location,"
+    , "  redirectStatus: redirectResult.data.status"
     , "}));"
     ]
 
