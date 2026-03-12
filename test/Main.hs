@@ -2034,13 +2034,16 @@ compileTests =
           Right emitted -> do
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
-    , testCase "compile emits workflow checkpoint and resume helpers" $
+    , testCase "compile emits workflow checkpoint, replay, and idempotency helpers" $
         case compileSource "workflow" workflowSource of
           Left err ->
             assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected workflow checkpoint helper" ("checkpoint(value) { return $encode_Counter(value); }" `T.isInfixOf` emitted)
             assertBool "expected workflow resume helper" ("resume(snapshot) { return $decode_Counter(snapshot); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow start helper" ("start(snapshot) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow deliver helper" ("deliver(run, message, handler) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter); }" `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
         case compileSource "let" letExpressionSource of
           Left err ->
@@ -2724,7 +2727,7 @@ compileTests =
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
-    , testCase "worker runtime exposes workflow checkpoint and resume contracts" $
+    , testCase "worker runtime exposes workflow replay and idempotency contracts" $
         case compileSource "workflow-worker-runtime" workflowSource of
           Left err ->
             assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -2736,8 +2739,8 @@ compileTests =
             absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
-              "expected workflow checkpoint and resume runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7}"
+              "expected workflow replay and idempotency runtime contract"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
               runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
@@ -5077,11 +5080,30 @@ workflowRuntimeScript compiledPath runtimePath =
     , "const workflow = runtime.workflow('CounterFlow');"
     , "const checkpoint = workflow.checkpoint({ count: 7 });"
     , "const resumed = workflow.resume(checkpoint);"
+    , "const run = workflow.start(checkpoint);"
+    , "const deliverOnce = workflow.deliver(run, { id: 'm1', payload: 2 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}));"
+    , "const deliverDuplicate = workflow.deliver(deliverOnce.run, { id: 'm1', payload: 99 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}));"
+    , "const replayed = workflow.replay(checkpoint, ["
+    , "  { id: 'm1', payload: 2 },"
+    , "  { id: 'm1', payload: 99 },"
+    , "  { id: 'm2', payload: 3 }"
+    , "], (state, payload) => ({ count: state.count + payload }));"
     , "console.log(JSON.stringify({"
     , "  workflowName: workflow.name,"
     , "  stateType: workflow.stateType,"
     , "  checkpoint,"
-    , "  resumedValue: resumed.count"
+    , "  resumedValue: resumed.count,"
+    , "  duplicateSuppressed: deliverDuplicate.duplicate,"
+    , "  duplicateResult: deliverDuplicate.result,"
+    , "  replayedCount: replayed.state.count,"
+    , "  replayedDeliveries: replayed.deliveries.length,"
+    , "  replayedIds: replayed.processedIds"
     , "}));"
     ]
 
