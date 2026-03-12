@@ -1,0 +1,63 @@
+module Main
+
+import Shared.Release
+
+foreign reviewRelease : ReleaseRequest -> Str = "provider:reviewRelease"
+
+opsSession : AuthSession
+opsSession = authSession "sess-release-204" (principal "ops-9") (tenant "operations") (resourceIdentity "release" "rel-204")
+
+opsTenantId : AuthSession -> Str
+opsTenantId session = session.tenant.id
+
+defaultAudit : ReleaseAudit
+defaultAudit = ReleaseAudit {
+    session = opsSession,
+    resource = resourceIdentity "release" "rel-204",
+    releaseId = "rel-204",
+    status = Pending,
+    note = "Awaiting automated review."
+  }
+
+reviewDecision : ReleaseRequest -> ReleaseDecision
+reviewDecision request = decode ReleaseDecision (reviewRelease request)
+
+dashboard : Empty -> Page
+dashboard req = page "Release gate" (styled "ops_shell" (element "main" (append (element "h1" (text "Release gate")) (append (element "p" (text (opsTenantId opsSession))) (append reviewSection (append fastTrackSection (element "p" (text "Typed audit route: /release/audit"))))))))
+
+reviewSection : View
+reviewSection = element "section" (append (element "h2" (text "Policy review")) reviewForm)
+
+reviewForm : View
+reviewForm = form "POST" "/release/review" (element "section" (append (element "label" (append (text "Release ID") (input "releaseId" "text" "rel-204"))) (append (element "label" (append (text "Change summary") (input "summary" "text" "Ship the support automation pipeline."))) (submit "Run policy review"))))
+
+fastTrackSection : View
+fastTrackSection = element "section" (append (element "h2" (text "Fast track")) (form "POST" "/release/accept" (element "section" (submit "Fast-track release"))))
+
+reviewPage : ReleaseRequest -> Page
+reviewPage request = renderDecisionPage (reviewDecision request)
+
+renderDecisionPage : ReleaseDecision -> Page
+renderDecisionPage decision = page "Release decision" (styled "ops_shell" (element "main" (append (element "h1" (text decision.releaseId)) (append (statusView decision.status) (append (element "p" (text decision.note)) (append (element "p" (text decision.audit.releaseId)) (element "p" (link "/release-gate" (text "Back to dashboard")))))))))
+
+statusView : ReleaseStatus -> View
+statusView status = match status {
+  Pending -> element "p" (text "Status: pending"),
+  Approved -> element "p" (text "Status: approved"),
+  RolledBack -> element "p" (text "Status: rolled back")
+}
+
+auditEnvelope : Empty -> ReleaseAudit
+auditEnvelope req = defaultAudit
+
+fastTrack : Empty -> Redirect
+fastTrack req = redirect "/release/ack"
+
+ackPage : Empty -> Page
+ackPage req = page "Release accepted" (styled "ops_shell" (element "main" (append (element "h1" (text "Release accepted")) (element "p" (link "/release-gate" (text "Back to dashboard"))))))
+
+route releaseGateRoute = GET "/release-gate" Empty -> Page dashboard
+route releaseAuditRoute = GET "/release/audit" Empty -> ReleaseAudit auditEnvelope
+route releaseAckRoute = GET "/release/ack" Empty -> Page ackPage
+route releaseReviewRoute = POST "/release/review" ReleaseRequest -> Page reviewPage
+route releaseAcceptRoute = POST "/release/accept" Empty -> Redirect fastTrack

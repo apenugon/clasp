@@ -7,6 +7,7 @@ This task is intentionally local to this workspace.
 - Keep the solution minimal and preserve the existing server-rendered route flow.
 - Use only `bash scripts/verify.sh` for acceptance in this workspace.
 - Do not edit generated artifacts directly; let the local verify script regenerate what it needs.
+- If you need Clasp-specific orientation, read `LANGUAGE_GUIDE.md` before inspecting runtime glue.
 
 Preferred workflow:
 

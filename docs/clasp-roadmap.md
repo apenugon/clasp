@@ -334,6 +334,8 @@ Near-term benchmark work should include:
 - creating a baseline task suite in `TypeScript`
 - measuring intervention-free completion, total tokens, repair loops, and time-to-green
 - expanding into real app-building tasks on a moderate SaaS codebase, because that is the benchmark that matters most for `Clasp`
+- splitting machine-readable page metadata from the default SSR HTML projection so benchmark tasks do not degrade into runtime or test-surface debugging
+- generating host-binding adapters and seeded fixtures from compiler-known declarations so benchmark product changes stay inside the app surface
 - adding mixed-stack scenarios where `Clasp` is the primary semantic layer while `JS`, native, SQL, or provider runtimes remain behind typed boundaries
 - adding later benchmark variants that compare semantic compiler artifacts against raw text- and browser-only workflows
 - expanding later into trust-boundary, control-plane, workflow, LLM-output, and external-objective adaptation benchmarks

@@ -393,6 +393,9 @@ Critical path:
 - `FS-014` Add structured route identity plus typed path, query, form, and body declarations instead of raw string route edges.
 - `FS-015` Emit machine-readable UI, action, and navigation graph artifacts for page-driven app flows.
 - `FS-016` Add compiler-known authorization requirements and proof-carrying access for routes, pages, actions, queries, and tools.
+- `FS-017` Add explicit page-render projection modes so default SSR HTML stays stable while machine metadata is emitted through sidecar artifacts or opt-in surfaces.
+- `FS-018` Generate typed host-binding adapters from foreign declarations so app-facing changes stop leaking into imperative runtime glue.
+- `FS-019` Add compiler-owned seeded fixture and mock-boundary declarations for benchmark and dogfood app surfaces.
 
 ### Track 5: Control Plane Declarations
 
@@ -475,6 +478,8 @@ Critical path:
 - `BM-019` Add semantic-artifact benchmarks comparing compiler-assisted workflows against raw text and browser-only workflows.
 - `BM-020` Add authorization and data-access benchmarks proving protected reads, writes, and field disclosures require policy proofs.
 - `BM-021` Add AIR-assisted planning benchmarks comparing raw-text tasking with workflows that target compiler-owned AIR.
+- `BM-022` Add benchmark acceptance helpers and mutation-surface guards so product tasks do not require runtime-wrapper or test-scaffold edits.
+- `BM-023` Add benchmark-prep semantic packs and workspace guidance generated from context, AIR, and UI graph artifacts.
 
 ### Track 10: SaaS Dogfooding
 

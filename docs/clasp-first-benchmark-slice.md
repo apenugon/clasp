@@ -130,3 +130,5 @@ For the next near-term improvement cycle, the benchmark should also become easie
 - the `Clasp` task should not require editing benchmark-only test scaffolding to complete an app-level product change
 - request and model-boundary failures should already be shaped by compiler-owned/runtime-generated semantics rather than handwritten wrapper normalization
 - task preparation should emit machine-readable semantic context for affected pages, forms, schemas, routes, and foreign bindings
+- the default SSR HTML projection should stay stable for humans and tests even when the compiler also emits richer machine-readable page metadata
+- seeded benchmark fixtures and mock host boundaries should be generated from compiler-owned declarations rather than hand-maintained imperative glue

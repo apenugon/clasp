@@ -281,6 +281,8 @@ The first `lead-segment` run showed that `Clasp` still forces the agent to reaso
 - request-boundary and model-boundary failures are not fully compiler-owned end to end, so the agent may need to normalize error behavior in host code
 - host runtime bindings remain too free-form, which makes foreign-boundary changes harder than they should be
 - agents still lack a machine-readable semantic map of the benchmark app surface, so they fall back to reading generated output or grepping files
+- compiler-emitted page metadata still leaks into the same HTML projection humans and tests read, which turns metadata details into benchmark noise
+- benchmark seed fixtures and mock boundary behavior still live in imperative host code instead of compiler-owned fixture declarations or generated adapters
 
 The near-term win condition for `Clasp` on this benchmark should be:
 
@@ -293,8 +295,11 @@ That means the next focused implementation wave should prioritize:
 
 - benchmark isomorphism and task-surface fairness
 - compiler-owned request and model boundary behavior for page flows
+- explicit separation between machine-readable page metadata and the default human SSR HTML projection
 - structured host-binding manifests for foreign/runtime edges
+- generated host-binding adapters plus compiler-owned seeded fixture surfaces for benchmark apps
 - semantic context artifacts for page, route, schema, and binding relationships
+- benchmark-prep semantic packs and acceptance helpers that keep ordinary product tasks out of runtime or test-only mutation surfaces
 - repeated benchmark automation so the repo can measure whether those changes are actually improving the result
 
 This is especially important for `Clasp`, because shared types and strong static semantics are part of the language value proposition.
