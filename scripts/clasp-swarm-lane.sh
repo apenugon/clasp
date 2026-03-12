@@ -86,6 +86,12 @@ run_lane_subprocess() {
   run_with_timeout "$timeout_seconds" "$@"
 }
 
+acquire_merge_lock() {
+  local merge_lock_fd="$1"
+
+  bash -c 'exec 9>&-; flock "$1"' _ "$merge_lock_fd"
+}
+
 task_id_of() {
   basename "$1" .md
 }
@@ -466,7 +472,7 @@ integrate_task_branch() {
   local status=0
 
   exec {merge_lock_fd}>"$merge_lock_file"
-  flock "$merge_lock_fd"
+  acquire_merge_lock "$merge_lock_fd"
 
   {
     ensure_trunk_branch
@@ -511,7 +517,7 @@ sync_trunk_with_main() {
   local status=0
 
   exec {merge_lock_fd}>"$merge_lock_file"
-  flock "$merge_lock_fd"
+  acquire_merge_lock "$merge_lock_fd"
 
   {
     ensure_trunk_branch
