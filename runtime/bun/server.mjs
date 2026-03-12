@@ -14,24 +14,30 @@ export function bindingContractFor(compiledModule) {
     contract.kind === "clasp-generated-bindings" &&
     contract.version === 1
   ) {
+    const hostBindings = contract.hostBindings ?? compiledModule?.__claspHostBindings ?? [];
     return {
       ...contract,
       module: contract.module ?? compiledModule?.__claspModule ?? null,
+      hostBindings,
+      providers: contract.providers ?? defaultProviderContract(hostBindings),
       nativeInterop:
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
-        defaultNativeInterop(contract.hostBindings ?? compiledModule?.__claspHostBindings ?? [])
+        defaultNativeInterop(hostBindings)
     };
   }
+
+  const hostBindings = compiledModule?.__claspHostBindings ?? [];
 
   return {
     kind: "clasp-generated-bindings",
     version: 1,
     module: compiledModule?.__claspModule ?? null,
-    hostBindings: compiledModule?.__claspHostBindings ?? [],
+    hostBindings,
+    providers: defaultProviderContract(hostBindings),
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
-      defaultNativeInterop(compiledModule?.__claspHostBindings ?? []),
+      defaultNativeInterop(hostBindings),
     packageImports: compiledModule?.__claspPackageImports ?? [],
     routes: compiledModule?.__claspRoutes ?? [],
     routeClients: compiledModule?.__claspRouteClients ?? [],
@@ -56,6 +62,180 @@ export function bindingContractFor(compiledModule) {
     navigationGraph: compiledModule?.__claspNavigationGraph ?? [],
     actionGraph: compiledModule?.__claspActionGraph ?? []
   };
+}
+
+function defaultProviderContract(hostBindings) {
+  const bindings = (hostBindings ?? [])
+    .map(defaultProviderBinding)
+    .filter((binding) => binding !== null);
+  const providerMap = new Map();
+
+  for (const binding of bindings) {
+    const current =
+      providerMap.get(binding.provider) ??
+      {
+        name: binding.provider,
+        runtimeNames: [],
+        bindingNames: []
+      };
+
+    current.runtimeNames.push(binding.runtimeName);
+    current.bindingNames.push(binding.name);
+    providerMap.set(binding.provider, current);
+  }
+
+  return Object.freeze({
+    kind: "clasp-provider-contract",
+    version: 1,
+    providers: Object.freeze(
+      Array.from(providerMap.values(), (provider) =>
+        Object.freeze({
+          name: provider.name,
+          runtimeNames: Object.freeze(provider.runtimeNames),
+          bindingNames: Object.freeze(provider.bindingNames)
+        })
+      )
+    ),
+    bindings: Object.freeze(bindings)
+  });
+}
+
+function defaultProviderBinding(binding) {
+  const descriptor = parseProviderRuntimeName(binding?.runtimeName);
+
+  if (!descriptor) {
+    return null;
+  }
+
+  return Object.freeze({
+    name: binding?.name ?? descriptor.operation,
+    runtimeName: binding?.runtimeName ?? `${descriptor.namespace}:${descriptor.operation}`,
+    provider: descriptor.provider,
+    namespace: descriptor.namespace,
+    operation: descriptor.operation,
+    capability: Object.freeze({
+      id: `capability:provider:${descriptor.provider}:${descriptor.operation}`,
+      kind: "model-runtime-operation",
+      provider: descriptor.provider,
+      operation: descriptor.operation,
+      runtimeName: binding?.runtimeName ?? `${descriptor.namespace}:${descriptor.operation}`
+    }),
+    params: Object.freeze(binding?.params ?? []),
+    returns: binding?.returns ?? null
+  });
+}
+
+function parseProviderRuntimeName(runtimeName) {
+  if (typeof runtimeName !== "string") {
+    return null;
+  }
+
+  const parts = runtimeName.split(":");
+
+  if (parts[0] !== "provider" || parts.length < 2) {
+    return null;
+  }
+
+  if (parts.length === 2) {
+    return {
+      namespace: "provider",
+      provider: "provider",
+      operation: parts[1]
+    };
+  }
+
+  return {
+    namespace: parts[0],
+    provider: parts[1],
+    operation: parts.slice(2).join(":")
+  };
+}
+
+export function providerContractFor(compiledModule) {
+  return bindingContractFor(compiledModule).providers;
+}
+
+export function createProviderRuntime(compiledModule, providers = {}) {
+  if (!compiledModule || typeof compiledModule.__claspAdaptHostBindings !== "function") {
+    throw new Error("createProviderRuntime requires a generated Clasp module.");
+  }
+
+  const contract = providerContractFor(compiledModule);
+  const bindingMap = new Map(contract.bindings.map((binding) => [binding.name, binding]));
+  const runtimeBindingMap = new Map(
+    contract.bindings.map((binding) => [binding.runtimeName, binding])
+  );
+  const implementations = {};
+
+  for (const binding of contract.bindings) {
+    const implementation = (...args) =>
+      invokeProviderBinding(binding, args, providers);
+    implementations[binding.name] = implementation;
+    implementations[binding.runtimeName] = implementation;
+  }
+
+  const runtime = {
+    contract,
+    providers: contract.providers,
+    bindings: contract.bindings,
+    implementations: Object.freeze(implementations),
+    binding(name) {
+      const found = bindingMap.get(name) ?? runtimeBindingMap.get(name) ?? null;
+
+      if (!found) {
+        throw new Error(`Unknown Clasp provider binding: ${String(name)}`);
+      }
+
+      return found;
+    },
+    call(name, ...args) {
+      const binding = this.binding(name);
+      return invokeProviderBinding(binding, args, providers);
+    },
+    install() {
+      const adaptedBindings =
+        compiledModule.__claspAdaptHostBindings(this.implementations);
+      installRuntime(adaptedBindings);
+      return adaptedBindings;
+    }
+  };
+
+  return Object.freeze(runtime);
+}
+
+export function installProviderRuntime(compiledModule, providers = {}) {
+  return createProviderRuntime(compiledModule, providers).install();
+}
+
+function invokeProviderBinding(binding, args, providers) {
+  const provider = resolveProviderImplementation(binding, providers);
+  return provider({
+    id: `provider:${binding.provider}:${binding.operation}`,
+    binding,
+    provider: binding.provider,
+    operation: binding.operation,
+    args: Object.freeze(args.slice())
+  });
+}
+
+function resolveProviderImplementation(binding, providers) {
+  const provider = providers?.[binding.provider];
+
+  if (provider && typeof provider.invoke === "function") {
+    return (request) => provider.invoke(request);
+  }
+
+  if (provider && typeof provider[binding.operation] === "function") {
+    return (request) => provider[binding.operation](...request.args, request);
+  }
+
+  if (typeof provider === "function") {
+    return (request) => provider(request);
+  }
+
+  throw new Error(
+    `Missing Clasp provider implementation for ${binding.provider}:${binding.operation}`
+  );
 }
 
 function defaultNativeInterop(hostBindings) {

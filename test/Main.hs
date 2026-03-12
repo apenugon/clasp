@@ -2990,6 +2990,21 @@ compileTests =
               "expected native interop contract and build plan"
               "{\"abi\":\"clasp-native-v1\",\"supportedTargets\":[\"bun\",\"worker\",\"react-native\",\"expo\"],\"bindingName\":\"mockLeadSummaryModel\",\"capabilityId\":\"capability:foreign:mockLeadSummaryModel\",\"crateName\":\"lead_summary_bridge\",\"loader\":\"bun:ffi\",\"crateType\":\"cdylib\",\"manifestPath\":\"native/lead-summary/Cargo.toml\",\"artifactFileName\":\"liblead_summary_bridge.so\",\"cargoCommand\":[\"cargo\",\"build\",\"--manifest-path\",\"native/lead-summary/Cargo.toml\",\"--release\",\"--target\",\"x86_64-unknown-linux-gnu\"],\"capabilities\":[\"capability:foreign:mockLeadSummaryModel\",\"capability:ml:lead-summary\"]}"
               runtimeOutput
+    , testCase "provider runtime abstracts provider-backed foreign bindings for app routes" $ do
+        case compileSource "provider-runtime" providerRuntimeSource of
+          Left err ->
+            assertFailure ("expected provider runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/provider-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (providerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected provider contract and provider-backed page flow"
+              "{\"providerKind\":\"clasp-provider-contract\",\"providerVersion\":1,\"providerNames\":[\"provider\"],\"providerOperation\":\"replyPreview\",\"providerBinding\":\"generateReplyPreview\",\"runtimeInstalled\":true,\"runtimeBindingVisible\":true,\"seenProvider\":\"provider\",\"seenOperation\":\"replyPreview\",\"seenCustomerId\":\"cust-42\",\"previewHasReply\":true,\"customerHasExport\":true}"
+              runtimeOutput
     , testCase "compile emits Python worker and service interop contracts" $
         case compileSource "python-interop" pythonInteropSource of
           Left err ->
@@ -3559,6 +3574,49 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+providerRuntimeSource :: Text
+providerRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record TicketDraft = {"
+    , "  customerId : Str,"
+    , "  summary : Str"
+    , "}"
+    , ""
+    , "record TicketPreview = {"
+    , "  suggestedReply : Str"
+    , "}"
+    , ""
+    , "record SupportCustomer = {"
+    , "  company : Str,"
+    , "  contactEmail : Str"
+    , "}"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "foreign generateReplyPreview : TicketDraft -> Str = \"provider:replyPreview\""
+    , "foreign publishCustomer : SupportCustomer -> Str = \"storage:publishCustomer\""
+    , ""
+    , "currentCustomer : SupportCustomer"
+    , "currentCustomer = SupportCustomer {"
+    , "  company = \"Northwind Studio\","
+    , "  contactEmail = \"ops@northwind.example\""
+    , "}"
+    , ""
+    , "previewText : TicketDraft -> Str"
+    , "previewText draft = (decode TicketPreview (generateReplyPreview draft)).suggestedReply"
+    , ""
+    , "previewPage : TicketDraft -> Page"
+    , "previewPage draft = page \"Reply preview\" (element \"main\" (element \"p\" (text (previewText draft))))"
+    , ""
+    , "customerPage : Empty -> Page"
+    , "customerPage req = page \"Customer export\" (element \"main\" (append (element \"p\" (text currentCustomer.company)) (element \"p\" (text ((decode SupportCustomer (publishCustomer currentCustomer)).contactEmail)))))"
+    , ""
+    , "route previewRoute = POST \"/preview\" TicketDraft -> Page previewPage"
+    , "route customerRoute = GET \"/customer\" Empty -> Page customerPage"
     ]
 
 packageForeignSource :: Text
@@ -5778,6 +5836,61 @@ nativeInteropRuntimeScript compiledPath runtimePath =
     , "  artifactFileName: bindingPlan.artifactFileName,"
     , "  cargoCommand: bindingPlan.cargo.command,"
     , "  capabilities: bindingPlan.capabilities"
+    , "}));"
+    ]
+
+providerRuntimeScript :: FilePath -> FilePath -> Text
+providerRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { bindingContractFor, createProviderRuntime, installCompiledModule, providerContractFor, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const contract = bindingContractFor(compiledModule);"
+    , "const providerContract = providerContractFor(compiledModule);"
+    , "let seen = null;"
+    , "const providerRuntime = createProviderRuntime(compiledModule, {"
+    , "  provider: {"
+    , "    invoke(request) {"
+    , "      seen = {"
+    , "        provider: request.provider,"
+    , "        operation: request.operation,"
+    , "        customerId: request.args[0].customerId"
+    , "      };"
+    , "      return JSON.stringify({"
+    , "        suggestedReply: `Reply for ${request.args[0].customerId}: ${request.args[0].summary}`"
+    , "      });"
+    , "    }"
+    , "  }"
+    , "});"
+    , "const installed = providerRuntime.install();"
+    , "installCompiledModule(compiledModule, {"
+    , "  publishCustomer(customer) {"
+    , "    return JSON.stringify(customer);"
+    , "  }"
+    , "});"
+    , "const previewRoute = contract.routes.find((candidate) => candidate.name === 'previewRoute');"
+    , "const customerRoute = contract.routes.find((candidate) => candidate.name === 'customerRoute');"
+    , "if (!previewRoute || !customerRoute) { throw new Error('missing provider runtime routes'); }"
+    , "const previewRequest = new Request('http://example.test/preview', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/x-www-form-urlencoded' },"
+    , "  body: 'customerId=cust-42&summary=Renewal+is+blocked+on+legal+review.'"
+    , "});"
+    , "const previewPayload = previewRoute.decodeRequest(await requestPayloadJson(previewRoute, previewRequest));"
+    , "const previewHtml = previewRoute.encodeResponse(await previewRoute.handler(previewPayload));"
+    , "const customerHtml = customerRoute.encodeResponse(await customerRoute.handler({}));"
+    , "console.log(JSON.stringify({"
+    , "  providerKind: providerContract.kind,"
+    , "  providerVersion: providerContract.version,"
+    , "  providerNames: providerContract.providers.map((provider) => provider.name),"
+    , "  providerOperation: providerContract.bindings[0]?.operation ?? null,"
+    , "  providerBinding: providerContract.bindings[0]?.name ?? null,"
+    , "  runtimeInstalled: typeof installed['provider:replyPreview'] === 'function',"
+    , "  runtimeBindingVisible: typeof globalThis.__claspRuntime['provider:replyPreview'] === 'function',"
+    , "  seenProvider: seen?.provider ?? null,"
+    , "  seenOperation: seen?.operation ?? null,"
+    , "  seenCustomerId: seen?.customerId ?? null,"
+    , "  previewHasReply: previewHtml.includes('Reply for cust-42: Renewal is blocked on legal review.'),"
+    , "  customerHasExport: customerHtml.includes('Northwind Studio') && customerHtml.includes('ops@northwind.example')"
     , "}));"
     ]
 
