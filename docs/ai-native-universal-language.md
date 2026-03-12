@@ -325,6 +325,23 @@ This keeps the semantic model honest.
 Browsers, databases, users, clocks, networks, and models are still real runtime actors.
 But they should enter the system through typed, auditable surfaces rather than through unstructured escape hatches.
 
+### Assumptions and proof obligations should be first-class
+
+For agent work, the compiler should not stop at "typechecks" or "fails."
+
+It should eventually emit an explicit ledger of:
+
+- what is statically proved
+- what is runtime-checked
+- what is foreign-trusted because it comes from a declared boundary
+- what is accepted only because of an explicit unsafe assumption
+- what is still unresolved and needs more evidence, refinement, or operator judgment
+
+That ledger should be queryable through the same context, AIR, and diagnostics surfaces as the rest of the system.
+
+The goal is not only stronger formalism.
+The goal is making remaining uncertainty explicit so an agent can plan around it instead of rediscovering it through runtime failures and repository archaeology.
+
 ### Refinement and constrained value types
 
 Shared schemas are necessary, but not sufficient for application correctness.
@@ -398,6 +415,29 @@ Clasp should also support:
 - Explicit checkpoint and resume points
 
 This is how "one language everywhere" remains safe over time instead of only at initial compile time.
+
+### Time should be a first-class semantic dimension
+
+Real systems are temporal.
+
+`Clasp` should eventually model things like:
+
+- deadlines and timeout budgets
+- TTLs and expirations
+- retries and backoff windows
+- schedules and cron-like triggers
+- rollout windows
+- cache staleness and freshness
+- secret expiry and delegated-capability expiry
+
+Those concepts should not live only in host config or ad hoc helper code.
+
+They should be compiler-known enough that:
+
+- workflows can be checked against them
+- policy and rollout logic can refer to them
+- simulation and replay can advance time deterministically
+- diagnostics can explain which temporal assumption failed
 
 ### Native storage, not a wrapped ORM
 
@@ -824,6 +864,24 @@ These declarations should:
 - participate in the same package graph
 - be validated by the compiler rather than interpreted as untyped sidecars
 
+### Typed environment and deployment model
+
+If `Clasp` is meant to own end-to-end system semantics, environment and deployment intent cannot remain permanently outside the language.
+
+That does not mean putting cloud-provider APIs into the expression core.
+
+It means eventually supporting compiler-known declarations for things like:
+
+- services and workers
+- queues and schedules
+- regions and deploy targets
+- declared secrets and secret providers
+- rollout strategies and windows
+- budgets and SLO-like constraints
+- environment-specific capability and topology differences
+
+The compiler should then be able to project those declarations into host artifacts such as platform config, infra manifests, and deploy plans while preserving one semantic source of truth.
+
 ### Built-in context graphs
 
 `Clasp` should emit first-class context graphs from the same semantic model used for checking, code generation, policy enforcement, and tracing.
@@ -842,6 +900,20 @@ The purpose is simple:
 - let external signals map directly to affected declarations
 - let prompts and task contexts be built from the smallest valid semantic neighborhood
 - let review, eval, rollout, and permission checks run as graph queries instead of heuristics
+
+### Counterfactual impact preview should be a core query mode
+
+Before editing, an agent should eventually be able to ask the compiler:
+
+- what declarations and runtime surfaces would change?
+- what proofs or assumptions would become invalid?
+- what policies, migrations, or rollout rules would be affected?
+- what new runtime checks or trust-boundary validators would appear?
+- which tests, evals, simulations, and audit surfaces would need to move with the change?
+
+That is much stronger than simple "find references."
+
+It is a compiler-owned counterfactual preview over the semantic graph of the system.
 
 ### Context graph layers
 
@@ -961,6 +1033,28 @@ The platform should capture:
 - Versions of prompts, models, tools, and dependencies
 
 This should make agent runs inspectable and replayable.
+
+### Deterministic simulation and dry-run should be first-class
+
+Tests are not enough.
+
+`Clasp` should eventually support a true dry-run and simulation mode for:
+
+- routes and page flows
+- tools and model boundaries
+- workflow and agent loops
+- policy and approval decisions
+- retries, schedules, and other temporal behavior
+
+That mode should run against declared fixtures, simulated time, and compiler-known boundaries while emitting:
+
+- traces
+- audit events
+- policy decisions
+- state transitions
+- failed proof obligations or unsafe assumptions
+
+This gives agents a way to ask "what will happen?" before making irreversible changes or calling live systems.
 
 ### Tooling products should consume first-class artifacts
 
@@ -1116,8 +1210,28 @@ At a minimum, the platform should support:
 - provenance metadata for values that came from users, tools, models, files, queues, or external services
 - policy hooks for redaction, retention, and disclosure
 - clear separation between trusted instructions, untrusted content, and executable authority
+- compiler-known secret declarations and typed secret-injection surfaces instead of ambient `process.env` or ad hoc host reads
+- policy-gated secret access so routes, tools, prompts, workflows, and storage effects cannot consume secret values without an explicit declared capability
+- explicit reveal or refinement boundaries so secret values never silently become ordinary strings
+- blame-carrying diagnostics that identify the secret declaration, consuming boundary, and failed path when a secret is missing, redacted incorrectly, or used outside policy
+- delegated secret capabilities that attenuate access by audience, operation, TTL, use count, or scope instead of copying raw secret material between agents or workflows
+- auditable delegation chains so secret use can always be traced back to the declaration, delegator, attenuation rules, and consuming boundary
 
 This matters for both classical security and agent-specific risks such as prompt injection, tool misuse, and accidental secret exfiltration.
+
+### Audit and accountability
+
+`Clasp` should treat audit events and audit logs as first-class semantic artifacts, not as ad hoc strings written from host code.
+
+At a minimum, the platform should support:
+
+- typed audit event declarations with compiler-known schemas
+- standard audit envelopes carrying actor, principal, tenant, resource, action, timestamp, and provenance metadata
+- policy hooks for audit retention, redaction, disclosure, and sink routing
+- compiler-generated audit helpers for routes, tools, workflows, auth decisions, secret access, and storage mutations
+- machine-readable audit logs that remain queryable through the same context, AIR, and policy model
+
+This matters because agent-built systems need more than “logs exist.” They need audit trails that are structured enough to support compliance, debugging, incident response, and post-hoc explanation without losing the root cause behind a change or decision.
 
 ### 17. Robust failure semantics
 

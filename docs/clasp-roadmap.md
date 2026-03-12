@@ -94,6 +94,7 @@ Exit criteria:
 - Treat machine-readable diagnostics as the primary interface and human-oriented rendering as a derived view
 - Add semantic edit and refactor operations over compiler-known declarations rather than relying only on raw text patching
 - Make a machine-native compiler protocol the primary tooling surface, with CLI and editor adapters built on top
+- Add a first-class proof and assumption ledger so the compiler can report what is statically proved, runtime-checked, foreign-trusted, unsafe-assumed, or still unresolved
 
 Exit criteria:
 
@@ -136,6 +137,10 @@ Exit criteria:
 - Add invariant, precondition, and postcondition declarations that can be checked statically where possible and enforced automatically at boundaries where necessary
 - Add field-level data classification and disclosure rules so protected values cannot flow into pages, prompts, traces, or storage projections without explicit policy mediation
 - Add provenance tracking and secret-aware value handling at trust boundaries
+- Add compiler-known secret declarations and typed injection surfaces for environment and host secret providers
+- Add non-loggable, non-serializable secret value semantics with explicit reveal or redaction boundaries instead of ambient string access
+- Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation
+- Add typed audit event schemas and standard audit envelopes for boundary decisions, data disclosures, tool calls, and state changes
 - Start separating untrusted content from authority-bearing instructions and capabilities
 - Start designing versioned state handoff for future hot swapping
 
@@ -152,7 +157,12 @@ Exit criteria:
 - Enforce capability and approval policies from declared semantics instead of shell conventions
 - Make policy decisions and authorization proofs traceable back to principal, resource, action, and data-classification declarations
 - Add explicit sandbox and least-privilege policy surfaces for file, network, process, secret, and model authority
+- Add secret-access audit trails and missing-secret diagnostics tied back to declared secret inputs, policies, and consuming boundaries
+- Add auditability for secret delegation chains so secret use can be traced through delegation and attenuation rather than only direct access
+- Add first-class audit log declarations, sink routing, retention rules, and redaction policy so auditability is compiler-owned instead of bolted onto host logging
 - Make audit trails and policy decisions part of standard trace output
+- Add compiler-known environment and deployment declarations for services, queues, schedules, regions, secrets, budgets, rollout targets, and topology constraints, then project them into host deploy artifacts instead of ambient config
+- Add counterfactual impact preview queries so agents can ask what declarations, proofs, policies, migrations, rollouts, and runtime checks would change before editing
 
 Exit criteria:
 
@@ -166,11 +176,14 @@ Exit criteria:
 - Add typed checkpoint/resume support
 - Add idempotency and replay concepts
 - Add explicit side-effect capabilities
+- Add typed workflow audit events for transitions, retries, operator handoffs, upgrades, and rollbacks
 - Extend context-graph emission with runtime execution edges for workflow state transitions, failures, retries, and handoffs
 - Add deadlines, cancellation, retry policy, and bounded backoff semantics
+- Treat time as a first-class semantic dimension covering TTLs, expirations, schedules, rollout windows, cache staleness, and delegated-capability expiry
 - Add degraded-mode and operator-handoff semantics for partial failure
 - Add supervisor trees, restart strategies, and mailbox-style coordination where needed
 - Add supervised module hot-swap and self-update semantics with dual-version upgrade windows and explicit state-upgrade handlers
+- Add deterministic simulation and dry-run support for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures and simulated time
 
 Exit criteria:
 
@@ -190,6 +203,7 @@ Exit criteria:
 - Add a constrained dynamic-schema facility for runtime-selected output shapes
 - Add prompt-injection-resistant separation between content, tool authority, and policy
 - Add secret-redaction and provenance rules for prompts, traces, and tool calls
+- Add secret-aware prompt and tool-input surfaces that consume declared secret handles rather than raw ambient strings
 - Preserve clean interoperability with systems like `BAML` while making the core model native to `Clasp`
 - Extend interoperability beyond AI-specific systems so higher-level `Clasp` programs can consume `npm`, `PyPI`, and `Cargo` ecosystems through compiler-managed foreign package surfaces rather than bespoke runtime glue
 

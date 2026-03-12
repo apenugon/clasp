@@ -10,20 +10,20 @@ Lanes in this wave:
 
 - `01-swarm-infra`: Swarm Infrastructure (8 tasks)
 - `02-core-language`: Core Language Surface (19 tasks)
-- `03-type-system`: Type System And Diagnostics (16 tasks)
-- `04-schemas`: Schemas And Trust Boundaries (17 tasks)
-- `05-full-stack`: Full-Stack Runtime And App Layer (23 tasks)
-- `06-control-plane`: Control Plane (13 tasks)
-- `07-workflows`: Durable Workflows And Hot Swap (13 tasks)
-- `08-ai-platform`: AI-Native Platform (13 tasks)
+- `03-type-system`: Type System And Diagnostics (17 tasks)
+- `04-schemas`: Schemas And Trust Boundaries (21 tasks)
+- `05-full-stack`: Full-Stack Runtime And App Layer (24 tasks)
+- `06-control-plane`: Control Plane (18 tasks)
+- `07-workflows`: Durable Workflows And Hot Swap (16 tasks)
+- `08-ai-platform`: AI-Native Platform (15 tasks)
 - `09-external-objectives`: External-Objective Adaptation (7 tasks)
-- `10-benchmarks`: Benchmark Program (27 tasks)
+- `10-benchmarks`: Benchmark Program (30 tasks)
 - `11-saas-dogfood`: SaaS Dogfooding (10 tasks)
 - `12-self-hosting`: Self-Hosting (10 tasks)
 - `13-native-backend`: Native Backend And Bytecode (9 tasks)
 - `14-sqlite`: SQLite Storage (10 tasks)
 
-Total tasks: 195
+Total tasks: 214
 
 Regenerate with:
 

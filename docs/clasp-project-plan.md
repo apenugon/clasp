@@ -155,6 +155,7 @@ Exit criteria:
 - invariant or constrained-value checks can be declared once and enforced automatically at boundaries
 - protected values can carry data classification or disclosure constraints rather than being treated as ordinary fields
 - provenance and secret-aware handling begin to exist
+- typed audit events and durable audit envelopes begin to exist
 
 ### M4: Control Plane in Clasp
 
@@ -168,6 +169,7 @@ Exit criteria:
 - runtime policy enforcement is generated from the same source of truth
 - static context-graph queries can resolve relevant declarations, capabilities, and policy gates
 - app-facing authorization proofs and policy decisions are traceable through the same semantic model rather than hidden in framework middleware
+- audit events, redaction policy, and audit-log sink routing are compiler-known rather than handwritten host logging conventions
 
 ### M5: Durable Self-Updating Workflows
 
@@ -355,6 +357,7 @@ Critical path:
 - `TY-014` Add semantic edit and refactor operations over compiler-known declarations and schemas.
 - `TY-015` Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization.
 - `TY-016` Add boundary-only `Dynamic` or `Unknown` foreign values with explicit unsafe refinement and blame-carrying diagnostics.
+- `TY-017` Add a compiler-emitted proof and assumption ledger that classifies facts as statically proved, runtime-checked, foreign-trusted, unsafe-assumed, or unresolved.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -375,6 +378,10 @@ Critical path:
 - `SC-015` Add transport-neutral schema projections with stable field identity and schema fingerprints.
 - `SC-016` Add generated binary boundary codecs from schemas for efficient service, worker, and agent-to-agent transport.
 - `SC-017` Add field-level data classifications and disclosure rules tied to schemas, policies, and projections.
+- `SC-018` Add compiler-known secret declarations plus typed injection surfaces for environment variables and host secret providers.
+- `SC-019` Add non-loggable, non-serializable secret value semantics with explicit reveal or redaction boundaries and provenance-aware diagnostics.
+- `SC-020` Add typed audit event schemas and standard audit envelopes carrying actor, resource, action, timestamp, and provenance metadata.
+- `SC-021` Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation chains.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
@@ -401,6 +408,7 @@ Critical path:
 - `FS-021` Add compiler-managed `Python` package and module interop through typed worker or service boundaries with generated schema bindings and lifecycle control.
 - `FS-022` Add compiler-managed `Rust` crate and native-library interop with generated bindings, capability metadata, and target-aware build integration.
 - `FS-023` Add static foreign-signature compatibility checks and explicit unsafe interop for `any`, untyped, or opaque package values.
+- `FS-024` Add app-facing secret-consumption surfaces for routes, tools, workflows, and providers that require declared secret handles instead of ambient host reads.
 
 ### Track 5: Control Plane Declarations
 
@@ -417,6 +425,11 @@ Critical path:
 - `CP-011` Add approval and sandbox policy surfaces as typed configuration, not shell convention.
 - `CP-012` Build one repo-level Clasp control-plane demo that drives a real agent loop.
 - `CP-013` Emit a queryable context graph and expose a stable machine protocol plus CLI/API adapters for agents and tools.
+- `CP-014` Add secret-access audit traces and missing-secret diagnostics tied to declared secret inputs, policies, and consuming boundaries.
+- `CP-015` Add first-class audit-log declarations, sink routing, retention rules, and redaction policy for compiler-owned audit output.
+- `CP-016` Add delegation-aware secret audit traces that preserve delegator, attenuation policy, and consuming-boundary provenance.
+- `CP-017` Add compiler-known environment and deployment declarations for services, queues, schedules, regions, secrets, budgets, rollout targets, and topology constraints with host deploy projections.
+- `CP-018` Add counterfactual impact preview queries that show affected surfaces, broken proofs, policy or migration consequences, rollout effects, and new runtime checks before edits land.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -433,6 +446,9 @@ Critical path:
 - `WF-011` Add mailbox or message-queue semantics for long-running workflow processes.
 - `WF-012` Add health-gated upgrade activation and rollback triggers.
 - `WF-013` Build a demo workflow that survives restart and controlled module replacement under supervision.
+- `WF-014` Add typed workflow audit events for transitions, retries, operator handoffs, upgrades, and rollbacks.
+- `WF-015` Add first-class temporal semantics for deadlines, TTLs, expirations, schedules, rollout windows, cache staleness, and delegated-capability expiry with simulated-time support.
+- `WF-016` Add deterministic simulation and dry-run mode for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures, simulated time, traces, and audit output.
 
 ### Track 7: AI-Native Platform
 
@@ -449,6 +465,8 @@ Critical path:
 - `AI-011` Build one real Clasp agent app using typed tools and structured outputs.
 - `AI-012` Add interoperability shims for systems like `BAML` where that lowers adoption friction.
 - `AI-013` Add source-to-AIR and prompt-or-plan-to-AIR projection hooks for higher-level agent builders.
+- `AI-014` Add secret-aware prompt and tool-input surfaces that consume declared secret handles instead of raw ambient strings.
+- `AI-015` Add delegated secret-handle passing for agent, tool, and workflow handoffs without exposing raw secret values.
 
 ### Track 8: External-Objective Adaptation
 
@@ -489,6 +507,9 @@ Critical path:
 - `BM-025` Add interop-boundary benchmarks that measure unsafe-refinement friction and root-cause blame quality for unexpected foreign values.
 - `BM-026` Add a publication-grade fairness protocol with frozen benchmark bundles, randomized run order, repeated samples, and phase-decomposed reporting across benchmark modes.
 - `BM-027` Add an `Oracle` benchmark mode that names the exact analogous edit surfaces so language and edit-model effects can be measured separately from repo discovery.
+- `BM-028` Add secret-handling benchmarks proving redaction, policy-gated secret access, and root-cause blame quality for missing or misused declared secrets.
+- `BM-029` Add audit-log benchmarks proving typed audit events, redaction policy, retention rules, and root-cause traceability across routes, tools, workflows, and secret access.
+- `BM-030` Add delegated-secret benchmarks proving attenuation, delegation-chain auditability, and misuse containment without exposing raw secret values.
 
 ### Track 10: SaaS Dogfooding
 
