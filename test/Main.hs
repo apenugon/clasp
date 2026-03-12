@@ -2018,6 +2018,22 @@ compileTests =
           "expected browser shell to preserve stable GET history across create and review flows"
           "{\"history\":[\"https://app.example.test/\",\"https://app.example.test/inbox\",\"https://app.example.test/lead/primary\"],\"fetches\":[{\"method\":\"POST\",\"pathname\":\"/leads\"},{\"method\":\"GET\",\"pathname\":\"/inbox\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"},{\"method\":\"POST\",\"pathname\":\"/review\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"},{\"method\":\"GET\",\"pathname\":\"/inbox\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"}],\"afterCreate\":\"https://app.example.test/\",\"afterReview\":\"https://app.example.test/lead/primary\",\"afterRefresh\":\"https://app.example.test/lead/primary\",\"afterBack\":\"https://app.example.test/inbox\",\"afterForward\":\"https://app.example.test/lead/primary\",\"title\":\"Primary lead\",\"html\":\"<main><h1>Primary lead</h1></main>\"}"
           shellOutput
+    , testCase "lead app mobile demo reuses compiled route logic through the native bridge" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-mobile.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "mobile-demo.mjs")
+            runtimeOutput <- runNodeScript (leadAppMobileDemoScript absoluteCompiledPath absoluteDemoPath)
+            assertEqual
+              "expected mobile demo to project shared lead flows into a stable native model"
+              "{\"platform\":\"react-native\",\"landingTitle\":\"Lead inbox\",\"landingFormAction\":\"/leads\",\"landingFieldNames\":[\"company\",\"contact\",\"budget\",\"segment\"],\"createdTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: new\",\"Add an internal note before handing this lead off.\",\"Review note\",\"Back to inbox\"],\"reviewedTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: reviewed\",\"Ready for field pilot\",\"Review note\",\"Back to inbox\"]}"
+              runtimeOutput
     , testCase "lead inbox app emits machine-readable ui, navigation, and action graphs" $ do
         result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
         case result of
@@ -3258,6 +3274,14 @@ leadAppBrowserShellScript shellPath =
     , "  html: document.body.innerHTML"
     , "}));"
     , ""
+    ]
+
+leadAppMobileDemoScript :: FilePath -> FilePath -> Text
+leadAppMobileDemoScript compiledPath demoPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { renderLeadMobileDemo } from " <> show ("file://" <> demoPath) <> ";"
+    , "console.log(JSON.stringify(await renderLeadMobileDemo(compiledModule)));"
     ]
 
 routeClientJsonRuntimeScript :: FilePath -> Text

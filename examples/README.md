@@ -17,6 +17,7 @@ This directory has two kinds of examples:
 ## Richer Examples
 
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
+- [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage boundaries
 - [release-gate/Main.clasp](/home/akul/DevProjects/synthspeak/examples/release-gate/Main.clasp): release review pages, typed redirects, audit envelopes with auth and resource identity primitives, and a provider-backed decision boundary
 
@@ -44,4 +45,10 @@ Run the browser demo:
 
 ```sh
 bun examples/lead-app/server.mjs
+```
+
+Project the same app into a mobile-friendly model after compiling `Main.clasp` to `Main.js`:
+
+```sh
+node examples/lead-app/mobile-demo.mjs examples/lead-app/Main.js
 ```
