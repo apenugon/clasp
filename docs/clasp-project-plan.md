@@ -358,6 +358,11 @@ Critical path:
 - `TY-015` Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization.
 - `TY-016` Add boundary-only `Dynamic` or `Unknown` foreign values with explicit unsafe refinement and blame-carrying diagnostics.
 - `TY-017` Add a compiler-emitted proof and assumption ledger that classifies facts as statically proved, runtime-checked, foreign-trusted, unsafe-assumed, or unresolved.
+- `TY-018` Add proof-preserving semantic propagation and autofix planning for compiler-known declarations so routine cross-stack changes can be proposed or applied from semantic intent rather than file hunts.
+- `TY-019` Add staged checking tiers that separate fast local or interface checks, affected-surface semantic verification, and full repository verification.
+- `TY-020` Add obligation-discharge guidance so unresolved proofs, unsafe boundaries, and refinement failures report the concrete missing evidence, legal refinement options, and remaining human or agent choice points.
+- `TY-021` Add transactional semantic edits with preview, atomic apply, and semantic rollback support for compiler-known change plans.
+- `TY-022` Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -382,6 +387,7 @@ Critical path:
 - `SC-019` Add non-loggable, non-serializable secret value semantics with explicit reveal or redaction boundaries and provenance-aware diagnostics.
 - `SC-020` Add typed audit event schemas and standard audit envelopes carrying actor, resource, action, timestamp, and provenance metadata.
 - `SC-021` Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation chains.
+- `SC-022` Add unsafe-quarantine and taint-propagation semantics so foreign-trusted, dynamic, or unresolved values remain explicitly marked until they pass a proved or checked refinement boundary.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
@@ -430,6 +436,13 @@ Critical path:
 - `CP-016` Add delegation-aware secret audit traces that preserve delegator, attenuation policy, and consuming-boundary provenance.
 - `CP-017` Add compiler-known environment and deployment declarations for services, queues, schedules, regions, secrets, budgets, rollout targets, and topology constraints with host deploy projections.
 - `CP-018` Add counterfactual impact preview queries that show affected surfaces, broken proofs, policy or migration consequences, rollout effects, and new runtime checks before edits land.
+- `CP-019` Add minimal valid context-pack synthesis for goals, failures, and candidate changes so agents can request the smallest sound semantic neighborhood instead of searching the full repo.
+- `CP-020` Add affected-surface verification planning that maps a candidate change to the exact tests, evals, simulations, proofs, policies, migrations, and rollout gates that should run first.
+- `CP-021` Add graph-bound semantic memory with automatic invalidation so stored agent guidance expires or requests refresh when the declarations, policies, workflows, or routes it depends on change.
+- `CP-022` Add semantic ownership and lease primitives so parallel agents can coordinate bounded responsibility over declarations, routes, workflows, policies, and rollout surfaces.
+- `CP-023` Add cheapest-valid-path planning queries that suggest the smallest legal semantic change plan and cheapest sufficient verification plan for a requested objective.
+- `CP-024` Add interference and commutativity analysis for candidate changes and parallel workstreams so the compiler can decide when plans can proceed independently and when they must serialize.
+- `CP-025` Add trusted computing base reporting for proofs, simulations, deploy projections, and verification results so remaining compiler, runtime, foreign, host, and snapshot assumptions stay explicit.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -449,6 +462,7 @@ Critical path:
 - `WF-014` Add typed workflow audit events for transitions, retries, operator handoffs, upgrades, and rollbacks.
 - `WF-015` Add first-class temporal semantics for deadlines, TTLs, expirations, schedules, rollout windows, cache staleness, and delegated-capability expiry with simulated-time support.
 - `WF-016` Add deterministic simulation and dry-run mode for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures, simulated time, traces, and audit output.
+- `WF-017` Add world snapshots that capture relevant fixtures, storage slices, environment or deployment state, provider responses, and simulated time so replay and simulation stay trustworthy.
 
 ### Track 7: AI-Native Platform
 
@@ -510,6 +524,10 @@ Critical path:
 - `BM-028` Add secret-handling benchmarks proving redaction, policy-gated secret access, and root-cause blame quality for missing or misused declared secrets.
 - `BM-029` Add audit-log benchmarks proving typed audit events, redaction policy, retention rules, and root-cause traceability across routes, tools, workflows, and secret access.
 - `BM-030` Add delegated-secret benchmarks proving attenuation, delegation-chain auditability, and misuse containment without exposing raw secret values.
+- `BM-031` Add agent-efficiency benchmarks measuring minimal-context-pack quality, affected-surface verification selectivity, and staged-check latency against full-repo baselines.
+- `BM-032` Add trust-and-autofix benchmarks proving unsafe-quarantine containment, proof-ledger clarity, and proof-preserving propagation or autofix quality on cross-stack product changes.
+- `BM-033` Add agent-planning benchmarks measuring obligation-discharge guidance quality, semantic-memory freshness, parallel-agent lease coordination, transactional-edit rollback behavior, and cheapest-valid-path planning efficiency.
+- `BM-034` Add caching-and-trust benchmarks measuring semantic proof or result cache reuse, world-snapshot fidelity, interference-analysis quality, and trusted-computing-base reporting clarity across repeated agent tasks.
 
 ### Track 10: SaaS Dogfooding
 
@@ -591,23 +609,30 @@ Reason:
 
 Dispatch after Wave 2:
 
-- `CP-001` through `CP-009`
+- `CP-001` through `CP-013`
+- `TY-017` through `TY-022`
+- `SC-022`
 - `BM-006`
+- `BM-031`
+- `BM-032`
+- `BM-033`
+- `BM-034`
 
 Reason:
 
-- the language thesis now explicitly includes agent memory, permissions, tool contracts, and verifier rules
+- the language thesis now explicitly includes agent memory, permissions, tool contracts, verifier rules, proof ledgers, semantic propagation, selective verification, and the machinery that keeps agent reasoning bounded and cheap
 
 ### Wave 4: Durable Self-Updating Agents
 
 Dispatch after Wave 3:
 
-- `WF-001` through `WF-013`
+- `WF-001` through `WF-017`
+- `CP-019` through `CP-025`
 - `BM-007`, `BM-008`
 
 Reason:
 
-- hot-swap and self-update are only meaningful once workflows and control-plane semantics exist
+- hot-swap, simulation, temporal semantics, world snapshots, context-pack synthesis, and cheapest-valid-path planning are only meaningful once workflows and control-plane semantics exist
 
 ### Wave 5: AI-Native Platform and Objective Loops
 
@@ -621,16 +646,18 @@ Reason:
 
 - this is where Clasp either proves the broader thesis or collapses into being "just another typed language"
 
-### Wave 6: Dogfood The Actual App
+### Wave 6: Dogfood The Actual App And Environment Model
 
 Dispatch after Wave 5:
 
+- `CP-017`
+- `CP-018`
 - `SA-001` through `SA-010`
 - `BM-012`
 
 Reason:
 
-- the benchmark that matters most is whether agents can build and evolve a real product in Clasp faster than in a baseline stack
+- the benchmark that matters most is whether agents can build and evolve a real product in Clasp faster than in a baseline stack, with compiler-known deployment and impact-preview surfaces available before the native/backend tail
 
 ### Wave 7: Hosted Self-Hosting
 

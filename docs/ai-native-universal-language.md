@@ -342,6 +342,19 @@ That ledger should be queryable through the same context, AIR, and diagnostics s
 The goal is not only stronger formalism.
 The goal is making remaining uncertainty explicit so an agent can plan around it instead of rediscovering it through runtime failures and repository archaeology.
 
+### Obligation discharge guidance should be compiler-emitted
+
+When something remains unresolved, the compiler should not stop at "missing proof" or "unsafe boundary."
+
+It should eventually explain:
+
+- which specific fact would discharge the obligation
+- which legal refinement or policy choice points are available
+- which evidence can be generated automatically
+- which parts still require human or agent judgment
+
+That turns unresolved obligations into bounded choices instead of open-ended debugging work.
+
 ### Refinement and constrained value types
 
 Shared schemas are necessary, but not sufficient for application correctness.
@@ -915,6 +928,62 @@ That is much stronger than simple "find references."
 
 It is a compiler-owned counterfactual preview over the semantic graph of the system.
 
+### Interference and commutativity analysis should be built in
+
+When multiple candidate changes or multiple agents act in parallel, the compiler should eventually be able to answer:
+
+- do these changes commute?
+- do they conflict semantically?
+- can they be verified independently?
+- do they share proof obligations, rollout surfaces, or policy consequences that force serialization?
+
+This lets the platform coordinate parallel work semantically instead of only at the text or file level.
+
+### Minimal valid context packs should be compiler-synthesized
+
+Agents should not have to reconstruct the right context window by hand.
+
+Given a goal, runtime failure, policy violation, or requested change, the compiler should eventually be able to emit the smallest sound semantic neighborhood needed to act safely.
+
+That context pack should include only the relevant:
+
+- declarations
+- schemas
+- routes and pages
+- workflows
+- policies and capabilities
+- tests, evals, simulations, and rollout gates
+- proof obligations and unsafe assumptions
+
+This is one of the clearest ways to save tokens without sacrificing correctness.
+The language wins when it prevents unnecessary reasoning work, not merely when it makes that work slightly nicer.
+
+### Semantic memory should be graph-bound and self-invalidating
+
+Agents should be able to rely on repository memory, but that memory should not drift silently.
+
+The stronger model is:
+
+- memory attaches to stable semantic graph identities
+- memory entries declare what declarations, policies, workflows, or routes they depend on
+- memory invalidates or requests refresh automatically when those dependencies change
+
+That prevents wasted reasoning on stale context while still letting agents reuse prior conclusions safely.
+
+### Parallel-agent ownership should be first-class
+
+If multiple agents are editing the same system, they should not coordinate only through convention and luck.
+
+The platform should eventually support semantic ownership or lease declarations over things like:
+
+- declarations
+- routes and pages
+- workflows
+- policies
+- rollout plans
+
+That lets the system coordinate parallel work at the semantic level instead of only at the file level, reducing duplicate work and merge churn.
+
 ### Context graph layers
 
 `Clasp` should eventually emit at least three related graph layers:
@@ -1056,6 +1125,20 @@ That mode should run against declared fixtures, simulated time, and compiler-kno
 
 This gives agents a way to ask "what will happen?" before making irreversible changes or calling live systems.
 
+### World snapshots should make replay and simulation trustworthy
+
+Dry-run and simulation become much more valuable when they can capture the relevant external world, not only in-memory program state.
+
+`Clasp` should eventually support world snapshots that can include:
+
+- declared fixtures
+- database or storage slices
+- environment and deployment state
+- provider or tool responses
+- simulated time and temporal budgets
+
+That makes replay, counterfactual preview, and bounded dry-run much more trustworthy because the compiler and runtime can say what outside-world assumptions the result depended on.
+
 ### Tooling products should consume first-class artifacts
 
 Products like a playground, prompt inspector, eval runner, or trace browser should be official and excellent, but they do not need to be part of the semantic core.
@@ -1175,6 +1258,19 @@ The language should support multiple layers of verification:
 
 Where it materially improves product-level guarantees, the platform should also leave room for solver-backed invariant checking rather than limiting itself to syntax-directed type rules alone.
 
+### Unsafe regions should stay quarantined
+
+Unsafe or foreign-trusted values should not silently become ordinary trusted values once they pass through one expression.
+
+The system should preserve explicit quarantine or taint semantics across the graph so that:
+
+- unsafe assumptions remain visible downstream
+- the compiler can distinguish fully proved surfaces from merely tolerated ones
+- runtime blame can point back to the original foreign or unsafe boundary
+- agents can decide whether they are editing a safe region or one that still depends on unresolved trust
+
+This matters especially for foreign package interop, dynamic values, manual refinements, and privileged authority boundaries.
+
 ### 16. Capability-based security
 
 This matters even more for agent systems than normal applications.
@@ -1269,6 +1365,20 @@ Where possible, the toolchain should also preserve provenance for:
 - prompt, model, and eval versions
 - policy and capability versions
 
+### Trusted computing base reporting should stay explicit
+
+When the compiler says something is proved, validated, or simulated, it should also say what still had to be trusted.
+
+That trusted computing base may include:
+
+- the compiler and emitter
+- the runtime and host adapter layer
+- foreign declarations
+- secret and deployment providers
+- simulation or snapshot assumptions
+
+This keeps the guarantee story honest and helps agents understand where the remaining risk actually lives.
+
 ## Tooling Optimized for AI
 
 ### 19. Machine-readable everything
@@ -1286,6 +1396,9 @@ The compiler and tooling should expose:
 - Projection manifests for docs, CLIs, hooks, and tool integrations
 - Semantic diffs
 - Refactoring APIs
+- Assumption and proof ledgers
+- Minimal valid context packs
+- Affected-surface verification plans
 
 AI systems should work against the semantic model of the codebase, not scrape error strings.
 
@@ -1311,6 +1424,66 @@ If the language is meant for iterative AI-human collaboration, the feedback loop
 - Fast tests
 - Fast eval runs
 - Fast local preview for frontend/mobile changes
+
+Speed is not only about faster parsing or code generation.
+
+The compiler should also support staged checking tiers such as:
+
+- very fast local and interface checks
+- affected-surface semantic checks over only the tests, proofs, policies, and sims that a change can actually invalidate
+- slower full-repository verification when needed
+
+That lets agents spend tokens and wall-clock time only where the system has evidence that more reasoning is necessary.
+
+### Proof and result caching should be semantic, not ad hoc
+
+The compiler should eventually cache proofs, simulations, affected-surface plans, and verification results by:
+
+- semantic graph identity
+- compiler and dependency version
+- relevant environment or world snapshot
+- policy and capability version where it matters
+
+That prevents both the compiler and the agent from re-deriving the same fact over and over when nothing semantically relevant has changed.
+
+### Proof-preserving propagation and autofix
+
+For many product changes, the compiler should eventually do more than point at impacted files.
+
+It should be able to synthesize a propagation or autofix plan that preserves known proofs and constraints where possible.
+
+Examples:
+
+- add a field to a shared contract and propagate the corresponding page, route, and boundary changes
+- rename a declaration and preserve all dependent schemas, routes, and generated artifacts
+- surface the exact points where automatic propagation stops because new human or agent judgment is required
+
+This is one of the most direct ways to reduce wasted agent reasoning on routine cross-stack changes.
+
+### Transactional semantic edits
+
+Semantic edits should not behave like fragile text mutations applied directly to the repository.
+
+They should eventually support transactional semantics:
+
+- stage a semantic change as one unit
+- preview its proof, policy, and verification impact
+- apply it atomically where possible
+- roll it back cleanly if downstream checks fail
+
+This makes agents much less defensive during routine change work because the system can provide reversible, semantically coherent edit units.
+
+### Cheapest valid path planning
+
+Given a goal, the compiler should eventually be able to suggest the smallest legal change plan and the cheapest sufficient verification plan.
+
+That means answering questions like:
+
+- what is the smallest semantic change that satisfies the request?
+- what is the least verification needed before proceeding?
+- what assumptions would still remain after that cheapest path?
+
+This is one of the cleanest ways to minimize both tokens and wall-clock time without weakening correctness.
 
 ## Additional Attributes Worth Adding
 

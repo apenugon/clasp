@@ -95,6 +95,11 @@ Exit criteria:
 - Add semantic edit and refactor operations over compiler-known declarations rather than relying only on raw text patching
 - Make a machine-native compiler protocol the primary tooling surface, with CLI and editor adapters built on top
 - Add a first-class proof and assumption ledger so the compiler can report what is statically proved, runtime-checked, foreign-trusted, unsafe-assumed, or still unresolved
+- Add proof-preserving semantic propagation and autofix planning for compiler-known declarations so routine cross-stack changes stop depending on manual file hunting
+- Add staged checking tiers so local/interface checks, affected-surface verification, and full verification can run at different costs and latencies
+- Add obligation discharge guidance so unresolved proofs and unsafe boundaries come with concrete refinement options, missing evidence, and bounded choice points
+- Add transactional semantic edits so compiler-known changes can be previewed, applied atomically, and rolled back coherently when downstream verification fails
+- Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily
 
 Exit criteria:
 
@@ -142,6 +147,7 @@ Exit criteria:
 - Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation
 - Add typed audit event schemas and standard audit envelopes for boundary decisions, data disclosures, tool calls, and state changes
 - Start separating untrusted content from authority-bearing instructions and capabilities
+- Keep unsafe, foreign-trusted, and unresolved values quarantined so trust and blame remain explicit through downstream use sites
 - Start designing versioned state handoff for future hot swapping
 
 Exit criteria:
@@ -163,6 +169,13 @@ Exit criteria:
 - Make audit trails and policy decisions part of standard trace output
 - Add compiler-known environment and deployment declarations for services, queues, schedules, regions, secrets, budgets, rollout targets, and topology constraints, then project them into host deploy artifacts instead of ambient config
 - Add counterfactual impact preview queries so agents can ask what declarations, proofs, policies, migrations, rollouts, and runtime checks would change before editing
+- Add interference and commutativity analysis so the compiler can decide when parallel change plans can proceed independently and when they must serialize
+- Add minimal valid context-pack synthesis so the compiler can produce the smallest sound semantic neighborhood for a change, failure, or objective instead of forcing repository-wide search
+- Add affected-surface verification planning so only the tests, sims, evals, proofs, and rollout gates that a change can actually invalidate are run in the fast path
+- Add graph-bound semantic memory with automatic invalidation when the declarations, policies, or workflows it depends on change
+- Add semantic ownership or lease primitives so parallel agents can coordinate responsibility over declarations, workflows, policies, and rollout surfaces
+- Add cheapest-valid-path planning so the compiler can suggest the smallest legal change plan and cheapest sufficient verification path for a requested objective
+- Add trusted computing base reporting so proofs, simulations, and deploy projections state exactly which compiler, runtime, host, foreign, or snapshot assumptions still had to be trusted
 
 Exit criteria:
 
@@ -184,6 +197,7 @@ Exit criteria:
 - Add supervisor trees, restart strategies, and mailbox-style coordination where needed
 - Add supervised module hot-swap and self-update semantics with dual-version upgrade windows and explicit state-upgrade handlers
 - Add deterministic simulation and dry-run support for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures and simulated time
+- Add world snapshots that capture the relevant external state for replay, simulation, and counterfactual preview instead of relying only on in-memory fixtures
 
 Exit criteria:
 
