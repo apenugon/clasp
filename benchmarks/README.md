@@ -22,6 +22,8 @@ Each task includes:
 
 The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task, and `bash benchmarks/test-task-prep.sh` now enforces that the pristine prepared workspaces do not already pass.
 
+For the Clasp `lead-segment` task, the prep check also guards the intended mutation surface: swapping in the completed app schema file from `../examples/lead-app/Shared/Lead.clasp` must be enough to reach green without editing the benchmark-only `server.mjs` wrapper or `test/lead-app.test.mjs` scaffold.
+
 The repo distinction matters:
 
 - `examples/lead-app` and `examples/lead-app-ts` are canonical runnable baselines for the clickable lead-inbox slice

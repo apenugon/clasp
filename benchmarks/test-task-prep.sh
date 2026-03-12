@@ -42,17 +42,44 @@ assert_not_contains() {
   fi
 }
 
+assert_files_match() {
+  local left="$1"
+  local right="$2"
+
+  if ! cmp -s "$left" "$right"; then
+    echo "expected $left to match $right" >&2
+    return 1
+  fi
+}
+
+check_product_only_clasp_solution() {
+  local task_id="clasp-lead-segment"
+  local workspace="$workspace_root/$task_id-product-only"
+  local task_root="$project_root/benchmarks/tasks/$task_id/repo"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+
+  cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$workspace/Shared/Lead.clasp"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null
+
+  assert_files_match "$workspace/server.mjs" "$task_root/server.mjs"
+  assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+}
+
 check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'import { createServer } from "../server.mjs";'
-assert_contains "$clasp_workspace/server.mjs" "export function createServer(bindings = {}, options = {})"
-assert_not_contains "$clasp_workspace/test/lead-app.test.mjs" "storeLead(intake, summary)"
+assert_contains "$clasp_workspace/server.mjs" "compiled.__claspAdaptHostBindings({"
+assert_contains "$clasp_workspace/server.mjs" 'segment: toWireSegment(summary.segment) ?? toWireSegment(intake.segment) ?? "startup"'
+assert_contains "$clasp_workspace/server.mjs" "const segment = toWireSegment(lead.segment);"
 assert_not_contains "$clasp_workspace/Shared/Lead.clasp" "LeadSegment"
-assert_not_contains "$clasp_workspace/server.mjs" "segment:"
 
 ts_workspace="$workspace_root/ts-lead-segment"
 assert_contains "$ts_workspace/test/lead-app.test.mjs" 'import { createServer } from "../dist/server/main.js";'
 assert_not_contains "$ts_workspace/src/shared/lead.ts" "LeadSegment"
 assert_not_contains "$ts_workspace/src/server/main.ts" "segment:"
+
+check_product_only_clasp_solution

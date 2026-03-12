@@ -2,32 +2,51 @@ import { pathToFileURL } from "node:url";
 import * as compiled from "./build/Main.js";
 import { installRuntime, serveCompiledModule } from "./runtime/server.mjs";
 
+function createSeedLead(overrides = {}) {
+  return {
+    leadId: "lead-1",
+    company: "Acme Labs",
+    contact: "Jordan Kim",
+    summary: "Acme Labs is exploring an internal AI pilot for support operations.",
+    priority: "high",
+    segment: "enterprise",
+    followUpRequired: true,
+    reviewStatus: "new",
+    reviewNote: "",
+    ...overrides
+  };
+}
+
 function createSeedLeads() {
   return [
-    {
+    createSeedLead({
       leadId: "lead-2",
       company: "Northwind Studio",
       contact: "Morgan Lee",
       summary: "Northwind Studio is ready for a design-system migration this quarter.",
       priority: "medium",
+      segment: "growth",
       followUpRequired: true,
       reviewStatus: "reviewed",
       reviewNote: "Confirmed budget window and asked for a migration timeline."
-    },
-    {
-      leadId: "lead-1",
-      company: "Acme Labs",
-      contact: "Jordan Kim",
-      summary: "Acme Labs is exploring an internal AI pilot for support operations.",
-      priority: "high",
-      followUpRequired: true,
-      reviewStatus: "new",
-      reviewNote: ""
-    }
+    }),
+    createSeedLead()
   ];
 }
 
 function toWirePriority(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
+function toWireSegment(value) {
   if (typeof value === "string") {
     return value;
   }
@@ -46,6 +65,7 @@ function defaultMockLeadSummaryModel(intake) {
   return JSON.stringify({
     summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,
     priority: priority.toLowerCase(),
+    segment: toWireSegment(intake.segment) ?? "startup",
     followUpRequired: intake.budget >= 20000
   });
 }
@@ -53,7 +73,7 @@ function defaultMockLeadSummaryModel(intake) {
 function createBindings({ mockLeadSummaryModel = defaultMockLeadSummaryModel } = {}) {
   const leads = createSeedLeads();
 
-  return {
+  return compiled.__claspAdaptHostBindings({
     mockLeadSummaryModel,
     storeLead(intake, summary) {
       const lead = {
@@ -61,7 +81,8 @@ function createBindings({ mockLeadSummaryModel = defaultMockLeadSummaryModel } =
         company: intake.company,
         contact: intake.contact,
         summary: summary.summary,
-        priority: toWirePriority(summary.priority),
+        priority: toWirePriority(summary.priority) ?? "low",
+        segment: toWireSegment(summary.segment) ?? toWireSegment(intake.segment) ?? "startup",
         followUpRequired: summary.followUpRequired,
         reviewStatus: "new",
         reviewNote: ""
@@ -94,7 +115,7 @@ function createBindings({ mockLeadSummaryModel = defaultMockLeadSummaryModel } =
       lead.reviewNote = review.note;
       return JSON.stringify(lead);
     }
-  };
+  });
 }
 
 export function createServer(bindings = {}, options = {}) {
@@ -103,7 +124,14 @@ export function createServer(bindings = {}, options = {}) {
 }
 
 function leadLabel(lead) {
-  return `${lead.company} (${lead.priority.toLowerCase()})`;
+  const detail = [toWirePriority(lead.priority) ?? "low"];
+  const segment = toWireSegment(lead.segment);
+
+  if (segment) {
+    detail.push(segment);
+  }
+
+  return `${lead.company} (${detail.join(", ")})`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
