@@ -461,9 +461,11 @@ integrate_task_branch() {
   local base_head
   local old_trunk
   local task_head
+  local merge_lock_fd
+  local status=0
 
-  exec 8>"$merge_lock_file"
-  flock 8
+  exec {merge_lock_fd}>"$merge_lock_file"
+  flock "$merge_lock_fd"
 
   {
     ensure_trunk_branch
@@ -490,7 +492,10 @@ integrate_task_branch() {
     git -C "$project_root" merge --ff-only "$task_head"
     git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
     printf '%s\n' "$(git -C "$project_root" rev-parse "$main_branch")"
-  } >"$integration_log" 2>&1
+  } >"$integration_log" 2>&1 || status=$?
+
+  exec {merge_lock_fd}>&-
+  return "$status"
 }
 
 ensure_trunk_branch() {
@@ -501,14 +506,19 @@ ensure_trunk_branch() {
 
 sync_trunk_with_main() {
   local sync_log="${1:-/dev/null}"
+  local merge_lock_fd
+  local status=0
 
-  exec 8>"$merge_lock_file"
-  flock 8
+  exec {merge_lock_fd}>"$merge_lock_file"
+  flock "$merge_lock_fd"
 
   {
     ensure_trunk_branch
     clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
-  } >>"$sync_log" 2>&1
+  } >>"$sync_log" 2>&1 || status=$?
+
+  exec {merge_lock_fd}>&-
+  return "$status"
 }
 
 exec 9>"$lock_file"
