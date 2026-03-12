@@ -665,7 +665,7 @@ emitRequestSchemaHelpers typeDecls recordDecls =
         TList itemType ->
           "{ kind: \"list\", item: " <> emitRequestSchemaRef itemType <> " }"
         TNamed name ->
-          if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+          if hasSchemaContractName typeDecls recordDecls name
             then "$claspSchema_" <> name
             else "null"
         TFunction _ _ ->
@@ -1172,7 +1172,7 @@ emitSchemaRegistryExport codecTypes typeDecls recordDecls =
         TList itemType ->
           isSchemaContractType itemType
         TNamed name ->
-          any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+          hasSchemaContractName typeDecls recordDecls name
         TFunction _ _ ->
           False
 
@@ -1254,7 +1254,7 @@ emitRouteRequestSchemaFor :: [TypeDecl] -> [RecordDecl] -> Text -> Text
 emitRouteRequestSchemaFor typeDecls recordDecls typeName
   | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
       "$claspSchema_" <> typeName
-  | any ((== typeName) . typeDeclName) typeDecls || any ((== typeName) . recordDeclName) recordDecls =
+  | hasSchemaContractName typeDecls recordDecls typeName =
       "$claspSchema_" <> typeName
   | otherwise =
       "null"
@@ -1441,11 +1441,16 @@ emitSchemaRef typeDecls recordDecls typ =
     TList itemType ->
       "{ kind: \"list\", item: " <> emitSchemaRef typeDecls recordDecls itemType <> " }"
     TNamed name ->
-      if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+      if hasSchemaContractName typeDecls recordDecls name
         then "$claspSchema_" <> name
         else "null"
     TFunction _ _ ->
       "null"
+
+hasSchemaContractName :: [TypeDecl] -> [RecordDecl] -> Text -> Bool
+hasSchemaContractName typeDecls recordDecls name =
+  any (\typeDecl -> typeDeclName typeDecl == name && isJsonEnumTypeDecl typeDecl) typeDecls
+    || any ((== name) . recordDeclName) recordDecls
 
 renderTypeName :: Type -> Text
 renderTypeName typ =

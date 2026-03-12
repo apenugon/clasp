@@ -1457,6 +1457,22 @@ compileTests =
             assertBool "expected decoded auth session" ("\"sessionId\":\"sess-1\"" `T.isInfixOf` encoded)
             assertBool "expected tenant id" ("\"tenantId\":\"tenant-1\"" `T.isInfixOf` encoded)
             assertBool "expected resource identity" ("\"resource\":\"lead:lead-1\"" `T.isInfixOf` encoded)
+    , testCase "generated auth identity contracts stay available across app runtimes" $
+        case compileSource "auth-runtime" authIdentitySource of
+          Left err ->
+            assertFailure ("expected auth identity compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/auth-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteServerRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteWorkerRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (authIdentityRuntimeScript absoluteCompiledPath absoluteServerRuntimePath absoluteWorkerRuntimePath)
+            assertEqual
+              "expected auth identity contract exports across server and worker runtimes"
+              "{\"contractVersion\":1,\"schemaNames\":[\"AuditEnvelope\",\"AuthSession\",\"Bool\",\"Int\",\"Principal\",\"ResourceIdentity\",\"Str\",\"Tenant\"],\"sessionSchemaKind\":\"record\",\"principalFieldType\":\"Principal\",\"tenantSeed\":\"seed\",\"workerSessionId\":\"sess-1\",\"workerPrincipalId\":\"user-1\",\"workerTenantId\":\"tenant-1\",\"workerResource\":\"lead:lead-1\"}"
+              runtimeOutput
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -3020,6 +3036,29 @@ workerJobRuntimeScript compiledPath runtimePath =
     , "  resultPriority: decoded.priority,"
     , "  resultFollowUpRequired: decoded.followUpRequired,"
     , "  invalid"
+    , "}));"
+    ]
+
+authIdentityRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+authIdentityRuntimeScript compiledPath serverRuntimePath workerRuntimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { bindingContractFor } from " <> show ("file://" <> serverRuntimePath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> workerRuntimePath) <> ";"
+    , "const contract = bindingContractFor(compiledModule);"
+    , "const workerRuntime = createWorkerRuntime(compiledModule);"
+    , "const authSession = workerRuntime.schema('AuthSession');"
+    , "const decodedAudit = workerRuntime.schema('AuditEnvelope').decodeJson(compiledModule.encodeAudit(compiledModule.defaultAudit));"
+    , "console.log(JSON.stringify({"
+    , "  contractVersion: contract.version,"
+    , "  schemaNames: Object.keys(contract.schemas).sort(),"
+    , "  sessionSchemaKind: contract.schemas.AuthSession?.schema?.kind ?? null,"
+    , "  principalFieldType: contract.schemas.AuthSession?.schema?.fields?.principal?.schema?.name ?? null,"
+    , "  tenantSeed: authSession.seed.tenant.id,"
+    , "  workerSessionId: decodedAudit.session.sessionId,"
+    , "  workerPrincipalId: decodedAudit.session.principal.id,"
+    , "  workerTenantId: decodedAudit.session.tenant.id,"
+    , "  workerResource: decodedAudit.resource.resourceType + ':' + decodedAudit.resource.resourceId"
     , "}));"
     ]
 
