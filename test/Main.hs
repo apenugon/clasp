@@ -316,6 +316,35 @@ parserTests =
                     assertFailure ("expected list literal body, got " <> show other)
               Nothing ->
                 assertFailure "expected roster declaration"
+    , testCase "parses local let expressions" $
+        case parseSource "inline" letExpressionSource of
+          Left err ->
+            assertFailure ("expected let expression source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "greeting" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ELet letSpan binderSpan "message" (EString _ "Ada") (EVar _ "message") -> do
+                    assertEqual "let starts on declaration line" 4 (positionLine (sourceSpanStart letSpan))
+                    assertEqual "binder line" 4 (positionLine (sourceSpanStart binderSpan))
+                  other ->
+                    assertFailure ("expected let expression body, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
+    , testCase "parses nested let expressions in match branches" $
+        case parseSource "inline" letInMatchSource of
+          Left err ->
+            assertFailure ("expected let-in-match source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "describe" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EMatch _ _ [MatchBranch _ (PConstructor _ "Busy" [PatternBinder "note" _]) (ELet _ _ "copy" (EVar _ "note") (EVar _ "copy"))] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected nested let expression inside match branch, got " <> show other)
+              Nothing ->
+                assertFailure "expected describe declaration"
     , testCase "parses the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case parseSource "examples/lists.clasp" source of
@@ -1842,6 +1871,28 @@ listJsonBoundarySource =
     , ""
     , "decodeUsers : Str -> [User]"
     , "decodeUsers raw = decode [User] raw"
+    ]
+
+letExpressionSource :: Text
+letExpressionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "greeting : Str"
+    , "greeting = let message = \"Ada\" in message"
+    ]
+
+letInMatchSource :: Text
+letInMatchSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Status = Busy Str"
+    , ""
+    , "describe : Status -> Str"
+    , "describe status = match status {"
+    , "  Busy note -> let copy = note in copy"
+    , "}"
     ]
 
 heterogeneousListSource :: Text

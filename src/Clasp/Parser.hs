@@ -379,13 +379,28 @@ declParser = do
     }
 
 exprParser :: Parser Expr
-exprParser = do
-  terms <- some termParser
+exprParser =
+  letExprParser <|> appExprParser
+
+appExprParser :: Parser Expr
+appExprParser = do
+  terms <- some (try termParser)
   case terms of
     firstTerm : remainingTerms ->
       pure (foldl applyExpr firstTerm remainingTerms)
     [] ->
       fail "expected at least one expression term"
+
+letExprParser :: Parser Expr
+letExprParser = do
+  start <- getSourcePos
+  keyword "let"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  value <- exprParser
+  keyword "in"
+  body <- exprParser
+  pure (ELet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body)
 
 termParser :: Parser Expr
 termParser = do
@@ -750,6 +765,8 @@ reservedWords :: [Text]
 reservedWords =
   [ "module"
   , "import"
+  , "let"
+  , "in"
   , "type"
   , "record"
   , "policy"

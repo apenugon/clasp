@@ -27,6 +27,7 @@ It includes:
 - Function definitions
 - Basic literals
 - Function application
+- Local `let` expressions
 - Field access
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
@@ -124,6 +125,15 @@ main : Str
 main = describe (makeBusy "loading")
 ```
 
+Local bindings are also available inside expressions:
+
+```clasp
+module Main
+
+greeting : Str
+greeting = let message = "Ada" in message
+```
+
 Records and field access are also part of the current `v0` surface:
 
 ```clasp
@@ -214,7 +224,8 @@ route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ide
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
-expr        ::= term term*
+expr        ::= let-expr | term term*
+let-expr    ::= "let" lower-ident "=" expr "in" expr
 term        ::= atom ("." lower-ident)*
 atom        ::= lower-ident
               | upper-ident
@@ -246,6 +257,7 @@ Notes:
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
+- `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 
 ## Semantics
