@@ -2106,6 +2106,9 @@ compileTests =
             assertBool "expected workflow handoff helper" ("handoff(run, operator, reason, options) { return $claspWorkflowHandoff(\"CounterFlow\", run, operator, reason, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow hot-swap compatibility metadata" ("explicitUpgradeHandlers: true," `T.isInfixOf` emitted)
+            assertBool "expected workflow migration helper" ("migrate(snapshot, targetWorkflow, options) { return $claspWorkflowMigrateSnapshot(this, targetWorkflow ?? this, snapshot, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow upgrade helper" ("upgrade(run, targetWorkflow, options) { return $claspWorkflowUpgrade(this, targetWorkflow ?? this, run, options); }" `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
         case compileSource "let" letExpressionSource of
           Left err ->
@@ -2807,7 +2810,7 @@ compileTests =
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected workflow lifecycle and retry runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"hotSwapHandlersExplicit\":true,\"hotSwapMigrationHooks\":true,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"],\"migratedStatus\":\"migrated\",\"migratedCount\":12,\"migratedHook\":true,\"upgradedStatus\":\"upgraded\",\"upgradedCount\":27,\"upgradedDeadlineAt\":1250,\"upgradedSupervisor\":\"UpgradeSupervisor\",\"upgradedPrepareHook\":true,\"upgradedActivateHook\":true}"
               runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
@@ -5224,12 +5227,35 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  { id: 'm1', payload: 99 },"
     , "  { id: 'm2', payload: 3 }"
     , "], (state, payload) => ({ count: state.count + payload }));"
+    , "const migrated = workflow.migrate(checkpoint, workflow, {"
+    , "  migrateState: (state, meta) => ({"
+    , "    count: state.count + (meta.toModuleVersionId === meta.fromModuleVersionId ? 5 : 10)"
+    , "  })"
+    , "});"
+    , "const upgraded = workflow.upgrade(run, workflow, {"
+    , "  migrateState: (state, meta) => ({"
+    , "    count: state.count + (meta.toWorkflowName === meta.fromWorkflowName ? 20 : 1)"
+    , "  }),"
+    , "  prepare: (currentRun, meta) => ({"
+    , "    ...currentRun,"
+    , "    deadlineAt: currentRun.deadlineAt + (meta.toStateType === meta.fromStateType ? 50 : 0)"
+    , "  }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
     , "console.log(JSON.stringify({"
     , "  workflowName: workflow.name,"
     , "  stateType: workflow.stateType,"
     , "  moduleVersionTagged: workflow.moduleVersionId.startsWith('module:Main:'),"
     , "  upgradeWindowPolicy: workflow.upgradeWindow.policy,"
     , "  compatibleVersionCount: workflow.compatibility.compatibleModuleVersionIds.length,"
+    , "  hotSwapHandlersExplicit: workflow.compatibility.hotSwap.explicitUpgradeHandlers,"
+    , "  hotSwapMigrationHooks: workflow.compatibility.hotSwap.stateMigrationHooks,"
     , "  runtimeModuleVersionTagged: runtime.contract.module.versionId.startsWith('module:Main:'),"
     , "  runtimeWorkflowCount: runtime.contract.module.compatibility.workflowCount,"
     , "  checkpoint,"
@@ -5258,7 +5284,16 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  handoffSupervisor: handedOff.supervision.supervisor,"
     , "  replayedCount: replayed.state.count,"
     , "  replayedDeliveries: replayed.deliveries.length,"
-    , "  replayedIds: replayed.processedIds"
+    , "  replayedIds: replayed.processedIds,"
+    , "  migratedStatus: migrated.status,"
+    , "  migratedCount: migrated.state.count,"
+    , "  migratedHook: migrated.handlers.migrateState,"
+    , "  upgradedStatus: upgraded.status,"
+    , "  upgradedCount: upgraded.run.state.count,"
+    , "  upgradedDeadlineAt: upgraded.run.deadlineAt,"
+    , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
+    , "  upgradedPrepareHook: upgraded.handlers.prepare,"
+    , "  upgradedActivateHook: upgraded.handlers.activate"
     , "}));"
     ]
 
