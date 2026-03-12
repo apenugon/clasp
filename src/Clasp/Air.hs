@@ -394,6 +394,30 @@ buildExprGraph nodeId expr =
            in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
               , buildExprGraph leftId left <> buildExprGraph rightId right
               )
+        CLessThan _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
+        CLessThanOrEqual _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
+        CGreaterThan _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
+        CGreaterThanOrEqual _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
         CLet _ _ name value body ->
           let valueId = exprChildId "value"
               bodyId = exprChildId "body"
@@ -567,6 +591,10 @@ exprKind expr =
     CList {} -> "list"
     CEqual {} -> "equal"
     CNotEqual {} -> "notEqual"
+    CLessThan {} -> "lessThan"
+    CLessThanOrEqual {} -> "lessThanOrEqual"
+    CGreaterThan {} -> "greaterThan"
+    CGreaterThanOrEqual {} -> "greaterThanOrEqual"
     CLet {} -> "let"
     CPage {} -> "page"
     CRedirect {} -> "redirect"
@@ -596,6 +624,10 @@ exprSpan expr =
     CList span' _ _ -> span'
     CEqual span' _ _ -> span'
     CNotEqual span' _ _ -> span'
+    CLessThan span' _ _ -> span'
+    CLessThanOrEqual span' _ _ -> span'
+    CGreaterThan span' _ _ -> span'
+    CGreaterThanOrEqual span' _ _ -> span'
     CLet span' _ _ _ _ -> span'
     CPage span' _ _ -> span'
     CRedirect span' _ -> span'

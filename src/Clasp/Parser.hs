@@ -424,9 +424,20 @@ exprParser =
 
 equalityExprParser :: Parser Expr
 equalityExprParser = do
-  firstTerm <- appExprParser
-  rest <- many ((,) <$> equalityOperatorParser <*> appExprParser)
+  firstTerm <- comparisonExprParser
+  rest <- many ((,) <$> equalityOperatorParser <*> comparisonExprParser)
   pure (foldl applyEqualityExpr firstTerm rest)
+
+comparisonExprParser :: Parser Expr
+comparisonExprParser = do
+  firstTerm <- appExprParser
+  rest <- optional ((,) <$> comparisonOperatorParser <*> appExprParser)
+  pure $
+    case rest of
+      Just comparison ->
+        applyComparisonExpr firstTerm comparison
+      Nothing ->
+        firstTerm
 
 appExprParser :: Parser Expr
 appExprParser = do
@@ -665,6 +676,13 @@ equalityOperatorParser :: Parser Text
 equalityOperatorParser =
   symbol "==" <|> symbol "!="
 
+comparisonOperatorParser :: Parser Text
+comparisonOperatorParser =
+  symbol "<="
+    <|> symbol ">="
+    <|> symbol "<"
+    <|> symbol ">"
+
 applyEqualityExpr :: Expr -> (Text, Expr) -> Expr
 applyEqualityExpr left (operator, right) =
   let equalitySpan = mergeSourceSpans (exprSpan left) (exprSpan right)
@@ -673,6 +691,21 @@ applyEqualityExpr left (operator, right) =
           EEqual equalitySpan left right
         "!=" ->
           ENotEqual equalitySpan left right
+        _ ->
+          left
+
+applyComparisonExpr :: Expr -> (Text, Expr) -> Expr
+applyComparisonExpr left (operator, right) =
+  let comparisonSpan = mergeSourceSpans (exprSpan left) (exprSpan right)
+   in case operator of
+        "<" ->
+          ELessThan comparisonSpan left right
+        "<=" ->
+          ELessThanOrEqual comparisonSpan left right
+        ">" ->
+          EGreaterThan comparisonSpan left right
+        ">=" ->
+          EGreaterThanOrEqual comparisonSpan left right
         _ ->
           left
 

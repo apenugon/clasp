@@ -401,6 +401,29 @@ parserTests =
                     assertFailure ("expected inequality expression, got " <> show other)
               Nothing ->
                 assertFailure "expected differentFlag declaration"
+    , testCase "parses integer comparison operators" $
+        case parseSource "inline" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected integer comparison source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case findDecl "isEarlier" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ELessThan _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected less-than expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected isEarlier declaration"
+            case findDecl "isLatest" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EGreaterThanOrEqual _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected greater-than-or-equal expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected isLatest declaration"
     , testCase "parses the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case parseSource "examples/lists.clasp" source of
@@ -565,6 +588,29 @@ checkerTests =
                     assertFailure ("expected checked inequality expression, got " <> show other)
               Nothing ->
                 assertFailure "expected differentFlag declaration"
+    , testCase "typechecks integer comparison operators for Int values" $
+        case checkSource "comparison" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected integer comparison source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "isEarlier") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CLessThan _ (CVar _ TInt "left") (CVar _ TInt "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked less-than expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected isEarlier declaration"
+            case find ((== "isLatest") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CGreaterThanOrEqual _ (CVar _ TInt "left") (CVar _ TInt "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked greater-than-or-equal expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected isLatest declaration"
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -619,6 +665,8 @@ checkerTests =
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects equality over unsupported or mismatched types" $
         assertHasCode "E_EQUALITY_OPERAND" (checkSource "bad" badEqualitySource)
+    , testCase "rejects integer comparison over non-integer operands" $
+        assertHasCode "E_INTEGER_COMPARISON_OPERAND" (checkSource "bad" badIntegerComparisonSource)
     , testCase "rejects active script tags in safe views" $
         assertHasCode "E_VIEW_TAG" (checkSource "bad" unsafeScriptSource)
     , testCase "rejects raw host class escapes in safe views" $
@@ -974,6 +1022,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered differentFlag declaration: " <> show other)
+    , testCase "lowering preserves integer comparison operators" $
+        case lowerChecked "comparison" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected comparison lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "isEarlier" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LLessThan (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered isEarlier declaration: " <> show other)
+            case findLowerDecl "isLatest" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LGreaterThanOrEqual (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered isLatest declaration: " <> show other)
     , testCase "lowering preserves page and view primitives" $
         case lowerChecked "page" pageSource of
           Left err ->
@@ -1198,6 +1261,31 @@ compileTests =
                 , "}));"
                 ]
             assertEqual "expected equality runtime result" "{\"number\":true,\"word\":false,\"flag\":true,\"main\":true}" runtimeOutput
+    , testCase "compile lowers integer comparison operators to JavaScript and evaluates them" $
+        case compileSource "comparison" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected integer comparison compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected less-than emission" ("(left < right)" `T.isInfixOf` emitted)
+            assertBool "expected less-than-or-equal emission" ("(left <= right)" `T.isInfixOf` emitted)
+            assertBool "expected greater-than emission" ("(left > right)" `T.isInfixOf` emitted)
+            assertBool "expected greater-than-or-equal emission" ("(left >= right)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/integer-comparison-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({"
+                , "  earlier: compiledModule.isEarlier(3, 5),"
+                , "  boundary: compiledModule.isAtMost(5, 5),"
+                , "  later: compiledModule.isLater(7, 5),"
+                , "  latest: compiledModule.isLatest(7, 7),"
+                , "  main: compiledModule.main"
+                , "}));"
+                ]
+            assertEqual "expected integer comparison runtime result" "{\"earlier\":true,\"boundary\":true,\"later\":true,\"latest\":true,\"main\":true}" runtimeOutput
     , testCase "compile round-trips list values through generated json codecs" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -2232,6 +2320,27 @@ equalitySource =
     , "main = sameNumber 7 7"
     ]
 
+integerComparisonSource :: Text
+integerComparisonSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "isEarlier : Int -> Int -> Bool"
+    , "isEarlier left right = left < right"
+    , ""
+    , "isAtMost : Int -> Int -> Bool"
+    , "isAtMost left right = left <= right"
+    , ""
+    , "isLater : Int -> Int -> Bool"
+    , "isLater left right = left > right"
+    , ""
+    , "isLatest : Int -> Int -> Bool"
+    , "isLatest left right = left >= right"
+    , ""
+    , "main : Bool"
+    , "main = isEarlier 3 5"
+    ]
+
 letInMatchSource :: Text
 letInMatchSource =
   T.unlines
@@ -2263,6 +2372,15 @@ badEqualitySource =
     , ""
     , "badMixed : Bool"
     , "badMixed = 1 == \"1\""
+    ]
+
+badIntegerComparisonSource :: Text
+badIntegerComparisonSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "bad : Str -> Str -> Bool"
+    , "bad left right = left < right"
     ]
 
 unsafeScriptSource :: Text

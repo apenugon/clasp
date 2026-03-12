@@ -143,6 +143,10 @@ data DraftExprNode
   | DraftList [DraftExpr]
   | DraftEqual DraftExpr DraftExpr
   | DraftNotEqual DraftExpr DraftExpr
+  | DraftLessThan DraftExpr DraftExpr
+  | DraftLessThanOrEqual DraftExpr DraftExpr
+  | DraftGreaterThan DraftExpr DraftExpr
+  | DraftGreaterThanOrEqual DraftExpr DraftExpr
   | DraftLet Text DraftExpr DraftExpr
   | DraftPage DraftExpr DraftExpr
   | DraftRedirect Text
@@ -1332,6 +1336,14 @@ inferExpr ctx termEnv localEnv expr =
       inferEqualityExpr ctx termEnv localEnv equalitySpan True left right
     ENotEqual equalitySpan left right ->
       inferEqualityExpr ctx termEnv localEnv equalitySpan False left right
+    ELessThan comparisonSpan left right ->
+      inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan DraftLessThan left right
+    ELessThanOrEqual comparisonSpan left right ->
+      inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan DraftLessThanOrEqual left right
+    EGreaterThan comparisonSpan left right ->
+      inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan DraftGreaterThan left right
+    EGreaterThanOrEqual comparisonSpan left right ->
+      inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan DraftGreaterThanOrEqual left right
     ELet letSpan _ binderName value body -> do
       valueExpr <- inferExpr ctx termEnv localEnv value
       bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (draftExprType valueExpr) localEnv) body
@@ -1423,6 +1435,21 @@ inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
             ["Only `Int`, `Str`, and `Bool` currently support `==` and `!=`."]
             []
         ]
+
+inferIntegerComparisonExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> (DraftExpr -> DraftExpr -> DraftExprNode) -> Expr -> Expr -> InferM DraftExpr
+inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan constructor left right = do
+  leftExpr <- inferExpr ctx termEnv localEnv left
+  rightExpr <- inferExpr ctx termEnv localEnv right
+  let unifyContext =
+        UnifyContext
+          { unifyCode = "E_INTEGER_COMPARISON_OPERAND"
+          , unifySummary = "Integer comparison operands must both be Int."
+          , unifyPrimarySpan = comparisonSpan
+          , unifyRelated = []
+          }
+  unify unifyContext (draftExprType leftExpr) IInt
+  unify unifyContext (draftExprType rightExpr) IInt
+  pure (DraftExpr comparisonSpan IBool (constructor leftExpr rightExpr))
 
 inferRegularCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
 inferRegularCall ctx termEnv localEnv callSpan fn args = do
@@ -2549,6 +2576,22 @@ freezeDraftExpr ctx decl inferState draftExpr =
       frozenLeft <- freezeDraftExpr ctx decl inferState left
       frozenRight <- freezeDraftExpr ctx decl inferState right
       pure (CNotEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftLessThan left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CLessThan (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftLessThanOrEqual left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CLessThanOrEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftGreaterThan left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CGreaterThan (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftGreaterThanOrEqual left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CGreaterThanOrEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
     DraftLet name value body -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenValue <- freezeDraftExpr ctx decl inferState value

@@ -126,6 +126,10 @@ data CoreExpr
   | CList SourceSpan Type [CoreExpr]
   | CEqual SourceSpan CoreExpr CoreExpr
   | CNotEqual SourceSpan CoreExpr CoreExpr
+  | CLessThan SourceSpan CoreExpr CoreExpr
+  | CLessThanOrEqual SourceSpan CoreExpr CoreExpr
+  | CGreaterThan SourceSpan CoreExpr CoreExpr
+  | CGreaterThanOrEqual SourceSpan CoreExpr CoreExpr
   | CLet SourceSpan Type Text CoreExpr CoreExpr
   | CPage SourceSpan CoreExpr CoreExpr
   | CRedirect SourceSpan Text
@@ -167,6 +171,14 @@ coreExprType expr =
     CEqual _ _ _ ->
       TBool
     CNotEqual _ _ _ ->
+      TBool
+    CLessThan _ _ _ ->
+      TBool
+    CLessThanOrEqual _ _ _ ->
+      TBool
+    CGreaterThan _ _ _ ->
+      TBool
+    CGreaterThanOrEqual _ _ _ ->
       TBool
     CLet _ typ _ _ _ ->
       typ
@@ -271,6 +283,14 @@ renameDecl oldName newName modl
           CEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CNotEqual span' left right ->
           CNotEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CLessThan span' left right ->
+          CLessThan span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CLessThanOrEqual span' left right ->
+          CLessThanOrEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CGreaterThan span' left right ->
+          CGreaterThan span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CGreaterThanOrEqual span' left right ->
+          CGreaterThanOrEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CLet span' typ name value body ->
           CLet span' typ name (renameDeclExpr boundNames value) (renameDeclExpr (Set.insert name boundNames) body)
         CCall span' typ fn args ->
@@ -410,6 +430,14 @@ renameSchema oldName newName modl
           CEqual span' (renameExprTypes left) (renameExprTypes right)
         CNotEqual span' left right ->
           CNotEqual span' (renameExprTypes left) (renameExprTypes right)
+        CLessThan span' left right ->
+          CLessThan span' (renameExprTypes left) (renameExprTypes right)
+        CLessThanOrEqual span' left right ->
+          CLessThanOrEqual span' (renameExprTypes left) (renameExprTypes right)
+        CGreaterThan span' left right ->
+          CGreaterThan span' (renameExprTypes left) (renameExprTypes right)
+        CGreaterThanOrEqual span' left right ->
+          CGreaterThanOrEqual span' (renameExprTypes left) (renameExprTypes right)
         CLet span' typ name value body ->
           CLet span' (renameType typ) name (renameExprTypes value) (renameExprTypes body)
         CCall span' typ fn args ->

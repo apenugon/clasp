@@ -77,6 +77,10 @@ data LowerExpr
   | LList [LowerExpr]
   | LEqual LowerExpr LowerExpr
   | LNotEqual LowerExpr LowerExpr
+  | LLessThan LowerExpr LowerExpr
+  | LLessThanOrEqual LowerExpr LowerExpr
+  | LGreaterThan LowerExpr LowerExpr
+  | LGreaterThanOrEqual LowerExpr LowerExpr
   | LLet Text LowerExpr LowerExpr
   | LPage LowerExpr LowerExpr
   | LRedirect Text
@@ -215,6 +219,14 @@ collectExprCodecTypes expr =
       collectExprCodecTypes left <> collectExprCodecTypes right
     CNotEqual _ left right ->
       collectExprCodecTypes left <> collectExprCodecTypes right
+    CLessThan _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CLessThanOrEqual _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CGreaterThan _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CGreaterThanOrEqual _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
     CLet _ _ _ value body ->
       collectExprCodecTypes value <> collectExprCodecTypes body
     CPage _ title body ->
@@ -330,6 +342,14 @@ lowerCoreExpr expr =
       LEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CNotEqual _ left right ->
       LNotEqual (lowerCoreExpr left) (lowerCoreExpr right)
+    CLessThan _ left right ->
+      LLessThan (lowerCoreExpr left) (lowerCoreExpr right)
+    CLessThanOrEqual _ left right ->
+      LLessThanOrEqual (lowerCoreExpr left) (lowerCoreExpr right)
+    CGreaterThan _ left right ->
+      LGreaterThan (lowerCoreExpr left) (lowerCoreExpr right)
+    CGreaterThanOrEqual _ left right ->
+      LGreaterThanOrEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CLet _ _ name value body ->
       LLet name (lowerCoreExpr value) (lowerCoreExpr body)
     CPage _ title body ->
@@ -447,6 +467,14 @@ expandExpr declEnv subst visited expr =
       LEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LNotEqual left right ->
       LNotEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LLessThan left right ->
+      LLessThan (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LLessThanOrEqual left right ->
+      LLessThanOrEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LGreaterThan left right ->
+      LGreaterThan (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LGreaterThanOrEqual left right ->
+      LGreaterThanOrEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LLet name value body ->
       let value' = expandExpr declEnv subst visited value
        in expandExpr declEnv (Map.insert name value' subst) visited body
@@ -681,6 +709,14 @@ summarizeValue expr =
       summarizeValue left <> " == " <> summarizeValue right
     LNotEqual left right ->
       summarizeValue left <> " != " <> summarizeValue right
+    LLessThan left right ->
+      summarizeValue left <> " < " <> summarizeValue right
+    LLessThanOrEqual left right ->
+      summarizeValue left <> " <= " <> summarizeValue right
+    LGreaterThan left right ->
+      summarizeValue left <> " > " <> summarizeValue right
+    LGreaterThanOrEqual left right ->
+      summarizeValue left <> " >= " <> summarizeValue right
     LLet name _ body ->
       normalizeSummaryName name <> " = " <> summarizeValue body
     LConstruct tag _ ->

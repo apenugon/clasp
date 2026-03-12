@@ -29,6 +29,7 @@ It includes:
 - Function application
 - Local `let` expressions
 - Equality operators for `Int`, `Str`, and `Bool`
+- Integer comparison operators for branching
 - Field access
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
@@ -148,6 +149,18 @@ differentFlag : Bool -> Bool -> Bool
 differentFlag left right = left != right
 ```
 
+Integer comparisons are currently available for `Int` values:
+
+```clasp
+module Main
+
+isEarlier : Int -> Int -> Bool
+isEarlier left right = left < right
+
+isLatest : Int -> Int -> Bool
+isLatest left right = left >= right
+```
+
 Records and field access are also part of the current `v0` surface:
 
 ```clasp
@@ -242,7 +255,8 @@ signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
 let-expr    ::= "let" lower-ident "=" expr "in" expr
 expr        ::= let-expr | equality-expr
-equality-expr ::= app-expr (("==" | "!=") app-expr)*
+equality-expr ::= comparison-expr (("==" | "!=") comparison-expr)*
+comparison-expr ::= app-expr (("<" | "<=" | ">" | ">=") app-expr)?
 app-expr    ::= term term*
 term        ::= atom ("." lower-ident)*
 atom        ::= lower-ident

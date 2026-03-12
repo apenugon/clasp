@@ -1543,6 +1543,22 @@ emitExpr counter expr =
       let (counterAfterLeft, leftText) = emitExpr counter left
           (counterAfterRight, rightText) = emitExpr counterAfterLeft right
        in (counterAfterRight, "(" <> leftText <> " !== " <> rightText <> ")")
+    LLessThan left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " < " <> rightText <> ")")
+    LLessThanOrEqual left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " <= " <> rightText <> ")")
+    LGreaterThan left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " > " <> rightText <> ")")
+    LGreaterThanOrEqual left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " >= " <> rightText <> ")")
     LLet name value body ->
       let (counterAfterValue, valueText) = emitExpr counter value
           (counterAfterBody, bodyText) = emitExpr counterAfterValue body

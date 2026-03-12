@@ -290,6 +290,10 @@ data Expr
   | EList SourceSpan [Expr]
   | EEqual SourceSpan Expr Expr
   | ENotEqual SourceSpan Expr Expr
+  | ELessThan SourceSpan Expr Expr
+  | ELessThanOrEqual SourceSpan Expr Expr
+  | EGreaterThan SourceSpan Expr Expr
+  | EGreaterThanOrEqual SourceSpan Expr Expr
   | ECall SourceSpan Expr [Expr]
   | ELet SourceSpan SourceSpan Text Expr Expr
   | EMatch SourceSpan Expr [MatchBranch]
@@ -315,6 +319,14 @@ exprSpan expr =
     EEqual span' _ _ ->
       span'
     ENotEqual span' _ _ ->
+      span'
+    ELessThan span' _ _ ->
+      span'
+    ELessThanOrEqual span' _ _ ->
+      span'
+    EGreaterThan span' _ _ ->
+      span'
+    EGreaterThanOrEqual span' _ _ ->
       span'
     ECall span' _ _ ->
       span'
