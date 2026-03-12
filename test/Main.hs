@@ -2115,6 +2115,9 @@ compileTests =
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract docs entry" ("docs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             assertBool "expected policy permission helpers" ("allowsFile(target) { return this.allows(\"file\", target); }" `T.isInfixOf` emitted)
+            assertBool "expected policy decision helper" ("decideFile(target, context = null) { return this.decide(\"file\", target, context); }" `T.isInfixOf` emitted)
+            assertBool "expected policy trace helper" ("traceFile(target, context = null) { return this.trace(\"file\", target, context); }" `T.isInfixOf` emitted)
+            assertBool "expected policy audit helper" ("auditFile(target, context = null) { return this.audit(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
             assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
@@ -2135,6 +2138,13 @@ compileTests =
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
                 , "const policy = agent.policy;"
+                , "const context = { actor: { id: 'worker-7', tags: ['initial'] }, requestId: 'req-1' };"
+                , "const decision = policy.decideFile('/workspace/src/Main.clasp', context);"
+                , "const trace = policy.traceFile('/workspace/src/Main.clasp', context);"
+                , "const audit = policy.auditFile('/workspace/src/Main.clasp', context);"
+                , "context.actor.id = 'mutated';"
+                , "context.actor.tags.push('later');"
+                , "context.requestId = 'req-2';"
                 , "let deniedFile = null;"
                 , "try {"
                 , "  policy.assertFile('/tmp');"
@@ -2150,6 +2160,14 @@ compileTests =
                 , "  networkAllowed: policy.allowsNetwork('api.openai.com'),"
                 , "  processAllowed: policy.allowsProcess('rg'),"
                 , "  secretAllowed: policy.allowsSecret('OPENAI_API_KEY'),"
+                , "  decisionAllowed: decision.allowed,"
+                , "  decisionActor: decision.context.actor.id,"
+                , "  traceActor: trace.context.actor.id,"
+                , "  traceTags: trace.context.actor.tags.join(','),"
+                , "  auditActor: audit.context.actor.id,"
+                , "  auditRequestId: audit.context.requestId,"
+                , "  traceFrozen: Object.isFrozen(trace.context) && Object.isFrozen(trace.context.actor) && Object.isFrozen(trace.context.actor.tags),"
+                , "  auditFrozen: Object.isFrozen(audit.context) && Object.isFrozen(audit.context.actor) && Object.isFrozen(audit.context.actor.tags),"
                 , "  deniedFile,"
                 , "  hookEvent: hook.event,"
                 , "  hookAccepted: hook.invoke({ workerId: 'worker-7' }).accepted,"
@@ -2168,7 +2186,7 @@ compileTests =
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
