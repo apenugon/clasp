@@ -1,0 +1,10 @@
+{
+  "id": "clasp-lead-segment",
+  "title": "Add lead segment across the clickable Clasp inbox app",
+  "suite": "clickable-lead-inbox",
+  "language": "clasp",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

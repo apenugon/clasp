@@ -100,5 +100,7 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner now ext
 - `ts-agent-escalation`: structured agent-output validation with stricter boundary behavior
 - `ts-lead-priority`: shared-schema change across a typed route, decoders, and an LLM-shaped model boundary
 - `clasp-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
+- `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
+- `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
 
 The Clasp task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.

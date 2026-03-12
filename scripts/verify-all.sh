@@ -15,4 +15,5 @@ nix develop -c bash -lc "
   export CLASP_PROJECT_ROOT=\"$project_root\"
   bash examples/lead-app-ts/scripts/verify.sh
   node benchmarks/run-benchmark.mjs list >/dev/null
+  bash benchmarks/test-task-prep.sh
 "
