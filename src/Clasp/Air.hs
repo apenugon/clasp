@@ -55,6 +55,8 @@ import Clasp.Syntax
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , ProjectionDecl (..)
   , ProjectionFieldDecl (..)
   , RecordDecl (..)
@@ -331,6 +333,10 @@ buildPolicyDeclNodes corePolicyDecl =
         , airNodeAttrs =
             [ ("name", AirAttrText (policyDeclName policyDecl))
             , ("allowedClassifications", AirAttrNodes classificationIds)
+            , ("filePermissions", AirAttrTexts (policyPermissionValues PolicyPermissionFile policyDecl))
+            , ("networkPermissions", AirAttrTexts (policyPermissionValues PolicyPermissionNetwork policyDecl))
+            , ("processPermissions", AirAttrTexts (policyPermissionValues PolicyPermissionProcess policyDecl))
+            , ("secretPermissions", AirAttrTexts (policyPermissionValues PolicyPermissionSecret policyDecl))
             ]
         }
     classificationNodes =
@@ -861,6 +867,13 @@ policyDeclId name = AirNodeId ("policy:" <> name)
 policyClassificationDeclId :: Text -> Text -> AirNodeId
 policyClassificationDeclId policyName classificationName =
   AirNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
+
+policyPermissionValues :: PolicyPermissionKind -> PolicyDecl -> [Text]
+policyPermissionValues permissionKind policyDecl =
+  [ policyPermissionDeclValue permissionDecl
+  | permissionDecl <- policyDeclPermissions policyDecl
+  , policyPermissionDeclKind permissionDecl == permissionKind
+  ]
 
 toolServerDeclId :: Text -> AirNodeId
 toolServerDeclId name = AirNodeId ("toolserver:" <> name)

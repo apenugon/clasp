@@ -105,6 +105,8 @@ import Clasp.Syntax
   , PatternBinder (..)
   , Position (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , ProjectionDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
@@ -224,8 +226,16 @@ parserTests =
               Nothing ->
                 assertFailure "expected Customer schema record declaration"
             case modulePolicyDecls modl of
-              [policyDecl] ->
+              [policyDecl] -> do
                 assertEqual "policy name" "SupportDisclosure" (policyDeclName policyDecl)
+                assertEqual
+                  "policy permissions"
+                  [ PolicyPermissionDecl PolicyPermissionFile dummySpan "/workspace"
+                  , PolicyPermissionDecl PolicyPermissionNetwork dummySpan "api.openai.com"
+                  , PolicyPermissionDecl PolicyPermissionProcess dummySpan "rg"
+                  , PolicyPermissionDecl PolicyPermissionSecret dummySpan "OPENAI_API_KEY"
+                  ]
+                  (normalizePolicyPermissions (policyDeclPermissions policyDecl))
               other ->
                 assertFailure ("expected one policy declaration, got " <> show (length other))
             case moduleProjectionDecls modl of
@@ -981,6 +991,8 @@ checkerTests =
         assertHasCode "E_UNKNOWN_AGENT_ROLE" (checkSource "bad" unknownAgentRoleSource)
     , testCase "rejects tool servers that reference unknown policies" $
         assertHasCode "E_UNKNOWN_TOOLSERVER_POLICY" (checkSource "bad" unknownToolServerPolicySource)
+    , testCase "rejects duplicate policy permission grants" $
+        assertHasCode "E_DUPLICATE_POLICY_PERMISSION" (checkSource "bad" duplicatePolicyPermissionSource)
     , testCase "rejects tools that reference unknown servers" $
         assertHasCode "E_UNKNOWN_TOOLSERVER" (checkSource "bad" unknownToolServerSource)
     , testCase "rejects verifiers that reference unknown tools" $
@@ -1209,10 +1221,13 @@ airTests =
             assertBool "expected policy root" (AirNodeId "policy:SupportDisclosure" `elem` airModuleRootIds airModule)
             assertBool "expected projection root" (AirNodeId "projection:SupportCustomer" `elem` airModuleRootIds airModule)
             case findAirNode (AirNodeId "policy:SupportDisclosure") (airModuleNodes airModule) of
-              Just node ->
+              Just node -> do
                 assertBool
                   "expected policy classification refs"
                   (("allowedClassifications", AirAttrNodes [AirNodeId "policy-classification:SupportDisclosure:public", AirNodeId "policy-classification:SupportDisclosure:pii"]) `elem` airNodeAttrs node)
+                assertBool
+                  "expected policy file permissions"
+                  (("filePermissions", AirAttrTexts ["/workspace"]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected policy AIR node"
             case findAirNode (AirNodeId "projection:SupportCustomer") (airModuleNodes airModule) of
@@ -1408,6 +1423,14 @@ contextTests =
             assertBool "expected agent role guide edge" ("\"agent-role-guide\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role policy edge" ("\"agent-role-policy\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role edge" ("\"agent-role\"" `T.isInfixOf` jsonText)
+    , testCase "context graph includes policy permission attributes" $
+        case renderContextSourceJson "policy" policyPermissionSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected file permissions attr" ("\"filePermissions\"" `T.isInfixOf` jsonText && "\"/workspace\"" `T.isInfixOf` jsonText)
+            assertBool "expected secret permissions attr" ("\"secretPermissions\"" `T.isInfixOf` jsonText && "\"OPENAI_API_KEY\"" `T.isInfixOf` jsonText)
     , testCase "context graph includes tool servers, policy edges, and tool schema edges" $
         case renderContextSourceJson "tool" toolSource of
           Left err ->
@@ -2007,6 +2030,7 @@ compileTests =
             assertBool "expected human-readable control-plane docs export" ("export const __claspControlPlaneDocs = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract docs entry" ("docs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
+            assertBool "expected policy permission helpers" ("allowsFile(target) { return this.allows(\"file\", target); }" `T.isInfixOf` emitted)
             assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
             assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
@@ -2026,10 +2050,23 @@ compileTests =
                 , "const verifier = compiledModule.__claspVerifiers[0];"
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
+                , "const policy = agent.policy;"
+                , "let deniedFile = null;"
+                , "try {"
+                , "  policy.assertFile('/tmp');"
+                , "} catch (error) {"
+                , "  deniedFile = error.message;"
+                , "}"
                 , "console.log(JSON.stringify({"
                 , "  guideExtends: guide.extends,"
                 , "  guideScope: guide.resolvedEntries.scope,"
                 , "  agentPolicy: agent.policy.name,"
+                , "  fileAllowed: policy.allowsFile('/workspace/src/Main.clasp'),"
+                , "  fileDenied: policy.allowsFile('/tmp'),"
+                , "  networkAllowed: policy.allowsNetwork('api.openai.com'),"
+                , "  processAllowed: policy.allowsProcess('rg'),"
+                , "  secretAllowed: policy.allowsSecret('OPENAI_API_KEY'),"
+                , "  deniedFile,"
                 , "  hookEvent: hook.event,"
                 , "  hookAccepted: hook.invoke({ workerId: 'worker-7' }).accepted,"
                 , "  toolMethod: tool.prepareCall({ query: 'search' }, 7).method,"
@@ -2039,6 +2076,7 @@ compileTests =
                 , "  mergeGatePlan: mergeGate.plan({ query: 'gate' }, 'trunk').map((request) => request.id).join(','),"
                 , "  docsFormat: docs.format,"
                 , "  docsHasGuides: docs.markdown.includes('## Guides'),"
+                , "  docsHasPermissions: docs.markdown.includes('File permissions: /workspace'),"
                 , "  docsHasHookEvent: docs.markdown.includes('worker.start'),"
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
                 , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version"
@@ -2046,7 +2084,7 @@ compileTests =
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
@@ -2655,6 +2693,10 @@ normalizeGuideEntries =
           }
     )
 
+normalizePolicyPermissions :: [PolicyPermissionDecl] -> [PolicyPermissionDecl]
+normalizePolicyPermissions =
+  fmap (\permissionDecl -> permissionDecl {policyPermissionDeclSpan = dummySpan})
+
 dummySpan :: SourceSpan
 dummySpan =
   SourceSpan
@@ -2929,7 +2971,12 @@ controlPlaneSource =
     , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
     , "}"
     , ""
-    , "policy SupportDisclosure = public"
+    , "policy SupportDisclosure = public permits {"
+    , "  file \"/workspace\","
+    , "  network \"api.openai.com\","
+    , "  process \"rg\","
+    , "  secret \"OPENAI_API_KEY\""
+    , "}"
     , ""
     , "role WorkerRole = guide: Worker, policy: SupportDisclosure"
     , ""
@@ -3008,6 +3055,21 @@ unknownAgentRoleSource =
     , "main = \"ok\""
     ]
 
+policyPermissionSource :: Text
+policyPermissionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "policy SupportDisclosure = public permits {"
+    , "  file \"/workspace\","
+    , "  network \"api.openai.com\","
+    , "  process \"rg\","
+    , "  secret \"OPENAI_API_KEY\""
+    , "}"
+    , ""
+    , "main = \"ok\""
+    ]
+
 unknownToolServerPolicySource :: Text
 unknownToolServerPolicySource =
   T.unlines
@@ -3019,6 +3081,19 @@ unknownToolServerPolicySource =
     , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with MissingPolicy"
     , ""
     , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "main = \"ok\""
+    ]
+
+duplicatePolicyPermissionSource :: Text
+duplicatePolicyPermissionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "policy SupportDisclosure = public permits {"
+    , "  file \"/workspace\","
+    , "  file \"/workspace\""
+    , "}"
     , ""
     , "main = \"ok\""
     ]
@@ -3104,7 +3179,12 @@ classifiedProjectionSource =
     , "  tier : Str"
     , "}"
     , ""
-    , "policy SupportDisclosure = public, pii"
+    , "policy SupportDisclosure = public, pii permits {"
+    , "  file \"/workspace\","
+    , "  network \"api.openai.com\","
+    , "  process \"rg\","
+    , "  secret \"OPENAI_API_KEY\""
+    , "}"
     , ""
     , "projection SupportCustomer = Customer with SupportDisclosure { id, email, tier }"
     , ""

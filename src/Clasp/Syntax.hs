@@ -21,6 +21,8 @@ module Clasp.Syntax
   , Pattern (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , Position (..)
   , ProjectionDecl (..)
   , ProjectionFieldDecl (..)
@@ -276,11 +278,26 @@ data PolicyClassificationDecl = PolicyClassificationDecl
   }
   deriving (Eq, Show)
 
+data PolicyPermissionKind
+  = PolicyPermissionFile
+  | PolicyPermissionNetwork
+  | PolicyPermissionProcess
+  | PolicyPermissionSecret
+  deriving (Eq, Ord, Show)
+
+data PolicyPermissionDecl = PolicyPermissionDecl
+  { policyPermissionDeclKind :: PolicyPermissionKind
+  , policyPermissionDeclSpan :: SourceSpan
+  , policyPermissionDeclValue :: Text
+  }
+  deriving (Eq, Show)
+
 data PolicyDecl = PolicyDecl
   { policyDeclName :: Text
   , policyDeclSpan :: SourceSpan
   , policyDeclNameSpan :: SourceSpan
   , policyDeclAllowedClassifications :: [PolicyClassificationDecl]
+  , policyDeclPermissions :: [PolicyPermissionDecl]
   }
   deriving (Eq, Show)
 

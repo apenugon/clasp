@@ -284,7 +284,8 @@ guide-entry-decl ::= lower-ident ":" string
 hook-decl ::= "hook" lower-ident "=" string upper-ident "->" upper-ident lower-ident
 role-decl ::= "role" upper-ident "=" "guide" ":" upper-ident "," "policy" ":" upper-ident
 agent-decl ::= "agent" lower-ident "=" upper-ident
-policy-decl ::= "policy" upper-ident "=" lower-ident ("," lower-ident)*
+policy-decl ::= "policy" upper-ident "=" lower-ident ("," lower-ident)* ("permits" "{" policy-permission-decl ("," policy-permission-decl)* "}")?
+policy-permission-decl ::= ("file" | "network" | "process" | "secret") string
 toolserver-decl ::= "toolserver" upper-ident "=" string string "with" upper-ident
 tool-decl ::= "tool" lower-ident "=" upper-ident string upper-ident "->" upper-ident
 verifier-decl ::= "verifier" lower-ident "=" lower-ident
@@ -352,7 +353,7 @@ Notes:
 - A list literal becomes a JavaScript array, and every element in the literal must have the same type.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
-- Policies list the field classifications a disclosure boundary may expose.
+- Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.
 - Projections derive boundary-facing record schemas from a source record plus a policy, and the checker rejects projected fields whose classifications are not allowed by that policy.
 - `decode` validates and decodes JSON text into a primitive or record type.
 - `encode` serializes a primitive or record value into JSON text.
@@ -366,7 +367,7 @@ Notes:
 - Verifier declarations bind a named verification rule to one declared tool contract.
 - Merge-gate declarations bind a named integration gate to one or more declared verifier rules.
 - Generated JavaScript modules also export versioned control-plane manifests for guides, hooks, agents, policies, tool servers, tools, verifiers, and merge gates, plus executable protocol helpers for hook invocation and tool or verifier request shaping.
-- Generated JavaScript modules also export versioned human-readable control-plane docs derived from the same declarations and bundled into the stable `__claspBindings` surface.
+- Generated JavaScript modules also export versioned human-readable control-plane docs derived from the same declarations and bundled into the stable `__claspBindings` surface, including declared policy permission grants.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
 - Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.

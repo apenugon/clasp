@@ -35,6 +35,8 @@ import Clasp.Syntax
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteBoundaryDecl (..)
@@ -122,6 +124,28 @@ emitRuntimePrelude =
   , "function $claspBoundaryLabel(path) {"
   , "  const index = path.lastIndexOf(\".\");"
   , "  return index >= 0 ? path.slice(index + 1) : path;"
+  , "}"
+  , ""
+  , "function $claspPolicyAllowsTarget(kind, allowed, target) {"
+  , "  if (allowed.includes(\"*\")) {"
+  , "    return true;"
+  , "  }"
+  , "  if (kind === \"file\") {"
+  , "    return allowed.some((prefix) => target === prefix || target.startsWith(prefix.endsWith(\"/\") ? prefix : `${prefix}/`));"
+  , "  }"
+  , "  return allowed.includes(target);"
+  , "}"
+  , ""
+  , "function $claspPolicyAllows(policy, kind, target) {"
+  , "  const allowed = policy.permissions[kind] ?? [];"
+  , "  return $claspPolicyAllowsTarget(kind, allowed, target);"
+  , "}"
+  , ""
+  , "function $claspPolicyAssert(policy, kind, target) {"
+  , "  if ($claspPolicyAllows(policy, kind, target)) {"
+  , "    return target;"
+  , "  }"
+  , "  throw new Error(`Policy ${policy.name} denies ${kind} access to ${target}`);"
   , "}"
   , ""
   , "function $claspExpectInt(value, path) {"
@@ -1354,7 +1378,7 @@ emitControlPlaneExports modl =
         <> concatMap emitPolicy policies
         <> [ "];"
            , "const $claspPolicyMap = Object.fromEntries(__claspPolicies.map((policy) => [policy.name, policy]));"
-           , "for (const policy of __claspPolicies) { Object.freeze(policy.allowedClassifications); Object.freeze(policy); }"
+           , "for (const policy of __claspPolicies) { Object.freeze(policy.allowedClassifications); Object.freeze(policy.permissions); Object.freeze(policy); }"
            , ""
            ]
 
@@ -1364,7 +1388,23 @@ emitControlPlaneExports modl =
       , "    id: " <> emitStringLiteral ("policy:" <> policyDeclName policyDecl) <> ","
       , "    allowedClassifications: ["
           <> T.intercalate ", " (fmap (emitStringLiteral . policyClassificationDeclName) (policyDeclAllowedClassifications policyDecl))
-          <> "]"
+          <> "],"
+      , "    permissions: Object.freeze({"
+      , "      file: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policyPermissionValues PolicyPermissionFile policyDecl)) <> "]),"
+      , "      network: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policyPermissionValues PolicyPermissionNetwork policyDecl)) <> "]),"
+      , "      process: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policyPermissionValues PolicyPermissionProcess policyDecl)) <> "]),"
+      , "      secret: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policyPermissionValues PolicyPermissionSecret policyDecl)) <> "])"
+      , "    }),"
+      , "    allows(kind, target) { return $claspPolicyAllows(this, kind, target); },"
+      , "    assertAllowed(kind, target) { return $claspPolicyAssert(this, kind, target); },"
+      , "    allowsFile(target) { return this.allows(\"file\", target); },"
+      , "    allowsNetwork(target) { return this.allows(\"network\", target); },"
+      , "    allowsProcess(target) { return this.allows(\"process\", target); },"
+      , "    allowsSecret(target) { return this.allows(\"secret\", target); },"
+      , "    assertFile(target) { return this.assertAllowed(\"file\", target); },"
+      , "    assertNetwork(target) { return this.assertAllowed(\"network\", target); },"
+      , "    assertProcess(target) { return this.assertAllowed(\"process\", target); },"
+      , "    assertSecret(target) { return this.assertAllowed(\"secret\", target); }"
       , "  },"
       ]
 
@@ -1641,7 +1681,24 @@ renderPolicyDoc policyDecl =
    in T.unlines
         [ "### " <> policyDeclName policyDecl
         , "- Allowed classifications: " <> classificationSummary
+        , "- File permissions: " <> renderPolicyPermissionSummary PolicyPermissionFile policyDecl
+        , "- Network permissions: " <> renderPolicyPermissionSummary PolicyPermissionNetwork policyDecl
+        , "- Process permissions: " <> renderPolicyPermissionSummary PolicyPermissionProcess policyDecl
+        , "- Secret permissions: " <> renderPolicyPermissionSummary PolicyPermissionSecret policyDecl
         ]
+
+renderPolicyPermissionSummary :: PolicyPermissionKind -> PolicyDecl -> Text
+renderPolicyPermissionSummary permissionKind policyDecl =
+  case policyPermissionValues permissionKind policyDecl of
+    [] -> "none"
+    values -> T.intercalate ", " values
+
+policyPermissionValues :: PolicyPermissionKind -> PolicyDecl -> [Text]
+policyPermissionValues permissionKind policyDecl =
+  [ policyPermissionDeclValue permissionDecl
+  | permissionDecl <- policyDeclPermissions policyDecl
+  , policyPermissionDeclKind permissionDecl == permissionKind
+  ]
 
 renderAgentRoleDoc :: AgentRoleDecl -> Text
 renderAgentRoleDoc agentRoleDecl =

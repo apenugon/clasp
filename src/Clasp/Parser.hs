@@ -69,6 +69,8 @@ import Clasp.Syntax
   , Pattern (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , Position (..)
   , ProjectionDecl (..)
   , ProjectionFieldDecl (..)
@@ -519,6 +521,7 @@ policyDeclParser = do
   (nameSpan, name) <- locatedUpperIdentifier
   _ <- symbol "="
   classifications <- policyClassificationParser `sepBy1` symbolN ","
+  permissions <- fromMaybe [] <$> optional policyPermissionsParser
   end <- getSourcePos
   _ <- optional eol
   scn
@@ -528,6 +531,7 @@ policyDeclParser = do
       , policyDeclSpan = makeSourceSpan start end
       , policyDeclNameSpan = nameSpan
       , policyDeclAllowedClassifications = classifications
+      , policyDeclPermissions = permissions
       }
 
 policyClassificationParser :: Parser PolicyClassificationDecl
@@ -538,6 +542,31 @@ policyClassificationParser = do
       { policyClassificationDeclName = classificationName
       , policyClassificationDeclSpan = classificationSpan
       }
+
+policyPermissionsParser :: Parser [PolicyPermissionDecl]
+policyPermissionsParser = do
+  keywordN "permits"
+  braces (policyPermissionParser `sepBy` symbolN ",")
+
+policyPermissionParser :: Parser PolicyPermissionDecl
+policyPermissionParser = do
+  start <- getSourcePos
+  permissionKind <- policyPermissionKindParser
+  (_, permissionValue) <- locatedStringLiteral
+  end <- getSourcePos
+  pure
+    PolicyPermissionDecl
+      { policyPermissionDeclKind = permissionKind
+      , policyPermissionDeclSpan = makeSourceSpan start end
+      , policyPermissionDeclValue = permissionValue
+      }
+
+policyPermissionKindParser :: Parser PolicyPermissionKind
+policyPermissionKindParser =
+  (keywordN "file" *> pure PolicyPermissionFile)
+    <|> (keywordN "network" *> pure PolicyPermissionNetwork)
+    <|> (keywordN "process" *> pure PolicyPermissionProcess)
+    <|> (keywordN "secret" *> pure PolicyPermissionSecret)
 
 projectionDeclParser :: Parser TopLevelItem
 projectionDeclParser = do
@@ -1192,6 +1221,11 @@ reservedWords =
   , "guide"
   , "extends"
   , "policy"
+  , "permits"
+  , "file"
+  , "network"
+  , "process"
+  , "secret"
   , "toolserver"
   , "tool"
   , "projection"

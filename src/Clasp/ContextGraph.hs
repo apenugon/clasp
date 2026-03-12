@@ -54,6 +54,8 @@ import Clasp.Syntax
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteBoundaryDecl (..)
@@ -253,6 +255,10 @@ buildPolicyNodes corePolicyDecl =
         , contextNodeAttrs =
             [ ("name", ContextAttrText (policyDeclName policyDecl))
             , ("allowedClassifications", ContextAttrTexts (fmap policyClassificationDeclName (policyDeclAllowedClassifications policyDecl)))
+            , ("filePermissions", ContextAttrTexts (policyPermissionValues PolicyPermissionFile policyDecl))
+            , ("networkPermissions", ContextAttrTexts (policyPermissionValues PolicyPermissionNetwork policyDecl))
+            , ("processPermissions", ContextAttrTexts (policyPermissionValues PolicyPermissionProcess policyDecl))
+            , ("secretPermissions", ContextAttrTexts (policyPermissionValues PolicyPermissionSecret policyDecl))
             ]
         }
 
@@ -770,6 +776,13 @@ policyNodeId name = ContextNodeId ("policy:" <> name)
 
 policyClassificationNodeId :: Text -> Text -> ContextNodeId
 policyClassificationNodeId policyName classificationName = ContextNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
+
+policyPermissionValues :: PolicyPermissionKind -> PolicyDecl -> [Text]
+policyPermissionValues permissionKind policyDecl =
+  [ policyPermissionDeclValue permissionDecl
+  | permissionDecl <- policyDeclPermissions policyDecl
+  , policyPermissionDeclKind permissionDecl == permissionKind
+  ]
 
 hookNodeId :: Text -> ContextNodeId
 hookNodeId name = ContextNodeId ("hook:" <> name)

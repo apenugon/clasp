@@ -68,6 +68,8 @@ import Clasp.Syntax
   , PatternBinder (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
@@ -707,6 +709,7 @@ ensureUniquePolicyDecls = go Map.empty
             ]
         Nothing -> do
           ensureUniquePolicyClassifications policyDecl
+          ensureUniquePolicyPermissions policyDecl
           go (Map.insert (policyDeclName policyDecl) policyDecl seen) rest
 
 ensureUniquePolicyClassifications :: PolicyDecl -> Either DiagnosticBundle ()
@@ -726,6 +729,33 @@ ensureUniquePolicyClassifications policyDecl = go Map.empty (policyDeclAllowedCl
             ]
         Nothing ->
           go (Map.insert (policyClassificationDeclName classificationDecl) classificationDecl seen) rest
+
+ensureUniquePolicyPermissions :: PolicyDecl -> Either DiagnosticBundle ()
+ensureUniquePolicyPermissions policyDecl = go Map.empty (policyDeclPermissions policyDecl)
+  where
+    go _ [] = pure ()
+    go seen (permissionDecl : rest) =
+      let permissionKey = (policyPermissionDeclKind permissionDecl, policyPermissionDeclValue permissionDecl)
+       in case Map.lookup permissionKey seen of
+            Just previousPermissionDecl ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_DUPLICATE_POLICY_PERMISSION"
+                    ("Policy `" <> policyDeclName policyDecl <> "` repeats " <> renderPolicyPermissionKind (policyPermissionDeclKind permissionDecl) <> " permission `" <> policyPermissionDeclValue permissionDecl <> "`.")
+                    (Just (policyPermissionDeclSpan permissionDecl))
+                    ["List each declared permission target at most once per policy."]
+                    [diagnosticRelated "previous permission" (policyPermissionDeclSpan previousPermissionDecl)]
+                ]
+            Nothing ->
+              go (Map.insert permissionKey permissionDecl seen) rest
+
+renderPolicyPermissionKind :: PolicyPermissionKind -> Text
+renderPolicyPermissionKind permissionKind =
+  case permissionKind of
+    PolicyPermissionFile -> "file"
+    PolicyPermissionNetwork -> "network"
+    PolicyPermissionProcess -> "process"
+    PolicyPermissionSecret -> "secret"
 
 ensureUniqueToolServerDecls :: [ToolServerDecl] -> Either DiagnosticBundle ()
 ensureUniqueToolServerDecls = go Map.empty
