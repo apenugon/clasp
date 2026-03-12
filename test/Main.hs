@@ -1589,6 +1589,21 @@ compileTests =
               "expected stable default html and opt-in metadata projection"
               "{\"defaultHasRoute\":false,\"defaultHasFlow\":false,\"flowHasRoute\":true,\"flowHasFlow\":true,\"sameTitle\":true}"
               renderOutput
+    , testCase "react interop page component works when extracted from the interop object" $
+        case compileSource "react-interop" pageSource of
+          Left err ->
+            assertFailure ("expected page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/react-interop/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/react.mjs"
+            runtimeOutput <- runNodeScript (reactInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected extracted react page component to render without relying on this binding"
+              "{\"headCount\":4,\"headTitle\":\"Inbox\",\"hasDoctype\":true,\"bodyHasSection\":true,\"bodyHasEscapedMarkup\":true,\"elementType\":\"div\",\"rootMarker\":\"\",\"renderedHtmlMatches\":true}"
+              runtimeOutput
     , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
         withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -3019,6 +3034,33 @@ pageAssetRuntimeScript compiledPath runtimePath =
     , "  bundleRefs: bundle?.refs ?? [],"
     , "  assetContentType: assetResponse?.headers.get('content-type') ?? null,"
     , "  assetHasRefComment: assetBody.includes('inbox_shell')"
+    , "}));"
+    ]
+
+reactInteropRuntimeScript :: FilePath -> FilePath -> Text
+reactInteropRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createReactInterop } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const React = {"
+    , "  createElement(type, props, ...children) {"
+    , "    return { type, props: props ?? {}, children };"
+    , "  }"
+    , "};"
+    , "const page = compiledModule.home({});"
+    , "const interop = createReactInterop(compiledModule, React);"
+    , "const ExtractedPage = interop.Page;"
+    , "const rendered = interop.renderPage(page);"
+    , "const componentElement = ExtractedPage({ value: page });"
+    , "console.log(JSON.stringify({"
+    , "  headCount: rendered.headElements.length,"
+    , "  headTitle: rendered.head.title,"
+    , "  hasDoctype: rendered.html.startsWith('<!DOCTYPE html>'),"
+    , "  bodyHasSection: rendered.bodyHtml.includes('<section>'),"
+    , "  bodyHasEscapedMarkup: rendered.bodyHtml.includes('&lt;markup&gt;'),"
+    , "  elementType: componentElement.type,"
+    , "  rootMarker: componentElement.props['data-clasp-page-root'],"
+    , "  renderedHtmlMatches: componentElement.props.dangerouslySetInnerHTML.__html === rendered.bodyHtml"
     , "}));"
     ]
 
