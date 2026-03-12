@@ -38,7 +38,24 @@ import Clasp.Air
   , AirNode (..)
   , AirNodeId (..)
   )
-import Clasp.Compiler (airEntry, airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson, renderContextSourceJson)
+import Clasp.Compiler
+  ( SemanticEdit (..)
+  , airEntry
+  , airSource
+  , checkEntry
+  , checkSource
+  , compileEntry
+  , compileSource
+  , parseSource
+  , renderAirSourceJson
+  , renderContextSourceJson
+  , semanticEditSource
+  )
+import Clasp.Core
+  ( CoreDecl (..)
+  , CoreExpr (..)
+  , CoreModule (..)
+  )
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
@@ -92,6 +109,7 @@ tests =
     "clasp-compiler"
     [ parserTests
     , checkerTests
+    , semanticEditTests
     , airTests
     , contextTests
     , diagnosticTests
@@ -394,6 +412,60 @@ diagnosticTests =
             assertBool "expected related marker" ("related previous declaration" `T.isInfixOf` rendered)
           Right _ ->
             assertFailure "expected duplicate declaration failure"
+    ]
+
+semanticEditTests :: TestTree
+semanticEditTests =
+  testGroup
+    "semantic-edits"
+    [ testCase "rename declaration updates call sites without touching shadowed locals" $
+        case semanticEditSource (RenameDecl "id" "identity") "rename-decl" shadowedDeclRenameSource of
+          Left err ->
+            assertFailure ("expected semantic declaration rename to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertBool "expected renamed declaration" (any ((== "identity") . coreDeclName) (coreModuleDecls modl))
+            case find ((== "use") . coreDeclName) (coreModuleDecls modl) of
+              Just useDecl ->
+                case coreDeclBody useDecl of
+                  CVar _ _ "id" ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected shadowed local to remain unchanged, got " <> show other)
+              Nothing ->
+                assertFailure "expected use declaration"
+            case find ((== "main") . coreDeclName) (coreModuleDecls modl) of
+              Just mainDecl ->
+                case coreDeclBody mainDecl of
+                  CCall _ _ (CVar _ _ "identity") [CString _ "hello"] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected renamed call site, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
+    , testCase "rename schema updates declarations, route contracts, and decode surfaces" $
+        case semanticEditSource (RenameSchema "LeadSummary" "LeadDigest") "service" serviceSource of
+          Left err ->
+            assertFailure ("expected semantic schema rename to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertBool "expected renamed record schema" (any ((== "LeadDigest") . recordDeclName) (coreModuleRecordDecls modl))
+            case find ((== "summarizeLead") . coreDeclName) (coreModuleDecls modl) of
+              Just decl -> do
+                assertEqual "renamed declaration type" (TFunction [TNamed "LeadRequest"] (TNamed "LeadDigest")) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CDecodeJson _ (TNamed "LeadDigest") (CCall _ _ _ _) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected renamed decode surface, got " <> show other)
+              Nothing ->
+                assertFailure "expected summarizeLead declaration"
+            case coreModuleRouteDecls modl of
+              [routeDecl] -> do
+                assertEqual "renamed route response type" "LeadDigest" (routeDeclResponseType routeDecl)
+                assertEqual "renamed route response boundary" (RouteBoundaryDecl "LeadDigest") (routeDeclResponseDecl routeDecl)
+              other ->
+                assertFailure ("expected one route declaration, got " <> show (length other))
+    , testCase "semantic schema rename rejects compiler-known builtin schemas" $
+        assertHasCode "E_SEMANTIC_EDIT_CONFLICT" (semanticEditSource (RenameSchema "AuthSession" "Session") "auth" authIdentitySource)
     ]
 
 airTests :: TestTree
@@ -1137,6 +1209,21 @@ helloSource =
     , "id v = v"
     , ""
     , "main = id hello"
+    ]
+
+shadowedDeclRenameSource :: Text
+shadowedDeclRenameSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "id : Str -> Str"
+    , "id value = value"
+    , ""
+    , "use : Str -> Str"
+    , "use id = id"
+    , ""
+    , "main : Str"
+    , "main = id \"hello\""
     ]
 
 adtSource :: Text

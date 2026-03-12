@@ -1,6 +1,7 @@
 module Clasp.Compiler
   ( airSource
   , airEntry
+  , applySemanticEdit
   , contextSource
   , contextEntry
   , checkSource
@@ -12,6 +13,9 @@ module Clasp.Compiler
   , renderAirSourceJson
   , renderContextEntryJson
   , renderContextSourceJson
+  , semanticEditEntry
+  , semanticEditSource
+  , SemanticEdit (..)
   ) where
 
 import Data.Text (Text)
@@ -19,7 +23,7 @@ import qualified Data.Text.Lazy as LT
 import Clasp.Air (AirModule, buildAirModule, renderAirModuleJson)
 import Clasp.Checker (checkModule)
 import Clasp.ContextGraph (ContextGraph, buildContextGraph, renderContextGraphJson)
-import Clasp.Core (CoreModule)
+import Clasp.Core (CoreModule, SemanticEdit (..), applySemanticEdit)
 import Clasp.Diagnostic (DiagnosticBundle)
 import Clasp.Emit.JavaScript (emitModule)
 import Clasp.Loader (loadEntryModule)
@@ -34,6 +38,10 @@ checkSource :: FilePath -> Text -> Either DiagnosticBundle CoreModule
 checkSource path source = do
   modl <- parseModule path source
   checkModule modl
+
+semanticEditSource :: SemanticEdit -> FilePath -> Text -> Either DiagnosticBundle CoreModule
+semanticEditSource edit path source =
+  applySemanticEdit edit =<< checkSource path source
 
 airSource :: FilePath -> Text -> Either DiagnosticBundle AirModule
 airSource path source =
@@ -80,6 +88,11 @@ checkEntry :: FilePath -> IO (Either DiagnosticBundle CoreModule)
 checkEntry entryPath = do
   loadedModule <- loadEntryModule entryPath
   pure (loadedModule >>= checkModule)
+
+semanticEditEntry :: SemanticEdit -> FilePath -> IO (Either DiagnosticBundle CoreModule)
+semanticEditEntry edit entryPath = do
+  checkedModule <- checkEntry entryPath
+  pure (checkedModule >>= applySemanticEdit edit)
 
 compileEntry :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntry entryPath = do
