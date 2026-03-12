@@ -474,7 +474,10 @@ integrate_task_branch() {
   exec {merge_lock_fd}>"$merge_lock_file"
   acquire_merge_lock "$merge_lock_fd"
 
-  {
+  set +e
+  (
+    set -euo pipefail
+
     ensure_trunk_branch
     clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
     base_head="$(git -C "$project_root" rev-parse "$main_branch")"
@@ -499,7 +502,9 @@ integrate_task_branch() {
     git -C "$project_root" merge --ff-only "$task_head"
     git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
     printf '%s\n' "$(git -C "$project_root" rev-parse "$main_branch")"
-  } >"$integration_log" 2>&1 || status=$?
+  ) >"$integration_log" 2>&1
+  status=$?
+  set -e
 
   exec {merge_lock_fd}>&-
   return "$status"
@@ -519,10 +524,15 @@ sync_trunk_with_main() {
   exec {merge_lock_fd}>"$merge_lock_file"
   acquire_merge_lock "$merge_lock_fd"
 
-  {
+  set +e
+  (
+    set -euo pipefail
+
     ensure_trunk_branch
     clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
-  } >>"$sync_log" 2>&1 || status=$?
+  ) >>"$sync_log" 2>&1
+  status=$?
+  set -e
 
   exec {merge_lock_fd}>&-
   return "$status"

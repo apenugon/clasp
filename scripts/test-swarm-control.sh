@@ -30,6 +30,19 @@ bash -lc "
   ! clasp_swarm_retry_limit_is_bounded 'forever'
 " >/dev/null
 
+bash -lc "
+  set -euo pipefail
+  set +e
+  (
+    set -euo pipefail
+    false
+    printf 'unexpected\\n'
+  ) >/dev/null 2>&1
+  status=\$?
+  set -e
+  [[ \$status -ne 0 ]]
+" >/dev/null
+
 repo_root="$(mktemp -d)"
 
 bash -lc "
