@@ -19,6 +19,7 @@ module Clasp.Core
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
+  , CoreWorkflowDecl (..)
   , SemanticEdit (..)
   , applySemanticEdit
   , coreExprType
@@ -59,6 +60,7 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   , renderType
   , splitModuleName
   )
@@ -71,6 +73,7 @@ data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
+  , coreModuleWorkflowDecls :: [CoreWorkflowDecl]
   , coreModuleGuideDecls :: [GuideDecl]
   , coreModuleHookDecls :: [CoreHookDecl]
   , coreModuleAgentRoleDecls :: [CoreAgentRoleDecl]
@@ -89,6 +92,11 @@ data CoreModule = CoreModule
 
 data CorePolicyDecl = CorePolicyDecl
   { corePolicySourceDecl :: PolicyDecl
+  }
+  deriving (Eq, Show)
+
+data CoreWorkflowDecl = CoreWorkflowDecl
+  { coreWorkflowSourceDecl :: WorkflowDecl
   }
   deriving (Eq, Show)
 
@@ -239,6 +247,7 @@ renderCoreModule modl =
     topLevelSections =
       [ fmap renderTypeDecl (coreModuleTypeDecls modl)
       , fmap renderRecordDecl (coreModuleRecordDecls modl)
+      , fmap renderWorkflowDecl (coreModuleWorkflowDecls modl)
       , fmap renderGuideDecl (coreModuleGuideDecls modl)
       , fmap renderHookDecl (coreModuleHookDecls modl)
       , fmap renderAgentRoleDecl (coreModuleAgentRoleDecls modl)
@@ -278,6 +287,16 @@ renderRecordDecl recordDecl =
     <> recordDeclName recordDecl
     <> " = "
     <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderWorkflowDecl :: CoreWorkflowDecl -> Text
+renderWorkflowDecl workflowDecl =
+  "workflow "
+    <> workflowDeclName sourceDecl
+    <> " = { state: "
+    <> renderType (workflowDeclStateType sourceDecl)
+    <> " }"
+  where
+    sourceDecl = coreWorkflowSourceDecl workflowDecl
 
 renderRecordFieldDecl :: RecordFieldDecl -> Text
 renderRecordFieldDecl fieldDecl =
@@ -803,6 +822,7 @@ renameSchema oldName newName modl
         modl
           { coreModuleTypeDecls = fmap renameTypeDecl (coreModuleTypeDecls modl)
           , coreModuleRecordDecls = fmap renameRecordDecl (coreModuleRecordDecls modl)
+          , coreModuleWorkflowDecls = fmap renameWorkflowDecl (coreModuleWorkflowDecls modl)
           , coreModuleHookDecls = fmap renameHookDecl (coreModuleHookDecls modl)
           , coreModuleProjectionDecls = fmap renameProjectionDecl (coreModuleProjectionDecls modl)
           , coreModuleToolDecls = fmap renameToolDecl (coreModuleToolDecls modl)
@@ -855,6 +875,15 @@ renameSchema oldName newName modl
                   , hookDeclRequestDecl = renameBoundaryDecl (hookDeclRequestDecl hookDecl)
                   , hookDeclResponseType = renameIfEqual oldName newName (hookDeclResponseType hookDecl)
                   , hookDeclResponseDecl = renameBoundaryDecl (hookDeclResponseDecl hookDecl)
+                  }
+        }
+
+    renameWorkflowDecl coreWorkflowDecl =
+      coreWorkflowDecl
+        { coreWorkflowSourceDecl =
+            let workflowDecl = coreWorkflowSourceDecl coreWorkflowDecl
+             in workflowDecl
+                  { workflowDeclStateType = renameType (workflowDeclStateType workflowDecl)
                   }
         }
 

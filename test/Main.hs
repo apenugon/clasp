@@ -66,6 +66,7 @@ import Clasp.Core
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
+  , CoreWorkflowDecl (..)
   )
 import Clasp.Diagnostic
   ( Diagnostic (..)
@@ -127,6 +128,7 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   )
 
 main :: IO ()
@@ -300,6 +302,18 @@ parserTests =
                 assertEqual "hook handler" "bootstrapWorker" (hookDeclHandlerName hookDecl)
               other ->
                 assertFailure ("expected one hook declaration, got " <> show (length other))
+    , testCase "parses workflow declarations with typed state" $
+        case parseSource "inline" workflowSource of
+          Left err ->
+            assertFailure ("expected workflow source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleWorkflowDecls modl of
+              [workflowDecl] -> do
+                assertEqual "workflow name" "CounterFlow" (workflowDeclName workflowDecl)
+                assertEqual "workflow identity" "workflow:CounterFlow" (workflowDeclIdentity workflowDecl)
+                assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
+              other ->
+                assertFailure ("expected one workflow declaration, got " <> show (length other))
     , testCase "parses agent roles and agent bindings" $
         case parseSource "inline" agentSource of
           Left err ->
@@ -835,6 +849,16 @@ checkerTests =
                 assertEqual "hook trigger event" "worker.start" (hookTriggerDeclEvent (hookDeclTrigger hookDecl))
               other ->
                 assertFailure ("expected one checked hook declaration, got " <> show (length other))
+    , testCase "accepts workflows with record-typed durable state" $
+        case checkSource "workflow" workflowSource of
+          Left err ->
+            assertFailure ("expected workflow source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case coreModuleWorkflowDecls checked of
+              [CoreWorkflowDecl workflowDecl] ->
+                assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
+              other ->
+                assertFailure ("expected one checked workflow declaration, got " <> show (length other))
     , testCase "accepts agent roles that bind guides and policies to agents" $
         case checkSource "agent" agentSource of
           Left err ->
@@ -1125,6 +1149,8 @@ checkerTests =
         assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
     , testCase "rejects hooks whose handlers do not match declared schemas" $
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
+    , testCase "rejects workflows whose state is not a record schema" $
+        assertHasCode "E_WORKFLOW_STATE_TYPE" (checkSource "bad" badWorkflowStateSource)
     , testCase "rejects agents that reference unknown roles" $
         assertHasCode "E_UNKNOWN_AGENT_ROLE" (checkSource "bad" unknownAgentRoleSource)
     , testCase "rejects tool servers that reference unknown policies" $
@@ -1697,6 +1723,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
+    , testCase "lowering preserves workflow declarations for later runtime emission" $
+        case lowerChecked "workflow" workflowSource of
+          Left err ->
+            assertFailure ("expected workflow lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case lowerModuleWorkflowDecls lowered of
+              [workflowDecl] ->
+                assertEqual "lowered workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
+              other ->
+                assertFailure ("expected one lowered workflow declaration, got " <> show (length other))
     , testCase "lowering preserves list literals" $
         case lowerChecked "lists" listLiteralSource of
           Left err ->
@@ -3297,6 +3333,18 @@ hookSource =
     , "main = \"ok\""
     ]
 
+workflowSource :: Text
+workflowSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { value : Int }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "main = \"ok\""
+    ]
+
 agentSource :: Text
 agentSource =
   T.unlines
@@ -3595,6 +3643,18 @@ badHookHandlerSource =
     , "bootstrapWorker req = WrongAck { note = req.workerId }"
     , ""
     , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
+    , ""
+    , "main = \"ok\""
+    ]
+
+badWorkflowStateSource :: Text
+badWorkflowStateSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Counter = CounterValue"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
     , ""
     , "main = \"ok\""
     ]
