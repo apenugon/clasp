@@ -67,8 +67,10 @@ import Clasp.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
+  , RoutePathDecl (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -175,12 +177,37 @@ routeDeclParser = do
       { routeDeclName = name
       , routeDeclSpan = makeSourceSpan start end
       , routeDeclNameSpan = nameSpan
+      , routeDeclIdentity = "route:" <> name
       , routeDeclMethod = method
       , routeDeclPath = routePath
+      , routeDeclPathDecl =
+          RoutePathDecl
+            { routePathDeclPattern = routePath
+            , routePathDeclParams = []
+            }
       , routeDeclPathSpan = pathSpan
       , routeDeclRequestType = requestTypeName
+      , routeDeclQueryDecl =
+          case method of
+            RouteGet -> Just (RouteBoundaryDecl requestTypeName)
+            RoutePost -> Nothing
+      , routeDeclFormDecl =
+          case method of
+            RoutePost
+              | responseTypeName == "Page" || responseTypeName == "Redirect" ->
+                  Just (RouteBoundaryDecl requestTypeName)
+            _ ->
+              Nothing
+      , routeDeclBodyDecl =
+          case method of
+            RoutePost
+              | responseTypeName /= "Page" && responseTypeName /= "Redirect" ->
+                  Just (RouteBoundaryDecl requestTypeName)
+            _ ->
+              Nothing
       , routeDeclRequestTypeSpan = requestTypeSpan
       , routeDeclResponseType = responseTypeName
+      , routeDeclResponseDecl = RouteBoundaryDecl responseTypeName
       , routeDeclResponseTypeSpan = responseTypeSpan
       , routeDeclHandlerName = handlerName
       , routeDeclHandlerSpan = handlerSpan

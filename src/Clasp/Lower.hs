@@ -30,8 +30,10 @@ import Clasp.Syntax
   , ForeignDecl
   , ModuleName
   , RecordDecl
+  , RouteBoundaryDecl
   , RouteDecl (..)
   , RouteMethod
+  , RoutePathDecl
   , Type (..)
   , TypeDecl (..)
   )
@@ -89,20 +91,32 @@ data LowerMatchBranch = LowerMatchBranch
 
 data LowerRouteContract = LowerRouteContract
   { lowerRouteContractName :: Text
+  , lowerRouteContractIdentity :: Text
   , lowerRouteContractMethod :: Text
   , lowerRouteContractPath :: Text
+  , lowerRouteContractPathDecl :: RoutePathDecl
   , lowerRouteContractRequestType :: Text
+  , lowerRouteContractQueryDecl :: Maybe RouteBoundaryDecl
+  , lowerRouteContractFormDecl :: Maybe RouteBoundaryDecl
+  , lowerRouteContractBodyDecl :: Maybe RouteBoundaryDecl
   , lowerRouteContractResponseType :: Text
+  , lowerRouteContractResponseDecl :: RouteBoundaryDecl
   , lowerRouteContractResponseKind :: Text
   }
   deriving (Eq, Show)
 
 data LowerRoute = LowerRoute
   { lowerRouteName :: Text
+  , lowerRouteIdentity :: Text
   , lowerRouteMethod :: RouteMethod
   , lowerRoutePath :: Text
+  , lowerRoutePathDecl :: RoutePathDecl
   , lowerRouteRequestTypeName :: Text
+  , lowerRouteQueryDecl :: Maybe RouteBoundaryDecl
+  , lowerRouteFormDecl :: Maybe RouteBoundaryDecl
+  , lowerRouteBodyDecl :: Maybe RouteBoundaryDecl
   , lowerRouteResponseTypeName :: Text
+  , lowerRouteResponseDecl :: RouteBoundaryDecl
   , lowerRouteHandlerName :: Text
   }
   deriving (Eq, Show)
@@ -215,10 +229,16 @@ lowerRouteDecl :: RouteDecl -> LowerRoute
 lowerRouteDecl routeDecl =
   LowerRoute
     { lowerRouteName = routeDeclName routeDecl
+    , lowerRouteIdentity = routeDeclIdentity routeDecl
     , lowerRouteMethod = routeDeclMethod routeDecl
     , lowerRoutePath = routeDeclPath routeDecl
+    , lowerRoutePathDecl = routeDeclPathDecl routeDecl
     , lowerRouteRequestTypeName = routeDeclRequestType routeDecl
+    , lowerRouteQueryDecl = routeDeclQueryDecl routeDecl
+    , lowerRouteFormDecl = routeDeclFormDecl routeDecl
+    , lowerRouteBodyDecl = routeDeclBodyDecl routeDecl
     , lowerRouteResponseTypeName = routeDeclResponseType routeDecl
+    , lowerRouteResponseDecl = routeDeclResponseDecl routeDecl
     , lowerRouteHandlerName = routeDeclHandlerName routeDecl
     }
 
@@ -226,10 +246,16 @@ lowerRouteContract :: CoreRouteContract -> LowerRouteContract
 lowerRouteContract routeContract =
   LowerRouteContract
     { lowerRouteContractName = coreRouteContractName routeContract
+    , lowerRouteContractIdentity = coreRouteContractIdentity routeContract
     , lowerRouteContractMethod = coreRouteContractMethod routeContract
     , lowerRouteContractPath = coreRouteContractPath routeContract
+    , lowerRouteContractPathDecl = coreRouteContractPathDecl routeContract
     , lowerRouteContractRequestType = coreRouteContractRequestType routeContract
+    , lowerRouteContractQueryDecl = coreRouteContractQueryDecl routeContract
+    , lowerRouteContractFormDecl = coreRouteContractFormDecl routeContract
+    , lowerRouteContractBodyDecl = coreRouteContractBodyDecl routeContract
     , lowerRouteContractResponseType = coreRouteContractResponseType routeContract
+    , lowerRouteContractResponseDecl = coreRouteContractResponseDecl routeContract
     , lowerRouteContractResponseKind = coreRouteContractResponseKind routeContract
     }
 

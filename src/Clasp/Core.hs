@@ -22,7 +22,9 @@ import Clasp.Syntax
   , PolicyDecl
   , ProjectionDecl
   , RecordDecl
+  , RouteBoundaryDecl
   , RouteDecl
+  , RoutePathDecl
   , SourceSpan
   , Type (..)
   , TypeDecl
@@ -90,10 +92,16 @@ data CoreRecordField = CoreRecordField
 
 data CoreRouteContract = CoreRouteContract
   { coreRouteContractName :: Text
+  , coreRouteContractIdentity :: Text
   , coreRouteContractMethod :: Text
   , coreRouteContractPath :: Text
+  , coreRouteContractPathDecl :: RoutePathDecl
   , coreRouteContractRequestType :: Text
+  , coreRouteContractQueryDecl :: Maybe RouteBoundaryDecl
+  , coreRouteContractFormDecl :: Maybe RouteBoundaryDecl
+  , coreRouteContractBodyDecl :: Maybe RouteBoundaryDecl
   , coreRouteContractResponseType :: Text
+  , coreRouteContractResponseDecl :: RouteBoundaryDecl
   , coreRouteContractResponseKind :: Text
   }
   deriving (Eq, Show)

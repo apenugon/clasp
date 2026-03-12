@@ -19,8 +19,11 @@ module Clasp.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
+  , RoutePathDecl (..)
+  , RoutePathParamDecl (..)
   , SourceSpan (..)
   , TypeDecl (..)
   , Type (..)
@@ -211,16 +214,39 @@ data RouteMethod
   | RoutePost
   deriving (Eq, Ord, Show)
 
+data RoutePathParamDecl = RoutePathParamDecl
+  { routePathParamDeclName :: Text
+  , routePathParamDeclType :: Text
+  }
+  deriving (Eq, Show)
+
+data RoutePathDecl = RoutePathDecl
+  { routePathDeclPattern :: Text
+  , routePathDeclParams :: [RoutePathParamDecl]
+  }
+  deriving (Eq, Show)
+
+data RouteBoundaryDecl = RouteBoundaryDecl
+  { routeBoundaryDeclType :: Text
+  }
+  deriving (Eq, Show)
+
 data RouteDecl = RouteDecl
   { routeDeclName :: Text
   , routeDeclSpan :: SourceSpan
   , routeDeclNameSpan :: SourceSpan
+  , routeDeclIdentity :: Text
   , routeDeclMethod :: RouteMethod
   , routeDeclPath :: Text
+  , routeDeclPathDecl :: RoutePathDecl
   , routeDeclPathSpan :: SourceSpan
   , routeDeclRequestType :: Text
+  , routeDeclQueryDecl :: Maybe RouteBoundaryDecl
+  , routeDeclFormDecl :: Maybe RouteBoundaryDecl
+  , routeDeclBodyDecl :: Maybe RouteBoundaryDecl
   , routeDeclRequestTypeSpan :: SourceSpan
   , routeDeclResponseType :: Text
+  , routeDeclResponseDecl :: RouteBoundaryDecl
   , routeDeclResponseTypeSpan :: SourceSpan
   , routeDeclHandlerName :: Text
   , routeDeclHandlerSpan :: SourceSpan

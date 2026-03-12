@@ -21,7 +21,10 @@ import Clasp.Syntax
   , ModuleName (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RouteBoundaryDecl (..)
   , RouteMethod (..)
+  , RoutePathDecl (..)
+  , RoutePathParamDecl (..)
   , Type (..)
   , TypeDecl (..)
   )
@@ -187,12 +190,13 @@ emitRuntimePrelude =
   , "    return ` data-clasp-flow=\"${$claspEscapeHtml(flowKind)}\"`;"
   , "  }"
   , "  const routeName = typeof contract.routeName === \"string\" ? contract.routeName : \"\";"
+  , "  const routeId = typeof contract.routeId === \"string\" ? contract.routeId : \"\";"
   , "  const routeMethod = typeof contract.method === \"string\" ? contract.method : \"\";"
   , "  const routePath = typeof contract.path === \"string\" ? contract.path : \"\";"
   , "  const requestType = typeof contract.requestType === \"string\" ? contract.requestType : \"\";"
   , "  const responseType = typeof contract.responseType === \"string\" ? contract.responseType : \"\";"
   , "  const responseKind = typeof contract.responseKind === \"string\" ? contract.responseKind : \"\";"
-  , "  return ` data-clasp-flow=\"${$claspEscapeHtml(flowKind)}\" data-clasp-route=\"${$claspEscapeHtml(routeName)}\" data-clasp-method=\"${$claspEscapeHtml(routeMethod)}\" data-clasp-path=\"${$claspEscapeHtml(routePath)}\" data-clasp-request-type=\"${$claspEscapeHtml(requestType)}\" data-clasp-response-type=\"${$claspEscapeHtml(responseType)}\" data-clasp-response-kind=\"${$claspEscapeHtml(responseKind)}\"`;"
+  , "  return ` data-clasp-flow=\"${$claspEscapeHtml(flowKind)}\" data-clasp-route=\"${$claspEscapeHtml(routeName)}\" data-clasp-route-id=\"${$claspEscapeHtml(routeId)}\" data-clasp-method=\"${$claspEscapeHtml(routeMethod)}\" data-clasp-path=\"${$claspEscapeHtml(routePath)}\" data-clasp-request-type=\"${$claspEscapeHtml(requestType)}\" data-clasp-response-type=\"${$claspEscapeHtml(responseType)}\" data-clasp-response-kind=\"${$claspEscapeHtml(responseKind)}\"`;"
   , "}"
   , ""
   , "function $claspRenderView(view) {"
@@ -512,25 +516,23 @@ emitRoutesExport typeDecls recordDecls routes =
        in
       [ "  {"
       , "    name: " <> emitStringLiteral (lowerRouteName route) <> ","
+      , "    id: " <> emitStringLiteral (lowerRouteIdentity route) <> ","
       , "    method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
       , "    path: " <> emitStringLiteral (lowerRoutePath route) <> ","
+      , "    pathDecl: " <> emitRoutePathDecl (lowerRoutePathDecl route) <> ","
+      , "    queryDecl: " <> emitRouteBoundaryDecl typeDecls recordDecls (lowerRouteQueryDecl route) <> ","
+      , "    formDecl: " <> emitRouteBoundaryDecl typeDecls recordDecls (lowerRouteFormDecl route) <> ","
+      , "    bodyDecl: " <> emitRouteBoundaryDecl typeDecls recordDecls (lowerRouteBodyDecl route) <> ","
       , "    requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
-      , "    requestSchema: " <> emitRouteRequestSchema (lowerRouteRequestTypeName route) <> ","
+      , "    requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (lowerRouteRequestTypeName route) <> ","
       , "    responseType: " <> emitStringLiteral (lowerRouteResponseTypeName route) <> ","
+      , "    responseDecl: " <> emitRouteBoundaryDecl typeDecls recordDecls (Just (lowerRouteResponseDecl route)) <> ","
       , "    responseKind: " <> emitStringLiteral responseKind <> ","
       , "    handler: " <> emitIdentifier (lowerRouteHandlerName route) <> ","
       , "    decodeRequest: $decode_" <> lowerRouteRequestTypeName route <> ","
       , "    encodeResponse: " <> responseEncoder
       , "  },"
       ]
-
-    emitRouteRequestSchema typeName
-      | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
-          "$claspSchema_" <> typeName
-      | any ((== typeName) . typeDeclName) typeDecls || any ((== typeName) . recordDeclName) recordDecls =
-          "$claspSchema_" <> typeName
-      | otherwise =
-          "null"
 
 emitRouteMethod :: RouteMethod -> Text
 emitRouteMethod routeMethod =
@@ -539,6 +541,40 @@ emitRouteMethod routeMethod =
       "GET"
     RoutePost ->
       "POST"
+
+emitRoutePathDecl :: RoutePathDecl -> Text
+emitRoutePathDecl pathDecl =
+  "{ pattern: "
+    <> emitStringLiteral (routePathDeclPattern pathDecl)
+    <> ", params: ["
+    <> T.intercalate ", " (fmap emitRoutePathParamDecl (routePathDeclParams pathDecl))
+    <> "] }"
+
+emitRoutePathParamDecl :: RoutePathParamDecl -> Text
+emitRoutePathParamDecl pathParam =
+  "{ name: "
+    <> emitStringLiteral (routePathParamDeclName pathParam)
+    <> ", type: "
+    <> emitStringLiteral (routePathParamDeclType pathParam)
+    <> " }"
+
+emitRouteBoundaryDecl :: [TypeDecl] -> [RecordDecl] -> Maybe RouteBoundaryDecl -> Text
+emitRouteBoundaryDecl _ _ Nothing = "null"
+emitRouteBoundaryDecl typeDecls recordDecls (Just boundary) =
+  "{ type: "
+    <> emitStringLiteral (routeBoundaryDeclType boundary)
+    <> ", schema: "
+    <> emitRouteRequestSchemaFor typeDecls recordDecls (routeBoundaryDeclType boundary)
+    <> " }"
+
+emitRouteRequestSchemaFor :: [TypeDecl] -> [RecordDecl] -> Text -> Text
+emitRouteRequestSchemaFor typeDecls recordDecls typeName
+  | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
+      "$claspSchema_" <> typeName
+  | any ((== typeName) . typeDeclName) typeDecls || any ((== typeName) . recordDeclName) recordDecls =
+      "$claspSchema_" <> typeName
+  | otherwise =
+      "null"
 
 emitValidator :: Type -> Text -> Text -> Text
 emitValidator typ valueRef pathRef =
@@ -787,14 +823,26 @@ emitRouteContractObject :: LowerRouteContract -> Text
 emitRouteContractObject routeContract =
   "{ routeName: "
     <> emitStringLiteral (lowerRouteContractName routeContract)
+    <> ", routeId: "
+    <> emitStringLiteral (lowerRouteContractIdentity routeContract)
     <> ", method: "
     <> emitStringLiteral (lowerRouteContractMethod routeContract)
     <> ", path: "
     <> emitStringLiteral (lowerRouteContractPath routeContract)
+    <> ", pathDecl: "
+    <> emitRoutePathDecl (lowerRouteContractPathDecl routeContract)
     <> ", requestType: "
     <> emitStringLiteral (lowerRouteContractRequestType routeContract)
+    <> ", queryDecl: "
+    <> emitRouteBoundaryDecl [] [] (lowerRouteContractQueryDecl routeContract)
+    <> ", formDecl: "
+    <> emitRouteBoundaryDecl [] [] (lowerRouteContractFormDecl routeContract)
+    <> ", bodyDecl: "
+    <> emitRouteBoundaryDecl [] [] (lowerRouteContractBodyDecl routeContract)
     <> ", responseType: "
     <> emitStringLiteral (lowerRouteContractResponseType routeContract)
+    <> ", responseDecl: "
+    <> emitRouteBoundaryDecl [] [] (Just (lowerRouteContractResponseDecl routeContract))
     <> ", responseKind: "
     <> emitStringLiteral (lowerRouteContractResponseKind routeContract)
     <> " }"

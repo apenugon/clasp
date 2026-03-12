@@ -63,8 +63,10 @@ import Clasp.Syntax
   , ProjectionDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
+  , RoutePathDecl (..)
   , SourceSpan (..)
   , Type (..)
   , TypeDecl (..)
@@ -197,8 +199,13 @@ parserTests =
             case moduleRouteDecls modl of
               [routeDecl] -> do
                 assertEqual "route name" "summarizeLeadRoute" (routeDeclName routeDecl)
+                assertEqual "route identity" "route:summarizeLeadRoute" (routeDeclIdentity routeDecl)
                 assertEqual "route method" RoutePost (routeDeclMethod routeDecl)
                 assertEqual "route path" "/lead/summary" (routeDeclPath routeDecl)
+                assertEqual "route path decl" (RoutePathDecl "/lead/summary" []) (routeDeclPathDecl routeDecl)
+                assertEqual "route body decl" (Just (RouteBoundaryDecl "LeadRequest")) (routeDeclBodyDecl routeDecl)
+                assertEqual "route form decl" Nothing (routeDeclFormDecl routeDecl)
+                assertEqual "route response decl" (RouteBoundaryDecl "LeadSummary") (routeDeclResponseDecl routeDecl)
               other ->
                 assertFailure ("expected one route declaration, got " <> show (length other))
             case findDecl "summarizeLead" (moduleDecls modl) of
@@ -219,6 +226,7 @@ parserTests =
               (Just decl, [routeDecl]) -> do
                 assertEqual "page annotation" (Just (TFunction [TNamed "Empty"] (TNamed "Page"))) (declAnnotation decl)
                 assertEqual "page route response" "Page" (routeDeclResponseType routeDecl)
+                assertEqual "page route query decl" (Just (RouteBoundaryDecl "Empty")) (routeDeclQueryDecl routeDecl)
               _ ->
                 assertFailure "expected page declaration and route"
     , testCase "parses compiler-known auth identity types through the normal surface" $
@@ -398,6 +406,39 @@ airTests =
                 assertBool "expected rawJson ref" (("rawJson", AirAttrNode (AirNodeId "expr:summarizeLead:body.rawJson")) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected summarizeLead body AIR node"
+            case findAirNode (AirNodeId "route:summarizeLeadRoute") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool "expected route identity" (("identity", AirAttrText "route:summarizeLeadRoute") `elem` airNodeAttrs node)
+                assertBool
+                  "expected structured path declaration"
+                  ( ("path", AirAttrObject [("pattern", AirAttrText "/lead/summary"), ("params", AirAttrList [])])
+                      `elem` airNodeAttrs node
+                  )
+                assertBool
+                  "expected structured body declaration"
+                  (("body", AirAttrObject [("type", AirAttrText "LeadRequest")]) `elem` airNodeAttrs node)
+                assertBool
+                  "expected structured response declaration"
+                  (("response", AirAttrObject [("type", AirAttrText "LeadSummary")]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected summarizeLeadRoute AIR node"
+    , testCase "air keeps view flow edges attached to route identities" $
+        case airSource "interactive" interactivePageSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            case find ((== "viewLink") . airNodeKind) (airModuleNodes airModule) of
+              Just node -> do
+                assertBool "expected link route ref" (("routeDecl", AirAttrNode (AirNodeId "route:leadRoute")) `elem` airNodeAttrs node)
+                assertBool "expected link route identity" (("routeIdentity", AirAttrText "route:leadRoute") `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected viewLink AIR node"
+            case find ((== "viewForm") . airNodeKind) (airModuleNodes airModule) of
+              Just node -> do
+                assertBool "expected form route ref" (("routeDecl", AirAttrNode (AirNodeId "route:createLeadRoute")) `elem` airNodeAttrs node)
+                assertBool "expected form route identity" (("routeIdentity", AirAttrText "route:createLeadRoute") `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected viewForm AIR node"
     , testCase "air retains policy and projection graph identity" $
         case airSource "projection" classifiedProjectionSource of
           Left err ->
@@ -504,9 +545,42 @@ lowerTests =
               Just
                 ( LFunctionDecl
                     _ ["req"]
-                    (LPage (LString "Inbox") (LViewAppend (LViewLink (LowerRouteContract "leadRoute" "GET" "/lead/primary" "Empty" "Page" "page") "/lead/primary" _) (LViewForm (LowerRouteContract "createLeadRoute" "POST" "/leads" "LeadCreate" "Redirect" "redirect") "POST" "/leads" _)))
-                  ) ->
-                pure ()
+                    (LPage (LString "Inbox") (LViewAppend (LViewLink routeLink "/lead/primary" _) (LViewForm routeForm "POST" "/leads" _)))
+                  ) -> do
+                    assertEqual
+                      "link route contract"
+                      ( LowerRouteContract
+                          "leadRoute"
+                          "route:leadRoute"
+                          "GET"
+                          "/lead/primary"
+                          (RoutePathDecl "/lead/primary" [])
+                          "Empty"
+                          (Just (RouteBoundaryDecl "Empty"))
+                          Nothing
+                          Nothing
+                          "Page"
+                          (RouteBoundaryDecl "Page")
+                          "page"
+                      )
+                      routeLink
+                    assertEqual
+                      "form route contract"
+                      ( LowerRouteContract
+                          "createLeadRoute"
+                          "route:createLeadRoute"
+                          "POST"
+                          "/leads"
+                          (RoutePathDecl "/leads" [])
+                          "LeadCreate"
+                          Nothing
+                          (Just (RouteBoundaryDecl "LeadCreate"))
+                          Nothing
+                          "Redirect"
+                          (RouteBoundaryDecl "Redirect")
+                          "redirect"
+                      )
+                      routeForm
               other ->
                 assertFailure ("unexpected lowered interactive page declaration: " <> show other)
     , testCase "lowering preserves redirect responses" $
@@ -579,6 +653,10 @@ compileTests =
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
             assertBool "expected request schema metadata" ("requestSchema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+            assertBool "expected route identity metadata" ("id: \"route:summarizeLeadRoute\"" `T.isInfixOf` emitted)
+            assertBool "expected path declaration metadata" ("pathDecl: { pattern: \"/lead/summary\", params: [] }" `T.isInfixOf` emitted)
+            assertBool "expected body declaration metadata" ("bodyDecl: { type: \"LeadRequest\", schema: $claspSchema_LeadRequest }" `T.isInfixOf` emitted)
+            assertBool "expected response declaration metadata" ("responseDecl: { type: \"LeadSummary\", schema: $claspSchema_LeadSummary }" `T.isInfixOf` emitted)
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->
@@ -607,6 +685,9 @@ compileTests =
             assertBool "expected input renderer" ("case \"input\":" `T.isInfixOf` emitted)
             assertBool "expected submit renderer" ("case \"submit\":" `T.isInfixOf` emitted)
             assertBool "expected link contract attrs" ("data-clasp-route=" `T.isInfixOf` emitted)
+            assertBool "expected link route identity attrs" ("data-clasp-route-id=" `T.isInfixOf` emitted)
+            assertBool "expected link query declaration metadata" ("queryDecl: { type: \"Empty\", schema: $claspSchema_Empty }" `T.isInfixOf` emitted)
+            assertBool "expected form declaration metadata" ("formDecl: { type: \"LeadCreate\", schema: $claspSchema_LeadCreate }" `T.isInfixOf` emitted)
             assertBool "expected redirect contract metadata" ("responseKind: \"redirect\"" `T.isInfixOf` emitted)
     , testCase "compile emits redirect helpers and redirect route metadata" $
         case compileSource "redirect" redirectSource of

@@ -16,6 +16,7 @@ import Data.Aeson
   , object
   , (.=)
   )
+import qualified Data.Aeson.Key as Key
 import Data.Aeson.Text (encodeToLazyText)
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as LT
@@ -30,6 +31,7 @@ import Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRouteContract (..)
   , coreExprType
   )
 import Clasp.Syntax
@@ -42,8 +44,11 @@ import Clasp.Syntax
   , ProjectionFieldDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
+  , RoutePathDecl (..)
+  , RoutePathParamDecl (..)
   , SourceSpan
   , Type
   , TypeDecl (..)
@@ -60,6 +65,8 @@ data AirAttr
   | AirAttrTexts [Text]
   | AirAttrInt Integer
   | AirAttrBool Bool
+  | AirAttrList [AirAttr]
+  | AirAttrObject [(Text, AirAttr)]
   | AirAttrNode AirNodeId
   | AirAttrNodes [AirNodeId]
   deriving (Eq, Show)
@@ -266,8 +273,13 @@ buildRouteDeclNode routeDecl =
     , airNodeType = Nothing
     , airNodeAttrs =
         [ ("name", AirAttrText (routeDeclName routeDecl))
+        , ("identity", AirAttrText (routeDeclIdentity routeDecl))
         , ("method", AirAttrText (renderRouteMethod routeDecl))
-        , ("path", AirAttrText (routeDeclPath routeDecl))
+        , ("path", routePathAttr (routeDeclPathDecl routeDecl))
+        , ("query", maybeBoundaryAttr (routeDeclQueryDecl routeDecl))
+        , ("form", maybeBoundaryAttr (routeDeclFormDecl routeDecl))
+        , ("body", maybeBoundaryAttr (routeDeclBodyDecl routeDecl))
+        , ("response", boundaryAttr (routeDeclResponseDecl routeDecl))
         , ("requestType", AirAttrText (routeDeclRequestType routeDecl))
         , ("responseType", AirAttrText (routeDeclResponseType routeDecl))
         , ("handlerName", AirAttrText (routeDeclHandlerName routeDecl))
@@ -351,12 +363,27 @@ buildExprGraph nodeId expr =
         CViewStyled _ styleRef child ->
           let childId = exprChildId "child"
            in ([("styleRef", AirAttrText styleRef), ("child", AirAttrNode childId)], buildExprGraph childId child)
-        CViewLink _ _ href child ->
+        CViewLink _ routeContract href child ->
           let childId = exprChildId "child"
-           in ([("href", AirAttrText href), ("child", AirAttrNode childId)], buildExprGraph childId child)
-        CViewForm _ _ method action child ->
+           in
+                ( [ ("routeDecl", AirAttrNode (routeDeclId (coreRouteContractName routeContract)))
+                  , ("routeIdentity", AirAttrText (coreRouteContractIdentity routeContract))
+                  , ("href", AirAttrText href)
+                  , ("child", AirAttrNode childId)
+                  ]
+                , buildExprGraph childId child
+                )
+        CViewForm _ routeContract method action child ->
           let childId = exprChildId "child"
-           in ([("method", AirAttrText method), ("action", AirAttrText action), ("child", AirAttrNode childId)], buildExprGraph childId child)
+           in
+                ( [ ("routeDecl", AirAttrNode (routeDeclId (coreRouteContractName routeContract)))
+                  , ("routeIdentity", AirAttrText (coreRouteContractIdentity routeContract))
+                  , ("method", AirAttrText method)
+                  , ("action", AirAttrText action)
+                  , ("child", AirAttrNode childId)
+                  ]
+                , buildExprGraph childId child
+                )
         CViewInput _ fieldName inputKind value ->
           let valueId = exprChildId "value"
            in ([("fieldName", AirAttrText fieldName), ("inputKind", AirAttrText inputKind), ("value", AirAttrNode valueId)], buildExprGraph valueId value)
@@ -575,6 +602,34 @@ renderRouteMethod routeDecl =
 showText :: Show a => a -> Text
 showText = pack . show
 
+routePathAttr :: RoutePathDecl -> AirAttr
+routePathAttr pathDecl =
+  AirAttrObject
+    [ ("pattern", AirAttrText (routePathDeclPattern pathDecl))
+    , ("params", AirAttrList (fmap routePathParamAttr (routePathDeclParams pathDecl)))
+    ]
+
+routePathParamAttr :: RoutePathParamDecl -> AirAttr
+routePathParamAttr pathParam =
+  AirAttrObject
+    [ ("name", AirAttrText (routePathParamDeclName pathParam))
+    , ("type", AirAttrText (routePathParamDeclType pathParam))
+    ]
+
+boundaryAttr :: RouteBoundaryDecl -> AirAttr
+boundaryAttr boundary =
+  AirAttrObject
+    [ ("type", AirAttrText (routeBoundaryDeclType boundary))
+    ]
+
+maybeBoundaryAttr :: Maybe RouteBoundaryDecl -> AirAttr
+maybeBoundaryAttr maybeBoundary =
+  case maybeBoundary of
+    Just boundary ->
+      boundaryAttr boundary
+    Nothing ->
+      AirAttrObject []
+
 instance ToJSON AirNodeId where
   toJSON = String . unAirNodeId
 
@@ -589,6 +644,10 @@ instance ToJSON AirAttr where
         toJSON value
       AirAttrBool value ->
         Bool value
+      AirAttrList values ->
+        toJSON values
+      AirAttrObject fields ->
+        object [Key.fromText label .= value | (label, value) <- fields]
       AirAttrNode refId ->
         object ["ref" .= refId]
       AirAttrNodes refIds ->

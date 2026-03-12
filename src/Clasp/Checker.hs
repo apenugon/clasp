@@ -344,10 +344,16 @@ freezeRouteContract :: RouteDecl -> CoreRouteContract
 freezeRouteContract routeDecl =
   CoreRouteContract
     { coreRouteContractName = routeDeclName routeDecl
+    , coreRouteContractIdentity = routeDeclIdentity routeDecl
     , coreRouteContractMethod = emitRouteMethodText (routeDeclMethod routeDecl)
     , coreRouteContractPath = routeDeclPath routeDecl
+    , coreRouteContractPathDecl = routeDeclPathDecl routeDecl
     , coreRouteContractRequestType = routeDeclRequestType routeDecl
+    , coreRouteContractQueryDecl = routeDeclQueryDecl routeDecl
+    , coreRouteContractFormDecl = routeDeclFormDecl routeDecl
+    , coreRouteContractBodyDecl = routeDeclBodyDecl routeDecl
     , coreRouteContractResponseType = routeDeclResponseType routeDecl
+    , coreRouteContractResponseDecl = routeDeclResponseDecl routeDecl
     , coreRouteContractResponseKind = routeResponseKind routeDecl
     }
 
