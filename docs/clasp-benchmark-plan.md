@@ -42,6 +42,12 @@ It should:
 - ship against real tests and task acceptance criteria rather than hand-waved correctness
 - run under `Codex` and `Claude Code` against mirrored `Clasp` and `TypeScript` repos, with `Python` variants where orchestration-heavy comparisons are useful
 
+The key repo-shape rule for this first benchmark is:
+
+- maintain canonical runnable baseline apps in each language
+- derive intentionally incomplete task-starting repos from those baselines
+- benchmark the agent on applying the requested product change, not on watching humans pre-complete the exact prompt
+
 This is the first benchmark that can credibly demonstrate whether `Clasp` should become the default semantic layer for software-building agents.
 
 ## Benchmark Principles
@@ -100,6 +106,12 @@ Comparisons should hold constant:
 - test suite
 
 Only the language and framework baseline should vary.
+
+For product-slice benchmarks, fairness also means:
+
+- both language variants start from mirrored, intentionally incomplete task repos
+- both variants are derived from runnable canonical baselines with the same visible flow
+- neither side gets the exact benchmark change pre-applied
 
 ### 5. Publish raw traces when possible
 

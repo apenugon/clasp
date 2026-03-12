@@ -16,6 +16,13 @@ The target is a benchmark-ready lead-inbox SaaS mini app in both `Clasp` and `Ty
 - one AI-shaped boundary
 - mirrored benchmark repos and prompts
 
+This wave should produce:
+
+- canonical runnable `Clasp` and `TypeScript` baselines for the lead-inbox slice
+- mirrored intentionally incomplete benchmark task repos derived from those baselines
+
+It should not pre-solve the exact benchmark prompts inside the task-starting repos themselves.
+
 The `Clasp` side should not hard-code an `SSR-only`, string-template-only, or raw-class-string-only foundation. The goal is a minimal page model that still leaves room for later client/server placement decisions, reactive islands, typed style lowering, and rich host-JavaScript interop.
 
 That first renderer should still default to safe inert SSR HTML. Future client-side JavaScript should come through explicit client modules, islands, or typed host interop rather than arbitrary raw script output inside compiler-owned page templates.

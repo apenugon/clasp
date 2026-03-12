@@ -36,6 +36,13 @@ It should include:
 
 For the first benchmark, frontend credibility comes from real pages and click-through behavior, not from introducing a large SPA framework.
 
+It is important to separate:
+
+- the canonical runnable slice used as the reference implementation for each language
+- the mirrored benchmark starting repos prepared for individual benchmark tasks
+
+The canonical slice should boot and click through cleanly. The benchmark task repos derived from it should remain intentionally incomplete, so the harness still has real product work to do.
+
 The implementation should be `SSR-first`, not `SSR-only`. The first HTML/page layer should remain compiler-known so later versions can:
 
 - decide what stays on the server
@@ -69,6 +76,8 @@ Good first tasks:
 
 These tasks force cross-layer changes while staying small enough for repeated harness runs.
 
+The benchmark should therefore measure agents applying those changes to starting repos, not agents “building the whole app from nothing” and not a swarm pre-solving the exact prompt in advance.
+
 ## Minimum Technical Floor
 
 This slice needs a short critical path of language and runtime features:
@@ -79,7 +88,7 @@ This slice needs a short critical path of language and runtime features:
 - SSR-first page/runtime support for returning safe HTML and handling form-style GET/POST flows
 - enough placement or capability structure that later compiler passes can reason about server-only, client-only, or island-style behavior
 - a concrete lead-inbox app scaffold with in-memory state, HTML pages, and one AI boundary
-- mirrored benchmark repos and prompts for `Clasp` and `TypeScript`
+- mirrored canonical baselines plus intentionally incomplete benchmark repos and prompts for `Clasp` and `TypeScript`
 
 It does not require waiting for the full schema/control-plane/workflow roadmap.
 
@@ -93,13 +102,14 @@ The focused swarm wave for this benchmark should execute these tasks in order:
 - `FB-004` Define the clickable lead-inbox benchmark slice and mirrored repo contract.
 - `FB-005` Build the Clasp lead-inbox app with compiler-owned pages, server-rendered inbox/detail/intake flows, and one AI boundary.
 - `FB-006` Build the mirrored TypeScript lead-inbox baseline with the same click-through flows.
-- `FB-007` Add mirrored benchmark tasks and prompts for the clickable lead-inbox slice.
+- `FB-007` Derive mirrored intentionally incomplete benchmark tasks and prompts for the clickable lead-inbox slice.
 
 ## Success Criteria
 
 This benchmark becomes credible when:
 
 - the same lead-inbox tasks run against mirrored `Clasp` and `TypeScript` repos
+- those task repos are derived from runnable canonical baselines but are intentionally incomplete at task start
 - both repos boot into a browser-runnable app that a human can click through locally
 - the tasks cross frontend templates, backend logic, shared contracts, validation boundaries, and client-visible behavior
 - the `Clasp` rendering and styling model remains compiler-owned enough to support later SSR/CSR placement, reactive client behavior, and style lowering while keeping safe SSR as the default page-rendering mode

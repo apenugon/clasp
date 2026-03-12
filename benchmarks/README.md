@@ -22,6 +22,11 @@ Each task includes:
 
 The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task.
 
+The repo distinction matters:
+
+- `examples/lead-app` and `examples/lead-app-ts` are canonical runnable baselines for the clickable lead-inbox slice
+- `benchmarks/tasks/*/repo` are derived task-starting snapshots that should remain intentionally incomplete for the specific prompt
+
 The canonical lead-inbox slice used to shape new benchmark tasks lives in:
 
 - `examples/lead-app`: `Clasp` baseline
