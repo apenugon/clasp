@@ -48,6 +48,8 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , MatchBranch (..)
   , Module (..)
   , Pattern (..)
@@ -372,6 +374,7 @@ checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       schemaRecordDecls = moduleRecordDecls modl
+      guideDecls = moduleGuideDecls modl
       policyDecls = modulePolicyDecls modl
       projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
@@ -379,7 +382,9 @@ checkModule modl = do
       decls = moduleDecls modl
 
   ensureUniqueTypeDecls typeDecls
+  ensureUniqueGuideDecls guideDecls
   ensureUniquePolicyDecls policyDecls
+  ensureGuideHierarchy guideDecls
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
   let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
@@ -416,6 +421,7 @@ checkModule modl = do
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
+      , coreModuleGuideDecls = guideDecls
       , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
       , coreModuleProjectionDecls =
           zipWith
@@ -431,6 +437,89 @@ checkModule modl = do
       , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls
       }
+
+ensureUniqueGuideDecls :: [GuideDecl] -> Either DiagnosticBundle ()
+ensureUniqueGuideDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (guideDecl : rest) =
+      case Map.lookup (guideDeclName guideDecl) seen of
+        Just previousGuideDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_GUIDE"
+                ("Duplicate guide declaration for `" <> guideDeclName guideDecl <> "`.")
+                (Just (guideDeclNameSpan guideDecl))
+                ["Each guide name may only be declared once."]
+                [diagnosticRelated "previous guide declaration" (guideDeclNameSpan previousGuideDecl)]
+            ]
+        Nothing -> do
+          ensureUniqueGuideEntries guideDecl
+          go (Map.insert (guideDeclName guideDecl) guideDecl seen) rest
+
+ensureUniqueGuideEntries :: GuideDecl -> Either DiagnosticBundle ()
+ensureUniqueGuideEntries guideDecl = go Map.empty (guideDeclEntries guideDecl)
+  where
+    go _ [] = pure ()
+    go seen (entryDecl : rest) =
+      case Map.lookup (guideEntryDeclName entryDecl) seen of
+        Just previousEntryDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_GUIDE_ENTRY"
+                ("Guide `" <> guideDeclName guideDecl <> "` repeats entry `" <> guideEntryDeclName entryDecl <> "`.")
+                (Just (guideEntryDeclSpan entryDecl))
+                ["Each guide entry name may only appear once per guide."]
+                [diagnosticRelated "previous guide entry" (guideEntryDeclSpan previousEntryDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (guideEntryDeclName entryDecl) entryDecl seen) rest
+
+ensureGuideHierarchy :: [GuideDecl] -> Either DiagnosticBundle ()
+ensureGuideHierarchy guideDecls =
+  traverse_ checkGuide guideDecls
+  where
+    guideEnv = Map.fromList [(guideDeclName guideDecl, guideDecl) | guideDecl <- guideDecls]
+
+    checkGuide guideDecl = do
+      _ <- ensureGuideParentExists guideEnv guideDecl
+      ensureGuideAcyclic guideEnv [] guideDecl
+
+    ensureGuideParentExists env guideDecl =
+      case guideDeclExtends guideDecl of
+        Just parentName
+          | Map.notMember parentName env ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_UNKNOWN_GUIDE_PARENT"
+                    ("Guide `" <> guideDeclName guideDecl <> "` extends unknown guide `" <> parentName <> "`.")
+                    (guideDeclExtendsSpan guideDecl)
+                    ["Declare the parent guide before extending it or fix the guide name."]
+                    []
+                ]
+        _ ->
+          pure guideDecl
+
+    ensureGuideAcyclic env seen guideDecl =
+      case guideDeclExtends guideDecl of
+        Nothing ->
+          pure ()
+        Just parentName
+          | guideDeclName guideDecl `elem` seen ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_GUIDE_CYCLE"
+                    ("Guide `" <> guideDeclName guideDecl <> "` participates in an inheritance cycle.")
+                    (Just (guideDeclNameSpan guideDecl))
+                    ["Remove the cyclic `extends` chain so guide inheritance stays acyclic."]
+                    []
+                ]
+          | otherwise ->
+              case Map.lookup parentName env of
+                Nothing ->
+                  pure ()
+                Just parentGuideDecl ->
+                  ensureGuideAcyclic env (guideDeclName guideDecl : seen) parentGuideDecl
 
 ensureUniquePolicyDecls :: [PolicyDecl] -> Either DiagnosticBundle ()
 ensureUniquePolicyDecls = go Map.empty

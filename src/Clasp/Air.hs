@@ -37,6 +37,8 @@ import Clasp.Core
 import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
@@ -97,6 +99,7 @@ buildAirModule modl =
   where
     typeNodes = concatMap buildTypeDeclNodes (coreModuleTypeDecls modl)
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
+    guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
     policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
     projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
@@ -105,6 +108,7 @@ buildAirModule modl =
     topLevelNodes =
       typeNodes
         <> recordNodes
+        <> guideNodes
         <> policyNodes
         <> projectionNodes
         <> foreignNodes
@@ -171,6 +175,42 @@ buildRecordFieldDeclNode recordName fieldDecl =
         [ ("name", AirAttrText (recordFieldDeclName fieldDecl))
         , ("recordName", AirAttrText recordName)
         , ("classification", AirAttrText (recordFieldDeclClassification fieldDecl))
+        ]
+    }
+
+buildGuideDeclNodes :: GuideDecl -> [AirNode]
+buildGuideDeclNodes guideDecl =
+  guideNode : entryNodes
+  where
+    entryIds =
+      fmap
+        (\entryDecl -> guideEntryDeclId (guideDeclName guideDecl) (guideEntryDeclName entryDecl))
+        (guideDeclEntries guideDecl)
+    guideNode =
+      AirNode
+        { airNodeId = guideDeclId (guideDeclName guideDecl)
+        , airNodeKind = "guideDecl"
+        , airNodeSpan = Just (guideDeclSpan guideDecl)
+        , airNodeType = Nothing
+        , airNodeAttrs =
+            [ ("name", AirAttrText (guideDeclName guideDecl))
+            , ("extends", maybeGuideAttr (guideDeclExtends guideDecl))
+            , ("entries", AirAttrNodes entryIds)
+            ]
+        }
+    entryNodes = fmap (buildGuideEntryDeclNode (guideDeclName guideDecl)) (guideDeclEntries guideDecl)
+
+buildGuideEntryDeclNode :: Text -> GuideEntryDecl -> AirNode
+buildGuideEntryDeclNode guideName entryDecl =
+  AirNode
+    { airNodeId = guideEntryDeclId guideName (guideEntryDeclName entryDecl)
+    , airNodeKind = "guideEntryDecl"
+    , airNodeSpan = Just (guideEntryDeclSpan entryDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (guideEntryDeclName entryDecl))
+        , ("guideName", AirAttrText guideName)
+        , ("value", AirAttrText (guideEntryDeclValue entryDecl))
         ]
     }
 
@@ -592,6 +632,12 @@ recordFieldDeclId recordName fieldName =
 foreignDeclId :: Text -> AirNodeId
 foreignDeclId name = AirNodeId ("foreign:" <> name)
 
+guideDeclId :: Text -> AirNodeId
+guideDeclId name = AirNodeId ("guide:" <> name)
+
+guideEntryDeclId :: Text -> Text -> AirNodeId
+guideEntryDeclId guideName entryName = AirNodeId ("guide-entry:" <> guideName <> ":" <> entryName)
+
 policyDeclId :: Text -> AirNodeId
 policyDeclId name = AirNodeId ("policy:" <> name)
 
@@ -631,6 +677,14 @@ renderRouteMethod routeDecl =
 
 showText :: Show a => a -> Text
 showText = pack . show
+
+maybeGuideAttr :: Maybe Text -> AirAttr
+maybeGuideAttr maybeName =
+  case maybeName of
+    Just name ->
+      AirAttrObject [("name", AirAttrText name), ("ref", AirAttrNode (guideDeclId name))]
+    Nothing ->
+      AirAttrObject []
 
 routePathAttr :: RoutePathDecl -> AirAttr
 routePathAttr pathDecl =

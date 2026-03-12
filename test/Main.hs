@@ -81,6 +81,8 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -215,6 +217,22 @@ parserTests =
                 assertEqual "projection policy" "SupportDisclosure" (projectionDeclPolicyName projectionDecl)
               other ->
                 assertFailure ("expected one projection declaration, got " <> show (length other))
+    , testCase "parses repo memory guides with inheritance" $
+        case parseSource "inline" guideSource of
+          Left err ->
+            assertFailure ("expected guide source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleGuideDecls modl of
+              [baseGuide, childGuide] -> do
+                assertEqual "base guide name" "Repo" (guideDeclName baseGuide)
+                assertEqual "base guide entry count" 2 (length (guideDeclEntries baseGuide))
+                assertEqual "child guide extends" (Just "Repo") (guideDeclExtends childGuide)
+                assertEqual
+                  "child entries"
+                  [GuideEntryDecl "verification" dummySpan "Run bash scripts/verify-all.sh before finishing." dummySpan]
+                  (normalizeGuideEntries (guideDeclEntries childGuide))
+              other ->
+                assertFailure ("expected two guide declarations, got " <> show (length other))
     , testCase "parses foreign declarations, routes, and json boundaries" $
         case parseSource "inline" serviceSource of
           Left err ->
@@ -463,6 +481,12 @@ checkerTests =
             assertFailure ("expected classified projection source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "accepts repo memory guides with inheritance" $
+        case checkSource "guide" guideSource of
+          Left err ->
+            assertFailure ("expected guide source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            assertEqual "guide count" 2 (length (coreModuleGuideDecls checked))
     , testCase "accepts compiler-known page primitives" $
         case checkSource "page" pageSource of
           Left err ->
@@ -587,6 +611,10 @@ checkerTests =
         assertHasCode "E_PATTERN_TYPE_MISMATCH" (checkSource "bad" wrongConstructorSource)
     , testCase "rejects duplicate match branches" $
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
+    , testCase "rejects guide inheritance that targets an unknown parent" $
+        assertHasCode "E_UNKNOWN_GUIDE_PARENT" (checkSource "bad" missingGuideParentSource)
+    , testCase "rejects cyclic guide inheritance" $
+        assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
     , testCase "rejects heterogeneous list literals" $
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects equality over unsupported or mismatched types" $
@@ -762,6 +790,29 @@ airTests =
                 assertBool "expected field refs" (("fields", AirAttrNodes [AirNodeId "projection-field:SupportCustomer:id", AirNodeId "projection-field:SupportCustomer:email", AirNodeId "projection-field:SupportCustomer:tier"]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected projection AIR node"
+    , testCase "air retains repo memory guide inheritance and entry text" $
+        case airSource "guide" guideSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected guide root" (AirNodeId "guide:Worker" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "guide:Worker") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool
+                  "expected extends ref"
+                  (("extends", AirAttrObject [("name", AirAttrText "Repo"), ("ref", AirAttrNode (AirNodeId "guide:Repo"))]) `elem` airNodeAttrs node)
+                assertBool
+                  "expected entry refs"
+                  (("entries", AirAttrNodes [AirNodeId "guide-entry:Worker:verification"]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected worker guide AIR node"
+            case findAirNode (AirNodeId "guide-entry:Worker:verification") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected guide entry value"
+                  (("value", AirAttrText "Run bash scripts/verify-all.sh before finishing.") `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected worker verification guide entry AIR node"
     , testCase "air serialization is replay-friendly and deterministic" $
         case renderAirSourceJson "adt" adtSource of
           Left err ->
@@ -808,6 +859,16 @@ contextTests =
             assertBool
               "expected all edge endpoints to resolve to nodes"
               (all (\(fromId, toId) -> Set.member fromId nodeIds && Set.member toId nodeIds) edges)
+    , testCase "context graph includes guide inheritance and guide entries" $
+        case renderContextSourceJson "guide" guideSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected repo guide node" ("\"guide:Repo\"" `T.isInfixOf` jsonText)
+            assertBool "expected guide entry node" ("\"guide-entry:Repo:scope\"" `T.isInfixOf` jsonText)
+            assertBool "expected guide extends edge" ("\"guide-extends\"" `T.isInfixOf` jsonText)
+            assertBool "expected guide entry edge" ("\"guide-has-entry\"" `T.isInfixOf` jsonText)
     , testCase "claspc context writes the default context artifact when -o is omitted" $
         withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -1757,6 +1818,16 @@ normalizeConstructors :: [ConstructorDecl] -> [ConstructorDecl]
 normalizeConstructors =
   fmap (\constructorDecl -> constructorDecl {constructorDeclSpan = dummySpan, constructorDeclNameSpan = dummySpan})
 
+normalizeGuideEntries :: [GuideEntryDecl] -> [GuideEntryDecl]
+normalizeGuideEntries =
+  fmap
+    ( \entryDecl ->
+        entryDecl
+          { guideEntryDeclSpan = dummySpan
+          , guideEntryDeclValueSpan = dummySpan
+          }
+    )
+
 dummySpan :: SourceSpan
 dummySpan =
   SourceSpan
@@ -1908,6 +1979,51 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+guideSource :: Text
+guideSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "guide Repo = {"
+    , "  scope: \"Stay inside the current checkout.\","
+    , "  edits: \"Keep changes small and local.\""
+    , "}"
+    , ""
+    , "guide Worker extends Repo = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "main = \"ok\""
+    ]
+
+missingGuideParentSource :: Text
+missingGuideParentSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "guide Worker extends Repo = {"
+    , "  scope: \"Stay inside the current checkout.\""
+    , "}"
+    , ""
+    , "main = \"ok\""
+    ]
+
+cyclicGuideSource :: Text
+cyclicGuideSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "guide Repo extends Worker = {"
+    , "  scope: \"Stay inside the current checkout.\""
+    , "}"
+    , ""
+    , "guide Worker extends Repo = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "main = \"ok\""
     ]
 
 classifiedProjectionSource :: Text

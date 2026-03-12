@@ -22,6 +22,7 @@ import Data.Text (Text)
 import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
   , ModuleName
   , PolicyDecl (..)
   , ProjectionDecl (..)
@@ -44,6 +45,7 @@ data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
+  , coreModuleGuideDecls :: [GuideDecl]
   , coreModulePolicyDecls :: [CorePolicyDecl]
   , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]

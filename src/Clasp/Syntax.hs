@@ -5,6 +5,8 @@ module Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -89,11 +91,30 @@ data Module = Module
   , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
+  , moduleGuideDecls :: [GuideDecl]
   , modulePolicyDecls :: [PolicyDecl]
   , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
   , moduleRouteDecls :: [RouteDecl]
   , moduleDecls :: [Decl]
+  }
+  deriving (Eq, Show)
+
+data GuideEntryDecl = GuideEntryDecl
+  { guideEntryDeclName :: Text
+  , guideEntryDeclSpan :: SourceSpan
+  , guideEntryDeclValue :: Text
+  , guideEntryDeclValueSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data GuideDecl = GuideDecl
+  { guideDeclName :: Text
+  , guideDeclSpan :: SourceSpan
+  , guideDeclNameSpan :: SourceSpan
+  , guideDeclExtends :: Maybe Text
+  , guideDeclExtendsSpan :: Maybe SourceSpan
+  , guideDeclEntries :: [GuideEntryDecl]
   }
   deriving (Eq, Show)
 

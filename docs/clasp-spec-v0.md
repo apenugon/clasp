@@ -87,7 +87,7 @@ Every `Clasp` source file in `v0` has:
 
 1. A required module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, foreign, or route declarations
+3. Zero or more top-level type, record, guide, foreign, or route declarations
 4. One or more top-level declarations
 
 Example:
@@ -226,11 +226,13 @@ module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name
 
-top-level   ::= type-decl | record-decl | policy-decl | projection-decl | foreign-decl | route-decl | signature | decl
+top-level   ::= type-decl | record-decl | guide-decl | policy-decl | projection-decl | foreign-decl | route-decl | signature | decl
 type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
 constructor ::= upper-ident type-atom*
 record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
 record-field-decl ::= lower-ident ":" type ("classified" lower-ident)?
+guide-decl ::= "guide" upper-ident ("extends" upper-ident)? "=" "{" guide-entry-decl ("," guide-entry-decl)* "}"
+guide-entry-decl ::= lower-ident ":" string
 policy-decl ::= "policy" upper-ident "=" lower-ident ("," lower-ident)*
 projection-decl ::= "projection" upper-ident "=" upper-ident "with" upper-ident "{" lower-ident ("," lower-ident)* "}"
 foreign-decl ::= "foreign" lower-ident ":" type "=" string

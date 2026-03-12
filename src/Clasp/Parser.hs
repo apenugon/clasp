@@ -53,6 +53,8 @@ import Clasp.Syntax
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -83,6 +85,7 @@ type Parser = Parsec Void Text
 data TopLevelItem
   = TopTypeDecl TypeDecl
   | TopRecordDecl RecordDecl
+  | TopGuideDecl GuideDecl
   | TopPolicyDecl PolicyDecl
   | TopProjectionDecl ProjectionDecl
   | TopForeignDecl ForeignDecl
@@ -125,12 +128,49 @@ topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
   try projectionDeclParser
     <|> try policyDeclParser
+    <|> try guideDeclParser
     <|> try foreignDeclParser
     <|> try routeDeclParser
     <|> try recordDeclParser
     <|> try typeDeclParser
     <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
+
+guideDeclParser :: Parser TopLevelItem
+guideDeclParser = do
+  start <- getSourcePos
+  keyword "guide"
+  (nameSpan, name) <- locatedUpperIdentifier
+  extendsDecl <- optional (keyword "extends" *> locatedUpperIdentifier)
+  _ <- symbol "="
+  entries <- braces (guideEntryDeclParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopGuideDecl $
+    GuideDecl
+      { guideDeclName = name
+      , guideDeclSpan = makeSourceSpan start end
+      , guideDeclNameSpan = nameSpan
+      , guideDeclExtends = snd <$> extendsDecl
+      , guideDeclExtendsSpan = fst <$> extendsDecl
+      , guideDeclEntries = entries
+      }
+
+guideEntryDeclParser :: Parser GuideEntryDecl
+guideEntryDeclParser = do
+  start <- getSourcePos
+  (_, entryName) <- locatedLowerIdentifierN
+  _ <- symbolN ":"
+  (valueSpan, entryValue) <- locatedStringLiteral
+  end <- getSourcePos
+  pure
+    GuideEntryDecl
+      { guideEntryDeclName = entryName
+      , guideEntryDeclSpan = makeSourceSpan start end
+      , guideEntryDeclValue = entryValue
+      , guideEntryDeclValueSpan = valueSpan
+      }
 
 foreignDeclParser :: Parser TopLevelItem
 foreignDeclParser = do
@@ -691,8 +731,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
-    foldM step ([], [], [], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -700,6 +740,7 @@ attachSignatures (name, imports, items) = do
         , moduleImports = imports
         , moduleTypeDecls = reverse typeDecls
         , moduleRecordDecls = reverse recordDecls
+        , moduleGuideDecls = reverse guideDecls
         , modulePolicyDecls = reverse policyDecls
         , moduleProjectionDecls = reverse projectionDecls
         , moduleForeignDecls = reverse foreignDecls
@@ -717,20 +758,22 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopGuideDecl guideDecl ->
+          pure (typeDecls, recordDecls, guideDecl : guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopPolicyDecl policyDecl ->
-          pure (typeDecls, recordDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopProjectionDecl projectionDecl ->
-          pure (typeDecls, recordDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -746,6 +789,7 @@ attachSignatures (name, imports, items) = do
               pure
                 ( typeDecls
                 , recordDecls
+                , guideDecls
                 , policyDecls
                 , projectionDecls
                 , foreignDecls
@@ -765,7 +809,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -790,6 +834,8 @@ reservedWords =
   , "in"
   , "type"
   , "record"
+  , "guide"
+  , "extends"
   , "policy"
   , "projection"
   , "with"

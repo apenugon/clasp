@@ -33,6 +33,8 @@ import Clasp.Lower
   )
 import Clasp.Syntax
   ( ForeignDecl (..)
+  , GuideDecl (..)
+  , GuideEntryDecl (..)
   , ModuleName (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
@@ -93,15 +95,17 @@ buildContextGraph modl =
     routeBoundaryNames = collectRouteBoundaryNames (coreModuleRouteDecls modl)
     builtinSchemaNodes = mapMaybe builtinSchemaNode (Set.toList routeBoundaryNames)
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
+    guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     routeNodes = fmap buildRouteNode (coreModuleRouteDecls modl)
     pageNodes = fmap buildPageNode pageFlows
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
+        <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildRouteEdges (coreModuleRouteDecls modl)
         <> concatMap buildPageEdges pageFlows
         <> concatMap buildForeignEdges (coreModuleForeignDecls modl)
@@ -136,6 +140,34 @@ buildSchemaFieldNode schemaName fieldDecl =
         , ("schemaName", ContextAttrText schemaName)
         , ("classification", ContextAttrText (recordFieldDeclClassification fieldDecl))
         , ("type", ContextAttrText (renderContextType (recordFieldDeclType fieldDecl)))
+        ]
+    }
+
+buildGuideNodes :: GuideDecl -> [ContextNode]
+buildGuideNodes guideDecl =
+  guideNode : fmap (buildGuideEntryNode (guideDeclName guideDecl)) (guideDeclEntries guideDecl)
+  where
+    guideNode =
+      ContextNode
+        { contextNodeId = guideNodeId (guideDeclName guideDecl)
+        , contextNodeKind = "guide"
+        , contextNodeSpan = Just (guideDeclSpan guideDecl)
+        , contextNodeAttrs =
+            [ ("name", ContextAttrText (guideDeclName guideDecl))
+            , ("extends", ContextAttrMaybeText (guideDeclExtends guideDecl))
+            ]
+        }
+
+buildGuideEntryNode :: Text -> GuideEntryDecl -> ContextNode
+buildGuideEntryNode guideName entryDecl =
+  ContextNode
+    { contextNodeId = guideEntryNodeId guideName (guideEntryDeclName entryDecl)
+    , contextNodeKind = "guideEntry"
+    , contextNodeSpan = Just (guideEntryDeclSpan entryDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (guideEntryDeclName entryDecl))
+        , ("guideName", ContextAttrText guideName)
+        , ("value", ContextAttrText (guideEntryDeclValue entryDecl))
         ]
     }
 
@@ -274,6 +306,34 @@ schemaFieldTypeEdge schemaName fieldDecl =
     _ ->
       Nothing
 
+buildGuideEdges :: GuideDecl -> [ContextEdge]
+buildGuideEdges guideDecl =
+  entryEdges <> parentEdges
+  where
+    entryEdges =
+      fmap
+        ( \entryDecl ->
+            ContextEdge
+              { contextEdgeKind = "guide-has-entry"
+              , contextEdgeFrom = guideNodeId (guideDeclName guideDecl)
+              , contextEdgeTo = guideEntryNodeId (guideDeclName guideDecl) (guideEntryDeclName entryDecl)
+              , contextEdgeAttrs = []
+              }
+        )
+        (guideDeclEntries guideDecl)
+    parentEdges =
+      case guideDeclExtends guideDecl of
+        Just parentName ->
+          [ ContextEdge
+              { contextEdgeKind = "guide-extends"
+              , contextEdgeFrom = guideNodeId (guideDeclName guideDecl)
+              , contextEdgeTo = guideNodeId parentName
+              , contextEdgeAttrs = []
+              }
+          ]
+        Nothing ->
+          []
+
 buildRouteEdges :: RouteDecl -> [ContextEdge]
 buildRouteEdges routeDecl =
   mapMaybe id
@@ -377,6 +437,12 @@ schemaNodeId name = ContextNodeId ("schema:" <> name)
 
 schemaFieldNodeId :: Text -> Text -> ContextNodeId
 schemaFieldNodeId schemaName fieldName = ContextNodeId ("schema-field:" <> schemaName <> ":" <> fieldName)
+
+guideNodeId :: Text -> ContextNodeId
+guideNodeId name = ContextNodeId ("guide:" <> name)
+
+guideEntryNodeId :: Text -> Text -> ContextNodeId
+guideEntryNodeId guideName entryName = ContextNodeId ("guide-entry:" <> guideName <> ":" <> entryName)
 
 routeNodeId :: Text -> ContextNodeId
 routeNodeId name = ContextNodeId ("route:" <> name)
