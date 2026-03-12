@@ -1574,7 +1574,9 @@ emitControlPlaneExports modl =
       [ "  {"
       , "    name: " <> emitStringLiteral (workflowDeclName workflowDecl) <> ","
       , "    id: " <> emitStringLiteral (workflowDeclIdentity workflowDecl) <> ","
-      , "    stateType: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl))
+      , "    stateType: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl)) <> ","
+      , "    checkpoint(value) { return $encode_" <> codecSuffix (workflowDeclStateType workflowDecl) <> "(value); },"
+      , "    resume(snapshot) { return $decode_" <> codecSuffix (workflowDeclStateType workflowDecl) <> "(snapshot); }"
       , "  },"
       ]
 
@@ -1925,6 +1927,8 @@ renderWorkflowDoc workflowDecl =
   T.unlines
     [ "### " <> workflowDeclName workflowDecl
     , "- State schema: " <> renderType (workflowDeclStateType workflowDecl)
+    , "- Checkpoint: `workflow.checkpoint(state) -> Str`"
+    , "- Resume: `workflow.resume(snapshot) -> " <> renderType (workflowDeclStateType workflowDecl) <> "`"
     ]
 
 renderGuideDoc :: GuideDecl -> Text

@@ -2034,6 +2034,13 @@ compileTests =
           Right emitted -> do
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
+    , testCase "compile emits workflow checkpoint and resume helpers" $
+        case compileSource "workflow" workflowSource of
+          Left err ->
+            assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected workflow checkpoint helper" ("checkpoint(value) { return $encode_Counter(value); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow resume helper" ("resume(snapshot) { return $decode_Counter(snapshot); }" `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
         case compileSource "let" letExpressionSource of
           Left err ->
@@ -2717,6 +2724,21 @@ compileTests =
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
+    , testCase "worker runtime exposes workflow checkpoint and resume contracts" $
+        case compileSource "workflow-worker-runtime" workflowSource of
+          Left err ->
+            assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/workflow-worker-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected workflow checkpoint and resume runtime contract"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7}"
+              runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
           Left err ->
@@ -3338,7 +3360,7 @@ workflowSource =
   T.unlines
     [ "module Main"
     , ""
-    , "record Counter = { value : Int }"
+    , "record Counter = { count : Int }"
     , ""
     , "workflow CounterFlow = { state : Counter }"
     , ""
@@ -5043,6 +5065,23 @@ workerJobRuntimeScript compiledPath runtimePath =
     , "  resultPriority: decoded.priority,"
     , "  resultFollowUpRequired: decoded.followUpRequired,"
     , "  invalid"
+    , "}));"
+    ]
+
+workflowRuntimeScript :: FilePath -> FilePath -> Text
+workflowRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(compiledModule);"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const checkpoint = workflow.checkpoint({ count: 7 });"
+    , "const resumed = workflow.resume(checkpoint);"
+    , "console.log(JSON.stringify({"
+    , "  workflowName: workflow.name,"
+    , "  stateType: workflow.stateType,"
+    , "  checkpoint,"
+    , "  resumedValue: resumed.count"
     , "}));"
     ]
 

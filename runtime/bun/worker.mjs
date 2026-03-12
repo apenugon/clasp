@@ -53,6 +53,19 @@ export function schemaContractFor(compiledModule, typeName) {
   return schema;
 }
 
+export function workflowContractFor(compiledModule, workflowName) {
+  const workflows = Array.isArray(compiledModule?.__claspWorkflows)
+    ? compiledModule.__claspWorkflows
+    : [];
+  const workflow = workflows.find((entry) => entry?.name === workflowName);
+
+  if (!workflow) {
+    throw new Error(`Missing Clasp workflow contract: ${workflowName}`);
+  }
+
+  return workflow;
+}
+
 export function createWorkerJob(compiledModule, options) {
   if (!options || typeof options !== "object") {
     throw new Error("createWorkerJob requires job options.");
@@ -117,6 +130,9 @@ export function createWorkerRuntime(compiledModule, options = {}) {
     contract: bindingContractFor(compiledModule),
     schema(typeName) {
       return schemaContractFor(compiledModule, typeName);
+    },
+    workflow(name) {
+      return workflowContractFor(compiledModule, name);
     },
     registerJob(jobOrOptions) {
       return registerJob(jobOrOptions);
