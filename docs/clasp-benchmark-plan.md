@@ -259,6 +259,36 @@ are needed before success.
 
 How many defects are caught before runtime.
 
+## Near-Term Win Plan
+
+The immediate benchmark objective is not to "improve Clasp in general."
+
+It is:
+
+- beat the mirrored `TypeScript` baseline on the clickable `lead-segment` benchmark
+
+The first `lead-segment` run showed that `Clasp` still forces the agent to reason about too much host and runtime machinery. The biggest near-term gaps are:
+
+- the `Clasp` task can still require edits outside the intended app surface, especially runtime or harness-adjacent glue
+- request-boundary and model-boundary failures are not fully compiler-owned end to end, so the agent may need to normalize error behavior in host code
+- host runtime bindings remain too free-form, which makes foreign-boundary changes harder than they should be
+- agents still lack a machine-readable semantic map of the benchmark app surface, so they fall back to reading generated output or grepping files
+
+The near-term win condition for `Clasp` on this benchmark should be:
+
+- the agent solves the mirrored `Clasp` task without inspecting generated JavaScript
+- the agent does not patch benchmark test scaffolding or generic runtime wrapper code to satisfy expected boundary behavior
+- the change stays mostly inside compiler-known app declarations plus clearly structured host binding data
+- repeated runs show lower or comparable time-to-green and uncached token usage than the `TypeScript` baseline
+
+That means the next focused implementation wave should prioritize:
+
+- benchmark isomorphism and task-surface fairness
+- compiler-owned request and model boundary behavior for page flows
+- structured host-binding manifests for foreign/runtime edges
+- semantic context artifacts for page, route, schema, and binding relationships
+- repeated benchmark automation so the repo can measure whether those changes are actually improving the result
+
 This is especially important for `Clasp`, because shared types and strong static semantics are part of the language value proposition.
 
 ### Boundary safety catch rate

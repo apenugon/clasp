@@ -115,3 +115,10 @@ This benchmark becomes credible when:
 - the `Clasp` rendering and styling model remains compiler-owned enough to support later SSR/CSR placement, reactive client behavior, and style lowering while keeping safe SSR as the default page-rendering mode
 - the benchmark harness can measure intervention-free completion, token cost, repair loops, and time-to-green
 - the story is clearly closer to a real product change than to a toy schema patch
+
+For the next near-term improvement cycle, the benchmark should also become easier for `Clasp` agents specifically in these concrete ways:
+
+- the `Clasp` task should not require inspecting generated JavaScript to understand boundary behavior
+- the `Clasp` task should not require editing benchmark-only test scaffolding to complete an app-level product change
+- request and model-boundary failures should already be shaped by compiler-owned/runtime-generated semantics rather than handwritten wrapper normalization
+- task preparation should emit machine-readable semantic context for affected pages, forms, schemas, routes, and foreign bindings

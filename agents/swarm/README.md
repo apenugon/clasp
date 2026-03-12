@@ -24,4 +24,5 @@ Wave directories:
 - `wave1/`: initial swarm-infrastructure and core-language slices
 - `benchmark-v0/`: focused critical path to the first credible lead-inbox benchmark
 - `benchmark-v1/`: clickable vertical-slice benchmark with HTML templating and browser-runnable flows in both repos
+- `benchmark-win-v0/`: focused remediation wave to beat the mirrored TypeScript baseline on the clickable lead-segment benchmark
 - `auth-air-v0/`: focused first pass on AIR, authorization primitives, proof-carrying access, and field-level data classification
