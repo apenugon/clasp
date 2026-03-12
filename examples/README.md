@@ -18,6 +18,8 @@ This directory has two kinds of examples:
 
 - [control-plane/Main.clasp](/home/akul/DevProjects/synthspeak/examples/control-plane/Main.clasp): a repo-level control-plane declaration set with guides, policies, hooks, tools, verifiers, and a merge gate for one builder loop
 - [control-plane/demo.mjs](/home/akul/DevProjects/synthspeak/examples/control-plane/demo.mjs): runs the compiled control-plane exports through one real agent loop with a simulated repo tool transport
+- [interop-ts/Main.clasp](/home/akul/DevProjects/synthspeak/examples/interop-ts/Main.clasp): compiler-managed `npm` and `TypeScript` package imports through foreign declarations with declaration ingestion and generated adapters
+- [interop-ts/demo.mjs](/home/akul/DevProjects/synthspeak/examples/interop-ts/demo.mjs): runs the compiled example through the generated package-adapter runtime and prints the resolved results
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
 - [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage boundaries
@@ -35,6 +37,12 @@ Emit AIR:
 
 ```sh
 cabal run claspc -- air examples/support-console/Main.clasp
+```
+
+Verify the `npm`/`TypeScript` interop example:
+
+```sh
+bash examples/interop-ts/scripts/verify.sh
 ```
 
 Emit the context graph:
