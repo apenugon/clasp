@@ -21,6 +21,7 @@ It includes:
 - Top-level foreign capability declarations
 - Top-level hook declarations for lifecycle triggers
 - Top-level agent-role and agent declarations for named subagents
+- Top-level tool-server and tool declarations for typed external tool contracts
 - Top-level route declarations
 - Top-level declarations
 - Declaration-level type signatures
@@ -91,7 +92,7 @@ Every `Clasp` source file in `v0` has:
 
 1. A required module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, guide, hook, role, agent, foreign, or route declarations
+3. Zero or more top-level type, record, guide, hook, role, agent, toolserver, tool, foreign, or route declarations
 4. One or more top-level declarations
 
 Example:
@@ -337,6 +338,8 @@ Notes:
 - Hook declarations bind a lifecycle trigger string to typed request/response schemas and a checked handler function.
 - Agent role declarations bind a reusable role to one guide and one policy declaration.
 - Agent declarations bind a named agent identity to a checked role declaration.
+- Tool-server declarations bind an external transport/location pair to one policy declaration.
+- Tool declarations bind a typed request/response contract to one declared tool server and operation name.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
 - Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.

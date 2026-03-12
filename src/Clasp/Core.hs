@@ -15,6 +15,8 @@ module Clasp.Core
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
   , SemanticEdit (..)
   , applySemanticEdit
   , coreExprType
@@ -39,6 +41,8 @@ import Clasp.Syntax
   , RouteDecl (..)
   , RoutePathDecl
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
   )
@@ -56,6 +60,8 @@ data CoreModule = CoreModule
   , coreModuleAgentRoleDecls :: [CoreAgentRoleDecl]
   , coreModuleAgentDecls :: [CoreAgentDecl]
   , coreModulePolicyDecls :: [CorePolicyDecl]
+  , coreModuleToolServerDecls :: [CoreToolServerDecl]
+  , coreModuleToolDecls :: [CoreToolDecl]
   , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]
   , coreModuleRouteDecls :: [RouteDecl]
@@ -80,6 +86,16 @@ data CoreAgentDecl = CoreAgentDecl
 
 data CoreHookDecl = CoreHookDecl
   { coreHookSourceDecl :: HookDecl
+  }
+  deriving (Eq, Show)
+
+data CoreToolServerDecl = CoreToolServerDecl
+  { coreToolServerSourceDecl :: ToolServerDecl
+  }
+  deriving (Eq, Show)
+
+data CoreToolDecl = CoreToolDecl
+  { coreToolSourceDecl :: ToolDecl
   }
   deriving (Eq, Show)
 
@@ -362,7 +378,9 @@ renameSchema oldName newName modl
         modl
           { coreModuleTypeDecls = fmap renameTypeDecl (coreModuleTypeDecls modl)
           , coreModuleRecordDecls = fmap renameRecordDecl (coreModuleRecordDecls modl)
+          , coreModuleHookDecls = fmap renameHookDecl (coreModuleHookDecls modl)
           , coreModuleProjectionDecls = fmap renameProjectionDecl (coreModuleProjectionDecls modl)
+          , coreModuleToolDecls = fmap renameToolDecl (coreModuleToolDecls modl)
           , coreModuleForeignDecls = fmap renameForeignDecl (coreModuleForeignDecls modl)
           , coreModuleRouteDecls = fmap renameRouteDecl (coreModuleRouteDecls modl)
           , coreModuleDecls = fmap renameCoreDeclTypes (coreModuleDecls modl)
@@ -402,6 +420,30 @@ renameSchema oldName newName modl
 
     renameForeignDecl foreignDecl =
       foreignDecl {foreignDeclType = renameType (foreignDeclType foreignDecl)}
+
+    renameHookDecl coreHookDecl =
+      coreHookDecl
+        { coreHookSourceDecl =
+            let hookDecl = coreHookSourceDecl coreHookDecl
+             in hookDecl
+                  { hookDeclRequestType = renameIfEqual oldName newName (hookDeclRequestType hookDecl)
+                  , hookDeclRequestDecl = renameBoundaryDecl (hookDeclRequestDecl hookDecl)
+                  , hookDeclResponseType = renameIfEqual oldName newName (hookDeclResponseType hookDecl)
+                  , hookDeclResponseDecl = renameBoundaryDecl (hookDeclResponseDecl hookDecl)
+                  }
+        }
+
+    renameToolDecl coreToolDecl =
+      coreToolDecl
+        { coreToolSourceDecl =
+            let toolDecl = coreToolSourceDecl coreToolDecl
+             in toolDecl
+                  { toolDeclRequestType = renameIfEqual oldName newName (toolDeclRequestType toolDecl)
+                  , toolDeclRequestDecl = renameBoundaryDecl (toolDeclRequestDecl toolDecl)
+                  , toolDeclResponseType = renameIfEqual oldName newName (toolDeclResponseType toolDecl)
+                  , toolDeclResponseDecl = renameBoundaryDecl (toolDeclResponseDecl toolDecl)
+                  }
+        }
 
     renameRouteDecl routeDecl =
       routeDecl

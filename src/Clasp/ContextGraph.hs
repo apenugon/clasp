@@ -28,6 +28,8 @@ import Clasp.Core
   , CoreHookDecl (..)
   , CoreModule (..)
   , CorePolicyDecl (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
   )
 import Clasp.Lower
   ( LowerFormField (..)
@@ -54,6 +56,8 @@ import Clasp.Syntax
   , RouteDecl (..)
   , RouteMethod (..)
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   )
 
@@ -110,6 +114,8 @@ buildContextGraph modl =
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
+    toolServerNodes = fmap buildToolServerNode (coreModuleToolServerDecls modl)
+    toolNodes = fmap buildToolNode (coreModuleToolDecls modl)
     agentRoleNodes = fmap buildAgentRoleNode (coreModuleAgentRoleDecls modl)
     agentNodes = fmap buildAgentNode (coreModuleAgentDecls modl)
     routeNodes = fmap buildRouteNode (coreModuleRouteDecls modl)
@@ -117,13 +123,15 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> toolServerNodes <> toolNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
+        <> concatMap buildToolServerEdges (coreModuleToolServerDecls modl)
+        <> concatMap buildToolEdges (coreModuleToolDecls modl)
         <> concatMap buildAgentRoleEdges (coreModuleAgentRoleDecls modl)
         <> concatMap buildAgentEdges (coreModuleAgentDecls modl)
         <> concatMap buildRouteEdges (coreModuleRouteDecls modl)
@@ -250,6 +258,41 @@ buildPolicyClassificationNode policyName classificationDecl =
         , ("policyName", ContextAttrText policyName)
         ]
     }
+
+buildToolServerNode :: CoreToolServerDecl -> ContextNode
+buildToolServerNode coreToolServerDecl =
+  ContextNode
+    { contextNodeId = toolServerNodeId (toolServerDeclName toolServerDecl)
+    , contextNodeKind = "toolServer"
+    , contextNodeSpan = Just (toolServerDeclSpan toolServerDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (toolServerDeclName toolServerDecl))
+        , ("identity", ContextAttrText (toolServerDeclIdentity toolServerDecl))
+        , ("protocol", ContextAttrText (toolServerDeclProtocol toolServerDecl))
+        , ("location", ContextAttrText (toolServerDeclLocation toolServerDecl))
+        , ("policyName", ContextAttrText (toolServerDeclPolicyName toolServerDecl))
+        ]
+    }
+  where
+    toolServerDecl = coreToolServerSourceDecl coreToolServerDecl
+
+buildToolNode :: CoreToolDecl -> ContextNode
+buildToolNode coreToolDecl =
+  ContextNode
+    { contextNodeId = toolNodeId (toolDeclName toolDecl)
+    , contextNodeKind = "tool"
+    , contextNodeSpan = Just (toolDeclSpan toolDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (toolDeclName toolDecl))
+        , ("identity", ContextAttrText (toolDeclIdentity toolDecl))
+        , ("serverName", ContextAttrText (toolDeclServerName toolDecl))
+        , ("operation", ContextAttrText (toolDeclOperation toolDecl))
+        , ("requestType", ContextAttrText (toolDeclRequestType toolDecl))
+        , ("responseType", ContextAttrText (toolDeclResponseType toolDecl))
+        ]
+    }
+  where
+    toolDecl = coreToolSourceDecl coreToolDecl
 
 buildAgentRoleNode :: CoreAgentRoleDecl -> ContextNode
 buildAgentRoleNode coreAgentRoleDecl =
@@ -482,6 +525,42 @@ buildPolicyEdges corePolicyDecl =
         , contextEdgeAttrs = []
         }
 
+buildToolServerEdges :: CoreToolServerDecl -> [ContextEdge]
+buildToolServerEdges coreToolServerDecl =
+  [ ContextEdge
+      { contextEdgeKind = "toolserver-policy"
+      , contextEdgeFrom = toolServerNodeId (toolServerDeclName toolServerDecl)
+      , contextEdgeTo = policyNodeId (toolServerDeclPolicyName toolServerDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    toolServerDecl = coreToolServerSourceDecl coreToolServerDecl
+
+buildToolEdges :: CoreToolDecl -> [ContextEdge]
+buildToolEdges coreToolDecl =
+  [ ContextEdge
+      { contextEdgeKind = "tool-server"
+      , contextEdgeFrom = toolNodeId (toolDeclName toolDecl)
+      , contextEdgeTo = toolServerNodeId (toolDeclServerName toolDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "tool-request-schema"
+      , contextEdgeFrom = toolNodeId (toolDeclName toolDecl)
+      , contextEdgeTo = schemaNodeId (toolDeclRequestType toolDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "tool-response-schema"
+      , contextEdgeFrom = toolNodeId (toolDeclName toolDecl)
+      , contextEdgeTo = schemaNodeId (toolDeclResponseType toolDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    toolDecl = coreToolSourceDecl coreToolDecl
+
 buildAgentRoleEdges :: CoreAgentRoleDecl -> [ContextEdge]
 buildAgentRoleEdges coreAgentRoleDecl =
   [ ContextEdge
@@ -633,6 +712,12 @@ hookNodeId name = ContextNodeId ("hook:" <> name)
 
 hookTriggerNodeId :: Text -> ContextNodeId
 hookTriggerNodeId hookName = ContextNodeId ("hook-trigger:" <> hookName)
+
+toolServerNodeId :: Text -> ContextNodeId
+toolServerNodeId name = ContextNodeId ("toolserver:" <> name)
+
+toolNodeId :: Text -> ContextNodeId
+toolNodeId name = ContextNodeId ("tool:" <> name)
 
 agentRoleNodeId :: Text -> ContextNodeId
 agentRoleNodeId name = ContextNodeId ("agent-role:" <> name)

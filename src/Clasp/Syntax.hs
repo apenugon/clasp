@@ -31,6 +31,8 @@ module Clasp.Syntax
   , RoutePathDecl (..)
   , RoutePathParamDecl (..)
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , TypeDecl (..)
   , Type (..)
   , exprSpan
@@ -100,6 +102,8 @@ data Module = Module
   , moduleAgentRoleDecls :: [AgentRoleDecl]
   , moduleAgentDecls :: [AgentDecl]
   , modulePolicyDecls :: [PolicyDecl]
+  , moduleToolServerDecls :: [ToolServerDecl]
+  , moduleToolDecls :: [ToolDecl]
   , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
   , moduleRouteDecls :: [RouteDecl]
@@ -167,6 +171,38 @@ data AgentDecl = AgentDecl
   , agentDeclIdentity :: Text
   , agentDeclRoleName :: Text
   , agentDeclRoleSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data ToolServerDecl = ToolServerDecl
+  { toolServerDeclName :: Text
+  , toolServerDeclSpan :: SourceSpan
+  , toolServerDeclNameSpan :: SourceSpan
+  , toolServerDeclIdentity :: Text
+  , toolServerDeclProtocol :: Text
+  , toolServerDeclProtocolSpan :: SourceSpan
+  , toolServerDeclLocation :: Text
+  , toolServerDeclLocationSpan :: SourceSpan
+  , toolServerDeclPolicyName :: Text
+  , toolServerDeclPolicySpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data ToolDecl = ToolDecl
+  { toolDeclName :: Text
+  , toolDeclSpan :: SourceSpan
+  , toolDeclNameSpan :: SourceSpan
+  , toolDeclIdentity :: Text
+  , toolDeclServerName :: Text
+  , toolDeclServerSpan :: SourceSpan
+  , toolDeclOperation :: Text
+  , toolDeclOperationSpan :: SourceSpan
+  , toolDeclRequestType :: Text
+  , toolDeclRequestDecl :: RouteBoundaryDecl
+  , toolDeclRequestTypeSpan :: SourceSpan
+  , toolDeclResponseType :: Text
+  , toolDeclResponseDecl :: RouteBoundaryDecl
+  , toolDeclResponseTypeSpan :: SourceSpan
   }
   deriving (Eq, Show)
 

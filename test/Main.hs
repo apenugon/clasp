@@ -58,6 +58,8 @@ import Clasp.Core
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreModule (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
   )
 import Clasp.Diagnostic
   ( Diagnostic (..)
@@ -106,6 +108,8 @@ import Clasp.Syntax
   , RouteMethod (..)
   , RoutePathDecl (..)
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
   )
@@ -275,6 +279,30 @@ parserTests =
                 assertEqual "agent role" "WorkerRole" (agentDeclRoleName agentDecl)
               other ->
                 assertFailure ("expected one agent declaration, got " <> show (length other))
+    , testCase "parses tool servers and tool contracts" $
+        case parseSource "inline" toolSource of
+          Left err ->
+            assertFailure ("expected tool source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleToolServerDecls modl of
+              [toolServerDecl] -> do
+                assertEqual "tool server name" "RepoTools" (toolServerDeclName toolServerDecl)
+                assertEqual "tool server identity" "toolserver:RepoTools" (toolServerDeclIdentity toolServerDecl)
+                assertEqual "tool server protocol" "mcp" (toolServerDeclProtocol toolServerDecl)
+                assertEqual "tool server location" "stdio://repo-tools" (toolServerDeclLocation toolServerDecl)
+                assertEqual "tool server policy" "SupportDisclosure" (toolServerDeclPolicyName toolServerDecl)
+              other ->
+                assertFailure ("expected one tool server declaration, got " <> show (length other))
+            case moduleToolDecls modl of
+              [toolDecl] -> do
+                assertEqual "tool name" "searchRepo" (toolDeclName toolDecl)
+                assertEqual "tool identity" "tool:searchRepo" (toolDeclIdentity toolDecl)
+                assertEqual "tool server" "RepoTools" (toolDeclServerName toolDecl)
+                assertEqual "tool operation" "search_repo" (toolDeclOperation toolDecl)
+                assertEqual "tool request" "SearchRequest" (toolDeclRequestType toolDecl)
+                assertEqual "tool response" "SearchResponse" (toolDeclResponseType toolDecl)
+              other ->
+                assertFailure ("expected one tool declaration, got " <> show (length other))
     , testCase "parses foreign declarations, routes, and json boundaries" $
         case parseSource "inline" serviceSource of
           Left err ->
@@ -638,6 +666,21 @@ checkerTests =
                 assertEqual "agent role binding" "WorkerRole" (agentDeclRoleName agentDecl)
               other ->
                 assertFailure ("expected one checked agent declaration, got " <> show (length other))
+    , testCase "accepts tool servers and tool contracts with typed schemas" $
+        case checkSource "tool" toolSource of
+          Left err ->
+            assertFailure ("expected tool source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case coreModuleToolServerDecls checked of
+              [CoreToolServerDecl toolServerDecl] ->
+                assertEqual "tool server policy" "SupportDisclosure" (toolServerDeclPolicyName toolServerDecl)
+              other ->
+                assertFailure ("expected one checked tool server declaration, got " <> show (length other))
+            case coreModuleToolDecls checked of
+              [CoreToolDecl toolDecl] ->
+                assertEqual "tool contract response" "SearchResponse" (toolDeclResponseType toolDecl)
+              other ->
+                assertFailure ("expected one checked tool declaration, got " <> show (length other))
     , testCase "accepts compiler-known page primitives" $
         case checkSource "page" pageSource of
           Left err ->
@@ -825,6 +868,12 @@ checkerTests =
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects agents that reference unknown roles" $
         assertHasCode "E_UNKNOWN_AGENT_ROLE" (checkSource "bad" unknownAgentRoleSource)
+    , testCase "rejects tool servers that reference unknown policies" $
+        assertHasCode "E_UNKNOWN_TOOLSERVER_POLICY" (checkSource "bad" unknownToolServerPolicySource)
+    , testCase "rejects tools that reference unknown servers" $
+        assertHasCode "E_UNKNOWN_TOOLSERVER" (checkSource "bad" unknownToolServerSource)
+    , testCase "rejects tools that use non-record schemas" $
+        assertHasCode "E_TOOL_SCHEMA_TYPE" (checkSource "bad" badToolSchemaSource)
     , testCase "rejects heterogeneous list literals" $
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects equality over unsupported or mismatched types" $
@@ -1122,6 +1171,29 @@ airTests =
                   (("role", AirAttrObject [("name", AirAttrText "WorkerRole"), ("ref", AirAttrNode (AirNodeId "agent-role:WorkerRole"))]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected agent AIR node"
+    , testCase "air retains tool servers, policies, and typed tool contracts" $
+        case airSource "tool" toolSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected tool server root" (AirNodeId "toolserver:RepoTools" `elem` airModuleRootIds airModule)
+            assertBool "expected tool root" (AirNodeId "tool:searchRepo" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "toolserver:RepoTools") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected tool server policy ref"
+                  (("policy", AirAttrObject [("name", AirAttrText "SupportDisclosure"), ("ref", AirAttrNode (AirNodeId "policy:SupportDisclosure"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected tool server AIR node"
+            case findAirNode (AirNodeId "tool:searchRepo") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool
+                  "expected tool server ref"
+                  (("server", AirAttrObject [("name", AirAttrText "RepoTools"), ("ref", AirAttrNode (AirNodeId "toolserver:RepoTools"))]) `elem` airNodeAttrs node)
+                assertBool "expected request boundary" (("request", AirAttrObject [("type", AirAttrText "SearchRequest")]) `elem` airNodeAttrs node)
+                assertBool "expected response boundary" (("response", AirAttrObject [("type", AirAttrText "SearchResponse")]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected tool AIR node"
     , testCase "air serialization is replay-friendly and deterministic" $
         case renderAirSourceJson "adt" adtSource of
           Left err ->
@@ -1200,6 +1272,18 @@ contextTests =
             assertBool "expected agent role guide edge" ("\"agent-role-guide\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role policy edge" ("\"agent-role-policy\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role edge" ("\"agent-role\"" `T.isInfixOf` jsonText)
+    , testCase "context graph includes tool servers, policy edges, and tool schema edges" $
+        case renderContextSourceJson "tool" toolSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected tool server node" ("\"toolserver:RepoTools\"" `T.isInfixOf` jsonText)
+            assertBool "expected tool node" ("\"tool:searchRepo\"" `T.isInfixOf` jsonText)
+            assertBool "expected tool server policy edge" ("\"toolserver-policy\"" `T.isInfixOf` jsonText)
+            assertBool "expected tool server edge" ("\"tool-server\"" `T.isInfixOf` jsonText)
+            assertBool "expected tool request edge" ("\"tool-request-schema\"" `T.isInfixOf` jsonText)
+            assertBool "expected tool response edge" ("\"tool-response-schema\"" `T.isInfixOf` jsonText)
     , testCase "claspc context writes the default context artifact when -o is omitted" $
         withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2534,6 +2618,23 @@ agentSource =
     , "main = \"ok\""
     ]
 
+toolSource :: Text
+toolSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "main = \"ok\""
+    ]
+
 missingGuideParentSource :: Text
 missingGuideParentSource =
   T.unlines
@@ -2591,6 +2692,53 @@ unknownAgentRoleSource =
     , "policy SupportDisclosure = public"
     , ""
     , "agent builder = WorkerRole"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownToolServerPolicySource :: Text
+unknownToolServerPolicySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with MissingPolicy"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownToolServerSource :: Text
+unknownToolServerSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "main = \"ok\""
+    ]
+
+badToolSchemaSource :: Text
+badToolSchemaSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type SearchRequest = Pending"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
     , ""
     , "main = \"ok\""
     ]

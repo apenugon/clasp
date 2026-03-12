@@ -36,6 +36,8 @@ import Clasp.Core
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
   , coreExprType
   )
 import Clasp.Diagnostic
@@ -71,6 +73,8 @@ import Clasp.Syntax
   , RouteMethod (..)
   , Position (..)
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
   , exprSpan
@@ -390,6 +394,8 @@ checkModule modl = do
       agentRoleDecls = moduleAgentRoleDecls modl
       agentDecls = moduleAgentDecls modl
       policyDecls = modulePolicyDecls modl
+      toolServerDecls = moduleToolServerDecls modl
+      toolDecls = moduleToolDecls modl
       projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
       routeDecls = moduleRouteDecls modl
@@ -401,16 +407,20 @@ checkModule modl = do
   ensureUniqueAgentRoleDecls agentRoleDecls
   ensureUniqueAgentDecls agentDecls
   ensureUniquePolicyDecls policyDecls
+  ensureUniqueToolServerDecls toolServerDecls
+  ensureUniqueToolDecls toolDecls
   ensureGuideHierarchy guideDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
+  ensureKnownToolServerReferences policyDecls toolServerDecls
+  ensureKnownToolReferences toolServerDecls toolDecls
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
   let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls routeDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls toolDecls routeDecls
 
   constructorEnv <- buildConstructorEnv typeDecls
   ensureUniqueForeignDecls foreignDecls decls constructorEnv
@@ -447,6 +457,8 @@ checkModule modl = do
       , coreModuleAgentRoleDecls = fmap CoreAgentRoleDecl agentRoleDecls
       , coreModuleAgentDecls = fmap CoreAgentDecl agentDecls
       , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
+      , coreModuleToolServerDecls = fmap CoreToolServerDecl toolServerDecls
+      , coreModuleToolDecls = fmap CoreToolDecl toolDecls
       , coreModuleProjectionDecls =
           zipWith
             (\projectionDecl projectionRecordDecl ->
@@ -680,6 +692,76 @@ ensureUniquePolicyClassifications policyDecl = go Map.empty (policyDeclAllowedCl
         Nothing ->
           go (Map.insert (policyClassificationDeclName classificationDecl) classificationDecl seen) rest
 
+ensureUniqueToolServerDecls :: [ToolServerDecl] -> Either DiagnosticBundle ()
+ensureUniqueToolServerDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (toolServerDecl : rest) =
+      case Map.lookup (toolServerDeclName toolServerDecl) seen of
+        Just previousToolServerDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_TOOLSERVER"
+                ("Duplicate tool server declaration for `" <> toolServerDeclName toolServerDecl <> "`.")
+                (Just (toolServerDeclNameSpan toolServerDecl))
+                ["Each tool server name may only be declared once."]
+                [diagnosticRelated "previous tool server declaration" (toolServerDeclNameSpan previousToolServerDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (toolServerDeclName toolServerDecl) toolServerDecl seen) rest
+
+ensureUniqueToolDecls :: [ToolDecl] -> Either DiagnosticBundle ()
+ensureUniqueToolDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (toolDecl : rest) =
+      case Map.lookup (toolDeclName toolDecl) seen of
+        Just previousToolDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_TOOL"
+                ("Duplicate tool declaration for `" <> toolDeclName toolDecl <> "`.")
+                (Just (toolDeclNameSpan toolDecl))
+                ["Each tool name may only be declared once."]
+                [diagnosticRelated "previous tool declaration" (toolDeclNameSpan previousToolDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (toolDeclName toolDecl) toolDecl seen) rest
+
+ensureKnownToolServerReferences :: [PolicyDecl] -> [ToolServerDecl] -> Either DiagnosticBundle ()
+ensureKnownToolServerReferences policyDecls =
+  mapM_ checkToolServer
+  where
+    policyEnv = Map.fromList [(policyDeclName policyDecl, policyDecl) | policyDecl <- policyDecls]
+
+    checkToolServer toolServerDecl =
+      unless (Map.member (toolServerDeclPolicyName toolServerDecl) policyEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_TOOLSERVER_POLICY"
+              ("Tool server `" <> toolServerDeclName toolServerDecl <> "` references unknown policy `" <> toolServerDeclPolicyName toolServerDecl <> "`.")
+              (Just (toolServerDeclPolicySpan toolServerDecl))
+              ["Declare the referenced policy before using it on a tool server."]
+              []
+          ]
+
+ensureKnownToolReferences :: [ToolServerDecl] -> [ToolDecl] -> Either DiagnosticBundle ()
+ensureKnownToolReferences toolServerDecls =
+  mapM_ checkTool
+  where
+    toolServerEnv = Map.fromList [(toolServerDeclName toolServerDecl, toolServerDecl) | toolServerDecl <- toolServerDecls]
+
+    checkTool toolDecl =
+      unless (Map.member (toolDeclServerName toolDecl) toolServerEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_TOOLSERVER"
+              ("Tool `" <> toolDeclName toolDecl <> "` references unknown tool server `" <> toolDeclServerName toolDecl <> "`.")
+              (Just (toolDeclServerSpan toolDecl))
+              ["Declare the referenced tool server before using it in a tool contract."]
+              []
+          ]
+
 synthesizeProjectionRecordDecls :: [RecordDecl] -> [PolicyDecl] -> [ProjectionDecl] -> Either DiagnosticBundle [RecordDecl]
 synthesizeProjectionRecordDecls schemaRecordDecls policyDecls =
   traverse (synthesizeProjectionRecordDecl schemaRecordEnv policyDeclEnv)
@@ -856,13 +938,14 @@ ensureDistinctNamedTypes typeDeclEnv =
         Nothing ->
           pure ()
 
-ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [HookDecl] -> [RouteDecl] -> Either DiagnosticBundle ()
-ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls routeDecls = do
+ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [HookDecl] -> [ToolDecl] -> [RouteDecl] -> Either DiagnosticBundle ()
+ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls toolDecls routeDecls = do
   mapM_ checkTypeDecl typeDecls
   mapM_ checkRecordDecl recordDecls
   mapM_ checkForeignDecl foreignDecls
   mapM_ checkDeclAnnotation decls
   mapM_ checkHookDeclTypes hookDecls
+  mapM_ checkToolDeclTypes toolDecls
   mapM_ checkRouteDeclTypes routeDecls
   where
     checkTypeDecl typeDecl =
@@ -920,6 +1003,10 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
     checkHookDeclTypes hookDecl = do
       ensureHookRecordType hookDecl (hookDeclRequestType hookDecl) (hookDeclRequestTypeSpan hookDecl) "request"
       ensureHookRecordType hookDecl (hookDeclResponseType hookDecl) (hookDeclResponseTypeSpan hookDecl) "response"
+
+    checkToolDeclTypes toolDecl = do
+      ensureToolRecordType toolDecl (toolDeclRequestType toolDecl) (toolDeclRequestTypeSpan toolDecl) "request"
+      ensureToolRecordType toolDecl (toolDeclResponseType toolDecl) (toolDeclResponseTypeSpan toolDecl) "response"
 
     checkRouteDeclTypes routeDecl = do
       ensureRecordType routeDecl (routeDeclRequestType routeDecl) (routeDeclRequestTypeSpan routeDecl) "request"
@@ -986,6 +1073,17 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
               ("Hook `" <> hookDeclName hookDecl <> "` must use a record type for its " <> role <> " body.")
               (Just primarySpan)
               ["Declare `" <> typeName <> "` as a record before using it in a hook."]
+              []
+          ]
+
+    ensureToolRecordType toolDecl typeName primarySpan role =
+      unless (Map.member typeName recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_TOOL_SCHEMA_TYPE"
+              ("Tool `" <> toolDeclName toolDecl <> "` must use a record type for its " <> role <> " body.")
+              (Just primarySpan)
+              ["Declare `" <> typeName <> "` as a record before using it in a tool contract."]
               []
           ]
 

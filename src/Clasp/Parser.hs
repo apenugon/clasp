@@ -78,6 +78,8 @@ import Clasp.Syntax
   , RouteMethod (..)
   , RoutePathDecl (..)
   , SourceSpan (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
   , exprSpan
@@ -94,6 +96,8 @@ data TopLevelItem
   | TopAgentRoleDecl AgentRoleDecl
   | TopAgentDecl AgentDecl
   | TopPolicyDecl PolicyDecl
+  | TopToolServerDecl ToolServerDecl
+  | TopToolDecl ToolDecl
   | TopProjectionDecl ProjectionDecl
   | TopForeignDecl ForeignDecl
   | TopRouteDecl RouteDecl
@@ -141,6 +145,8 @@ topLevelItemParser =
     <|> try agentRoleDeclParser
     <|> try hookDeclParser
     <|> try guideDeclParser
+    <|> try toolDeclParser
+    <|> try toolServerDeclParser
     <|> try foreignDeclParser
     <|> try routeDeclParser
     <|> try recordDeclParser
@@ -290,6 +296,65 @@ foreignDeclParser = do
       , foreignDeclType = foreignType
       , foreignDeclRuntimeName = runtimeName
       , foreignDeclRuntimeSpan = runtimeSpan
+      }
+
+toolServerDeclParser :: Parser TopLevelItem
+toolServerDeclParser = do
+  start <- getSourcePos
+  keyword "toolserver"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  (protocolSpan, protocolName) <- locatedStringLiteral
+  (locationSpan, locationName) <- locatedStringLiteral
+  keyword "with"
+  (policySpan, policyName) <- locatedUpperIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopToolServerDecl $
+    ToolServerDecl
+      { toolServerDeclName = name
+      , toolServerDeclSpan = makeSourceSpan start end
+      , toolServerDeclNameSpan = nameSpan
+      , toolServerDeclIdentity = "toolserver:" <> name
+      , toolServerDeclProtocol = protocolName
+      , toolServerDeclProtocolSpan = protocolSpan
+      , toolServerDeclLocation = locationName
+      , toolServerDeclLocationSpan = locationSpan
+      , toolServerDeclPolicyName = policyName
+      , toolServerDeclPolicySpan = policySpan
+      }
+
+toolDeclParser :: Parser TopLevelItem
+toolDeclParser = do
+  start <- getSourcePos
+  keyword "tool"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  (serverSpan, serverName) <- locatedUpperIdentifier
+  (operationSpan, operationName) <- locatedStringLiteral
+  (requestTypeSpan, requestTypeName) <- locatedUpperIdentifier
+  _ <- symbol "->"
+  (responseTypeSpan, responseTypeName) <- locatedUpperIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopToolDecl $
+    ToolDecl
+      { toolDeclName = name
+      , toolDeclSpan = makeSourceSpan start end
+      , toolDeclNameSpan = nameSpan
+      , toolDeclIdentity = "tool:" <> name
+      , toolDeclServerName = serverName
+      , toolDeclServerSpan = serverSpan
+      , toolDeclOperation = operationName
+      , toolDeclOperationSpan = operationSpan
+      , toolDeclRequestType = requestTypeName
+      , toolDeclRequestDecl = RouteBoundaryDecl requestTypeName
+      , toolDeclRequestTypeSpan = requestTypeSpan
+      , toolDeclResponseType = responseTypeName
+      , toolDeclResponseDecl = RouteBoundaryDecl responseTypeName
+      , toolDeclResponseTypeSpan = responseTypeSpan
       }
 
 routeDeclParser :: Parser TopLevelItem
@@ -891,8 +956,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
-    foldM step ([], [], [], [], [], [], [], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -905,6 +970,8 @@ attachSignatures (name, imports, items) = do
         , moduleAgentRoleDecls = reverse agentRoleDecls
         , moduleAgentDecls = reverse agentDecls
         , modulePolicyDecls = reverse policyDecls
+        , moduleToolServerDecls = reverse toolServerDecls
+        , moduleToolDecls = reverse toolDecls
         , moduleProjectionDecls = reverse projectionDecls
         , moduleForeignDecls = reverse foreignDecls
         , moduleRouteDecls = reverse routeDecls
@@ -921,28 +988,32 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopGuideDecl guideDecl ->
-          pure (typeDecls, recordDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopHookDecl hookDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentRoleDecl agentRoleDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentDecl agentDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopPolicyDecl policyDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopToolServerDecl toolServerDecl ->
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecl : toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopToolDecl toolDecl ->
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecl : toolDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopProjectionDecl projectionDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -963,6 +1034,8 @@ attachSignatures (name, imports, items) = do
                 , agentRoleDecls
                 , agentDecls
                 , policyDecls
+                , toolServerDecls
+                , toolDecls
                 , projectionDecls
                 , foreignDecls
                 , routeDecls
@@ -981,7 +1054,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -1011,6 +1084,8 @@ reservedWords =
   , "guide"
   , "extends"
   , "policy"
+  , "toolserver"
+  , "tool"
   , "projection"
   , "with"
   , "foreign"

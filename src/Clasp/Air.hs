@@ -35,6 +35,8 @@ import Clasp.Core
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreToolDecl (..)
+  , CoreToolServerDecl (..)
   , coreExprType
   )
 import Clasp.Syntax
@@ -59,6 +61,8 @@ import Clasp.Syntax
   , RoutePathDecl (..)
   , RoutePathParamDecl (..)
   , SourceSpan
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type
   , TypeDecl (..)
   , renderType
@@ -111,6 +115,8 @@ buildAirModule modl =
     agentRoleNodes = fmap buildAgentRoleDeclNode (coreModuleAgentRoleDecls modl)
     agentNodes = fmap buildAgentDeclNode (coreModuleAgentDecls modl)
     policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
+    toolServerNodes = fmap buildToolServerDeclNode (coreModuleToolServerDecls modl)
+    toolNodes = fmap buildToolDeclNode (coreModuleToolDecls modl)
     projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
     routeNodes = fmap buildRouteDeclNode (coreModuleRouteDecls modl)
@@ -123,6 +129,8 @@ buildAirModule modl =
         <> agentRoleNodes
         <> agentNodes
         <> policyNodes
+        <> toolServerNodes
+        <> toolNodes
         <> projectionNodes
         <> foreignNodes
         <> routeNodes
@@ -331,6 +339,43 @@ buildPolicyClassificationDeclNode policyName classificationDecl =
         , ("policyName", AirAttrText policyName)
         ]
     }
+
+buildToolServerDeclNode :: CoreToolServerDecl -> AirNode
+buildToolServerDeclNode coreToolServerDecl =
+  AirNode
+    { airNodeId = toolServerDeclId (toolServerDeclName toolServerDecl)
+    , airNodeKind = "toolServerDecl"
+    , airNodeSpan = Just (toolServerDeclSpan toolServerDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (toolServerDeclName toolServerDecl))
+        , ("identity", AirAttrText (toolServerDeclIdentity toolServerDecl))
+        , ("protocol", AirAttrText (toolServerDeclProtocol toolServerDecl))
+        , ("location", AirAttrText (toolServerDeclLocation toolServerDecl))
+        , ("policy", AirAttrObject [("name", AirAttrText (toolServerDeclPolicyName toolServerDecl)), ("ref", AirAttrNode (policyDeclId (toolServerDeclPolicyName toolServerDecl)))])
+        ]
+    }
+  where
+    toolServerDecl = coreToolServerSourceDecl coreToolServerDecl
+
+buildToolDeclNode :: CoreToolDecl -> AirNode
+buildToolDeclNode coreToolDecl =
+  AirNode
+    { airNodeId = toolDeclId (toolDeclName toolDecl)
+    , airNodeKind = "toolDecl"
+    , airNodeSpan = Just (toolDeclSpan toolDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (toolDeclName toolDecl))
+        , ("identity", AirAttrText (toolDeclIdentity toolDecl))
+        , ("server", AirAttrObject [("name", AirAttrText (toolDeclServerName toolDecl)), ("ref", AirAttrNode (toolServerDeclId (toolDeclServerName toolDecl)))])
+        , ("operation", AirAttrText (toolDeclOperation toolDecl))
+        , ("request", boundaryAttr (toolDeclRequestDecl toolDecl))
+        , ("response", boundaryAttr (toolDeclResponseDecl toolDecl))
+        ]
+    }
+  where
+    toolDecl = coreToolSourceDecl coreToolDecl
 
 buildProjectionDeclNodes :: CoreProjectionDecl -> [AirNode]
 buildProjectionDeclNodes coreProjectionDecl =
@@ -770,6 +815,12 @@ policyDeclId name = AirNodeId ("policy:" <> name)
 policyClassificationDeclId :: Text -> Text -> AirNodeId
 policyClassificationDeclId policyName classificationName =
   AirNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
+
+toolServerDeclId :: Text -> AirNodeId
+toolServerDeclId name = AirNodeId ("toolserver:" <> name)
+
+toolDeclId :: Text -> AirNodeId
+toolDeclId name = AirNodeId ("tool:" <> name)
 
 projectionDeclId :: Text -> AirNodeId
 projectionDeclId name = AirNodeId ("projection:" <> name)
