@@ -50,6 +50,7 @@ emitModule modl =
       <> emitPageFlowArtifacts (lowerPageFlows modl)
       <> emitSeededFixturesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
+      <> emitRouteClientsExport (lowerModuleRoutes modl)
 
 emitRuntimePrelude :: [Text]
 emitRuntimePrelude =
@@ -274,6 +275,110 @@ emitRuntimePrelude =
   , ""
   , "export function __claspRenderPage(value, renderMode = __claspPageRenderModes.html) {"
   , "  return $render_PageWithMode(value, renderMode);"
+  , "}"
+  , ""
+  , "function $claspIsPlainObject(value) {"
+  , "  return typeof value === \"object\" && value !== null && !Array.isArray(value);"
+  , "}"
+  , ""
+  , "function $claspRouteFieldString(value) {"
+  , "  if (typeof value === \"boolean\") {"
+  , "    return value ? \"true\" : \"false\";"
+  , "  }"
+  , "  return String(value);"
+  , "}"
+  , ""
+  , "function $claspRoutePayloadEntries(value) {"
+  , "  if (!$claspIsPlainObject(value)) {"
+  , "    return value === undefined ? [] : [[\"value\", value]];"
+  , "  }"
+  , "  return Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null);"
+  , "}"
+  , ""
+  , "function $claspRoutePathParamNames(pathDecl) {"
+  , "  return Array.isArray(pathDecl?.params)"
+  , "    ? pathDecl.params"
+  , "        .map((param) => (param && typeof param.name === \"string\" ? param.name : null))"
+  , "        .filter((name) => name !== null)"
+  , "    : [];"
+  , "}"
+  , ""
+  , "function $claspBuildRoutePath(pathDecl, payload) {"
+  , "  const pattern = typeof pathDecl?.pattern === \"string\" ? pathDecl.pattern : \"\";"
+  , "  if (!$claspIsPlainObject(payload)) {"
+  , "    return pattern;"
+  , "  }"
+  , "  return $claspRoutePathParamNames(pathDecl).reduce((path, paramName) => {"
+  , "    const rawValue = payload[paramName];"
+  , "    const encodedValue = rawValue === undefined || rawValue === null ? \"\" : encodeURIComponent($claspRouteFieldString(rawValue));"
+  , "    return path.replace(`:${paramName}`, encodedValue);"
+  , "  }, pattern);"
+  , "}"
+  , ""
+  , "function $claspRoutePayloadWithoutPathParams(pathDecl, payload) {"
+  , "  if (!$claspIsPlainObject(payload)) {"
+  , "    return payload;"
+  , "  }"
+  , "  const filtered = { ...payload };"
+  , "  for (const paramName of $claspRoutePathParamNames(pathDecl)) {"
+  , "    delete filtered[paramName];"
+  , "  }"
+  , "  return filtered;"
+  , "}"
+  , ""
+  , "function $claspBuildRouteQuery(path, payload) {"
+  , "  const searchParams = new URLSearchParams();"
+  , "  for (const [fieldName, fieldValue] of $claspRoutePayloadEntries(payload)) {"
+  , "    searchParams.set(fieldName, $claspRouteFieldString(fieldValue));"
+  , "  }"
+  , "  const query = searchParams.toString();"
+  , "  return query === \"\" ? path : `${path}?${query}`;"
+  , "}"
+  , ""
+  , "function $claspBuildRouteFormBody(payload) {"
+  , "  const searchParams = new URLSearchParams();"
+  , "  for (const [fieldName, fieldValue] of $claspRoutePayloadEntries(payload)) {"
+  , "    searchParams.set(fieldName, $claspRouteFieldString(fieldValue));"
+  , "  }"
+  , "  return searchParams.toString();"
+  , "}"
+  , ""
+  , "function $claspPrepareRouteRequest(route, value, serializeRequest, encodeRequest) {"
+  , "  const payload = serializeRequest(value);"
+  , "  const path = $claspBuildRoutePath(route.pathDecl, payload);"
+  , "  const transportPayload = $claspRoutePayloadWithoutPathParams(route.pathDecl, payload);"
+  , "  if (route.method === \"GET\") {"
+  , "    return { method: route.method, path, href: $claspBuildRouteQuery(path, transportPayload), headers: {}, body: null };"
+  , "  }"
+  , "  if (route.formDecl !== null) {"
+  , "    return {"
+  , "      method: route.method,"
+  , "      path,"
+  , "      href: path,"
+  , "      headers: { \"content-type\": \"application/x-www-form-urlencoded\" },"
+  , "      body: $claspBuildRouteFormBody(transportPayload)"
+  , "    };"
+  , "  }"
+  , "  return {"
+  , "    method: route.method,"
+  , "    path,"
+  , "    href: path,"
+  , "    headers: { \"content-type\": \"application/json\" },"
+  , "    body: encodeRequest(value)"
+  , "  };"
+  , "}"
+  , ""
+  , "async function $claspParseRouteResponse(route, response, decodeJsonResponse) {"
+  , "  if (route.responseKind === \"json\") {"
+  , "    return decodeJsonResponse(await response.text());"
+  , "  }"
+  , "  if (route.responseKind === \"page\") {"
+  , "    return await response.text();"
+  , "  }"
+  , "  return {"
+  , "    status: response.status,"
+  , "    location: response.headers.get(\"location\") ?? \"\""
+  , "  };"
   , "}"
   , ""
   ]
@@ -759,6 +864,62 @@ emitRoutesExport typeDecls recordDecls routes =
       , "    encodeResponse: " <> responseEncoder
       , "  },"
       ]
+
+emitRouteClientsExport :: [LowerRoute] -> [Text]
+emitRouteClientsExport routes =
+  concatMap emitRouteClient routes
+    <> [ "export const __claspRouteClients = ["
+       , "  " <> T.intercalate ", " (fmap (\route -> emitIdentifier (lowerRouteName route) <> "Client") routes)
+       , "];"
+       ]
+  where
+    emitRouteClient route =
+      let responseDecoder =
+            case lowerRouteResponseTypeName route of
+              "Page" ->
+                "null"
+              "Redirect" ->
+                "null"
+              responseTypeName ->
+                "$decode_" <> responseTypeName
+          serializeRequest =
+            "$serialize_"
+              <> lowerRouteRequestTypeName route
+              <> "($validateInternal_"
+              <> lowerRouteRequestTypeName route
+              <> "(value, \"value\"))"
+          clientName = emitIdentifier (lowerRouteName route) <> "Client"
+       in
+      [ "export const " <> clientName <> " = {"
+      , "  name: " <> emitStringLiteral (lowerRouteName route) <> ","
+      , "  id: " <> emitStringLiteral (lowerRouteIdentity route) <> ","
+      , "  method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
+      , "  path: " <> emitStringLiteral (lowerRoutePath route) <> ","
+      , "  pathDecl: " <> emitRoutePathDecl (lowerRoutePathDecl route) <> ","
+      , "  queryDecl: " <> emitRouteBoundaryDecl [] [] (lowerRouteQueryDecl route) <> ","
+      , "  formDecl: " <> emitRouteBoundaryDecl [] [] (lowerRouteFormDecl route) <> ","
+      , "  bodyDecl: " <> emitRouteBoundaryDecl [] [] (lowerRouteBodyDecl route) <> ","
+      , "  requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
+      , "  responseType: " <> emitStringLiteral (lowerRouteResponseTypeName route) <> ","
+      , "  responseKind: " <> emitStringLiteral responseKind <> ","
+      , "  serializeRequest(value) {"
+      , "    return " <> serializeRequest <> ";"
+      , "  },"
+      , "  prepareRequest(value) {"
+      , "    return $claspPrepareRouteRequest(this, value, (input) => this.serializeRequest(input), (input) => $encode_" <> lowerRouteRequestTypeName route <> "(input));"
+      , "  },"
+      , "  async parseResponse(response) {"
+      , "    return $claspParseRouteResponse(this, response, " <> responseDecoder <> ");"
+      , "  }"
+      , "};"
+      , ""
+      ]
+      where
+        responseKind =
+          case lowerRouteResponseTypeName route of
+            "Page" -> "page"
+            "Redirect" -> "redirect"
+            _ -> "json"
 
 emitRouteMethod :: RouteMethod -> Text
 emitRouteMethod routeMethod =

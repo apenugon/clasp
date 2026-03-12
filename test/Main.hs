@@ -843,6 +843,10 @@ compileTests =
             assertBool "expected path declaration metadata" ("pathDecl: { pattern: \"/lead/summary\", params: [] }" `T.isInfixOf` emitted)
             assertBool "expected body declaration metadata" ("bodyDecl: { type: \"LeadRequest\", schema: $claspSchema_LeadRequest }" `T.isInfixOf` emitted)
             assertBool "expected response declaration metadata" ("responseDecl: { type: \"LeadSummary\", schema: $claspSchema_LeadSummary }" `T.isInfixOf` emitted)
+            assertBool "expected route client export" ("export const summarizeLeadRouteClient = {" `T.isInfixOf` emitted)
+            assertBool "expected route clients registry" ("export const __claspRouteClients = [" `T.isInfixOf` emitted)
+            assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
+            assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->
@@ -1001,6 +1005,50 @@ compileTests =
               assertEqual
                 "expected query decode, form decode, and invalid form failure"
                 "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
+                runtimeOutput
+    , testCase "generated json route clients prepare requests and decode responses" $
+        case compileSource "service-client" serviceSource of
+          Left err ->
+            assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/service-client/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (routeClientJsonRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected json route client transport contract"
+              "{\"method\":\"POST\",\"path\":\"/lead/summary\",\"href\":\"/lead/summary\",\"contentType\":\"application/json\",\"body\":\"{\\\"company\\\":\\\"Acme\\\",\\\"budget\\\":42,\\\"priorityHint\\\":\\\"high\\\"}\",\"parsedSummary\":\"Ready\",\"parsedPriority\":\"High\",\"parsedFollowUpRequired\":true}"
+              runtimeOutput
+    , testCase "generated page route clients build query and form requests" $
+        withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              runtimeOutput <- runNodeScript (routeClientPageRuntimeScript absoluteCompiledPath)
+              assertEqual
+                "expected page route client transport contract"
+                "{\"lookupHref\":\"/order?customerId=00123&quantity=7\",\"lookupBody\":null,\"submitContentType\":\"application/x-www-form-urlencoded\",\"submitBody\":\"customerId=00123&quantity=7\",\"pageHtml\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\"}"
+                runtimeOutput
+    , testCase "generated redirect route clients decode redirect responses" $
+        withProjectFiles "route-client-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              runtimeOutput <- runNodeScript (routeClientRedirectRuntimeScript absoluteCompiledPath)
+              assertEqual
+                "expected redirect route client response contract"
+                "{\"method\":\"POST\",\"path\":\"/submit\",\"body\":\"\",\"redirect\":{\"status\":303,\"location\":\"/inbox\"}}"
                 runtimeOutput
     , testCase "runtime turns redirect route results into http redirects" $
         withProjectFiles "page-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
@@ -1856,6 +1904,66 @@ pageRedirectRuntimeScript compiledPath runtimePath =
     , "if (!submitRoute) { throw new Error('missing submitLeadRoute'); }"
     , "const response = responseForRouteResult(submitRoute, await submitRoute.handler({}));"
     , "console.log(JSON.stringify({ status: response.status, location: response.headers.get('location') }));"
+    ]
+
+routeClientJsonRuntimeScript :: FilePath -> Text
+routeClientJsonRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const client = compiledModule.summarizeLeadRouteClient;"
+    , "const request = client.prepareRequest({ company: 'Acme', budget: 42, priorityHint: compiledModule.High });"
+    , "const parsed = await client.parseResponse(new Response(JSON.stringify({"
+    , "  summary: 'Ready',"
+    , "  priority: 'high',"
+    , "  followUpRequired: true"
+    , "})));"
+    , "console.log(JSON.stringify({"
+    , "  method: request.method,"
+    , "  path: request.path,"
+    , "  href: request.href,"
+    , "  contentType: request.headers['content-type'] ?? null,"
+    , "  body: request.body,"
+    , "  parsedSummary: parsed.summary,"
+    , "  parsedPriority: parsed.priority?.$tag ?? parsed.priority,"
+    , "  parsedFollowUpRequired: parsed.followUpRequired"
+    , "}));"
+    ]
+
+routeClientPageRuntimeScript :: FilePath -> Text
+routeClientPageRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const lookupClient = compiledModule.lookupRouteClient;"
+    , "const submitClient = compiledModule.submitRouteClient;"
+    , "const payload = { customerId: '00123', quantity: 7 };"
+    , "const lookupRequest = lookupClient.prepareRequest(payload);"
+    , "const submitRequest = submitClient.prepareRequest(payload);"
+    , "const pageHtml = await lookupClient.parseResponse(new Response('<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Order</title></head><body>00123</body></html>'));"
+    , "console.log(JSON.stringify({"
+    , "  lookupHref: lookupRequest.href,"
+    , "  lookupBody: lookupRequest.body,"
+    , "  submitContentType: submitRequest.headers['content-type'] ?? null,"
+    , "  submitBody: submitRequest.body,"
+    , "  pageHtml"
+    , "}));"
+    ]
+
+routeClientRedirectRuntimeScript :: FilePath -> Text
+routeClientRedirectRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const client = compiledModule.submitLeadRouteClient;"
+    , "const request = client.prepareRequest({});"
+    , "const redirect = await client.parseResponse(new Response('', {"
+    , "  status: 303,"
+    , "  headers: { location: '/inbox' }"
+    , "}));"
+    , "console.log(JSON.stringify({"
+    , "  method: request.method,"
+    , "  path: request.path,"
+    , "  body: request.body,"
+    , "  redirect"
+    , "}));"
     ]
 
 leadInboxRuntimeScript :: FilePath -> FilePath -> Text
