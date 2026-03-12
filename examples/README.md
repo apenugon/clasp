@@ -11,6 +11,7 @@ This directory has two kinds of examples:
 - [status.clasp](/home/akul/DevProjects/synthspeak/examples/status.clasp): ADTs plus `match`
 - [records.clasp](/home/akul/DevProjects/synthspeak/examples/records.clasp): records and field access
 - [lists.clasp](/home/akul/DevProjects/synthspeak/examples/lists.clasp): list types, literals, nested list fields, and JSON list boundaries
+- [let.clasp](/home/akul/DevProjects/synthspeak/examples/let.clasp): local `let` bindings at the top level and inside `match` branches
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples

@@ -345,6 +345,21 @@ parserTests =
                     assertFailure ("expected nested let expression inside match branch, got " <> show other)
               Nothing ->
                 assertFailure "expected describe declaration"
+    , testCase "parses the let example file" $ do
+        source <- readExampleSource "let.clasp"
+        case parseSource "examples/let.clasp" source of
+          Left err ->
+            assertFailure ("expected let example source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ELet _ _ "current" (ECall _ (EVar _ "Busy") [EString _ "loading"]) (ECall _ (EVar _ "describe") [EVar _ "current"]) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected top-level let expression in example main, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "parses the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case parseSource "examples/lists.clasp" source of
@@ -458,6 +473,17 @@ checkerTests =
                     assertFailure ("expected checked let expression, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "typechecks the let example file" $ do
+        source <- readExampleSource "let.clasp"
+        case checkSource "examples/let.clasp" source of
+          Left err ->
+            assertFailure ("expected let example source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "main type" TStr (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "typechecks the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case checkSource "examples/lists.clasp" source of
@@ -1056,6 +1082,24 @@ compileTests =
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
             assertBool "expected nested list schema" ("kind: \"list\", item: { kind: \"list\", item: $claspSchema_Int }" `T.isInfixOf` emitted)
+    , testCase "compile evaluates the let example file" $ do
+        source <- readExampleSource "let.clasp"
+        case compileSource "examples/let.clasp" source of
+          Left err ->
+            assertFailure ("expected let example compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected let binding from main" ("const current = Busy(\"loading\");" `T.isInfixOf` emitted)
+            assertBool "expected let binding from match branch" ("const copy = note;" `T.isInfixOf` emitted)
+            let compiledPath = "dist/let-example.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.main);"
+                ]
+            assertEqual "expected let example result" "loading" runtimeOutput
     , testCase "compile emits runtime bindings, codecs, and route metadata" $
         case compileSource "service" serviceSource of
           Left err ->
