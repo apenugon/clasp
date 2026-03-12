@@ -451,6 +451,7 @@ renderProjectionDecl coreProjectionDecl =
 renderForeignDecl :: ForeignDecl -> Text
 renderForeignDecl foreignDecl =
   "foreign "
+    <> (if foreignDeclUnsafeInterop foreignDecl then "unsafe " else "")
     <> foreignDeclName foreignDecl
     <> " : "
     <> renderType (foreignDeclType foreignDecl)

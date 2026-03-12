@@ -332,7 +332,7 @@ tool-decl ::= "tool" lower-ident "=" upper-ident string upper-ident "->" upper-i
 verifier-decl ::= "verifier" lower-ident "=" lower-ident
 mergegate-decl ::= "mergegate" lower-ident "=" lower-ident ("," lower-ident)*
 projection-decl ::= "projection" upper-ident "=" upper-ident "with" upper-ident "{" lower-ident ("," lower-ident)* "}"
-foreign-decl ::= "foreign" lower-ident ":" type "=" string foreign-package-import?
+foreign-decl ::= "foreign" ["unsafe"] lower-ident ":" type "=" string foreign-package-import?
 foreign-package-import ::= "from" ("npm" | "typescript") string "declaration" string
 route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ident lower-ident
 method      ::= "GET" | "POST"
@@ -381,6 +381,8 @@ type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "[" type "]" | "(" type "
 ```
 
 Notes:
+
+Package-backed foreign declarations are checked against the referenced declaration file when the package type is structurally known. Unchecked package leaves such as `any`, untyped parameters or returns, and opaque named package types require an explicit `foreign unsafe` marker, but that marker does not waive surrounding function, record, or list structure checks.
 
 - Function application is left-associative.
 - Field access binds tighter than function application.

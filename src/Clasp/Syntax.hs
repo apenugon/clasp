@@ -438,6 +438,7 @@ data ForeignDecl = ForeignDecl
   { foreignDeclName :: Text
   , foreignDeclSpan :: SourceSpan
   , foreignDeclNameSpan :: SourceSpan
+  , foreignDeclUnsafeInterop :: Bool
   , foreignDeclAnnotationSpan :: SourceSpan
   , foreignDeclType :: Type
   , foreignDeclRuntimeName :: Text
@@ -852,6 +853,7 @@ renderProjectionFieldDecl = projectionFieldDeclName
 renderForeignDecl :: ForeignDecl -> Text
 renderForeignDecl foreignDecl =
   "foreign "
+    <> (if foreignDeclUnsafeInterop foreignDecl then "unsafe " else "")
     <> foreignDeclName foreignDecl
     <> " : "
     <> renderType (foreignDeclType foreignDecl)

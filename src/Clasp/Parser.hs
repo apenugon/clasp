@@ -406,6 +406,7 @@ foreignDeclParser :: Parser TopLevelItem
 foreignDeclParser = do
   start <- getSourcePos
   keyword "foreign"
+  unsafeInterop <- maybe False (const True) <$> optional (keyword "unsafe")
   (nameSpan, name) <- locatedLowerIdentifier
   annotationStart <- getSourcePos
   _ <- symbol ":"
@@ -422,6 +423,7 @@ foreignDeclParser = do
       { foreignDeclName = name
       , foreignDeclSpan = makeSourceSpan start end
       , foreignDeclNameSpan = nameSpan
+      , foreignDeclUnsafeInterop = unsafeInterop
       , foreignDeclAnnotationSpan = makeSourceSpan annotationStart annotationEnd
       , foreignDeclType = foreignType
       , foreignDeclRuntimeName = runtimeName

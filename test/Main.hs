@@ -488,6 +488,16 @@ parserTests =
                 assertEqual "typescript foreign runtime name" "formatLead" (foreignDeclRuntimeName tsDecl)
               other ->
                 assertFailure ("expected two foreign declarations, got " <> show (length other))
+    , testCase "parses explicit unsafe package foreign declarations" $
+        case parseSource "inline" packageUnsafeForeignSource of
+          Left err ->
+            assertFailure ("expected parse success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleForeignDecls modl of
+              [foreignDecl] ->
+                assertBool "expected unsafe package interop flag" (foreignDeclUnsafeInterop foreignDecl)
+              other ->
+                assertFailure ("expected one foreign declaration, got " <> show (length other))
     , testCase "parses compiler-known page types through the normal surface" $
         case parseSource "inline" pageSource of
           Left err ->
@@ -2706,6 +2716,18 @@ compileTests =
         withProjectFiles "package-import-missing-export" packageImportMissingExportFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
           assertHasCode "E_FOREIGN_PACKAGE_EXPORT_NOT_FOUND" result
+    , testCase "checkEntry accepts explicit unsafe package leaves when structure still matches" $
+        withProjectFiles "package-import-unsafe-leaf" packageImportUnsafeLeafFiles $ \root -> do
+          result <- checkEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected unsafe leaf package import to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right _ ->
+              pure ()
+    , testCase "checkEntry still rejects structural mismatches around unsafe package leaves" $
+        withProjectFiles "package-import-unsafe-structural-mismatch" packageImportUnsafeStructuralMismatchFiles $ \root -> do
+          result <- checkEntry (root </> "Main.clasp")
+          assertHasCode "E_FOREIGN_PACKAGE_SIGNATURE_MISMATCH" result
     , testCase "compileEntry renders an inbox-style shared page safely" $
         withProjectFiles "render-inbox-page" inboxPageFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -3551,6 +3573,21 @@ packageForeignSource =
     , ""
     , "foreign upperCase : Str -> Str = \"upperCase\" from npm \"local-upper\" declaration \"./node_modules/local-upper/index.d.ts\""
     , "foreign formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , ""
+    , "main = \"ok\""
+    ]
+
+packageUnsafeForeignSource :: Text
+packageUnsafeForeignSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int"
+    , "}"
+    , ""
+    , "foreign unsafe formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
     , ""
     , "main = \"ok\""
     ]
@@ -4712,6 +4749,20 @@ packageImportFiles =
   , ("node_modules/local-upper/index.d.ts", packageImportNpmDeclarationSource)
   ]
 
+packageImportUnsafeLeafFiles :: [(FilePath, Text)]
+packageImportUnsafeLeafFiles =
+  [ ("Main.clasp", packageImportUnsafeLeafMainSource)
+  , ("support/formatLead.mjs", packageImportTsModuleSource)
+  , ("support/formatLead.d.ts", packageImportUnsafeLeafTsDeclarationSource)
+  ]
+
+packageImportUnsafeStructuralMismatchFiles :: [(FilePath, Text)]
+packageImportUnsafeStructuralMismatchFiles =
+  [ ("Main.clasp", packageImportUnsafeLeafMainSource)
+  , ("support/formatLead.mjs", packageImportTsModuleSource)
+  , ("support/formatLead.d.ts", packageImportUnsafeStructuralMismatchTsDeclarationSource)
+  ]
+
 packageImportMissingExportFiles :: [(FilePath, Text)]
 packageImportMissingExportFiles =
   [ ("Main.clasp", packageImportMissingExportMainSource)
@@ -4790,6 +4841,21 @@ packageImportMainSource =
     , "main = \"ready\""
     ]
 
+packageImportUnsafeLeafMainSource :: Text
+packageImportUnsafeLeafMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int"
+    , "}"
+    , ""
+    , "foreign unsafe formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , ""
+    , "main = \"ready\""
+    ]
+
 packageImportMissingExportMainSource :: Text
 packageImportMissingExportMainSource =
   T.unlines
@@ -4812,6 +4878,18 @@ packageImportTsDeclarationSource :: Text
 packageImportTsDeclarationSource =
   T.unlines
     [ "export declare function formatLead(request: { company: string; budget: number }): string;"
+    ]
+
+packageImportUnsafeLeafTsDeclarationSource :: Text
+packageImportUnsafeLeafTsDeclarationSource =
+  T.unlines
+    [ "export declare function formatLead(request: { company: string; budget: any }): string;"
+    ]
+
+packageImportUnsafeStructuralMismatchTsDeclarationSource :: Text
+packageImportUnsafeStructuralMismatchTsDeclarationSource =
+  T.unlines
+    [ "export declare function formatLead(request: Array<{ company: string; budget: any }>): string;"
     ]
 
 packageImportNpmPackageSource :: Text
