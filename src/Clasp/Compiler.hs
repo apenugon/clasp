@@ -1,12 +1,16 @@
 module Clasp.Compiler
-  ( checkSource
+  ( airSource
+  , checkSource
   , checkEntry
   , compileSource
   , compileEntry
   , parseSource
+  , renderAirSourceJson
   ) where
 
 import Data.Text (Text)
+import qualified Data.Text.Lazy as LT
+import Clasp.Air (AirModule, buildAirModule, renderAirModuleJson)
 import Clasp.Checker (checkModule)
 import Clasp.Core (CoreModule)
 import Clasp.Diagnostic (DiagnosticBundle)
@@ -23,6 +27,14 @@ checkSource :: FilePath -> Text -> Either DiagnosticBundle CoreModule
 checkSource path source = do
   modl <- parseModule path source
   checkModule modl
+
+airSource :: FilePath -> Text -> Either DiagnosticBundle AirModule
+airSource path source =
+  buildAirModule <$> checkSource path source
+
+renderAirSourceJson :: FilePath -> Text -> Either DiagnosticBundle LT.Text
+renderAirSourceJson path source =
+  renderAirModuleJson <$> airSource path source
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do

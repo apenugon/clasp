@@ -25,7 +25,13 @@ import Test.Tasty.HUnit
   , assertFailure
   , testCase
   )
-import Clasp.Compiler (checkEntry, checkSource, compileEntry, compileSource, parseSource)
+import Clasp.Air
+  ( AirAttr (..)
+  , AirModule (..)
+  , AirNode (..)
+  , AirNodeId (..)
+  )
+import Clasp.Compiler (airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson)
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
@@ -68,6 +74,7 @@ tests =
     "clasp-compiler"
     [ parserTests
     , checkerTests
+    , airTests
     , diagnosticTests
     , lowerTests
     , compileTests
@@ -299,6 +306,40 @@ diagnosticTests =
             assertBool "expected related marker" ("related previous declaration" `T.isInfixOf` rendered)
           Right _ ->
             assertFailure "expected duplicate declaration failure"
+    ]
+
+airTests :: TestTree
+airTests =
+  testGroup
+    "air"
+    [ testCase "air builds a stable graph with explicit identities" $
+        case airSource "service" serviceSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected top-level decl root" (AirNodeId "decl:summarizeLead" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "decl:summarizeLead") (airModuleNodes airModule) of
+              Just node -> do
+                assertEqual "decl kind" "decl" (airNodeKind node)
+                assertBool "expected body ref" (("body", AirAttrNode (AirNodeId "expr:summarizeLead:body")) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected summarizeLead AIR node"
+            case findAirNode (AirNodeId "expr:summarizeLead:body") (airModuleNodes airModule) of
+              Just node -> do
+                assertEqual "decode node kind" "decodeJson" (airNodeKind node)
+                assertBool "expected rawJson ref" (("rawJson", AirAttrNode (AirNodeId "expr:summarizeLead:body.rawJson")) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected summarizeLead body AIR node"
+    , testCase "air serialization is replay-friendly and deterministic" $
+        case renderAirSourceJson "adt" adtSource of
+          Left err ->
+            assertFailure ("expected AIR json generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected decl id in json" ("\"decl:describe\"" `T.isInfixOf` jsonText)
+            assertBool "expected branch id in json" ("\"expr:describe:body.branch0\"" `T.isInfixOf` jsonText)
+            assertBool "expected explicit ref encoding" ("{\"ref\":\"expr:describe:body.subject\"}" `T.isInfixOf` jsonText)
+            assertBool "expected constructor pattern binder id" ("\"expr:describe:body.branch1.pattern.binder0\"" `T.isInfixOf` jsonText)
     ]
 
 lowerTests :: TestTree
@@ -539,6 +580,15 @@ findLowerDecl target =
         LFunctionDecl name _ _
           | name == target -> Just decl
         _ -> go rest
+
+findAirNode :: AirNodeId -> [AirNode] -> Maybe AirNode
+findAirNode target =
+  go
+  where
+    go [] = Nothing
+    go (node : rest)
+      | airNodeId node == target = Just node
+      | otherwise = go rest
 
 lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do

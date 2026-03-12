@@ -27,6 +27,7 @@ library
   import:           common-options
   hs-source-dirs:   src
   exposed-modules:
+      Clasp.Air
       Clasp.Checker
       Clasp.Compiler
       Clasp.Core

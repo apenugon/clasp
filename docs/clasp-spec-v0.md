@@ -33,6 +33,7 @@ It includes:
 - Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
+- A stable AIR graph with compiler-known node identity and JSON serialization for tooling/replay
 - A lowered backend IR between checking and emission
 - Local inference for declarations whose types are constrained enough by usage
 - Exhaustiveness checking for constructor matches
@@ -248,7 +249,7 @@ Notes:
 The current compiler pipeline is:
 
 ```text
-Source -> Parser -> AST -> Typed Core IR -> Lowered IR -> JavaScript Emitter
+Source -> Parser -> AST -> Typed Core IR -> AIR Graph -> Lowered IR -> JavaScript Emitter
 ```
 
 The intended expanded pipeline is:
