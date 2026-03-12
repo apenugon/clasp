@@ -1,10 +1,10 @@
-# Task: Add Lead Segment Across the Clickable TypeScript Inbox App
+# Task: Add Lead Segment Across the Clickable Inbox App
 
-The repository models a browser-runnable TypeScript lead inbox with:
+The repository models a browser-runnable lead inbox with:
 
 - a server-rendered HTML intake form
 - a clickable inbox page and lead detail pages
-- shared lead contracts used by server logic and HTML rendering
+- a shared lead contract used by request decoding, storage, and rendering
 - a mock model boundary that still returns raw JSON
 
 Implement lead segments end to end.
@@ -13,7 +13,7 @@ Implement lead segments end to end.
 
 - This task is intentionally local to the workspace.
 - Start with `test/lead-app.test.mjs` and `src/shared/lead.ts`.
-- Do not inspect the parent repo unless `bash scripts/verify.sh` exposes a benchmark harness bug rather than an app bug.
+- Do not inspect the parent repo unless `bash scripts/verify.sh` exposes a benchmark harness or language-runtime bug rather than an app bug.
 - The intended app-level fix is to express the constraint in the shared schema and thread it through the existing server-rendered flow.
 
 ## Requirements
@@ -32,8 +32,8 @@ Implement lead segments end to end.
 ## Constraints
 
 - Keep the codebase small and readable.
-- Preserve the route structure and server-rendered page flow.
-- Do not bypass validation with unchecked shortcuts.
+- Preserve the existing route structure and server-rendered page flow.
+- Do not bypass validation with unchecked shortcuts or generated-output edits.
 
 ## Acceptance
 

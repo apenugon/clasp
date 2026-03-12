@@ -115,6 +115,13 @@ For product-slice benchmarks, fairness also means:
 - the first clickable lead-inbox task family should stay mirrored around one small product change such as a lead segment threaded through intake, storage, rendering, and the model boundary
 - acceptance tests should exercise the same app-owned server surface on both sides, so the `Clasp` variant does not require benchmark-only test/runtime edits for ordinary field propagation
 
+The benchmark program should publish at least two official comparison modes instead of collapsing everything into one headline number:
+
+- `Raw Repo`: normal task prompt plus the repo's ordinary docs and structure, with no exact entry-file hints beyond what a real user would provide. This mode measures the combined effect of language design, repo shape, compiler artifacts, and agent discovery cost.
+- `File-Hinted`: the same task and acceptance criteria, but each language variant names the analogous entry files explicitly. This mode reduces repo-discovery noise so the comparison focuses more on propagation, editing, and verification behavior once the agent is on the right surfaces.
+
+Both modes are useful, and they should be reported separately. A `Clasp` win in `Raw Repo` but not `File-Hinted` still matters, but it means the advantage is mostly in compiler-owned discovery and navigation rather than in the pure edit model.
+
 ### 5. Publish raw traces when possible
 
 For persuasive public results, keep:

@@ -20,7 +20,7 @@ Each task includes:
 - `prompt.md`: the task prompt shown to the harness
 - `repo`: the starting repository snapshot for that task
 
-The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task.
+The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task, and `bash benchmarks/test-task-prep.sh` now enforces that the pristine prepared workspaces do not already pass.
 
 The repo distinction matters:
 
@@ -31,6 +31,20 @@ The canonical lead-inbox slice used to shape new benchmark tasks lives in:
 
 - `examples/lead-app`: `Clasp` baseline
 - `examples/lead-app-ts`: `TypeScript` baseline
+
+## Benchmark Modes
+
+The lead-inbox benchmark should be reported in two official modes:
+
+- `Raw Repo`: the harness gets the task prompt and ordinary repo docs only. No exact entry-file hints are included. This measures language plus repo-discovery ergonomics.
+- `File-Hinted`: the harness gets the same task and acceptance criteria, but the prompt names the analogous starting files in each language variant. This reduces discovery noise and focuses more on edit and verification behavior.
+
+Do not collapse these into one number. They answer different questions:
+
+- `Raw Repo` asks whether `Clasp` helps an agent find and bound the change faster.
+- `File-Hinted` asks whether `Clasp` helps once the agent is already on the right files.
+
+The current mirrored `lead-segment` task pair should remain compatible with both modes. Prompt variants may differ only in the presence or absence of those analogous file hints; the acceptance surface should stay identical.
 
 ## Commands
 

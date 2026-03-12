@@ -78,6 +78,13 @@ These tasks force cross-layer changes while staying small enough for repeated ha
 
 The benchmark should therefore measure agents applying those changes to starting repos, not agents “building the whole app from nothing” and not a swarm pre-solving the exact prompt in advance.
 
+The lead-inbox benchmark should also be maintained in two official modes:
+
+- `Raw Repo`: the harness gets the normal task prompt and repo docs, but no exact file hints.
+- `File-Hinted`: the harness gets the same task plus the analogous starting files for each language variant, so discovery is not the main differentiator.
+
+Those runs should be compared separately rather than merged into one score, because they answer different questions about where `Clasp` is helping.
+
 ## Minimum Technical Floor
 
 This slice needs a short critical path of language and runtime features:
@@ -114,6 +121,7 @@ This benchmark becomes credible when:
 - the tasks cross frontend templates, backend logic, shared contracts, validation boundaries, and client-visible behavior
 - the `Clasp` rendering and styling model remains compiler-owned enough to support later SSR/CSR placement, reactive client behavior, and style lowering while keeping safe SSR as the default page-rendering mode
 - the benchmark harness can measure intervention-free completion, token cost, repair loops, and time-to-green
+- the benchmark harness can report both `Raw Repo` and `File-Hinted` results for the same mirrored task family without changing the acceptance surface
 - the story is clearly closer to a real product change than to a toy schema patch
 
 For the next near-term improvement cycle, the benchmark should also become easier for `Clasp` agents specifically in these concrete ways:

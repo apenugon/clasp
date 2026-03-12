@@ -28,7 +28,6 @@ function createSeedLeads(): LeadRecord[] {
       summary:
         "Northwind Studio is ready for a design-system migration this quarter.",
       priority: "medium",
-      segment: "growth",
       followUpRequired: true,
       reviewStatus: "reviewed",
       reviewNote: "Confirmed budget window and asked for a migration timeline."
@@ -40,7 +39,6 @@ function createSeedLeads(): LeadRecord[] {
       summary:
         "Acme Labs is exploring an internal AI pilot for support operations.",
       priority: "high",
-      segment: "enterprise",
       followUpRequired: true,
       reviewStatus: "new",
       reviewNote: ""
@@ -65,7 +63,6 @@ function createLeadRecord(
       contact: intake.contact,
       summary: summary.summary,
       priority: summary.priority,
-      segment: summary.segment,
       followUpRequired: summary.followUpRequired,
       reviewStatus: "new",
       reviewNote: ""
