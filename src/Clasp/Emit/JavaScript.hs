@@ -108,6 +108,10 @@ emitRuntimePrelude =
   , "  };"
   , "}"
   , ""
+  , "function $claspEarlyReturn(value) {"
+  , "  return { $claspEarlyReturn: true, value };"
+  , "}"
+  , ""
   , "function $claspExpectObject(value, path) {"
   , "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {"
   , "    throw new Error(`${path} expected an object`);"
@@ -572,6 +576,8 @@ collectStyledRefsExpr expr =
   case expr of
     LPage title body ->
       collectStyledRefsExpr title <> collectStyledRefsExpr body
+    LReturn value ->
+      collectStyledRefsExpr value
     LViewText value ->
       collectStyledRefsExpr value
     LViewAppend left right ->
@@ -602,6 +608,68 @@ collectStyledRefsExpr expr =
       collectStyledRefsExpr subject
     _ ->
       []
+
+lowerExprContainsReturn :: LowerExpr -> Bool
+lowerExprContainsReturn expr =
+  case expr of
+    LVar _ ->
+      False
+    LInt _ ->
+      False
+    LString _ ->
+      False
+    LBool _ ->
+      False
+    LList items ->
+      any lowerExprContainsReturn items
+    LReturn _ ->
+      True
+    LEqual left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LNotEqual left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LLessThan left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LLessThanOrEqual left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LGreaterThan left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LGreaterThanOrEqual left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LLet _ value body ->
+      lowerExprContainsReturn value || lowerExprContainsReturn body
+    LPage title body ->
+      lowerExprContainsReturn title || lowerExprContainsReturn body
+    LRedirect _ ->
+      False
+    LViewEmpty ->
+      False
+    LViewText value ->
+      lowerExprContainsReturn value
+    LViewAppend left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LViewElement _ child ->
+      lowerExprContainsReturn child
+    LViewStyled _ child ->
+      lowerExprContainsReturn child
+    LViewLink _ _ child ->
+      lowerExprContainsReturn child
+    LViewForm _ _ _ child ->
+      lowerExprContainsReturn child
+    LViewInput _ _ value ->
+      lowerExprContainsReturn value
+    LViewSubmit value ->
+      lowerExprContainsReturn value
+    LCall fn args ->
+      lowerExprContainsReturn fn || any lowerExprContainsReturn args
+    LConstruct _ fields ->
+      any lowerExprContainsReturn fields
+    LMatch subject branches ->
+      lowerExprContainsReturn subject || any (lowerExprContainsReturn . lowerMatchBranchBody) branches
+    LRecord fields ->
+      any (lowerExprContainsReturn . lowerRecordFieldValue) fields
+    LFieldAccess subject _ ->
+      lowerExprContainsReturn subject
 
 emitListCodecHelpers :: [Type] -> [Text]
 emitListCodecHelpers codecTypes =
@@ -1830,14 +1898,28 @@ emitDecl counter decl =
           )
     LFunctionDecl name params body ->
       let (nextCounter, bodyText) = emitExpr counter body
+          functionBody
+            | lowerExprContainsReturn body =
+                T.unlines
+                  [ "try {"
+                  , "  return " <> bodyText <> ";"
+                  , "} catch (error) {"
+                  , "  if (error && error.$claspEarlyReturn === true) {"
+                  , "    return error.value;"
+                  , "  }"
+                  , "  throw error;"
+                  , "}"
+                  ]
+            | otherwise =
+                "return " <> bodyText <> ";"
        in ( nextCounter
           , "export function "
               <> emitIdentifier name
               <> "("
               <> T.intercalate ", " (fmap emitIdentifier params)
-              <> ") { return "
-              <> bodyText
-              <> "; }"
+              <> ") { "
+              <> functionBody
+              <> " }"
           )
 
 emitExpr :: Int -> LowerExpr -> (Int, Text)
@@ -1856,6 +1938,15 @@ emitExpr counter expr =
     LList items ->
       let (nextCounter, itemTexts) = emitExprList counter items
        in (nextCounter, "[" <> T.intercalate ", " itemTexts <> "]")
+    LReturn value ->
+      let (nextCounter, valueText) = emitExpr counter value
+       in ( nextCounter
+          , T.unlines
+              [ "(() => {"
+              , "  throw $claspEarlyReturn(" <> valueText <> ");"
+              , "})()"
+              ]
+          )
     LEqual left right ->
       let (counterAfterLeft, leftText) = emitExpr counter left
           (counterAfterRight, rightText) = emitExpr counterAfterLeft right

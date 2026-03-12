@@ -687,6 +687,7 @@ baseExprParser :: Parser Expr
 baseExprParser =
   parens exprParser
     <|> blockExprParser
+    <|> returnParser
     <|> decodeParser
     <|> encodeParser
     <|> matchParser
@@ -773,6 +774,14 @@ blockSeparatorParser :: Parser ()
 blockSeparatorParser =
   void (symbolN ";")
     <|> void (some eol *> scn)
+
+returnParser :: Parser Expr
+returnParser = do
+  start <- getSourcePos
+  keyword "return"
+  value <- exprParser
+  end <- getSourcePos
+  pure (EReturn (makeSourceSpan start end) value)
 
 decodeParser :: Parser Expr
 decodeParser = do
@@ -1191,6 +1200,7 @@ reservedWords =
   , "route"
   , "decode"
   , "encode"
+  , "return"
   , "match"
   , "classified"
   , "true"

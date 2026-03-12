@@ -406,6 +406,7 @@ data Expr
   | EString SourceSpan Text
   | EBool SourceSpan Bool
   | EList SourceSpan [Expr]
+  | EReturn SourceSpan Expr
   | EBlock SourceSpan Expr
   | EEqual SourceSpan Expr Expr
   | ENotEqual SourceSpan Expr Expr
@@ -436,6 +437,8 @@ exprSpan expr =
     EBool span' _ ->
       span'
     EList span' _ ->
+      span'
+    EReturn span' _ ->
       span'
     EBlock span' _ ->
       span'

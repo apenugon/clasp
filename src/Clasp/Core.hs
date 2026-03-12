@@ -180,6 +180,7 @@ data CoreExpr
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CList SourceSpan Type [CoreExpr]
+  | CReturn SourceSpan Type CoreExpr
   | CEqual SourceSpan CoreExpr CoreExpr
   | CNotEqual SourceSpan CoreExpr CoreExpr
   | CLessThan SourceSpan CoreExpr CoreExpr
@@ -223,6 +224,8 @@ coreExprType expr =
     CBool _ _ ->
       TBool
     CList _ typ _ ->
+      typ
+    CReturn _ typ _ ->
       typ
     CEqual _ _ _ ->
       TBool

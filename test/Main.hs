@@ -57,8 +57,10 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
+  , CoreMatchBranch (..)
   , CoreMergeGateDecl (..)
   , CoreModule (..)
+  , CorePattern (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -492,6 +494,20 @@ parserTests =
                     assertFailure ("expected mutable block assignment body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "parses early return expressions inside function bodies" $
+        case parseSource "inline" earlyReturnSource of
+          Left err ->
+            assertFailure ("expected early return source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "choose" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EBlock _ (ELet _ _ "alias" (EVar _ "name") (EMatch _ (EVar _ "decision") [MatchBranch _ (PConstructor _ "Exit" []) (EReturn _ (EVar _ "alias")), MatchBranch _ (PConstructor _ "Continue" []) (EString _ "fallback")])) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected early return in match branch, got " <> show other)
+              Nothing ->
+                assertFailure "expected choose declaration"
     , testCase "parses nested let expressions in match branches" $
         case parseSource "inline" letInMatchSource of
           Left err ->
@@ -820,6 +836,21 @@ checkerTests =
                     assertFailure ("expected checked mutable block assignment to lower to nested lets, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "typechecks early returns against the enclosing function result" $
+        case checkSource "return" earlyReturnSource of
+          Left err ->
+            assertFailure ("expected early return source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "choose") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "choose type" (TFunction [TNamed "Decision", TStr] TStr) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CLet _ TStr "alias" (CVar _ TStr "name") (CMatch _ TStr (CVar _ (TNamed "Decision") "decision") [CoreMatchBranch _ (CConstructorPattern _ "Exit" []) (CReturn _ TStr (CVar _ TStr "alias")), CoreMatchBranch _ (CConstructorPattern _ "Continue" []) (CString _ "fallback")]) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked early return expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected choose declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -932,6 +963,8 @@ checkerTests =
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" immutableBlockAssignmentSource)
     , testCase "rejects assignment to names that are not mutable block locals" $
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" nonLocalAssignmentSource)
+    , testCase "rejects return outside function bodies" $
+        assertHasCode "E_RETURN_OUTSIDE_FUNCTION" (checkSource "bad" invalidEarlyReturnSource)
     , testCase "reports non-exhaustive match expressions" $
         assertHasCode "E_NONEXHAUSTIVE_MATCH" (checkSource "bad" nonExhaustiveMatchSource)
     , testCase "rejects constructors from the wrong type" $
@@ -1517,6 +1550,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered mutable block assignment declaration: " <> show other)
+    , testCase "lowering preserves early returns inside nested control flow" $
+        case lowerChecked "return" earlyReturnSource of
+          Left err ->
+            assertFailure ("expected early return lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "choose" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["decision", "name"] (LLet "alias" (LVar "name") (LMatch (LVar "decision") [LowerMatchBranch "Exit" [] (LReturn (LVar "alias")), LowerMatchBranch "Continue" [] (LString "fallback")]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered early return declaration: " <> show other)
     , testCase "lowering preserves equality operators" $
         case lowerChecked "equality" equalitySource of
           Left err ->
@@ -1799,6 +1842,24 @@ compileTests =
                 , "console.log(compiledModule.greeting);"
                 ]
             assertEqual "expected mutable block assignment result" "Grace" runtimeOutput
+    , testCase "compile implements early returns in function bodies" $
+        case compileSource "return" earlyReturnSource of
+          Left err ->
+            assertFailure ("expected early return compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected early return helper" ("function $claspEarlyReturn(value)" `T.isInfixOf` emitted)
+            assertBool "expected function wrapper catch" ("if (error && error.$claspEarlyReturn === true)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/early-return.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.choose(compiledModule.Exit, 'Ada'));"
+                , "console.log(compiledModule.choose(compiledModule.Continue, 'Ada'));"
+                ]
+            assertEqual "expected early return results" "Ada\nfallback" runtimeOutput
     , testCase "compile lowers equality operators to JavaScript and evaluates them" $
         case compileSource "equality" equalitySource of
           Left err ->
@@ -3245,6 +3306,23 @@ mutableBlockAssignmentSource =
     , "}"
     ]
 
+earlyReturnSource :: Text
+earlyReturnSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Decision = Exit | Continue"
+    , ""
+    , "choose : Decision -> Str -> Str"
+    , "choose decision name = {"
+    , "  let alias = name;"
+    , "  match decision {"
+    , "    Exit -> return alias,"
+    , "    Continue -> \"fallback\""
+    , "  }"
+    , "}"
+    ]
+
 immutableBlockAssignmentSource :: Text
 immutableBlockAssignmentSource =
   T.unlines
@@ -3256,6 +3334,15 @@ immutableBlockAssignmentSource =
     , "  message = \"Grace\";"
     , "  message"
     , "}"
+    ]
+
+invalidEarlyReturnSource :: Text
+invalidEarlyReturnSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "greeting : Str"
+    , "greeting = return \"Ada\""
     ]
 
 nonLocalAssignmentSource :: Text

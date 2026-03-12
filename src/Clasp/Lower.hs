@@ -101,6 +101,7 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LList [LowerExpr]
+  | LReturn LowerExpr
   | LEqual LowerExpr LowerExpr
   | LNotEqual LowerExpr LowerExpr
   | LLessThan LowerExpr LowerExpr
@@ -250,6 +251,8 @@ collectExprCodecTypes expr =
       []
     CList _ _ items ->
       concatMap collectExprCodecTypes items
+    CReturn _ _ value ->
+      collectExprCodecTypes value
     CEqual _ left right ->
       collectExprCodecTypes left <> collectExprCodecTypes right
     CNotEqual _ left right ->
@@ -373,6 +376,8 @@ lowerCoreExpr expr =
       LBool value
     CList _ _ items ->
       LList (fmap lowerCoreExpr items)
+    CReturn _ _ value ->
+      LReturn (lowerCoreExpr value)
     CEqual _ left right ->
       LEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CNotEqual _ left right ->
@@ -498,6 +503,8 @@ expandExpr declEnv subst visited expr =
       LBool value
     LList items ->
       LList (fmap (expandExpr declEnv subst visited) items)
+    LReturn value ->
+      LReturn (expandExpr declEnv subst visited value)
     LEqual left right ->
       LEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LNotEqual left right ->
@@ -740,6 +747,8 @@ summarizeValue expr =
       "false"
     LList items ->
       "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
+    LReturn value ->
+      summarizeValue value
     LEqual left right ->
       summarizeValue left <> " == " <> summarizeValue right
     LNotEqual left right ->

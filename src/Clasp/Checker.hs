@@ -123,6 +123,7 @@ data InferType
 data InferState = InferState
   { inferNextTypeVar :: Int
   , inferSubstitution :: Map.Map Int InferType
+  , inferReturnType :: Maybe InferType
   }
 
 data InferFailure
@@ -177,6 +178,7 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftList [DraftExpr]
+  | DraftReturn DraftExpr
   | DraftEqual DraftExpr DraftExpr
   | DraftNotEqual DraftExpr DraftExpr
   | DraftLessThan DraftExpr DraftExpr
@@ -1654,7 +1656,8 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
             else do
               let draftParams = zipWith DraftParam params (fmap typeToInferType argTypes)
                   localEnv = Map.fromList (zip params (fmap (immutableLocalBinding . draftParamType) draftParams))
-              body <- inferExpr ctx termEnv localEnv (declBody decl)
+                  resultInferType = typeToInferType resultType
+              body <- withReturnType resultInferType (inferExpr ctx termEnv localEnv (declBody decl))
               unify
                 ( UnifyContext
                     { unifyCode = "E_TYPE_MISMATCH"
@@ -1664,7 +1667,7 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
                     }
                 )
                 (draftExprType body)
-                (typeToInferType resultType)
+                resultInferType
               pure
                 DraftDecl
                   { draftDeclName = name
@@ -1696,13 +1699,24 @@ inferUnannotatedDecl ctx termEnv decl name params =
           }
     _ -> do
       paramTypes <- traverse (const freshTypeVar) params
+      resultType <- freshTypeVar
       let draftParams = zipWith DraftParam params paramTypes
           localEnv = Map.fromList (zip params (fmap immutableLocalBinding paramTypes))
-      body <- inferExpr ctx termEnv localEnv (declBody decl)
+      body <- withReturnType resultType (inferExpr ctx termEnv localEnv (declBody decl))
+      unify
+        ( UnifyContext
+            { unifyCode = "E_TYPE_MISMATCH"
+            , unifySummary = "Type mismatch."
+            , unifyPrimarySpan = exprSpan (declBody decl)
+            , unifyRelated = []
+            }
+        )
+        (draftExprType body)
+        resultType
       pure
         DraftDecl
           { draftDeclName = name
-          , draftDeclType = IFunction paramTypes (draftExprType body)
+          , draftDeclType = IFunction paramTypes resultType
           , draftDeclParams = draftParams
           , draftDeclBody = body
           }
@@ -1738,6 +1752,29 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EList span' values ->
       inferListExpr ctx termEnv localEnv span' values
+    EReturn returnSpan value -> do
+      maybeReturnType <- gets inferReturnType
+      case maybeReturnType of
+        Nothing ->
+          throwDiagnostic $
+            singleDiagnosticAt
+              "E_RETURN_OUTSIDE_FUNCTION"
+              "`return` is only allowed inside function bodies."
+              returnSpan
+              ["Use the final expression value directly, or move the `return` inside a function declaration."]
+        Just returnType -> do
+          valueExpr <- inferExpr ctx termEnv localEnv value
+          unify
+            ( UnifyContext
+                { unifyCode = "E_TYPE_MISMATCH"
+                , unifySummary = "Type mismatch."
+                , unifyPrimarySpan = exprSpan value
+                , unifyRelated = [diagnosticRelated "function return" returnSpan]
+                }
+            )
+            (draftExprType valueExpr)
+            returnType
+          pure (DraftExpr returnSpan returnType (DraftReturn valueExpr))
     EBlock blockSpan body -> do
       bodyExpr <- inferExpr ctx termEnv localEnv body
       pure bodyExpr {draftExprSpan = blockSpan}
@@ -3010,6 +3047,10 @@ freezeDraftExpr ctx decl inferState draftExpr =
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
       pure (CList (draftExprSpan draftExpr) exprType frozenItems)
+    DraftReturn value -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      pure (CReturn (draftExprSpan draftExpr) exprType frozenValue)
     DraftEqual left right -> do
       frozenLeft <- freezeDraftExpr ctx decl inferState left
       frozenRight <- freezeDraftExpr ctx decl inferState right
@@ -3191,6 +3232,14 @@ freshTypeVar = do
   modify' (\state -> state {inferNextTypeVar = nextVar + 1})
   pure (IVar nextVar)
 
+withReturnType :: InferType -> InferM a -> InferM a
+withReturnType returnType action = do
+  previousReturnType <- gets inferReturnType
+  modify' (\state -> state {inferReturnType = Just returnType})
+  result <- action
+  modify' (\state -> state {inferReturnType = previousReturnType})
+  pure result
+
 resolveCurrentType :: InferType -> InferM InferType
 resolveCurrentType inferType =
   gets (\state -> resolveInferType (inferSubstitution state) inferType)
@@ -3326,7 +3375,7 @@ renderTypeVar varId =
 
 runInferAction :: InferM a -> Either InferFailure (a, InferState)
 runInferAction action =
-  case runState (runExceptT (unInferM action)) (InferState 0 Map.empty) of
+  case runState (runExceptT (unInferM action)) (InferState 0 Map.empty Nothing) of
     (Left err, _) ->
       Left err
     (Right result, inferState) ->

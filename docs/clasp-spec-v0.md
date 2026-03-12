@@ -33,6 +33,7 @@ It includes:
 - Function application
 - Block expressions
 - Local `let` expressions
+- Early `return` expressions inside function bodies
 - Equality operators for `Int`, `Str`, and `Bool`
 - Integer comparison operators for branching
 - Field access
@@ -152,6 +153,20 @@ greeting = {
   let mut message = "Ada";
   message = "Grace";
   message
+}
+```
+
+Function bodies may also use `return` to exit early from nested expressions such as blocks or match branches:
+
+```clasp
+module Main
+
+type Decision = Exit | Continue
+
+choose : Decision -> Str -> Str
+choose decision name = match decision {
+  Exit -> return name,
+  Continue -> "fallback"
 }
 ```
 
@@ -298,12 +313,14 @@ atom        ::= lower-ident
               | "false"
               | decode-expr
               | encode-expr
+              | return-expr
               | record-expr
               | match-expr
               | block-expr
               | "(" expr ")"
 decode-expr ::= "decode" type-atom expr
 encode-expr ::= "encode" expr
+return-expr ::= "return" expr
 record-expr ::= upper-ident "{" record-field-expr ("," record-field-expr)* "}"
 list-expr   ::= "[" (expr ("," expr)*)? "]"
 record-field-expr ::= lower-ident "=" expr
@@ -321,6 +338,7 @@ Notes:
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
 - Blocks return their final expression and may contain leading local `let` declarations or assignments to previously declared `let mut` locals.
+- `return` is only valid inside function bodies and exits the enclosing function immediately.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 
