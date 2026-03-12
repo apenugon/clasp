@@ -2812,6 +2812,47 @@ compileTests =
               "expected workflow lifecycle and retry runtime contract"
               "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"hotSwapHandlersExplicit\":true,\"hotSwapMigrationHooks\":true,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"],\"migratedStatus\":\"migrated\",\"migratedCount\":12,\"migratedHook\":true,\"upgradedStatus\":\"upgraded\",\"upgradedCount\":27,\"upgradedDeadlineAt\":1250,\"upgradedSupervisor\":\"UpgradeSupervisor\",\"upgradedPrepareHook\":true,\"upgradedActivateHook\":true}"
               runtimeOutput
+    , testCase "worker runtime stages supervised module hot swaps with bounded overlap" $
+        case (compileSource "workflow-hot-swap-old" workflowSource, compileSource "workflow-hot-swap-new" workflowHotSwapTargetSource) of
+          (Left err, _) ->
+            assertFailure ("expected old workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (_, Left err) ->
+            assertFailure ("expected new workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (Right oldEmitted, Right newEmitted) -> do
+            let oldCompiledPath = "dist/test-projects/workflow-hot-swap-runtime/old-compiled.mjs"
+            let newCompiledPath = "dist/test-projects/workflow-hot-swap-runtime/new-compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+            TIO.writeFile oldCompiledPath oldEmitted
+            TIO.writeFile newCompiledPath newEmitted
+            absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+            absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowHotSwapRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected hot-swap runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "protocol kind" (Just (String "clasp-module-hot-swap")) (KeyMap.lookup "protocolKind" value)
+                assertEqual "supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "supervisor" value)
+                assertEqual "source version tagged" (Just (Bool True)) (KeyMap.lookup "sourceVersionTagged" value)
+                assertEqual "target version tagged" (Just (Bool True)) (KeyMap.lookup "targetVersionTagged" value)
+                assertEqual "max active versions" (Just (Number 2)) (KeyMap.lookup "maxActiveVersions" value)
+                assertEqual "active version count" (Just (Number 2)) (KeyMap.lookup "activeVersionCount" value)
+                assertEqual "accepts source version" (Just (Bool True)) (KeyMap.lookup "acceptsSourceVersion" value)
+                assertEqual "workflow count" (Just (Number 1)) (KeyMap.lookup "workflowCount" value)
+                assertEqual "workflow name" (Just (String "CounterFlow")) (KeyMap.lookup "workflowName" value)
+                assertEqual "workflow handlers explicit" (Just (Bool True)) (KeyMap.lookup "workflowHotSwapHandlers" value)
+                assertEqual "overlap status" (Just (String "overlap")) (KeyMap.lookup "overlapStatus" value)
+                assertEqual "overlap started at" (Just (Number 1000)) (KeyMap.lookup "overlapStartedAt" value)
+                assertEqual "retired status" (Just (String "retired")) (KeyMap.lookup "retiredStatus" value)
+                assertEqual "retired reason" (Just (String "drained")) (KeyMap.lookup "retiredReason" value)
+                assertEqual "remaining version count" (Just (Number 1)) (KeyMap.lookup "remainingVersionCount" value)
+                assertEqual "upgraded status" (Just (String "upgraded")) (KeyMap.lookup "upgradedStatus" value)
+                assertEqual "upgraded count" (Just (Number 8)) (KeyMap.lookup "upgradedCount" value)
+                assertEqual "upgraded supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "upgradedSupervisor" value)
+                assertEqual "upgraded target version tagged" (Just (Bool True)) (KeyMap.lookup "upgradedTargetVersionTagged" value)
+              Right other ->
+                assertFailure ("expected JSON object from hot-swap runtime, got " <> show other)
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
           Left err ->
@@ -3453,6 +3494,18 @@ workflowSource =
     , "workflow CounterFlow = { state : Counter }"
     , ""
     , "main = \"ok\""
+    ]
+
+workflowHotSwapTargetSource :: Text
+workflowHotSwapTargetSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "versionMarker = \"v2\""
     ]
 
 agentSource :: Text
@@ -5294,6 +5347,87 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
     , "  upgradedPrepareHook: upgraded.handlers.prepare,"
     , "  upgradedActivateHook: upgraded.handlers.activate"
+    , "}));"
+    ]
+
+workflowHotSwapRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+workflowHotSwapRuntimeScript oldCompiledPath newCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as oldCompiledModule from " <> show ("file://" <> oldCompiledPath) <> ";"
+    , "import * as newCompiledModule from " <> show ("file://" <> newCompiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(oldCompiledModule);"
+    , "const sourceVersionId = oldCompiledModule.__claspModule.versionId;"
+    , "const patchedTargetModule = Object.freeze({"
+    , "  ...newCompiledModule.__claspModule,"
+    , "  upgradeWindow: Object.freeze({"
+    , "    ...newCompiledModule.__claspModule.upgradeWindow,"
+    , "    fromVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(newCompiledModule.__claspModule.upgradeWindow.fromVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "});"
+    , "const patchedTargetWorkflows = Object.freeze((newCompiledModule.__claspWorkflows ?? []).map((workflow) => Object.freeze({"
+    , "  ...workflow,"
+    , "  compatibility: Object.freeze({"
+    , "    ...workflow.compatibility,"
+    , "    compatibleModuleVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(workflow.compatibility?.compatibleModuleVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "})));"
+    , "const patchedTargetBindings = Object.freeze({"
+    , "  ...(newCompiledModule.__claspBindings ?? {}),"
+    , "  module: patchedTargetModule"
+    , "});"
+    , "const patchedTargetCompiledModule = Object.freeze({"
+    , "  ...newCompiledModule,"
+    , "  __claspModule: patchedTargetModule,"
+    , "  __claspWorkflows: patchedTargetWorkflows,"
+    , "  __claspBindings: patchedTargetBindings"
+    , "});"
+    , "const protocol = runtime.hotSwap(patchedTargetCompiledModule, { supervisor: 'UpgradeSupervisor' });"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const run = workflow.start(workflow.checkpoint({ count: 5 }), { deadlineAt: 100 });"
+    , "const overlap = protocol.begin({ startedAt: 1000 });"
+    , "const upgraded = protocol.upgrade('CounterFlow', run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  prepare: (currentRun) => currentRun,"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
+    , "const retired = protocol.retire({ retiredAt: 1010, reason: 'drained' });"
+    , "console.log(JSON.stringify({"
+    , "  protocolKind: protocol.kind,"
+    , "  supervisor: protocol.supervisor,"
+    , "  sourceVersionTagged: protocol.source.versionId.startsWith('module:Main:'),"
+    , "  targetVersionTagged: protocol.target.versionId.startsWith('module:Main:'),"
+    , "  maxActiveVersions: protocol.overlap.maxActiveVersions,"
+    , "  activeVersionCount: protocol.overlap.activeVersionIds.length,"
+    , "  acceptsSourceVersion: protocol.overlap.acceptedSourceVersionIds.includes(protocol.source.versionId),"
+    , "  workflowCount: protocol.workflows.length,"
+    , "  workflowName: protocol.workflow('CounterFlow').name,"
+    , "  workflowHotSwapHandlers: protocol.workflow('CounterFlow').hotSwap?.explicitUpgradeHandlers ?? false,"
+    , "  overlapStatus: overlap.status,"
+    , "  overlapStartedAt: overlap.startedAt,"
+    , "  retiredStatus: retired.status,"
+    , "  retiredReason: retired.reason,"
+    , "  remainingVersionCount: retired.activeVersionIds.length,"
+    , "  upgradedStatus: upgraded.status,"
+    , "  upgradedCount: upgraded.run.state.count,"
+    , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
+    , "  upgradedTargetVersionTagged: upgraded.context.toModuleVersionId.startsWith('module:Main:')"
     , "}));"
     ]
 

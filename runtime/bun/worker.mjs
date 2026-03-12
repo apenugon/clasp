@@ -27,6 +27,20 @@ function bindingContractFor(compiledModule) {
   };
 }
 
+export function moduleContractFor(compiledModule) {
+  const module = bindingContractFor(compiledModule).module;
+
+  if (!module || typeof module !== "object") {
+    throw new Error("Missing Clasp module contract.");
+  }
+
+  if (typeof module.versionId !== "string" || module.versionId === "") {
+    throw new Error("Clasp module contract is missing a versionId.");
+  }
+
+  return module;
+}
+
 function defaultNativeInterop(hostBindings) {
   return Object.freeze({
     version: 1,
@@ -66,6 +80,202 @@ export function workflowContractFor(compiledModule, workflowName) {
   }
 
   return workflow;
+}
+
+export function createModuleHotSwapProtocol(
+  sourceCompiledModule,
+  targetCompiledModule,
+  options = {}
+) {
+  const sourceModule = moduleContractFor(sourceCompiledModule);
+  const targetModule = moduleContractFor(targetCompiledModule);
+  const targetUpgradeWindow = normalizeHotSwapUpgradeWindow(targetModule);
+
+  if (!targetUpgradeWindow.fromVersionIds.includes(sourceModule.versionId)) {
+    throw new Error(
+      `Module ${targetModule.name} cannot hot-swap from version ${sourceModule.versionId}.`
+    );
+  }
+
+  const sourceWorkflows = Array.isArray(sourceCompiledModule?.__claspWorkflows)
+    ? sourceCompiledModule.__claspWorkflows
+    : [];
+  const targetWorkflows = Array.isArray(targetCompiledModule?.__claspWorkflows)
+    ? targetCompiledModule.__claspWorkflows
+    : [];
+  const workflowPlans = Object.freeze(
+    sourceWorkflows.map((sourceWorkflow) => {
+      const targetWorkflow = targetWorkflows.find(
+        (candidate) => candidate?.name === sourceWorkflow?.name
+      );
+
+      if (!targetWorkflow) {
+        throw new Error(
+          `Module ${targetModule.name} is missing workflow ${String(sourceWorkflow?.name)}.`
+        );
+      }
+
+      const compatibleModuleVersionIds = Array.isArray(
+        targetWorkflow.compatibility?.compatibleModuleVersionIds
+      )
+        ? targetWorkflow.compatibility.compatibleModuleVersionIds
+        : [];
+
+      if (!compatibleModuleVersionIds.includes(sourceWorkflow.moduleVersionId)) {
+        throw new Error(
+          `Workflow ${sourceWorkflow.name} cannot hot-swap from module version ${sourceWorkflow.moduleVersionId} to ${targetWorkflow.moduleVersionId}.`
+        );
+      }
+
+      return Object.freeze({
+        name: sourceWorkflow.name,
+        sourceWorkflow,
+        targetWorkflow,
+        sourceWorkflowId: sourceWorkflow.id,
+        targetWorkflowId: targetWorkflow.id,
+        sourceStateType: sourceWorkflow.stateType,
+        targetStateType: targetWorkflow.stateType,
+        hotSwap: targetWorkflow.compatibility?.hotSwap ?? null
+      });
+    })
+  );
+  const workflowPlansByName = new Map(workflowPlans.map((plan) => [plan.name, plan]));
+  const defaultSupervisor = normalizeHotSwapLabel(options.supervisor, "hotSwap.supervisor");
+
+  return Object.freeze({
+    kind: "clasp-module-hot-swap",
+    version: 1,
+    supervisor: defaultSupervisor,
+    source: Object.freeze({
+      name: sourceModule.name,
+      versionId: sourceModule.versionId
+    }),
+    target: Object.freeze({
+      name: targetModule.name,
+      versionId: targetModule.versionId
+    }),
+    overlap: Object.freeze({
+      policy: targetUpgradeWindow.policy,
+      maxActiveVersions: 2,
+      activeVersionIds: Object.freeze([sourceModule.versionId, targetModule.versionId]),
+      drainingVersionIds: Object.freeze([sourceModule.versionId]),
+      acceptedSourceVersionIds: targetUpgradeWindow.fromVersionIds,
+      targetVersionId: targetUpgradeWindow.toVersionId
+    }),
+    workflows: workflowPlans,
+    workflow(name) {
+      return getWorkflowPlan(name);
+    },
+    migrate(workflowName, snapshot, workflowOptions) {
+      const plan = getWorkflowPlan(workflowName);
+      return plan.sourceWorkflow.migrate(snapshot, plan.targetWorkflow, workflowOptions);
+    },
+    upgrade(workflowName, run, workflowOptions) {
+      const plan = getWorkflowPlan(workflowName);
+      return plan.sourceWorkflow.upgrade(run, plan.targetWorkflow, workflowOptions);
+    },
+    begin(beginOptions = {}) {
+      return Object.freeze({
+        status: "overlap",
+        supervisor: normalizeHotSwapLabel(
+          beginOptions.supervisor,
+          "hotSwap.begin.supervisor"
+        ) ?? defaultSupervisor,
+        startedAt: normalizeHotSwapTimestamp(beginOptions.startedAt, "hotSwap.begin.startedAt"),
+        activeVersionIds: Object.freeze([
+          sourceModule.versionId,
+          targetModule.versionId
+        ]),
+        drainingVersionIds: Object.freeze([sourceModule.versionId]),
+        workflowCount: workflowPlans.length
+      });
+    },
+    retire(retireOptions = {}) {
+      return Object.freeze({
+        status: "retired",
+        supervisor: normalizeHotSwapLabel(
+          retireOptions.supervisor,
+          "hotSwap.retire.supervisor"
+        ) ?? defaultSupervisor,
+        retiredAt: normalizeHotSwapTimestamp(retireOptions.retiredAt, "hotSwap.retire.retiredAt"),
+        retiredVersionId: sourceModule.versionId,
+        activeVersionIds: Object.freeze([targetModule.versionId]),
+        reason: normalizeHotSwapLabel(retireOptions.reason, "hotSwap.retire.reason")
+      });
+    }
+  });
+
+  function getWorkflowPlan(name) {
+    const plan = workflowPlansByName.get(name);
+
+    if (!plan) {
+      throw new Error(`Missing Clasp hot-swap workflow: ${name}`);
+    }
+
+    return plan;
+  }
+}
+
+function normalizeHotSwapUpgradeWindow(module) {
+  const upgradeWindow = module?.upgradeWindow;
+
+  if (!upgradeWindow || typeof upgradeWindow !== "object") {
+    throw new Error(`Module ${String(module?.name ?? "unknown")} is missing an upgrade window.`);
+  }
+
+  if (upgradeWindow.policy !== "bounded-overlap") {
+    throw new Error(
+      `Module ${String(module?.name ?? "unknown")} must use bounded-overlap hot swaps.`
+    );
+  }
+
+  const fromVersionIds = Array.isArray(upgradeWindow.fromVersionIds)
+    ? upgradeWindow.fromVersionIds.filter(
+        (versionId) => typeof versionId === "string" && versionId !== ""
+      )
+    : [];
+
+  if (fromVersionIds.length === 0) {
+    throw new Error(
+      `Module ${String(module?.name ?? "unknown")} must declare at least one compatible source version.`
+    );
+  }
+
+  if (typeof upgradeWindow.toVersionId !== "string" || upgradeWindow.toVersionId === "") {
+    throw new Error(
+      `Module ${String(module?.name ?? "unknown")} is missing upgradeWindow.toVersionId.`
+    );
+  }
+
+  return Object.freeze({
+    policy: upgradeWindow.policy,
+    fromVersionIds: Object.freeze([...new Set(fromVersionIds)]),
+    toVersionId: upgradeWindow.toVersionId
+  });
+}
+
+function normalizeHotSwapLabel(value, path) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string" || value === "") {
+    throw new Error(`${path} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function normalizeHotSwapTimestamp(value, path) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${path} must be a non-negative integer.`);
+  }
+
+  return value;
 }
 
 export function createWorkerJob(compiledModule, options) {
@@ -135,6 +345,13 @@ export function createWorkerRuntime(compiledModule, options = {}) {
     },
     workflow(name) {
       return workflowContractFor(compiledModule, name);
+    },
+    hotSwap(targetCompiledModule, hotSwapOptions = {}) {
+      return createModuleHotSwapProtocol(
+        compiledModule,
+        targetCompiledModule,
+        hotSwapOptions
+      );
     },
     registerJob(jobOrOptions) {
       return registerJob(jobOrOptions);
