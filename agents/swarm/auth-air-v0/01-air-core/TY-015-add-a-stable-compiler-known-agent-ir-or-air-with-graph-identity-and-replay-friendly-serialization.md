@@ -26,7 +26,8 @@ Clasp needs stronger typing and more useful diagnostics than mainstream baseline
 
 ## Dependencies
 
-- `TY-014`
+- None within this focused wave.
+- Assume the current `main` branch already provides the benchmark/runtime and tooling foundation this slice builds on.
 
 ## Acceptance
 

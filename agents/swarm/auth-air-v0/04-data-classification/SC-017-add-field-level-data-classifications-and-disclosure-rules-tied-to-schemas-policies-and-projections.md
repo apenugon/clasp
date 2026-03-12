@@ -27,7 +27,8 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Dependencies
 
-- `SC-016`
+- None within this focused wave.
+- Assume the current `main` branch already provides the boundary/schema foundation this slice builds on.
 
 ## Acceptance
 

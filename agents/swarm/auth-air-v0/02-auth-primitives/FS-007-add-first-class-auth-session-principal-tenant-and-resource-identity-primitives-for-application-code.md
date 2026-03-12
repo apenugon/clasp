@@ -26,7 +26,8 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 ## Dependencies
 
-- `FS-006`
+- None within this focused wave.
+- Assume the current `main` branch already provides the benchmark/runtime and app-surface foundation this slice builds on.
 
 ## Acceptance
 
