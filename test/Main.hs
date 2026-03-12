@@ -41,11 +41,16 @@ import Clasp.Diagnostic
   )
 import Clasp.Lower
   ( LowerDecl (..)
+  , LowerFormField (..)
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerPageFlow (..)
+  , LowerPageForm (..)
+  , LowerPageLink (..)
   , LowerRecordField (..)
   , LowerRouteContract (..)
+  , lowerPageFlows
   , lowerModule
   )
 import Clasp.Syntax
@@ -583,6 +588,63 @@ lowerTests =
                       routeForm
               other ->
                 assertFailure ("unexpected lowered interactive page declaration: " <> show other)
+    , testCase "lowering extracts machine-readable page flow artifacts" $
+        case lowerChecked "interactive" interactivePageSource of
+          Left err ->
+            assertFailure ("expected interactive page lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            assertEqual
+              "expected page flow summary"
+              [ LowerPageFlow
+                  { lowerPageFlowRouteName = "homeRoute"
+                  , lowerPageFlowRouteIdentity = "route:homeRoute"
+                  , lowerPageFlowPath = "/"
+                  , lowerPageFlowHandlerName = "home"
+                  , lowerPageFlowTitle = "Inbox"
+                  , lowerPageFlowTexts = ["Open lead", "Save"]
+                  , lowerPageFlowLinks =
+                      [ LowerPageLink
+                          { lowerPageLinkRouteName = "leadRoute"
+                          , lowerPageLinkRouteIdentity = "route:leadRoute"
+                          , lowerPageLinkPath = "/lead/primary"
+                          , lowerPageLinkHref = "/lead/primary"
+                          , lowerPageLinkLabel = "Open lead"
+                          }
+                      ]
+                  , lowerPageFlowForms =
+                      [ LowerPageForm
+                          { lowerPageFormRouteName = "createLeadRoute"
+                          , lowerPageFormRouteIdentity = "route:createLeadRoute"
+                          , lowerPageFormPath = "/leads"
+                          , lowerPageFormMethod = "POST"
+                          , lowerPageFormAction = "/leads"
+                          , lowerPageFormRequestType = "LeadCreate"
+                          , lowerPageFormResponseType = "Redirect"
+                          , lowerPageFormResponseKind = "redirect"
+                          , lowerPageFormFields =
+                              [ LowerFormField
+                                  { lowerFormFieldName = "company"
+                                  , lowerFormFieldInputKind = "text"
+                                  , lowerFormFieldLabel = Nothing
+                                  , lowerFormFieldValue = ""
+                                  }
+                              ]
+                          , lowerPageFormSubmitLabels = ["Save"]
+                          }
+                      ]
+                  }
+              , LowerPageFlow
+                  { lowerPageFlowRouteName = "leadRoute"
+                  , lowerPageFlowRouteIdentity = "route:leadRoute"
+                  , lowerPageFlowPath = "/lead/primary"
+                  , lowerPageFlowHandlerName = "leadPage"
+                  , lowerPageFlowTitle = "Lead"
+                  , lowerPageFlowTexts = ["Primary"]
+                  , lowerPageFlowLinks = []
+                  , lowerPageFlowForms = []
+                  }
+              ]
+              (lowerPageFlows lowered)
     , testCase "lowering preserves redirect responses" $
         case lowerChecked "redirect" redirectSource of
           Left err ->
@@ -689,6 +751,11 @@ compileTests =
             assertBool "expected link query declaration metadata" ("queryDecl: { type: \"Empty\", schema: $claspSchema_Empty }" `T.isInfixOf` emitted)
             assertBool "expected form declaration metadata" ("formDecl: { type: \"LeadCreate\", schema: $claspSchema_LeadCreate }" `T.isInfixOf` emitted)
             assertBool "expected redirect contract metadata" ("responseKind: \"redirect\"" `T.isInfixOf` emitted)
+            assertBool "expected ui graph export" ("export const __claspUiGraph = [" `T.isInfixOf` emitted)
+            assertBool "expected navigation graph export" ("export const __claspNavigationGraph = [" `T.isInfixOf` emitted)
+            assertBool "expected action graph export" ("export const __claspActionGraph = [" `T.isInfixOf` emitted)
+            assertBool "expected link label in ui graph" ("label: \"Open lead\"" `T.isInfixOf` emitted)
+            assertBool "expected form field metadata in action graph" ("fields: [{ name: \"company\", inputKind: \"text\", label: null, value: \"\" }]" `T.isInfixOf` emitted)
     , testCase "compile emits redirect helpers and redirect route metadata" $
         case compileSource "redirect" redirectSource of
           Left err ->
@@ -813,6 +880,37 @@ compileTests =
               "expected landing, create, inbox, detail, review, and invalid form behavior"
               "{\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
+    , testCase "lead inbox app emits machine-readable ui, navigation, and action graphs" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-graph.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            graphOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const uiLanding = compiledModule.__claspUiGraph.find((page) => page.routeName === 'landingRoute');"
+                , "const action = compiledModule.__claspActionGraph.find((edge) => edge.actionRoute === 'createLeadRoute');"
+                , "const navigation = compiledModule.__claspNavigationGraph.find((edge) => edge.targetRoute === 'secondaryLeadRoute');"
+                , "console.log(JSON.stringify({"
+                , "  pageCount: compiledModule.__claspUiGraph.length,"
+                , "  navigationCount: compiledModule.__claspNavigationGraph.length,"
+                , "  actionCount: compiledModule.__claspActionGraph.length,"
+                , "  landingTitle: uiLanding?.title ?? null,"
+                , "  landingTexts: uiLanding?.texts ?? [],"
+                , "  landingForms: uiLanding?.forms ?? [],"
+                , "  reviewSubmit: compiledModule.__claspActionGraph.find((edge) => edge.actionRoute === 'reviewLeadRoute')?.submitLabels ?? [],"
+                , "  navigationLabel: navigation?.label ?? null"
+                , "}));"
+                ]
+            assertEqual
+              "expected exported ui graphs to summarize benchmark app flows"
+              "{\"pageCount\":6,\"navigationCount\":10,\"actionCount\":5,\"landingTitle\":\"Lead inbox\",\"landingTexts\":[\"Lead inbox\",\"Capture a lead, score it once, and review it on the server.\",\"New lead\",\"Company\",\"Contact\",\"Budget\",\"Segment\",\"Create lead\",\"InboxSnapshot(...).headline\",\"InboxSnapshot(...).primaryLeadLabel\",\"InboxSnapshot(...).secondaryLeadLabel\",\"Open the inbox page\"],\"landingForms\":[{\"routeName\":\"createLeadRoute\",\"routeId\":\"route:createLeadRoute\",\"path\":\"/leads\",\"method\":\"POST\",\"action\":\"/leads\",\"requestType\":\"LeadIntake\",\"responseType\":\"Page\",\"responseKind\":\"page\",\"fields\":[{\"name\":\"company\",\"inputKind\":\"text\",\"label\":\"Company\",\"value\":\"\"},{\"name\":\"contact\",\"inputKind\":\"text\",\"label\":\"Contact\",\"value\":\"\"},{\"name\":\"budget\",\"inputKind\":\"number\",\"label\":\"Budget\",\"value\":\"\"},{\"name\":\"segment\",\"inputKind\":\"text\",\"label\":\"Segment\",\"value\":\"\"}],\"submitLabels\":[\"Create lead\"]}],\"reviewSubmit\":[\"Save review\"],\"navigationLabel\":\"InboxSnapshot(...).secondaryLeadLabel\"}"
+              graphOutput
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion

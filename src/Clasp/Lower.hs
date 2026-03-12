@@ -2,15 +2,24 @@
 
 module Clasp.Lower
   ( LowerDecl (..)
+  , LowerFormField (..)
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerPageFlow (..)
+  , LowerPageForm (..)
+  , LowerPageLink (..)
   , LowerRecordField (..)
   , LowerRouteContract (..)
   , LowerRoute (..)
+  , lowerPageFlows
   , lowerModule
   ) where
 
+import qualified Data.Map.Strict as Map
+import Data.List (find)
+import Data.Maybe (mapMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Core
@@ -121,6 +130,49 @@ data LowerRoute = LowerRoute
   }
   deriving (Eq, Show)
 
+data LowerPageFlow = LowerPageFlow
+  { lowerPageFlowRouteName :: Text
+  , lowerPageFlowRouteIdentity :: Text
+  , lowerPageFlowPath :: Text
+  , lowerPageFlowHandlerName :: Text
+  , lowerPageFlowTitle :: Text
+  , lowerPageFlowTexts :: [Text]
+  , lowerPageFlowLinks :: [LowerPageLink]
+  , lowerPageFlowForms :: [LowerPageForm]
+  }
+  deriving (Eq, Show)
+
+data LowerPageLink = LowerPageLink
+  { lowerPageLinkRouteName :: Text
+  , lowerPageLinkRouteIdentity :: Text
+  , lowerPageLinkPath :: Text
+  , lowerPageLinkHref :: Text
+  , lowerPageLinkLabel :: Text
+  }
+  deriving (Eq, Show)
+
+data LowerPageForm = LowerPageForm
+  { lowerPageFormRouteName :: Text
+  , lowerPageFormRouteIdentity :: Text
+  , lowerPageFormPath :: Text
+  , lowerPageFormMethod :: Text
+  , lowerPageFormAction :: Text
+  , lowerPageFormRequestType :: Text
+  , lowerPageFormResponseType :: Text
+  , lowerPageFormResponseKind :: Text
+  , lowerPageFormFields :: [LowerFormField]
+  , lowerPageFormSubmitLabels :: [Text]
+  }
+  deriving (Eq, Show)
+
+data LowerFormField = LowerFormField
+  { lowerFormFieldName :: Text
+  , lowerFormFieldInputKind :: Text
+  , lowerFormFieldLabel :: Maybe Text
+  , lowerFormFieldValue :: Text
+  }
+  deriving (Eq, Show)
+
 lowerModule :: CoreModule -> LowerModule
 lowerModule modl =
   LowerModule
@@ -133,6 +185,39 @@ lowerModule modl =
         concatMap lowerTypeDeclConstructors (coreModuleTypeDecls modl)
           <> fmap lowerCoreDecl (coreModuleDecls modl)
     }
+
+lowerPageFlows :: LowerModule -> [LowerPageFlow]
+lowerPageFlows modl =
+  mapMaybe buildPageFlow (filter ((== "Page") . lowerRouteResponseTypeName) (lowerModuleRoutes modl))
+  where
+    declEnv =
+      Map.fromList
+        [ (name, (params, body))
+        | decl <- lowerModuleDecls modl
+        , (name, params, body) <- case decl of
+            LValueDecl name value ->
+              [(name, [], value)]
+            LFunctionDecl name params body ->
+              [(name, params, body)]
+        ]
+
+    buildPageFlow route = do
+      (_, handlerBody) <- Map.lookup (lowerRouteHandlerName route) declEnv
+      case expandExpr declEnv Map.empty Set.empty handlerBody of
+        LPage title body ->
+          Just
+            LowerPageFlow
+              { lowerPageFlowRouteName = lowerRouteName route
+              , lowerPageFlowRouteIdentity = lowerRouteIdentity route
+              , lowerPageFlowPath = lowerRoutePath route
+              , lowerPageFlowHandlerName = lowerRouteHandlerName route
+              , lowerPageFlowTitle = summarizeValue title
+              , lowerPageFlowTexts = uniqueTexts (collectViewTexts body)
+              , lowerPageFlowLinks = collectPageLinks body
+              , lowerPageFlowForms = collectPageForms body
+              }
+        _ ->
+          Nothing
 
 lowerTypeDeclConstructors :: TypeDecl -> [LowerDecl]
 lowerTypeDeclConstructors typeDecl =
@@ -258,6 +343,285 @@ lowerRouteContract routeContract =
     , lowerRouteContractResponseDecl = coreRouteContractResponseDecl routeContract
     , lowerRouteContractResponseKind = coreRouteContractResponseKind routeContract
     }
+
+type DeclEnv = Map.Map Text ([Text], LowerExpr)
+type SubstEnv = Map.Map Text LowerExpr
+
+expandExpr :: DeclEnv -> SubstEnv -> Set.Set Text -> LowerExpr -> LowerExpr
+expandExpr declEnv subst visited expr =
+  case expr of
+    LVar name ->
+      case Map.lookup name subst of
+        Just value ->
+          expandExpr declEnv subst visited value
+        Nothing
+          | Set.member name visited ->
+              LVar name
+          | Just ([], body) <- Map.lookup name declEnv ->
+              expandExpr declEnv subst (Set.insert name visited) body
+          | otherwise ->
+              LVar name
+    LInt value ->
+      LInt value
+    LString value ->
+      LString value
+    LBool value ->
+      LBool value
+    LPage title body ->
+      LPage (expandExpr declEnv subst visited title) (expandExpr declEnv subst visited body)
+    LRedirect targetPath ->
+      LRedirect targetPath
+    LViewEmpty ->
+      LViewEmpty
+    LViewText value ->
+      LViewText (expandExpr declEnv subst visited value)
+    LViewAppend left right ->
+      LViewAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LViewElement tag child ->
+      LViewElement tag (expandExpr declEnv subst visited child)
+    LViewStyled styleRef child ->
+      LViewStyled styleRef (expandExpr declEnv subst visited child)
+    LViewLink routeContract href child ->
+      LViewLink routeContract href (expandExpr declEnv subst visited child)
+    LViewForm routeContract method action child ->
+      LViewForm routeContract method action (expandExpr declEnv subst visited child)
+    LViewInput fieldName inputKind value ->
+      LViewInput fieldName inputKind (expandExpr declEnv subst visited value)
+    LViewSubmit label ->
+      LViewSubmit (expandExpr declEnv subst visited label)
+    LCall fn args ->
+      let fn' = expandExpr declEnv subst visited fn
+          args' = fmap (expandExpr declEnv subst visited) args
+       in case fn' of
+            LVar name
+              | not (Set.member name visited)
+              , Just (params, body) <- Map.lookup name declEnv
+              , length params == length args' ->
+                  expandExpr
+                    declEnv
+                    (Map.fromList (zip params args') `Map.union` subst)
+                    (Set.insert name visited)
+                    body
+            _ ->
+              LCall fn' args'
+    LConstruct tag fields ->
+      LConstruct tag (fmap (expandExpr declEnv subst visited) fields)
+    LMatch subject branches ->
+      let subject' = expandExpr declEnv subst visited subject
+       in case subject' of
+            LConstruct tag fields ->
+              case findMatchingBranch tag branches of
+                Just branch ->
+                  expandExpr
+                    declEnv
+                    (Map.fromList (zip (lowerMatchBranchBinders branch) fields) `Map.union` subst)
+                    visited
+                    (lowerMatchBranchBody branch)
+                Nothing ->
+                  LMatch subject' (fmap (expandBranch declEnv subst visited) branches)
+            _ ->
+              LMatch subject' (fmap (expandBranch declEnv subst visited) branches)
+    LRecord fields ->
+      LRecord (fmap (expandRecordField declEnv subst visited) fields)
+    LFieldAccess subject fieldName ->
+      let subject' = expandExpr declEnv subst visited subject
+       in case subject' of
+            LRecord fields ->
+              case find ((== fieldName) . lowerRecordFieldName) fields of
+                Just field ->
+                  expandExpr declEnv subst visited (lowerRecordFieldValue field)
+                Nothing ->
+                  LFieldAccess subject' fieldName
+            _ ->
+              LFieldAccess subject' fieldName
+
+expandBranch :: DeclEnv -> SubstEnv -> Set.Set Text -> LowerMatchBranch -> LowerMatchBranch
+expandBranch declEnv subst visited branch =
+  branch
+    { lowerMatchBranchBody = expandExpr declEnv subst visited (lowerMatchBranchBody branch)
+    }
+
+expandRecordField :: DeclEnv -> SubstEnv -> Set.Set Text -> LowerRecordField -> LowerRecordField
+expandRecordField declEnv subst visited field =
+  field
+    { lowerRecordFieldValue = expandExpr declEnv subst visited (lowerRecordFieldValue field)
+    }
+
+findMatchingBranch :: Text -> [LowerMatchBranch] -> Maybe LowerMatchBranch
+findMatchingBranch tag =
+  find ((== tag) . lowerMatchBranchTag)
+
+collectViewTexts :: LowerExpr -> [Text]
+collectViewTexts expr =
+  case expr of
+    LViewEmpty ->
+      []
+    LViewText value ->
+      [summarizeValue value]
+    LViewAppend left right ->
+      collectViewTexts left <> collectViewTexts right
+    LViewElement _ child ->
+      collectViewTexts child
+    LViewStyled _ child ->
+      collectViewTexts child
+    LViewLink _ _ child ->
+      collectViewTexts child
+    LViewForm _ _ _ child ->
+      collectViewTexts child
+    LViewInput _ _ _ ->
+      []
+    LViewSubmit label ->
+      [summarizeValue label]
+    _ ->
+      []
+
+collectPageLinks :: LowerExpr -> [LowerPageLink]
+collectPageLinks expr =
+  case expr of
+    LViewAppend left right ->
+      collectPageLinks left <> collectPageLinks right
+    LViewElement _ child ->
+      collectPageLinks child
+    LViewStyled _ child ->
+      collectPageLinks child
+    LViewLink routeContract href child ->
+      LowerPageLink
+        { lowerPageLinkRouteName = lowerRouteContractName routeContract
+        , lowerPageLinkRouteIdentity = lowerRouteContractIdentity routeContract
+        , lowerPageLinkPath = lowerRouteContractPath routeContract
+        , lowerPageLinkHref = href
+        , lowerPageLinkLabel = summarizeViewLabel child
+        }
+        : collectPageLinks child
+    LViewForm _ _ _ child ->
+      collectPageLinks child
+    _ ->
+      []
+
+collectPageForms :: LowerExpr -> [LowerPageForm]
+collectPageForms expr =
+  case expr of
+    LViewAppend left right ->
+      collectPageForms left <> collectPageForms right
+    LViewElement _ child ->
+      collectPageForms child
+    LViewStyled _ child ->
+      collectPageForms child
+    LViewLink _ _ child ->
+      collectPageForms child
+    LViewForm routeContract method action child ->
+      LowerPageForm
+        { lowerPageFormRouteName = lowerRouteContractName routeContract
+        , lowerPageFormRouteIdentity = lowerRouteContractIdentity routeContract
+        , lowerPageFormPath = lowerRouteContractPath routeContract
+        , lowerPageFormMethod = method
+        , lowerPageFormAction = action
+        , lowerPageFormRequestType = lowerRouteContractRequestType routeContract
+        , lowerPageFormResponseType = lowerRouteContractResponseType routeContract
+        , lowerPageFormResponseKind = lowerRouteContractResponseKind routeContract
+        , lowerPageFormFields = collectFormFields Nothing child
+        , lowerPageFormSubmitLabels = uniqueTexts (collectSubmitLabels child)
+        }
+        : collectPageForms child
+    _ ->
+      []
+
+collectFormFields :: Maybe Text -> LowerExpr -> [LowerFormField]
+collectFormFields currentLabel expr =
+  case expr of
+    LViewAppend left right ->
+      collectFormFields currentLabel left <> collectFormFields currentLabel right
+    LViewElement "label" child ->
+      let labelText = summarizeViewLabel child
+       in collectFormFields (Just labelText) child
+    LViewElement _ child ->
+      collectFormFields currentLabel child
+    LViewStyled _ child ->
+      collectFormFields currentLabel child
+    LViewLink _ _ child ->
+      collectFormFields currentLabel child
+    LViewForm _ _ _ child ->
+      collectFormFields currentLabel child
+    LViewInput fieldName inputKind value ->
+      [ LowerFormField
+          { lowerFormFieldName = fieldName
+          , lowerFormFieldInputKind = inputKind
+          , lowerFormFieldLabel = currentLabel
+          , lowerFormFieldValue = summarizeValue value
+          }
+      ]
+    _ ->
+      []
+
+collectSubmitLabels :: LowerExpr -> [Text]
+collectSubmitLabels expr =
+  case expr of
+    LViewAppend left right ->
+      collectSubmitLabels left <> collectSubmitLabels right
+    LViewElement _ child ->
+      collectSubmitLabels child
+    LViewStyled _ child ->
+      collectSubmitLabels child
+    LViewLink _ _ child ->
+      collectSubmitLabels child
+    LViewForm _ _ _ child ->
+      collectSubmitLabels child
+    LViewSubmit label ->
+      [summarizeValue label]
+    _ ->
+      []
+
+summarizeViewLabel :: LowerExpr -> Text
+summarizeViewLabel expr =
+  case uniqueTexts (collectViewTexts expr) of
+    [] ->
+      "<dynamic>"
+    labels ->
+      T.intercalate " " labels
+
+summarizeValue :: LowerExpr -> Text
+summarizeValue expr =
+  case expr of
+    LVar name ->
+      normalizeSummaryName name
+    LInt value ->
+      T.pack (show value)
+    LString value ->
+      value
+    LBool True ->
+      "true"
+    LBool False ->
+      "false"
+    LConstruct tag _ ->
+      tag
+    LCall fn _ ->
+      summarizeValue fn <> "(...)"
+    LFieldAccess subject fieldName ->
+      summarizeValue subject <> "." <> fieldName
+    _ ->
+      "<dynamic>"
+
+normalizeSummaryName :: Text -> Text
+normalizeSummaryName name
+  | "$decode_" `T.isPrefixOf` name =
+      T.drop (T.length ("$decode_" :: Text)) name
+  | "$encode_" `T.isPrefixOf` name =
+      T.drop (T.length ("$encode_" :: Text)) name
+  | otherwise =
+      name
+
+uniqueTexts :: [Text] -> [Text]
+uniqueTexts =
+  go Set.empty
+  where
+    go _ [] = []
+    go seen (value : rest)
+      | T.null value =
+          go seen rest
+      | Set.member value seen =
+          go seen rest
+      | otherwise =
+          value : go (Set.insert value seen) rest
 
 codecDecodeName :: Type -> Text
 codecDecodeName typ =

@@ -8,12 +8,17 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Lower
   ( LowerDecl (..)
+  , LowerFormField (..)
   , LowerExpr (..)
   , LowerMatchBranch (..)
   , LowerModule (..)
+  , LowerPageFlow (..)
+  , LowerPageForm (..)
+  , LowerPageLink (..)
   , LowerRecordField (..)
   , LowerRoute (..)
   , LowerRouteContract (..)
+  , lowerPageFlows
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
@@ -42,6 +47,7 @@ emitModule modl =
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
+      <> emitPageFlowArtifacts (lowerPageFlows modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
 
 emitRuntimePrelude :: [Text]
@@ -475,6 +481,139 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
             <> ", ["
             <> T.intercalate ", " params
             <> "]); }"
+
+emitPageFlowArtifacts :: [LowerPageFlow] -> [Text]
+emitPageFlowArtifacts pageFlows =
+  [ "export const __claspUiGraph = ["
+  ]
+    <> concatMap emitUiPage pageFlows
+    <> [ "];"
+       , "export const __claspNavigationGraph = ["
+       ]
+    <> concatMap emitNavigationEdges pageFlows
+    <> [ "];"
+       , "export const __claspActionGraph = ["
+       ]
+    <> concatMap emitActionEdges pageFlows
+    <> [ "];"
+       ]
+  where
+    emitUiPage pageFlow =
+      [ "  {"
+      , "    routeName: " <> emitStringLiteral (lowerPageFlowRouteName pageFlow) <> ","
+      , "    routeId: " <> emitStringLiteral (lowerPageFlowRouteIdentity pageFlow) <> ","
+      , "    path: " <> emitStringLiteral (lowerPageFlowPath pageFlow) <> ","
+      , "    handler: " <> emitStringLiteral (lowerPageFlowHandlerName pageFlow) <> ","
+      , "    title: " <> emitStringLiteral (lowerPageFlowTitle pageFlow) <> ","
+      , "    texts: [" <> T.intercalate ", " (fmap emitStringLiteral (lowerPageFlowTexts pageFlow)) <> "],"
+      , "    links: [" <> T.intercalate ", " (fmap emitPageLink (lowerPageFlowLinks pageFlow)) <> "],"
+      , "    forms: [" <> T.intercalate ", " (fmap emitPageForm (lowerPageFlowForms pageFlow)) <> "]"
+      , "  },"
+      ]
+
+    emitNavigationEdges pageFlow =
+      fmap (emitNavigationEdge pageFlow) (lowerPageFlowLinks pageFlow)
+
+    emitNavigationEdge pageFlow pageLink =
+      "  { sourceRoute: "
+        <> emitStringLiteral (lowerPageFlowRouteName pageFlow)
+        <> ", sourceRouteId: "
+        <> emitStringLiteral (lowerPageFlowRouteIdentity pageFlow)
+        <> ", sourcePath: "
+        <> emitStringLiteral (lowerPageFlowPath pageFlow)
+        <> ", targetRoute: "
+        <> emitStringLiteral (lowerPageLinkRouteName pageLink)
+        <> ", targetRouteId: "
+        <> emitStringLiteral (lowerPageLinkRouteIdentity pageLink)
+        <> ", targetPath: "
+        <> emitStringLiteral (lowerPageLinkPath pageLink)
+        <> ", href: "
+        <> emitStringLiteral (lowerPageLinkHref pageLink)
+        <> ", label: "
+        <> emitStringLiteral (lowerPageLinkLabel pageLink)
+        <> " },"
+
+    emitActionEdges pageFlow =
+      fmap (emitActionEdge pageFlow) (lowerPageFlowForms pageFlow)
+
+    emitActionEdge pageFlow pageForm =
+      "  { sourceRoute: "
+        <> emitStringLiteral (lowerPageFlowRouteName pageFlow)
+        <> ", sourceRouteId: "
+        <> emitStringLiteral (lowerPageFlowRouteIdentity pageFlow)
+        <> ", sourcePath: "
+        <> emitStringLiteral (lowerPageFlowPath pageFlow)
+        <> ", actionRoute: "
+        <> emitStringLiteral (lowerPageFormRouteName pageForm)
+        <> ", actionRouteId: "
+        <> emitStringLiteral (lowerPageFormRouteIdentity pageForm)
+        <> ", actionPath: "
+        <> emitStringLiteral (lowerPageFormPath pageForm)
+        <> ", method: "
+        <> emitStringLiteral (lowerPageFormMethod pageForm)
+        <> ", action: "
+        <> emitStringLiteral (lowerPageFormAction pageForm)
+        <> ", requestType: "
+        <> emitStringLiteral (lowerPageFormRequestType pageForm)
+        <> ", responseType: "
+        <> emitStringLiteral (lowerPageFormResponseType pageForm)
+        <> ", responseKind: "
+        <> emitStringLiteral (lowerPageFormResponseKind pageForm)
+        <> ", fields: ["
+        <> T.intercalate ", " (fmap emitFormField (lowerPageFormFields pageForm))
+        <> "], submitLabels: ["
+        <> T.intercalate ", " (fmap emitStringLiteral (lowerPageFormSubmitLabels pageForm))
+        <> "] },"
+
+emitPageLink :: LowerPageLink -> Text
+emitPageLink pageLink =
+  "{ routeName: "
+    <> emitStringLiteral (lowerPageLinkRouteName pageLink)
+    <> ", routeId: "
+    <> emitStringLiteral (lowerPageLinkRouteIdentity pageLink)
+    <> ", path: "
+    <> emitStringLiteral (lowerPageLinkPath pageLink)
+    <> ", href: "
+    <> emitStringLiteral (lowerPageLinkHref pageLink)
+    <> ", label: "
+    <> emitStringLiteral (lowerPageLinkLabel pageLink)
+    <> " }"
+
+emitPageForm :: LowerPageForm -> Text
+emitPageForm pageForm =
+  "{ routeName: "
+    <> emitStringLiteral (lowerPageFormRouteName pageForm)
+    <> ", routeId: "
+    <> emitStringLiteral (lowerPageFormRouteIdentity pageForm)
+    <> ", path: "
+    <> emitStringLiteral (lowerPageFormPath pageForm)
+    <> ", method: "
+    <> emitStringLiteral (lowerPageFormMethod pageForm)
+    <> ", action: "
+    <> emitStringLiteral (lowerPageFormAction pageForm)
+    <> ", requestType: "
+    <> emitStringLiteral (lowerPageFormRequestType pageForm)
+    <> ", responseType: "
+    <> emitStringLiteral (lowerPageFormResponseType pageForm)
+    <> ", responseKind: "
+    <> emitStringLiteral (lowerPageFormResponseKind pageForm)
+    <> ", fields: ["
+    <> T.intercalate ", " (fmap emitFormField (lowerPageFormFields pageForm))
+    <> "], submitLabels: ["
+    <> T.intercalate ", " (fmap emitStringLiteral (lowerPageFormSubmitLabels pageForm))
+    <> "] }"
+
+emitFormField :: LowerFormField -> Text
+emitFormField formField =
+  "{ name: "
+    <> emitStringLiteral (lowerFormFieldName formField)
+    <> ", inputKind: "
+    <> emitStringLiteral (lowerFormFieldInputKind formField)
+    <> ", label: "
+    <> emitOptionalText (lowerFormFieldLabel formField)
+    <> ", value: "
+    <> emitStringLiteral (lowerFormFieldValue formField)
+    <> " }"
 
 foreignParams :: Type -> [Text]
 foreignParams typ =
