@@ -17,13 +17,13 @@ Lanes in this wave:
 - `07-workflows`: Durable Workflows And Hot Swap (13 tasks)
 - `08-ai-platform`: AI-Native Platform (13 tasks)
 - `09-external-objectives`: External-Objective Adaptation (7 tasks)
-- `10-benchmarks`: Benchmark Program (25 tasks)
+- `10-benchmarks`: Benchmark Program (27 tasks)
 - `11-saas-dogfood`: SaaS Dogfooding (10 tasks)
 - `12-self-hosting`: Self-Hosting (10 tasks)
 - `13-native-backend`: Native Backend And Bytecode (9 tasks)
 - `14-sqlite`: SQLite Storage (10 tasks)
 
-Total tasks: 193
+Total tasks: 195
 
 Regenerate with:
 

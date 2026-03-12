@@ -487,6 +487,8 @@ Critical path:
 - `BM-023` Add benchmark-prep semantic packs and workspace guidance generated from context, AIR, and UI graph artifacts.
 - `BM-024` Add foreign-package interop benchmarks that compare compiler-managed `npm`, `Python`, and `Rust` usage against handwritten host glue on the same tasks.
 - `BM-025` Add interop-boundary benchmarks that measure unsafe-refinement friction and root-cause blame quality for unexpected foreign values.
+- `BM-026` Add a publication-grade fairness protocol with frozen benchmark bundles, randomized run order, repeated samples, and phase-decomposed reporting across benchmark modes.
+- `BM-027` Add an `Oracle` benchmark mode that names the exact analogous edit surfaces so language and edit-model effects can be measured separately from repo discovery.
 
 ### Track 10: SaaS Dogfooding
 

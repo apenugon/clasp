@@ -115,12 +115,36 @@ For product-slice benchmarks, fairness also means:
 - the first clickable lead-inbox task family should stay mirrored around one small product change such as a lead segment threaded through intake, storage, rendering, and the model boundary
 - acceptance tests should exercise the same app-owned server surface on both sides, so the `Clasp` variant does not require benchmark-only test/runtime edits for ordinary field propagation
 
-The benchmark program should publish at least two official comparison modes instead of collapsing everything into one headline number:
+The benchmark program should publish at least three official comparison modes instead of collapsing everything into one headline number:
 
 - `Raw Repo`: normal task prompt plus the repo's ordinary docs and structure, with no exact entry-file hints beyond what a real user would provide. This mode measures the combined effect of language design, repo shape, compiler artifacts, and agent discovery cost.
 - `File-Hinted`: the same task and acceptance criteria, but each language variant names the analogous entry files explicitly. This mode reduces repo-discovery noise so the comparison focuses more on propagation, editing, and verification behavior once the agent is on the right surfaces.
+- `Oracle`: the same task and acceptance criteria, but each language variant names the exact analogous files expected to change for the benchmark prompt. This mode largely removes discovery variance and isolates the propagation, editing, and verification model once the agent is already on the right surface.
 
-Both modes are useful, and they should be reported separately. A `Clasp` win in `Raw Repo` but not `File-Hinted` still matters, but it means the advantage is mostly in compiler-owned discovery and navigation rather than in the pure edit model.
+All three modes are useful, and they should be reported separately, but they are not equally important.
+
+- `Raw Repo` is the primary benchmark and the main product scorecard. It is the closest to the real question: can the harness enter an unfamiliar codebase, understand it, bound the change, and ship it safely?
+- `File-Hinted` is a secondary diagnostic benchmark that helps separate discovery effects from propagation and verification effects.
+- `Oracle` is a control benchmark for research and analysis, not the headline benchmark.
+
+A `Clasp` win in `Raw Repo` but not `File-Hinted` still matters, because discovery and environment understanding are part of the real product. A `Clasp` win in `Oracle` is useful for isolating edit-model behavior, but it should not be treated as the main public proof that the language is better for agents.
+
+### 4A. Publication-grade fairness protocol
+
+No benchmark is perfectly neutral in the abstract, but the benchmark program should define a strict comparison protocol that is hard to dismiss as accidental prompt shaping or repo favoritism.
+
+That protocol should require:
+
+- a frozen benchmark bundle containing the exact task repo snapshots, prompts, `AGENTS.md`, acceptance tests, harness wrapper, seed data, and commit hashes for both sides
+- mirrored canonical baselines whose task repos are derived from the same visible product slice and acceptance contract
+- equal information content across prompts and repo guidance, even when analogous file paths differ by language
+- one identical acceptance surface per task family, with no language-specific runtime-wrapper or test-scaffold edits allowed as part of ordinary product changes
+- randomized run order across language variants so cache or ordering effects are not always biased one way
+- repeated runs with the same harness, model, budget, and time limit rather than one-shot anecdotal samples
+- phase decomposition of each run into at least discovery, first edit, first verify, and time-to-green segments
+- separate reporting for `Raw Repo`, `File-Hinted`, and `Oracle` rather than collapsing them into one number
+
+Every published benchmark result should say explicitly which mode it uses and which frozen benchmark bundle it belongs to. Headline benchmark claims should default to `Raw Repo`, with the other modes presented as supporting analysis rather than replacements for the main scorecard.
 
 ### 5. Publish raw traces when possible
 
@@ -196,6 +220,19 @@ Later benchmark rounds should compare:
 - semantic-artifact-assisted workflows
 
 That is the honest way to test whether the language is actually reducing agent work rather than just moving complexity around.
+
+### 9. Freeze the benchmark before using it as the standing scorecard
+
+Once a benchmark family is good enough for language iteration, freeze:
+
+- the task repo contents
+- the prompt text
+- the repo guidance files
+- the acceptance commands
+- the harness wrapper
+- the reporting mode definitions
+
+After that, improve the language and runtime, not the benchmark. New benchmark ideas should become new benchmark families or explicit protocol versions rather than silent edits to the standing scorecard.
 
 ## Headline Metrics
 

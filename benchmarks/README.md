@@ -36,17 +36,41 @@ The canonical lead-inbox slice used to shape new benchmark tasks lives in:
 
 ## Benchmark Modes
 
-The lead-inbox benchmark should be reported in two official modes:
+The lead-inbox benchmark should be reported in three official modes:
 
 - `Raw Repo`: the harness gets the task prompt and ordinary repo docs only. No exact entry-file hints are included. This measures language plus repo-discovery ergonomics.
 - `File-Hinted`: the harness gets the same task and acceptance criteria, but the prompt names the analogous starting files in each language variant. This reduces discovery noise and focuses more on edit and verification behavior.
+- `Oracle`: the harness gets the same task and acceptance criteria, but the prompt names the exact analogous files expected to change in each language variant. This largely removes discovery variance and isolates propagation, edit, and verification behavior.
 
 Do not collapse these into one number. They answer different questions:
 
 - `Raw Repo` asks whether `Clasp` helps an agent find and bound the change faster.
 - `File-Hinted` asks whether `Clasp` helps once the agent is already on the right files.
+- `Oracle` asks whether `Clasp` helps once the agent is already on the exact edit surface.
 
-The current mirrored `lead-segment` task pair should remain compatible with both modes. Prompt variants may differ only in the presence or absence of those analogous file hints; the acceptance surface should stay identical.
+The current mirrored `lead-segment` task pair should remain compatible with all three modes. Prompt variants may differ only in the presence or absence of those file hints; the acceptance surface should stay identical.
+
+`Raw Repo` is the primary benchmark scorecard. That is the most realistic mode because a real harness has to inspect and understand the environment. `File-Hinted` and `Oracle` are supporting diagnostic modes used to explain *why* one side won, not to replace the main benchmark.
+
+## Publication-Grade Fairness
+
+The most defensible benchmark publication mode should freeze a full benchmark bundle:
+
+- task repo snapshots
+- prompt files
+- `AGENTS.md`
+- acceptance tests and commands
+- harness wrapper
+- run budget and time limit
+- benchmark mode (`Raw Repo`, `File-Hinted`, or `Oracle`)
+
+That bundle should then be run:
+
+- with randomized language order
+- with repeated samples rather than one-off anecdotes
+- with phase-level reporting for discovery, first edit, first verify, and time to green
+
+This is the version of the benchmark that should be treated as the hardest-to-argue-with protocol. It is stricter than the everyday inner-loop benchmark used during language iteration.
 
 ## Commands
 
