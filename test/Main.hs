@@ -1213,10 +1213,13 @@ compileTests =
             assertBool "expected response declaration metadata" ("responseDecl: { type: \"LeadSummary\", schema: $claspSchema_LeadSummary }" `T.isInfixOf` emitted)
             assertBool "expected route client export" ("export const summarizeLeadRouteClient = {" `T.isInfixOf` emitted)
             assertBool "expected route clients registry" ("export const __claspRouteClients = [" `T.isInfixOf` emitted)
+            assertBool "expected schema registry export" ("export const __claspSchemas = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected schema registry entry" ("\"LeadRequest\": {" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract export" ("export const __claspBindings = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract version" ("version: 1," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract routes" ("routes: __claspRoutes," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract host bindings" ("hostBindings: __claspHostBindings," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract schemas" ("schemas: __claspSchemas," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
             assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
     , testCase "compile emits field classifications and projection disclosure metadata" $
@@ -1430,6 +1433,21 @@ compileTests =
             assertEqual
               "expected json route client fetch runtime contract"
               "{\"preparedUrl\":\"https://app.example.test/lead/summary\",\"preparedCredentials\":\"same-origin\",\"fetchUrl\":\"https://app.example.test/lead/summary\",\"fetchMethod\":\"POST\",\"fetchContentType\":\"application/json\",\"fetchBody\":\"{\\\"company\\\":\\\"Acme\\\",\\\"budget\\\":42,\\\"priorityHint\\\":\\\"high\\\"}\",\"parsedSummary\":\"Queued\",\"parsedPriority\":\"Medium\",\"parsedFollowUpRequired\":false}"
+              runtimeOutput
+    , testCase "worker runtime registers typed jobs against generated schema contracts" $
+        case compileSource "service-worker-runtime" serviceSource of
+          Left err ->
+            assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/service-worker-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workerJobRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected typed worker job contract and dispatch"
+              "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
     , testCase "generated page route clients build query and form requests" $
         withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
@@ -2721,6 +2739,53 @@ routeClientBrowserRuntimeScript pageCompiledPath redirectCompiledPath runtimePat
     , "  redirectMode,"
     , "  redirectLocation: redirectResult.data.location,"
     , "  redirectStatus: redirectResult.data.status"
+    , "}));"
+    ]
+
+workerJobRuntimeScript :: FilePath -> FilePath -> Text
+workerJobRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(compiledModule);"
+    , "const contract = runtime.contract;"
+    , "const leadRequest = runtime.schema('LeadRequest');"
+    , "const job = runtime.registerJob({"
+    , "  name: 'summarizeLeadJob',"
+    , "  inputType: 'LeadRequest',"
+    , "  outputType: 'LeadSummary',"
+    , "  async handler(payload) {"
+    , "    return {"
+    , "      summary: `${payload.company}:${payload.budget}`,"
+    , "      priority: payload.priorityHint,"
+    , "      followUpRequired: payload.budget >= 40"
+    , "    };"
+    , "  }"
+    , "});"
+    , "const encoded = await runtime.dispatch('summarizeLeadJob', JSON.stringify({"
+    , "  company: 'Acme',"
+    , "  budget: 42,"
+    , "  priorityHint: 'high'"
+    , "}));"
+    , "const decoded = JSON.parse(encoded);"
+    , "let invalid = null;"
+    , "try {"
+    , "  await runtime.dispatch('summarizeLeadJob', JSON.stringify({ company: 'Acme', budget: 'oops', priorityHint: 'high' }));"
+    , "} catch (error) {"
+    , "  invalid = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  contractVersion: contract.version,"
+    , "  schemaKind: leadRequest.schema.kind,"
+    , "  seedBudget: leadRequest.seed.budget,"
+    , "  jobCount: runtime.listJobs().length,"
+    , "  jobInputType: job.inputType,"
+    , "  jobOutputType: job.outputType,"
+    , "  outputSchemaKind: job.outputSchema.kind,"
+    , "  outputSeedPriority: job.outputSeed.priority,"
+    , "  resultPriority: decoded.priority,"
+    , "  resultFollowUpRequired: decoded.followUpRequired,"
+    , "  invalid"
     , "}));"
     ]
 

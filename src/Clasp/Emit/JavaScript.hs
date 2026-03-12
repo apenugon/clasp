@@ -54,6 +54,7 @@ emitModule modl =
       <> emitSeededFixturesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRouteClientsExport (lowerModuleRoutes modl)
+      <> emitSchemaRegistryExport (lowerModuleCodecTypes modl) (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> emitGeneratedBindingsExport
 
 emitRuntimePrelude :: [Text]
@@ -1140,6 +1141,55 @@ emitRouteClientsExport routes =
             "Redirect" -> "redirect"
             _ -> "json"
 
+emitSchemaRegistryExport :: [Type] -> [TypeDecl] -> [RecordDecl] -> [Text]
+emitSchemaRegistryExport codecTypes typeDecls recordDecls =
+  [ "export const __claspSchemas = Object.freeze({"
+  ]
+    <> concatMap emitSchemaContractEntry schemaTypes
+    <> [ "});"
+       , ""
+       ]
+  where
+    schemaTypes =
+      nub
+        ( filter
+            isSchemaContractType
+            ( [TInt, TStr, TBool]
+                <> fmap (TNamed . typeDeclName) typeDecls
+                <> fmap (TNamed . recordDeclName) recordDecls
+                <> codecTypes
+            )
+        )
+
+    isSchemaContractType typ =
+      case typ of
+        TInt ->
+          True
+        TStr ->
+          True
+        TBool ->
+          True
+        TList itemType ->
+          isSchemaContractType itemType
+        TNamed name ->
+          any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+        TFunction _ _ ->
+          False
+
+    emitSchemaContractEntry typ =
+      let typeName = renderTypeName typ
+          schemaRef = emitSchemaRef typeDecls recordDecls typ
+       in [ "  " <> emitStringLiteral typeName <> ": {"
+          , "    type: " <> emitStringLiteral typeName <> ","
+          , "    schema: " <> schemaRef <> ","
+          , "    seed: " <> emitSeedValueForType typeDecls recordDecls typ <> ","
+          , "    fromHost(value, path = \"value\") { return " <> emitHostDeserializer typ "value" "path" <> "; },"
+          , "    toHost(value, path = \"value\") { return " <> emitHostSerializer typ "value" "path" <> "; },"
+          , "    decodeJson(jsonText) { return this.toHost(this.fromHost(JSON.parse(jsonText), \"value\"), \"value\"); },"
+          , "    encodeJson(value) { return JSON.stringify(this.toHost(this.fromHost(value, \"value\"), \"value\")); }"
+          , "  },"
+          ]
+
 emitGeneratedBindingsExport :: [Text]
 emitGeneratedBindingsExport =
   [ "export const __claspBindings = Object.freeze({"
@@ -1148,6 +1198,7 @@ emitGeneratedBindingsExport =
   , "  hostBindings: __claspHostBindings,"
   , "  routes: __claspRoutes,"
   , "  routeClients: __claspRouteClients,"
+  , "  schemas: __claspSchemas,"
   , "  seededFixtures: __claspSeededFixtures,"
   , "  staticAssetStrategy: __claspStaticAssetStrategy,"
   , "  staticAssets: __claspStaticAssets,"

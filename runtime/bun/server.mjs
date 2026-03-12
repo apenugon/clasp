@@ -23,6 +23,7 @@ export function bindingContractFor(compiledModule) {
     hostBindings: compiledModule?.__claspHostBindings ?? [],
     routes: compiledModule?.__claspRoutes ?? [],
     routeClients: compiledModule?.__claspRouteClients ?? [],
+    schemas: compiledModule?.__claspSchemas ?? {},
     seededFixtures: compiledModule?.__claspSeededFixtures ?? [],
     staticAssetStrategy:
       compiledModule?.__claspStaticAssetStrategy ?? {
