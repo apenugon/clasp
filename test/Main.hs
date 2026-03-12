@@ -824,7 +824,10 @@ compileTests =
           Right emitted -> do
             assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $claspCallHostBinding(\"mockLeadSummaryModel\", [$0]); }" `T.isInfixOf` emitted)
             assertBool "expected host binding manifest export" ("export const __claspHostBindings = [" `T.isInfixOf` emitted)
+            assertBool "expected host binding adapter export" ("export function __claspAdaptHostBindings" `T.isInfixOf` emitted)
             assertBool "expected host binding manifest schema" ("schema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+            assertBool "expected host binding manifest fromHost adapter" ("fromHost(value, path = \"value\")" `T.isInfixOf` emitted)
+            assertBool "expected host binding manifest toHost adapter" ("toHost(value, path = \"result\")" `T.isInfixOf` emitted)
             assertBool "expected host binding manifest return type" ("returns: {" `T.isInfixOf` emitted)
             assertBool "expected enum decoder" ("function $decode_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected internal enum validator" ("function $validateInternal_LeadPriority" `T.isInfixOf` emitted)
@@ -1857,7 +1860,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    reviewNote: ''"
     , "  }"
     , "];"
-    , "installRuntime({"
+    , "installRuntime(compiledModule.__claspAdaptHostBindings({"
     , "  mockLeadSummaryModel(intake) {"
     , "    structuredModelArg = typeof intake.segment === 'string' && intake.segment === 'enterprise';"
     , "    const priority = intake.budget >= 50000 ? 'High' : intake.budget >= 20000 ? 'Medium' : 'Low';"
@@ -1904,7 +1907,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    lead.reviewNote = review.note;"
     , "    return JSON.stringify(lead);"
     , "  }"
-    , "});"
+    , "}));"
     , "const route = (name) => {"
     , "  const found = compiledModule.__claspRoutes.find((candidate) => candidate.name === name);"
     , "  if (!found) { throw new Error(`missing route ${name}`); }"

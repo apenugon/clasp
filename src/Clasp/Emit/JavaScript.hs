@@ -76,6 +76,16 @@ emitRuntimePrelude =
   , "  return binding.returns.fromHost(runtime(...hostArgs));"
   , "}"
   , ""
+  , "function $claspAdaptHostBinding(binding, implementation) {"
+  , "  return (...args) => {"
+  , "    const preparedArgs = binding.params.map((param, index) => {"
+  , "      const path = `arguments[${index}]`;"
+  , "      return param.toHost(param.fromHost(args[index], path), path);"
+  , "    });"
+  , "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");"
+  , "  };"
+  , "}"
+  , ""
   , "function $claspExpectObject(value, path) {"
   , "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {"
   , "    throw new Error(`${path} expected an object`);"
@@ -464,6 +474,9 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
       | null foreignDecls =
           [ "export const __claspHostBindings = [];"
           , "const $claspHostBindingMap = {};"
+          , "export function __claspAdaptHostBindings(implementations = {}) {"
+          , "  return {};"
+          , "}"
           ]
       | otherwise =
           [ "export const __claspHostBindings = ["
@@ -471,6 +484,18 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
             <> concatMap emitHostBindingEntry foreignDecls
             <> [ "];"
                , "const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));"
+               , "export function __claspAdaptHostBindings(implementations = {}) {"
+               , "  const runtimeBindings = {};"
+               , "  for (const binding of __claspHostBindings) {"
+               , "    const byName = implementations[binding.name];"
+               , "    const byRuntimeName = implementations[binding.runtimeName];"
+               , "    const implementation = typeof byName === \"function\" ? byName : byRuntimeName;"
+               , "    if (typeof implementation === \"function\") {"
+               , "      runtimeBindings[binding.runtimeName] = $claspAdaptHostBinding(binding, implementation);"
+               , "    }"
+               , "  }"
+               , "  return runtimeBindings;"
+               , "}"
                ]
 
     emitHostBindingEntry foreignDecl =
@@ -485,7 +510,8 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
                 , "        index: " <> T.pack (show index) <> ","
                 , "        type: " <> emitStringLiteral (renderTypeName paramType) <> ","
                 , "        schema: " <> emitSchemaRef typeDecls recordDecls paramType <> ","
-                , "        toHost(value) { return " <> emitHostSerializer paramType "value" "\"value\"" <> "; }"
+                , "        fromHost(value, path = \"value\") { return " <> emitHostDeserializer paramType "value" "path" <> "; },"
+                , "        toHost(value, path = \"value\") { return " <> emitHostSerializer paramType "value" "path" <> "; }"
                 , "      },"
                 ]
               | (index, paramType) <- zip [(0 :: Int) ..] paramTypes
@@ -494,7 +520,8 @@ emitForeignBindings typeDecls recordDecls foreignDecls =
                , "    returns: {"
                , "      type: " <> emitStringLiteral (renderTypeName returnType) <> ","
                , "      schema: " <> emitSchemaRef typeDecls recordDecls returnType <> ","
-               , "      fromHost(value) { return " <> emitHostDeserializer returnType "value" "\"result\"" <> "; }"
+               , "      fromHost(value, path = \"result\") { return " <> emitHostDeserializer returnType "value" "path" <> "; },"
+               , "      toHost(value, path = \"result\") { return " <> emitHostSerializer returnType "value" "path" <> "; }"
                , "    }"
                , "  },"
                ]
