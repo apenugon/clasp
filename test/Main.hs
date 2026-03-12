@@ -2041,6 +2041,10 @@ compileTests =
           Right emitted -> do
             assertBool "expected workflow checkpoint helper" ("checkpoint(value) { return $encode_Counter(value); }" `T.isInfixOf` emitted)
             assertBool "expected workflow resume helper" ("resume(snapshot) { return $decode_Counter(snapshot); }" `T.isInfixOf` emitted)
+            assertBool "expected module metadata export" ("export const __claspModule = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected workflow module version metadata" ("moduleVersionId: $claspModuleVersionId," `T.isInfixOf` emitted)
+            assertBool "expected workflow upgrade window metadata" ("upgradeWindow: $claspModuleUpgradeWindow," `T.isInfixOf` emitted)
+            assertBool "expected workflow compatibility metadata" ("compatibleModuleVersionIds: $claspModuleUpgradeWindow.fromVersionIds" `T.isInfixOf` emitted)
             assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deadline helper" ("withDeadline(run, deadlineAt) { return $claspWorkflowWithDeadline(\"CounterFlow\", run, deadlineAt); }" `T.isInfixOf` emitted)
             assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
@@ -2297,8 +2301,10 @@ compileTests =
             assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
             assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
             assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
+            assertBool "expected control-plane module metadata export" ("export const __claspModule = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected human-readable control-plane docs export" ("export const __claspControlPlaneDocs = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected control-plane contract module entry" ("module: __claspModule," `T.isInfixOf` emitted)
             assertBool "expected control-plane contract docs entry" ("docs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             assertBool "expected agent role approval metadata" ("approvalPolicy: \"on_request\"" `T.isInfixOf` emitted)
             assertBool "expected agent role sandbox metadata" ("sandboxPolicy: \"workspace_write\"" `T.isInfixOf` emitted)
@@ -2372,13 +2378,16 @@ compileTests =
                 , "  docsHasApproval: docs.markdown.includes('Approval: on_request'),"
                 , "  docsHasSandbox: docs.markdown.includes('Sandbox: workspace_write'),"
                 , "  docsHasHookEvent: docs.markdown.includes('worker.start'),"
+                , "  docsHasModuleVersion: docs.markdown.includes('Version id: module:Main:'),"
+                , "  controlPlaneModuleVersionTagged: compiledModule.__claspControlPlane.module.versionId.startsWith('module:Main:'),"
+                , "  bindingModuleVersionTagged: compiledModule.__claspBindings.module.versionId.startsWith('module:Main:'),"
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
                 , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version"
                 , "}));"
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "control-plane example drives one repo-level agent loop" $ do
         result <- compileEntry ("examples" </> "control-plane" </> "Main.clasp")
@@ -2744,7 +2753,7 @@ compileTests =
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected workflow lifecycle and retry runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
               runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
@@ -5149,6 +5158,11 @@ workflowRuntimeScript compiledPath runtimePath =
     , "console.log(JSON.stringify({"
     , "  workflowName: workflow.name,"
     , "  stateType: workflow.stateType,"
+    , "  moduleVersionTagged: workflow.moduleVersionId.startsWith('module:Main:'),"
+    , "  upgradeWindowPolicy: workflow.upgradeWindow.policy,"
+    , "  compatibleVersionCount: workflow.compatibility.compatibleModuleVersionIds.length,"
+    , "  runtimeModuleVersionTagged: runtime.contract.module.versionId.startsWith('module:Main:'),"
+    , "  runtimeWorkflowCount: runtime.contract.module.compatibility.workflowCount,"
     , "  checkpoint,"
     , "  resumedValue: resumed.count,"
     , "  deadlineAt: run.deadlineAt,"

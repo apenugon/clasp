@@ -16,6 +16,7 @@ export function bindingContractFor(compiledModule) {
   ) {
     return {
       ...contract,
+      module: contract.module ?? compiledModule?.__claspModule ?? null,
       nativeInterop:
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
@@ -26,6 +27,7 @@ export function bindingContractFor(compiledModule) {
   return {
     kind: "clasp-generated-bindings",
     version: 1,
+    module: compiledModule?.__claspModule ?? null,
     hostBindings: compiledModule?.__claspHostBindings ?? [],
     nativeInterop:
       compiledModule?.__claspNativeInterop ??

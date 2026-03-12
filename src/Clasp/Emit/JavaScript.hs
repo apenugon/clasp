@@ -4,6 +4,7 @@ module Clasp.Emit.JavaScript
   ( emitModule
   ) where
 
+import Data.Char (ord)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (nub)
@@ -1980,9 +1981,23 @@ emitControlPlaneExports modl =
     tools = lowerModuleToolDecls modl
     verifiers = lowerModuleVerifierDecls modl
     mergeGates = lowerModuleMergeGateDecls modl
+    moduleNameText = unModuleName (lowerModuleName modl)
+    moduleVersionId = moduleVersionIdentifier modl
+    compatibleModuleVersionIds = [moduleVersionId]
+
+    emitModuleMetadataPrelude =
+      [ "const $claspModuleVersionId = " <> emitStringLiteral moduleVersionId <> ";"
+      , "const $claspModuleUpgradeWindow = Object.freeze({"
+      , "  policy: \"bounded-overlap\","
+      , "  fromVersionIds: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral compatibleModuleVersionIds) <> "]),"
+      , "  toVersionId: $claspModuleVersionId"
+      , "});"
+      , ""
+      ]
 
     emitWorkflows =
-      [ "export const __claspWorkflows = ["
+      emitModuleMetadataPrelude
+        <> [ "export const __claspWorkflows = ["
       ]
         <> concatMap emitWorkflow workflows
         <> [ "];"
@@ -1990,12 +2005,34 @@ emitControlPlaneExports modl =
            , "  Object.freeze(workflow);"
            , "}"
            , ""
+           , "export const __claspModule = Object.freeze({"
+           , "  name: " <> emitStringLiteral moduleNameText <> ","
+           , "  versionId: $claspModuleVersionId,"
+           , "  upgradeWindow: $claspModuleUpgradeWindow,"
+           , "  compatibility: Object.freeze({"
+           , "    workflowCount: " <> T.pack (show (length workflows)) <> ","
+           , "    controlPlaneVersion: 1,"
+           , "    workflows: Object.freeze(__claspWorkflows.map((workflow) => Object.freeze({"
+           , "      name: workflow.name,"
+           , "      stateType: workflow.stateType,"
+           , "      compatibility: workflow.compatibility"
+           , "    })))"
+           , "  })"
+           , "});"
+           , ""
            ]
 
     emitWorkflow workflowDecl =
       [ "  {"
       , "    name: " <> emitStringLiteral (workflowDeclName workflowDecl) <> ","
       , "    id: " <> emitStringLiteral (workflowDeclIdentity workflowDecl) <> ","
+      , "    moduleVersionId: $claspModuleVersionId,"
+      , "    upgradeWindow: $claspModuleUpgradeWindow,"
+      , "    compatibility: Object.freeze({"
+      , "      stateType: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl)) <> ","
+      , "      checkpointSchema: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl)) <> ","
+      , "      compatibleModuleVersionIds: $claspModuleUpgradeWindow.fromVersionIds"
+      , "    }),"
       , "    stateType: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl)) <> ","
       , "    checkpoint(value) { return $encode_" <> codecSuffix (workflowDeclStateType workflowDecl) <> "(value); },"
       , "    resume(snapshot) { return $decode_" <> codecSuffix (workflowDeclStateType workflowDecl) <> "(snapshot); },"
@@ -2303,6 +2340,7 @@ emitControlPlaneExports modl =
     emitControlPlaneContract =
       [ "export const __claspControlPlane = Object.freeze({"
       , "  version: 1,"
+      , "  module: __claspModule,"
       , "  workflows: __claspWorkflows,"
       , "  guides: __claspGuides,"
       , "  hooks: __claspHooks,"
@@ -2324,6 +2362,12 @@ renderControlPlaneDocsMarkdown modl =
       [ "# Control Plane Docs"
     , ""
     , "This document is generated from the same Clasp declarations as the executable control-plane manifests."
+    , ""
+    , "## Module"
+    , ""
+    , "- Name: " <> unModuleName (lowerModuleName modl)
+    , "- Version id: " <> moduleVersionIdentifier modl
+    , "- Upgrade window: bounded-overlap"
     ]
       <> renderDocsSection "Workflows" (fmap renderWorkflowDoc (lowerModuleWorkflowDecls modl))
       <> renderDocsSection "Guides" (fmap renderGuideDoc (lowerModuleGuideDecls modl))
@@ -2356,6 +2400,7 @@ renderWorkflowDoc workflowDecl =
   T.unlines
     [ "### " <> workflowDeclName workflowDecl
     , "- State schema: " <> renderType (workflowDeclStateType workflowDecl)
+    , "- Compatibility metadata: checkpoint schema `" <> renderType (workflowDeclStateType workflowDecl) <> "` with bounded-overlap module upgrades"
     , "- Checkpoint: `workflow.checkpoint(state) -> Str`"
     , "- Resume: `workflow.resume(snapshot) -> " <> renderType (workflowDeclStateType workflowDecl) <> "`"
     , "- Start: `workflow.start(snapshot, { deadlineAt?, retry?, supervisor? }) -> { checkpoint, state, deliveries, processedIds, deadlineAt, cancelled, retryPolicy, supervision }`"
@@ -2543,6 +2588,7 @@ emitGeneratedBindingsExport =
   [ "export const __claspBindings = Object.freeze({"
   , "  kind: \"clasp-generated-bindings\","
   , "  version: 1,"
+  , "  module: __claspModule,"
   , "  hostBindings: __claspHostBindings,"
   , "  nativeInterop: __claspNativeInterop,"
   , "  packageImports: __claspPackageImports,"
@@ -3171,6 +3217,27 @@ emitIdentifier = id
 emitStringLiteral :: Text -> Text
 emitStringLiteral value =
   T.pack (show (T.unpack value))
+
+moduleVersionIdentifier :: LowerModule -> Text
+moduleVersionIdentifier modl =
+  "module:"
+    <> unModuleName (lowerModuleName modl)
+    <> ":"
+    <> moduleVersionChecksum versionPayload
+  where
+    versionPayload =
+      T.intercalate
+        "|"
+        (unModuleName (lowerModuleName modl) : fmap workflowPayload (lowerModuleWorkflowDecls modl))
+    workflowPayload workflowDecl =
+      workflowDeclIdentity workflowDecl <> ":" <> renderType (workflowDeclStateType workflowDecl)
+
+moduleVersionChecksum :: Text -> Text
+moduleVersionChecksum =
+  T.pack . show . T.foldl' step (2166136261 :: Integer)
+  where
+    step acc charValue =
+      ((acc * 16777619) + fromIntegral (ord charValue)) `mod` 2147483647
 
 emitMaybeStringLiteral :: Maybe Text -> Text
 emitMaybeStringLiteral =

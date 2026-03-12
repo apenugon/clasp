@@ -407,6 +407,7 @@ Notes:
 - Merge-gate declarations bind a named integration gate to one or more declared verifier rules.
 - Generated JavaScript modules also export versioned control-plane manifests for guides, hooks, agents, policies, tool servers, tools, verifiers, and merge gates, plus executable protocol helpers for hook invocation and tool or verifier request shaping.
 - Generated JavaScript modules also export versioned human-readable control-plane docs derived from the same declarations and bundled into the stable `__claspBindings` surface, including declared policy permission grants.
+- Generated JavaScript modules also export `__claspModule`, a module-level durable workflow contract with a derived version identifier, bounded upgrade-window metadata, and per-workflow compatibility descriptors for checkpoint replay and supervised hot-swap planning.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
 - Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, native interop metadata, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
