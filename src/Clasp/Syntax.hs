@@ -415,6 +415,8 @@ data Expr
   | EGreaterThanOrEqual SourceSpan Expr Expr
   | ECall SourceSpan Expr [Expr]
   | ELet SourceSpan SourceSpan Text Expr Expr
+  | EMutableLet SourceSpan SourceSpan Text Expr Expr
+  | EAssign SourceSpan SourceSpan Text Expr Expr
   | EMatch SourceSpan Expr [MatchBranch]
   | ERecord SourceSpan Text [RecordFieldExpr]
   | EFieldAccess SourceSpan Expr Text
@@ -452,6 +454,10 @@ exprSpan expr =
     ECall span' _ _ ->
       span'
     ELet span' _ _ _ _ ->
+      span'
+    EMutableLet span' _ _ _ _ ->
+      span'
+    EAssign span' _ _ _ _ ->
       span'
     EMatch span' _ _ ->
       span'

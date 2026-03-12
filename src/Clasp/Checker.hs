@@ -91,6 +91,7 @@ type TypeDeclEnv = Map.Map Text TypeDecl
 type RecordDeclEnv = Map.Map Text RecordDecl
 type ForeignDeclEnv = Map.Map Text ForeignDecl
 type DeclMap = Map.Map Text Decl
+type LocalEnv = Map.Map Text LocalBinding
 
 data ModuleContext = ModuleContext
   { contextTypeDeclEnv :: TypeDeclEnv
@@ -127,6 +128,25 @@ data InferState = InferState
 data InferFailure
   = InferDeferredName Text SourceSpan
   | InferDiagnostic DiagnosticBundle
+
+data LocalBinding = LocalBinding
+  { localBindingType :: InferType
+  , localBindingMutable :: Bool
+  }
+
+immutableLocalBinding :: InferType -> LocalBinding
+immutableLocalBinding inferType =
+  LocalBinding
+    { localBindingType = inferType
+    , localBindingMutable = False
+    }
+
+mutableLocalBinding :: InferType -> LocalBinding
+mutableLocalBinding inferType =
+  LocalBinding
+    { localBindingType = inferType
+    , localBindingMutable = True
+    }
 
 newtype InferM a = InferM
   { unInferM :: ExceptT InferFailure (State InferState) a
@@ -1633,7 +1653,7 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
                 ]
             else do
               let draftParams = zipWith DraftParam params (fmap typeToInferType argTypes)
-                  localEnv = Map.fromList (zip params (fmap draftParamType draftParams))
+                  localEnv = Map.fromList (zip params (fmap (immutableLocalBinding . draftParamType) draftParams))
               body <- inferExpr ctx termEnv localEnv (declBody decl)
               unify
                 ( UnifyContext
@@ -1677,7 +1697,7 @@ inferUnannotatedDecl ctx termEnv decl name params =
     _ -> do
       paramTypes <- traverse (const freshTypeVar) params
       let draftParams = zipWith DraftParam params paramTypes
-          localEnv = Map.fromList (zip params paramTypes)
+          localEnv = Map.fromList (zip params (fmap immutableLocalBinding paramTypes))
       body <- inferExpr ctx termEnv localEnv (declBody decl)
       pure
         DraftDecl
@@ -1687,15 +1707,15 @@ inferUnannotatedDecl ctx termEnv decl name params =
           , draftDeclBody = body
           }
 
-inferExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> Expr -> InferM DraftExpr
+inferExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> Expr -> InferM DraftExpr
 inferExpr ctx termEnv localEnv expr =
   case expr of
     EVar span' name ->
       if name == "empty" && Map.notMember name localEnv && Map.notMember name termEnv
         then pure (DraftExpr span' (INamed viewTypeName) DraftViewEmpty)
         else case Map.lookup name localEnv of
-        Just localType ->
-          pure (DraftExpr span' localType (DraftVar name))
+        Just localBinding ->
+          pure (DraftExpr span' (localBindingType localBinding) (DraftVar name))
         Nothing ->
           case Map.lookup name termEnv of
             Just topLevelType ->
@@ -1735,8 +1755,43 @@ inferExpr ctx termEnv localEnv expr =
       inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan DraftGreaterThanOrEqual left right
     ELet letSpan _ binderName value body -> do
       valueExpr <- inferExpr ctx termEnv localEnv value
-      bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (draftExprType valueExpr) localEnv) body
+      bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (immutableLocalBinding (draftExprType valueExpr)) localEnv) body
       pure (DraftExpr letSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
+    EMutableLet letSpan _ binderName value body -> do
+      valueExpr <- inferExpr ctx termEnv localEnv value
+      bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (mutableLocalBinding (draftExprType valueExpr)) localEnv) body
+      pure (DraftExpr letSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
+    EAssign assignSpan targetSpan binderName value body ->
+      case Map.lookup binderName localEnv of
+        Just localBinding
+          | localBindingMutable localBinding -> do
+              valueExpr <- inferExpr ctx termEnv localEnv value
+              unify
+                ( UnifyContext
+                    { unifyCode = "E_TYPE_MISMATCH"
+                    , unifySummary = "Type mismatch."
+                    , unifyPrimarySpan = exprSpan value
+                    , unifyRelated = [diagnosticRelated "mutable local" targetSpan]
+                    }
+                )
+                (draftExprType valueExpr)
+                (localBindingType localBinding)
+              bodyExpr <- inferExpr ctx termEnv (Map.insert binderName localBinding localEnv) body
+              pure (DraftExpr assignSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
+          | otherwise ->
+              throwDiagnostic $
+                singleDiagnosticAt
+                  "E_ASSIGNMENT_TARGET"
+                  ("Assignment target `" <> binderName <> "` is not mutable.")
+                  targetSpan
+                  ["Declare the local with `let mut " <> binderName <> " = ...;` before assigning to it."]
+        Nothing ->
+          throwDiagnostic $
+            singleDiagnosticAt
+              "E_ASSIGNMENT_TARGET"
+              ("Assignment target `" <> binderName <> "` is not a mutable local.")
+              targetSpan
+              ["Declare the name in the current block with `let mut " <> binderName <> " = ...;` before assigning to it."]
     ECall callSpan fn args ->
       case fn of
         EVar _ name
@@ -1760,7 +1815,7 @@ inferExpr ctx termEnv localEnv expr =
       inferEncodeExpr ctx termEnv localEnv encodeSpan value
     EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
 
-inferListExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> [Expr] -> InferM DraftExpr
+inferListExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> [Expr] -> InferM DraftExpr
 inferListExpr ctx termEnv localEnv listSpan values = do
   itemType <- freshTypeVar
   draftValues <- traverse (inferExpr ctx termEnv localEnv) values
@@ -1791,7 +1846,7 @@ inferListExpr ctx termEnv localEnv listSpan values = do
     draftValues
   pure (DraftExpr listSpan (IList itemType) (DraftList draftValues))
 
-inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Bool -> Expr -> Expr -> InferM DraftExpr
+inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Bool -> Expr -> Expr -> InferM DraftExpr
 inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
   leftExpr <- inferExpr ctx termEnv localEnv left
   rightExpr <- inferExpr ctx termEnv localEnv right
@@ -1823,7 +1878,7 @@ inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
             []
         ]
 
-inferIntegerComparisonExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> (DraftExpr -> DraftExpr -> DraftExprNode) -> Expr -> Expr -> InferM DraftExpr
+inferIntegerComparisonExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> (DraftExpr -> DraftExpr -> DraftExprNode) -> Expr -> Expr -> InferM DraftExpr
 inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan constructor left right = do
   leftExpr <- inferExpr ctx termEnv localEnv left
   rightExpr <- inferExpr ctx termEnv localEnv right
@@ -1838,7 +1893,7 @@ inferIntegerComparisonExpr ctx termEnv localEnv comparisonSpan constructor left 
   unify unifyContext (draftExprType rightExpr) IInt
   pure (DraftExpr comparisonSpan IBool (constructor leftExpr rightExpr))
 
-inferRegularCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
+inferRegularCall :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
 inferRegularCall ctx termEnv localEnv callSpan fn args = do
   fnExpr <- inferExpr ctx termEnv localEnv fn
   resolvedFnType <- resolveCurrentType (draftExprType fnExpr)
@@ -1899,7 +1954,7 @@ inferRegularCall ctx termEnv localEnv callSpan fn args = do
     expectedParamTypes
   pure (DraftExpr callSpan resultType (DraftCall fnExpr argExprs))
 
-inferBuiltinViewCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
+inferBuiltinViewCall :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
 inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
   case builtinName of
     "page" ->
@@ -2196,7 +2251,7 @@ throwViewBuiltinArity callSpan builtinName expectedArity actualArity =
         []
     ]
 
-inferBuiltinAuthCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
+inferBuiltinAuthCall :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
 inferBuiltinAuthCall ctx termEnv localEnv callSpan builtinName args =
   case builtinName of
     name
@@ -2312,7 +2367,7 @@ throwBuiltinRecordArity callSpan builtinName expectedArity actualArity =
         []
     ]
 
-inferRecordExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Text -> [RecordFieldExpr] -> InferM DraftExpr
+inferRecordExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Text -> [RecordFieldExpr] -> InferM DraftExpr
 inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
   case Map.lookup recordName (contextRecordDeclEnv ctx) of
     Nothing ->
@@ -2384,7 +2439,7 @@ inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
             (DraftRecord recordName draftFields)
         )
 
-inferFieldAccessExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> Text -> InferM DraftExpr
+inferFieldAccessExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr -> Text -> InferM DraftExpr
 inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName = do
   subjectExpr <- inferExpr ctx termEnv localEnv subject
   recordDecl <- resolveFieldAccessRecord ctx accessSpan fieldName (draftExprType subjectExpr)
@@ -2406,7 +2461,7 @@ inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName = do
             [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
         ]
 
-inferDecodeExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Type -> Expr -> InferM DraftExpr
+inferDecodeExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Type -> Expr -> InferM DraftExpr
 inferDecodeExpr ctx termEnv localEnv decodeSpan targetType rawJson = do
   ensureJsonTypeSupported ctx decodeSpan targetType
   rawJsonExpr <- inferExpr ctx termEnv localEnv rawJson
@@ -2427,7 +2482,7 @@ inferDecodeExpr ctx termEnv localEnv decodeSpan targetType rawJson = do
         (DraftDecodeJson targetType rawJsonExpr)
     )
 
-inferEncodeExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> InferM DraftExpr
+inferEncodeExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr -> InferM DraftExpr
 inferEncodeExpr ctx termEnv localEnv encodeSpan value = do
   valueExpr <- inferExpr ctx termEnv localEnv value
   resolvedValueType <- resolveCurrentType (draftExprType valueExpr)
@@ -2439,7 +2494,7 @@ inferEncodeExpr ctx termEnv localEnv encodeSpan value = do
     Left (Just bundle) ->
       throwDiagnostic bundle
 
-inferMatchExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
+inferMatchExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr -> [MatchBranch] -> InferM DraftExpr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
   subjectExpr <- inferExpr ctx termEnv localEnv subject
   subjectType <- resolveCurrentType (draftExprType subjectExpr)
@@ -2541,7 +2596,7 @@ inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
 inferMatchBranch ::
   ModuleContext ->
   DeclTypeEnv ->
-  Map.Map Text InferType ->
+  LocalEnv ->
   MatchResultAccumulator ->
   MatchBranch ->
   InferM MatchResultAccumulator
@@ -2564,7 +2619,7 @@ inferMatchBranch ctx termEnv localEnv accumulator branch = do
 
   let binderEnv =
         Map.fromList
-          [ (draftPatternBinderName binder, draftPatternBinderType binder)
+          [ (draftPatternBinderName binder, immutableLocalBinding (draftPatternBinderType binder))
           | binder <- patternBinders draftPattern
           ]
 

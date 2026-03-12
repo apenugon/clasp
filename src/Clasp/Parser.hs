@@ -109,7 +109,10 @@ data TopLevelItem
   | TopSignature Text Type SourceSpan
   | TopDecl Decl
 
-data BlockBinding = BlockBinding SourcePos SourceSpan Text Expr
+data BlockBinding
+  = BlockLetBinding SourcePos SourceSpan Text Expr
+  | BlockMutableLetBinding SourcePos SourceSpan Text Expr
+  | BlockAssignBinding SourcePos SourceSpan Text Expr
 
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
 parseModule path source =
@@ -732,13 +735,39 @@ blockExprParser = do
 
 blockBindingParser :: Parser BlockBinding
 blockBindingParser = do
+  try mutableBlockBindingParser
+    <|> try immutableBlockBindingParser
+    <|> assignmentBlockBindingParser
+
+mutableBlockBindingParser :: Parser BlockBinding
+mutableBlockBindingParser = do
+  start <- getSourcePos
+  keywordN "let"
+  keywordN "mut"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  value <- exprParser
+  blockSeparatorParser
+  pure (BlockMutableLetBinding start nameSpan name value)
+
+immutableBlockBindingParser :: Parser BlockBinding
+immutableBlockBindingParser = do
   start <- getSourcePos
   keywordN "let"
   (nameSpan, name) <- locatedLowerIdentifier
   _ <- symbol "="
   value <- exprParser
   blockSeparatorParser
-  pure (BlockBinding start nameSpan name value)
+  pure (BlockLetBinding start nameSpan name value)
+
+assignmentBlockBindingParser :: Parser BlockBinding
+assignmentBlockBindingParser = do
+  start <- getSourcePos
+  (nameSpan, name) <- locatedLowerIdentifierN
+  _ <- symbolN "="
+  value <- exprParser
+  blockSeparatorParser
+  pure (BlockAssignBinding start nameSpan name value)
 
 blockSeparatorParser :: Parser ()
 blockSeparatorParser =
@@ -957,8 +986,14 @@ applyFieldAccess subject (fieldSpan, fieldName) =
   EFieldAccess (mergeSourceSpans (exprSpan subject) fieldSpan) subject fieldName
 
 applyBlockBinding :: BlockBinding -> Expr -> Expr
-applyBlockBinding (BlockBinding start nameSpan name value) body =
-  ELet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
+applyBlockBinding binding body =
+  case binding of
+    BlockLetBinding start nameSpan name value ->
+      ELet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
+    BlockMutableLetBinding start nameSpan name value ->
+      EMutableLet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
+    BlockAssignBinding start nameSpan name value ->
+      EAssign (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
@@ -1141,6 +1176,7 @@ reservedWords =
   , "role"
   , "agent"
   , "let"
+  , "mut"
   , "in"
   , "type"
   , "record"

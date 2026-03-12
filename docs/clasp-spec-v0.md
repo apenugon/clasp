@@ -142,16 +142,16 @@ greeting : Str
 greeting = let message = "Ada" in message
 ```
 
-Block expressions are also available as a lightweight imperative-adjacent surface form. A block evaluates to its final expression, and it may introduce local variables with leading `let` declarations:
+Block expressions are also available as a lightweight imperative-adjacent surface form. A block evaluates to its final expression, and it may introduce local variables with leading `let` declarations. Reassignment is supported only for locals declared with `let mut`:
 
 ```clasp
 module Main
 
 greeting : Str
 greeting = {
-  let message = "Ada";
-  let alias = message;
-  alias
+  let mut message = "Ada";
+  message = "Grace";
+  message
 }
 ```
 
@@ -281,7 +281,7 @@ method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
 block-expr  ::= "{" block-let* expr "}"
-block-let   ::= "let" lower-ident "=" expr block-separator
+block-let   ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr) block-separator
 block-separator ::= ";" | newline+
 let-expr    ::= "let" lower-ident "=" expr "in" expr
 expr        ::= let-expr | equality-expr
@@ -320,7 +320,7 @@ Notes:
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
-- Blocks return their final expression and may contain leading local `let` declarations.
+- Blocks return their final expression and may contain leading local `let` declarations or assignments to previously declared `let mut` locals.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 
