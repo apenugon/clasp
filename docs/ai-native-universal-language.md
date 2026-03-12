@@ -547,6 +547,13 @@ The compiler should still own:
 - package identity and version tracking
 - deterministic adapter generation for each target
 
+And the foreign ecosystems should not be allowed to smuggle ambient `Any` into normal `Clasp` code.
+
+- `Clasp` should have no ordinary `Any` type in user code
+- untyped or weakly typed foreign values should enter through a boundary-only `Dynamic` or `Unknown` model
+- promoting those values into normal typed `Clasp` values should require either compiler-proved compatibility or an explicit unsafe refinement
+- runtime failures at those boundaries should carry blame metadata that points back to the exact foreign import, declaration, expected type, observed value path, and unsafe assertion site
+
 That lets `Clasp` absorb the ecosystem gravity of `TypeScript`, `Python`, and `Rust` without giving up the language-level guarantees that justify using `Clasp` in the first place.
 
 ### 9. Shared UI and state model

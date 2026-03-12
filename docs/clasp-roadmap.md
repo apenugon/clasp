@@ -117,6 +117,9 @@ Exit criteria:
 - Add compiler-managed foreign package imports so `npm` and `TypeScript` ecosystems can be consumed through typed manifests, declaration ingestion, and generated adapters instead of handwritten glue
 - Add compiler-managed `Python` package and module interop as typed worker or service boundaries with generated schema bindings, transport, and lifecycle management
 - Add compiler-managed `Rust` crate or native-library interop for performance-critical extensions, using generated bindings, capability metadata, and target-aware build integration
+- Treat untyped or weakly typed foreign values as explicit boundary-only `Dynamic` or `Unknown` values rather than ambient `Any`
+- Require explicit unsafe refinement when the compiler cannot prove a foreign declaration matches the claimed `Clasp` type
+- Preserve blame-carrying boundary diagnostics so runtime type failures identify the exact foreign import, declaration, expected type, observed path, and unsafe assertion site
 
 Exit criteria:
 

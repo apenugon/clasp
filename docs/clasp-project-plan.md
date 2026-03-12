@@ -354,6 +354,7 @@ Critical path:
 - `TY-013` Add compiler-known typestate or state-machine declarations for UI, workflow, and domain transitions.
 - `TY-014` Add semantic edit and refactor operations over compiler-known declarations and schemas.
 - `TY-015` Add a stable compiler-known agent IR or AIR with graph identity and replay-friendly serialization.
+- `TY-016` Add boundary-only `Dynamic` or `Unknown` foreign values with explicit unsafe refinement and blame-carrying diagnostics.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -399,6 +400,7 @@ Critical path:
 - `FS-020` Add compiler-managed `npm` and `TypeScript` package imports with declaration ingestion, typed manifests, and generated host adapters.
 - `FS-021` Add compiler-managed `Python` package and module interop through typed worker or service boundaries with generated schema bindings and lifecycle control.
 - `FS-022` Add compiler-managed `Rust` crate and native-library interop with generated bindings, capability metadata, and target-aware build integration.
+- `FS-023` Add static foreign-signature compatibility checks and explicit unsafe interop for `any`, untyped, or opaque package values.
 
 ### Track 5: Control Plane Declarations
 
@@ -484,6 +486,7 @@ Critical path:
 - `BM-022` Add benchmark acceptance helpers and mutation-surface guards so product tasks do not require runtime-wrapper or test-scaffold edits.
 - `BM-023` Add benchmark-prep semantic packs and workspace guidance generated from context, AIR, and UI graph artifacts.
 - `BM-024` Add foreign-package interop benchmarks that compare compiler-managed `npm`, `Python`, and `Rust` usage against handwritten host glue on the same tasks.
+- `BM-025` Add interop-boundary benchmarks that measure unsafe-refinement friction and root-cause blame quality for unexpected foreign values.
 
 ### Track 10: SaaS Dogfooding
 
