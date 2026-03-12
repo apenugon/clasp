@@ -301,6 +301,20 @@ parserTests =
                   (declAnnotation decl)
               Nothing ->
                 assertFailure "expected flattened declaration"
+    , testCase "parses list literals" $
+        case parseSource "inline" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list literal source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "roster" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EList _ [EString _ "Ada", EString _ "Grace"] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected list literal body, got " <> show other)
+              Nothing ->
+                assertFailure "expected roster declaration"
     ]
 
 checkerTests :: TestTree
@@ -355,6 +369,12 @@ checkerTests =
             assertFailure ("expected auth identity source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "accepts homogeneous list literals" $
+        case checkSource "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -401,6 +421,8 @@ checkerTests =
         assertHasCode "E_PATTERN_TYPE_MISMATCH" (checkSource "bad" wrongConstructorSource)
     , testCase "rejects duplicate match branches" $
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
+    , testCase "rejects heterogeneous list literals" $
+        assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects active script tags in safe views" $
         assertHasCode "E_VIEW_TAG" (checkSource "bad" unsafeScriptSource)
     , testCase "rejects raw host class escapes in safe views" $
@@ -673,6 +695,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
+    , testCase "lowering preserves list literals" $
+        case lowerChecked "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "roster" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LList [LString "Ada", LString "Grace"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered roster declaration: " <> show other)
     , testCase "lowering preserves page and view primitives" $
         case lowerChecked "page" pageSource of
           Left err ->
@@ -846,6 +878,12 @@ compileTests =
           Right emitted -> do
             assertBool "expected object literal" ("{ name: \"Ada\", active: true }" `T.isInfixOf` emitted)
             assertBool "expected field access" ("(user).name" `T.isInfixOf` emitted)
+    , testCase "compile lowers list literals to JavaScript arrays" $
+        case compileSource "lists" listLiteralSource of
+          Left err ->
+            assertFailure ("expected list compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool "expected array literal" ("[\"Ada\", \"Grace\"]" `T.isInfixOf` emitted)
     , testCase "compile emits runtime bindings, codecs, and route metadata" $
         case compileSource "service" serviceSource of
           Left err ->
@@ -1659,6 +1697,26 @@ listTypeSource =
     , ""
     , "flattened : [BatchResult] -> [Str]"
     , "flattened batches = batches"
+    ]
+
+listLiteralSource :: Text
+listLiteralSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "roster : [Str]"
+    , "roster = [\"Ada\", \"Grace\"]"
+    , ""
+    , "emptyRoster : [Str]"
+    , "emptyRoster = []"
+    ]
+
+heterogeneousListSource :: Text
+heterogeneousListSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "bad = [\"Ada\", 1]"
     ]
 
 unsafeScriptSource :: Text

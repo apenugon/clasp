@@ -399,6 +399,7 @@ baseExprParser =
     <|> decodeParser
     <|> encodeParser
     <|> matchParser
+    <|> listExprParser
     <|> boolParser
     <|> intParser
     <|> stringParser
@@ -445,6 +446,13 @@ encodeParser = do
   value <- exprParser
   end <- getSourcePos
   pure (EEncode (makeSourceSpan start end) value)
+
+listExprParser :: Parser Expr
+listExprParser = do
+  start <- getSourcePos
+  values <- brackets (exprParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  pure (EList (makeSourceSpan start end) values)
 
 patternParser :: Parser Pattern
 patternParser = do

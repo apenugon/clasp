@@ -338,6 +338,10 @@ buildExprGraph nodeId expr =
           ([("value", AirAttrText value)], [])
         CBool _ value ->
           ([("value", AirAttrBool value)], [])
+        CList _ _ items ->
+          let itemIds = fmap (\index -> childSegmentId nodeId ("item" <> showText index)) [(0 :: Int) .. length items - 1]
+              itemNodes = concat (zipWith buildExprGraph itemIds items)
+           in ([("items", AirAttrNodes itemIds)], itemNodes)
         CPage _ title body ->
           let titleId = exprChildId "title"
               bodyId = exprChildId "body"
@@ -502,6 +506,7 @@ exprKind expr =
     CInt {} -> "int"
     CString {} -> "string"
     CBool {} -> "bool"
+    CList {} -> "list"
     CPage {} -> "page"
     CRedirect {} -> "redirect"
     CViewEmpty {} -> "viewEmpty"
@@ -527,6 +532,7 @@ exprSpan expr =
     CInt span' _ -> span'
     CString span' _ -> span'
     CBool span' _ -> span'
+    CList span' _ _ -> span'
     CPage span' _ _ -> span'
     CRedirect span' _ -> span'
     CViewEmpty span' -> span'

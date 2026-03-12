@@ -138,6 +138,7 @@ data DraftExprNode
   | DraftInt Integer
   | DraftString Text
   | DraftBool Bool
+  | DraftList [DraftExpr]
   | DraftPage DraftExpr DraftExpr
   | DraftRedirect Text
   | DraftViewEmpty
@@ -1233,6 +1234,8 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IStr (DraftString value))
     EBool span' value ->
       pure (DraftExpr span' IBool (DraftBool value))
+    EList span' values ->
+      inferListExpr ctx termEnv localEnv span' values
     ECall callSpan fn args ->
       case fn of
         EVar _ name
@@ -1255,6 +1258,37 @@ inferExpr ctx termEnv localEnv expr =
     EEncode encodeSpan value ->
       inferEncodeExpr ctx termEnv localEnv encodeSpan value
     EMatch matchSpan subject branches -> inferMatchExpr ctx termEnv localEnv matchSpan subject branches
+
+inferListExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> [Expr] -> InferM DraftExpr
+inferListExpr ctx termEnv localEnv listSpan values = do
+  itemType <- freshTypeVar
+  draftValues <- traverse (inferExpr ctx termEnv localEnv) values
+  zipWithM_
+    ( \index draftValue ->
+        unify
+          ( UnifyContext
+              { unifyCode = "E_LIST_ITEM_TYPE"
+              , unifySummary = "List elements must all have the same type."
+              , unifyPrimarySpan = draftExprSpan draftValue
+              , unifyRelated =
+                  case drop index draftValues of
+                    [] ->
+                      []
+                    _ : _ ->
+                      case draftValues of
+                        firstValue : _
+                          | draftExprSpan firstValue /= draftExprSpan draftValue ->
+                              [diagnosticRelated "first list element" (draftExprSpan firstValue)]
+                        _ ->
+                          []
+              }
+          )
+          (draftExprType draftValue)
+          itemType
+    )
+    [(0 :: Int) ..]
+    draftValues
+  pure (DraftExpr listSpan (IList itemType) (DraftList draftValues))
 
 inferRegularCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
 inferRegularCall ctx termEnv localEnv callSpan fn args = do
@@ -2369,6 +2403,10 @@ freezeDraftExpr ctx decl inferState draftExpr =
       pure (CString (draftExprSpan draftExpr) value)
     DraftBool value ->
       pure (CBool (draftExprSpan draftExpr) value)
+    DraftList items -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
+      pure (CList (draftExprSpan draftExpr) exprType frozenItems)
     DraftPage title body -> do
       frozenTitle <- freezeDraftExpr ctx decl inferState title
       frozenBody <- freezeDraftExpr ctx decl inferState body
@@ -2565,6 +2603,8 @@ unify context leftType rightType = do
       pure ()
     (IBool, IBool) ->
       pure ()
+    (IList leftItem, IList rightItem) ->
+      unify context leftItem rightItem
     (INamed leftName, INamed rightName)
       | leftName == rightName ->
           pure ()

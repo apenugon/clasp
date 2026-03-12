@@ -73,6 +73,7 @@ data LowerExpr
   | LInt Integer
   | LString Text
   | LBool Bool
+  | LList [LowerExpr]
   | LPage LowerExpr LowerExpr
   | LRedirect Text
   | LViewEmpty
@@ -258,6 +259,8 @@ lowerCoreExpr expr =
       LString value
     CBool _ value ->
       LBool value
+    CList _ _ items ->
+      LList (fmap lowerCoreExpr items)
     CPage _ title body ->
       LPage (lowerCoreExpr title) (lowerCoreExpr body)
     CRedirect _ targetPath ->
@@ -367,6 +370,8 @@ expandExpr declEnv subst visited expr =
       LString value
     LBool value ->
       LBool value
+    LList items ->
+      LList (fmap (expandExpr declEnv subst visited) items)
     LPage title body ->
       LPage (expandExpr declEnv subst visited title) (expandExpr declEnv subst visited body)
     LRedirect targetPath ->
@@ -592,6 +597,8 @@ summarizeValue expr =
       "true"
     LBool False ->
       "false"
+    LList items ->
+      "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
     LConstruct tag _ ->
       tag
     LCall fn _ ->

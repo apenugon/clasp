@@ -158,6 +158,18 @@ record UserDirectory = {
 type BatchResult = Batch [UserDirectory]
 ```
 
+List literals use the same brackets and must stay homogeneous:
+
+```clasp
+module Main
+
+roster : [Str]
+roster = ["Ada", "Grace"]
+
+emptyRoster : [Str]
+emptyRoster = []
+```
+
 The first backend-boundary slice is also part of `v0`:
 
 ```clasp
@@ -208,6 +220,7 @@ atom        ::= lower-ident
               | upper-ident
               | integer
               | string
+              | list-expr
               | "true"
               | "false"
               | decode-expr
@@ -218,6 +231,7 @@ atom        ::= lower-ident
 decode-expr ::= "decode" type-atom expr
 encode-expr ::= "encode" expr
 record-expr ::= upper-ident "{" record-field-expr ("," record-field-expr)* "}"
+list-expr   ::= "[" (expr ("," expr)*)? "]"
 record-field-expr ::= lower-ident "=" expr
 match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
@@ -241,6 +255,7 @@ Notes:
 - A nullary constructor becomes an exported tagged JavaScript object.
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
+- A list literal becomes a JavaScript array, and every element in the literal must have the same type.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
 - Policies list the field classifications a disclosure boundary may expose.

@@ -1236,6 +1236,9 @@ emitExpr counter expr =
       (counter, "true")
     LBool False ->
       (counter, "false")
+    LList items ->
+      let (nextCounter, itemTexts) = emitExprList counter items
+       in (nextCounter, "[" <> T.intercalate ", " itemTexts <> "]")
     LPage title body ->
       let (counterAfterTitle, titleText) = emitExpr counter title
           (counterAfterBody, bodyText) = emitExpr counterAfterTitle body
