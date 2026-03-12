@@ -22,7 +22,10 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as LT
-import Clasp.Core (CoreModule (..))
+import Clasp.Core
+  ( CoreHookDecl (..)
+  , CoreModule (..)
+  )
 import Clasp.Lower
   ( LowerFormField (..)
   , LowerPageFlow (..)
@@ -35,6 +38,8 @@ import Clasp.Syntax
   ( ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , ModuleName (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
@@ -96,16 +101,18 @@ buildContextGraph modl =
     builtinSchemaNodes = mapMaybe builtinSchemaNode (Set.toList routeBoundaryNames)
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
+    hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     routeNodes = fmap buildRouteNode (coreModuleRouteDecls modl)
     pageNodes = fmap buildPageNode pageFlows
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> hookNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
+        <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildRouteEdges (coreModuleRouteDecls modl)
         <> concatMap buildPageEdges pageFlows
         <> concatMap buildForeignEdges (coreModuleForeignDecls modl)
@@ -170,6 +177,38 @@ buildGuideEntryNode guideName entryDecl =
         , ("value", ContextAttrText (guideEntryDeclValue entryDecl))
         ]
     }
+
+buildHookNodes :: CoreHookDecl -> [ContextNode]
+buildHookNodes coreHookDecl =
+  [ hookNode
+  , triggerNode
+  ]
+  where
+    hookDecl = coreHookSourceDecl coreHookDecl
+    triggerDecl = hookDeclTrigger hookDecl
+    hookNode =
+      ContextNode
+        { contextNodeId = hookNodeId (hookDeclName hookDecl)
+        , contextNodeKind = "hook"
+        , contextNodeSpan = Just (hookDeclSpan hookDecl)
+        , contextNodeAttrs =
+            [ ("name", ContextAttrText (hookDeclName hookDecl))
+            , ("identity", ContextAttrText (hookDeclIdentity hookDecl))
+            , ("requestType", ContextAttrText (hookDeclRequestType hookDecl))
+            , ("responseType", ContextAttrText (hookDeclResponseType hookDecl))
+            , ("handlerName", ContextAttrText (hookDeclHandlerName hookDecl))
+            ]
+        }
+    triggerNode =
+      ContextNode
+        { contextNodeId = hookTriggerNodeId (hookDeclName hookDecl)
+        , contextNodeKind = "hookTrigger"
+        , contextNodeSpan = Just (hookTriggerDeclSpan triggerDecl)
+        , contextNodeAttrs =
+            [ ("hookName", ContextAttrText (hookDeclName hookDecl))
+            , ("event", ContextAttrText (hookTriggerDeclEvent triggerDecl))
+            ]
+        }
 
 builtinSchemaNode :: Text -> Maybe ContextNode
 builtinSchemaNode name =
@@ -334,6 +373,30 @@ buildGuideEdges guideDecl =
         Nothing ->
           []
 
+buildHookEdges :: CoreHookDecl -> [ContextEdge]
+buildHookEdges coreHookDecl =
+  [ ContextEdge
+      { contextEdgeKind = "hook-trigger"
+      , contextEdgeFrom = hookNodeId (hookDeclName hookDecl)
+      , contextEdgeTo = hookTriggerNodeId (hookDeclName hookDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "hook-request-schema"
+      , contextEdgeFrom = hookNodeId (hookDeclName hookDecl)
+      , contextEdgeTo = schemaNodeId (hookDeclRequestType hookDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "hook-response-schema"
+      , contextEdgeFrom = hookNodeId (hookDeclName hookDecl)
+      , contextEdgeTo = schemaNodeId (hookDeclResponseType hookDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    hookDecl = coreHookSourceDecl coreHookDecl
+
 buildRouteEdges :: RouteDecl -> [ContextEdge]
 buildRouteEdges routeDecl =
   mapMaybe id
@@ -443,6 +506,12 @@ guideNodeId name = ContextNodeId ("guide:" <> name)
 
 guideEntryNodeId :: Text -> Text -> ContextNodeId
 guideEntryNodeId guideName entryName = ContextNodeId ("guide-entry:" <> guideName <> ":" <> entryName)
+
+hookNodeId :: Text -> ContextNodeId
+hookNodeId name = ContextNodeId ("hook:" <> name)
+
+hookTriggerNodeId :: Text -> ContextNodeId
+hookTriggerNodeId hookName = ContextNodeId ("hook-trigger:" <> hookName)
 
 routeNodeId :: Text -> ContextNodeId
 routeNodeId name = ContextNodeId ("route:" <> name)

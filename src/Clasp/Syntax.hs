@@ -7,6 +7,8 @@ module Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -92,6 +94,7 @@ data Module = Module
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
   , moduleGuideDecls :: [GuideDecl]
+  , moduleHookDecls :: [HookDecl]
   , modulePolicyDecls :: [PolicyDecl]
   , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
@@ -115,6 +118,29 @@ data GuideDecl = GuideDecl
   , guideDeclExtends :: Maybe Text
   , guideDeclExtendsSpan :: Maybe SourceSpan
   , guideDeclEntries :: [GuideEntryDecl]
+  }
+  deriving (Eq, Show)
+
+data HookTriggerDecl = HookTriggerDecl
+  { hookTriggerDeclEvent :: Text
+  , hookTriggerDeclSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data HookDecl = HookDecl
+  { hookDeclName :: Text
+  , hookDeclSpan :: SourceSpan
+  , hookDeclNameSpan :: SourceSpan
+  , hookDeclIdentity :: Text
+  , hookDeclTrigger :: HookTriggerDecl
+  , hookDeclRequestType :: Text
+  , hookDeclRequestDecl :: RouteBoundaryDecl
+  , hookDeclRequestTypeSpan :: SourceSpan
+  , hookDeclResponseType :: Text
+  , hookDeclResponseDecl :: RouteBoundaryDecl
+  , hookDeclResponseTypeSpan :: SourceSpan
+  , hookDeclHandlerName :: Text
+  , hookDeclHandlerSpan :: SourceSpan
   }
   deriving (Eq, Show)
 

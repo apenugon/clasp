@@ -54,6 +54,7 @@ import Clasp.Compiler
 import Clasp.Core
   ( CoreDecl (..)
   , CoreExpr (..)
+  , CoreHookDecl (..)
   , CoreModule (..)
   )
 import Clasp.Diagnostic
@@ -83,6 +84,8 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
@@ -233,6 +236,21 @@ parserTests =
                   (normalizeGuideEntries (guideDeclEntries childGuide))
               other ->
                 assertFailure ("expected two guide declarations, got " <> show (length other))
+    , testCase "parses hooks with lifecycle triggers" $
+        case parseSource "inline" hookSource of
+          Left err ->
+            assertFailure ("expected hook source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleHookDecls modl of
+              [hookDecl] -> do
+                assertEqual "hook name" "workerStart" (hookDeclName hookDecl)
+                assertEqual "hook identity" "hook:workerStart" (hookDeclIdentity hookDecl)
+                assertEqual "hook trigger" (HookTriggerDecl "worker.start" dummySpan) ((hookDeclTrigger hookDecl) {hookTriggerDeclSpan = dummySpan})
+                assertEqual "hook request" "WorkerBoot" (hookDeclRequestType hookDecl)
+                assertEqual "hook response" "HookAck" (hookDeclResponseType hookDecl)
+                assertEqual "hook handler" "bootstrapWorker" (hookDeclHandlerName hookDecl)
+              other ->
+                assertFailure ("expected one hook declaration, got " <> show (length other))
     , testCase "parses foreign declarations, routes, and json boundaries" $
         case parseSource "inline" serviceSource of
           Left err ->
@@ -541,6 +559,16 @@ checkerTests =
             assertFailure ("expected guide source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right checked ->
             assertEqual "guide count" 2 (length (coreModuleGuideDecls checked))
+    , testCase "accepts hooks with typed lifecycle handlers" $
+        case checkSource "hook" hookSource of
+          Left err ->
+            assertFailure ("expected hook source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case coreModuleHookDecls checked of
+              [CoreHookDecl hookDecl] ->
+                assertEqual "hook trigger event" "worker.start" (hookTriggerDeclEvent (hookDeclTrigger hookDecl))
+              other ->
+                assertFailure ("expected one checked hook declaration, got " <> show (length other))
     , testCase "accepts compiler-known page primitives" $
         case checkSource "page" pageSource of
           Left err ->
@@ -692,6 +720,8 @@ checkerTests =
         assertHasCode "E_UNKNOWN_GUIDE_PARENT" (checkSource "bad" missingGuideParentSource)
     , testCase "rejects cyclic guide inheritance" $
         assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
+    , testCase "rejects hooks whose handlers do not match declared schemas" $
+        assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects heterogeneous list literals" $
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
     , testCase "rejects equality over unsupported or mismatched types" $
@@ -896,6 +926,24 @@ airTests =
                   (("value", AirAttrText "Run bash scripts/verify-all.sh before finishing.") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected worker verification guide entry AIR node"
+    , testCase "air retains hook triggers and typed boundaries" $
+        case airSource "hook" hookSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected hook root" (AirNodeId "hook:workerStart" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "hook:workerStart") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool "expected hook trigger ref" (("trigger", AirAttrNode (AirNodeId "hook-trigger:workerStart")) `elem` airNodeAttrs node)
+                assertBool "expected hook request boundary" (("request", AirAttrObject [("type", AirAttrText "WorkerBoot")]) `elem` airNodeAttrs node)
+                assertBool "expected hook response boundary" (("response", AirAttrObject [("type", AirAttrText "HookAck")]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected workerStart hook AIR node"
+            case findAirNode (AirNodeId "hook-trigger:workerStart") (airModuleNodes airModule) of
+              Just node ->
+                assertBool "expected lifecycle event" (("event", AirAttrText "worker.start") `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected hook trigger AIR node"
     , testCase "air serialization is replay-friendly and deterministic" $
         case renderAirSourceJson "adt" adtSource of
           Left err ->
@@ -952,6 +1000,16 @@ contextTests =
             assertBool "expected guide entry node" ("\"guide-entry:Repo:scope\"" `T.isInfixOf` jsonText)
             assertBool "expected guide extends edge" ("\"guide-extends\"" `T.isInfixOf` jsonText)
             assertBool "expected guide entry edge" ("\"guide-has-entry\"" `T.isInfixOf` jsonText)
+    , testCase "context graph includes hooks, lifecycle triggers, and schema edges" $
+        case renderContextSourceJson "hook" hookSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected hook node" ("\"hook:workerStart\"" `T.isInfixOf` jsonText)
+            assertBool "expected hook trigger node" ("\"hook-trigger:workerStart\"" `T.isInfixOf` jsonText)
+            assertBool "expected hook trigger edge" ("\"hook-trigger\"" `T.isInfixOf` jsonText)
+            assertBool "expected hook request edge" ("\"hook-request-schema\"" `T.isInfixOf` jsonText)
     , testCase "claspc context writes the default context artifact when -o is omitted" $
         withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2152,6 +2210,22 @@ guideSource =
     , "main = \"ok\""
     ]
 
+hookSource :: Text
+hookSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record WorkerBoot = { workerId : Str }"
+    , "record HookAck = { accepted : Bool }"
+    , ""
+    , "bootstrapWorker : WorkerBoot -> HookAck"
+    , "bootstrapWorker req = HookAck { accepted = true }"
+    , ""
+    , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
+    , ""
+    , "main = \"ok\""
+    ]
+
 missingGuideParentSource :: Text
 missingGuideParentSource =
   T.unlines
@@ -2176,6 +2250,23 @@ cyclicGuideSource =
     , "guide Worker extends Repo = {"
     , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
     , "}"
+    , ""
+    , "main = \"ok\""
+    ]
+
+badHookHandlerSource :: Text
+badHookHandlerSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record WorkerBoot = { workerId : Str }"
+    , "record HookAck = { accepted : Bool }"
+    , "record WrongAck = { note : Str }"
+    , ""
+    , "bootstrapWorker : WorkerBoot -> WrongAck"
+    , "bootstrapWorker req = WrongAck { note = req.workerId }"
+    , ""
+    , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
     , ""
     , "main = \"ok\""
     ]

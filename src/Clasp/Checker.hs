@@ -24,6 +24,7 @@ import qualified Data.Text as T
 import Clasp.Core
   ( CoreDecl (..)
   , CoreExpr (..)
+  , CoreHookDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -50,6 +51,7 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
   , MatchBranch (..)
   , Module (..)
   , Pattern (..)
@@ -83,6 +85,7 @@ data ModuleContext = ModuleContext
   , contextForeignDeclEnv :: ForeignDeclEnv
   , contextConstructorEnv :: ConstructorEnv
   , contextDeclMap :: DeclMap
+  , contextHookDecls :: [HookDecl]
   , contextRouteDecls :: [RouteDecl]
   }
 
@@ -379,6 +382,7 @@ checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       schemaRecordDecls = moduleRecordDecls modl
       guideDecls = moduleGuideDecls modl
+      hookDecls = moduleHookDecls modl
       policyDecls = modulePolicyDecls modl
       projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
@@ -387,6 +391,7 @@ checkModule modl = do
 
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
+  ensureUniqueHooks hookDecls
   ensureUniquePolicyDecls policyDecls
   ensureGuideHierarchy guideDecls
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
@@ -395,7 +400,7 @@ checkModule modl = do
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls routeDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls routeDecls
 
   constructorEnv <- buildConstructorEnv typeDecls
   ensureUniqueForeignDecls foreignDecls decls constructorEnv
@@ -411,6 +416,7 @@ checkModule modl = do
           , contextForeignDeclEnv = foreignDeclEnv
           , contextConstructorEnv = constructorEnv
           , contextDeclMap = Map.fromList [(declName decl, decl) | decl <- decls]
+          , contextHookDecls = hookDecls
           , contextRouteDecls = routeDecls
           }
 
@@ -418,6 +424,7 @@ checkModule modl = do
   let foreignTypeEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDeclType foreignDecl) | foreignDecl <- foreignDecls]
       termEnv = Map.unions [declTypeEnv, foreignTypeEnv, Map.map constructorInfoType constructorEnv]
 
+  traverse_ (checkHookDecl ctx termEnv) hookDecls
   traverse_ (checkRouteDecl ctx termEnv) routeDecls
   coreDecls <- traverse (checkDecl ctx termEnv) decls
   pure
@@ -426,6 +433,7 @@ checkModule modl = do
       , coreModuleTypeDecls = typeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleGuideDecls = guideDecls
+      , coreModuleHookDecls = fmap CoreHookDecl hookDecls
       , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
       , coreModuleProjectionDecls =
           zipWith
@@ -524,6 +532,24 @@ ensureGuideHierarchy guideDecls =
                   pure ()
                 Just parentGuideDecl ->
                   ensureGuideAcyclic env (guideDeclName guideDecl : seen) parentGuideDecl
+
+ensureUniqueHooks :: [HookDecl] -> Either DiagnosticBundle ()
+ensureUniqueHooks = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (hookDecl : rest) =
+      case Map.lookup (hookDeclName hookDecl) seen of
+        Just previousHookDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_HOOK"
+                ("Duplicate hook declaration for `" <> hookDeclName hookDecl <> "`.")
+                (Just (hookDeclNameSpan hookDecl))
+                ["Each hook name may only be declared once."]
+                [diagnosticRelated "previous hook declaration" (hookDeclNameSpan previousHookDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (hookDeclName hookDecl) hookDecl seen) rest
 
 ensureUniquePolicyDecls :: [PolicyDecl] -> Either DiagnosticBundle ()
 ensureUniquePolicyDecls = go Map.empty
@@ -738,12 +764,13 @@ ensureDistinctNamedTypes typeDeclEnv =
         Nothing ->
           pure ()
 
-ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [RouteDecl] -> Either DiagnosticBundle ()
-ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls routeDecls = do
+ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [HookDecl] -> [RouteDecl] -> Either DiagnosticBundle ()
+ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls routeDecls = do
   mapM_ checkTypeDecl typeDecls
   mapM_ checkRecordDecl recordDecls
   mapM_ checkForeignDecl foreignDecls
   mapM_ checkDeclAnnotation decls
+  mapM_ checkHookDeclTypes hookDecls
   mapM_ checkRouteDeclTypes routeDecls
   where
     checkTypeDecl typeDecl =
@@ -797,6 +824,10 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                   ["Use an explicit function type for foreign runtime bindings."]
                   [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
               ]
+
+    checkHookDeclTypes hookDecl = do
+      ensureHookRecordType hookDecl (hookDeclRequestType hookDecl) (hookDeclRequestTypeSpan hookDecl) "request"
+      ensureHookRecordType hookDecl (hookDeclResponseType hookDecl) (hookDeclResponseTypeSpan hookDecl) "response"
 
     checkRouteDeclTypes routeDecl = do
       ensureRecordType routeDecl (routeDeclRequestType routeDecl) (routeDeclRequestTypeSpan routeDecl) "request"
@@ -854,6 +885,17 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                 ["Record fields currently support primitive types, list types, nested record types, and nullary enum types only."]
                 [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
             ]
+
+    ensureHookRecordType hookDecl typeName primarySpan role =
+      unless (Map.member typeName recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_HOOK_TYPE"
+              ("Hook `" <> hookDeclName hookDecl <> "` must use a record type for its " <> role <> " body.")
+              (Just primarySpan)
+              ["Declare `" <> typeName <> "` as a record before using it in a hook."]
+              []
+          ]
 
     ensureRecordType routeDecl typeName primarySpan role =
       unless (Map.member typeName recordDeclEnv) $
@@ -1193,6 +1235,55 @@ checkRouteDecl ctx termEnv routeDecl =
                     <> "."
                 ]
                 (relatedForHandler (routeDeclHandlerName routeDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
+                ]
+
+checkHookDecl :: ModuleContext -> DeclTypeEnv -> HookDecl -> Either DiagnosticBundle ()
+checkHookDecl ctx termEnv hookDecl =
+  case Map.lookup (hookDeclHandlerName hookDecl) termEnv of
+    Nothing ->
+      Left $
+        singleDiagnosticAt
+          "E_UNKNOWN_HOOK_HANDLER"
+          ("Unknown hook handler `" <> hookDeclHandlerName hookDecl <> "`.")
+          (hookDeclHandlerSpan hookDecl)
+          ["Declare the handler before using it in a hook."]
+    Just handlerType ->
+      case handlerType of
+        TFunction [TNamed requestName] (TNamed responseName)
+          | requestName == hookDeclRequestType hookDecl
+          , responseName == hookDeclResponseType hookDecl ->
+              pure ()
+          | otherwise ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_HOOK_HANDLER_TYPE"
+                    ("Hook handler `" <> hookDeclHandlerName hookDecl <> "` does not match the hook schema.")
+                    (Just (hookDeclHandlerSpan hookDecl))
+                    [ "Expected "
+                        <> hookDeclRequestType hookDecl
+                        <> " -> "
+                        <> hookDeclResponseType hookDecl
+                        <> " but got "
+                        <> renderType handlerType
+                        <> "."
+                    ]
+                    (relatedForHandler (hookDeclHandlerName hookDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
+                ]
+        _ ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_HOOK_HANDLER_TYPE"
+                ("Hook handler `" <> hookDeclHandlerName hookDecl <> "` must be a function from request record to response record.")
+                (Just (hookDeclHandlerSpan hookDecl))
+                [ "Expected "
+                    <> hookDeclRequestType hookDecl
+                    <> " -> "
+                    <> hookDeclResponseType hookDecl
+                    <> " but got "
+                    <> renderType handlerType
+                    <> "."
+                ]
+                (relatedForHandler (hookDeclHandlerName hookDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
             ]
 
 inferDeclDraft :: ModuleContext -> DeclTypeEnv -> Decl -> Maybe Type -> InferM DraftDecl

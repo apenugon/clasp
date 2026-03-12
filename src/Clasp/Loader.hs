@@ -139,6 +139,7 @@ combineModules entryModule state =
         , moduleTypeDecls = concatMap moduleTypeDecls (importedModules <> [entryModule])
         , moduleRecordDecls = concatMap moduleRecordDecls (importedModules <> [entryModule])
         , moduleGuideDecls = concatMap moduleGuideDecls (importedModules <> [entryModule])
+        , moduleHookDecls = concatMap moduleHookDecls (importedModules <> [entryModule])
         , modulePolicyDecls = concatMap modulePolicyDecls (importedModules <> [entryModule])
         , moduleProjectionDecls = concatMap moduleProjectionDecls (importedModules <> [entryModule])
         , moduleForeignDecls = concatMap moduleForeignDecls (importedModules <> [entryModule])

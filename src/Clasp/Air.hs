@@ -23,6 +23,7 @@ import qualified Data.Text.Lazy as LT
 import Clasp.Core
   ( CoreDecl (..)
   , CoreExpr (..)
+  , CoreHookDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -39,6 +40,8 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
@@ -100,6 +103,7 @@ buildAirModule modl =
     typeNodes = concatMap buildTypeDeclNodes (coreModuleTypeDecls modl)
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
     guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
+    hookNodes = concatMap buildHookDeclNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
     projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
@@ -109,6 +113,7 @@ buildAirModule modl =
       typeNodes
         <> recordNodes
         <> guideNodes
+        <> hookNodes
         <> policyNodes
         <> projectionNodes
         <> foreignNodes
@@ -213,6 +218,42 @@ buildGuideEntryDeclNode guideName entryDecl =
         , ("value", AirAttrText (guideEntryDeclValue entryDecl))
         ]
     }
+
+buildHookDeclNodes :: CoreHookDecl -> [AirNode]
+buildHookDeclNodes coreHookDecl =
+  [ hookNode
+  , triggerNode
+  ]
+  where
+    hookDecl = coreHookSourceDecl coreHookDecl
+    triggerDecl = hookDeclTrigger hookDecl
+    triggerId = hookTriggerDeclId (hookDeclName hookDecl)
+    hookNode =
+      AirNode
+        { airNodeId = hookDeclId (hookDeclName hookDecl)
+        , airNodeKind = "hookDecl"
+        , airNodeSpan = Just (hookDeclSpan hookDecl)
+        , airNodeType = Nothing
+        , airNodeAttrs =
+            [ ("name", AirAttrText (hookDeclName hookDecl))
+            , ("identity", AirAttrText (hookDeclIdentity hookDecl))
+            , ("trigger", AirAttrNode triggerId)
+            , ("request", boundaryAttr (hookDeclRequestDecl hookDecl))
+            , ("response", boundaryAttr (hookDeclResponseDecl hookDecl))
+            , ("handlerName", AirAttrText (hookDeclHandlerName hookDecl))
+            ]
+        }
+    triggerNode =
+      AirNode
+        { airNodeId = triggerId
+        , airNodeKind = "hookTriggerDecl"
+        , airNodeSpan = Just (hookTriggerDeclSpan triggerDecl)
+        , airNodeType = Nothing
+        , airNodeAttrs =
+            [ ("event", AirAttrText (hookTriggerDeclEvent triggerDecl))
+            , ("hookName", AirAttrText (hookDeclName hookDecl))
+            ]
+        }
 
 buildPolicyDeclNodes :: CorePolicyDecl -> [AirNode]
 buildPolicyDeclNodes corePolicyDecl =
@@ -669,6 +710,12 @@ guideDeclId name = AirNodeId ("guide:" <> name)
 
 guideEntryDeclId :: Text -> Text -> AirNodeId
 guideEntryDeclId guideName entryName = AirNodeId ("guide-entry:" <> guideName <> ":" <> entryName)
+
+hookDeclId :: Text -> AirNodeId
+hookDeclId name = AirNodeId ("hook:" <> name)
+
+hookTriggerDeclId :: Text -> AirNodeId
+hookTriggerDeclId hookName = AirNodeId ("hook-trigger:" <> hookName)
 
 policyDeclId :: Text -> AirNodeId
 policyDeclId name = AirNodeId ("policy:" <> name)

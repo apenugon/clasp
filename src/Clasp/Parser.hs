@@ -55,6 +55,8 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
   , Module (..)
@@ -86,6 +88,7 @@ data TopLevelItem
   = TopTypeDecl TypeDecl
   | TopRecordDecl RecordDecl
   | TopGuideDecl GuideDecl
+  | TopHookDecl HookDecl
   | TopPolicyDecl PolicyDecl
   | TopProjectionDecl ProjectionDecl
   | TopForeignDecl ForeignDecl
@@ -128,6 +131,7 @@ topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
   try projectionDeclParser
     <|> try policyDeclParser
+    <|> try hookDeclParser
     <|> try guideDeclParser
     <|> try foreignDeclParser
     <|> try routeDeclParser
@@ -135,6 +139,41 @@ topLevelItemParser =
     <|> try typeDeclParser
     <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
+
+hookDeclParser :: Parser TopLevelItem
+hookDeclParser = do
+  start <- getSourcePos
+  keyword "hook"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  (triggerSpan, triggerEvent) <- locatedStringLiteral
+  (requestTypeSpan, requestTypeName) <- locatedUpperIdentifier
+  _ <- symbol "->"
+  (responseTypeSpan, responseTypeName) <- locatedUpperIdentifier
+  (handlerSpan, handlerName) <- locatedLowerIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopHookDecl $
+    HookDecl
+      { hookDeclName = name
+      , hookDeclSpan = makeSourceSpan start end
+      , hookDeclNameSpan = nameSpan
+      , hookDeclIdentity = "hook:" <> name
+      , hookDeclTrigger =
+          HookTriggerDecl
+            { hookTriggerDeclEvent = triggerEvent
+            , hookTriggerDeclSpan = triggerSpan
+            }
+      , hookDeclRequestType = requestTypeName
+      , hookDeclRequestDecl = RouteBoundaryDecl requestTypeName
+      , hookDeclRequestTypeSpan = requestTypeSpan
+      , hookDeclResponseType = responseTypeName
+      , hookDeclResponseDecl = RouteBoundaryDecl responseTypeName
+      , hookDeclResponseTypeSpan = responseTypeSpan
+      , hookDeclHandlerName = handlerName
+      , hookDeclHandlerSpan = handlerSpan
+      }
 
 guideDeclParser :: Parser TopLevelItem
 guideDeclParser = do
@@ -764,8 +803,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
-    foldM step ([], [], [], [], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -774,6 +813,7 @@ attachSignatures (name, imports, items) = do
         , moduleTypeDecls = reverse typeDecls
         , moduleRecordDecls = reverse recordDecls
         , moduleGuideDecls = reverse guideDecls
+        , moduleHookDecls = reverse hookDecls
         , modulePolicyDecls = reverse policyDecls
         , moduleProjectionDecls = reverse projectionDecls
         , moduleForeignDecls = reverse foreignDecls
@@ -791,22 +831,24 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopGuideDecl guideDecl ->
-          pure (typeDecls, recordDecls, guideDecl : guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecl : guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopHookDecl hookDecl ->
+          pure (typeDecls, recordDecls, guideDecls, hookDecl : hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopPolicyDecl policyDecl ->
-          pure (typeDecls, recordDecls, guideDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopProjectionDecl projectionDecl ->
-          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -823,6 +865,7 @@ attachSignatures (name, imports, items) = do
                 ( typeDecls
                 , recordDecls
                 , guideDecls
+                , hookDecls
                 , policyDecls
                 , projectionDecls
                 , foreignDecls
@@ -842,7 +885,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, guideDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, guideDecls, hookDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =

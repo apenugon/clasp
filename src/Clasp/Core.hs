@@ -3,6 +3,7 @@
 module Clasp.Core
   ( CoreDecl (..)
   , CoreExpr (..)
+  , CoreHookDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -23,6 +24,7 @@ import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
+  , HookDecl (..)
   , ModuleName
   , PolicyDecl (..)
   , ProjectionDecl (..)
@@ -46,6 +48,7 @@ data CoreModule = CoreModule
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleGuideDecls :: [GuideDecl]
+  , coreModuleHookDecls :: [CoreHookDecl]
   , coreModulePolicyDecls :: [CorePolicyDecl]
   , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]
@@ -56,6 +59,11 @@ data CoreModule = CoreModule
 
 data CorePolicyDecl = CorePolicyDecl
   { corePolicySourceDecl :: PolicyDecl
+  }
+  deriving (Eq, Show)
+
+data CoreHookDecl = CoreHookDecl
+  { coreHookSourceDecl :: HookDecl
   }
   deriving (Eq, Show)
 
