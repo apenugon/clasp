@@ -9,6 +9,21 @@ function $claspRuntime(name) {
   return runtime[name];
 }
 
+function $claspHostBinding(name) {
+  const binding = $claspHostBindingMap[name];
+  if (!binding) {
+    throw new Error(`Missing Clasp host binding manifest: ${name}`);
+  }
+  return binding;
+}
+
+function $claspCallHostBinding(name, args) {
+  const binding = $claspHostBinding(name);
+  const runtime = $claspRuntime(binding.runtimeName);
+  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));
+  return binding.returns.fromHost(runtime(...hostArgs));
+}
+
 function $claspExpectObject(value, path) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${path} expected an object`);
@@ -154,6 +169,38 @@ const $claspSchema_Bool = { kind: "bool" };
 const $claspSchema_LeadPriority = { kind: "enum", name: "LeadPriority" };
 const $claspSchema_LeadSegment = { kind: "enum", name: "LeadSegment" };
 const $claspSchema_ReviewStatus = { kind: "enum", name: "ReviewStatus" };
+const $claspSchema_Principal = {
+  kind: "record",
+  name: "Principal",
+  fields: {
+    id: $claspSchema_Str,
+  }
+};
+const $claspSchema_Tenant = {
+  kind: "record",
+  name: "Tenant",
+  fields: {
+    id: $claspSchema_Str,
+  }
+};
+const $claspSchema_ResourceIdentity = {
+  kind: "record",
+  name: "ResourceIdentity",
+  fields: {
+    resourceType: $claspSchema_Str,
+    resourceId: $claspSchema_Str,
+  }
+};
+const $claspSchema_AuthSession = {
+  kind: "record",
+  name: "AuthSession",
+  fields: {
+    sessionId: $claspSchema_Str,
+    principal: $claspSchema_Principal,
+    tenant: $claspSchema_Tenant,
+    resource: $claspSchema_ResourceIdentity,
+  }
+};
 const $claspSchema_Empty = {
   kind: "record",
   name: "Empty",
@@ -296,6 +343,102 @@ function $serialize_ReviewStatus(value, path = "value") {
 }
 function $decode_ReviewStatus(jsonText) { return $validate_ReviewStatus(JSON.parse(jsonText), "value"); }
 function $encode_ReviewStatus(value) { return JSON.stringify($serialize_ReviewStatus(value, "value")); }
+
+function $validate_Principal(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const idValue = objectValue["id"];
+  const id = $claspExpectStr(idValue, path + ".id");
+  return { id: id };
+}
+function $validateInternal_Principal(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const idValue = $claspRequireField(objectValue, "id", path);
+  const id = $claspExpectStr(idValue, path + ".id");
+  return { id: id };
+}
+function $serialize_Principal(value) {
+  const id = $claspExpectStr(value.id, "value");
+  return { id: id };
+}
+function $decode_Principal(jsonText) { return $validate_Principal(JSON.parse(jsonText), "value"); }
+function $encode_Principal(value) { return JSON.stringify($serialize_Principal($validateInternal_Principal(value, "value"))); }
+
+function $validate_Tenant(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const idValue = objectValue["id"];
+  const id = $claspExpectStr(idValue, path + ".id");
+  return { id: id };
+}
+function $validateInternal_Tenant(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const idValue = $claspRequireField(objectValue, "id", path);
+  const id = $claspExpectStr(idValue, path + ".id");
+  return { id: id };
+}
+function $serialize_Tenant(value) {
+  const id = $claspExpectStr(value.id, "value");
+  return { id: id };
+}
+function $decode_Tenant(jsonText) { return $validate_Tenant(JSON.parse(jsonText), "value"); }
+function $encode_Tenant(value) { return JSON.stringify($serialize_Tenant($validateInternal_Tenant(value, "value"))); }
+
+function $validate_ResourceIdentity(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const resourceTypeValue = objectValue["resourceType"];
+  const resourceType = $claspExpectStr(resourceTypeValue, path + ".resourceType");
+  const resourceIdValue = objectValue["resourceId"];
+  const resourceId = $claspExpectStr(resourceIdValue, path + ".resourceId");
+  return { resourceType: resourceType, resourceId: resourceId };
+}
+function $validateInternal_ResourceIdentity(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const resourceTypeValue = $claspRequireField(objectValue, "resourceType", path);
+  const resourceType = $claspExpectStr(resourceTypeValue, path + ".resourceType");
+  const resourceIdValue = $claspRequireField(objectValue, "resourceId", path);
+  const resourceId = $claspExpectStr(resourceIdValue, path + ".resourceId");
+  return { resourceType: resourceType, resourceId: resourceId };
+}
+function $serialize_ResourceIdentity(value) {
+  const resourceType = $claspExpectStr(value.resourceType, "value");
+  const resourceId = $claspExpectStr(value.resourceId, "value");
+  return { resourceType: resourceType, resourceId: resourceId };
+}
+function $decode_ResourceIdentity(jsonText) { return $validate_ResourceIdentity(JSON.parse(jsonText), "value"); }
+function $encode_ResourceIdentity(value) { return JSON.stringify($serialize_ResourceIdentity($validateInternal_ResourceIdentity(value, "value"))); }
+
+function $validate_AuthSession(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const sessionIdValue = objectValue["sessionId"];
+  const sessionId = $claspExpectStr(sessionIdValue, path + ".sessionId");
+  const principalValue = objectValue["principal"];
+  const principal = $validate_Principal(principalValue, path + ".principal");
+  const tenantValue = objectValue["tenant"];
+  const tenant = $validate_Tenant(tenantValue, path + ".tenant");
+  const resourceValue = objectValue["resource"];
+  const resource = $validate_ResourceIdentity(resourceValue, path + ".resource");
+  return { sessionId: sessionId, principal: principal, tenant: tenant, resource: resource };
+}
+function $validateInternal_AuthSession(value, path = "value") {
+  const objectValue = $claspExpectObject(value, path);
+  const sessionIdValue = $claspRequireField(objectValue, "sessionId", path);
+  const sessionId = $claspExpectStr(sessionIdValue, path + ".sessionId");
+  const principalValue = $claspRequireField(objectValue, "principal", path);
+  const principal = $validateInternal_Principal(principalValue, path + ".principal");
+  const tenantValue = $claspRequireField(objectValue, "tenant", path);
+  const tenant = $validateInternal_Tenant(tenantValue, path + ".tenant");
+  const resourceValue = $claspRequireField(objectValue, "resource", path);
+  const resource = $validateInternal_ResourceIdentity(resourceValue, path + ".resource");
+  return { sessionId: sessionId, principal: principal, tenant: tenant, resource: resource };
+}
+function $serialize_AuthSession(value) {
+  const sessionId = $claspExpectStr(value.sessionId, "value");
+  const principal = $serialize_Principal(value.principal);
+  const tenant = $serialize_Tenant(value.tenant);
+  const resource = $serialize_ResourceIdentity(value.resource);
+  return { sessionId: sessionId, principal: principal, tenant: tenant, resource: resource };
+}
+function $decode_AuthSession(jsonText) { return $validate_AuthSession(JSON.parse(jsonText), "value"); }
+function $encode_AuthSession(value) { return JSON.stringify($serialize_AuthSession($validateInternal_AuthSession(value, "value"))); }
 
 function $validate_Empty(value, path = "value") {
   const objectValue = $claspExpectObject(value, path);
@@ -491,12 +634,123 @@ function $serialize_InboxSnapshot(value) {
 function $decode_InboxSnapshot(jsonText) { return $validate_InboxSnapshot(JSON.parse(jsonText), "value"); }
 function $encode_InboxSnapshot(value) { return JSON.stringify($serialize_InboxSnapshot($validateInternal_InboxSnapshot(value, "value"))); }
 
-function mockLeadSummaryModel($0) { return $claspRuntime("mockLeadSummaryModel")($0); }
-function storeLead($0, $1) { return $claspRuntime("storeLead")($0, $1); }
-function loadInbox($0) { return $claspRuntime("loadInbox")($0); }
-function loadPrimaryLead($0) { return $claspRuntime("loadPrimaryLead")($0); }
-function loadSecondaryLead($0) { return $claspRuntime("loadSecondaryLead")($0); }
-function reviewLead($0) { return $claspRuntime("reviewLead")($0); }
+export const __claspHostBindings = [
+  {
+    name: "mockLeadSummaryModel",
+    runtimeName: "mockLeadSummaryModel",
+    params: [
+      {
+        index: 0,
+        type: "LeadIntake",
+        schema: $claspSchema_LeadIntake,
+        toHost(value) { return $serialize_LeadIntake($validateInternal_LeadIntake(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+  {
+    name: "storeLead",
+    runtimeName: "storeLead",
+    params: [
+      {
+        index: 0,
+        type: "LeadIntake",
+        schema: $claspSchema_LeadIntake,
+        toHost(value) { return $serialize_LeadIntake($validateInternal_LeadIntake(value, "value")); }
+      },
+      {
+        index: 1,
+        type: "LeadSummary",
+        schema: $claspSchema_LeadSummary,
+        toHost(value) { return $serialize_LeadSummary($validateInternal_LeadSummary(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+  {
+    name: "loadInbox",
+    runtimeName: "loadInbox",
+    params: [
+      {
+        index: 0,
+        type: "Empty",
+        schema: $claspSchema_Empty,
+        toHost(value) { return $serialize_Empty($validateInternal_Empty(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+  {
+    name: "loadPrimaryLead",
+    runtimeName: "loadPrimaryLead",
+    params: [
+      {
+        index: 0,
+        type: "Empty",
+        schema: $claspSchema_Empty,
+        toHost(value) { return $serialize_Empty($validateInternal_Empty(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+  {
+    name: "loadSecondaryLead",
+    runtimeName: "loadSecondaryLead",
+    params: [
+      {
+        index: 0,
+        type: "Empty",
+        schema: $claspSchema_Empty,
+        toHost(value) { return $serialize_Empty($validateInternal_Empty(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+  {
+    name: "reviewLead",
+    runtimeName: "reviewLead",
+    params: [
+      {
+        index: 0,
+        type: "LeadReview",
+        schema: $claspSchema_LeadReview,
+        toHost(value) { return $serialize_LeadReview($validateInternal_LeadReview(value, "value")); }
+      },
+    ],
+    returns: {
+      type: "Str",
+      schema: $claspSchema_Str,
+      fromHost(value) { return $claspExpectStr(value, "result"); }
+    }
+  },
+];
+const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));
+function mockLeadSummaryModel($0) { return $claspCallHostBinding("mockLeadSummaryModel", [$0]); }
+function storeLead($0, $1) { return $claspCallHostBinding("storeLead", [$0, $1]); }
+function loadInbox($0) { return $claspCallHostBinding("loadInbox", [$0]); }
+function loadPrimaryLead($0) { return $claspCallHostBinding("loadPrimaryLead", [$0]); }
+function loadSecondaryLead($0) { return $claspCallHostBinding("loadSecondaryLead", [$0]); }
+function reviewLead($0) { return $claspCallHostBinding("reviewLead", [$0]); }
 
 export const Low = { $tag: "Low" };
 export const Medium = { $tag: "Medium" };

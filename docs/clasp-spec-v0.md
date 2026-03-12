@@ -230,6 +230,7 @@ Notes:
 - `decode` validates and decodes JSON text into a primitive or record type.
 - `encode` serializes a primitive or record value into JSON text.
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
+- Foreign declarations also emit structured host-binding manifests so host code can target schema-shaped argument and result contracts instead of compiler-internal tagged values.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Function application compiles to JavaScript function calls.
 - Match expressions compile to a JavaScript `switch` over constructor tags.

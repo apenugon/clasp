@@ -474,7 +474,10 @@ compileTests =
           Left err ->
             assertFailure ("expected service compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
-            assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $claspRuntime(\"mockLeadSummaryModel\")($0); }" `T.isInfixOf` emitted)
+            assertBool "expected foreign runtime wrapper" ("function mockLeadSummaryModel($0) { return $claspCallHostBinding(\"mockLeadSummaryModel\", [$0]); }" `T.isInfixOf` emitted)
+            assertBool "expected host binding manifest export" ("export const __claspHostBindings = [" `T.isInfixOf` emitted)
+            assertBool "expected host binding manifest schema" ("schema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+            assertBool "expected host binding manifest return type" ("returns: {" `T.isInfixOf` emitted)
             assertBool "expected enum decoder" ("function $decode_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected internal enum validator" ("function $validateInternal_LeadPriority" `T.isInfixOf` emitted)
             assertBool "expected record decoder" ("function $decode_LeadSummary" `T.isInfixOf` emitted)
@@ -598,7 +601,7 @@ compileTests =
             runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected landing, create, inbox, detail, review, and invalid form behavior"
-              "{\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
+              "{\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
     ]
 
@@ -1193,6 +1196,9 @@ leadInboxRuntimeScript compiledPath runtimePath =
   T.pack . unlines $
     [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
     , "import { installRuntime, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const manifest = Object.fromEntries(compiledModule.__claspHostBindings.map((binding) => [binding.name, binding]));"
+    , "let structuredModelArg = false;"
+    , "let structuredStoreArg = false;"
     , "const leads = ["
     , "  {"
     , "    leadId: 'lead-2',"
@@ -1219,22 +1225,24 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "];"
     , "installRuntime({"
     , "  mockLeadSummaryModel(intake) {"
+    , "    structuredModelArg = typeof intake.segment === 'string' && intake.segment === 'enterprise';"
     , "    const priority = intake.budget >= 50000 ? 'High' : intake.budget >= 20000 ? 'Medium' : 'Low';"
     , "    return JSON.stringify({"
     , "      summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,"
     , "      priority: priority.toLowerCase(),"
-    , "      segment: intake.segment?.$tag?.toLowerCase() ?? 'startup',"
+    , "      segment: intake.segment ?? 'startup',"
     , "      followUpRequired: intake.budget >= 20000"
     , "    });"
     , "  },"
     , "  storeLead(intake, summary) {"
+    , "    structuredStoreArg = typeof summary.priority === 'string' && typeof summary.segment === 'string';"
     , "    const lead = {"
     , "      leadId: `lead-${leads.length + 1}`,"
     , "      company: intake.company,"
     , "      contact: intake.contact,"
     , "      summary: summary.summary,"
-    , "      priority: summary.priority?.$tag?.toLowerCase() ?? 'low',"
-    , "      segment: summary.segment?.$tag?.toLowerCase() ?? 'startup',"
+    , "      priority: summary.priority ?? 'low',"
+    , "      segment: summary.segment ?? 'startup',"
     , "      followUpRequired: summary.followUpRequired,"
     , "      reviewStatus: 'new',"
     , "      reviewNote: ''"
@@ -1302,6 +1310,14 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "  invalidMessage = error instanceof Error ? error.message : String(error);"
     , "}"
     , "console.log(JSON.stringify({"
+    , "  manifestTypes: ["
+    , "    manifest.mockLeadSummaryModel.params[0].type,"
+    , "    `${manifest.storeLead.params[0].type} -> ${manifest.storeLead.params[1].type}`,"
+    , "    `${manifest.loadInbox.params[0].type} -> ${manifest.loadInbox.returns.type}`,"
+    , "    manifest.reviewLead.params[0].type"
+    , "  ],"
+    , "  structuredModelArg,"
+    , "  structuredStoreArg,"
     , "  landingHasForm: landingHtml.includes('action=\"/leads\"') && landingHtml.includes('name=\"segment\"'),"
     , "  createdHasLead: createdHtml.includes('SynthSpeak') && createdHtml.includes('Ada Lovelace'),"
     , "  inboxHasLink: inboxHtml.includes('href=\"/lead/primary\"') && inboxHtml.includes('SynthSpeak (high, enterprise)'),"

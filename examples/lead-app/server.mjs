@@ -26,6 +26,30 @@ const leads = [
   }
 ];
 
+function toWirePriority(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
+function toWireSegment(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
 installRuntime({
   mockLeadSummaryModel(intake) {
     const priority =
@@ -34,7 +58,7 @@ installRuntime({
     return JSON.stringify({
       summary: `${intake.company} led by ${intake.contact} fits the ${priority.toLowerCase()} priority pipeline.`,
       priority: priority.toLowerCase(),
-      segment: intake.segment?.$tag?.toLowerCase() ?? "startup",
+      segment: toWireSegment(intake.segment) ?? "startup",
       followUpRequired: intake.budget >= 20000
     });
   },
@@ -44,8 +68,8 @@ installRuntime({
       company: intake.company,
       contact: intake.contact,
       summary: summary.summary,
-      priority: summary.priority?.$tag?.toLowerCase() ?? "low",
-      segment: summary.segment?.$tag?.toLowerCase() ?? "startup",
+      priority: toWirePriority(summary.priority) ?? "low",
+      segment: toWireSegment(summary.segment) ?? "startup",
       followUpRequired: summary.followUpRequired,
       reviewStatus: "new",
       reviewNote: ""

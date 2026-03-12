@@ -36,7 +36,7 @@ emitModule modl =
       <> emitRequestSchemaHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
-      <> emitForeignBindings (lowerModuleForeignDecls modl)
+      <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
 
@@ -49,6 +49,21 @@ emitRuntimePrelude =
   , "    throw new Error(`Missing Clasp runtime binding: ${name}`);"
   , "  }"
   , "  return runtime[name];"
+  , "}"
+  , ""
+  , "function $claspHostBinding(name) {"
+  , "  const binding = $claspHostBindingMap[name];"
+  , "  if (!binding) {"
+  , "    throw new Error(`Missing Clasp host binding manifest: ${name}`);"
+  , "  }"
+  , "  return binding;"
+  , "}"
+  , ""
+  , "function $claspCallHostBinding(name, args) {"
+  , "  const binding = $claspHostBinding(name);"
+  , "  const runtime = $claspRuntime(binding.runtimeName);"
+  , "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));"
+  , "  return binding.returns.fromHost(runtime(...hostArgs));"
   , "}"
   , ""
   , "function $claspExpectObject(value, path) {"
@@ -357,25 +372,62 @@ emitRecordCodecHelpers recordDecl =
       let fieldName = recordFieldDeclName fieldDecl
        in [ "  const " <> fieldName <> " = " <> emitSerializer (recordFieldDeclType fieldDecl) ("value." <> fieldName) <> ";" ]
 
-emitForeignBindings :: [ForeignDecl] -> [Text]
-emitForeignBindings foreignDecls =
-  fmap emitForeignBinding foreignDecls <> [""]
+emitForeignBindings :: [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Text]
+emitForeignBindings typeDecls recordDecls foreignDecls =
+  emitHostBindingManifest
+    <> fmap emitForeignBinding foreignDecls
+    <> [""]
   where
+    emitHostBindingManifest
+      | null foreignDecls =
+          [ "export const __claspHostBindings = [];"
+          , "const $claspHostBindingMap = {};"
+          ]
+      | otherwise =
+          [ "export const __claspHostBindings = ["
+          ]
+            <> concatMap emitHostBindingEntry foreignDecls
+            <> [ "];"
+               , "const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));"
+               ]
+
+    emitHostBindingEntry foreignDecl =
+      let (paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
+       in [ "  {"
+          , "    name: " <> emitStringLiteral (foreignDeclName foreignDecl) <> ","
+          , "    runtimeName: " <> emitStringLiteral (foreignDeclRuntimeName foreignDecl) <> ","
+          , "    params: ["
+          ]
+            <> concat
+              [ [ "      {"
+                , "        index: " <> T.pack (show index) <> ","
+                , "        type: " <> emitStringLiteral (renderTypeName paramType) <> ","
+                , "        schema: " <> emitSchemaRef typeDecls recordDecls paramType <> ","
+                , "        toHost(value) { return " <> emitHostSerializer paramType "value" "\"value\"" <> "; }"
+                , "      },"
+                ]
+              | (index, paramType) <- zip [(0 :: Int) ..] paramTypes
+              ]
+            <> [ "    ],"
+               , "    returns: {"
+               , "      type: " <> emitStringLiteral (renderTypeName returnType) <> ","
+               , "      schema: " <> emitSchemaRef typeDecls recordDecls returnType <> ","
+               , "      fromHost(value) { return " <> emitHostDeserializer returnType "value" "\"result\"" <> "; }"
+               , "    }"
+               , "  },"
+               ]
+
     emitForeignBinding foreignDecl =
       let params = foreignParams (foreignDeclType foreignDecl)
-          runtimeCall =
-            "$claspRuntime("
-              <> emitStringLiteral (foreignDeclRuntimeName foreignDecl)
-              <> ")("
-              <> T.intercalate ", " params
-              <> ")"
        in "function "
             <> emitIdentifier (foreignDeclName foreignDecl)
             <> "("
             <> T.intercalate ", " params
-            <> ") { return "
-            <> runtimeCall
-            <> "; }"
+            <> ") { return $claspCallHostBinding("
+            <> emitStringLiteral (foreignDeclName foreignDecl)
+            <> ", ["
+            <> T.intercalate ", " params
+            <> "]); }"
 
 foreignParams :: Type -> [Text]
 foreignParams typ =
@@ -384,6 +436,14 @@ foreignParams typ =
       fmap (("$" <>) . T.pack . show) [(0 :: Int) .. length args - 1]
     _ ->
       []
+
+splitFunctionType :: Type -> ([Type], Type)
+splitFunctionType typ =
+  case typ of
+    TFunction args result ->
+      (args, result)
+    _ ->
+      ([], typ)
 
 emitRoutesExport :: [TypeDecl] -> [RecordDecl] -> [LowerRoute] -> [Text]
 emitRoutesExport typeDecls recordDecls routes =
@@ -475,6 +535,64 @@ emitSerializer typ valueRef =
       "$serialize_" <> name <> "(" <> valueRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitHostSerializer :: Type -> Text -> Text -> Text
+emitHostSerializer typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TNamed name ->
+      "$serialize_" <> name <> "($validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitHostDeserializer :: Type -> Text -> Text -> Text
+emitHostDeserializer typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TNamed name ->
+      "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitSchemaRef :: [TypeDecl] -> [RecordDecl] -> Type -> Text
+emitSchemaRef typeDecls recordDecls typ =
+  case typ of
+    TInt ->
+      "$claspSchema_Int"
+    TStr ->
+      "$claspSchema_Str"
+    TBool ->
+      "$claspSchema_Bool"
+    TNamed name ->
+      if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
+        then "$claspSchema_" <> name
+        else "null"
+    TFunction _ _ ->
+      "null"
+
+renderTypeName :: Type -> Text
+renderTypeName typ =
+  case typ of
+    TInt ->
+      "Int"
+    TStr ->
+      "Str"
+    TBool ->
+      "Bool"
+    TNamed name ->
+      name
+    TFunction args result ->
+      T.intercalate " -> " (fmap renderTypeName args <> [renderTypeName result])
 
 isJsonEnumTypeDecl :: TypeDecl -> Bool
 isJsonEnumTypeDecl typeDecl =
