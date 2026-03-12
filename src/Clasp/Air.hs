@@ -5,6 +5,7 @@ module Clasp.Air
   , AirModule (..)
   , AirNode (..)
   , AirNodeId (..)
+  , airModuleNodeCount
   , buildAirModule
   , renderAirModuleJson
   ) where
@@ -24,8 +25,10 @@ import Clasp.Core
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
+  , CorePolicyDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , coreExprType
   )
@@ -33,6 +36,10 @@ import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
   , ModuleName (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
+  , ProjectionDecl (..)
+  , ProjectionFieldDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteDecl (..)
@@ -83,16 +90,23 @@ buildAirModule modl =
   where
     typeNodes = concatMap buildTypeDeclNodes (coreModuleTypeDecls modl)
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
+    policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
+    projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
     routeNodes = fmap buildRouteDeclNode (coreModuleRouteDecls modl)
     declGraphs = fmap buildDeclGraph (coreModuleDecls modl)
     topLevelNodes =
       typeNodes
         <> recordNodes
+        <> policyNodes
+        <> projectionNodes
         <> foreignNodes
         <> routeNodes
         <> fmap declGraphDeclNode declGraphs
     nestedNodes = concatMap declGraphNestedNodes declGraphs
+
+airModuleNodeCount :: AirModule -> Int
+airModuleNodeCount = length . airModuleNodes
 
 renderAirModuleJson :: AirModule -> LT.Text
 renderAirModuleJson = encodeToLazyText
@@ -149,6 +163,84 @@ buildRecordFieldDeclNode recordName fieldDecl =
     , airNodeAttrs =
         [ ("name", AirAttrText (recordFieldDeclName fieldDecl))
         , ("recordName", AirAttrText recordName)
+        , ("classification", AirAttrText (recordFieldDeclClassification fieldDecl))
+        ]
+    }
+
+buildPolicyDeclNodes :: CorePolicyDecl -> [AirNode]
+buildPolicyDeclNodes corePolicyDecl =
+  policyNode : classificationNodes
+  where
+    policyDecl = corePolicySourceDecl corePolicyDecl
+    classificationIds =
+      fmap
+        (\classificationDecl -> policyClassificationDeclId (policyDeclName policyDecl) (policyClassificationDeclName classificationDecl))
+        (policyDeclAllowedClassifications policyDecl)
+    policyNode =
+      AirNode
+        { airNodeId = policyDeclId (policyDeclName policyDecl)
+        , airNodeKind = "policyDecl"
+        , airNodeSpan = Just (policyDeclSpan policyDecl)
+        , airNodeType = Nothing
+        , airNodeAttrs =
+            [ ("name", AirAttrText (policyDeclName policyDecl))
+            , ("allowedClassifications", AirAttrNodes classificationIds)
+            ]
+        }
+    classificationNodes =
+      fmap (buildPolicyClassificationDeclNode (policyDeclName policyDecl)) (policyDeclAllowedClassifications policyDecl)
+
+buildPolicyClassificationDeclNode :: Text -> PolicyClassificationDecl -> AirNode
+buildPolicyClassificationDeclNode policyName classificationDecl =
+  AirNode
+    { airNodeId = policyClassificationDeclId policyName (policyClassificationDeclName classificationDecl)
+    , airNodeKind = "policyClassificationDecl"
+    , airNodeSpan = Just (policyClassificationDeclSpan classificationDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (policyClassificationDeclName classificationDecl))
+        , ("policyName", AirAttrText policyName)
+        ]
+    }
+
+buildProjectionDeclNodes :: CoreProjectionDecl -> [AirNode]
+buildProjectionDeclNodes coreProjectionDecl =
+  projectionNode : fieldNodes
+  where
+    projectionDecl = coreProjectionSourceDecl coreProjectionDecl
+    recordDecl = coreProjectionRecordDecl coreProjectionDecl
+    fieldIds =
+      fmap
+        (\fieldDecl -> projectionFieldDeclId (projectionDeclName projectionDecl) (projectionFieldDeclName fieldDecl))
+        (projectionDeclFields projectionDecl)
+    projectionNode =
+      AirNode
+        { airNodeId = projectionDeclId (projectionDeclName projectionDecl)
+        , airNodeKind = "projectionDecl"
+        , airNodeSpan = Just (projectionDeclSpan projectionDecl)
+        , airNodeType = Nothing
+        , airNodeAttrs =
+            [ ("name", AirAttrText (projectionDeclName projectionDecl))
+            , ("sourceRecordName", AirAttrText (projectionDeclSourceRecordName projectionDecl))
+            , ("policyName", AirAttrText (projectionDeclPolicyName projectionDecl))
+            , ("recordDecl", AirAttrNode (recordDeclId (recordDeclName recordDecl)))
+            , ("fields", AirAttrNodes fieldIds)
+            ]
+        }
+    fieldNodes =
+      fmap (buildProjectionFieldDeclNode projectionDecl recordDecl) (projectionDeclFields projectionDecl)
+
+buildProjectionFieldDeclNode :: ProjectionDecl -> RecordDecl -> ProjectionFieldDecl -> AirNode
+buildProjectionFieldDeclNode projectionDecl recordDecl fieldDecl =
+  AirNode
+    { airNodeId = projectionFieldDeclId (projectionDeclName projectionDecl) (projectionFieldDeclName fieldDecl)
+    , airNodeKind = "projectionFieldDecl"
+    , airNodeSpan = Just (projectionFieldDeclSpan fieldDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (projectionFieldDeclName fieldDecl))
+        , ("projectionName", AirAttrText (projectionDeclName projectionDecl))
+        , ("recordFieldDecl", AirAttrNode (recordFieldDeclId (recordDeclName recordDecl) (projectionFieldDeclName fieldDecl)))
         ]
     }
 
@@ -439,6 +531,20 @@ recordFieldDeclId recordName fieldName =
 foreignDeclId :: Text -> AirNodeId
 foreignDeclId name = AirNodeId ("foreign:" <> name)
 
+policyDeclId :: Text -> AirNodeId
+policyDeclId name = AirNodeId ("policy:" <> name)
+
+policyClassificationDeclId :: Text -> Text -> AirNodeId
+policyClassificationDeclId policyName classificationName =
+  AirNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
+
+projectionDeclId :: Text -> AirNodeId
+projectionDeclId name = AirNodeId ("projection:" <> name)
+
+projectionFieldDeclId :: Text -> Text -> AirNodeId
+projectionFieldDeclId projectionName fieldName =
+  AirNodeId ("projection-field:" <> projectionName <> ":" <> fieldName)
+
 routeDeclId :: Text -> AirNodeId
 routeDeclId name = AirNodeId ("route:" <> name)
 
@@ -497,7 +603,9 @@ instance ToJSON AirNode where
 instance ToJSON AirModule where
   toJSON airModule =
     object
-      [ "module" .= unModuleName (airModuleName airModule)
+      [ "format" .= ("clasp-air-v1" :: Text)
+      , "module" .= unModuleName (airModuleName airModule)
+      , "nodeCount" .= airModuleNodeCount airModule
       , "roots" .= airModuleRootIds airModule
       , "nodes" .= airModuleNodes airModule
       ]

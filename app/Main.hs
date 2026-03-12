@@ -10,7 +10,7 @@ import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Clasp.Compiler (checkEntry, compileEntry, parseSource)
+import Clasp.Compiler (checkEntry, compileEntry, parseSource, renderAirEntryJson)
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
@@ -26,6 +26,12 @@ main = do
       runParse format inputPath
     ["check", inputPath] ->
       runCheck format inputPath
+    ["air", inputPath] ->
+      runAir format inputPath Nothing
+    ["air", inputPath, "-o", outputPath] ->
+      runAir format inputPath (Just outputPath)
+    ["air", "-o", outputPath, inputPath] ->
+      runAir format inputPath (Just outputPath)
     ["compile", inputPath] ->
       runCompile format inputPath Nothing
     ["compile", inputPath, "-o", outputPath] ->
@@ -81,6 +87,29 @@ runCheck format inputPath = do
                 , "input" .= inputPath
                 ]
 
+runAir :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
+runAir format inputPath outputPath = do
+  result <- renderAirEntryJson inputPath
+  case result of
+    Left err -> do
+      writeFailure format err
+      exitFailure
+    Right airJson -> do
+      let resolvedOutput = maybe (replaceExtension inputPath "air.json") id outputPath
+      LTIO.writeFile resolvedOutput airJson
+      case format of
+        Pretty ->
+          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("air" :: String)
+                , "input" .= inputPath
+                , "output" .= resolvedOutput
+                ]
+
 runCompile :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
 runCompile format inputPath outputPath = do
   result <- compileEntry inputPath
@@ -118,5 +147,6 @@ usage =
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
     , "  claspc check <input.clasp> [--json]"
+    , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json]"
     ]

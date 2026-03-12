@@ -1,10 +1,12 @@
 module Clasp.Compiler
   ( airSource
+  , airEntry
   , checkSource
   , checkEntry
   , compileSource
   , compileEntry
   , parseSource
+  , renderAirEntryJson
   , renderAirSourceJson
   ) where
 
@@ -35,6 +37,16 @@ airSource path source =
 renderAirSourceJson :: FilePath -> Text -> Either DiagnosticBundle LT.Text
 renderAirSourceJson path source =
   renderAirModuleJson <$> airSource path source
+
+airEntry :: FilePath -> IO (Either DiagnosticBundle AirModule)
+airEntry entryPath = do
+  checkedModule <- checkEntry entryPath
+  pure (buildAirModule <$> checkedModule)
+
+renderAirEntryJson :: FilePath -> IO (Either DiagnosticBundle LT.Text)
+renderAirEntryJson entryPath = do
+  airModule <- airEntry entryPath
+  pure (renderAirModuleJson <$> airModule)
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do

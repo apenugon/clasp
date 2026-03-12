@@ -6,8 +6,10 @@ module Clasp.Core
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
+  , CorePolicyDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , coreExprType
   ) where
@@ -16,6 +18,8 @@ import Data.Text (Text)
 import Clasp.Syntax
   ( ForeignDecl
   , ModuleName
+  , PolicyDecl
+  , ProjectionDecl
   , RecordDecl
   , RouteDecl
   , SourceSpan
@@ -27,9 +31,22 @@ data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
+  , coreModulePolicyDecls :: [CorePolicyDecl]
+  , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]
   , coreModuleRouteDecls :: [RouteDecl]
   , coreModuleDecls :: [CoreDecl]
+  }
+  deriving (Eq, Show)
+
+data CorePolicyDecl = CorePolicyDecl
+  { corePolicySourceDecl :: PolicyDecl
+  }
+  deriving (Eq, Show)
+
+data CoreProjectionDecl = CoreProjectionDecl
+  { coreProjectionSourceDecl :: ProjectionDecl
+  , coreProjectionRecordDecl :: RecordDecl
   }
   deriving (Eq, Show)
 

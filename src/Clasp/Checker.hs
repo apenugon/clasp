@@ -27,8 +27,10 @@ import Clasp.Core
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
+  , CorePolicyDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , coreExprType
   )
@@ -353,6 +355,17 @@ checkModule modl = do
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
+      , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
+      , coreModuleProjectionDecls =
+          zipWith
+            (\projectionDecl projectionRecordDecl ->
+               CoreProjectionDecl
+                 { coreProjectionSourceDecl = projectionDecl
+                 , coreProjectionRecordDecl = projectionRecordDecl
+                 }
+            )
+            projectionDecls
+            projectionRecordDecls
       , coreModuleForeignDecls = foreignDecls
       , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls

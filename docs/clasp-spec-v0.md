@@ -251,6 +251,8 @@ Notes:
 - `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`.
 - Safe views escape text content, reject raw `script`/`style` tags, and keep styling explicit through `styled` references instead of raw host `class` or `style` strings.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.
+- AIR JSON is emitted as `clasp-air-v1`, with stable node IDs, explicit `ref` edges, root node IDs, and a module-level node count so tools can replay declaration, policy, projection, route, and expression graphs without reconstructing them from raw files.
+- The CLI can persist that graph directly with `claspc air <input.clasp> [-o output.air.json]`.
 
 ## Compiler Pipeline
 

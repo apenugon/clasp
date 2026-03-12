@@ -32,7 +32,7 @@ import Clasp.Air
   , AirNode (..)
   , AirNodeId (..)
   )
-import Clasp.Compiler (airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson)
+import Clasp.Compiler (airEntry, airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson)
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
@@ -387,16 +387,47 @@ airTests =
                 assertBool "expected rawJson ref" (("rawJson", AirAttrNode (AirNodeId "expr:summarizeLead:body.rawJson")) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected summarizeLead body AIR node"
+    , testCase "air retains policy and projection graph identity" $
+        case airSource "projection" classifiedProjectionSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected policy root" (AirNodeId "policy:SupportDisclosure" `elem` airModuleRootIds airModule)
+            assertBool "expected projection root" (AirNodeId "projection:SupportCustomer" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "policy:SupportDisclosure") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected policy classification refs"
+                  (("allowedClassifications", AirAttrNodes [AirNodeId "policy-classification:SupportDisclosure:public", AirNodeId "policy-classification:SupportDisclosure:pii"]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected policy AIR node"
+            case findAirNode (AirNodeId "projection:SupportCustomer") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool "expected record link" (("recordDecl", AirAttrNode (AirNodeId "record:SupportCustomer")) `elem` airNodeAttrs node)
+                assertBool "expected field refs" (("fields", AirAttrNodes [AirNodeId "projection-field:SupportCustomer:id", AirNodeId "projection-field:SupportCustomer:email", AirNodeId "projection-field:SupportCustomer:tier"]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected projection AIR node"
     , testCase "air serialization is replay-friendly and deterministic" $
         case renderAirSourceJson "adt" adtSource of
           Left err ->
             assertFailure ("expected AIR json generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right rendered -> do
             let jsonText = LT.toStrict rendered
+            assertBool "expected format version in json" ("\"format\":\"clasp-air-v1\"" `T.isInfixOf` jsonText)
             assertBool "expected decl id in json" ("\"decl:describe\"" `T.isInfixOf` jsonText)
             assertBool "expected branch id in json" ("\"expr:describe:body.branch0\"" `T.isInfixOf` jsonText)
             assertBool "expected explicit ref encoding" ("{\"ref\":\"expr:describe:body.subject\"}" `T.isInfixOf` jsonText)
             assertBool "expected constructor pattern binder id" ("\"expr:describe:body.branch1.pattern.binder0\"" `T.isInfixOf` jsonText)
+    , testCase "airEntry emits a merged AIR graph for imported projects" $
+        withProjectFiles "air-entry-imports" importSuccessFiles $ \root -> do
+          result <- airEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected imported project AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right airModule -> do
+              assertEqual "merged module name" (ModuleName "Main") (airModuleName airModule)
+              assertBool "expected imported declaration root" (AirNodeId "decl:formatUser" `elem` airModuleRootIds airModule)
+              assertBool "expected main declaration root" (AirNodeId "decl:main" `elem` airModuleRootIds airModule)
     ]
 
 lowerTests :: TestTree
