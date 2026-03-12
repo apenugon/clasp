@@ -48,6 +48,12 @@ export function serveCompiledModule(compiledModule, options = {}) {
     port,
     async fetch(request) {
       const url = new URL(request.url);
+      const assetResponse = await responseForAssetRequest(compiledModule, url.pathname, options);
+
+      if (assetResponse) {
+        return assetResponse;
+      }
+
       const route = routes.find(
         (candidate) =>
           candidate.method === request.method && candidate.path === url.pathname
@@ -78,6 +84,26 @@ export function serveCompiledModule(compiledModule, options = {}) {
       }
     }
   });
+}
+
+export async function responseForAssetRequest(compiledModule, pathname, options = {}) {
+  const generatedAsset = generatedAssetForPath(compiledModule, pathname);
+
+  if (generatedAsset) {
+    return new Response(generatedAsset.content ?? "", {
+      status: 200,
+      headers: {
+        "content-type": generatedAsset.contentType ?? "text/plain; charset=utf-8"
+      }
+    });
+  }
+
+  if (typeof Bun === "undefined" || typeof Bun.file !== "function") {
+    return null;
+  }
+
+  const staticAsset = await staticAssetResponse(pathname, compiledModule, options);
+  return staticAsset;
 }
 
 export function responseForRouteResult(route, result) {
@@ -139,6 +165,48 @@ function errorResponse(route, status, code, error) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function generatedAssetForPath(compiledModule, pathname) {
+  const assets = compiledModule?.__claspStaticAssets ?? [];
+
+  return assets.find(
+    (asset) => typeof asset?.href === "string" && asset.href === pathname
+  ) ?? null;
+}
+
+async function staticAssetResponse(pathname, compiledModule, options) {
+  const assetBasePath =
+    options.assetBasePath ??
+    compiledModule?.__claspStaticAssetStrategy?.assetBasePath ??
+    "/assets";
+  const staticAssetsDir = options.staticAssetsDir;
+
+  if (typeof staticAssetsDir !== "string" || staticAssetsDir === "") {
+    return null;
+  }
+
+  const normalizedBasePath = assetBasePath.endsWith("/")
+    ? assetBasePath
+    : `${assetBasePath}/`;
+
+  if (!pathname.startsWith(normalizedBasePath)) {
+    return null;
+  }
+
+  const relativePath = pathname.slice(normalizedBasePath.length);
+
+  if (relativePath === "" || relativePath.includes("..")) {
+    return null;
+  }
+
+  const file = Bun.file(`${staticAssetsDir}/${relativePath}`);
+
+  if (!(await file.exists())) {
+    return null;
+  }
+
+  return new Response(file);
 }
 
 function readSearchParams(searchParams) {

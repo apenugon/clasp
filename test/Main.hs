@@ -1062,7 +1062,14 @@ compileTests =
             assertBool "expected page renderer" ("function $render_Page" `T.isInfixOf` emitted)
             assertBool "expected render mode export" ("export { __claspPageRenderModes };" `T.isInfixOf` emitted)
             assertBool "expected opt-in render helper" ("export function __claspRenderPage" `T.isInfixOf` emitted)
+            assertBool "expected page head helper" ("export function __claspPageHead" `T.isInfixOf` emitted)
             assertBool "expected view renderer" ("function $claspRenderView" `T.isInfixOf` emitted)
+            assertBool "expected static asset strategy export" ("export const __claspStaticAssetStrategy" `T.isInfixOf` emitted)
+            assertBool "expected static asset registry" ("export const __claspStaticAssets" `T.isInfixOf` emitted)
+            assertBool "expected style bundle registry" ("export const __claspStyleBundles" `T.isInfixOf` emitted)
+            assertBool "expected head strategy export" ("export const __claspHeadStrategy" `T.isInfixOf` emitted)
+            assertBool "expected default viewport meta" ("viewport: \"width=device-width, initial-scale=1\"" `T.isInfixOf` emitted)
+            assertBool "expected generated stylesheet href" ("href: \"/assets/clasp/Main.styles.css\"" `T.isInfixOf` emitted)
             assertBool "expected page response kind" ("responseKind: \"page\"" `T.isInfixOf` emitted)
             assertBool "expected page route encoder" ("encodeResponse: $render_Page" `T.isInfixOf` emitted)
     , testCase "compile emits link and form renderers for interactive pages" $
@@ -1156,11 +1163,28 @@ compileTests =
               TIO.writeFile compiledPath emitted
               renderedHtml <- runNodeModule compiledPath
               assertBool "expected doctype" ("<!DOCTYPE html>" `T.isInfixOf` renderedHtml)
+              assertBool "expected viewport head tag" ("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" `T.isInfixOf` renderedHtml)
               assertBool "expected title" ("<title>Inbox</title>" `T.isInfixOf` renderedHtml)
+              assertBool "expected stylesheet link" ("<link rel=\"stylesheet\" href=\"/assets/clasp/Main.styles.css\" data-clasp-asset-kind=\"style-bundle\" data-clasp-style-bundle=\"module:Main:styles\">" `T.isInfixOf` renderedHtml)
               assertBool "expected escaped subject" ("&lt;Quarterly &lt;review&gt;&gt;" `T.isInfixOf` renderedHtml)
               assertBool "expected escaped ampersand" ("Escaped &amp; archived" `T.isInfixOf` renderedHtml)
               assertBool "expected explicit style ref wrapper" ("data-clasp-style=\"inbox_shell\"" `T.isInfixOf` renderedHtml)
               assertBool "expected stable default html without flow metadata attrs" (not ("data-clasp-route=" `T.isInfixOf` renderedHtml))
+    , testCase "generated page head and style bundle assets stay machine-readable" $
+        case compileSource "page-head-assets" pageSource of
+          Left err ->
+            assertFailure ("expected page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/page-head-assets/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (pageAssetRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected generated asset, head, and style bundle strategy"
+              "{\"assetBasePath\":\"/assets\",\"generatedAssetBasePath\":\"/assets/clasp\",\"headTitle\":\"Inbox\",\"headViewport\":\"width=device-width, initial-scale=1\",\"headStylesheet\":\"/assets/clasp/Main.styles.css\",\"bundleId\":\"module:Main:styles\",\"bundleHref\":\"/assets/clasp/Main.styles.css\",\"bundleRefs\":[\"inbox_shell\"],\"assetContentType\":\"text/css; charset=utf-8\",\"assetHasRefComment\":true}"
+              runtimeOutput
     , testCase "opt-in page render mode emits flow metadata while default html stays stable" $
         case compileSource "interactive-render" interactivePageSource of
           Left err ->
@@ -1202,7 +1226,7 @@ compileTests =
               runtimeOutput <- runNodeScript (pageFormRuntimeScript absoluteCompiledPath absoluteRuntimePath)
               assertEqual
                 "expected query decode, form decode, and invalid form failure"
-                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
+                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
                 runtimeOutput
     , testCase "generated json route clients prepare requests and decode responses" $
         case compileSource "service-client" serviceSource of
@@ -2429,6 +2453,30 @@ routeClientRedirectRuntimeScript compiledPath =
     , "  path: request.path,"
     , "  body: request.body,"
     , "  redirect"
+    , "}));"
+    ]
+
+pageAssetRuntimeScript :: FilePath -> FilePath -> Text
+pageAssetRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { responseForAssetRequest } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const page = compiledModule.home({});"
+    , "const head = compiledModule.__claspPageHead(page);"
+    , "const bundle = compiledModule.__claspStyleBundles[0] ?? null;"
+    , "const assetResponse = bundle ? await responseForAssetRequest(compiledModule, bundle.href) : null;"
+    , "const assetBody = assetResponse ? await assetResponse.text() : '';"
+    , "console.log(JSON.stringify({"
+    , "  assetBasePath: compiledModule.__claspStaticAssetStrategy.assetBasePath,"
+    , "  generatedAssetBasePath: compiledModule.__claspStaticAssetStrategy.generatedAssetBasePath,"
+    , "  headTitle: head.title,"
+    , "  headViewport: head.meta.find((entry) => entry.name === 'viewport')?.content ?? null,"
+    , "  headStylesheet: head.links[0]?.href ?? null,"
+    , "  bundleId: bundle?.id ?? null,"
+    , "  bundleHref: bundle?.href ?? null,"
+    , "  bundleRefs: bundle?.refs ?? [],"
+    , "  assetContentType: assetResponse?.headers.get('content-type') ?? null,"
+    , "  assetHasRefComment: assetBody.includes('inbox_shell')"
     , "}));"
     ]
 

@@ -6,6 +6,7 @@ module Clasp.Emit.JavaScript
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.List (nub)
 import Clasp.Lower
   ( LowerDecl (..)
   , LowerFormField (..)
@@ -48,6 +49,7 @@ emitModule modl =
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
+      <> emitAssetHeadArtifacts modl
       <> emitPageFlowArtifacts (lowerPageFlows modl)
       <> emitSeededFixturesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
@@ -226,6 +228,66 @@ emitRuntimePrelude =
   , "  throw new Error(`Unknown Clasp page render mode: ${String(mode)}`);"
   , "}"
   , ""
+  , "function $claspRenderHeadMetaTag(entry) {"
+  , "  if (!entry || typeof entry !== \"object\") {"
+  , "    return \"\";"
+  , "  }"
+  , "  if (typeof entry.charset === \"string\") {"
+  , "    return `<meta charset=\"${$claspEscapeHtml(entry.charset)}\">`;"
+  , "  }"
+  , "  const attributes = [];"
+  , "  if (typeof entry.name === \"string\" && entry.name !== \"\") {"
+  , "    attributes.push(`name=\"${$claspEscapeHtml(entry.name)}\"`);"
+  , "  }"
+  , "  if (typeof entry.content === \"string\") {"
+  , "    attributes.push(`content=\"${$claspEscapeHtml(entry.content)}\"`);"
+  , "  }"
+  , "  return attributes.length === 0 ? \"\" : `<meta ${attributes.join(\" \")}>`;"
+  , "}"
+  , ""
+  , "function $claspRenderHeadLinkTag(entry) {"
+  , "  if (!entry || typeof entry !== \"object\") {"
+  , "    return \"\";"
+  , "  }"
+  , "  const attributes = [];"
+  , "  if (typeof entry.rel === \"string\" && entry.rel !== \"\") {"
+  , "    attributes.push(`rel=\"${$claspEscapeHtml(entry.rel)}\"`);"
+  , "  }"
+  , "  if (typeof entry.href === \"string\" && entry.href !== \"\") {"
+  , "    attributes.push(`href=\"${$claspEscapeHtml(entry.href)}\"`);"
+  , "  }"
+  , "  if (typeof entry[\"data-clasp-asset-kind\"] === \"string\") {"
+  , "    attributes.push(`data-clasp-asset-kind=\"${$claspEscapeHtml(entry[\"data-clasp-asset-kind\"])}\"`);"
+  , "  }"
+  , "  if (typeof entry[\"data-clasp-style-bundle\"] === \"string\") {"
+  , "    attributes.push(`data-clasp-style-bundle=\"${$claspEscapeHtml(entry[\"data-clasp-style-bundle\"])}\"`);"
+  , "  }"
+  , "  return attributes.length === 0 ? \"\" : `<link ${attributes.join(\" \")}>`;"
+  , "}"
+  , ""
+  , "function $claspHeadForPageObject(page) {"
+  , "  return {"
+  , "    title: page.title,"
+  , "    meta: ["
+  , "      { charset: __claspHeadStrategy.charset },"
+  , "      { name: \"viewport\", content: __claspHeadStrategy.viewport }"
+  , "    ],"
+  , "    links: __claspStyleBundles.map((bundle) => ({"
+  , "      rel: \"stylesheet\","
+  , "      href: bundle.href,"
+  , "      \"data-clasp-asset-kind\": bundle.kind,"
+  , "      \"data-clasp-style-bundle\": bundle.id"
+  , "    }))"
+  , "  };"
+  , "}"
+  , ""
+  , "function $claspRenderHead(page) {"
+  , "  const head = $claspHeadForPageObject(page);"
+  , "  const metaHtml = Array.isArray(head.meta) ? head.meta.map($claspRenderHeadMetaTag).join(\"\") : \"\";"
+  , "  const linkHtml = Array.isArray(head.links) ? head.links.map($claspRenderHeadLinkTag).join(\"\") : \"\";"
+  , "  return metaHtml + `<title>${$claspEscapeHtml(head.title ?? \"\")}</title>` + linkHtml;"
+  , "}"
+  , ""
   , "function $claspRenderFlowAttrs(contract, flowKind, renderMode) {"
   , "  if ($claspNormalizePageRenderMode(renderMode) !== __claspPageRenderModes.htmlWithFlowMetadata) {"
   , "    return \"\";"
@@ -272,7 +334,7 @@ emitRuntimePrelude =
   , "function $render_PageWithMode(value, renderMode = __claspPageRenderModes.html) {"
   , "  const page = $claspExpectPage(value);"
   , "  const normalizedMode = $claspNormalizePageRenderMode(renderMode);"
-  , "  return \"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>\" + $claspEscapeHtml(page.title) + \"</title></head><body>\" + $claspRenderView(page.body, normalizedMode) + \"</body></html>\";"
+  , "  return \"<!DOCTYPE html><html><head>\" + $claspRenderHead(page) + \"</head><body>\" + $claspRenderView(page.body, normalizedMode) + \"</body></html>\";"
   , "}"
   , ""
   , "function $render_Page(value) {"
@@ -283,6 +345,10 @@ emitRuntimePrelude =
   , ""
   , "export function __claspRenderPage(value, renderMode = __claspPageRenderModes.html) {"
   , "  return $render_PageWithMode(value, renderMode);"
+  , "}"
+  , ""
+  , "export function __claspPageHead(value) {"
+  , "  return $claspHeadForPageObject($claspExpectPage(value));"
   , "}"
   , ""
   , "function $claspIsPlainObject(value) {"
@@ -403,6 +469,122 @@ emitPrimitiveCodecHelpers =
   , "function $encode_Redirect(value) { return JSON.stringify($claspExpectRedirect(value, \"value\")); }"
   , ""
   ]
+
+emitAssetHeadArtifacts :: LowerModule -> [Text]
+emitAssetHeadArtifacts modl =
+  emitStaticAssetStrategy assetBasePath generatedBasePath
+    <> emitStyleBundleAssets styleBundle
+    <> emitHeadStrategy
+  where
+    assetBasePath = "/assets"
+    generatedBasePath = assetBasePath <> "/clasp"
+    styleRefs = nub (filter (not . T.null) (concatMap collectStyledRefsDecl (lowerModuleDecls modl)))
+    styleBundle =
+      if null styleRefs
+        then Nothing
+        else
+          Just
+            ( "module:" <> moduleAssetSlug (lowerModuleName modl) <> ":styles"
+            , generatedBasePath <> "/" <> moduleAssetSlug (lowerModuleName modl) <> ".styles.css"
+            , styleRefs
+            )
+
+emitStaticAssetStrategy :: Text -> Text -> [Text]
+emitStaticAssetStrategy assetBasePath generatedBasePath =
+  [ "export const __claspStaticAssetStrategy = Object.freeze({"
+  , "  assetBasePath: " <> emitStringLiteral assetBasePath <> ","
+  , "  generatedAssetBasePath: " <> emitStringLiteral generatedBasePath
+  , "});"
+  , ""
+  ]
+
+emitStyleBundleAssets :: Maybe (Text, Text, [Text]) -> [Text]
+emitStyleBundleAssets maybeStyleBundle =
+  case maybeStyleBundle of
+    Nothing ->
+      [ "export const __claspStaticAssets = Object.freeze([]);"
+      , "export const __claspStyleBundles = Object.freeze([]);"
+      , ""
+      ]
+    Just (bundleId, bundleHref, styleRefs) ->
+      [ "export const __claspStaticAssets = Object.freeze(["
+      , "  Object.freeze({"
+      , "    kind: \"style-bundle\","
+      , "    id: " <> emitStringLiteral bundleId <> ","
+      , "    href: " <> emitStringLiteral bundleHref <> ","
+      , "    contentType: \"text/css; charset=utf-8\","
+      , "    refs: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral styleRefs) <> "]),"
+      , "    content: " <> emitStringLiteral (emitStyleBundleContent styleRefs)
+      , "  })"
+      , "]);"
+      , "export const __claspStyleBundles = Object.freeze(__claspStaticAssets.filter((asset) => asset.kind === \"style-bundle\"));"
+      , ""
+      ]
+
+emitHeadStrategy :: [Text]
+emitHeadStrategy =
+  [ "export const __claspHeadStrategy = Object.freeze({"
+  , "  charset: \"utf-8\","
+  , "  viewport: \"width=device-width, initial-scale=1\""
+  , "});"
+  , ""
+  ]
+
+emitStyleBundleContent :: [Text] -> Text
+emitStyleBundleContent styleRefs =
+  let refComment = T.intercalate ", " styleRefs
+   in "/* Generated Clasp style bundle placeholder. */\n/* style refs: " <> refComment <> " */\n"
+
+moduleAssetSlug :: ModuleName -> Text
+moduleAssetSlug moduleName =
+  T.map replaceSeparator (unModuleName moduleName)
+  where
+    replaceSeparator '.' = '-'
+    replaceSeparator char = char
+
+collectStyledRefsDecl :: LowerDecl -> [Text]
+collectStyledRefsDecl decl =
+  case decl of
+    LValueDecl _ expr ->
+      collectStyledRefsExpr expr
+    LFunctionDecl _ _ expr ->
+      collectStyledRefsExpr expr
+
+collectStyledRefsExpr :: LowerExpr -> [Text]
+collectStyledRefsExpr expr =
+  case expr of
+    LPage title body ->
+      collectStyledRefsExpr title <> collectStyledRefsExpr body
+    LViewText value ->
+      collectStyledRefsExpr value
+    LViewAppend left right ->
+      collectStyledRefsExpr left <> collectStyledRefsExpr right
+    LViewElement _ child ->
+      collectStyledRefsExpr child
+    LViewStyled styleRef child ->
+      styleRef : collectStyledRefsExpr child
+    LViewLink _ _ child ->
+      collectStyledRefsExpr child
+    LViewForm _ _ _ child ->
+      collectStyledRefsExpr child
+    LViewInput _ _ value ->
+      collectStyledRefsExpr value
+    LViewSubmit value ->
+      collectStyledRefsExpr value
+    LList items ->
+      concatMap collectStyledRefsExpr items
+    LCall fn args ->
+      collectStyledRefsExpr fn <> concatMap collectStyledRefsExpr args
+    LConstruct _ fields ->
+      concatMap collectStyledRefsExpr fields
+    LMatch subject branches ->
+      collectStyledRefsExpr subject <> concatMap (collectStyledRefsExpr . lowerMatchBranchBody) branches
+    LRecord fields ->
+      concatMap (collectStyledRefsExpr . lowerRecordFieldValue) fields
+    LFieldAccess subject _ ->
+      collectStyledRefsExpr subject
+    _ ->
+      []
 
 emitListCodecHelpers :: [Type] -> [Text]
 emitListCodecHelpers codecTypes =

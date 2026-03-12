@@ -32,6 +32,7 @@ It includes:
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
+- Generated JavaScript page modules that export static-asset, head, and shared style-bundle metadata for compiler-known page/view output
 - Compiler-known `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` primitives for shared application identity data
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
