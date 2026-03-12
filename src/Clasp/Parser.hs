@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.FilePath (dropExtension, splitDirectories, takeExtension)
 import Data.Void (Void)
 import Text.Megaparsec
   ( Parsec
@@ -122,17 +123,32 @@ parseModule path source =
   attachSignatures =<<
     first
       (\bundle -> singleDiagnostic "E_PARSE" "Failed to parse source." [T.pack (errorBundlePretty bundle)])
-      (parse (moduleParser <* eof) path source)
+      (parse (moduleParser path <* eof) path source)
 
-moduleParser :: Parser (ModuleName, [ImportDecl], [TopLevelItem])
-moduleParser = do
+moduleParser :: FilePath -> Parser (ModuleName, [ImportDecl], [TopLevelItem])
+moduleParser path = do
   scn
-  keyword "module"
-  name <- moduleNameParser
+  explicitName <- optional (try moduleDeclParser)
   scn
   imports <- many importParser
   items <- some topLevelItemParser
-  pure (ModuleName name, imports, items)
+  pure (ModuleName (fromMaybe (inferModuleName path) explicitName), imports, items)
+
+moduleDeclParser :: Parser Text
+moduleDeclParser = do
+  keyword "module"
+  moduleNameParser
+
+inferModuleName :: FilePath -> Text
+inferModuleName path =
+  let extension = takeExtension path
+      moduleSegments =
+        filter
+          (\segment -> not (null segment) && segment /= ".")
+          (splitDirectories (dropExtension path))
+   in if extension == ".clasp" && not (null moduleSegments)
+        then T.intercalate "." (fmap T.pack moduleSegments)
+        else "Main"
 
 importParser :: Parser ImportDecl
 importParser = do

@@ -211,6 +211,22 @@ parserTests =
                     assertFailure ("expected field access, got " <> show other)
               Nothing ->
                 assertFailure "expected showName declaration"
+    , testCase "infers the module name when the file header is omitted" $
+        case parseSource "Main.clasp" headerlessMainSource of
+          Left err ->
+            assertFailure ("expected headerless source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertEqual "inferred module name" (ModuleName "Main") (moduleName modl)
+            assertEqual "import count" 1 (length (moduleImports modl))
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EString _ "ready" ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected string literal body, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "parses classified fields, policies, and projections" $
         case parseSource "inline" classifiedProjectionSource of
           Left err ->
@@ -2273,6 +2289,14 @@ compileTests =
             Right emitted -> do
               assertBool "expected imported function export" ("export function formatUser" `T.isInfixOf` emitted)
               assertBool "expected main export" ("export const main" `T.isInfixOf` emitted)
+    , testCase "checkEntry infers module names from headerless project files" $
+        withProjectFiles "import-success-headerless" headerlessImportSuccessFiles $ \root -> do
+          result <- checkEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected headerless imported project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right checkedModule ->
+              assertEqual "merged module name" (ModuleName "Main") (coreModuleName checkedModule)
     , testCase "checkEntry reports missing imported modules" $
         withProjectFiles "import-missing" missingImportFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -3849,6 +3873,12 @@ importSuccessFiles =
   , ("Shared/User.clasp", sharedUserSource)
   ]
 
+headerlessImportSuccessFiles :: [(FilePath, Text)]
+headerlessImportSuccessFiles =
+  [ ("Main.clasp", headerlessImportSuccessMainSource)
+  , ("Shared/User.clasp", headerlessSharedUserSource)
+  ]
+
 inboxPageFiles :: [(FilePath, Text)]
 inboxPageFiles =
   [ ("Main.clasp", inboxPageMainSource)
@@ -3881,12 +3911,48 @@ importSuccessMainSource =
     , "main = formatUser defaultUser"
     ]
 
+headerlessMainSource :: Text
+headerlessMainSource =
+  T.unlines
+    [ "import Shared.User"
+    , ""
+    , "main : Str"
+    , "main = \"ready\""
+    ]
+
+headerlessImportSuccessMainSource :: Text
+headerlessImportSuccessMainSource =
+  T.unlines
+    [ "import Shared.User"
+    , ""
+    , "main : Str"
+    , "main = formatUser defaultUser"
+    ]
+
 sharedUserSource :: Text
 sharedUserSource =
   T.unlines
     [ "module Shared.User"
     , ""
     , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "defaultUser : User"
+    , "defaultUser = User {"
+    , "  name = \"Ada\","
+    , "  active = true"
+    , "}"
+    , ""
+    , "formatUser : User -> Str"
+    , "formatUser user = user.name"
+    ]
+
+headerlessSharedUserSource :: Text
+headerlessSharedUserSource =
+  T.unlines
+    [ "record User = {"
     , "  name : Str,"
     , "  active : Bool"
     , "}"

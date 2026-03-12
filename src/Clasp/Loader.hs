@@ -9,7 +9,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Directory (doesFileExist, makeAbsolute)
-import System.FilePath ((</>), (<.>), joinPath, takeDirectory)
+import System.FilePath ((</>), (<.>), joinPath, takeDirectory, takeFileName)
 import Clasp.Diagnostic
   ( DiagnosticBundle
   , diagnostic
@@ -32,7 +32,7 @@ loadEntryModule :: FilePath -> IO (Either DiagnosticBundle Module)
 loadEntryModule entryPath = do
   absoluteEntryPath <- makeAbsolute entryPath
   entrySource <- TIO.readFile absoluteEntryPath
-  case parseModule absoluteEntryPath entrySource of
+  case parseModule (takeFileName absoluteEntryPath) entrySource of
     Left err ->
       pure (Left err)
     Right entryModule -> do
@@ -96,7 +96,7 @@ loadModule projectRoot state stack importDecl = do
         ]
     else do
       importedSource <- TIO.readFile importedFilePath
-      case parseModule importedFilePath importedSource of
+      case parseModule (joinPath (fmap T.unpack (splitModuleName importedModuleName)) <.> "clasp") importedSource of
         Left err ->
           pure (Left err)
         Right importedModule ->

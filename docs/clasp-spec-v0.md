@@ -14,7 +14,7 @@ It is also intentionally bootstrap-oriented. The current syntax is meant to get 
 
 It includes:
 
-- A module header
+- An optional module header when module identity can be inferred from the file path
 - File-level imports
 - Top-level type declarations
 - Top-level record declarations
@@ -93,10 +93,12 @@ The v0 compiler now implements a first slice of those features through nominal s
 
 Every `Clasp` source file in `v0` has:
 
-1. A required module declaration
+1. An optional module declaration
 2. Zero or more file-level imports
 3. Zero or more top-level type, record, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
 4. One or more top-level declarations
+
+When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
 
 Example:
 
@@ -286,7 +288,8 @@ route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summa
 ## Grammar
 
 ```text
-module      ::= "module" module-name import* top-level+
+module      ::= module-header? import* top-level+
+module-header ::= "module" module-name
 module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name
