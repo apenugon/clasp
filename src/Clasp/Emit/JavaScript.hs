@@ -48,6 +48,7 @@ emitModule modl =
       <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
       <> emitPageFlowArtifacts (lowerPageFlows modl)
+      <> emitSeededFixturesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
 
 emitRuntimePrelude :: [Text]
@@ -687,6 +688,36 @@ splitFunctionType typ =
     _ ->
       ([], typ)
 
+emitSeededFixturesExport :: [TypeDecl] -> [RecordDecl] -> [LowerRoute] -> [Text]
+emitSeededFixturesExport typeDecls recordDecls routes =
+  [ "export const __claspSeededFixtures = ["
+  ]
+    <> concatMap emitRouteFixture routes
+    <> [ "];" ]
+  where
+    emitRouteFixture route =
+      let responseTypeName = lowerRouteResponseTypeName route
+          responseKind =
+            case responseTypeName of
+              "Page" -> "page"
+              "Redirect" -> "redirect"
+              _ -> "json"
+       in
+      [ "  {"
+      , "    routeName: " <> emitStringLiteral (lowerRouteName route) <> ","
+      , "    routeId: " <> emitStringLiteral (lowerRouteIdentity route) <> ","
+      , "    method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
+      , "    path: " <> emitStringLiteral (lowerRoutePath route) <> ","
+      , "    requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
+      , "    requestSchema: " <> emitRouteFixtureSchemaFor typeDecls recordDecls (lowerRouteRequestTypeName route) <> ","
+      , "    requestSeed: " <> emitSeedValueForTypeName typeDecls recordDecls (lowerRouteRequestTypeName route) <> ","
+      , "    responseType: " <> emitStringLiteral responseTypeName <> ","
+      , "    responseKind: " <> emitStringLiteral responseKind <> ","
+      , "    responseSchema: " <> emitRouteFixtureSchemaFor typeDecls recordDecls responseTypeName <> ","
+      , "    responseSeed: " <> emitSeedValueForTypeName typeDecls recordDecls responseTypeName
+      , "  },"
+      ]
+
 emitRoutesExport :: [TypeDecl] -> [RecordDecl] -> [LowerRoute] -> [Text]
 emitRoutesExport typeDecls recordDecls routes =
   [ "export const __claspRoutes = ["
@@ -762,6 +793,13 @@ emitRouteBoundaryDecl typeDecls recordDecls (Just boundary) =
     <> emitRouteRequestSchemaFor typeDecls recordDecls (routeBoundaryDeclType boundary)
     <> " }"
 
+emitRouteFixtureSchemaFor :: [TypeDecl] -> [RecordDecl] -> Text -> Text
+emitRouteFixtureSchemaFor typeDecls recordDecls typeName
+  | typeName == "Page" || typeName == "Redirect" =
+      "null"
+  | otherwise =
+      emitRouteRequestSchemaFor typeDecls recordDecls typeName
+
 emitRouteRequestSchemaFor :: [TypeDecl] -> [RecordDecl] -> Text -> Text
 emitRouteRequestSchemaFor typeDecls recordDecls typeName
   | typeName == "Int" || typeName == "Str" || typeName == "Bool" =
@@ -770,6 +808,84 @@ emitRouteRequestSchemaFor typeDecls recordDecls typeName
       "$claspSchema_" <> typeName
   | otherwise =
       "null"
+
+emitSeedValueForTypeName :: [TypeDecl] -> [RecordDecl] -> Text -> Text
+emitSeedValueForTypeName typeDecls recordDecls typeName
+  | typeName == "Int" =
+      "0"
+  | typeName == "Str" =
+      emitStringLiteral "seed"
+  | typeName == "Bool" =
+      "false"
+  | typeName == "Page" =
+      "{ $kind: \"page\", title: \"Seeded Page\", body: { $kind: \"text\", text: \"seed\" } }"
+  | typeName == "Redirect" =
+      "{ $kind: \"redirect\", location: \"/seeded\", status: 303 }"
+  | otherwise =
+      case findTypeDecl typeName typeDecls of
+        Just typeDecl ->
+          emitSeedValueForTypeDecl typeDecl
+        Nothing ->
+          case findRecordDecl typeName recordDecls of
+            Just recordDecl ->
+              emitSeedValueForRecordDecl typeDecls recordDecls recordDecl
+            Nothing ->
+              "null"
+
+emitSeedValueForTypeDecl :: TypeDecl -> Text
+emitSeedValueForTypeDecl typeDecl =
+  case typeDeclConstructors typeDecl of
+    constructor : _ ->
+      emitStringLiteral (constructorDeclName constructor)
+    [] ->
+      "null"
+
+emitSeedValueForRecordDecl :: [TypeDecl] -> [RecordDecl] -> RecordDecl -> Text
+emitSeedValueForRecordDecl typeDecls recordDecls recordDecl =
+  "{ "
+    <> T.intercalate ", " (fmap emitSeedField (recordDeclFields recordDecl))
+    <> " }"
+  where
+    emitSeedField fieldDecl =
+      recordFieldDeclName fieldDecl
+        <> ": "
+        <> emitSeedValueForType typeDecls recordDecls (recordFieldDeclType fieldDecl)
+
+emitSeedValueForType :: [TypeDecl] -> [RecordDecl] -> Type -> Text
+emitSeedValueForType typeDecls recordDecls typ =
+  case typ of
+    TInt ->
+      "0"
+    TStr ->
+      emitStringLiteral "seed"
+    TBool ->
+      "false"
+    TNamed name ->
+      emitSeedValueForTypeName typeDecls recordDecls name
+    TFunction _ _ ->
+      "null"
+
+findTypeDecl :: Text -> [TypeDecl] -> Maybe TypeDecl
+findTypeDecl typeName =
+  findByName typeName typeDeclName
+
+findRecordDecl :: Text -> [RecordDecl] -> Maybe RecordDecl
+findRecordDecl recordName =
+  findByName recordName recordDeclName
+
+findByName :: Text -> (a -> Text) -> [a] -> Maybe a
+findByName target getName =
+  go
+  where
+    go values =
+      case values of
+        [] ->
+          Nothing
+        value : rest
+          | getName value == target ->
+              Just value
+          | otherwise ->
+              go rest
 
 emitValidator :: Type -> Text -> Text -> Text
 emitValidator typ valueRef pathRef =

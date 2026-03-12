@@ -834,8 +834,11 @@ compileTests =
             assertBool "expected record decoder" ("function $decode_LeadSummary" `T.isInfixOf` emitted)
             assertBool "expected record encoder to validate internal values" ("function $encode_LeadSummary(value) { return JSON.stringify($serialize_LeadSummary($validateInternal_LeadSummary(value, \"value\"))); }" `T.isInfixOf` emitted)
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
+            assertBool "expected seeded fixture export" ("export const __claspSeededFixtures = [" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
             assertBool "expected request schema metadata" ("requestSchema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+            assertBool "expected response schema metadata in seeded fixtures" ("responseSchema: $claspSchema_LeadSummary" `T.isInfixOf` emitted)
+            assertBool "expected response seed metadata in seeded fixtures" ("responseSeed: { summary: \"seed\", priority: \"Low\", followUpRequired: false }" `T.isInfixOf` emitted)
             assertBool "expected route identity metadata" ("id: \"route:summarizeLeadRoute\"" `T.isInfixOf` emitted)
             assertBool "expected path declaration metadata" ("pathDecl: { pattern: \"/lead/summary\", params: [] }" `T.isInfixOf` emitted)
             assertBool "expected body declaration metadata" ("bodyDecl: { type: \"LeadRequest\", schema: $claspSchema_LeadRequest }" `T.isInfixOf` emitted)
@@ -1062,6 +1065,33 @@ compileTests =
               "expected exported ui graphs to summarize benchmark app flows"
               "{\"pageCount\":6,\"navigationCount\":10,\"actionCount\":5,\"landingTitle\":\"Lead inbox\",\"landingTexts\":[\"Lead inbox\",\"Capture a lead, score it once, and review it on the server.\",\"New lead\",\"Company\",\"Contact\",\"Budget\",\"Segment\",\"Create lead\",\"InboxSnapshot(...).headline\",\"InboxSnapshot(...).primaryLeadLabel\",\"InboxSnapshot(...).secondaryLeadLabel\",\"Open the inbox page\"],\"landingForms\":[{\"routeName\":\"createLeadRoute\",\"routeId\":\"route:createLeadRoute\",\"path\":\"/leads\",\"method\":\"POST\",\"action\":\"/leads\",\"requestType\":\"LeadIntake\",\"responseType\":\"Page\",\"responseKind\":\"page\",\"fields\":[{\"name\":\"company\",\"inputKind\":\"text\",\"label\":\"Company\",\"value\":\"\"},{\"name\":\"contact\",\"inputKind\":\"text\",\"label\":\"Contact\",\"value\":\"\"},{\"name\":\"budget\",\"inputKind\":\"number\",\"label\":\"Budget\",\"value\":\"\"},{\"name\":\"segment\",\"inputKind\":\"text\",\"label\":\"Segment\",\"value\":\"\"}],\"submitLabels\":[\"Create lead\"]}],\"reviewSubmit\":[\"Save review\"],\"navigationLabel\":\"InboxSnapshot(...).secondaryLeadLabel\"}"
               graphOutput
+    , testCase "lead inbox app exports response-side seeded fixtures for routes" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-fixtures.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            fixtureOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const landing = compiledModule.__claspSeededFixtures.find((fixture) => fixture.routeName === 'landingRoute');"
+                , "const createLead = compiledModule.__claspSeededFixtures.find((fixture) => fixture.routeName === 'createLeadRoute');"
+                , "console.log(JSON.stringify({"
+                , "  fixtureCount: compiledModule.__claspSeededFixtures.length,"
+                , "  landingResponseType: landing?.responseType ?? null,"
+                , "  landingResponseSchema: landing?.responseSchema ?? null,"
+                , "  landingResponseSeed: landing?.responseSeed ?? null,"
+                , "  createLeadRequestSeed: createLead?.requestSeed ?? null"
+                , "}));"
+                ]
+            assertEqual
+              "expected seeded fixtures to expose stable request and response seeds"
+              "{\"fixtureCount\":6,\"landingResponseType\":\"Page\",\"landingResponseSchema\":null,\"landingResponseSeed\":{\"$kind\":\"page\",\"title\":\"Seeded Page\",\"body\":{\"$kind\":\"text\",\"text\":\"seed\"}},\"createLeadRequestSeed\":{\"company\":\"seed\",\"contact\":\"seed\",\"budget\":0,\"segment\":\"Startup\"}}"
+              fixtureOutput
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
