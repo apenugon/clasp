@@ -143,7 +143,7 @@ function coerceRequestObject(rawValue, schema) {
 
   for (const [fieldName, fieldSchema] of Object.entries(schema.fields ?? {})) {
     if (Object.prototype.hasOwnProperty.call(value, fieldName)) {
-      coerced[fieldName] = coerceRequestValue(value[fieldName], fieldSchema);
+      coerced[fieldName] = coerceRequestValue(value[fieldName], unwrapFieldSchema(fieldSchema));
     }
   }
 
@@ -174,6 +174,14 @@ function coerceRequestValue(rawValue, schema) {
     default:
       return rawValue;
   }
+}
+
+function unwrapFieldSchema(schema) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return schema;
+  }
+
+  return schema.schema ?? schema;
 }
 
 function maybeParseInt(rawValue) {

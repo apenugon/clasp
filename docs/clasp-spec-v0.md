@@ -177,11 +177,13 @@ module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name
 
-top-level   ::= type-decl | record-decl | foreign-decl | route-decl | signature | decl
+top-level   ::= type-decl | record-decl | policy-decl | projection-decl | foreign-decl | route-decl | signature | decl
 type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
 constructor ::= upper-ident type-atom*
 record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
-record-field-decl ::= lower-ident ":" type
+record-field-decl ::= lower-ident ":" type ("classified" lower-ident)?
+policy-decl ::= "policy" upper-ident "=" lower-ident ("," lower-ident)*
+projection-decl ::= "projection" upper-ident "=" upper-ident "with" upper-ident "{" lower-ident ("," lower-ident)* "}"
 foreign-decl ::= "foreign" lower-ident ":" type "=" string
 route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ident lower-ident
 method      ::= "GET" | "POST"
@@ -227,6 +229,9 @@ Notes:
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
 - Record field access becomes JavaScript property access.
+- Record fields may carry a classification label; unlabeled fields default to `public`.
+- Policies list the field classifications a disclosure boundary may expose.
+- Projections derive boundary-facing record schemas from a source record plus a policy, and the checker rejects projected fields whose classifications are not allowed by that policy.
 - `decode` validates and decodes JSON text into a primitive or record type.
 - `encode` serializes a primitive or record value into JSON text.
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.

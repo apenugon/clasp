@@ -49,9 +49,13 @@ import Clasp.Syntax
   , Module (..)
   , Pattern (..)
   , PatternBinder (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , ProjectionDecl (..)
+  , ProjectionFieldDecl (..)
   , RouteDecl (..)
   , Position (..)
   , SourceSpan (..)
@@ -228,6 +232,7 @@ builtinRecordFieldDecl name typ =
     { recordFieldDeclName = name
     , recordFieldDeclSpan = builtinSpan
     , recordFieldDeclType = typ
+    , recordFieldDeclClassification = "public"
     }
 
 builtinRecordDecl :: Text -> [(Text, Type)] -> RecordDecl
@@ -236,6 +241,8 @@ builtinRecordDecl name fields =
     { recordDeclName = name
     , recordDeclSpan = builtinSpan
     , recordDeclNameSpan = builtinSpan
+    , recordDeclProjectionSource = Nothing
+    , recordDeclProjectionPolicy = Nothing
     , recordDeclFields = fmap (uncurry builtinRecordFieldDecl) fields
     }
 
@@ -302,12 +309,17 @@ isSafeInputKind inputKind = inputKind `elem` ["text", "number", "hidden"]
 checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
-      recordDecls = moduleRecordDecls modl
+      schemaRecordDecls = moduleRecordDecls modl
+      policyDecls = modulePolicyDecls modl
+      projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
       routeDecls = moduleRouteDecls modl
       decls = moduleDecls modl
 
   ensureUniqueTypeDecls typeDecls
+  ensureUniquePolicyDecls policyDecls
+  projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
+  let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
@@ -345,6 +357,145 @@ checkModule modl = do
       , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls
       }
+
+ensureUniquePolicyDecls :: [PolicyDecl] -> Either DiagnosticBundle ()
+ensureUniquePolicyDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (policyDecl : rest) =
+      case Map.lookup (policyDeclName policyDecl) seen of
+        Just previousPolicyDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_POLICY"
+                ("Duplicate policy declaration for `" <> policyDeclName policyDecl <> "`.")
+                (Just (policyDeclNameSpan policyDecl))
+                ["Each policy name may only be declared once."]
+                [diagnosticRelated "previous policy declaration" (policyDeclNameSpan previousPolicyDecl)]
+            ]
+        Nothing -> do
+          ensureUniquePolicyClassifications policyDecl
+          go (Map.insert (policyDeclName policyDecl) policyDecl seen) rest
+
+ensureUniquePolicyClassifications :: PolicyDecl -> Either DiagnosticBundle ()
+ensureUniquePolicyClassifications policyDecl = go Map.empty (policyDeclAllowedClassifications policyDecl)
+  where
+    go _ [] = pure ()
+    go seen (classificationDecl : rest) =
+      case Map.lookup (policyClassificationDeclName classificationDecl) seen of
+        Just previousClassificationDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_POLICY_CLASSIFICATION"
+                ("Policy `" <> policyDeclName policyDecl <> "` repeats classification `" <> policyClassificationDeclName classificationDecl <> "`.")
+                (Just (policyClassificationDeclSpan classificationDecl))
+                ["List each disclosure classification at most once per policy."]
+                [diagnosticRelated "previous classification" (policyClassificationDeclSpan previousClassificationDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (policyClassificationDeclName classificationDecl) classificationDecl seen) rest
+
+synthesizeProjectionRecordDecls :: [RecordDecl] -> [PolicyDecl] -> [ProjectionDecl] -> Either DiagnosticBundle [RecordDecl]
+synthesizeProjectionRecordDecls schemaRecordDecls policyDecls =
+  traverse (synthesizeProjectionRecordDecl schemaRecordEnv policyDeclEnv)
+  where
+    schemaRecordEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- schemaRecordDecls])
+    policyDeclEnv = Map.fromList [(policyDeclName policyDecl, policyDecl) | policyDecl <- policyDecls]
+
+synthesizeProjectionRecordDecl :: RecordDeclEnv -> Map.Map Text PolicyDecl -> ProjectionDecl -> Either DiagnosticBundle RecordDecl
+synthesizeProjectionRecordDecl schemaRecordEnv policyDeclEnv projectionDecl = do
+  sourceRecordDecl <-
+    case Map.lookup (projectionDeclSourceRecordName projectionDecl) schemaRecordEnv of
+      Just recordDecl ->
+        pure recordDecl
+      Nothing ->
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_PROJECTION_SOURCE"
+              ("Projection `" <> projectionDeclName projectionDecl <> "` references unknown record `" <> projectionDeclSourceRecordName projectionDecl <> "`.")
+              (Just (projectionDeclSourceRecordSpan projectionDecl))
+              ["Declare the source record before using it in a projection."]
+              []
+          ]
+  policyDecl <-
+    case Map.lookup (projectionDeclPolicyName projectionDecl) policyDeclEnv of
+      Just currentPolicyDecl ->
+        pure currentPolicyDecl
+      Nothing ->
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_POLICY"
+              ("Projection `" <> projectionDeclName projectionDecl <> "` references unknown policy `" <> projectionDeclPolicyName projectionDecl <> "`.")
+              (Just (projectionDeclPolicySpan projectionDecl))
+              ["Declare the disclosure policy before using it in a projection."]
+              []
+          ]
+  projectedFields <- projectRecordFields sourceRecordDecl policyDecl projectionDecl
+  pure
+    RecordDecl
+      { recordDeclName = projectionDeclName projectionDecl
+      , recordDeclSpan = projectionDeclSpan projectionDecl
+      , recordDeclNameSpan = projectionDeclNameSpan projectionDecl
+      , recordDeclProjectionSource = Just (projectionDeclSourceRecordName projectionDecl)
+      , recordDeclProjectionPolicy = Just (projectionDeclPolicyName projectionDecl)
+      , recordDeclFields = projectedFields
+      }
+
+projectRecordFields :: RecordDecl -> PolicyDecl -> ProjectionDecl -> Either DiagnosticBundle [RecordFieldDecl]
+projectRecordFields sourceRecordDecl policyDecl projectionDecl = do
+  ensureUniqueProjectionFields projectionDecl
+  traverse (projectField sourceFieldEnv allowedClassifications) (projectionDeclFields projectionDecl)
+  where
+    sourceFieldEnv = Map.fromList [(recordFieldDeclName fieldDecl, fieldDecl) | fieldDecl <- recordDeclFields sourceRecordDecl]
+    allowedClassifications =
+      Map.fromList
+        [ (policyClassificationDeclName classificationDecl, ())
+        | classificationDecl <- policyDeclAllowedClassifications policyDecl
+        ]
+    projectField fieldEnv allowed projectionFieldDecl =
+      case Map.lookup (projectionFieldDeclName projectionFieldDecl) fieldEnv of
+        Nothing ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_UNKNOWN_PROJECTION_FIELD"
+                ("Projection `" <> projectionDeclName projectionDecl <> "` references unknown field `" <> projectionFieldDeclName projectionFieldDecl <> "` on `" <> recordDeclName sourceRecordDecl <> "`.")
+                (Just (projectionFieldDeclSpan projectionFieldDecl))
+                ["Project only fields declared on the source record."]
+                [diagnosticRelated "source record" (recordDeclNameSpan sourceRecordDecl)]
+            ]
+        Just fieldDecl ->
+          if Map.member (recordFieldDeclClassification fieldDecl) allowed
+            then
+              pure fieldDecl
+            else
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_DISCLOSURE_POLICY"
+                    ("Projection `" <> projectionDeclName projectionDecl <> "` cannot disclose `" <> projectionFieldDeclName projectionFieldDecl <> "` classified as `" <> recordFieldDeclClassification fieldDecl <> "` under policy `" <> policyDeclName policyDecl <> "`.")
+                    (Just (projectionFieldDeclSpan projectionFieldDecl))
+                    ["Choose a policy that allows the field classification or remove the field from the projection."]
+                    [ diagnosticRelated "source field" (recordFieldDeclSpan fieldDecl)
+                    , diagnosticRelated "policy declaration" (policyDeclNameSpan policyDecl)
+                    ]
+                ]
+
+ensureUniqueProjectionFields :: ProjectionDecl -> Either DiagnosticBundle ()
+ensureUniqueProjectionFields projectionDecl = go Map.empty (projectionDeclFields projectionDecl)
+  where
+    go _ [] = pure ()
+    go seen (fieldDecl : rest) =
+      case Map.lookup (projectionFieldDeclName fieldDecl) seen of
+        Just previousFieldDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_PROJECTION_FIELD"
+                ("Projection `" <> projectionDeclName projectionDecl <> "` repeats field `" <> projectionFieldDeclName fieldDecl <> "`.")
+                (Just (projectionFieldDeclSpan fieldDecl))
+                ["Each projected field may only appear once."]
+                [diagnosticRelated "previous field" (projectionFieldDeclSpan previousFieldDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (projectionFieldDeclName fieldDecl) fieldDecl seen) rest
 
 ensureUniqueTypeDecls :: [TypeDecl] -> Either DiagnosticBundle ()
 ensureUniqueTypeDecls = go Map.empty

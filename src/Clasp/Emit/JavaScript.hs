@@ -232,6 +232,8 @@ emitRequestSchemaHelpers typeDecls recordDecls =
       [ "const $claspSchema_" <> recordDeclName recordDecl <> " = {"
       , "  kind: \"record\","
       , "  name: " <> emitStringLiteral (recordDeclName recordDecl) <> ","
+      , "  classificationPolicy: " <> emitOptionalText (recordDeclProjectionPolicy recordDecl) <> ","
+      , "  projectionSource: " <> emitOptionalText (recordDeclProjectionSource recordDecl) <> ","
       , "  fields: {"
       ]
         <> fmap emitRecordFieldSchema (recordDeclFields recordDecl)
@@ -242,9 +244,12 @@ emitRequestSchemaHelpers typeDecls recordDecls =
     emitRecordFieldSchema fieldDecl =
       "    "
         <> recordFieldDeclName fieldDecl
-        <> ": "
+        <> ": {"
+        <> " schema: "
         <> emitRequestSchemaRef (recordFieldDeclType fieldDecl)
-        <> ","
+        <> ", classification: "
+        <> emitStringLiteral (recordFieldDeclClassification fieldDecl)
+        <> " },"
 
     emitRequestSchemaRef typ =
       case typ of
@@ -260,6 +265,14 @@ emitRequestSchemaHelpers typeDecls recordDecls =
             else "null"
         TFunction _ _ ->
           "null"
+
+emitOptionalText :: Maybe Text -> Text
+emitOptionalText maybeText =
+  case maybeText of
+    Just value ->
+      emitStringLiteral value
+    Nothing ->
+      "null"
 
 emitTypeCodecHelpers :: TypeDecl -> [Text]
 emitTypeCodecHelpers typeDecl

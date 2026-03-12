@@ -7,6 +7,7 @@ module Clasp.Parser
 import Control.Monad (foldM, void, when)
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
@@ -58,7 +59,11 @@ import Clasp.Syntax
   , ModuleName (..)
   , PatternBinder (..)
   , Pattern (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
   , Position (..)
+  , ProjectionDecl (..)
+  , ProjectionFieldDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
@@ -76,6 +81,8 @@ type Parser = Parsec Void Text
 data TopLevelItem
   = TopTypeDecl TypeDecl
   | TopRecordDecl RecordDecl
+  | TopPolicyDecl PolicyDecl
+  | TopProjectionDecl ProjectionDecl
   | TopForeignDecl ForeignDecl
   | TopRouteDecl RouteDecl
   | TopSignature Text Type SourceSpan
@@ -114,7 +121,9 @@ importParser = do
 
 topLevelItemParser :: Parser TopLevelItem
 topLevelItemParser =
-  try foreignDeclParser
+  try projectionDeclParser
+    <|> try policyDeclParser
+    <|> try foreignDeclParser
     <|> try routeDeclParser
     <|> try recordDeclParser
     <|> try typeDeclParser
@@ -197,6 +206,8 @@ recordDeclParser = do
       { recordDeclName = name
       , recordDeclSpan = makeSourceSpan start end
       , recordDeclNameSpan = nameSpan
+      , recordDeclProjectionSource = Nothing
+      , recordDeclProjectionPolicy = Nothing
       , recordDeclFields = fields
       }
 
@@ -206,12 +217,75 @@ recordFieldDeclParser = do
   (_, fieldName) <- locatedLowerIdentifierN
   _ <- symbolN ":"
   fieldType <- typeParser
+  classification <- optional (keywordN "classified" *> lowerIdentifier)
   end <- getSourcePos
   pure
     RecordFieldDecl
       { recordFieldDeclName = fieldName
       , recordFieldDeclSpan = makeSourceSpan start end
       , recordFieldDeclType = fieldType
+      , recordFieldDeclClassification = fromMaybe "public" classification
+      }
+
+policyDeclParser :: Parser TopLevelItem
+policyDeclParser = do
+  start <- getSourcePos
+  keyword "policy"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  classifications <- policyClassificationParser `sepBy1` symbolN ","
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopPolicyDecl $
+    PolicyDecl
+      { policyDeclName = name
+      , policyDeclSpan = makeSourceSpan start end
+      , policyDeclNameSpan = nameSpan
+      , policyDeclAllowedClassifications = classifications
+      }
+
+policyClassificationParser :: Parser PolicyClassificationDecl
+policyClassificationParser = do
+  (classificationSpan, classificationName) <- locatedLowerIdentifierN
+  pure
+    PolicyClassificationDecl
+      { policyClassificationDeclName = classificationName
+      , policyClassificationDeclSpan = classificationSpan
+      }
+
+projectionDeclParser :: Parser TopLevelItem
+projectionDeclParser = do
+  start <- getSourcePos
+  keyword "projection"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  (sourceSpan, sourceRecordName) <- locatedUpperIdentifier
+  keyword "with"
+  (policySpan, policyName) <- locatedUpperIdentifier
+  fields <- braces (projectionFieldDeclParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopProjectionDecl $
+    ProjectionDecl
+      { projectionDeclName = name
+      , projectionDeclSpan = makeSourceSpan start end
+      , projectionDeclNameSpan = nameSpan
+      , projectionDeclSourceRecordName = sourceRecordName
+      , projectionDeclSourceRecordSpan = sourceSpan
+      , projectionDeclPolicyName = policyName
+      , projectionDeclPolicySpan = policySpan
+      , projectionDeclFields = fields
+      }
+
+projectionFieldDeclParser :: Parser ProjectionFieldDecl
+projectionFieldDeclParser = do
+  (fieldSpan, fieldName) <- locatedLowerIdentifierN
+  pure
+    ProjectionFieldDecl
+      { projectionFieldDeclName = fieldName
+      , projectionFieldDeclSpan = fieldSpan
       }
 
 typeDeclParser :: Parser TopLevelItem
@@ -468,6 +542,9 @@ upperIdentifierRaw =
 keyword :: Text -> Parser ()
 keyword word = lexeme (keywordRaw word)
 
+keywordN :: Text -> Parser ()
+keywordN word = locatedLexemeWith scn (keywordRaw word) *> pure ()
+
 keywordRaw :: Text -> Parser ()
 keywordRaw word = do
   void (string word)
@@ -539,7 +616,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures) <- foldM step ([], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -547,6 +625,8 @@ attachSignatures (name, imports, items) = do
         , moduleImports = imports
         , moduleTypeDecls = reverse typeDecls
         , moduleRecordDecls = reverse recordDecls
+        , modulePolicyDecls = reverse policyDecls
+        , moduleProjectionDecls = reverse projectionDecls
         , moduleForeignDecls = reverse foreignDecls
         , moduleRouteDecls = reverse routeDecls
         , moduleDecls = reverse decls
@@ -562,16 +642,20 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopPolicyDecl policyDecl ->
+          pure (typeDecls, recordDecls, policyDecl : policyDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopProjectionDecl projectionDecl ->
+          pure (typeDecls, recordDecls, policyDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -584,7 +668,16 @@ attachSignatures (name, imports, items) = do
                     [diagnosticRelated "previous signature" existingSpan]
                 ]
             Nothing ->
-              pure (typeDecls, recordDecls, foreignDecls, routeDecls, decls, Map.insert sigName (sigType, signatureSpan) pendingSignatures)
+              pure
+                ( typeDecls
+                , recordDecls
+                , policyDecls
+                , projectionDecls
+                , foreignDecls
+                , routeDecls
+                , decls
+                , Map.insert sigName (sigType, signatureSpan) pendingSignatures
+                )
         TopDecl decl ->
           let annotationData = Map.lookup (declName decl) pendingSignatures
               updatedDecl =
@@ -597,7 +690,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, policyDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -620,11 +713,15 @@ reservedWords =
   , "import"
   , "type"
   , "record"
+  , "policy"
+  , "projection"
+  , "with"
   , "foreign"
   , "route"
   , "decode"
   , "encode"
   , "match"
+  , "classified"
   , "true"
   , "false"
   , "Int"

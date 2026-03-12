@@ -4,6 +4,7 @@ module Main (main) where
 
 import Control.Exception (finally)
 import Control.Monad (when)
+import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -57,7 +58,10 @@ import Clasp.Syntax
   , Pattern (..)
   , PatternBinder (..)
   , Position (..)
+  , PolicyDecl (..)
+  , ProjectionDecl (..)
   , RecordDecl (..)
+  , RecordFieldDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
   , SourceSpan (..)
@@ -151,6 +155,32 @@ parserTests =
                     assertFailure ("expected field access, got " <> show other)
               Nothing ->
                 assertFailure "expected showName declaration"
+    , testCase "parses classified fields, policies, and projections" $
+        case parseSource "inline" classifiedProjectionSource of
+          Left err ->
+            assertFailure ("expected classified projection source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case find ((== "Customer") . recordDeclName) (moduleRecordDecls modl) of
+              Just recordDecl ->
+                case recordDeclFields recordDecl of
+                  _ : RecordFieldDecl {recordFieldDeclClassification = classification} : _ ->
+                    assertEqual "classified field" "pii" classification
+                  _ ->
+                    assertFailure "expected classified email field"
+              Nothing ->
+                assertFailure "expected Customer schema record declaration"
+            case modulePolicyDecls modl of
+              [policyDecl] ->
+                assertEqual "policy name" "SupportDisclosure" (policyDeclName policyDecl)
+              other ->
+                assertFailure ("expected one policy declaration, got " <> show (length other))
+            case moduleProjectionDecls modl of
+              [projectionDecl] -> do
+                assertEqual "projection name" "SupportCustomer" (projectionDeclName projectionDecl)
+                assertEqual "projection source" "Customer" (projectionDeclSourceRecordName projectionDecl)
+                assertEqual "projection policy" "SupportDisclosure" (projectionDeclPolicyName projectionDecl)
+              other ->
+                assertFailure ("expected one projection declaration, got " <> show (length other))
     , testCase "parses foreign declarations, routes, and json boundaries" $
         case parseSource "inline" serviceSource of
           Left err ->
@@ -239,6 +269,12 @@ checkerTests =
             assertFailure ("expected service source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "accepts classified projections that disclose only policy-approved fields" $
+        case checkSource "projection" classifiedProjectionSource of
+          Left err ->
+            assertFailure ("expected classified projection source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right _ ->
+            pure ()
     , testCase "accepts compiler-known page primitives" $
         case checkSource "page" pageSource of
           Left err ->
@@ -289,6 +325,8 @@ checkerTests =
         assertHasCode "E_RECORD_MISSING_FIELDS" (checkSource "bad" missingRecordFieldSource)
     , testCase "rejects route handlers with the wrong response type" $
         assertHasCode "E_ROUTE_HANDLER_TYPE" (checkSource "bad" wrongRouteHandlerSource)
+    , testCase "rejects projections that disclose disallowed classified fields" $
+        assertHasCode "E_DISCLOSURE_POLICY" (checkSource "bad" disallowedProjectionSource)
     , testCase "reports non-exhaustive match expressions" $
         assertHasCode "E_NONEXHAUSTIVE_MATCH" (checkSource "bad" nonExhaustiveMatchSource)
     , testCase "rejects constructors from the wrong type" $
@@ -485,6 +523,15 @@ compileTests =
             assertBool "expected route registry" ("export const __claspRoutes" `T.isInfixOf` emitted)
             assertBool "expected route path" ("\"/lead/summary\"" `T.isInfixOf` emitted)
             assertBool "expected request schema metadata" ("requestSchema: $claspSchema_LeadRequest" `T.isInfixOf` emitted)
+    , testCase "compile emits field classifications and projection disclosure metadata" $
+        case compileSource "projection" classifiedProjectionSource of
+          Left err ->
+            assertFailure ("expected classified projection source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected classified source field metadata" ("email: { schema: $claspSchema_Str, classification: \"pii\" }" `T.isInfixOf` emitted)
+            assertBool "expected projection metadata" ("classificationPolicy: \"SupportDisclosure\"" `T.isInfixOf` emitted)
+            assertBool "expected projection source metadata" ("projectionSource: \"Customer\"" `T.isInfixOf` emitted)
+            assertBool "expected foreign manifest to use projection schema" ("schema: $claspSchema_SupportCustomer" `T.isInfixOf` emitted)
     , testCase "compile emits safe page rendering helpers and page route metadata" $
         case compileSource "page" pageSource of
           Left err ->
@@ -846,6 +893,56 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+classifiedProjectionSource :: Text
+classifiedProjectionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , ""
+    , "record Customer = {"
+    , "  id : Str,"
+    , "  email : Str classified pii,"
+    , "  tier : Str"
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public, pii"
+    , ""
+    , "projection SupportCustomer = Customer with SupportDisclosure { id, email, tier }"
+    , ""
+    , "currentCustomer : SupportCustomer"
+    , "currentCustomer = SupportCustomer {"
+    , "  id = \"cust-1\","
+    , "  email = \"ada@example.com\","
+    , "  tier = \"gold\""
+    , "}"
+    , ""
+    , "foreign publishCustomer : SupportCustomer -> Str = \"publishCustomer\""
+    , ""
+    , "shareCustomer : Empty -> SupportCustomer"
+    , "shareCustomer req = currentCustomer"
+    , ""
+    , "encodedCustomer : Str"
+    , "encodedCustomer = encode currentCustomer"
+    , ""
+    , "route shareCustomerRoute = GET \"/customer\" Empty -> SupportCustomer shareCustomer"
+    ]
+
+disallowedProjectionSource :: Text
+disallowedProjectionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Customer = {"
+    , "  id : Str,"
+    , "  email : Str classified pii"
+    , "}"
+    , ""
+    , "policy PublicDisclosure = public"
+    , ""
+    , "projection PublicCustomer = Customer with PublicDisclosure { id, email }"
     ]
 
 pageSource :: Text

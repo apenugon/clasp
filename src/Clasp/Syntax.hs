@@ -11,7 +11,11 @@ module Clasp.Syntax
   , ModuleName (..)
   , PatternBinder (..)
   , Pattern (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
   , Position (..)
+  , ProjectionDecl (..)
+  , ProjectionFieldDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
@@ -82,6 +86,8 @@ data Module = Module
   , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
+  , modulePolicyDecls :: [PolicyDecl]
+  , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
   , moduleRouteDecls :: [RouteDecl]
   , moduleDecls :: [Decl]
@@ -108,6 +114,8 @@ data RecordDecl = RecordDecl
   { recordDeclName :: Text
   , recordDeclSpan :: SourceSpan
   , recordDeclNameSpan :: SourceSpan
+  , recordDeclProjectionSource :: Maybe Text
+  , recordDeclProjectionPolicy :: Maybe Text
   , recordDeclFields :: [RecordFieldDecl]
   }
   deriving (Eq, Show)
@@ -116,6 +124,39 @@ data RecordFieldDecl = RecordFieldDecl
   { recordFieldDeclName :: Text
   , recordFieldDeclSpan :: SourceSpan
   , recordFieldDeclType :: Type
+  , recordFieldDeclClassification :: Text
+  }
+  deriving (Eq, Show)
+
+data PolicyClassificationDecl = PolicyClassificationDecl
+  { policyClassificationDeclName :: Text
+  , policyClassificationDeclSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data PolicyDecl = PolicyDecl
+  { policyDeclName :: Text
+  , policyDeclSpan :: SourceSpan
+  , policyDeclNameSpan :: SourceSpan
+  , policyDeclAllowedClassifications :: [PolicyClassificationDecl]
+  }
+  deriving (Eq, Show)
+
+data ProjectionFieldDecl = ProjectionFieldDecl
+  { projectionFieldDeclName :: Text
+  , projectionFieldDeclSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data ProjectionDecl = ProjectionDecl
+  { projectionDeclName :: Text
+  , projectionDeclSpan :: SourceSpan
+  , projectionDeclNameSpan :: SourceSpan
+  , projectionDeclSourceRecordName :: Text
+  , projectionDeclSourceRecordSpan :: SourceSpan
+  , projectionDeclPolicyName :: Text
+  , projectionDeclPolicySpan :: SourceSpan
+  , projectionDeclFields :: [ProjectionFieldDecl]
   }
   deriving (Eq, Show)
 
