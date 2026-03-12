@@ -267,6 +267,8 @@ data Expr
   | EString SourceSpan Text
   | EBool SourceSpan Bool
   | EList SourceSpan [Expr]
+  | EEqual SourceSpan Expr Expr
+  | ENotEqual SourceSpan Expr Expr
   | ECall SourceSpan Expr [Expr]
   | ELet SourceSpan SourceSpan Text Expr Expr
   | EMatch SourceSpan Expr [MatchBranch]
@@ -288,6 +290,10 @@ exprSpan expr =
     EBool span' _ ->
       span'
     EList span' _ ->
+      span'
+    EEqual span' _ _ ->
+      span'
+    ENotEqual span' _ _ ->
       span'
     ECall span' _ _ ->
       span'

@@ -360,6 +360,29 @@ parserTests =
                     assertFailure ("expected top-level let expression in example main, got " <> show other)
               Nothing ->
                 assertFailure "expected main declaration"
+    , testCase "parses equality operators" $
+        case parseSource "inline" equalitySource of
+          Left err ->
+            assertFailure ("expected equality source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case findDecl "sameNumber" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EEqual _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected equality expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected sameNumber declaration"
+            case findDecl "differentFlag" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ENotEqual _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected inequality expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected differentFlag declaration"
     , testCase "parses the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case parseSource "examples/lists.clasp" source of
@@ -495,6 +518,29 @@ checkerTests =
                 assertEqual "main type" (TList (TNamed "User")) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
+    , testCase "typechecks equality operators for primitive values" $
+        case checkSource "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "sameNumber") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CEqual _ (CVar _ TInt "left") (CVar _ TInt "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked equality expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected sameNumber declaration"
+            case find ((== "differentFlag") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CNotEqual _ (CVar _ TBool "left") (CVar _ TBool "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked inequality expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected differentFlag declaration"
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -543,6 +589,8 @@ checkerTests =
         assertHasCode "E_DUPLICATE_MATCH_BRANCH" (checkSource "bad" duplicateBranchSource)
     , testCase "rejects heterogeneous list literals" $
         assertHasCode "E_LIST_ITEM_TYPE" (checkSource "bad" heterogeneousListSource)
+    , testCase "rejects equality over unsupported or mismatched types" $
+        assertHasCode "E_EQUALITY_OPERAND" (checkSource "bad" badEqualitySource)
     , testCase "rejects active script tags in safe views" $
         assertHasCode "E_VIEW_TAG" (checkSource "bad" unsafeScriptSource)
     , testCase "rejects raw host class escapes in safe views" $
@@ -850,6 +898,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered let declaration: " <> show other)
+    , testCase "lowering preserves equality operators" $
+        case lowerChecked "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "sameNumber" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LEqual (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered sameNumber declaration: " <> show other)
+            case findLowerDecl "differentFlag" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LNotEqual (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered differentFlag declaration: " <> show other)
     , testCase "lowering preserves page and view primitives" $
         case lowerChecked "page" pageSource of
           Left err ->
@@ -1052,6 +1115,28 @@ compileTests =
                 , "console.log(compiledModule.greeting);"
                 ]
             assertEqual "expected let result" "Ada" runtimeOutput
+    , testCase "compile lowers equality operators to JavaScript and evaluates them" $
+        case compileSource "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected strict equality emission" ("(left === right)" `T.isInfixOf` emitted)
+            assertBool "expected strict inequality emission" ("(left !== right)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/equality-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({"
+                , "  number: compiledModule.sameNumber(7, 7),"
+                , "  word: compiledModule.sameWord(\"Ada\", \"Grace\"),"
+                , "  flag: compiledModule.differentFlag(true, false),"
+                , "  main: compiledModule.main"
+                , "}));"
+                ]
+            assertEqual "expected equality runtime result" "{\"number\":true,\"word\":false,\"flag\":true,\"main\":true}" runtimeOutput
     , testCase "compile round-trips list values through generated json codecs" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -1995,6 +2080,24 @@ letExpressionSource =
     , "greeting = let message = \"Ada\" in message"
     ]
 
+equalitySource :: Text
+equalitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "sameNumber : Int -> Int -> Bool"
+    , "sameNumber left right = left == right"
+    , ""
+    , "sameWord : Str -> Str -> Bool"
+    , "sameWord left right = left == right"
+    , ""
+    , "differentFlag : Bool -> Bool -> Bool"
+    , "differentFlag left right = left != right"
+    , ""
+    , "main : Bool"
+    , "main = sameNumber 7 7"
+    ]
+
 letInMatchSource :: Text
 letInMatchSource =
   T.unlines
@@ -2014,6 +2117,18 @@ heterogeneousListSource =
     [ "module Main"
     , ""
     , "bad = [\"Ada\", 1]"
+    ]
+
+badEqualitySource :: Text
+badEqualitySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "badList : Bool"
+    , "badList = [1] == [1]"
+    , ""
+    , "badMixed : Bool"
+    , "badMixed = 1 == \"1\""
     ]
 
 unsafeScriptSource :: Text

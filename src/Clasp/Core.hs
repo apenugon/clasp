@@ -122,6 +122,8 @@ data CoreExpr
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CList SourceSpan Type [CoreExpr]
+  | CEqual SourceSpan CoreExpr CoreExpr
+  | CNotEqual SourceSpan CoreExpr CoreExpr
   | CLet SourceSpan Type Text CoreExpr CoreExpr
   | CPage SourceSpan CoreExpr CoreExpr
   | CRedirect SourceSpan Text
@@ -160,6 +162,10 @@ coreExprType expr =
       TBool
     CList _ typ _ ->
       typ
+    CEqual _ _ _ ->
+      TBool
+    CNotEqual _ _ _ ->
+      TBool
     CLet _ typ _ _ _ ->
       typ
     CPage _ _ _ ->
@@ -259,6 +265,10 @@ renameDecl oldName newName modl
           CViewSubmit span' (renameDeclExpr boundNames body)
         CList span' typ items ->
           CList span' typ (fmap (renameDeclExpr boundNames) items)
+        CEqual span' left right ->
+          CEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CNotEqual span' left right ->
+          CNotEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CLet span' typ name value body ->
           CLet span' typ name (renameDeclExpr boundNames value) (renameDeclExpr (Set.insert name boundNames) body)
         CCall span' typ fn args ->
@@ -394,6 +404,10 @@ renameSchema oldName newName modl
           CViewSubmit span' (renameExprTypes body)
         CList span' typ items ->
           CList span' (renameType typ) (fmap renameExprTypes items)
+        CEqual span' left right ->
+          CEqual span' (renameExprTypes left) (renameExprTypes right)
+        CNotEqual span' left right ->
+          CNotEqual span' (renameExprTypes left) (renameExprTypes right)
         CLet span' typ name value body ->
           CLet span' (renameType typ) name (renameExprTypes value) (renameExprTypes body)
         CCall span' typ fn args ->

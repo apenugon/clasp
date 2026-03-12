@@ -342,6 +342,18 @@ buildExprGraph nodeId expr =
           let itemIds = fmap (\index -> childSegmentId nodeId ("item" <> showText index)) [(0 :: Int) .. length items - 1]
               itemNodes = concat (zipWith buildExprGraph itemIds items)
            in ([("items", AirAttrNodes itemIds)], itemNodes)
+        CEqual _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
+        CNotEqual _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
         CLet _ _ name value body ->
           let valueId = exprChildId "value"
               bodyId = exprChildId "body"
@@ -513,6 +525,8 @@ exprKind expr =
     CString {} -> "string"
     CBool {} -> "bool"
     CList {} -> "list"
+    CEqual {} -> "equal"
+    CNotEqual {} -> "notEqual"
     CLet {} -> "let"
     CPage {} -> "page"
     CRedirect {} -> "redirect"
@@ -540,6 +554,8 @@ exprSpan expr =
     CString span' _ -> span'
     CBool span' _ -> span'
     CList span' _ _ -> span'
+    CEqual span' _ _ -> span'
+    CNotEqual span' _ _ -> span'
     CLet span' _ _ _ _ -> span'
     CPage span' _ _ -> span'
     CRedirect span' _ -> span'

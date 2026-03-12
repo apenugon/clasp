@@ -28,6 +28,7 @@ It includes:
 - Basic literals
 - Function application
 - Local `let` expressions
+- Equality operators for `Int`, `Str`, and `Bool`
 - Field access
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
@@ -135,6 +136,18 @@ greeting : Str
 greeting = let message = "Ada" in message
 ```
 
+Primitive equality is also available for `Int`, `Str`, and `Bool`:
+
+```clasp
+module Main
+
+sameNumber : Int -> Int -> Bool
+sameNumber left right = left == right
+
+differentFlag : Bool -> Bool -> Bool
+differentFlag left right = left != right
+```
+
 Records and field access are also part of the current `v0` surface:
 
 ```clasp
@@ -225,8 +238,10 @@ route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ide
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
-expr        ::= let-expr | term term*
 let-expr    ::= "let" lower-ident "=" expr "in" expr
+expr        ::= let-expr | equality-expr
+equality-expr ::= app-expr (("==" | "!=") app-expr)*
+app-expr    ::= term term*
 term        ::= atom ("." lower-ident)*
 atom        ::= lower-ident
               | upper-ident

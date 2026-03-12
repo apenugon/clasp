@@ -1484,6 +1484,14 @@ emitExpr counter expr =
     LList items ->
       let (nextCounter, itemTexts) = emitExprList counter items
        in (nextCounter, "[" <> T.intercalate ", " itemTexts <> "]")
+    LEqual left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " === " <> rightText <> ")")
+    LNotEqual left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "(" <> leftText <> " !== " <> rightText <> ")")
     LLet name value body ->
       let (counterAfterValue, valueText) = emitExpr counter value
           (counterAfterBody, bodyText) = emitExpr counterAfterValue body

@@ -380,7 +380,13 @@ declParser = do
 
 exprParser :: Parser Expr
 exprParser =
-  letExprParser <|> appExprParser
+  letExprParser <|> equalityExprParser
+
+equalityExprParser :: Parser Expr
+equalityExprParser = do
+  firstTerm <- appExprParser
+  rest <- many ((,) <$> equalityOperatorParser <*> appExprParser)
+  pure (foldl applyEqualityExpr firstTerm rest)
 
 appExprParser :: Parser Expr
 appExprParser = do
@@ -614,6 +620,21 @@ applyExpr fn arg =
           ECall callSpan target (args <> [arg])
         _ ->
           ECall callSpan fn [arg]
+
+equalityOperatorParser :: Parser Text
+equalityOperatorParser =
+  symbol "==" <|> symbol "!="
+
+applyEqualityExpr :: Expr -> (Text, Expr) -> Expr
+applyEqualityExpr left (operator, right) =
+  let equalitySpan = mergeSourceSpans (exprSpan left) (exprSpan right)
+   in case operator of
+        "==" ->
+          EEqual equalitySpan left right
+        "!=" ->
+          ENotEqual equalitySpan left right
+        _ ->
+          left
 
 applyFieldAccess :: Expr -> (SourceSpan, Text) -> Expr
 applyFieldAccess subject (fieldSpan, fieldName) =

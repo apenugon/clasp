@@ -139,6 +139,8 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftList [DraftExpr]
+  | DraftEqual DraftExpr DraftExpr
+  | DraftNotEqual DraftExpr DraftExpr
   | DraftLet Text DraftExpr DraftExpr
   | DraftPage DraftExpr DraftExpr
   | DraftRedirect Text
@@ -1237,6 +1239,10 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EList span' values ->
       inferListExpr ctx termEnv localEnv span' values
+    EEqual equalitySpan left right ->
+      inferEqualityExpr ctx termEnv localEnv equalitySpan True left right
+    ENotEqual equalitySpan left right ->
+      inferEqualityExpr ctx termEnv localEnv equalitySpan False left right
     ELet letSpan _ binderName value body -> do
       valueExpr <- inferExpr ctx termEnv localEnv value
       bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (draftExprType valueExpr) localEnv) body
@@ -1294,6 +1300,40 @@ inferListExpr ctx termEnv localEnv listSpan values = do
     [(0 :: Int) ..]
     draftValues
   pure (DraftExpr listSpan (IList itemType) (DraftList draftValues))
+
+inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Bool -> Expr -> Expr -> InferM DraftExpr
+inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
+  leftExpr <- inferExpr ctx termEnv localEnv left
+  rightExpr <- inferExpr ctx termEnv localEnv right
+  unify
+    ( UnifyContext
+        { unifyCode = "E_EQUALITY_OPERAND"
+        , unifySummary = "Equality operands must have the same supported primitive type."
+        , unifyPrimarySpan = equalitySpan
+        , unifyRelated = []
+        }
+    )
+    (draftExprType leftExpr)
+    (draftExprType rightExpr)
+  resolvedOperandType <- resolveCurrentType (draftExprType leftExpr)
+  case resolvedOperandType of
+    IInt ->
+      pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
+    IStr ->
+      pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
+    IBool ->
+      pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
+    IVar _ ->
+      pure (DraftExpr equalitySpan IBool (if isEqual then DraftEqual leftExpr rightExpr else DraftNotEqual leftExpr rightExpr))
+    _ ->
+      throwDiagnostic . diagnosticBundle $
+        [ diagnostic
+            "E_EQUALITY_OPERAND"
+            "Equality operands must have the same supported primitive type."
+            (Just equalitySpan)
+            ["Only `Int`, `Str`, and `Bool` currently support `==` and `!=`."]
+            []
+        ]
 
 inferRegularCall :: ModuleContext -> DeclTypeEnv -> Map.Map Text InferType -> SourceSpan -> Expr -> [Expr] -> InferM DraftExpr
 inferRegularCall ctx termEnv localEnv callSpan fn args = do
@@ -2412,6 +2452,14 @@ freezeDraftExpr ctx decl inferState draftExpr =
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
       pure (CList (draftExprSpan draftExpr) exprType frozenItems)
+    DraftEqual left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftNotEqual left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CNotEqual (draftExprSpan draftExpr) frozenLeft frozenRight)
     DraftLet name value body -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenValue <- freezeDraftExpr ctx decl inferState value

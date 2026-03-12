@@ -75,6 +75,8 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LList [LowerExpr]
+  | LEqual LowerExpr LowerExpr
+  | LNotEqual LowerExpr LowerExpr
   | LLet Text LowerExpr LowerExpr
   | LPage LowerExpr LowerExpr
   | LRedirect Text
@@ -209,6 +211,10 @@ collectExprCodecTypes expr =
       []
     CList _ _ items ->
       concatMap collectExprCodecTypes items
+    CEqual _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CNotEqual _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
     CLet _ _ _ value body ->
       collectExprCodecTypes value <> collectExprCodecTypes body
     CPage _ title body ->
@@ -320,6 +326,10 @@ lowerCoreExpr expr =
       LBool value
     CList _ _ items ->
       LList (fmap lowerCoreExpr items)
+    CEqual _ left right ->
+      LEqual (lowerCoreExpr left) (lowerCoreExpr right)
+    CNotEqual _ left right ->
+      LNotEqual (lowerCoreExpr left) (lowerCoreExpr right)
     CLet _ _ name value body ->
       LLet name (lowerCoreExpr value) (lowerCoreExpr body)
     CPage _ title body ->
@@ -433,6 +443,10 @@ expandExpr declEnv subst visited expr =
       LBool value
     LList items ->
       LList (fmap (expandExpr declEnv subst visited) items)
+    LEqual left right ->
+      LEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LNotEqual left right ->
+      LNotEqual (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LLet name value body ->
       let value' = expandExpr declEnv subst visited value
        in expandExpr declEnv (Map.insert name value' subst) visited body
@@ -663,6 +677,10 @@ summarizeValue expr =
       "false"
     LList items ->
       "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
+    LEqual left right ->
+      summarizeValue left <> " == " <> summarizeValue right
+    LNotEqual left right ->
+      summarizeValue left <> " != " <> summarizeValue right
     LLet name _ body ->
       normalizeSummaryName name <> " = " <> summarizeValue body
     LConstruct tag _ ->
