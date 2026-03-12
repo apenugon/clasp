@@ -63,6 +63,7 @@ import Clasp.Core
   , CoreMergeGateDecl (..)
   , CoreModule (..)
   , CorePattern (..)
+  , CorePatternBinder (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -1021,6 +1022,31 @@ checkerTests =
                     assertFailure ("expected checked early return expression, got " <> show other)
               Nothing ->
                 assertFailure "expected choose declaration"
+    , testCase "typechecks compiler-known Result constructors and matches" $
+        case checkSource "result" builtinResultSource of
+          Left err ->
+            assertFailure ("expected builtin Result source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "Result") . typeDeclName) (coreModuleTypeDecls checked) of
+              Just typeDecl ->
+                assertEqual
+                  "builtin Result constructors"
+                  [ ConstructorDecl "Ok" dummySpan dummySpan [TStr]
+                  , ConstructorDecl "Err" dummySpan dummySpan [TStr]
+                  ]
+                  (normalizeConstructors (typeDeclConstructors typeDecl))
+              Nothing ->
+                assertFailure "expected compiler-known Result type declaration"
+            case find ((== "unwrap") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "unwrap type" (TFunction [TNamed "Result"] TStr) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CMatch _ TStr (CVar _ (TNamed "Result") "result") [CoreMatchBranch _ (CConstructorPattern _ "Ok" [CorePatternBinder "value" _ TStr]) (CVar _ TStr "value"), CoreMatchBranch _ (CConstructorPattern _ "Err" [CorePatternBinder "message" _ TStr]) (CVar _ TStr "message")] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked Result match expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected unwrap declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -1698,6 +1724,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered constructors: " <> show other)
+    , testCase "lowering materializes compiler-known Result constructors" $
+        case lowerChecked "result" builtinResultSource of
+          Left err ->
+            assertFailure ("expected builtin Result lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case lowerModuleDecls lowered of
+              LFunctionDecl "Ok" ["$0"] (LConstruct "Ok" [LVar "$0"]) : LFunctionDecl "Err" ["$0"] (LConstruct "Err" [LVar "$0"]) : _ ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered Result constructors: " <> show other)
     , testCase "lowering preserves match branches as tag dispatch" $
         case lowerChecked "adt" adtSource of
           Left err ->
@@ -2007,6 +2043,24 @@ compileTests =
             assertBool "expected constructor function" ("export function Busy" `T.isInfixOf` emitted)
             assertBool "expected nullary constructor" ("export const Idle" `T.isInfixOf` emitted)
             assertBool "expected switch for match" ("switch ($match" `T.isInfixOf` emitted)
+    , testCase "compile emits compiler-known Result constructors and evaluates matches" $
+        case compileSource "result" builtinResultSource of
+          Left err ->
+            assertFailure ("expected builtin Result compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected Ok constructor function" ("export function Ok" `T.isInfixOf` emitted)
+            assertBool "expected Err constructor function" ("export function Err" `T.isInfixOf` emitted)
+            let compiledPath = "dist/result-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.main);"
+                , "console.log(compiledModule.unwrap(compiledModule.Err(\"problem\")));"
+                ]
+            assertEqual "expected Result runtime output" "done\nproblem" runtimeOutput
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->
@@ -3263,6 +3317,21 @@ inferredFunctionSource =
     , ""
     , "main : Str"
     , "main = describe (makeBusy \"loading\")"
+    ]
+
+builtinResultSource :: Text
+builtinResultSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "unwrap : Result -> Str"
+    , "unwrap result = match result {"
+    , "  Ok value -> value,"
+    , "  Err message -> message"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = unwrap (Ok \"done\")"
     ]
 
 recordSource :: Text

@@ -265,6 +265,15 @@ tenantTypeName = "Tenant"
 resourceIdentityTypeName :: Text
 resourceIdentityTypeName = "ResourceIdentity"
 
+resultTypeName :: Text
+resultTypeName = "Result"
+
+resultOkConstructorName :: Text
+resultOkConstructorName = "Ok"
+
+resultErrConstructorName :: Text
+resultErrConstructorName = "Err"
+
 authSessionBuiltinName :: Text
 authSessionBuiltinName = "authSession"
 
@@ -311,6 +320,27 @@ builtinRecordDecl name fields =
     , recordDeclFields = fmap (uncurry builtinRecordFieldDecl) fields
     }
 
+builtinConstructorDecl :: Text -> [Type] -> ConstructorDecl
+builtinConstructorDecl name fields =
+  ConstructorDecl
+    { constructorDeclName = name
+    , constructorDeclSpan = builtinSpan
+    , constructorDeclNameSpan = builtinSpan
+    , constructorDeclFields = fields
+    }
+
+builtinResultTypeDecl :: TypeDecl
+builtinResultTypeDecl =
+  TypeDecl
+    { typeDeclName = resultTypeName
+    , typeDeclSpan = builtinSpan
+    , typeDeclNameSpan = builtinSpan
+    , typeDeclConstructors =
+        [ builtinConstructorDecl resultOkConstructorName [TStr]
+        , builtinConstructorDecl resultErrConstructorName [TStr]
+        ]
+    }
+
 builtinRecordDecls :: [RecordDecl]
 builtinRecordDecls =
   [ builtinRecordDecl principalTypeName [("id", TStr)]
@@ -333,7 +363,133 @@ isBuiltinRecordTypeName name = Map.member name builtinRecordDeclEnv
 
 isBuiltinTypeName :: Text -> Bool
 isBuiltinTypeName name =
-  name `elem` [pageTypeName, redirectTypeName, viewTypeName] || isBuiltinRecordTypeName name
+  name `elem` [pageTypeName, redirectTypeName, viewTypeName, resultTypeName] || isBuiltinRecordTypeName name
+
+builtinTypeDeclsForModule :: Module -> [TypeDecl]
+builtinTypeDeclsForModule modl
+  | moduleUsesBuiltinResult modl =
+      [builtinResultTypeDecl]
+  | otherwise =
+      []
+
+moduleUsesBuiltinResult :: Module -> Bool
+moduleUsesBuiltinResult modl =
+  let userConstructorNames =
+        concatMap (fmap constructorDeclName . typeDeclConstructors) (moduleTypeDecls modl)
+   in any typeUsesBuiltinResult (collectModuleTypes modl)
+        || any (`notElem` userConstructorNames) (collectBuiltinResultConstructorRefs modl)
+
+collectModuleTypes :: Module -> [Type]
+collectModuleTypes modl =
+  concatMap collectTypeDeclTypes (moduleTypeDecls modl)
+    <> concatMap collectRecordDeclTypes (moduleRecordDecls modl)
+    <> fmap workflowDeclStateType (moduleWorkflowDecls modl)
+    <> fmap foreignDeclType (moduleForeignDecls modl)
+    <> [ annotation
+       | decl <- moduleDecls modl
+       , Just annotation <- [declAnnotation decl]
+       ]
+
+collectTypeDeclTypes :: TypeDecl -> [Type]
+collectTypeDeclTypes typeDecl =
+  concatMap constructorDeclFields (typeDeclConstructors typeDecl)
+
+collectRecordDeclTypes :: RecordDecl -> [Type]
+collectRecordDeclTypes recordDecl =
+  fmap recordFieldDeclType (recordDeclFields recordDecl)
+
+collectBuiltinResultConstructorRefs :: Module -> [Text]
+collectBuiltinResultConstructorRefs modl =
+  concatMap collectDeclResultConstructors (moduleDecls modl)
+
+collectDeclResultConstructors :: Decl -> [Text]
+collectDeclResultConstructors decl =
+  collectExprResultConstructors (declBody decl)
+
+collectExprResultConstructors :: Expr -> [Text]
+collectExprResultConstructors expr =
+  case expr of
+    EVar _ name
+      | name `elem` [resultOkConstructorName, resultErrConstructorName] ->
+          [name]
+      | otherwise ->
+          []
+    EInt _ _ ->
+      []
+    EString _ _ ->
+      []
+    EBool _ _ ->
+      []
+    EList _ values ->
+      concatMap collectExprResultConstructors values
+    EReturn _ value ->
+      collectExprResultConstructors value
+    EBlock _ body ->
+      collectExprResultConstructors body
+    EEqual _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    ENotEqual _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    ELessThan _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    ELessThanOrEqual _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    EGreaterThan _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    EGreaterThanOrEqual _ left right ->
+      collectExprResultConstructors left <> collectExprResultConstructors right
+    ECall _ fn args ->
+      collectExprResultConstructors fn <> concatMap collectExprResultConstructors args
+    ELet _ _ _ value body ->
+      collectExprResultConstructors value <> collectExprResultConstructors body
+    EMutableLet _ _ _ value body ->
+      collectExprResultConstructors value <> collectExprResultConstructors body
+    EAssign _ _ _ value body ->
+      collectExprResultConstructors value <> collectExprResultConstructors body
+    EFor _ _ _ iterable loopBody body ->
+      collectExprResultConstructors iterable
+        <> collectExprResultConstructors loopBody
+        <> collectExprResultConstructors body
+    EMatch _ subject branches ->
+      collectExprResultConstructors subject <> concatMap collectMatchBranchResultConstructors branches
+    ERecord _ _ fields ->
+      concatMap (collectExprResultConstructors . recordFieldExprValue) fields
+    EFieldAccess _ subject _ ->
+      collectExprResultConstructors subject
+    EDecode _ _ value ->
+      collectExprResultConstructors value
+    EEncode _ value ->
+      collectExprResultConstructors value
+
+collectMatchBranchResultConstructors :: MatchBranch -> [Text]
+collectMatchBranchResultConstructors branch =
+  collectPatternResultConstructors (matchBranchPattern branch)
+    <> collectExprResultConstructors (matchBranchBody branch)
+
+collectPatternResultConstructors :: Pattern -> [Text]
+collectPatternResultConstructors pattern' =
+  case pattern' of
+    PConstructor _ constructorName _
+      | constructorName `elem` [resultOkConstructorName, resultErrConstructorName] ->
+          [constructorName]
+      | otherwise ->
+          []
+
+typeUsesBuiltinResult :: Type -> Bool
+typeUsesBuiltinResult typ =
+  case typ of
+    TInt ->
+      False
+    TStr ->
+      False
+    TBool ->
+      False
+    TList itemType ->
+      typeUsesBuiltinResult itemType
+    TNamed name ->
+      name == resultTypeName
+    TFunction args result ->
+      any typeUsesBuiltinResult (args <> [result])
 
 isBuiltinViewFunctionName :: Text -> Bool
 isBuiltinViewFunctionName name =
@@ -437,6 +593,8 @@ checkModule modl = do
       foreignDecls = moduleForeignDecls modl
       routeDecls = moduleRouteDecls modl
       decls = moduleDecls modl
+      builtinTypeDecls = builtinTypeDeclsForModule modl
+      allTypeDecls = builtinTypeDecls <> typeDecls
 
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
@@ -459,12 +617,12 @@ checkModule modl = do
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
   let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
-  let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
+  let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- allTypeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv allTypeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls
 
-  constructorEnv <- buildConstructorEnv typeDecls
+  constructorEnv <- buildConstructorEnv allTypeDecls
   ensureUniqueForeignDecls foreignDecls decls constructorEnv
   ensureUniqueDecls decls foreignDecls constructorEnv
   ensureUniqueRoutes routeDecls
@@ -492,7 +650,7 @@ checkModule modl = do
   pure
     CoreModule
       { coreModuleName = moduleName modl
-      , coreModuleTypeDecls = typeDecls
+      , coreModuleTypeDecls = allTypeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
       , coreModuleGuideDecls = guideDecls
