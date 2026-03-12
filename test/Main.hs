@@ -4330,6 +4330,7 @@ headerlessImportSuccessFiles :: [(FilePath, Text)]
 headerlessImportSuccessFiles =
   [ ("Main.clasp", headerlessImportSuccessMainSource)
   , ("Shared/User.clasp", headerlessSharedUserSource)
+  ]
 
 packageImportFiles :: [(FilePath, Text)]
 packageImportFiles =
@@ -5017,6 +5018,8 @@ nativeInteropRuntimeScript compiledPath runtimePath =
     , "  artifactFileName: bindingPlan.artifactFileName,"
     , "  cargoCommand: bindingPlan.cargo.command,"
     , "  capabilities: bindingPlan.capabilities"
+    , "}));"
+    ]
 
 pythonInteropRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
 pythonInteropRuntimeScript compiledPath runtimePath projectRoot =

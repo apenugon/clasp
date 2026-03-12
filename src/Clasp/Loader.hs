@@ -52,7 +52,7 @@ loadEntryModule entryPath = do
         Left err ->
           pure (Left err)
         Right state ->
-          enrichForeignPackageImports (combineModules entryModule state)
+          enrichForeignPackageImports projectRoot (combineModules entryModule state)
 
 loadImports :: FilePath -> LoadState -> [ModuleName] -> [ImportDecl] -> IO (Either DiagnosticBundle LoadState)
 loadImports projectRoot state stack imports =
@@ -162,16 +162,16 @@ combineModules entryModule state =
         , moduleDecls = concatMap moduleDecls (importedModules <> [entryModule])
         }
 
-enrichForeignPackageImports :: Module -> IO (Either DiagnosticBundle Module)
-enrichForeignPackageImports modl = do
-  enrichedForeignDecls <- foldM enrichForeignDecl (Right []) (moduleForeignDecls modl)
+enrichForeignPackageImports :: FilePath -> Module -> IO (Either DiagnosticBundle Module)
+enrichForeignPackageImports projectRoot modl = do
+  enrichedForeignDecls <- foldM (enrichForeignDecl projectRoot) (Right []) (moduleForeignDecls modl)
   pure $
     fmap
       (\foreignDecls -> modl {moduleForeignDecls = reverse foreignDecls})
       enrichedForeignDecls
 
-enrichForeignDecl :: Either DiagnosticBundle [ForeignDecl] -> ForeignDecl -> IO (Either DiagnosticBundle [ForeignDecl])
-enrichForeignDecl acc foreignDecl =
+enrichForeignDecl :: FilePath -> Either DiagnosticBundle [ForeignDecl] -> ForeignDecl -> IO (Either DiagnosticBundle [ForeignDecl])
+enrichForeignDecl projectRoot acc foreignDecl =
   case acc of
     Left err ->
       pure (Left err)
@@ -180,7 +180,7 @@ enrichForeignDecl acc foreignDecl =
         Nothing ->
           pure (Right (foreignDecl : foreignDecls))
         Just packageImport -> do
-          signatureResult <- ingestDeclarationSignature foreignDecl packageImport
+          signatureResult <- ingestDeclarationSignature projectRoot foreignDecl packageImport
           pure $
             fmap
               ( \signature ->
@@ -192,10 +192,11 @@ enrichForeignDecl acc foreignDecl =
               )
               signatureResult
 
-ingestDeclarationSignature :: ForeignDecl -> ForeignPackageImport -> IO (Either DiagnosticBundle Text)
-ingestDeclarationSignature foreignDecl packageImport = do
+ingestDeclarationSignature :: FilePath -> ForeignDecl -> ForeignPackageImport -> IO (Either DiagnosticBundle Text)
+ingestDeclarationSignature projectRoot foreignDecl packageImport = do
   let declarationPath =
-        takeDirectory (T.unpack (sourceSpanFile (foreignDeclSpan foreignDecl)))
+        projectRoot
+          </> takeDirectory (T.unpack (sourceSpanFile (foreignDeclSpan foreignDecl)))
           </> T.unpack (foreignPackageImportDeclarationPath packageImport)
   declarationExists <- doesFileExist declarationPath
   if not declarationExists
