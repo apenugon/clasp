@@ -114,6 +114,9 @@ Exit criteria:
 - Add compiler-known state-transition or typestate surfaces where they prove benchmark value for app correctness
 - Add typed asset/head/style bundle declarations so UI outputs remain part of one semantic model
 - Formalize stable host interop contracts with structured capability identities so the first benchmark can reuse existing ecosystems without stringly binding drift
+- Add compiler-managed foreign package imports so `npm` and `TypeScript` ecosystems can be consumed through typed manifests, declaration ingestion, and generated adapters instead of handwritten glue
+- Add compiler-managed `Python` package and module interop as typed worker or service boundaries with generated schema bindings, transport, and lifecycle management
+- Add compiler-managed `Rust` crate or native-library interop for performance-critical extensions, using generated bindings, capability metadata, and target-aware build integration
 
 Exit criteria:
 
@@ -185,6 +188,7 @@ Exit criteria:
 - Add prompt-injection-resistant separation between content, tool authority, and policy
 - Add secret-redaction and provenance rules for prompts, traces, and tool calls
 - Preserve clean interoperability with systems like `BAML` while making the core model native to `Clasp`
+- Extend interoperability beyond AI-specific systems so higher-level `Clasp` programs can consume `npm`, `PyPI`, and `Cargo` ecosystems through compiler-managed foreign package surfaces rather than bespoke runtime glue
 
 Exit criteria:
 

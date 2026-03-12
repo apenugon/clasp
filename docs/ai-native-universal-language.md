@@ -527,6 +527,28 @@ The right backend strategy is:
 
 That means Clasp should not be designed as "a JavaScript-flavored language forever." It should be designed as a language with multiple emitters sharing one semantic core.
 
+### Compiler-managed foreign package ecosystems
+
+Interoperability should eventually go beyond host runtimes and hand-written foreign functions.
+
+`Clasp` should be able to treat external package ecosystems as compiler-managed foreign modules:
+
+- `npm` or `TypeScript` packages imported through typed package manifests, declaration ingestion, and generated adapters
+- `Python` packages imported through compiler-managed worker or service boundaries with generated schema bindings and lifecycle control
+- `Rust` crates or native libraries imported through compiler-managed bindings, capability metadata, and target-aware build integration
+
+The key point is that these imports should not dissolve the semantic model.
+
+The compiler should still own:
+
+- schema projection and validation
+- transport and codec generation
+- capability and trust-boundary metadata
+- package identity and version tracking
+- deterministic adapter generation for each target
+
+That lets `Clasp` absorb the ecosystem gravity of `TypeScript`, `Python`, and `Rust` without giving up the language-level guarantees that justify using `Clasp` in the first place.
+
 ### 9. Shared UI and state model
 
 For true full-stack viability, the language should have a coherent way to express:

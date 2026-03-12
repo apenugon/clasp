@@ -396,6 +396,9 @@ Critical path:
 - `FS-017` Add explicit page-render projection modes so default SSR HTML stays stable while machine metadata is emitted through sidecar artifacts or opt-in surfaces.
 - `FS-018` Generate typed host-binding adapters from foreign declarations so app-facing changes stop leaking into imperative runtime glue.
 - `FS-019` Add compiler-owned seeded fixture and mock-boundary declarations for benchmark and dogfood app surfaces.
+- `FS-020` Add compiler-managed `npm` and `TypeScript` package imports with declaration ingestion, typed manifests, and generated host adapters.
+- `FS-021` Add compiler-managed `Python` package and module interop through typed worker or service boundaries with generated schema bindings and lifecycle control.
+- `FS-022` Add compiler-managed `Rust` crate and native-library interop with generated bindings, capability metadata, and target-aware build integration.
 
 ### Track 5: Control Plane Declarations
 
@@ -480,6 +483,7 @@ Critical path:
 - `BM-021` Add AIR-assisted planning benchmarks comparing raw-text tasking with workflows that target compiler-owned AIR.
 - `BM-022` Add benchmark acceptance helpers and mutation-surface guards so product tasks do not require runtime-wrapper or test-scaffold edits.
 - `BM-023` Add benchmark-prep semantic packs and workspace guidance generated from context, AIR, and UI graph artifacts.
+- `BM-024` Add foreign-package interop benchmarks that compare compiler-managed `npm`, `Python`, and `Rust` usage against handwritten host glue on the same tasks.
 
 ### Track 10: SaaS Dogfooding
 

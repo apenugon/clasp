@@ -1,6 +1,6 @@
 # Native Backend Wave v0
 
-This wave now includes the full transitive dependency closure for the native backend path instead of a hand-curated subset.
+This wave now includes the full transitive dependency closure for the native backend path instead of a hand-curated subset, plus the explicit foreign-package interop tasks needed to let `Clasp` absorb `npm`, `Python`, and `Rust` ecosystems without giving up compiler ownership.
 
 The native goal is still the same:
 
@@ -15,23 +15,28 @@ This wave therefore snapshots the full closure of dependencies for:
 - `NB-001` through `NB-009`
 - `BM-014`
 
-Current closure size:
+And it explicitly carries these interop adoption tasks on top:
 
-- `115` canonical tasks
+- `FS-020` through `FS-022`
+- `BM-024`
+
+Current wave size:
+
+- `119` canonical tasks
 
 Lanes in this wave:
 
 - `01-core-language` with `LG-001` through `LG-019`
 - `02-type-system` with `TY-001` through `TY-010`
 - `03-schemas` with `SC-001` through `SC-013`
-- `04-full-stack` with `FS-001` through `FS-010`
+- `04-full-stack` with `FS-001` through `FS-010` plus `FS-020` through `FS-022`
 - `05-control-plane` with `CP-001` through `CP-012`
 - `06-workflows` with `WF-001` through `WF-010`
 - `07-ai-platform` with `AI-001` through `AI-011`
 - `08-saas-dogfood` with `SA-001` through `SA-010`
 - `09-self-hosting` with `SH-001` through `SH-010`
 - `10-native-backend` with `NB-001` through `NB-009`
-- `11-benchmarks` with `BM-014`
+- `11-benchmarks` with `BM-014` plus `BM-024`
 
 Why this shape:
 
