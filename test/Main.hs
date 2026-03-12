@@ -2044,6 +2044,8 @@ compileTests =
             assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deadline helper" ("withDeadline(run, deadlineAt) { return $claspWorkflowWithDeadline(\"CounterFlow\", run, deadlineAt); }" `T.isInfixOf` emitted)
             assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow degrade helper" ("degrade(run, reason, options) { return $claspWorkflowDegrade(\"CounterFlow\", run, reason, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow handoff helper" ("handoff(run, operator, reason, options) { return $claspWorkflowHandoff(\"CounterFlow\", run, operator, reason, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
@@ -2742,7 +2744,7 @@ compileTests =
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected workflow lifecycle and retry runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
               runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
@@ -5113,6 +5115,32 @@ workflowRuntimeScript compiledPath runtimePath =
     , "const cancelledDelivery = workflow.deliver(cancelled, { id: 'm4', payload: 1 }, (state, payload) => ({"
     , "  count: state.count + payload"
     , "}), { now: 1000 });"
+    , "const degraded = workflow.degrade(run, 'provider-outage', {"
+    , "  supervisor: 'SupportSupervisor',"
+    , "  updatedAt: 1100"
+    , "});"
+    , "const degradedDelivery = workflow.deliver(degraded, { id: 'm5', payload: 1 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: 'primary'"
+    , "}), { now: 1000 });"
+    , "const degradedFallback = workflow.deliver(degraded, { id: 'm6', payload: 1 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: 'primary'"
+    , "}), {"
+    , "  now: 1000,"
+    , "  degradedHandler: (state, payload, message, meta) => ({"
+    , "    state: { count: state.count + 10 },"
+    , "    result: `fallback-${payload}`"
+    , "  })"
+    , "});"
+    , "const handedOff = workflow.handoff(run, 'case-ops', 'manual-review', {"
+    , "  supervisor: 'SupportSupervisor',"
+    , "  updatedAt: 1150"
+    , "});"
+    , "const handoffDelivery = workflow.deliver(handedOff, { id: 'm7', payload: 1 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}), { now: 1000 });"
     , "const replayed = workflow.replay(checkpoint, ["
     , "  { id: 'm1', payload: 2 },"
     , "  { id: 'm1', payload: 99 },"
@@ -5135,6 +5163,16 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  deadlineFailure: deadlineExceeded.failure?.message ?? null,"
     , "  cancelledStatus: cancelledDelivery.status,"
     , "  cancelReason: cancelled.cancelReason,"
+    , "  degradedStatus: degradedDelivery.status,"
+    , "  degradedReason: degraded.supervision.reason,"
+    , "  degradedSupervisor: degraded.supervision.supervisor,"
+    , "  degradedFallbackStatus: degradedFallback.status,"
+    , "  degradedFallbackResult: degradedFallback.result,"
+    , "  degradedFallbackMode: degradedFallback.supervision.status,"
+    , "  handoffStatus: handoffDelivery.status,"
+    , "  handoffOperator: handedOff.supervision.operator,"
+    , "  handoffReason: handedOff.supervision.reason,"
+    , "  handoffSupervisor: handedOff.supervision.supervisor,"
     , "  replayedCount: replayed.state.count,"
     , "  replayedDeliveries: replayed.deliveries.length,"
     , "  replayedIds: replayed.processedIds"
