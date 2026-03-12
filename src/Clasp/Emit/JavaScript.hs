@@ -54,6 +54,7 @@ emitModule modl =
       <> emitSeededFixturesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRouteClientsExport (lowerModuleRoutes modl)
+      <> emitGeneratedBindingsExport
 
 emitRuntimePrelude :: [Text]
 emitRuntimePrelude =
@@ -1138,6 +1139,25 @@ emitRouteClientsExport routes =
             "Page" -> "page"
             "Redirect" -> "redirect"
             _ -> "json"
+
+emitGeneratedBindingsExport :: [Text]
+emitGeneratedBindingsExport =
+  [ "export const __claspBindings = Object.freeze({"
+  , "  kind: \"clasp-generated-bindings\","
+  , "  version: 1,"
+  , "  hostBindings: __claspHostBindings,"
+  , "  routes: __claspRoutes,"
+  , "  routeClients: __claspRouteClients,"
+  , "  seededFixtures: __claspSeededFixtures,"
+  , "  staticAssetStrategy: __claspStaticAssetStrategy,"
+  , "  staticAssets: __claspStaticAssets,"
+  , "  styleBundles: __claspStyleBundles,"
+  , "  headStrategy: __claspHeadStrategy,"
+  , "  uiGraph: __claspUiGraph,"
+  , "  navigationGraph: __claspNavigationGraph,"
+  , "  actionGraph: __claspActionGraph"
+  , "});"
+  ]
 
 emitRouteMethod :: RouteMethod -> Text
 emitRouteMethod routeMethod =

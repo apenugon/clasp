@@ -1,5 +1,5 @@
 import * as compiled from "./Main.js";
-import { installRuntime, serveCompiledModule } from "../../runtime/bun/server.mjs";
+import { installCompiledModule, serveCompiledModule } from "../../runtime/bun/server.mjs";
 
 const leads = [
   {
@@ -26,7 +26,7 @@ const leads = [
   }
 ];
 
-installRuntime(compiled.__claspAdaptHostBindings({
+installCompiledModule(compiled, {
   mockLeadSummaryModel(intake) {
     const priority =
       intake.budget >= 50000 ? "High" : intake.budget >= 20000 ? "Medium" : "Low";
@@ -78,7 +78,7 @@ installRuntime(compiled.__claspAdaptHostBindings({
     lead.reviewNote = review.note;
     return JSON.stringify(lead);
   }
-}));
+});
 
 const server = serveCompiledModule(compiled, {
   port: Number(process.env.PORT ?? "3001")

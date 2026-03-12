@@ -6,6 +6,52 @@ export function installRuntime(bindings) {
   };
 }
 
+export function bindingContractFor(compiledModule) {
+  const contract = compiledModule?.__claspBindings;
+
+  if (
+    contract &&
+    contract.kind === "clasp-generated-bindings" &&
+    contract.version === 1
+  ) {
+    return contract;
+  }
+
+  return {
+    kind: "clasp-generated-bindings",
+    version: 1,
+    hostBindings: compiledModule?.__claspHostBindings ?? [],
+    routes: compiledModule?.__claspRoutes ?? [],
+    routeClients: compiledModule?.__claspRouteClients ?? [],
+    seededFixtures: compiledModule?.__claspSeededFixtures ?? [],
+    staticAssetStrategy:
+      compiledModule?.__claspStaticAssetStrategy ?? {
+        assetBasePath: "/assets",
+        generatedAssetBasePath: "/assets/clasp"
+      },
+    staticAssets: compiledModule?.__claspStaticAssets ?? [],
+    styleBundles: compiledModule?.__claspStyleBundles ?? [],
+    headStrategy:
+      compiledModule?.__claspHeadStrategy ?? {
+        charset: "utf-8",
+        viewport: "width=device-width, initial-scale=1"
+      },
+    uiGraph: compiledModule?.__claspUiGraph ?? [],
+    navigationGraph: compiledModule?.__claspNavigationGraph ?? [],
+    actionGraph: compiledModule?.__claspActionGraph ?? []
+  };
+}
+
+export function installCompiledModule(compiledModule, implementations = {}) {
+  if (!compiledModule || typeof compiledModule.__claspAdaptHostBindings !== "function") {
+    throw new Error("installCompiledModule requires a generated Clasp module.");
+  }
+
+  const runtimeBindings = compiledModule.__claspAdaptHostBindings(implementations);
+  installRuntime(runtimeBindings);
+  return runtimeBindings;
+}
+
 export async function requestPayloadJson(route, request) {
   const url = new URL(request.url);
 
@@ -41,7 +87,8 @@ export function serveCompiledModule(compiledModule, options = {}) {
     throw new Error("serveCompiledModule requires Bun.");
   }
 
-  const routes = compiledModule.__claspRoutes ?? [];
+  const contract = bindingContractFor(compiledModule);
+  const routes = contract.routes;
   const port = options.port ?? 3001;
 
   return Bun.serve({
@@ -87,7 +134,8 @@ export function serveCompiledModule(compiledModule, options = {}) {
 }
 
 export async function responseForAssetRequest(compiledModule, pathname, options = {}) {
-  const generatedAsset = generatedAssetForPath(compiledModule, pathname);
+  const contract = bindingContractFor(compiledModule);
+  const generatedAsset = generatedAssetForPath(contract, pathname);
 
   if (generatedAsset) {
     return new Response(generatedAsset.content ?? "", {
@@ -102,7 +150,7 @@ export async function responseForAssetRequest(compiledModule, pathname, options 
     return null;
   }
 
-  const staticAsset = await staticAssetResponse(pathname, compiledModule, options);
+  const staticAsset = await staticAssetResponse(pathname, contract, options);
   return staticAsset;
 }
 
@@ -167,18 +215,18 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function generatedAssetForPath(compiledModule, pathname) {
-  const assets = compiledModule?.__claspStaticAssets ?? [];
+function generatedAssetForPath(contract, pathname) {
+  const assets = contract.staticAssets ?? [];
 
   return assets.find(
     (asset) => typeof asset?.href === "string" && asset.href === pathname
   ) ?? null;
 }
 
-async function staticAssetResponse(pathname, compiledModule, options) {
+async function staticAssetResponse(pathname, contract, options) {
   const assetBasePath =
     options.assetBasePath ??
-    compiledModule?.__claspStaticAssetStrategy?.assetBasePath ??
+    contract.staticAssetStrategy?.assetBasePath ??
     "/assets";
   const staticAssetsDir = options.staticAssetsDir;
 

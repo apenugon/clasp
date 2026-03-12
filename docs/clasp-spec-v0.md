@@ -279,7 +279,8 @@ Notes:
 - Foreign declarations also emit structured host-binding manifests plus generated host-binding adapters so host code can register schema-shaped implementations without hand-written runtime glue.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
-- The Bun runtime also exposes a browser/client helper layer for generated route clients, including shared fetch preparation, execution, and redirect-aware response handling.
+- Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
+- The Bun runtime also exposes a browser/client helper layer for generated route clients, plus server helpers that consume the generated binding contract for host-binding installation, asset serving, request decoding, and redirect-aware response handling.
 - Route declarations also emit compiler-owned `__claspSeededFixtures` entries so hosts can inspect stable request and response seed shapes for benchmark and dogfood surfaces.
 - Function application compiles to JavaScript function calls.
 - Match expressions compile to a JavaScript `switch` over constructor tags.

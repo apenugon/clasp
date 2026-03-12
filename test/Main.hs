@@ -1084,6 +1084,10 @@ compileTests =
             assertBool "expected response declaration metadata" ("responseDecl: { type: \"LeadSummary\", schema: $claspSchema_LeadSummary }" `T.isInfixOf` emitted)
             assertBool "expected route client export" ("export const summarizeLeadRouteClient = {" `T.isInfixOf` emitted)
             assertBool "expected route clients registry" ("export const __claspRouteClients = [" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract export" ("export const __claspBindings = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract version" ("version: 1," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract routes" ("routes: __claspRoutes," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract host bindings" ("hostBindings: __claspHostBindings," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
             assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
     , testCase "compile emits field classifications and projection disclosure metadata" $
@@ -1383,7 +1387,7 @@ compileTests =
             runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected landing, create, inbox, detail, review, and invalid form behavior"
-              "{\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
+              "{\"contractKind\":\"clasp-generated-bindings\",\"contractVersion\":1,\"contractRouteCount\":6,\"contractAssetBasePath\":\"/assets\",\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
     , testCase "lead app browser shell keeps POST results on stable GET history entries" $ do
         absoluteShellPath <- makeAbsolute ("examples" </> "lead-app" </> "app-shell.mjs")
@@ -2565,8 +2569,9 @@ leadInboxRuntimeScript :: FilePath -> FilePath -> Text
 leadInboxRuntimeScript compiledPath runtimePath =
   T.pack . unlines $
     [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
-    , "import { installRuntime, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
-    , "const manifest = Object.fromEntries(compiledModule.__claspHostBindings.map((binding) => [binding.name, binding]));"
+    , "import { bindingContractFor, installCompiledModule, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const contract = bindingContractFor(compiledModule);"
+    , "const manifest = Object.fromEntries(contract.hostBindings.map((binding) => [binding.name, binding]));"
     , "let structuredModelArg = false;"
     , "let structuredStoreArg = false;"
     , "const leads = ["
@@ -2593,7 +2598,7 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    reviewNote: ''"
     , "  }"
     , "];"
-    , "installRuntime(compiledModule.__claspAdaptHostBindings({"
+    , "installCompiledModule(compiledModule, {"
     , "  mockLeadSummaryModel(intake) {"
     , "    structuredModelArg = typeof intake.segment === 'string' && intake.segment === 'enterprise';"
     , "    const priority = intake.budget >= 50000 ? 'High' : intake.budget >= 20000 ? 'Medium' : 'Low';"
@@ -2640,9 +2645,9 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "    lead.reviewNote = review.note;"
     , "    return JSON.stringify(lead);"
     , "  }"
-    , "}));"
+    , "});"
     , "const route = (name) => {"
-    , "  const found = compiledModule.__claspRoutes.find((candidate) => candidate.name === name);"
+    , "  const found = contract.routes.find((candidate) => candidate.name === name);"
     , "  if (!found) { throw new Error(`missing route ${name}`); }"
     , "  return found;"
     , "};"
@@ -2680,6 +2685,10 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "  invalidMessage = error instanceof Error ? error.message : String(error);"
     , "}"
     , "console.log(JSON.stringify({"
+    , "  contractKind: contract.kind,"
+    , "  contractVersion: contract.version,"
+    , "  contractRouteCount: contract.routes.length,"
+    , "  contractAssetBasePath: contract.staticAssetStrategy.assetBasePath,"
     , "  manifestTypes: ["
     , "    manifest.mockLeadSummaryModel.params[0].type,"
     , "    `${manifest.storeLead.params[0].type} -> ${manifest.storeLead.params[1].type}`,"
