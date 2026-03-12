@@ -89,7 +89,9 @@ import Clasp.Lower
   )
 import Clasp.Syntax
   ( AgentDecl (..)
+  , AgentRoleApprovalPolicy (..)
   , AgentRoleDecl (..)
+  , AgentRoleSandboxPolicy (..)
   , ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
@@ -307,6 +309,8 @@ parserTests =
                 assertEqual "agent role identity" "agent-role:WorkerRole" (agentRoleDeclIdentity agentRoleDecl)
                 assertEqual "agent role guide" "Worker" (agentRoleDeclGuideName agentRoleDecl)
                 assertEqual "agent role policy" "SupportDisclosure" (agentRoleDeclPolicyName agentRoleDecl)
+                assertEqual "agent role approval" (Just AgentRoleApprovalOnRequest) (agentRoleDeclApprovalPolicy agentRoleDecl)
+                assertEqual "agent role sandbox" (Just AgentRoleSandboxWorkspaceWrite) (agentRoleDeclSandboxPolicy agentRoleDecl)
               other ->
                 assertFailure ("expected one agent role declaration, got " <> show (length other))
             case moduleAgentDecls modl of
@@ -316,6 +320,30 @@ parserTests =
                 assertEqual "agent role" "WorkerRole" (agentDeclRoleName agentDecl)
               other ->
                 assertFailure ("expected one agent declaration, got " <> show (length other))
+    , testCase "parses sandbox-only agent role attributes" $
+        case parseSource "inline" agentSandboxOnlySource of
+          Left err ->
+            assertFailure ("expected sandbox-only agent source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleAgentRoleDecls modl of
+              [agentRoleDecl] -> do
+                assertEqual "agent role guide" "Worker" (agentRoleDeclGuideName agentRoleDecl)
+                assertEqual "agent role policy" "SupportDisclosure" (agentRoleDeclPolicyName agentRoleDecl)
+                assertEqual "agent role approval" Nothing (agentRoleDeclApprovalPolicy agentRoleDecl)
+                assertEqual "agent role sandbox" (Just AgentRoleSandboxReadOnly) (agentRoleDeclSandboxPolicy agentRoleDecl)
+              other ->
+                assertFailure ("expected one agent role declaration, got " <> show (length other))
+    , testCase "parses agent role approval and sandbox attributes in either order" $
+        case parseSource "inline" agentMixedOrderingSource of
+          Left err ->
+            assertFailure ("expected mixed-order agent source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleAgentRoleDecls modl of
+              [agentRoleDecl] -> do
+                assertEqual "agent role approval" (Just AgentRoleApprovalOnRequest) (agentRoleDeclApprovalPolicy agentRoleDecl)
+                assertEqual "agent role sandbox" (Just AgentRoleSandboxWorkspaceWrite) (agentRoleDeclSandboxPolicy agentRoleDecl)
+              other ->
+                assertFailure ("expected one agent role declaration, got " <> show (length other))
     , testCase "parses tool servers and tool contracts" $
         case parseSource "inline" toolSource of
           Left err ->
@@ -787,7 +815,10 @@ checkerTests =
           Right checked -> do
             case coreModuleAgentRoleDecls checked of
               [CoreAgentRoleDecl agentRoleDecl] ->
-                assertEqual "agent role policy" "SupportDisclosure" (agentRoleDeclPolicyName agentRoleDecl)
+                do
+                  assertEqual "agent role policy" "SupportDisclosure" (agentRoleDeclPolicyName agentRoleDecl)
+                  assertEqual "agent role approval" (Just AgentRoleApprovalOnRequest) (agentRoleDeclApprovalPolicy agentRoleDecl)
+                  assertEqual "agent role sandbox" (Just AgentRoleSandboxWorkspaceWrite) (agentRoleDeclSandboxPolicy agentRoleDecl)
               other ->
                 assertFailure ("expected one checked agent role declaration, got " <> show (length other))
             case coreModuleAgentDecls checked of
@@ -1415,6 +1446,12 @@ airTests =
                 assertBool
                   "expected policy ref"
                   (("policy", AirAttrObject [("name", AirAttrText "SupportDisclosure"), ("ref", AirAttrNode (AirNodeId "policy:SupportDisclosure"))]) `elem` airNodeAttrs node)
+                assertBool
+                  "expected approval policy"
+                  (("approvalPolicy", AirAttrText "on_request") `elem` airNodeAttrs node)
+                assertBool
+                  "expected sandbox policy"
+                  (("sandboxPolicy", AirAttrText "workspace_write") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected agent role AIR node"
             case findAirNode (AirNodeId "agent:builder") (airModuleNodes airModule) of
@@ -1543,6 +1580,8 @@ contextTests =
             assertBool "expected policy node" ("\"policy:SupportDisclosure\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role node" ("\"agent-role:WorkerRole\"" `T.isInfixOf` jsonText)
             assertBool "expected agent node" ("\"agent:builder\"" `T.isInfixOf` jsonText)
+            assertBool "expected approval policy attr" ("\"name\":\"approvalPolicy\"" `T.isInfixOf` jsonText && "\"value\":\"on_request\"" `T.isInfixOf` jsonText)
+            assertBool "expected sandbox policy attr" ("\"name\":\"sandboxPolicy\"" `T.isInfixOf` jsonText && "\"value\":\"workspace_write\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role guide edge" ("\"agent-role-guide\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role policy edge" ("\"agent-role-policy\"" `T.isInfixOf` jsonText)
             assertBool "expected agent role edge" ("\"agent-role\"" `T.isInfixOf` jsonText)
@@ -2184,6 +2223,8 @@ compileTests =
             assertBool "expected human-readable control-plane docs export" ("export const __claspControlPlaneDocs = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract docs entry" ("docs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
+            assertBool "expected agent role approval metadata" ("approvalPolicy: \"on_request\"" `T.isInfixOf` emitted)
+            assertBool "expected agent role sandbox metadata" ("sandboxPolicy: \"workspace_write\"" `T.isInfixOf` emitted)
             assertBool "expected policy permission helpers" ("allowsFile(target) { return this.allows(\"file\", target); }" `T.isInfixOf` emitted)
             assertBool "expected policy decision helper" ("decideFile(target, context = null) { return this.decide(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected policy trace helper" ("traceFile(target, context = null) { return this.trace(\"file\", target, context); }" `T.isInfixOf` emitted)
@@ -2225,6 +2266,8 @@ compileTests =
                 , "  guideExtends: guide.extends,"
                 , "  guideScope: guide.resolvedEntries.scope,"
                 , "  agentPolicy: agent.policy.name,"
+                , "  agentApproval: agent.role.approvalPolicy,"
+                , "  agentSandbox: agent.role.sandboxPolicy,"
                 , "  fileAllowed: policy.allowsFile('/workspace/src/Main.clasp'),"
                 , "  fileDenied: policy.allowsFile('/tmp'),"
                 , "  networkAllowed: policy.allowsNetwork('api.openai.com'),"
@@ -2249,6 +2292,8 @@ compileTests =
                 , "  docsFormat: docs.format,"
                 , "  docsHasGuides: docs.markdown.includes('## Guides'),"
                 , "  docsHasPermissions: docs.markdown.includes('File permissions: /workspace'),"
+                , "  docsHasApproval: docs.markdown.includes('Approval: on_request'),"
+                , "  docsHasSandbox: docs.markdown.includes('Sandbox: workspace_write'),"
                 , "  docsHasHookEvent: docs.markdown.includes('worker.start'),"
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
                 , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version"
@@ -2256,7 +2301,7 @@ compileTests =
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
@@ -3101,7 +3146,43 @@ agentSource =
     , ""
     , "policy SupportDisclosure = public"
     , ""
-    , "role WorkerRole = guide: Worker, policy: SupportDisclosure"
+    , "role WorkerRole = guide: Worker, policy: SupportDisclosure, approval: on_request, sandbox: workspace_write"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "main = \"ok\""
+    ]
+
+agentSandboxOnlySource :: Text
+agentSandboxOnlySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "guide Worker = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "role WorkerRole = guide: Worker, policy: SupportDisclosure, sandbox: read_only"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "main = \"ok\""
+    ]
+
+agentMixedOrderingSource :: Text
+agentMixedOrderingSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "guide Worker = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "role WorkerRole = guide: Worker, policy: SupportDisclosure, sandbox: workspace_write, approval: on_request"
     , ""
     , "agent builder = WorkerRole"
     , ""
@@ -3235,7 +3316,7 @@ controlPlaneSource =
     , "  secret \"OPENAI_API_KEY\""
     , "}"
     , ""
-    , "role WorkerRole = guide: Worker, policy: SupportDisclosure"
+    , "role WorkerRole = guide: Worker, policy: SupportDisclosure, approval: on_request, sandbox: workspace_write"
     , ""
     , "agent builder = WorkerRole"
     , ""

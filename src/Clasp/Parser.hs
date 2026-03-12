@@ -51,7 +51,9 @@ import Clasp.Diagnostic
   )
 import Clasp.Syntax
   ( AgentDecl (..)
+  , AgentRoleApprovalPolicy (..)
   , AgentRoleDecl (..)
+  , AgentRoleSandboxPolicy (..)
   , ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
@@ -117,6 +119,12 @@ data BlockBinding
   | BlockMutableLetBinding SourcePos SourceSpan Text Expr
   | BlockAssignBinding SourcePos SourceSpan Text Expr
   | BlockForBinding SourcePos SourceSpan Text Expr Expr
+
+data AgentRoleAttr
+  = AgentRoleGuideAttr SourceSpan Text
+  | AgentRolePolicyAttr SourceSpan Text
+  | AgentRoleApprovalAttr AgentRoleApprovalPolicy
+  | AgentRoleSandboxAttr AgentRoleSandboxPolicy
 
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
 parseModule path source =
@@ -224,16 +232,20 @@ agentRoleDeclParser = do
   keyword "role"
   (nameSpan, name) <- locatedUpperIdentifier
   _ <- symbol "="
-  keyword "guide"
-  _ <- symbol ":"
-  (guideSpan, guideName) <- locatedUpperIdentifier
-  _ <- symbol ","
-  keyword "policy"
-  _ <- symbol ":"
-  (policySpan, policyName) <- locatedUpperIdentifier
+  attrs <- agentRoleAttrParser `sepBy1` symbol ","
   end <- getSourcePos
   _ <- optional eol
   scn
+  (guideSpan, guideName, policySpan, policyName, approvalPolicy, sandboxPolicy) <-
+    case foldM applyAgentRoleAttr (Nothing, Nothing, Nothing, Nothing) attrs of
+      Left message ->
+        fail message
+      Right (Just guideDecl, Just policyDecl, approvalDecl, sandboxDecl) ->
+        pure (fst guideDecl, snd guideDecl, fst policyDecl, snd policyDecl, approvalDecl, sandboxDecl)
+      Right (Nothing, _, _, _) ->
+        fail "agent role declaration requires a `guide` attribute"
+      Right (_, Nothing, _, _) ->
+        fail "agent role declaration requires a `policy` attribute"
   pure . TopAgentRoleDecl $
     AgentRoleDecl
       { agentRoleDeclName = name
@@ -244,7 +256,85 @@ agentRoleDeclParser = do
       , agentRoleDeclGuideSpan = guideSpan
       , agentRoleDeclPolicyName = policyName
       , agentRoleDeclPolicySpan = policySpan
+      , agentRoleDeclApprovalPolicy = approvalPolicy
+      , agentRoleDeclSandboxPolicy = sandboxPolicy
       }
+
+agentRoleAttrParser :: Parser AgentRoleAttr
+agentRoleAttrParser =
+  try agentRoleGuideAttrParser
+    <|> try agentRolePolicyAttrParser
+    <|> try agentRoleApprovalAttrParser
+    <|> agentRoleSandboxAttrParser
+
+agentRoleGuideAttrParser :: Parser AgentRoleAttr
+agentRoleGuideAttrParser = do
+  keyword "guide"
+  _ <- symbol ":"
+  uncurry AgentRoleGuideAttr <$> locatedUpperIdentifier
+
+agentRolePolicyAttrParser :: Parser AgentRoleAttr
+agentRolePolicyAttrParser = do
+  keyword "policy"
+  _ <- symbol ":"
+  uncurry AgentRolePolicyAttr <$> locatedUpperIdentifier
+
+agentRoleApprovalAttrParser :: Parser AgentRoleAttr
+agentRoleApprovalAttrParser = do
+  keyword "approval"
+  _ <- symbol ":"
+  AgentRoleApprovalAttr <$> agentRoleApprovalPolicyParser
+
+agentRoleSandboxAttrParser :: Parser AgentRoleAttr
+agentRoleSandboxAttrParser = do
+  keyword "sandbox"
+  _ <- symbol ":"
+  AgentRoleSandboxAttr <$> agentRoleSandboxPolicyParser
+
+agentRoleApprovalPolicyParser :: Parser AgentRoleApprovalPolicy
+agentRoleApprovalPolicyParser =
+  keyword "never" *> pure AgentRoleApprovalNever
+    <|> keyword "on_failure" *> pure AgentRoleApprovalOnFailure
+    <|> keyword "on_request" *> pure AgentRoleApprovalOnRequest
+    <|> keyword "untrusted" *> pure AgentRoleApprovalUntrusted
+
+agentRoleSandboxPolicyParser :: Parser AgentRoleSandboxPolicy
+agentRoleSandboxPolicyParser =
+  keyword "read_only" *> pure AgentRoleSandboxReadOnly
+    <|> keyword "workspace_write" *> pure AgentRoleSandboxWorkspaceWrite
+    <|> keyword "danger_full_access" *> pure AgentRoleSandboxDangerFullAccess
+
+applyAgentRoleAttr ::
+  ( Maybe (SourceSpan, Text)
+  , Maybe (SourceSpan, Text)
+  , Maybe AgentRoleApprovalPolicy
+  , Maybe AgentRoleSandboxPolicy
+  ) ->
+  AgentRoleAttr ->
+  Either String
+    ( Maybe (SourceSpan, Text)
+    , Maybe (SourceSpan, Text)
+    , Maybe AgentRoleApprovalPolicy
+    , Maybe AgentRoleSandboxPolicy
+    )
+applyAgentRoleAttr (guideDecl, policyDecl, approvalDecl, sandboxDecl) attr =
+  case attr of
+    AgentRoleGuideAttr span' name ->
+      case guideDecl of
+        Just _ -> Left "agent role declaration cannot declare `guide` more than once"
+        Nothing -> Right (Just (span', name), policyDecl, approvalDecl, sandboxDecl)
+    AgentRolePolicyAttr span' name ->
+      case policyDecl of
+        Just _ -> Left "agent role declaration cannot declare `policy` more than once"
+        Nothing -> Right (guideDecl, Just (span', name), approvalDecl, sandboxDecl)
+    AgentRoleApprovalAttr approvalPolicy ->
+      case approvalDecl of
+        Just _ -> Left "agent role declaration cannot declare `approval` more than once"
+        Nothing -> Right (guideDecl, policyDecl, Just approvalPolicy, sandboxDecl)
+    AgentRoleSandboxAttr sandboxPolicy ->
+      case sandboxDecl of
+        Just _ -> Left "agent role declaration cannot declare `sandbox` more than once"
+        Nothing -> Right (guideDecl, policyDecl, approvalDecl, Just sandboxPolicy)
 
 agentDeclParser :: Parser TopLevelItem
 agentDeclParser = do

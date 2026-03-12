@@ -43,7 +43,9 @@ import Clasp.Lower
   )
 import Clasp.Syntax
   ( AgentDecl (..)
+  , AgentRoleApprovalPolicy
   , AgentRoleDecl (..)
+  , AgentRoleSandboxPolicy
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
@@ -66,6 +68,8 @@ import Clasp.Syntax
   , ToolServerDecl (..)
   , Type (..)
   , VerifierDecl (..)
+  , renderAgentRoleApprovalPolicy
+  , renderAgentRoleSandboxPolicy
   )
 
 newtype ContextNodeId = ContextNodeId
@@ -350,10 +354,18 @@ buildAgentRoleNode coreAgentRoleDecl =
         , ("identity", ContextAttrText (agentRoleDeclIdentity agentRoleDecl))
         , ("guideName", ContextAttrText (agentRoleDeclGuideName agentRoleDecl))
         , ("policyName", ContextAttrText (agentRoleDeclPolicyName agentRoleDecl))
+        , ("approvalPolicy", renderApprovalPolicyAttr (agentRoleDeclApprovalPolicy agentRoleDecl))
+        , ("sandboxPolicy", renderSandboxPolicyAttr (agentRoleDeclSandboxPolicy agentRoleDecl))
         ]
     }
   where
     agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+
+renderApprovalPolicyAttr :: Maybe AgentRoleApprovalPolicy -> ContextAttr
+renderApprovalPolicyAttr = ContextAttrMaybeText . fmap renderAgentRoleApprovalPolicy
+
+renderSandboxPolicyAttr :: Maybe AgentRoleSandboxPolicy -> ContextAttr
+renderSandboxPolicyAttr = ContextAttrMaybeText . fmap renderAgentRoleSandboxPolicy
 
 buildAgentNode :: CoreAgentDecl -> ContextNode
 buildAgentNode coreAgentDecl =

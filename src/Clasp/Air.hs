@@ -72,6 +72,8 @@ import Clasp.Syntax
   , Type
   , TypeDecl (..)
   , VerifierDecl (..)
+  , renderAgentRoleApprovalPolicy
+  , renderAgentRoleSandboxPolicy
   , renderType
   )
 
@@ -295,6 +297,8 @@ buildAgentRoleDeclNode coreAgentRoleDecl =
         , ("guide", AirAttrObject [("name", AirAttrText (agentRoleDeclGuideName agentRoleDecl)), ("ref", AirAttrNode (guideDeclId (agentRoleDeclGuideName agentRoleDecl)))])
         , ("policy", AirAttrObject [("name", AirAttrText (agentRoleDeclPolicyName agentRoleDecl)), ("ref", AirAttrNode (policyDeclId (agentRoleDeclPolicyName agentRoleDecl)))])
         ]
+        <> maybe [] (\approvalPolicy -> [("approvalPolicy", AirAttrText (renderAgentRoleApprovalPolicy approvalPolicy))]) (agentRoleDeclApprovalPolicy agentRoleDecl)
+        <> maybe [] (\sandboxPolicy -> [("sandboxPolicy", AirAttrText (renderAgentRoleSandboxPolicy sandboxPolicy))]) (agentRoleDeclSandboxPolicy agentRoleDecl)
     }
   where
     agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl

@@ -48,6 +48,8 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , renderAgentRoleApprovalPolicy
+  , renderAgentRoleSandboxPolicy
   )
 
 emitModule :: LowerModule -> Text
@@ -1570,7 +1572,9 @@ emitControlPlaneExports modl =
       , "    name: " <> emitStringLiteral (agentRoleDeclName agentRoleDecl) <> ","
       , "    id: " <> emitStringLiteral (agentRoleDeclIdentity agentRoleDecl) <> ","
       , "    guideName: " <> emitStringLiteral (agentRoleDeclGuideName agentRoleDecl) <> ","
-      , "    policyName: " <> emitStringLiteral (agentRoleDeclPolicyName agentRoleDecl)
+      , "    policyName: " <> emitStringLiteral (agentRoleDeclPolicyName agentRoleDecl) <> ","
+      , "    approvalPolicy: " <> emitMaybeStringLiteral (fmap renderAgentRoleApprovalPolicy (agentRoleDeclApprovalPolicy agentRoleDecl)) <> ","
+      , "    sandboxPolicy: " <> emitMaybeStringLiteral (fmap renderAgentRoleSandboxPolicy (agentRoleDeclSandboxPolicy agentRoleDecl))
       , "  },"
       ]
 
@@ -1849,6 +1853,8 @@ renderAgentRoleDoc agentRoleDecl =
     [ "### " <> agentRoleDeclName agentRoleDecl
     , "- Guide: " <> agentRoleDeclGuideName agentRoleDecl
     , "- Policy: " <> agentRoleDeclPolicyName agentRoleDecl
+    , "- Approval: " <> maybe "none" renderAgentRoleApprovalPolicy (agentRoleDeclApprovalPolicy agentRoleDecl)
+    , "- Sandbox: " <> maybe "none" renderAgentRoleSandboxPolicy (agentRoleDeclSandboxPolicy agentRoleDecl)
     ]
 
 renderAgentDoc :: AgentDecl -> Text
@@ -2537,3 +2543,7 @@ emitIdentifier = id
 emitStringLiteral :: Text -> Text
 emitStringLiteral value =
   T.pack (show (T.unpack value))
+
+emitMaybeStringLiteral :: Maybe Text -> Text
+emitMaybeStringLiteral =
+  maybe "null" emitStringLiteral

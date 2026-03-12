@@ -2,7 +2,9 @@
 
 module Clasp.Syntax
   ( AgentDecl (..)
+  , AgentRoleApprovalPolicy (..)
   , AgentRoleDecl (..)
+  , AgentRoleSandboxPolicy (..)
   , ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
@@ -44,6 +46,8 @@ module Clasp.Syntax
   , mergeSourceSpans
   , renderModule
   , renderType
+  , renderAgentRoleApprovalPolicy
+  , renderAgentRoleSandboxPolicy
   , splitModuleName
   ) where
 
@@ -160,6 +164,34 @@ data HookDecl = HookDecl
   }
   deriving (Eq, Show)
 
+data AgentRoleApprovalPolicy
+  = AgentRoleApprovalNever
+  | AgentRoleApprovalOnFailure
+  | AgentRoleApprovalOnRequest
+  | AgentRoleApprovalUntrusted
+  deriving (Eq, Show)
+
+renderAgentRoleApprovalPolicy :: AgentRoleApprovalPolicy -> Text
+renderAgentRoleApprovalPolicy approvalPolicy =
+  case approvalPolicy of
+    AgentRoleApprovalNever -> "never"
+    AgentRoleApprovalOnFailure -> "on_failure"
+    AgentRoleApprovalOnRequest -> "on_request"
+    AgentRoleApprovalUntrusted -> "untrusted"
+
+data AgentRoleSandboxPolicy
+  = AgentRoleSandboxReadOnly
+  | AgentRoleSandboxWorkspaceWrite
+  | AgentRoleSandboxDangerFullAccess
+  deriving (Eq, Show)
+
+renderAgentRoleSandboxPolicy :: AgentRoleSandboxPolicy -> Text
+renderAgentRoleSandboxPolicy sandboxPolicy =
+  case sandboxPolicy of
+    AgentRoleSandboxReadOnly -> "read_only"
+    AgentRoleSandboxWorkspaceWrite -> "workspace_write"
+    AgentRoleSandboxDangerFullAccess -> "danger_full_access"
+
 data AgentRoleDecl = AgentRoleDecl
   { agentRoleDeclName :: Text
   , agentRoleDeclSpan :: SourceSpan
@@ -169,6 +201,8 @@ data AgentRoleDecl = AgentRoleDecl
   , agentRoleDeclGuideSpan :: SourceSpan
   , agentRoleDeclPolicyName :: Text
   , agentRoleDeclPolicySpan :: SourceSpan
+  , agentRoleDeclApprovalPolicy :: Maybe AgentRoleApprovalPolicy
+  , agentRoleDeclSandboxPolicy :: Maybe AgentRoleSandboxPolicy
   }
   deriving (Eq, Show)
 
