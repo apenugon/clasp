@@ -121,6 +121,13 @@ emitRuntimePrelude =
   , "  return value;"
   , "}"
   , ""
+  , "function $claspExpectArray(value, path) {"
+  , "  if (!Array.isArray(value)) {"
+  , "    throw new Error(`${path} expected an array`);"
+  , "  }"
+  , "  return value;"
+  , "}"
+  , ""
   , "function $claspRequireField(objectValue, fieldName, path) {"
   , "  if (!Object.prototype.hasOwnProperty.call(objectValue, fieldName)) {"
   , "    throw new Error(`${path}.${fieldName} is missing`);"
@@ -444,6 +451,8 @@ emitRequestSchemaHelpers typeDecls recordDecls =
           "$claspSchema_Str"
         TBool ->
           "$claspSchema_Bool"
+        TList itemType ->
+          "{ kind: \"list\", item: " <> emitRequestSchemaRef itemType <> " }"
         TNamed name ->
           if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
             then "$claspSchema_" <> name
@@ -1021,6 +1030,8 @@ emitSeedValueForType typeDecls recordDecls typ =
       emitStringLiteral "seed"
     TBool ->
       "false"
+    TList _ ->
+      "[]"
     TNamed name ->
       emitSeedValueForTypeName typeDecls recordDecls name
     TFunction _ _ ->
@@ -1057,6 +1068,10 @@ emitValidator typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitValidator itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
     TNamed name ->
       "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
@@ -1071,6 +1086,10 @@ emitInternalValidator typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitInternalValidator itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
     TNamed name ->
       "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
@@ -1085,6 +1104,10 @@ emitSerializer typ valueRef =
       "$claspExpectStr(" <> valueRef <> ", \"value\")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", \"value\")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", \"value\").map((item, index) => "
+        <> emitSerializer itemType "item"
+        <> ")"
     TNamed name ->
       "$serialize_" <> name <> "(" <> valueRef <> ")"
     TFunction _ _ ->
@@ -1099,6 +1122,10 @@ emitHostSerializer typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitHostSerializer itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
     TNamed name ->
       "$serialize_" <> name <> "($validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
     TFunction _ _ ->
@@ -1113,6 +1140,10 @@ emitHostDeserializer typ valueRef pathRef =
       "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitHostDeserializer itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
     TNamed name ->
       "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
@@ -1127,6 +1158,8 @@ emitSchemaRef typeDecls recordDecls typ =
       "$claspSchema_Str"
     TBool ->
       "$claspSchema_Bool"
+    TList itemType ->
+      "{ kind: \"list\", item: " <> emitSchemaRef typeDecls recordDecls itemType <> " }"
     TNamed name ->
       if any ((== name) . typeDeclName) typeDecls || any ((== name) . recordDeclName) recordDecls
         then "$claspSchema_" <> name
@@ -1143,6 +1176,8 @@ renderTypeName typ =
       "Str"
     TBool ->
       "Bool"
+    TList itemType ->
+      "[" <> renderTypeName itemType <> "]"
     TNamed name ->
       name
     TFunction args result ->

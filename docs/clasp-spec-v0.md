@@ -145,6 +145,19 @@ main : Str
 main = showName defaultUser
 ```
 
+List types use square brackets around any type expression:
+
+```clasp
+module Main
+
+record UserDirectory = {
+  names : [Str],
+  scoreBuckets : [[Int]]
+}
+
+type BatchResult = Batch [UserDirectory]
+```
+
 The first backend-boundary slice is also part of `v0`:
 
 ```clasp
@@ -210,7 +223,7 @@ match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
 pattern     ::= upper-ident lower-ident*
 type        ::= type-atom ("->" type-atom)*
-type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "(" type ")"
+type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "[" type "]" | "(" type ")"
 ```
 
 Notes:

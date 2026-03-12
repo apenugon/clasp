@@ -525,6 +525,7 @@ typeParser = do
 typeAtomParser :: Parser Type
 typeAtomParser =
   parens typeParser
+    <|> (TList <$> brackets typeParser)
     <|> (keyword "Int" *> pure TInt)
     <|> (keyword "Str" *> pure TStr)
     <|> (keyword "Bool" *> pure TBool)
@@ -617,6 +618,9 @@ symbolN = L.symbol scn
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
+
+brackets :: Parser a -> Parser a
+brackets = between (symbol "[") (symbol "]")
 
 braces :: Parser a -> Parser a
 braces parser =

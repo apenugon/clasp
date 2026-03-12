@@ -189,6 +189,7 @@ data Type
   = TInt
   | TStr
   | TBool
+  | TList Type
   | TNamed Text
   | TFunction [Type] Type
   deriving (Eq, Ord, Show)
@@ -314,6 +315,8 @@ renderType typ =
       "Str"
     TBool ->
       "Bool"
+    TList itemType ->
+      "[" <> renderType itemType <> "]"
     TNamed name ->
       name
     TFunction args result ->

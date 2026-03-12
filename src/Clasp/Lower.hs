@@ -640,6 +640,8 @@ codecSuffix typ =
       "Str"
     TBool ->
       "Bool"
+    TList itemType ->
+      "List_" <> codecSuffix itemType
     TNamed name ->
       name
     TFunction _ _ ->

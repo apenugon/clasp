@@ -95,6 +95,7 @@ data InferType
   = IInt
   | IStr
   | IBool
+  | IList InferType
   | INamed Text
   | IFunction [InferType] InferType
   | IVar Int
@@ -712,6 +713,8 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
           pure ()
         TBool ->
           pure ()
+        TList itemType ->
+          ensureKnownType primarySpan related itemType
         TNamed name ->
           unless (isBuiltinTypeName name || Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
             Left . diagnosticBundle $
@@ -733,6 +736,8 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
           pure ()
         TBool ->
           pure ()
+        TList itemType ->
+          ensureSchemaFieldType recordDecl fieldDecl { recordFieldDeclType = itemType }
         TNamed name ->
           unless (Map.member name recordDeclEnv || maybe False isJsonEnumTypeDecl (Map.lookup name typeDeclEnv)) $
             Left . diagnosticBundle $
@@ -740,7 +745,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                   "E_SCHEMA_FIELD_TYPE"
                   ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> name <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
                   (Just (recordFieldDeclSpan fieldDecl))
-                  ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
+                  ["Record fields currently support primitive types, list types, nested record types, and nullary enum types only."]
                   [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
               ]
         TFunction _ _ ->
@@ -749,7 +754,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                 "E_SCHEMA_FIELD_TYPE"
                 ("Record `" <> recordDeclName recordDecl <> "` uses a function field for `" <> recordFieldDeclName fieldDecl <> "`.")
                 (Just (recordFieldDeclSpan fieldDecl))
-                ["Record fields currently support primitive types, nested record types, and nullary enum types only."]
+                ["Record fields currently support primitive types, list types, nested record types, and nullary enum types only."]
                 [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
             ]
 
@@ -2228,6 +2233,8 @@ inferTypeToJsonType ctx inferType =
       Right TStr
     IBool ->
       Right TBool
+    IList itemType ->
+      TList <$> inferTypeToJsonType ctx itemType
     INamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Right (TNamed name)
@@ -2245,6 +2252,7 @@ inferTypeToJsonType ctx inferType =
         IInt -> TInt
         IStr -> TStr
         IBool -> TBool
+        IList itemType -> TList (inferTypeToTypeUnsafe itemType)
         INamed name -> TNamed name
         IFunction args result -> TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result)
         IVar _ -> TNamed "<unknown>"
@@ -2258,6 +2266,8 @@ jsonTypeSupportError ctx primarySpan typ =
       Nothing
     TBool ->
       Nothing
+    TList itemType ->
+      jsonTypeSupportError ctx primarySpan itemType
     TNamed name
       | Map.member name (contextRecordDeclEnv ctx) ->
           Nothing
@@ -2269,7 +2279,7 @@ jsonTypeSupportError ctx primarySpan typ =
                   "E_JSON_TYPE"
                   ("JSON codecs currently support record and primitive types, but got `" <> name <> "`.")
                   (Just primarySpan)
-                  ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+                  ["Use a record type, a primitive type, a list type, or a nullary enum type at the JSON boundary."]
                   []
               ]
     TFunction _ _ ->
@@ -2278,7 +2288,7 @@ jsonTypeSupportError ctx primarySpan typ =
             "E_JSON_TYPE"
             "JSON codecs do not support function values."
             (Just primarySpan)
-            ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+            ["Use a record type, a primitive type, a list type, or a nullary enum type at the JSON boundary."]
             []
         ]
 
@@ -2289,7 +2299,7 @@ jsonTypeUnsupportedBundle maybeContext typ =
         "E_JSON_TYPE"
         summary
         Nothing
-        ["Use a record type, a primitive type, or a nullary enum type at the JSON boundary."]
+        ["Use a record type, a primitive type, a list type, or a nullary enum type at the JSON boundary."]
         []
     ]
   where
@@ -2304,7 +2314,7 @@ jsonTypeUnsupportedBundle maybeContext typ =
         TFunction _ _ ->
           prefix <> "JSON codecs do not support function values."
         _ ->
-          prefix <> "JSON codecs currently support record, primitive, and nullary enum types, but got `" <> renderType typ <> "`."
+          prefix <> "JSON codecs currently support record, primitive, list, and nullary enum types, but got `" <> renderType typ <> "`."
 
 isJsonEnumTypeDecl :: TypeDecl -> Bool
 isJsonEnumTypeDecl typeDecl =
@@ -2480,6 +2490,8 @@ inferTypeToType inferState inferType =
       Right TStr
     IBool ->
       Right TBool
+    IList itemType ->
+      TList <$> inferTypeToType inferState itemType
     INamed name ->
       Right (TNamed name)
     IFunction args result ->
@@ -2496,6 +2508,8 @@ typeToInferType typ =
       IStr
     TBool ->
       IBool
+    TList itemType ->
+      IList (typeToInferType itemType)
     TNamed name ->
       INamed name
     TFunction args result ->
@@ -2520,6 +2534,8 @@ resolveInferType substitution inferType =
       IStr
     IBool ->
       IBool
+    IList itemType ->
+      IList (resolveInferType substitution itemType)
     INamed name ->
       INamed name
     IFunction args result ->
@@ -2586,6 +2602,8 @@ occursInType varId inferType =
       False
     IBool ->
       False
+    IList itemType ->
+      occursInType varId itemType
     INamed _ ->
       False
     IFunction args result ->
@@ -2613,6 +2631,8 @@ renderInferType inferType =
       "Str"
     IBool ->
       "Bool"
+    IList itemType ->
+      "[" <> renderInferType itemType <> "]"
     INamed name ->
       name
     IFunction args result ->

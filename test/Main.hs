@@ -272,6 +272,35 @@ parserTests =
                   (declAnnotation decl)
               Nothing ->
                 assertFailure "expected sessionTenantId declaration"
+    , testCase "parses list types in signatures, constructors, and record fields" $
+        case parseSource "inline" listTypeSource of
+          Left err ->
+            assertFailure ("expected list type source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleTypeDecls modl of
+              [typeDecl] ->
+                assertEqual
+                  "list constructor field"
+                  [ConstructorDecl "Batch" dummySpan dummySpan [TList (TNamed "User")]]
+                  (normalizeConstructors (typeDeclConstructors typeDecl))
+              other ->
+                assertFailure ("expected one type declaration, got " <> show (length other))
+            case moduleRecordDecls modl of
+              [recordDecl] ->
+                assertEqual
+                  "record list field"
+                  [TList TStr, TList (TList TInt)]
+                  (fmap recordFieldDeclType (recordDeclFields recordDecl))
+              other ->
+                assertFailure ("expected one record declaration, got " <> show (length other))
+            case findDecl "flattened" (moduleDecls modl) of
+              Just decl ->
+                assertEqual
+                  "list annotation"
+                  (Just (TFunction [TList (TNamed "BatchResult")] (TList TStr)))
+                  (declAnnotation decl)
+              Nothing ->
+                assertFailure "expected flattened declaration"
     ]
 
 checkerTests :: TestTree
@@ -1574,6 +1603,22 @@ authIdentitySource =
     , ""
     , "decodeAudit : Str -> AuditEnvelope"
     , "decodeAudit raw = decode AuditEnvelope raw"
+    ]
+
+listTypeSource :: Text
+listTypeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type BatchResult = Batch [User]"
+    , ""
+    , "record UserDirectory = {"
+    , "  names : [Str],"
+    , "  scoreBuckets : [[Int]]"
+    , "}"
+    , ""
+    , "flattened : [BatchResult] -> [Str]"
+    , "flattened batches = batches"
     ]
 
 unsafeScriptSource :: Text

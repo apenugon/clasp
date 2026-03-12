@@ -426,6 +426,8 @@ renameSchema oldName newName modl
 
     renameType typ =
       case typ of
+        TList itemType ->
+          TList (renameType itemType)
         TNamed name ->
           TNamed (renameIfEqual oldName newName name)
         TFunction args result ->

@@ -411,6 +411,8 @@ renderContextType typ =
       "Str"
     TBool ->
       "Bool"
+    TList itemType ->
+      "[" <> renderContextType itemType <> "]"
     TNamed name ->
       name
     TFunction args result ->
