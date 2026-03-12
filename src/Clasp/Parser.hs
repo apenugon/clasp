@@ -100,6 +100,8 @@ data TopLevelItem
   | TopSignature Text Type SourceSpan
   | TopDecl Decl
 
+data BlockBinding = BlockBinding SourcePos SourceSpan Text Expr
+
 parseModule :: FilePath -> Text -> Either DiagnosticBundle Module
 parseModule path source =
   attachSignatures =<<
@@ -599,9 +601,29 @@ matchBranchParser = do
 blockExprParser :: Parser Expr
 blockExprParser = do
   start <- getSourcePos
-  body <- braces exprParser
+  _ <- L.symbol scn "{"
+  scn
+  bindings <- many (try blockBindingParser)
+  body <- exprParser
+  scn
+  _ <- symbol "}"
   end <- getSourcePos
-  pure (EBlock (makeSourceSpan start end) body)
+  pure (EBlock (makeSourceSpan start end) (foldr applyBlockBinding body bindings))
+
+blockBindingParser :: Parser BlockBinding
+blockBindingParser = do
+  start <- getSourcePos
+  keywordN "let"
+  (nameSpan, name) <- locatedLowerIdentifier
+  _ <- symbol "="
+  value <- exprParser
+  blockSeparatorParser
+  pure (BlockBinding start nameSpan name value)
+
+blockSeparatorParser :: Parser ()
+blockSeparatorParser =
+  void (symbolN ";")
+    <|> void (some eol *> scn)
 
 decodeParser :: Parser Expr
 decodeParser = do
@@ -813,6 +835,10 @@ applyComparisonExpr left (operator, right) =
 applyFieldAccess :: Expr -> (SourceSpan, Text) -> Expr
 applyFieldAccess subject (fieldSpan, fieldName) =
   EFieldAccess (mergeSourceSpans (exprSpan subject) fieldSpan) subject fieldName
+
+applyBlockBinding :: BlockBinding -> Expr -> Expr
+applyBlockBinding (BlockBinding start nameSpan name value) body =
+  ELet (mergeSourceSpans (makeSourceSpan start start) (exprSpan body)) nameSpan name value body
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc

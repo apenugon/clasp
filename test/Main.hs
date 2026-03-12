@@ -405,6 +405,22 @@ parserTests =
                     assertFailure ("expected block expression body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "parses local variable declarations inside blocks" $
+        case parseSource "inline" blockLocalDeclarationsSource of
+          Left err ->
+            assertFailure ("expected block locals source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "greeting" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EBlock blockSpan (ELet _ firstBinder "message" (EString _ "Ada") (ELet _ secondBinder "alias" (EVar _ "message") (EVar _ "alias"))) -> do
+                    assertEqual "block starts on declaration line" 4 (positionLine (sourceSpanStart blockSpan))
+                    assertEqual "first binder line" 5 (positionLine (sourceSpanStart firstBinder))
+                    assertEqual "second binder line" 6 (positionLine (sourceSpanStart secondBinder))
+                  other ->
+                    assertFailure ("expected block locals body, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
     , testCase "parses nested let expressions in match branches" $
         case parseSource "inline" letInMatchSource of
           Left err ->
@@ -668,6 +684,23 @@ checkerTests =
                     assertEqual "block let body variable type" TStr bodyType
                   other ->
                     assertFailure ("expected checked block expression to lower to let, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
+    , testCase "typechecks block-local declarations by desugaring to nested lets" $
+        case checkSource "block-locals" blockLocalDeclarationsSource of
+          Left err ->
+            assertFailure ("expected block locals source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "greeting") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CLet _ typ "message" (CString _ "Ada") (CLet _ aliasType "alias" (CVar _ messageType "message") (CVar _ bodyType "alias")) -> do
+                    assertEqual "outer let result type" TStr typ
+                    assertEqual "inner let result type" TStr aliasType
+                    assertEqual "message variable type" TStr messageType
+                    assertEqual "body variable type" TStr bodyType
+                  other ->
+                    assertFailure ("expected checked block locals to lower to nested lets, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
     , testCase "typechecks the let example file" $ do
@@ -1267,6 +1300,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered block declaration: " <> show other)
+    , testCase "lowering block-local declarations preserves nested lets" $
+        case lowerChecked "block-locals" blockLocalDeclarationsSource of
+          Left err ->
+            assertFailure ("expected block locals lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "greeting" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LLet "message" (LString "Ada") (LLet "alias" (LVar "message") (LVar "alias")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered block locals declaration: " <> show other)
     , testCase "lowering preserves equality operators" $
         case lowerChecked "equality" equalitySource of
           Left err ->
@@ -1515,6 +1558,23 @@ compileTests =
                 , "console.log(compiledModule.greeting);"
                 ]
             assertEqual "expected block result" "Ada" runtimeOutput
+    , testCase "compile evaluates block-local declarations" $
+        case compileSource "block-locals" blockLocalDeclarationsSource of
+          Left err ->
+            assertFailure ("expected block locals compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected first block local emission" ("const message = \"Ada\";" `T.isInfixOf` emitted)
+            assertBool "expected second block local emission" ("const alias = message;" `T.isInfixOf` emitted)
+            let compiledPath = "dist/block-local-declarations.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.greeting);"
+                ]
+            assertEqual "expected block locals result" "Ada" runtimeOutput
     , testCase "compile lowers equality operators to JavaScript and evaluates them" $
         case compileSource "equality" equalitySource of
           Left err ->
@@ -2730,6 +2790,19 @@ blockExpressionSource =
     , ""
     , "greeting : Str"
     , "greeting = { let message = \"Ada\" in message }"
+    ]
+
+blockLocalDeclarationsSource :: Text
+blockLocalDeclarationsSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "greeting : Str"
+    , "greeting = {"
+    , "  let message = \"Ada\";"
+    , "  let alias = message;"
+    , "  alias"
+    , "}"
     ]
 
 equalitySource :: Text

@@ -140,13 +140,17 @@ greeting : Str
 greeting = let message = "Ada" in message
 ```
 
-Block expressions are also available as a lightweight imperative-adjacent surface form. In this first slice, a block wraps a single expression and evaluates to that expression's value:
+Block expressions are also available as a lightweight imperative-adjacent surface form. A block evaluates to its final expression, and it may introduce local variables with leading `let` declarations:
 
 ```clasp
 module Main
 
 greeting : Str
-greeting = { let message = "Ada" in message }
+greeting = {
+  let message = "Ada";
+  let alias = message;
+  alias
+}
 ```
 
 Primitive equality is also available for `Int`, `Str`, and `Bool`:
@@ -270,7 +274,9 @@ route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ide
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
-block-expr  ::= "{" expr "}"
+block-expr  ::= "{" block-let* expr "}"
+block-let   ::= "let" lower-ident "=" expr block-separator
+block-separator ::= ";" | newline+
 let-expr    ::= "let" lower-ident "=" expr "in" expr
 expr        ::= let-expr | equality-expr
 equality-expr ::= comparison-expr (("==" | "!=") comparison-expr)*
@@ -308,7 +314,7 @@ Notes:
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
-- Blocks currently wrap a single expression and return its value.
+- Blocks return their final expression and may contain leading local `let` declarations.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 
