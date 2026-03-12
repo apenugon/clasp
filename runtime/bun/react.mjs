@@ -33,6 +33,41 @@ export function createReactInterop(frontend, reactRuntime = {}) {
   });
 }
 
+export function createReactNativeBridge(frontend, options = {}) {
+  assertFrontendModule(frontend);
+
+  const platform = normalizePlatform(options.platform);
+  const renderViewModel = (value) => renderNativeViewModel(value);
+  const renderPageModel = (value) => {
+    const page = normalizePageValue(value);
+    const head = frontend.__claspPageHead(page);
+
+    return Object.freeze({
+      kind: "clasp-native-page",
+      version: 1,
+      platform,
+      title: head?.title ?? page.title ?? "",
+      head,
+      body: renderNativeViewModel(page.body)
+    });
+  };
+
+  return Object.freeze({
+    kind: "clasp-native-bridge",
+    version: 1,
+    platform,
+    renderViewModel,
+    renderPageModel
+  });
+}
+
+export function createExpoBridge(frontend, options = {}) {
+  return createReactNativeBridge(frontend, {
+    ...options,
+    platform: "expo"
+  });
+}
+
 function assertFrontendModule(frontend) {
   if (
     !frontend ||
@@ -101,4 +136,93 @@ function extractBodyHtml(html) {
 
   const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   return match ? match[1] : html;
+}
+
+function normalizePlatform(platform) {
+  return platform === "expo" ? "expo" : "react-native";
+}
+
+function normalizePageValue(value) {
+  if (!value || value.$kind !== "page") {
+    throw new Error("Expected a generated Clasp Page value for native interop.");
+  }
+
+  return value;
+}
+
+function renderNativeViewModel(view) {
+  if (!view || typeof view !== "object") {
+    throw new Error("Expected a generated Clasp View value for native interop.");
+  }
+
+  switch (view.$kind) {
+    case "empty":
+      return Object.freeze({ kind: "empty" });
+    case "text":
+      return Object.freeze({ kind: "text", text: view.text ?? "" });
+    case "append":
+      return Object.freeze({
+        kind: "fragment",
+        children: flattenNativeChildren(view)
+      });
+    case "element":
+      return Object.freeze({
+        kind: "element",
+        tag: view.tag ?? "",
+        child: renderNativeViewModel(view.child)
+      });
+    case "styled":
+      return Object.freeze({
+        kind: "styled",
+        styleRef: view.styleRef ?? "",
+        child: renderNativeViewModel(view.child)
+      });
+    case "link":
+      return Object.freeze({
+        kind: "link",
+        href: view.href ?? "",
+        child: renderNativeViewModel(view.child)
+      });
+    case "form":
+      return Object.freeze({
+        kind: "form",
+        method: view.method ?? "GET",
+        action: view.action ?? "",
+        child: renderNativeViewModel(view.child)
+      });
+    case "input":
+      return Object.freeze({
+        kind: "input",
+        fieldName: view.fieldName ?? "",
+        inputKind: view.inputKind ?? "text",
+        value: view.value ?? ""
+      });
+    case "submit":
+      return Object.freeze({
+        kind: "submit",
+        label: view.label ?? ""
+      });
+    default:
+      throw new Error("Expected a generated Clasp View value for native interop.");
+  }
+}
+
+function flattenNativeChildren(view) {
+  const children = [];
+
+  appendNativeChild(children, view.left);
+  appendNativeChild(children, view.right);
+
+  return Object.freeze(children);
+}
+
+function appendNativeChild(children, view) {
+  const child = renderNativeViewModel(view);
+
+  if (child.kind === "fragment") {
+    children.push(...child.children);
+    return;
+  }
+
+  children.push(child);
 }

@@ -315,8 +315,9 @@ Notes:
 - Hook declarations bind a lifecycle trigger string to typed request/response schemas and a checked handler function.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
-- Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
+- Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
 - The Bun runtime also exposes a browser/client helper layer for generated route clients, plus server helpers that consume the generated binding contract for host-binding installation, asset serving, request decoding, and redirect-aware response handling.
+- The React runtime helper also exposes `createReactNativeBridge` and `createExpoBridge`, which turn compiler-owned `Page` and `View` values into stable mobile-friendly models without forcing React Native or Expo-specific rendering decisions into generated code.
 - Generated JavaScript modules also export `__claspSchemas`, a schema-contract registry with shared schema references, seed values, and host/JSON adapters that Bun worker runtimes can use to register typed jobs without re-declaring boundary shapes.
 - Route declarations also emit compiler-owned `__claspSeededFixtures` entries so hosts can inspect stable request and response seed shapes for benchmark and dogfood surfaces.
 - Function application compiles to JavaScript function calls.

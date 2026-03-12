@@ -24,6 +24,8 @@ export function bindingContractFor(compiledModule) {
     routes: compiledModule?.__claspRoutes ?? [],
     routeClients: compiledModule?.__claspRouteClients ?? [],
     schemas: compiledModule?.__claspSchemas ?? {},
+    platformBridges:
+      compiledModule?.__claspPlatformBridges ?? defaultPlatformBridges(),
     seededFixtures: compiledModule?.__claspSeededFixtures ?? [],
     staticAssetStrategy:
       compiledModule?.__claspStaticAssetStrategy ?? {
@@ -41,6 +43,23 @@ export function bindingContractFor(compiledModule) {
     navigationGraph: compiledModule?.__claspNavigationGraph ?? [],
     actionGraph: compiledModule?.__claspActionGraph ?? []
   };
+}
+
+function defaultPlatformBridges() {
+  return Object.freeze({
+    react: Object.freeze({
+      module: "runtime/bun/react.mjs",
+      entry: "createReactInterop"
+    }),
+    reactNative: Object.freeze({
+      module: "runtime/bun/react.mjs",
+      entry: "createReactNativeBridge"
+    }),
+    expo: Object.freeze({
+      module: "runtime/bun/react.mjs",
+      entry: "createExpoBridge"
+    })
+  });
 }
 
 export function installCompiledModule(compiledModule, implementations = {}) {

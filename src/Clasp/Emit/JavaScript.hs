@@ -55,6 +55,7 @@ emitModule modl =
       <> emitRoutesExport (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleRoutes modl)
       <> emitRouteClientsExport (lowerModuleRoutes modl)
       <> emitSchemaRegistryExport (lowerModuleCodecTypes modl) (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
+      <> emitPlatformBridgesExport
       <> emitGeneratedBindingsExport
 
 emitRuntimePrelude :: [Text]
@@ -1190,6 +1191,15 @@ emitSchemaRegistryExport codecTypes typeDecls recordDecls =
           , "  },"
           ]
 
+emitPlatformBridgesExport :: [Text]
+emitPlatformBridgesExport =
+  [ "export const __claspPlatformBridges = Object.freeze({"
+  , "  react: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createReactInterop\" }),"
+  , "  reactNative: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createReactNativeBridge\" }),"
+  , "  expo: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createExpoBridge\" })"
+  , "});"
+  ]
+
 emitGeneratedBindingsExport :: [Text]
 emitGeneratedBindingsExport =
   [ "export const __claspBindings = Object.freeze({"
@@ -1199,6 +1209,7 @@ emitGeneratedBindingsExport =
   , "  routes: __claspRoutes,"
   , "  routeClients: __claspRouteClients,"
   , "  schemas: __claspSchemas,"
+  , "  platformBridges: __claspPlatformBridges,"
   , "  seededFixtures: __claspSeededFixtures,"
   , "  staticAssetStrategy: __claspStaticAssetStrategy,"
   , "  staticAssets: __claspStaticAssets,"

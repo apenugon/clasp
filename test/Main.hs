@@ -1508,11 +1508,15 @@ compileTests =
             assertBool "expected route clients registry" ("export const __claspRouteClients = [" `T.isInfixOf` emitted)
             assertBool "expected schema registry export" ("export const __claspSchemas = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected schema registry entry" ("\"LeadRequest\": {" `T.isInfixOf` emitted)
+            assertBool "expected platform bridge export" ("export const __claspPlatformBridges = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected react native bridge descriptor" ("reactNative: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createReactNativeBridge\" })" `T.isInfixOf` emitted)
+            assertBool "expected expo bridge descriptor" ("expo: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createExpoBridge\" })" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract export" ("export const __claspBindings = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract version" ("version: 1," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract routes" ("routes: __claspRoutes," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract host bindings" ("hostBindings: __claspHostBindings," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract schemas" ("schemas: __claspSchemas," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract platform bridges" ("platformBridges: __claspPlatformBridges," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
             assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
     , testCase "compile emits field classifications and projection disclosure metadata" $
@@ -1712,6 +1716,21 @@ compileTests =
             assertEqual
               "expected extracted react page component to render without relying on this binding"
               "{\"headCount\":4,\"headTitle\":\"Inbox\",\"hasDoctype\":true,\"bodyHasSection\":true,\"bodyHasEscapedMarkup\":true,\"elementType\":\"div\",\"rootMarker\":\"\",\"renderedHtmlMatches\":true}"
+              runtimeOutput
+    , testCase "react native bridge exposes a stable mobile page model" $
+        case compileSource "react-native-bridge" pageSource of
+          Left err ->
+            assertFailure ("expected page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/react-native-bridge/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/react.mjs"
+            runtimeOutput <- runNodeScript (reactNativeBridgeRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected react native and expo bridge models to stay stable for future mobile reuse"
+              "{\"modulePath\":\"runtime/bun/react.mjs\",\"nativeEntry\":\"createReactNativeBridge\",\"expoEntry\":\"createExpoBridge\",\"nativeKind\":\"clasp-native-bridge\",\"nativePlatform\":\"react-native\",\"expoPlatform\":\"expo\",\"pageKind\":\"clasp-native-page\",\"pageTitle\":\"Inbox\",\"bodyKind\":\"styled\",\"styleRef\":\"inbox_shell\",\"childKind\":\"element\",\"childTag\":\"section\",\"textKind\":\"text\",\"textValue\":\"Safe <markup>\",\"linkHref\":null}"
               runtimeOutput
     , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
         withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
@@ -3211,6 +3230,35 @@ reactInteropRuntimeScript compiledPath runtimePath =
     , "  elementType: componentElement.type,"
     , "  rootMarker: componentElement.props['data-clasp-page-root'],"
     , "  renderedHtmlMatches: componentElement.props.dangerouslySetInnerHTML.__html === rendered.bodyHtml"
+    , "}));"
+    ]
+
+reactNativeBridgeRuntimeScript :: FilePath -> FilePath -> Text
+reactNativeBridgeRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createExpoBridge, createReactNativeBridge } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const page = compiledModule.home({});"
+    , "const nativeBridge = createReactNativeBridge(compiledModule);"
+    , "const expoBridge = createExpoBridge(compiledModule);"
+    , "const pageModel = nativeBridge.renderPageModel(page);"
+    , "const firstText = pageModel.body.child.child.children[1]?.child ?? null;"
+    , "console.log(JSON.stringify({"
+    , "  modulePath: compiledModule.__claspBindings.platformBridges.reactNative.module,"
+    , "  nativeEntry: compiledModule.__claspBindings.platformBridges.reactNative.entry,"
+    , "  expoEntry: compiledModule.__claspBindings.platformBridges.expo.entry,"
+    , "  nativeKind: nativeBridge.kind,"
+    , "  nativePlatform: nativeBridge.platform,"
+    , "  expoPlatform: expoBridge.platform,"
+    , "  pageKind: pageModel.kind,"
+    , "  pageTitle: pageModel.title,"
+    , "  bodyKind: pageModel.body.kind,"
+    , "  styleRef: pageModel.body.styleRef,"
+    , "  childKind: pageModel.body.child.kind,"
+    , "  childTag: pageModel.body.child.tag,"
+    , "  textKind: firstText?.kind ?? null,"
+    , "  textValue: firstText?.text ?? null,"
+    , "  linkHref: pageModel.body.child.child.children.find((child) => child.kind === 'link')?.href ?? null"
     , "}));"
     ]
 
