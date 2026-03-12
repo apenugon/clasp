@@ -1,111 +1,53 @@
 # Native Backend Wave v0
 
-This wave starts the full native-backend path from the earliest unmet prerequisite rather than pretending the native tasks can begin in isolation.
+This wave now includes the full transitive dependency closure for the native backend path instead of a hand-curated subset.
 
-The objective is to drive `Clasp` through:
+The native goal is still the same:
 
-- the SaaS dogfood chain that currently gates self-hosting
-- the remaining hosted self-hosting prerequisite chain
-- the native-backend path in `M10`
+- define a backend-native IR and runtime ABI
+- run compiler and backend workloads without Bun
+- keep the same front end and type system across JS and native targets
 
-The native track depends on `SH-010`, and the self-hosting track depends on `SA-010`, so this wave intentionally includes the full prerequisite ladder needed to unlock native work.
+The difference is that this wave now reflects the actual canonical backlog graph. Reaching the native backend requires most of the roadmap first, including the language floor, type system, schema/runtime boundaries, control plane, workflows, AI platform, SaaS dogfood, and hosted self-hosting path.
 
-The `M10` outcome in the project plan is:
+This wave therefore snapshots the full closure of dependencies for:
 
-- a backend-oriented native IR and runtime ABI exist
-- compiler and backend demos can run without Bun
-- the same front end and type system drive both JS and native backends
+- `NB-001` through `NB-009`
+- `BM-014`
 
-This wave uses canonical backlog task IDs directly.
+Current closure size:
+
+- `115` canonical tasks
 
 Lanes in this wave:
 
-- `01-saas-foundation`
-- `02-saas-product`
-- `03-saas-benchmark`
-- `04-self-hosting-foundation`
-- `05-self-hosting-frontend`
-- `06-hosted-self-host`
-- `07-native-ir`
-- `08-native-runtime`
-- `09-native-codegen`
-- `10-native-selfhost`
-- `11-native-benchmarks`
+- `01-core-language` with `LG-001` through `LG-019`
+- `02-type-system` with `TY-001` through `TY-010`
+- `03-schemas` with `SC-001` through `SC-013`
+- `04-full-stack` with `FS-001` through `FS-010`
+- `05-control-plane` with `CP-001` through `CP-012`
+- `06-workflows` with `WF-001` through `WF-010`
+- `07-ai-platform` with `AI-001` through `AI-011`
+- `08-saas-dogfood` with `SA-001` through `SA-010`
+- `09-self-hosting` with `SH-001` through `SH-010`
+- `10-native-backend` with `NB-001` through `NB-009`
+- `11-benchmarks` with `BM-014`
 
-Tasks in this wave:
+Why this shape:
 
-- `SA-001` moderate SaaS app scope and product surface
-- `SA-002` in-memory or file-backed app state primitives
-- `SA-003` core shared domain types, routes, and generated clients
-- `SA-004` primary user-facing flows across frontend and backend
-- `SA-005` one worker or workflow-driven product path
-- `SA-006` one AI-assisted product feature with typed model and tool boundaries
-- `SA-007` deterministic seeded app fixtures
-- `SA-008` end-to-end tests for the moderate SaaS app
-- `SA-009` package the app so an agent can build and modify it from one Clasp codebase
-- `SA-010` use the app as the main public benchmark proving ground against TypeScript baselines
-- `SH-001` self-hosting subset and bootstrap boundary
-- `SH-002` standard-library surface for compiler code written in `Clasp`
-- `SH-003` formatter and diagnostics helpers in `Clasp`
-- `SH-004` module loading and package resolution in `Clasp`
-- `SH-005` parser in `Clasp`
-- `SH-006` lowered IR helpers and JavaScript emitter in `Clasp`
-- `SH-007` checker and type inference in `Clasp`
-- `SH-008` hosted self-hosted compiler through JS/Bun
-- `SH-009` stage0/stage1/stage2 bootstrap reproducibility checks
-- `SH-010` switch the primary compiler implementation to `Clasp` with Haskell fallback
-- `NB-001` backend-native IR below the current lowered IR
-- `NB-002` native runtime ABI and data layout
-- `NB-003` first native bytecode or native-target IR path
-- `NB-004` minimal native runtime for compiler and backend execution
-- `NB-005` native code generation for functions, ADTs, records, and control flow
-- `NB-006` native JSON and runtime-boundary support for compiler and SaaS workloads
-- `NB-007` self-hosted compiler execution through the native backend
-- `NB-008` JS/Bun versus native backend benchmarks
-- `BM-014` backend compile-time and runtime benchmarks comparing JS/Bun and native
-- `NB-009` native support for compiler-owned binary boundary codecs and efficient transport
+- `SA-001` is blocked by `AI-011` and `FS-010`
+- `SH-001` is blocked by `SA-010`
+- `NB-001` is blocked by `SH-010`
+- `BM-014` is blocked by `NB-008`
 
-Dependency flow:
-
-- `SA-001` starts immediately.
-- `SA-002` builds on `SA-001`.
-- `SA-003` builds on `SA-002`.
-- `SA-004` builds on `SA-003`.
-- `SA-005` builds on `SA-004`.
-- `SA-006` builds on `SA-005`.
-- `SA-007` builds on `SA-006`.
-- `SA-008` builds on `SA-007`.
-- `SA-009` builds on `SA-008`.
-- `SA-010` builds on `SA-009`.
-- `SH-001` builds on `SA-010`.
-- `SH-002` builds on `SH-001`.
-- `SH-003` builds on `SH-002`.
-- `SH-004` builds on `SH-003`.
-- `SH-005` builds on `SH-004`.
-- `SH-006` builds on `SH-005`.
-- `SH-007` builds on `SH-006`.
-- `SH-008` builds on `SH-007`.
-- `SH-009` builds on `SH-008`.
-- `SH-010` builds on `SH-009`.
-- `NB-001` builds on `SH-010`.
-- `NB-002` builds on `NB-001`.
-- `NB-003` builds on `NB-002`.
-- `NB-004` builds on `NB-003`.
-- `NB-005` builds on `NB-004`.
-- `NB-006` builds on `NB-005`.
-- `NB-007` builds on `NB-006`.
-- `NB-008` builds on `NB-007`.
-- `BM-014` builds on `NB-008`.
-- `NB-009` builds on `NB-008`.
+So a realistic native wave cannot begin at `NB-*`; it must begin at the earliest unmet work in the language and product stack.
 
 Success for this wave means:
 
-- the moderate SaaS dogfood app and its benchmark proving-ground path are complete enough to unlock self-hosting
-- the hosted self-hosted compiler path is complete enough to act as the prerequisite for native work
+- the full dependency ladder from language floor through hosted self-hosting is complete enough to unlock native work
 - `Clasp` has a real native execution path below the current lowered IR
-- backend and compiler workloads can run without Bun on the native path
-- native codegen supports the data and control-flow shapes needed by the current compiler and SaaS app slices
+- compiler and backend workloads can run without Bun on the native path
 - the self-hosted compiler can execute through the native backend
 - the repo has benchmark evidence comparing JS/Bun and native on the same workloads
 
-This wave is expected to be long-running and only lightly parallel because the SaaS dogfood, hosted self-hosting, and native backend tracks are all mostly long dependency chains.
+This wave is expected to be long-running, only partially parallel, and much closer to a whole-roadmap execution program than a narrow feature sprint.
