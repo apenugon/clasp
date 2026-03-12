@@ -1423,6 +1423,9 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EList span' values ->
       inferListExpr ctx termEnv localEnv span' values
+    EBlock blockSpan body -> do
+      bodyExpr <- inferExpr ctx termEnv localEnv body
+      pure bodyExpr {draftExprSpan = blockSpan}
     EEqual equalitySpan left right ->
       inferEqualityExpr ctx termEnv localEnv equalitySpan True left right
     ENotEqual equalitySpan left right ->

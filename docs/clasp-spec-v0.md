@@ -28,6 +28,7 @@ It includes:
 - Function definitions
 - Basic literals
 - Function application
+- Block expressions
 - Local `let` expressions
 - Equality operators for `Int`, `Str`, and `Bool`
 - Integer comparison operators for branching
@@ -136,6 +137,15 @@ module Main
 
 greeting : Str
 greeting = let message = "Ada" in message
+```
+
+Block expressions are also available as a lightweight imperative-adjacent surface form. In this first slice, a block wraps a single expression and evaluates to that expression's value:
+
+```clasp
+module Main
+
+greeting : Str
+greeting = { let message = "Ada" in message }
 ```
 
 Primitive equality is also available for `Int`, `Str`, and `Bool`:
@@ -257,6 +267,7 @@ route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ide
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
+block-expr  ::= "{" expr "}"
 let-expr    ::= "let" lower-ident "=" expr "in" expr
 expr        ::= let-expr | equality-expr
 equality-expr ::= comparison-expr (("==" | "!=") comparison-expr)*
@@ -274,6 +285,7 @@ atom        ::= lower-ident
               | encode-expr
               | record-expr
               | match-expr
+              | block-expr
               | "(" expr ")"
 decode-expr ::= "decode" type-atom expr
 encode-expr ::= "encode" expr
@@ -293,6 +305,7 @@ Notes:
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
+- Blocks currently wrap a single expression and return its value.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
 

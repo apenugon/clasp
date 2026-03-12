@@ -367,6 +367,20 @@ parserTests =
                     assertFailure ("expected let expression body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+    , testCase "parses block expressions" $
+        case parseSource "inline" blockExpressionSource of
+          Left err ->
+            assertFailure ("expected block expression source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "greeting" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EBlock blockSpan (ELet _ _ "message" (EString _ "Ada") (EVar _ "message")) ->
+                    assertEqual "block starts on declaration line" 4 (positionLine (sourceSpanStart blockSpan))
+                  other ->
+                    assertFailure ("expected block expression body, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
     , testCase "parses nested let expressions in match branches" $
         case parseSource "inline" letInMatchSource of
           Left err ->
@@ -600,6 +614,21 @@ checkerTests =
                     assertEqual "let body variable type" TStr bodyType
                   other ->
                     assertFailure ("expected checked let expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
+    , testCase "typechecks block expressions by desugaring to the inner expression" $
+        case checkSource "block" blockExpressionSource of
+          Left err ->
+            assertFailure ("expected block source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "greeting") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CLet _ typ "message" (CString _ "Ada") (CVar _ bodyType "message") -> do
+                    assertEqual "block let result type" TStr typ
+                    assertEqual "block let body variable type" TStr bodyType
+                  other ->
+                    assertFailure ("expected checked block expression to lower to let, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
     , testCase "typechecks the let example file" $ do
@@ -1151,6 +1180,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered let declaration: " <> show other)
+    , testCase "lowering block expressions preserves the lowered inner expression" $
+        case lowerChecked "block" blockExpressionSource of
+          Left err ->
+            assertFailure ("expected block lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "greeting" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LLet "message" (LString "Ada") (LVar "message"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered block declaration: " <> show other)
     , testCase "lowering preserves equality operators" $
         case lowerChecked "equality" equalitySource of
           Left err ->
@@ -1383,6 +1422,22 @@ compileTests =
                 , "console.log(compiledModule.greeting);"
                 ]
             assertEqual "expected let result" "Ada" runtimeOutput
+    , testCase "compile evaluates block expressions" $
+        case compileSource "block" blockExpressionSource of
+          Left err ->
+            assertFailure ("expected block compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected block to compile through let emission" ("const message = \"Ada\";" `T.isInfixOf` emitted)
+            let compiledPath = "dist/block-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.greeting);"
+                ]
+            assertEqual "expected block result" "Ada" runtimeOutput
     , testCase "compile lowers equality operators to JavaScript and evaluates them" $
         case compileSource "equality" equalitySource of
           Left err ->
@@ -2535,6 +2590,15 @@ letExpressionSource =
     , ""
     , "greeting : Str"
     , "greeting = let message = \"Ada\" in message"
+    ]
+
+blockExpressionSource :: Text
+blockExpressionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "greeting : Str"
+    , "greeting = { let message = \"Ada\" in message }"
     ]
 
 equalitySource :: Text

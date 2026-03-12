@@ -507,6 +507,7 @@ termParser = do
 baseExprParser :: Parser Expr
 baseExprParser =
   parens exprParser
+    <|> blockExprParser
     <|> decodeParser
     <|> encodeParser
     <|> matchParser
@@ -540,6 +541,13 @@ matchBranchParser = do
       , matchBranchPattern = pattern'
       , matchBranchBody = body
       }
+
+blockExprParser :: Parser Expr
+blockExprParser = do
+  start <- getSourcePos
+  body <- braces exprParser
+  end <- getSourcePos
+  pure (EBlock (makeSourceSpan start end) body)
 
 decodeParser :: Parser Expr
 decodeParser = do
