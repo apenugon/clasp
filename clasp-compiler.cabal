@@ -30,6 +30,7 @@ library
       Clasp.Air
       Clasp.Checker
       Clasp.Compiler
+      Clasp.ContextGraph
       Clasp.Core
       Clasp.Diagnostic
       Clasp.Emit.JavaScript

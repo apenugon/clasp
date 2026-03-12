@@ -1,6 +1,8 @@
 module Clasp.Compiler
   ( airSource
   , airEntry
+  , contextSource
+  , contextEntry
   , checkSource
   , checkEntry
   , compileSource
@@ -8,12 +10,15 @@ module Clasp.Compiler
   , parseSource
   , renderAirEntryJson
   , renderAirSourceJson
+  , renderContextEntryJson
+  , renderContextSourceJson
   ) where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
 import Clasp.Air (AirModule, buildAirModule, renderAirModuleJson)
 import Clasp.Checker (checkModule)
+import Clasp.ContextGraph (ContextGraph, buildContextGraph, renderContextGraphJson)
 import Clasp.Core (CoreModule)
 import Clasp.Diagnostic (DiagnosticBundle)
 import Clasp.Emit.JavaScript (emitModule)
@@ -38,6 +43,14 @@ renderAirSourceJson :: FilePath -> Text -> Either DiagnosticBundle LT.Text
 renderAirSourceJson path source =
   renderAirModuleJson <$> airSource path source
 
+contextSource :: FilePath -> Text -> Either DiagnosticBundle ContextGraph
+contextSource path source =
+  buildContextGraph <$> checkSource path source
+
+renderContextSourceJson :: FilePath -> Text -> Either DiagnosticBundle LT.Text
+renderContextSourceJson path source =
+  renderContextGraphJson <$> contextSource path source
+
 airEntry :: FilePath -> IO (Either DiagnosticBundle AirModule)
 airEntry entryPath = do
   checkedModule <- checkEntry entryPath
@@ -47,6 +60,16 @@ renderAirEntryJson :: FilePath -> IO (Either DiagnosticBundle LT.Text)
 renderAirEntryJson entryPath = do
   airModule <- airEntry entryPath
   pure (renderAirModuleJson <$> airModule)
+
+contextEntry :: FilePath -> IO (Either DiagnosticBundle ContextGraph)
+contextEntry entryPath = do
+  checkedModule <- checkEntry entryPath
+  pure (buildContextGraph <$> checkedModule)
+
+renderContextEntryJson :: FilePath -> IO (Either DiagnosticBundle LT.Text)
+renderContextEntryJson entryPath = do
+  contextGraph <- contextEntry entryPath
+  pure (renderContextGraphJson <$> contextGraph)
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do

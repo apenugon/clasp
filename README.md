@@ -174,6 +174,7 @@ cabal run claspc -- check examples/status.clasp
 cabal run claspc -- check examples/records.clasp
 cabal run claspc -- check examples/lead-app/Main.clasp
 
+cabal run claspc -- context examples/lead-app/Main.clasp
 cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js
 bun examples/lead-app/server.mjs
 

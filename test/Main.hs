@@ -4,7 +4,12 @@ module Main (main) where
 
 import Control.Exception (finally)
 import Control.Monad (when)
+import Data.Aeson (Value (..), eitherDecodeStrictText)
+import Data.Aeson.Key (fromText)
+import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Foldable (toList)
 import Data.List (find)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -12,11 +17,12 @@ import qualified Data.Text.Lazy as LT
 import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
+  , doesFileExist
   , makeAbsolute
   , removePathForcibly
   )
 import System.Exit (ExitCode (..))
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath ((</>), replaceExtension, takeDirectory)
 import System.Process (readProcessWithExitCode)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -32,7 +38,7 @@ import Clasp.Air
   , AirNode (..)
   , AirNodeId (..)
   )
-import Clasp.Compiler (airEntry, airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson)
+import Clasp.Compiler (airEntry, airSource, checkEntry, checkSource, compileEntry, compileSource, parseSource, renderAirSourceJson, renderContextSourceJson)
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
@@ -87,6 +93,7 @@ tests =
     [ parserTests
     , checkerTests
     , airTests
+    , contextTests
     , diagnosticTests
     , lowerTests
     , compileTests
@@ -485,6 +492,45 @@ airTests =
               assertEqual "merged module name" (ModuleName "Main") (airModuleName airModule)
               assertBool "expected imported declaration root" (AirNodeId "decl:formatUser" `elem` airModuleRootIds airModule)
               assertBool "expected main declaration root" (AirNodeId "decl:main" `elem` airModuleRootIds airModule)
+    ]
+
+contextTests :: TestTree
+contextTests =
+  testGroup
+    "context"
+    [ testCase "context graph keeps edges referentially intact and materializes builtin boundary schemas" $
+        case renderContextSourceJson "interactive" interactivePageSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            graphValue <- case eitherDecodeStrictText jsonText of
+              Left decodeErr ->
+                assertFailure ("expected context graph json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "format version" (Just (String "clasp-context-v1")) (lookupObjectKey "format" graphValue)
+            let nodeIds = Set.fromList (extractNodeIds graphValue)
+                edges = extractEdges graphValue
+            assertBool "expected builtin Page schema node" (Set.member "schema:Page" nodeIds)
+            assertBool "expected builtin Redirect schema node" (Set.member "schema:Redirect" nodeIds)
+            assertBool
+              "expected all edge endpoints to resolve to nodes"
+              (all (\(fromId, toId) -> Set.member fromId nodeIds && Set.member toId nodeIds) edges)
+    , testCase "claspc context writes the default context artifact when -o is omitted" $
+        withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = replaceExtension inputPath "context.json"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["context", inputPath]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("claspc context failed:\n" <> stderrText)
+          exists <- doesFileExist outputPath
+          assertBool "expected default context artifact to be written" exists
+          outputText <- TIO.readFile outputPath
+          assertBool "expected context format marker" ("\"format\":\"clasp-context-v1\"" `T.isInfixOf` outputText)
     ]
 
 lowerTests :: TestTree
@@ -994,6 +1040,51 @@ runNodeScript script = do
       pure (T.strip (T.pack stdoutText))
     ExitFailure _ ->
       assertFailure ("node script failed:\n" <> stderrText)
+
+runClaspc :: [String] -> IO (ExitCode, String, String)
+runClaspc args =
+  readProcessWithExitCode
+    "cabal"
+    (["run", "claspc", "--"] <> args)
+    ""
+
+lookupObjectKey :: Text -> Value -> Maybe Value
+lookupObjectKey key value =
+  case value of
+    Object obj ->
+      KeyMap.lookup (fromText key) obj
+    _ ->
+      Nothing
+
+extractNodeIds :: Value -> [Text]
+extractNodeIds value =
+  case lookupObjectKey "nodes" value of
+    Just (Array nodes) ->
+      foldMap extractNodeId (toList nodes)
+    _ ->
+      []
+  where
+    extractNodeId nodeValue =
+      case lookupObjectKey "id" nodeValue of
+        Just (String nodeId) ->
+          [nodeId]
+        _ ->
+          []
+
+extractEdges :: Value -> [(Text, Text)]
+extractEdges value =
+  case lookupObjectKey "edges" value of
+    Just (Array edges) ->
+      foldMap extractEdge (toList edges)
+    _ ->
+      []
+  where
+    extractEdge edgeValue =
+      case (lookupObjectKey "from" edgeValue, lookupObjectKey "to" edgeValue) of
+        (Just (String fromId), Just (String toId)) ->
+          [(fromId, toId)]
+        _ ->
+          []
 
 withProjectFiles :: FilePath -> [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
 withProjectFiles fixtureName files action = do

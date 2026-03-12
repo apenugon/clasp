@@ -10,7 +10,7 @@ import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Clasp.Compiler (checkEntry, compileEntry, parseSource, renderAirEntryJson)
+import Clasp.Compiler (checkEntry, compileEntry, parseSource, renderAirEntryJson, renderContextEntryJson)
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
@@ -32,6 +32,12 @@ main = do
       runAir format inputPath (Just outputPath)
     ["air", "-o", outputPath, inputPath] ->
       runAir format inputPath (Just outputPath)
+    ["context", inputPath] ->
+      runContext format inputPath Nothing
+    ["context", inputPath, "-o", outputPath] ->
+      runContext format inputPath (Just outputPath)
+    ["context", "-o", outputPath, inputPath] ->
+      runContext format inputPath (Just outputPath)
     ["compile", inputPath] ->
       runCompile format inputPath Nothing
     ["compile", inputPath, "-o", outputPath] ->
@@ -110,6 +116,29 @@ runAir format inputPath outputPath = do
                 , "output" .= resolvedOutput
                 ]
 
+runContext :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
+runContext format inputPath outputPath = do
+  result <- renderContextEntryJson inputPath
+  case result of
+    Left err -> do
+      writeFailure format err
+      exitFailure
+    Right contextJson -> do
+      let resolvedOutput = maybe (replaceExtension inputPath "context.json") id outputPath
+      LTIO.writeFile resolvedOutput contextJson
+      case format of
+        Pretty ->
+          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("context" :: String)
+                , "input" .= inputPath
+                , "output" .= resolvedOutput
+                ]
+
 runCompile :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
 runCompile format inputPath outputPath = do
   result <- compileEntry inputPath
@@ -148,5 +177,6 @@ usage =
     , "  claspc parse <input.clasp> [--json]"
     , "  claspc check <input.clasp> [--json]"
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
+    , "  claspc context <input.clasp> [-o output.context.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json]"
     ]
