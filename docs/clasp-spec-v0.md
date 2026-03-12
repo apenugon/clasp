@@ -403,6 +403,7 @@ Notes:
 - The Bun runtime also exposes a browser/client helper layer for generated route clients, plus server helpers that consume the generated binding contract for host-binding installation, asset serving, request decoding, and redirect-aware response handling.
 - The React runtime helper also exposes `createReactNativeBridge` and `createExpoBridge`, which turn compiler-owned `Page` and `View` values into stable mobile-friendly models without forcing React Native or Expo-specific rendering decisions into generated code.
 - Generated JavaScript modules also export `__claspSchemas`, a schema-contract registry with shared schema references, seed values, and host/JSON adapters that Bun worker runtimes can use to register typed jobs without re-declaring boundary shapes.
+- Generated JavaScript modules also export `__claspPythonInterop`, a versioned Python boundary contract that maps hook and JSON route schemas into compiler-managed worker and service descriptors, and the Bun runtime exposes lifecycle-managed Python module or package adapters that reuse the same schema registry for typed stdio interop.
 - Route declarations also emit compiler-owned `__claspSeededFixtures` entries so hosts can inspect stable request and response seed shapes for benchmark and dogfood surfaces.
 - Function application compiles to JavaScript function calls.
 - Block-scoped `for` loops compile to JavaScript `for...of` loops over checked list values.

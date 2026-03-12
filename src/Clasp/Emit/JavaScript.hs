@@ -78,6 +78,7 @@ emitModule modl =
       <> emitSchemaRegistryExport (lowerModuleCodecTypes modl) (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> emitPlatformBridgesExport
       <> emitControlPlaneExports modl
+      <> emitPythonInteropExport modl
       <> emitGeneratedBindingsExport
 
 emitRuntimePrelude :: [Text]
@@ -2004,6 +2005,69 @@ renderMergeGateDoc mergeGateDecl =
         , "- Verifiers: " <> verifierSummary
         ]
 
+emitPythonInteropExport :: LowerModule -> [Text]
+emitPythonInteropExport modl =
+  [ "export const __claspPythonInterop = Object.freeze({"
+  , "  version: 1,"
+  , "  runtime: Object.freeze({ module: \"runtime/bun/python.mjs\", entry: \"createPythonInteropRuntime\" }),"
+  , "  workers: Object.freeze(["
+  ]
+    <> concatMap emitPythonWorker hooks
+    <> [ "  ]),"
+       , "  services: Object.freeze(["
+       ]
+    <> concatMap emitPythonService pythonRoutes
+    <> [ "  ]),"
+       , "  schemas: __claspSchemas"
+       , "});"
+       , ""
+       ]
+  where
+    typeDecls = lowerModuleTypeDecls modl
+    recordDecls = lowerModuleRecordDecls modl
+    hooks = lowerModuleHookDecls modl
+    pythonRoutes = filter isPythonServiceRoute (lowerModuleRoutes modl)
+
+    isPythonServiceRoute route =
+      case lowerRouteResponseTypeName route of
+        "Page" ->
+          False
+        "Redirect" ->
+          False
+        _ ->
+          True
+
+    emitPythonWorker hookDecl =
+      [ "    Object.freeze({"
+      , "      kind: \"worker\","
+      , "      name: " <> emitStringLiteral (hookDeclName hookDecl) <> ","
+      , "      id: " <> emitStringLiteral (hookDeclIdentity hookDecl) <> ","
+      , "      event: " <> emitStringLiteral (hookTriggerDeclEvent (hookDeclTrigger hookDecl)) <> ","
+      , "      transport: \"stdio\","
+      , "      lifecycle: \"managed\","
+      , "      requestType: " <> emitStringLiteral (hookDeclRequestType hookDecl) <> ","
+      , "      requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (hookDeclRequestType hookDecl) <> ","
+      , "      responseType: " <> emitStringLiteral (hookDeclResponseType hookDecl) <> ","
+      , "      responseSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (hookDeclResponseType hookDecl)
+      , "    }),"
+      ]
+
+    emitPythonService route =
+      [ "    Object.freeze({"
+      , "      kind: \"service\","
+      , "      name: " <> emitStringLiteral (lowerRouteName route) <> ","
+      , "      id: " <> emitStringLiteral (lowerRouteIdentity route) <> ","
+      , "      method: " <> emitStringLiteral (emitRouteMethod (lowerRouteMethod route)) <> ","
+      , "      path: " <> emitStringLiteral (lowerRoutePath route) <> ","
+      , "      transport: \"stdio\","
+      , "      lifecycle: \"managed\","
+      , "      requestType: " <> emitStringLiteral (lowerRouteRequestTypeName route) <> ","
+      , "      requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (lowerRouteRequestTypeName route) <> ","
+      , "      responseType: " <> emitStringLiteral (lowerRouteResponseTypeName route) <> ","
+      , "      responseSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (lowerRouteResponseTypeName route)
+      , "    }),"
+      ]
+
 emitGeneratedBindingsExport :: [Text]
 emitGeneratedBindingsExport =
   [ "export const __claspBindings = Object.freeze({"
@@ -2016,6 +2080,7 @@ emitGeneratedBindingsExport =
   , "  routeClients: __claspRouteClients,"
   , "  schemas: __claspSchemas,"
   , "  platformBridges: __claspPlatformBridges,"
+  , "  python: __claspPythonInterop,"
   , "  seededFixtures: __claspSeededFixtures,"
   , "  staticAssetStrategy: __claspStaticAssetStrategy,"
   , "  staticAssets: __claspStaticAssets,"

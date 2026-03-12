@@ -2696,6 +2696,37 @@ compileTests =
               "expected native interop contract and build plan"
               "{\"abi\":\"clasp-native-v1\",\"supportedTargets\":[\"bun\",\"worker\",\"react-native\",\"expo\"],\"bindingName\":\"mockLeadSummaryModel\",\"capabilityId\":\"capability:foreign:mockLeadSummaryModel\",\"crateName\":\"lead_summary_bridge\",\"loader\":\"bun:ffi\",\"crateType\":\"cdylib\",\"manifestPath\":\"native/lead-summary/Cargo.toml\",\"artifactFileName\":\"liblead_summary_bridge.so\",\"cargoCommand\":[\"cargo\",\"build\",\"--manifest-path\",\"native/lead-summary/Cargo.toml\",\"--release\",\"--target\",\"x86_64-unknown-linux-gnu\"],\"capabilities\":[\"capability:foreign:mockLeadSummaryModel\",\"capability:ml:lead-summary\"]}"
               runtimeOutput
+    , testCase "compile emits Python worker and service interop contracts" $
+        case compileSource "python-interop" pythonInteropSource of
+          Left err ->
+            assertFailure ("expected python interop compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected python interop export" ("export const __claspPythonInterop = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected python runtime descriptor" ("runtime: Object.freeze({ module: \"runtime/bun/python.mjs\", entry: \"createPythonInteropRuntime\" })" `T.isInfixOf` emitted)
+            assertBool "expected worker boundary descriptor" ("kind: \"worker\"" `T.isInfixOf` emitted)
+            assertBool "expected service boundary descriptor" ("kind: \"service\"" `T.isInfixOf` emitted)
+            assertBool "expected python binding contract entry" ("python: __claspPythonInterop," `T.isInfixOf` emitted)
+    , testCase "python interop runtime manages typed worker and service boundaries" $
+        withProjectFiles "python-interop-runtime"
+          [ ("compiled-source.clasp", pythonInteropSource)
+          , ("clasp_worker_bridge.py", pythonWorkerModuleSource)
+          , ("clasp_service_pkg/__main__.py", pythonServicePackageSource)
+          ] $ \root -> do
+            result <- compileEntry (root </> "compiled-source.clasp")
+            case result of
+              Left err ->
+                assertFailure ("expected python interop project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+              Right emitted -> do
+                let compiledPath = root </> "compiled.mjs"
+                TIO.writeFile compiledPath emitted
+                absoluteCompiledPath <- makeAbsolute compiledPath
+                absoluteRuntimePath <- makeAbsolute "runtime/bun/python.mjs"
+                absoluteRoot <- makeAbsolute root
+                runtimeOutput <- runNodeScript (pythonInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath absoluteRoot)
+                assertEqual
+                  "expected python worker/service lifecycle contract"
+                  "{\"runtimeModule\":\"runtime/bun/python.mjs\",\"workerCount\":1,\"serviceCount\":1,\"workerRunning\":true,\"workerAccepted\":true,\"workerLabel\":\"py:worker-7\",\"workerStopped\":false,\"workerRestarted\":true,\"serviceSummary\":\"py:Acme:42\",\"serviceAccepted\":true,\"serviceStopped\":false,\"invalid\":\"budget must be an integer\"}"
+                  runtimeOutput
     , testCase "generated page route clients build query and form requests" $
         withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
@@ -3465,6 +3496,62 @@ controlPlaneSource =
     , "mergegate trunk = repoChecks"
     , ""
     , "main = \"ok\""
+    ]
+
+pythonInteropSource :: Text
+pythonInteropSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record WorkerBoot = { workerId : Str }"
+    , "record HookAck = { accepted : Bool, workerLabel : Str }"
+    , "record LeadRequest = { company : Str, budget : Int }"
+    , "record LeadSummary = { summary : Str, accepted : Bool }"
+    , ""
+    , "bootstrapWorker : WorkerBoot -> HookAck"
+    , "bootstrapWorker req = HookAck { accepted = true, workerLabel = req.workerId }"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead req = LeadSummary { summary = req.company, accepted = req.budget >= 40 }"
+    , ""
+    , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
+    , "route summarizeRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    , ""
+    , "main = \"ok\""
+    ]
+
+pythonWorkerModuleSource :: Text
+pythonWorkerModuleSource =
+  T.unlines
+    [ "import json"
+    , "import sys"
+    , ""
+    , "for raw in sys.stdin:"
+    , "    message = json.loads(raw)"
+    , "    request = message[\"request\"]"
+    , "    response = {"
+    , "        \"accepted\": True,"
+    , "        \"workerLabel\": f\"py:{request['workerId']}\""
+    , "    }"
+    , "    sys.stdout.write(json.dumps({\"response\": response}) + \"\\n\")"
+    , "    sys.stdout.flush()"
+    ]
+
+pythonServicePackageSource :: Text
+pythonServicePackageSource =
+  T.unlines
+    [ "import json"
+    , "import sys"
+    , ""
+    , "for raw in sys.stdin:"
+    , "    message = json.loads(raw)"
+    , "    request = message[\"request\"]"
+    , "    response = {"
+    , "        \"summary\": f\"py:{request['company']}:{request['budget']}\","
+    , "        \"accepted\": request[\"budget\"] >= 40"
+    , "    }"
+    , "    sys.stdout.write(json.dumps({\"response\": response}) + \"\\n\")"
+    , "    sys.stdout.flush()"
     ]
 
 missingGuideParentSource :: Text
@@ -4930,6 +5017,43 @@ nativeInteropRuntimeScript compiledPath runtimePath =
     , "  artifactFileName: bindingPlan.artifactFileName,"
     , "  cargoCommand: bindingPlan.cargo.command,"
     , "  capabilities: bindingPlan.capabilities"
+
+pythonInteropRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+pythonInteropRuntimeScript compiledPath runtimePath projectRoot =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createPythonInteropRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createPythonInteropRuntime(compiledModule);"
+    , "const worker = runtime.worker('workerStart', { cwd: " <> show projectRoot <> ", module: 'clasp_worker_bridge' });"
+    , "const service = runtime.service('summarizeRoute', { cwd: " <> show projectRoot <> ", package: 'clasp_service_pkg' });"
+    , "const workerStart = await worker.start();"
+    , "const workerResult = await worker.invoke({ workerId: 'worker-7' });"
+    , "const workerStop = await worker.stop();"
+    , "await worker.restart();"
+    , "const workerRestart = worker.status();"
+    , "await worker.stop();"
+    , "await service.start();"
+    , "const serviceResult = await service.invoke({ company: 'Acme', budget: 42 });"
+    , "let invalid = null;"
+    , "try {"
+    , "  await service.invoke({ company: 'Acme', budget: 'oops' });"
+    , "} catch (error) {"
+    , "  invalid = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "const serviceStop = await service.stop();"
+    , "console.log(JSON.stringify({"
+    , "  runtimeModule: runtime.contract.runtime.module,"
+    , "  workerCount: runtime.listWorkers().length,"
+    , "  serviceCount: runtime.listServices().length,"
+    , "  workerRunning: workerStart.running,"
+    , "  workerAccepted: workerResult.accepted,"
+    , "  workerLabel: workerResult.workerLabel,"
+    , "  workerStopped: workerStop.running,"
+    , "  workerRestarted: workerRestart.running,"
+    , "  serviceSummary: serviceResult.summary,"
+    , "  serviceAccepted: serviceResult.accepted,"
+    , "  serviceStopped: serviceStop.running,"
+    , "  invalid"
     , "}));"
     ]
 

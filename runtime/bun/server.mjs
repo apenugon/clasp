@@ -36,6 +36,7 @@ export function bindingContractFor(compiledModule) {
     schemas: compiledModule?.__claspSchemas ?? {},
     platformBridges:
       compiledModule?.__claspPlatformBridges ?? defaultPlatformBridges(),
+    python: compiledModule?.__claspPythonInterop ?? null,
     seededFixtures: compiledModule?.__claspSeededFixtures ?? [],
     staticAssetStrategy:
       compiledModule?.__claspStaticAssetStrategy ?? {
