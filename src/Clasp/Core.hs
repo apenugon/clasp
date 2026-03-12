@@ -22,26 +22,36 @@ module Clasp.Core
   , SemanticEdit (..)
   , applySemanticEdit
   , coreExprType
+  , renderCoreModule
   ) where
 
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import Clasp.Syntax
   ( AgentDecl (..)
   , AgentRoleDecl (..)
   , ConstructorDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
+  , GuideEntryDecl (..)
   , HookDecl (..)
+  , HookTriggerDecl (..)
   , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , ModuleName
   , PolicyDecl (..)
+  , PolicyClassificationDecl (..)
+  , PolicyPermissionDecl (..)
+  , PolicyPermissionKind (..)
   , ProjectionDecl (..)
+  , ProjectionFieldDecl (..)
   , Position (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
+  , RouteMethod (..)
   , RoutePathDecl
   , SourceSpan (..)
   , ToolDecl (..)
@@ -49,6 +59,8 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , renderType
+  , splitModuleName
   )
 import Clasp.Diagnostic
   ( DiagnosticBundle
@@ -214,6 +226,379 @@ data SemanticEdit
   = RenameDecl Text Text
   | RenameSchema Text Text
   deriving (Eq, Show)
+
+renderCoreModule :: CoreModule -> Text
+renderCoreModule modl =
+  T.intercalate
+    "\n\n"
+    ([ "module " <> renderModuleName (coreModuleName modl)
+     ]
+       <> fmap renderSection (filter (not . null) topLevelSections)
+    )
+  where
+    topLevelSections =
+      [ fmap renderTypeDecl (coreModuleTypeDecls modl)
+      , fmap renderRecordDecl (coreModuleRecordDecls modl)
+      , fmap renderGuideDecl (coreModuleGuideDecls modl)
+      , fmap renderHookDecl (coreModuleHookDecls modl)
+      , fmap renderAgentRoleDecl (coreModuleAgentRoleDecls modl)
+      , fmap renderAgentDecl (coreModuleAgentDecls modl)
+      , fmap renderPolicyDecl (coreModulePolicyDecls modl)
+      , fmap renderToolServerDecl (coreModuleToolServerDecls modl)
+      , fmap renderToolDecl (coreModuleToolDecls modl)
+      , fmap renderVerifierDecl (coreModuleVerifierDecls modl)
+      , fmap renderMergeGateDecl (coreModuleMergeGateDecls modl)
+      , fmap renderProjectionDecl (coreModuleProjectionDecls modl)
+      , fmap renderForeignDecl (coreModuleForeignDecls modl)
+      , fmap renderRouteDecl (coreModuleRouteDecls modl)
+      , fmap renderCoreDecl (coreModuleDecls modl)
+      ]
+
+renderModuleName :: ModuleName -> Text
+renderModuleName = T.intercalate "." . splitModuleName
+
+renderSection :: [Text] -> Text
+renderSection =
+  T.intercalate "\n"
+
+renderTypeDecl :: TypeDecl -> Text
+renderTypeDecl typeDecl =
+  "type "
+    <> typeDeclName typeDecl
+    <> " = "
+    <> T.intercalate " | " (fmap renderConstructorDecl (typeDeclConstructors typeDecl))
+
+renderConstructorDecl :: ConstructorDecl -> Text
+renderConstructorDecl constructorDecl =
+  T.unwords (constructorDeclName constructorDecl : fmap renderAtomicType (constructorDeclFields constructorDecl))
+
+renderRecordDecl :: RecordDecl -> Text
+renderRecordDecl recordDecl =
+  "record "
+    <> recordDeclName recordDecl
+    <> " = "
+    <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderRecordFieldDecl :: RecordFieldDecl -> Text
+renderRecordFieldDecl fieldDecl =
+  recordFieldDeclName fieldDecl
+    <> ": "
+    <> renderType (recordFieldDeclType fieldDecl)
+
+renderGuideDecl :: GuideDecl -> Text
+renderGuideDecl guideDecl =
+  "guide "
+    <> guideDeclName guideDecl
+    <> maybe "" (" extends " <>) (guideDeclExtends guideDecl)
+    <> " = "
+    <> renderBracedInline (fmap renderGuideEntryDecl (guideDeclEntries guideDecl))
+
+renderGuideEntryDecl :: GuideEntryDecl -> Text
+renderGuideEntryDecl entryDecl =
+  guideEntryDeclName entryDecl
+    <> ": "
+    <> renderStringLiteral (guideEntryDeclValue entryDecl)
+
+renderHookDecl :: CoreHookDecl -> Text
+renderHookDecl (CoreHookDecl hookDecl) =
+  "hook "
+    <> hookDeclName hookDecl
+    <> " = "
+    <> renderStringLiteral (hookTriggerDeclEvent (hookDeclTrigger hookDecl))
+    <> " "
+    <> hookDeclRequestType hookDecl
+    <> " -> "
+    <> hookDeclResponseType hookDecl
+    <> " "
+    <> hookDeclHandlerName hookDecl
+
+renderAgentRoleDecl :: CoreAgentRoleDecl -> Text
+renderAgentRoleDecl (CoreAgentRoleDecl roleDecl) =
+  "role "
+    <> agentRoleDeclName roleDecl
+    <> " = guide: "
+    <> agentRoleDeclGuideName roleDecl
+    <> ", policy: "
+    <> agentRoleDeclPolicyName roleDecl
+
+renderAgentDecl :: CoreAgentDecl -> Text
+renderAgentDecl (CoreAgentDecl agentDecl) =
+  "agent " <> agentDeclName agentDecl <> " = " <> agentDeclRoleName agentDecl
+
+renderPolicyDecl :: CorePolicyDecl -> Text
+renderPolicyDecl (CorePolicyDecl policyDecl) =
+  "policy "
+    <> policyDeclName policyDecl
+    <> " = "
+    <> T.intercalate ", " (fmap policyClassificationDeclName (policyDeclAllowedClassifications policyDecl))
+    <> renderPolicyPermissionsSuffix (policyDeclPermissions policyDecl)
+
+renderPolicyPermissionsSuffix :: [PolicyPermissionDecl] -> Text
+renderPolicyPermissionsSuffix [] = ""
+renderPolicyPermissionsSuffix permissions =
+  " permits " <> renderBracedInline (fmap renderPolicyPermissionDecl permissions)
+
+renderPolicyPermissionDecl :: PolicyPermissionDecl -> Text
+renderPolicyPermissionDecl permissionDecl =
+  renderPolicyPermissionKind (policyPermissionDeclKind permissionDecl)
+    <> " "
+    <> renderStringLiteral (policyPermissionDeclValue permissionDecl)
+
+renderPolicyPermissionKind :: PolicyPermissionKind -> Text
+renderPolicyPermissionKind permissionKind =
+  case permissionKind of
+    PolicyPermissionFile -> "file"
+    PolicyPermissionNetwork -> "network"
+    PolicyPermissionProcess -> "process"
+    PolicyPermissionSecret -> "secret"
+
+renderToolServerDecl :: CoreToolServerDecl -> Text
+renderToolServerDecl (CoreToolServerDecl toolServerDecl) =
+  "toolserver "
+    <> toolServerDeclName toolServerDecl
+    <> " = "
+    <> renderStringLiteral (toolServerDeclProtocol toolServerDecl)
+    <> " "
+    <> renderStringLiteral (toolServerDeclLocation toolServerDecl)
+    <> " with "
+    <> toolServerDeclPolicyName toolServerDecl
+
+renderToolDecl :: CoreToolDecl -> Text
+renderToolDecl (CoreToolDecl toolDecl) =
+  "tool "
+    <> toolDeclName toolDecl
+    <> " = "
+    <> toolDeclServerName toolDecl
+    <> " "
+    <> renderStringLiteral (toolDeclOperation toolDecl)
+    <> " "
+    <> toolDeclRequestType toolDecl
+    <> " -> "
+    <> toolDeclResponseType toolDecl
+
+renderVerifierDecl :: CoreVerifierDecl -> Text
+renderVerifierDecl (CoreVerifierDecl verifierDecl) =
+  "verifier " <> verifierDeclName verifierDecl <> " = " <> verifierDeclToolName verifierDecl
+
+renderMergeGateDecl :: CoreMergeGateDecl -> Text
+renderMergeGateDecl (CoreMergeGateDecl mergeGateDecl) =
+  "mergegate "
+    <> mergeGateDeclName mergeGateDecl
+    <> " = "
+    <> T.intercalate ", " (fmap mergeGateVerifierRefName (mergeGateDeclVerifierRefs mergeGateDecl))
+
+renderProjectionDecl :: CoreProjectionDecl -> Text
+renderProjectionDecl coreProjectionDecl =
+  let projectionDecl = coreProjectionSourceDecl coreProjectionDecl
+   in "projection "
+        <> projectionDeclName projectionDecl
+        <> " = "
+        <> projectionDeclSourceRecordName projectionDecl
+        <> " with "
+        <> projectionDeclPolicyName projectionDecl
+        <> " "
+        <> renderBracedInline (fmap projectionFieldDeclName (projectionDeclFields projectionDecl))
+
+renderForeignDecl :: ForeignDecl -> Text
+renderForeignDecl foreignDecl =
+  "foreign "
+    <> foreignDeclName foreignDecl
+    <> " : "
+    <> renderType (foreignDeclType foreignDecl)
+    <> " = "
+    <> renderStringLiteral (foreignDeclRuntimeName foreignDecl)
+
+renderRouteDecl :: RouteDecl -> Text
+renderRouteDecl routeDecl =
+  "route "
+    <> routeDeclName routeDecl
+    <> " = "
+    <> renderRouteMethod (routeDeclMethod routeDecl)
+    <> " "
+    <> renderStringLiteral (routeDeclPath routeDecl)
+    <> " "
+    <> routeDeclRequestType routeDecl
+    <> " -> "
+    <> routeDeclResponseType routeDecl
+    <> " "
+    <> routeDeclHandlerName routeDecl
+
+renderRouteMethod :: RouteMethod -> Text
+renderRouteMethod routeMethod =
+  case routeMethod of
+    RouteGet -> "GET"
+    RoutePost -> "POST"
+
+renderCoreDecl :: CoreDecl -> Text
+renderCoreDecl coreDecl =
+  T.intercalate
+    "\n"
+    [ coreDeclName coreDecl <> " : " <> renderType (coreDeclType coreDecl)
+    , renderCoreDeclHead coreDecl <> " = " <> renderCoreExpr 0 (coreDeclBody coreDecl)
+    ]
+
+renderCoreDeclHead :: CoreDecl -> Text
+renderCoreDeclHead coreDecl =
+  case coreDeclParams coreDecl of
+    [] ->
+      coreDeclName coreDecl
+    params ->
+      T.unwords (coreDeclName coreDecl : fmap renderCoreParam params)
+
+renderCoreParam :: CoreParam -> Text
+renderCoreParam param =
+  "(" <> coreParamName param <> " : " <> renderType (coreParamType param) <> ")"
+
+renderCoreExpr :: Int -> CoreExpr -> Text
+renderCoreExpr parentPrecedence expr =
+  case expr of
+    CVar _ typ name ->
+      renderTypedAtom name typ
+    CInt _ value ->
+      renderTypedAtom (T.pack (show value)) TInt
+    CString _ value ->
+      renderTypedAtom (renderStringLiteral value) TStr
+    CBool _ value ->
+      renderTypedAtom (if value then "true" else "false") TBool
+    CList _ typ values ->
+      renderTypedAtom ("[" <> T.intercalate ", " (fmap (renderCoreExpr 0) values) <> "]") typ
+    CReturn _ typ value ->
+      renderTypedExpr parentPrecedence 0 ("return " <> renderCoreExpr 1 value) typ
+    CEqual _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 1 "==" left right) TBool
+    CNotEqual _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 1 "!=" left right) TBool
+    CLessThan _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 2 "<" left right) TBool
+    CLessThanOrEqual _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 2 "<=" left right) TBool
+    CGreaterThan _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 2 ">" left right) TBool
+    CGreaterThanOrEqual _ left right ->
+      renderTypedExpr parentPrecedence 1 (renderBinaryExpr 2 ">=" left right) TBool
+    CLet _ typ name value body ->
+      renderTypedExpr parentPrecedence 0 ("let " <> name <> " : " <> renderType (coreExprType value) <> " = " <> renderCoreExpr 0 value <> " in " <> renderCoreExpr 0 body) typ
+    CMutableLet _ typ name value body ->
+      renderTypedExpr parentPrecedence 0 ("let mut " <> name <> " : " <> renderType (coreExprType value) <> " = " <> renderCoreExpr 0 value <> " in " <> renderCoreExpr 0 body) typ
+    CAssign _ typ name value body ->
+      renderTypedExpr parentPrecedence 0 ("let " <> name <> " := " <> renderCoreExpr 0 value <> " in " <> renderCoreExpr 0 body) typ
+    CFor _ typ name iterable loopBody body ->
+      renderTypedExpr parentPrecedence 0 ("for " <> name <> " in " <> renderCoreExpr 0 iterable <> " do " <> renderCoreExpr 0 loopBody <> " then " <> renderCoreExpr 0 body) typ
+    CPage _ title body ->
+      renderTypedAtom ("page " <> renderCoreExpr 4 title <> " " <> renderCoreExpr 4 body) (TNamed "Page")
+    CRedirect _ path ->
+      renderTypedAtom ("redirect " <> renderStringLiteral path) (TNamed "Redirect")
+    CViewEmpty _ ->
+      renderTypedAtom "emptyView" (TNamed "View")
+    CViewText _ value ->
+      renderTypedAtom ("text " <> renderCoreExpr 4 value) (TNamed "View")
+    CViewAppend _ left right ->
+      renderTypedAtom ("append " <> renderCoreExpr 4 left <> " " <> renderCoreExpr 4 right) (TNamed "View")
+    CViewElement _ tag child ->
+      renderTypedAtom ("element " <> renderStringLiteral tag <> " " <> renderCoreExpr 4 child) (TNamed "View")
+    CViewStyled _ styleRef child ->
+      renderTypedAtom ("styled " <> renderStringLiteral styleRef <> " " <> renderCoreExpr 4 child) (TNamed "View")
+    CViewLink _ route href child ->
+      renderTypedAtom ("link " <> renderStringLiteral (coreRouteContractName route) <> " " <> renderStringLiteral href <> " " <> renderCoreExpr 4 child) (TNamed "View")
+    CViewForm _ route method action child ->
+      renderTypedAtom ("form " <> renderStringLiteral (coreRouteContractName route) <> " " <> renderStringLiteral method <> " " <> renderStringLiteral action <> " " <> renderCoreExpr 4 child) (TNamed "View")
+    CViewInput _ fieldName inputKind value ->
+      renderTypedAtom ("input " <> renderStringLiteral fieldName <> " " <> renderStringLiteral inputKind <> " " <> renderCoreExpr 4 value) (TNamed "View")
+    CViewSubmit _ label ->
+      renderTypedAtom ("submit " <> renderCoreExpr 4 label) (TNamed "View")
+    CCall _ typ fn args ->
+      renderTypedExpr parentPrecedence 3 (T.unwords (renderCoreExpr 3 fn : fmap (renderCoreExpr 4) args)) typ
+    CMatch _ typ subject branches ->
+      renderTypedExpr parentPrecedence 0 ("match " <> renderCoreExpr 0 subject <> " " <> renderBracedCommaBlock (fmap renderCoreMatchBranch branches)) typ
+    CRecord _ typ recordName fields ->
+      renderTypedAtom (recordName <> renderBracedInline (fmap renderCoreRecordField fields)) typ
+    CFieldAccess _ typ subject fieldName ->
+      renderTypedExpr parentPrecedence 4 (renderCoreExpr 4 subject <> "." <> fieldName) typ
+    CDecodeJson _ typ rawJson ->
+      renderTypedExpr parentPrecedence 4 ("decode " <> renderAtomicType typ <> " " <> renderCoreExpr 4 rawJson) typ
+    CEncodeJson _ value ->
+      renderTypedAtom ("encode " <> renderCoreExpr 4 value) TStr
+
+renderBinaryExpr :: Int -> Text -> CoreExpr -> CoreExpr -> Text
+renderBinaryExpr precedence operator left right =
+  renderCoreExpr precedence left
+    <> " "
+    <> operator
+    <> " "
+    <> renderCoreExpr precedence right
+
+renderTypedAtom :: Text -> Type -> Text
+renderTypedAtom rendered typ =
+  "(" <> rendered <> " : " <> renderType typ <> ")"
+
+renderTypedExpr :: Int -> Int -> Text -> Type -> Text
+renderTypedExpr parentPrecedence exprPrecedence rendered typ =
+  renderTypedAtom (renderWithParensIfNeeded parentPrecedence exprPrecedence rendered) typ
+
+renderCoreMatchBranch :: CoreMatchBranch -> Text
+renderCoreMatchBranch branch =
+  renderCorePattern (coreMatchBranchPattern branch) <> " -> " <> renderCoreExpr 0 (coreMatchBranchBody branch)
+
+renderCorePattern :: CorePattern -> Text
+renderCorePattern pattern' =
+  case pattern' of
+    CConstructorPattern _ constructorName binders ->
+      T.unwords (constructorName : fmap renderCorePatternBinder binders)
+
+renderCorePatternBinder :: CorePatternBinder -> Text
+renderCorePatternBinder binder =
+  "(" <> corePatternBinderName binder <> " : " <> renderType (corePatternBinderType binder) <> ")"
+
+renderCoreRecordField :: CoreRecordField -> Text
+renderCoreRecordField field =
+  coreRecordFieldName field <> " = " <> renderCoreExpr 0 (coreRecordFieldValue field)
+
+renderAtomicType :: Type -> Text
+renderAtomicType typ =
+  case typ of
+    TFunction _ _ ->
+      "(" <> renderType typ <> ")"
+    _ ->
+      renderType typ
+
+renderBracedInline :: [Text] -> Text
+renderBracedInline entries =
+  "{"
+    <> ( if null entries
+           then ""
+           else " " <> T.intercalate ", " entries <> " "
+       )
+    <> "}"
+
+renderBracedCommaBlock :: [Text] -> Text
+renderBracedCommaBlock entries =
+  "{\n"
+    <> T.intercalate "\n" (fmap (indentText 2) (commaSeparate entries))
+    <> "\n}"
+  where
+    commaSeparate [] = []
+    commaSeparate [entry] = [entry]
+    commaSeparate (entry : rest) = (entry <> ",") : commaSeparate rest
+
+indentText :: Int -> Text -> Text
+indentText spaces =
+  T.intercalate "\n" . fmap ((T.replicate spaces " ") <>) . T.lines
+
+renderWithParensIfNeeded :: Int -> Int -> Text -> Text
+renderWithParensIfNeeded parentPrecedence exprPrecedence rendered
+  | parentPrecedence > exprPrecedence = "(" <> rendered <> ")"
+  | otherwise = rendered
+
+renderStringLiteral :: Text -> Text
+renderStringLiteral value =
+  "\"" <> T.concatMap escapeChar value <> "\""
+  where
+    escapeChar '"' = "\\\""
+    escapeChar '\\' = "\\\\"
+    escapeChar '\n' = "\\n"
+    escapeChar '\t' = "\\t"
+    escapeChar '\r' = "\\r"
+    escapeChar char = T.singleton char
 
 coreExprType :: CoreExpr -> Type
 coreExprType expr =

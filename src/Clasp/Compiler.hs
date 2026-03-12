@@ -8,6 +8,8 @@ module Clasp.Compiler
   , checkEntry
   , compileSource
   , compileEntry
+  , explainSource
+  , explainEntry
   , formatSource
   , parseSource
   , renderAirEntryJson
@@ -24,7 +26,7 @@ import qualified Data.Text.Lazy as LT
 import Clasp.Air (AirModule, buildAirModule, renderAirModuleJson)
 import Clasp.Checker (checkModule)
 import Clasp.ContextGraph (ContextGraph, buildContextGraph, renderContextGraphJson)
-import Clasp.Core (CoreModule, SemanticEdit (..), applySemanticEdit)
+import Clasp.Core (CoreModule, SemanticEdit (..), applySemanticEdit, renderCoreModule)
 import Clasp.Diagnostic (DiagnosticBundle)
 import Clasp.Emit.JavaScript (emitModule)
 import Clasp.Loader (loadEntryModule)
@@ -89,6 +91,10 @@ compileSource path source = do
   modl <- checkSource path source
   pure (emitModule (lowerModule modl))
 
+explainSource :: FilePath -> Text -> Either DiagnosticBundle Text
+explainSource path source =
+  renderCoreModule <$> checkSource path source
+
 checkEntry :: FilePath -> IO (Either DiagnosticBundle CoreModule)
 checkEntry entryPath = do
   loadedModule <- loadEntryModule entryPath
@@ -103,3 +109,8 @@ compileEntry :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntry entryPath = do
   checkedModule <- checkEntry entryPath
   pure (emitModule . lowerModule <$> checkedModule)
+
+explainEntry :: FilePath -> IO (Either DiagnosticBundle Text)
+explainEntry entryPath = do
+  checkedModule <- checkEntry entryPath
+  pure (renderCoreModule <$> checkedModule)

@@ -46,6 +46,7 @@ import Clasp.Compiler
   , checkSource
   , compileEntry
   , compileSource
+  , explainSource
   , formatSource
   , parseSource
   , renderAirSourceJson
@@ -134,6 +135,7 @@ tests =
     [ parserTests
     , formatterTests
     , checkerTests
+    , explainTests
     , semanticEditTests
     , airTests
     , contextTests
@@ -1107,6 +1109,49 @@ checkerTests =
             assertFailure ("expected redirect source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    ]
+
+explainTests :: TestTree
+explainTests =
+  testGroup
+    "explain"
+    [ testCase "explain renders typed lets and desugared block structure" $
+        case explainSource "block" blockExpressionSource of
+          Left err ->
+            assertFailure ("expected explain rendering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            assertBool "expected declaration signature" ("greeting : Str" `T.isInfixOf` rendered)
+            assertBool "expected typed let binding" ("let message : Str =" `T.isInfixOf` rendered)
+            assertBool "expected typed variable reference" ("(message : Str)" `T.isInfixOf` rendered)
+    , testCase "explain renders typed decode flows for checked programs" $
+        case explainSource "service" serviceSource of
+          Left err ->
+            assertFailure ("expected explain rendering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            assertBool "expected summarizeLead signature" ("summarizeLead : LeadRequest -> LeadSummary" `T.isInfixOf` rendered)
+            assertBool "expected typed parameter" ("summarizeLead (lead : LeadRequest)" `T.isInfixOf` rendered)
+            assertBool "expected typed decode" ("decode LeadSummary" `T.isInfixOf` rendered && ": LeadSummary" `T.isInfixOf` rendered)
+    , testCase "claspc explain emits json output when requested" $
+        withProjectFiles "explain-cli-json" [("Main.clasp", blockExpressionSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("claspc explain failed:\n" <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected explain json to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
+          case lookupObjectKey "explanation" jsonValue of
+            Just (String explanation) ->
+              assertBool "expected typed let in json payload" ("let message : Str =" `T.isInfixOf` explanation)
+            _ ->
+              assertFailure "expected explanation string in explain json"
     ]
 
 diagnosticTests :: TestTree
@@ -2765,7 +2810,7 @@ runClaspc :: [String] -> IO (ExitCode, String, String)
 runClaspc args =
   readProcessWithExitCode
     "cabal"
-    (["run", "claspc", "--"] <> args)
+    (["run", "-v0", "claspc", "--"] <> args)
     ""
 
 lookupObjectKey :: Text -> Value -> Maybe Value

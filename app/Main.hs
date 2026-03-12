@@ -10,7 +10,7 @@ import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Clasp.Compiler (checkEntry, compileEntry, parseSource, renderAirEntryJson, renderContextEntryJson)
+import Clasp.Compiler (checkEntry, compileEntry, explainEntry, parseSource, renderAirEntryJson, renderContextEntryJson)
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
@@ -26,6 +26,8 @@ main = do
       runParse format inputPath
     ["check", inputPath] ->
       runCheck format inputPath
+    ["explain", inputPath] ->
+      runExplain format inputPath
     ["air", inputPath] ->
       runAir format inputPath Nothing
     ["air", inputPath, "-o", outputPath] ->
@@ -91,6 +93,27 @@ runCheck format inputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("check" :: String)
                 , "input" .= inputPath
+                ]
+
+runExplain :: OutputFormat -> FilePath -> IO ()
+runExplain format inputPath = do
+  result <- explainEntry inputPath
+  case result of
+    Left err -> do
+      writeFailure format err
+      exitFailure
+    Right explanation ->
+      case format of
+        Pretty ->
+          TIO.putStrLn explanation
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("explain" :: String)
+                , "input" .= inputPath
+                , "explanation" .= explanation
                 ]
 
 runAir :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
@@ -176,6 +199,7 @@ usage =
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
     , "  claspc check <input.clasp> [--json]"
+    , "  claspc explain <input.clasp> [--json]"
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json]"
