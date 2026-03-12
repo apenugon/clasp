@@ -443,6 +443,21 @@ checkerTests =
             assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "typechecks local let expressions" $
+        case checkSource "let" letExpressionSource of
+          Left err ->
+            assertFailure ("expected let source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "greeting") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CLet _ typ "message" (CString _ "Ada") (CVar _ bodyType "message") -> do
+                    assertEqual "let result type" TStr typ
+                    assertEqual "let body variable type" TStr bodyType
+                  other ->
+                    assertFailure ("expected checked let expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected greeting declaration"
     , testCase "typechecks the list example file" $ do
         source <- readExampleSource "lists.clasp"
         case checkSource "examples/lists.clasp" source of
@@ -799,6 +814,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered decodeUsers declaration: " <> show other)
+    , testCase "lowering preserves local let expressions" $
+        case lowerChecked "let" letExpressionSource of
+          Left err ->
+            assertFailure ("expected let lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "greeting" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LLet "message" (LString "Ada") (LVar "message"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered let declaration: " <> show other)
     , testCase "lowering preserves page and view primitives" $
         case lowerChecked "page" pageSource of
           Left err ->
@@ -985,6 +1010,22 @@ compileTests =
           Right emitted -> do
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
+    , testCase "compile evaluates local let expressions" $
+        case compileSource "let" letExpressionSource of
+          Left err ->
+            assertFailure ("expected let compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected let IIFE emission" ("const message = \"Ada\";" `T.isInfixOf` emitted)
+            let compiledPath = "dist/let-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.greeting);"
+                ]
+            assertEqual "expected let result" "Ada" runtimeOutput
     , testCase "compile round-trips list values through generated json codecs" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->

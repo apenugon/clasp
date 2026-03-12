@@ -139,6 +139,7 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftList [DraftExpr]
+  | DraftLet Text DraftExpr DraftExpr
   | DraftPage DraftExpr DraftExpr
   | DraftRedirect Text
   | DraftViewEmpty
@@ -1236,6 +1237,10 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EList span' values ->
       inferListExpr ctx termEnv localEnv span' values
+    ELet letSpan _ binderName value body -> do
+      valueExpr <- inferExpr ctx termEnv localEnv value
+      bodyExpr <- inferExpr ctx termEnv (Map.insert binderName (draftExprType valueExpr) localEnv) body
+      pure (DraftExpr letSpan (draftExprType bodyExpr) (DraftLet binderName valueExpr bodyExpr))
     ECall callSpan fn args ->
       case fn of
         EVar _ name
@@ -2407,6 +2412,11 @@ freezeDraftExpr ctx decl inferState draftExpr =
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
       pure (CList (draftExprSpan draftExpr) exprType frozenItems)
+    DraftLet name value body -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenValue <- freezeDraftExpr ctx decl inferState value
+      frozenBody <- freezeDraftExpr ctx decl inferState body
+      pure (CLet (draftExprSpan draftExpr) exprType name frozenValue frozenBody)
     DraftPage title body -> do
       frozenTitle <- freezeDraftExpr ctx decl inferState title
       frozenBody <- freezeDraftExpr ctx decl inferState body

@@ -1464,6 +1464,17 @@ emitExpr counter expr =
     LList items ->
       let (nextCounter, itemTexts) = emitExprList counter items
        in (nextCounter, "[" <> T.intercalate ", " itemTexts <> "]")
+    LLet name value body ->
+      let (counterAfterValue, valueText) = emitExpr counter value
+          (counterAfterBody, bodyText) = emitExpr counterAfterValue body
+       in ( counterAfterBody
+          , T.unlines
+              [ "(() => {"
+              , "  const " <> emitIdentifier name <> " = " <> valueText <> ";"
+              , "  return " <> bodyText <> ";"
+              , "})()"
+              ]
+          )
     LPage title body ->
       let (counterAfterTitle, titleText) = emitExpr counter title
           (counterAfterBody, bodyText) = emitExpr counterAfterTitle body

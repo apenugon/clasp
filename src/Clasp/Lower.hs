@@ -75,6 +75,7 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LList [LowerExpr]
+  | LLet Text LowerExpr LowerExpr
   | LPage LowerExpr LowerExpr
   | LRedirect Text
   | LViewEmpty
@@ -208,6 +209,8 @@ collectExprCodecTypes expr =
       []
     CList _ _ items ->
       concatMap collectExprCodecTypes items
+    CLet _ _ _ value body ->
+      collectExprCodecTypes value <> collectExprCodecTypes body
     CPage _ title body ->
       collectExprCodecTypes title <> collectExprCodecTypes body
     CRedirect _ _ ->
@@ -317,6 +320,8 @@ lowerCoreExpr expr =
       LBool value
     CList _ _ items ->
       LList (fmap lowerCoreExpr items)
+    CLet _ _ name value body ->
+      LLet name (lowerCoreExpr value) (lowerCoreExpr body)
     CPage _ title body ->
       LPage (lowerCoreExpr title) (lowerCoreExpr body)
     CRedirect _ targetPath ->
@@ -428,6 +433,9 @@ expandExpr declEnv subst visited expr =
       LBool value
     LList items ->
       LList (fmap (expandExpr declEnv subst visited) items)
+    LLet name value body ->
+      let value' = expandExpr declEnv subst visited value
+       in expandExpr declEnv (Map.insert name value' subst) visited body
     LPage title body ->
       LPage (expandExpr declEnv subst visited title) (expandExpr declEnv subst visited body)
     LRedirect targetPath ->
@@ -655,6 +663,8 @@ summarizeValue expr =
       "false"
     LList items ->
       "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
+    LLet name _ body ->
+      normalizeSummaryName name <> " = " <> summarizeValue body
     LConstruct tag _ ->
       tag
     LCall fn _ ->
