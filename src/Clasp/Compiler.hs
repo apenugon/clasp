@@ -8,6 +8,7 @@ module Clasp.Compiler
   , checkEntry
   , compileSource
   , compileEntry
+  , formatSource
   , parseSource
   , renderAirEntryJson
   , renderAirSourceJson
@@ -29,10 +30,14 @@ import Clasp.Emit.JavaScript (emitModule)
 import Clasp.Loader (loadEntryModule)
 import Clasp.Lower (lowerModule)
 import Clasp.Parser (parseModule)
-import Clasp.Syntax (Module)
+import Clasp.Syntax (Module, renderModule)
 
 parseSource :: FilePath -> Text -> Either DiagnosticBundle Module
 parseSource = parseModule
+
+formatSource :: FilePath -> Text -> Either DiagnosticBundle Text
+formatSource path source =
+  renderModule <$> parseSource path source
 
 checkSource :: FilePath -> Text -> Either DiagnosticBundle CoreModule
 checkSource path source = do

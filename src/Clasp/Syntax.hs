@@ -42,6 +42,7 @@ module Clasp.Syntax
   , VerifierDecl (..)
   , exprSpan
   , mergeSourceSpans
+  , renderModule
   , renderType
   , splitModuleName
   ) where
@@ -524,3 +525,419 @@ renderAtomicType typ =
       "(" <> renderType typ <> ")"
     _ ->
       renderType typ
+
+renderModule :: Module -> Text
+renderModule modl =
+  T.intercalate
+    "\n\n"
+    (["module " <> unModuleName (moduleName modl)] <> importSections <> topLevelSections)
+  where
+    importSections =
+      case moduleImports modl of
+        [] -> []
+        imports ->
+          [T.dropWhileEnd (== '\n') (T.unlines (fmap renderImportDecl imports))]
+    topLevelSections =
+      fmap renderSection . filter (not . null) $
+        [ fmap renderTypeDecl (moduleTypeDecls modl)
+        , fmap renderRecordDecl (moduleRecordDecls modl)
+        , fmap renderGuideDecl (moduleGuideDecls modl)
+        , fmap renderHookDecl (moduleHookDecls modl)
+        , fmap renderAgentRoleDecl (moduleAgentRoleDecls modl)
+        , fmap renderAgentDecl (moduleAgentDecls modl)
+        , fmap renderPolicyDecl (modulePolicyDecls modl)
+        , fmap renderToolServerDecl (moduleToolServerDecls modl)
+        , fmap renderToolDecl (moduleToolDecls modl)
+        , fmap renderVerifierDecl (moduleVerifierDecls modl)
+        , fmap renderMergeGateDecl (moduleMergeGateDecls modl)
+        , fmap renderProjectionDecl (moduleProjectionDecls modl)
+        , fmap renderForeignDecl (moduleForeignDecls modl)
+        , fmap renderRouteDecl (moduleRouteDecls modl)
+        , fmap renderDecl (moduleDecls modl)
+        ]
+
+renderSection :: [Text] -> Text
+renderSection entries =
+  T.dropWhileEnd (== '\n') (T.unlines entries)
+
+renderImportDecl :: ImportDecl -> Text
+renderImportDecl importDecl =
+  "import " <> unModuleName (importDeclModule importDecl)
+
+renderTypeDecl :: TypeDecl -> Text
+renderTypeDecl typeDecl =
+  "type "
+    <> typeDeclName typeDecl
+    <> " = "
+    <> T.intercalate " | " (fmap renderConstructorDecl (typeDeclConstructors typeDecl))
+
+renderConstructorDecl :: ConstructorDecl -> Text
+renderConstructorDecl constructorDecl =
+  T.unwords (constructorDeclName constructorDecl : fmap renderAtomicType (constructorDeclFields constructorDecl))
+
+renderRecordDecl :: RecordDecl -> Text
+renderRecordDecl recordDecl =
+  "record "
+    <> recordDeclName recordDecl
+    <> " = "
+    <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderRecordFieldDecl :: RecordFieldDecl -> Text
+renderRecordFieldDecl fieldDecl =
+  recordFieldDeclName fieldDecl
+    <> ": "
+    <> renderType (recordFieldDeclType fieldDecl)
+    <> renderClassificationSuffix (recordFieldDeclClassification fieldDecl)
+
+renderClassificationSuffix :: Text -> Text
+renderClassificationSuffix classification
+  | classification == "public" = ""
+  | otherwise = " classified " <> classification
+
+renderGuideDecl :: GuideDecl -> Text
+renderGuideDecl guideDecl =
+  "guide "
+    <> guideDeclName guideDecl
+    <> renderGuideExtends (guideDeclExtends guideDecl)
+    <> " = "
+    <> renderBracedInline (fmap renderGuideEntryDecl (guideDeclEntries guideDecl))
+
+renderGuideExtends :: Maybe Text -> Text
+renderGuideExtends Nothing = ""
+renderGuideExtends (Just parentName) = " extends " <> parentName
+
+renderGuideEntryDecl :: GuideEntryDecl -> Text
+renderGuideEntryDecl entryDecl =
+  guideEntryDeclName entryDecl <> ": " <> renderStringLiteral (guideEntryDeclValue entryDecl)
+
+renderHookDecl :: HookDecl -> Text
+renderHookDecl hookDecl =
+  "hook "
+    <> hookDeclName hookDecl
+    <> " = "
+    <> renderStringLiteral (hookTriggerDeclEvent (hookDeclTrigger hookDecl))
+    <> " "
+    <> hookDeclRequestType hookDecl
+    <> " -> "
+    <> hookDeclResponseType hookDecl
+    <> " "
+    <> hookDeclHandlerName hookDecl
+
+renderAgentRoleDecl :: AgentRoleDecl -> Text
+renderAgentRoleDecl roleDecl =
+  "role "
+    <> agentRoleDeclName roleDecl
+    <> " = guide: "
+    <> agentRoleDeclGuideName roleDecl
+    <> ", policy: "
+    <> agentRoleDeclPolicyName roleDecl
+
+renderAgentDecl :: AgentDecl -> Text
+renderAgentDecl agentDecl =
+  "agent " <> agentDeclName agentDecl <> " = " <> agentDeclRoleName agentDecl
+
+renderPolicyDecl :: PolicyDecl -> Text
+renderPolicyDecl policyDecl =
+  "policy "
+    <> policyDeclName policyDecl
+    <> " = "
+    <> T.intercalate ", " (fmap renderPolicyClassificationDecl (policyDeclAllowedClassifications policyDecl))
+    <> renderPolicyPermissionsSuffix (policyDeclPermissions policyDecl)
+
+renderPolicyClassificationDecl :: PolicyClassificationDecl -> Text
+renderPolicyClassificationDecl = policyClassificationDeclName
+
+renderPolicyPermissionsSuffix :: [PolicyPermissionDecl] -> Text
+renderPolicyPermissionsSuffix [] = ""
+renderPolicyPermissionsSuffix permissions =
+  " permits " <> renderBracedInline (fmap renderPolicyPermissionDecl permissions)
+
+renderPolicyPermissionDecl :: PolicyPermissionDecl -> Text
+renderPolicyPermissionDecl permissionDecl =
+  renderPolicyPermissionKind (policyPermissionDeclKind permissionDecl)
+    <> " "
+    <> renderStringLiteral (policyPermissionDeclValue permissionDecl)
+
+renderPolicyPermissionKind :: PolicyPermissionKind -> Text
+renderPolicyPermissionKind permissionKind =
+  case permissionKind of
+    PolicyPermissionFile -> "file"
+    PolicyPermissionNetwork -> "network"
+    PolicyPermissionProcess -> "process"
+    PolicyPermissionSecret -> "secret"
+
+renderToolServerDecl :: ToolServerDecl -> Text
+renderToolServerDecl toolServerDecl =
+  "toolserver "
+    <> toolServerDeclName toolServerDecl
+    <> " = "
+    <> renderStringLiteral (toolServerDeclProtocol toolServerDecl)
+    <> " "
+    <> renderStringLiteral (toolServerDeclLocation toolServerDecl)
+    <> " with "
+    <> toolServerDeclPolicyName toolServerDecl
+
+renderToolDecl :: ToolDecl -> Text
+renderToolDecl toolDecl =
+  "tool "
+    <> toolDeclName toolDecl
+    <> " = "
+    <> toolDeclServerName toolDecl
+    <> " "
+    <> renderStringLiteral (toolDeclOperation toolDecl)
+    <> " "
+    <> toolDeclRequestType toolDecl
+    <> " -> "
+    <> toolDeclResponseType toolDecl
+
+renderVerifierDecl :: VerifierDecl -> Text
+renderVerifierDecl verifierDecl =
+  "verifier " <> verifierDeclName verifierDecl <> " = " <> verifierDeclToolName verifierDecl
+
+renderMergeGateDecl :: MergeGateDecl -> Text
+renderMergeGateDecl mergeGateDecl =
+  "mergegate "
+    <> mergeGateDeclName mergeGateDecl
+    <> " = "
+    <> T.intercalate ", " (fmap renderMergeGateVerifierRef (mergeGateDeclVerifierRefs mergeGateDecl))
+
+renderMergeGateVerifierRef :: MergeGateVerifierRef -> Text
+renderMergeGateVerifierRef = mergeGateVerifierRefName
+
+renderProjectionDecl :: ProjectionDecl -> Text
+renderProjectionDecl projectionDecl =
+  "projection "
+    <> projectionDeclName projectionDecl
+    <> " = "
+    <> projectionDeclSourceRecordName projectionDecl
+    <> " with "
+    <> projectionDeclPolicyName projectionDecl
+    <> " "
+    <> renderBracedInline (fmap renderProjectionFieldDecl (projectionDeclFields projectionDecl))
+
+renderProjectionFieldDecl :: ProjectionFieldDecl -> Text
+renderProjectionFieldDecl = projectionFieldDeclName
+
+renderForeignDecl :: ForeignDecl -> Text
+renderForeignDecl foreignDecl =
+  "foreign "
+    <> foreignDeclName foreignDecl
+    <> " : "
+    <> renderType (foreignDeclType foreignDecl)
+    <> " = "
+    <> renderStringLiteral (foreignDeclRuntimeName foreignDecl)
+
+renderRouteDecl :: RouteDecl -> Text
+renderRouteDecl routeDecl =
+  "route "
+    <> routeDeclName routeDecl
+    <> " = "
+    <> renderRouteMethod (routeDeclMethod routeDecl)
+    <> " "
+    <> renderStringLiteral (routeDeclPath routeDecl)
+    <> " "
+    <> routeDeclRequestType routeDecl
+    <> " -> "
+    <> routeDeclResponseType routeDecl
+    <> " "
+    <> routeDeclHandlerName routeDecl
+
+renderRouteMethod :: RouteMethod -> Text
+renderRouteMethod routeMethod =
+  case routeMethod of
+    RouteGet -> "GET"
+    RoutePost -> "POST"
+
+renderDecl :: Decl -> Text
+renderDecl decl =
+  T.intercalate
+    "\n"
+    (annotationLine <> [definitionLine])
+  where
+    annotationLine =
+      case declAnnotation decl of
+        Nothing -> []
+        Just annotation ->
+          [declName decl <> " : " <> renderType annotation]
+    definitionLine =
+      T.unwords (declName decl : declParams decl)
+        <> " = "
+        <> renderExpr 0 (declBody decl)
+
+renderExpr :: Int -> Expr -> Text
+renderExpr parentPrecedence expr =
+  case expr of
+    EVar _ name ->
+      name
+    EInt _ value ->
+      T.pack (show value)
+    EString _ value ->
+      renderStringLiteral value
+    EBool _ value ->
+      if value then "true" else "false"
+    EList _ values ->
+      "[" <> T.intercalate ", " (fmap (renderExpr 0) values) <> "]"
+    EReturn _ value ->
+      "return " <> renderExpr 4 value
+    EBlock _ body ->
+      renderBlockExpr body
+    EEqual _ left right ->
+      renderInfixExpr parentPrecedence 1 "==" left right
+    ENotEqual _ left right ->
+      renderInfixExpr parentPrecedence 1 "!=" left right
+    ELessThan _ left right ->
+      renderInfixExpr parentPrecedence 2 "<" left right
+    ELessThanOrEqual _ left right ->
+      renderInfixExpr parentPrecedence 2 "<=" left right
+    EGreaterThan _ left right ->
+      renderInfixExpr parentPrecedence 2 ">" left right
+    EGreaterThanOrEqual _ left right ->
+      renderInfixExpr parentPrecedence 2 ">=" left right
+    ECall _ fn args ->
+      renderWithParensIfNeeded parentPrecedence 3 $
+        T.unwords (renderExpr 3 fn : fmap (renderExpr 4) args)
+    ELet _ _ name value body ->
+      renderWithParensIfNeeded parentPrecedence 0 $
+        "let " <> name <> " = " <> renderExpr 0 value <> " in " <> renderExpr 0 body
+    EMutableLet _ _ name value body ->
+      renderWithParensIfNeeded parentPrecedence 4 $
+        renderSyntheticBlock [RenderMutableLetBinding name value] body
+    EAssign _ _ name value body ->
+      renderWithParensIfNeeded parentPrecedence 4 $
+        renderSyntheticBlock [RenderAssignBinding name value] body
+    EFor _ _ name iterable loopBody body ->
+      renderWithParensIfNeeded parentPrecedence 4 $
+        renderSyntheticBlock [RenderForBinding name iterable loopBody] body
+    EMatch _ subject branches ->
+      "match " <> renderExpr 0 subject <> " " <> renderBracedCommaBlock (fmap renderMatchBranch branches)
+    ERecord _ recordName fields ->
+      recordName <> renderBracedInline (fmap renderRecordFieldExpr fields)
+    EFieldAccess _ subject fieldName ->
+      renderWithParensIfNeeded parentPrecedence 4 $
+        renderExpr 4 subject <> "." <> fieldName
+    EDecode _ targetType rawJson ->
+      "decode " <> renderAtomicType targetType <> " " <> renderExpr 4 rawJson
+    EEncode _ value ->
+      "encode " <> renderExpr 4 value
+
+renderInfixExpr :: Int -> Int -> Text -> Expr -> Expr -> Text
+renderInfixExpr parentPrecedence operatorPrecedence operatorText left right =
+  renderWithParensIfNeeded parentPrecedence operatorPrecedence $
+    renderExpr operatorPrecedence left
+      <> " "
+      <> operatorText
+      <> " "
+      <> renderExpr operatorPrecedence right
+
+renderBlockExpr :: Expr -> Text
+renderBlockExpr body =
+  renderSyntheticBlock bindings finalExpr
+  where
+    (bindings, finalExpr) = collectBlockBindings body
+
+renderSyntheticBlock :: [RenderBlockBinding] -> Expr -> Text
+renderSyntheticBlock bindings finalExpr =
+  renderBracedBlock (fmap renderBlockBinding bindings <> [renderExpr 0 finalExpr])
+
+data RenderBlockBinding
+  = RenderLetBinding Text Expr
+  | RenderMutableLetBinding Text Expr
+  | RenderAssignBinding Text Expr
+  | RenderForBinding Text Expr Expr
+
+collectBlockBindings :: Expr -> ([RenderBlockBinding], Expr)
+collectBlockBindings expr =
+  case expr of
+    ELet _ _ name value body ->
+      prependBinding (RenderLetBinding name value) body
+    EMutableLet _ _ name value body ->
+      prependBinding (RenderMutableLetBinding name value) body
+    EAssign _ _ name value body ->
+      prependBinding (RenderAssignBinding name value) body
+    EFor _ _ name iterable loopBody body ->
+      prependBinding (RenderForBinding name iterable loopBody) body
+    _ ->
+      ([], expr)
+  where
+    prependBinding binding body =
+      let (bindings, finalExpr) = collectBlockBindings body
+       in (binding : bindings, finalExpr)
+
+renderBlockBinding :: RenderBlockBinding -> Text
+renderBlockBinding binding =
+  case binding of
+    RenderLetBinding name value ->
+      "let " <> name <> " = " <> renderExpr 0 value <> ";"
+    RenderMutableLetBinding name value ->
+      "let mut " <> name <> " = " <> renderExpr 0 value <> ";"
+    RenderAssignBinding name value ->
+      name <> " = " <> renderExpr 0 value <> ";"
+    RenderForBinding name iterable loopBody ->
+      "for " <> name <> " in " <> renderExpr 0 iterable <> " " <> renderLoopBody loopBody <> ";"
+
+renderLoopBody :: Expr -> Text
+renderLoopBody loopBody =
+  case loopBody of
+    EBlock _ blockBody ->
+      renderBlockExpr blockBody
+    _ ->
+      renderBracedBlock [renderExpr 0 loopBody]
+
+renderMatchBranch :: MatchBranch -> Text
+renderMatchBranch branch =
+  renderPattern (matchBranchPattern branch) <> " -> " <> renderExpr 0 (matchBranchBody branch)
+
+renderPattern :: Pattern -> Text
+renderPattern pattern' =
+  case pattern' of
+    PConstructor _ constructorName binders ->
+      T.unwords (constructorName : fmap patternBinderName binders)
+
+renderRecordFieldExpr :: RecordFieldExpr -> Text
+renderRecordFieldExpr fieldExpr =
+  recordFieldExprName fieldExpr <> " = " <> renderExpr 0 (recordFieldExprValue fieldExpr)
+
+renderBracedInline :: [Text] -> Text
+renderBracedInline entries =
+  "{"
+    <> ( if null entries
+           then ""
+           else " " <> T.intercalate ", " entries <> " "
+       )
+    <> "}"
+
+renderBracedBlock :: [Text] -> Text
+renderBracedBlock entries =
+  "{\n"
+    <> T.intercalate "\n" (fmap (indentText 2) entries)
+    <> "\n}"
+
+renderBracedCommaBlock :: [Text] -> Text
+renderBracedCommaBlock entries =
+  "{\n"
+    <> T.intercalate "\n" (fmap (indentText 2) (commaSeparate entries))
+    <> "\n}"
+  where
+    commaSeparate [] = []
+    commaSeparate [entry] = [entry]
+    commaSeparate (entry : rest) = (entry <> ",") : commaSeparate rest
+
+indentText :: Int -> Text -> Text
+indentText spaces =
+  T.intercalate "\n" . fmap ((T.replicate spaces " ") <>) . T.lines
+
+renderWithParensIfNeeded :: Int -> Int -> Text -> Text
+renderWithParensIfNeeded parentPrecedence exprPrecedence rendered
+  | parentPrecedence > exprPrecedence = "(" <> rendered <> ")"
+  | otherwise = rendered
+
+renderStringLiteral :: Text -> Text
+renderStringLiteral value =
+  "\"" <> T.concatMap escapeChar value <> "\""
+  where
+    escapeChar '"' = "\\\""
+    escapeChar '\\' = "\\\\"
+    escapeChar '\n' = "\\n"
+    escapeChar '\t' = "\\t"
+    escapeChar '\r' = "\\r"
+    escapeChar char = T.singleton char

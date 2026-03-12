@@ -46,6 +46,7 @@ import Clasp.Compiler
   , checkSource
   , compileEntry
   , compileSource
+  , formatSource
   , parseSource
   , renderAirSourceJson
   , renderContextSourceJson
@@ -131,6 +132,7 @@ tests =
   testGroup
     "clasp-compiler"
     [ parserTests
+    , formatterTests
     , checkerTests
     , semanticEditTests
     , airTests
@@ -474,6 +476,7 @@ parserTests =
                     assertFailure ("expected let expression body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
+
     , testCase "parses block expressions" $
         case parseSource "inline" blockExpressionSource of
           Left err ->
@@ -695,6 +698,28 @@ parserTests =
                     assertFailure ("expected list decode boundary, got " <> show other)
               Nothing ->
                 assertFailure "expected usersFromJson declaration"
+    ]
+
+formatterTests :: TestTree
+formatterTests =
+  testGroup
+    "formatter"
+    [ testCase "adds inferred module headers and normalizes top-level ordering" $
+        case formatSource "Main.clasp" formatterCanonicalizationSource of
+          Left err ->
+            assertFailure ("expected formatter success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right formatted ->
+            assertEqual "canonical source" formatterCanonicalizationExpected formatted
+    , testCase "formats composite modules stably" $
+        case formatSource "Main.clasp" formatterRoundTripSource of
+          Left err ->
+            assertFailure ("expected formatter success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right formatted ->
+            case formatSource "Main.clasp" formatted of
+              Left err ->
+                assertFailure ("expected formatted output to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+              Right reformatted ->
+                assertEqual "formatter should be idempotent" formatted reformatted
     ]
 
 checkerTests :: TestTree
@@ -3073,6 +3098,68 @@ verifierSource =
     , "mergegate trunk = repoChecks"
     , ""
     , "main = \"ok\""
+    ]
+
+formatterCanonicalizationSource :: Text
+formatterCanonicalizationSource =
+  T.unlines
+    [ "import Shared.User"
+    , ""
+    , "main=let message = \"Ada\" in message"
+    , ""
+    , "record User={name:Str, aliases:[Str]}"
+    , "type Status=Busy Str|Idle"
+    ]
+
+formatterCanonicalizationExpected :: Text
+formatterCanonicalizationExpected =
+  T.intercalate
+    "\n"
+    [ "module Main"
+    , ""
+    , "import Shared.User"
+    , ""
+    , "type Status = Busy Str | Idle"
+    , ""
+    , "record User = { name: Str, aliases: [Str] }"
+    , ""
+    , "main = let message = \"Ada\" in message"
+    ]
+
+formatterRoundTripSource :: Text
+formatterRoundTripSource =
+  T.unlines
+    [ "import Shared.User"
+    , ""
+    , "record Worker={name:Str classified pii, aliases:[Str]}"
+    , "record LeadRequest={company:Str, budget:Int}"
+    , "record LeadSummary={summary:Str}"
+    , "type Status=Idle|Busy Str"
+    , "guide Repo extends Base={verification:\"Run bash scripts/verify-all.sh\"}"
+    , "hook workerStart=\"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
+    , "role WorkerRole=guide: Repo, policy: SupportDisclosure"
+    , "agent builder=WorkerRole"
+    , "policy SupportDisclosure=public, pii permits{file \"/workspace\", network \"api.openai.com\"}"
+    , "toolserver RepoTools=\"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , "tool searchRepo=RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , "verifier repoChecks=searchRepo"
+    , "mergegate trunk=repoChecks"
+    , "projection WorkerView=Worker with SupportDisclosure{name}"
+    , "foreign mockLeadSummaryModel : LeadRequest -> Str = \"mockLeadSummaryModel\""
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead lead={"
+    , " let mut status=Busy lead.company;"
+    , " for alias in [\"Ada\",\"Grace\"] {"
+    , "  status=Busy alias;"
+    , "  status"
+    , " };"
+    , " match status {"
+    , "  Busy note -> return note,"
+    , "  Idle -> decode LeadSummary (mockLeadSummaryModel (LeadRequest {company=lead.company, budget=1}))"
+    , " }"
+    , "}"
     ]
 
 controlPlaneSource :: Text
