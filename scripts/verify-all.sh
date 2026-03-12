@@ -11,6 +11,7 @@ nix develop -c bash -lc "
   cabal run claspc -- check examples/hello.clasp
   cabal run claspc -- check examples/status.clasp
   cabal run claspc -- check examples/records.clasp
+  cabal run claspc -- check examples/lists.clasp
   cabal run claspc -- check examples/project/Main.clasp
   cabal run claspc -- check examples/lead-app/Main.clasp
   cabal run claspc -- check examples/support-console/Main.clasp

@@ -91,6 +91,7 @@ import Clasp.Syntax
   , ProjectionDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RecordFieldExpr (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -315,6 +316,44 @@ parserTests =
                     assertFailure ("expected list literal body, got " <> show other)
               Nothing ->
                 assertFailure "expected roster declaration"
+    , testCase "parses the list example file" $ do
+        source <- readExampleSource "lists.clasp"
+        case parseSource "examples/lists.clasp" source of
+          Left err ->
+            assertFailure ("expected list example source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertEqual "record decl count" 2 (length (moduleRecordDecls modl))
+            case find ((== "UserDirectory") . recordDeclName) (moduleRecordDecls modl) of
+              Just recordDecl ->
+                assertEqual
+                  "nested list record fields"
+                  [TList TStr, TList (TList TInt)]
+                  (fmap recordFieldDeclType (recordDeclFields recordDecl))
+              Nothing ->
+                assertFailure "expected UserDirectory record"
+            case findDecl "directory" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ERecord
+                    _
+                    "UserDirectory"
+                    [ RecordFieldExpr "names" _ (EList _ [EString _ "Ada", EString _ "Grace"])
+                    , RecordFieldExpr "scoreBuckets" _ (EList _ [EList _ [EInt _ 10, EInt _ 20], EList _ [EInt _ 30]])
+                    ] ->
+                      pure ()
+                  other ->
+                    assertFailure ("expected list-focused record literal, got " <> show other)
+              Nothing ->
+                assertFailure "expected directory declaration"
+            case findDecl "usersFromJson" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EDecode _ (TList (TNamed "User")) (EVar _ "raw") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected list decode boundary, got " <> show other)
+              Nothing ->
+                assertFailure "expected usersFromJson declaration"
     ]
 
 checkerTests :: TestTree
@@ -375,6 +414,17 @@ checkerTests =
             assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
           Right _ ->
             pure ()
+    , testCase "typechecks the list example file" $ do
+        source <- readExampleSource "lists.clasp"
+        case checkSource "examples/lists.clasp" source of
+          Left err ->
+            assertFailure ("expected list example source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "main type" (TList (TNamed "User")) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "reports undefined names with a primary span" $
         case checkSource "bad" unboundNameSource of
           Left bundle -> do
@@ -925,6 +975,17 @@ compileTests =
             assertBool "expected encoded list payload" ("\\\"name\\\":\\\"Ada\\\"" `T.isInfixOf` encoded)
             assertBool "expected decoded first user" ("\"name\":\"Ada\"" `T.isInfixOf` encoded)
             assertBool "expected decoded second user boolean" ("\"active\":false" `T.isInfixOf` encoded)
+    , testCase "compile emits list-focused helpers for the list example file" $ do
+        source <- readExampleSource "lists.clasp"
+        case compileSource "examples/lists.clasp" source of
+          Left err ->
+            assertFailure ("expected list example compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected record array literal" ("[{ name: \"Ada\", active: true }, { name: \"Grace\", active: false }]" `T.isInfixOf` emitted)
+            assertBool "expected nested list literal" ("[[10, 20], [30]]" `T.isInfixOf` emitted)
+            assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
+            assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
+            assertBool "expected nested list schema" ("kind: \"list\", item: { kind: \"list\", item: $claspSchema_Int }" `T.isInfixOf` emitted)
     , testCase "compile emits runtime bindings, codecs, and route metadata" $
         case compileSource "service" serviceSource of
           Left err ->
@@ -1431,6 +1492,10 @@ withProjectFiles fixtureName files action = do
   createDirectoryIfMissing True root
   mapM_ (writeProjectFile root) files
   action root `finally` cleanupProjectDir root
+
+readExampleSource :: FilePath -> IO Text
+readExampleSource relativePath =
+  TIO.readFile ("examples" </> relativePath)
 
 writeProjectFile :: FilePath -> (FilePath, Text) -> IO ()
 writeProjectFile root (relativePath, content) = do

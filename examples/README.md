@@ -10,6 +10,7 @@ This directory has two kinds of examples:
 - [hello.clasp](/home/akul/DevProjects/synthspeak/examples/hello.clasp): minimal values and function calls
 - [status.clasp](/home/akul/DevProjects/synthspeak/examples/status.clasp): ADTs plus `match`
 - [records.clasp](/home/akul/DevProjects/synthspeak/examples/records.clasp): records and field access
+- [lists.clasp](/home/akul/DevProjects/synthspeak/examples/lists.clasp): list types, literals, nested list fields, and JSON list boundaries
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples

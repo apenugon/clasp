@@ -1,0 +1,32 @@
+module Main
+
+record User = {
+  name : Str,
+  active : Bool
+}
+
+record UserDirectory = {
+  names : [Str],
+  scoreBuckets : [[Int]]
+}
+
+defaultUsers : [User]
+defaultUsers = [User { name = "Ada", active = true }, User { name = "Grace", active = false }]
+
+directory : UserDirectory
+directory = UserDirectory {
+  names = ["Ada", "Grace"],
+  scoreBuckets = [[10, 20], [30]]
+}
+
+usersToJson : [User] -> Str
+usersToJson users = encode users
+
+usersFromJson : Str -> [User]
+usersFromJson raw = decode [User] raw
+
+usersJson : Str
+usersJson = usersToJson defaultUsers
+
+main : [User]
+main = usersFromJson usersJson
