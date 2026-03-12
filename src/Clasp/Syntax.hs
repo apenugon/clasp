@@ -44,6 +44,7 @@ module Clasp.Syntax
   , TypeDecl (..)
   , Type (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   , exprSpan
   , mergeSourceSpans
   , renderModule
@@ -109,6 +110,7 @@ data Module = Module
   , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
+  , moduleWorkflowDecls :: [WorkflowDecl]
   , moduleGuideDecls :: [GuideDecl]
   , moduleHookDecls :: [HookDecl]
   , moduleAgentRoleDecls :: [AgentRoleDecl]
@@ -130,6 +132,16 @@ data GuideEntryDecl = GuideEntryDecl
   , guideEntryDeclSpan :: SourceSpan
   , guideEntryDeclValue :: Text
   , guideEntryDeclValueSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data WorkflowDecl = WorkflowDecl
+  { workflowDeclName :: Text
+  , workflowDeclSpan :: SourceSpan
+  , workflowDeclNameSpan :: SourceSpan
+  , workflowDeclIdentity :: Text
+  , workflowDeclStateType :: Type
+  , workflowDeclStateTypeSpan :: SourceSpan
   }
   deriving (Eq, Show)
 
@@ -594,6 +606,7 @@ renderModule modl =
       fmap renderSection . filter (not . null) $
         [ fmap renderTypeDecl (moduleTypeDecls modl)
         , fmap renderRecordDecl (moduleRecordDecls modl)
+        , fmap renderWorkflowDecl (moduleWorkflowDecls modl)
         , fmap renderGuideDecl (moduleGuideDecls modl)
         , fmap renderHookDecl (moduleHookDecls modl)
         , fmap renderAgentRoleDecl (moduleAgentRoleDecls modl)
@@ -662,6 +675,14 @@ renderGuideExtends (Just parentName) = " extends " <> parentName
 renderGuideEntryDecl :: GuideEntryDecl -> Text
 renderGuideEntryDecl entryDecl =
   guideEntryDeclName entryDecl <> ": " <> renderStringLiteral (guideEntryDeclValue entryDecl)
+
+renderWorkflowDecl :: WorkflowDecl -> Text
+renderWorkflowDecl workflowDecl =
+  "workflow "
+    <> workflowDeclName workflowDecl
+    <> " = { state: "
+    <> renderType (workflowDeclStateType workflowDecl)
+    <> " }"
 
 renderHookDecl :: HookDecl -> Text
 renderHookDecl hookDecl =

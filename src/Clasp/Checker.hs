@@ -40,6 +40,7 @@ import Clasp.Core
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
+  , CoreWorkflowDecl (..)
   , coreExprType
   )
 import Clasp.Diagnostic
@@ -84,6 +85,7 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   , exprSpan
   , renderType
   )
@@ -421,6 +423,7 @@ checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       schemaRecordDecls = moduleRecordDecls modl
+      workflowDecls = moduleWorkflowDecls modl
       guideDecls = moduleGuideDecls modl
       hookDecls = moduleHookDecls modl
       agentRoleDecls = moduleAgentRoleDecls modl
@@ -437,6 +440,7 @@ checkModule modl = do
 
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
+  ensureUniqueWorkflowDecls workflowDecls
   ensureUniqueHooks hookDecls
   ensureUniqueAgentRoleDecls agentRoleDecls
   ensureUniqueAgentDecls agentDecls
@@ -458,7 +462,7 @@ checkModule modl = do
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls toolDecls routeDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls
 
   constructorEnv <- buildConstructorEnv typeDecls
   ensureUniqueForeignDecls foreignDecls decls constructorEnv
@@ -490,6 +494,7 @@ checkModule modl = do
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = typeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
+      , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
       , coreModuleGuideDecls = guideDecls
       , coreModuleHookDecls = fmap CoreHookDecl hookDecls
       , coreModuleAgentRoleDecls = fmap CoreAgentRoleDecl agentRoleDecls
@@ -532,6 +537,24 @@ ensureUniqueGuideDecls = go Map.empty
         Nothing -> do
           ensureUniqueGuideEntries guideDecl
           go (Map.insert (guideDeclName guideDecl) guideDecl seen) rest
+
+ensureUniqueWorkflowDecls :: [WorkflowDecl] -> Either DiagnosticBundle ()
+ensureUniqueWorkflowDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (workflowDecl : rest) =
+      case Map.lookup (workflowDeclName workflowDecl) seen of
+        Just previousWorkflowDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_WORKFLOW"
+                ("Duplicate workflow declaration for `" <> workflowDeclName workflowDecl <> "`.")
+                (Just (workflowDeclNameSpan workflowDecl))
+                ["Each workflow name may only be declared once."]
+                [diagnosticRelated "previous workflow declaration" (workflowDeclNameSpan previousWorkflowDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (workflowDeclName workflowDecl) workflowDecl seen) rest
 
 ensureUniqueGuideEntries :: GuideDecl -> Either DiagnosticBundle ()
 ensureUniqueGuideEntries guideDecl = go Map.empty (guideDeclEntries guideDecl)
@@ -1098,10 +1121,11 @@ ensureDistinctNamedTypes typeDeclEnv =
         Nothing ->
           pure ()
 
-ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Decl] -> [HookDecl] -> [ToolDecl] -> [RouteDecl] -> Either DiagnosticBundle ()
-ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls decls hookDecls toolDecls routeDecls = do
+ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -> [WorkflowDecl] -> [ForeignDecl] -> [Decl] -> [HookDecl] -> [ToolDecl] -> [RouteDecl] -> Either DiagnosticBundle ()
+ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls = do
   mapM_ checkTypeDecl typeDecls
   mapM_ checkRecordDecl recordDecls
+  mapM_ checkWorkflowDecl workflowDecls
   mapM_ checkForeignDecl foreignDecls
   mapM_ checkDeclAnnotation decls
   mapM_ checkHookDeclTypes hookDecls
@@ -1130,6 +1154,9 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
                 fieldDecl
         )
         (recordDeclFields recordDecl)
+
+    checkWorkflowDecl workflowDecl =
+      ensureWorkflowStateType workflowDecl
 
     checkDeclAnnotation decl =
       case declAnnotation decl of
@@ -1246,6 +1273,30 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls foreignDecls de
               ["Declare `" <> typeName <> "` as a record before using it in a tool contract."]
               []
           ]
+
+    ensureWorkflowStateType workflowDecl =
+      case workflowDeclStateType workflowDecl of
+        TNamed typeName
+          | Map.member typeName recordDeclEnv ->
+              pure ()
+          | otherwise ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_WORKFLOW_STATE_TYPE"
+                    ("Workflow `" <> workflowDeclName workflowDecl <> "` must use a record type for durable state.")
+                    (Just (workflowDeclStateTypeSpan workflowDecl))
+                    ["Declare `" <> typeName <> "` as a record before using it as workflow state."]
+                    []
+                ]
+        _ ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_WORKFLOW_STATE_TYPE"
+                ("Workflow `" <> workflowDeclName workflowDecl <> "` must use a record type for durable state.")
+                (Just (workflowDeclStateTypeSpan workflowDecl))
+                ["Use a named record type for the workflow `state` field."]
+                []
+            ]
 
     ensureRecordType routeDecl typeName primarySpan role =
       unless (Map.member typeName recordDeclEnv) $

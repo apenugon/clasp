@@ -18,6 +18,7 @@ It includes:
 - File-level imports
 - Top-level type declarations
 - Top-level record declarations
+- Top-level workflow declarations for isolated long-running processes with typed durable state
 - Top-level foreign capability declarations
 - Top-level hook declarations for lifecycle triggers
 - Top-level agent-role and agent declarations for named subagents
@@ -59,7 +60,6 @@ It does not yet include:
 - Nested patterns
 - Effects
 - Dedicated schema syntax separate from records
-- Workflows
 - Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
 - External-objective declarations such as goals, metrics, experiments, and rollout policies
 - Compiler-emitted context graphs over declarations, capabilities, traces, and external-objective structure
@@ -95,10 +95,20 @@ Every `Clasp` source file in `v0` has:
 
 1. An optional module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
+3. Zero or more top-level type, record, workflow, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
 4. One or more top-level declarations
 
 When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
+
+Workflows declare a named durable state model with a record-backed `state` field:
+
+```clasp
+module Main
+
+record Counter = { value : Int }
+
+workflow CounterFlow = { state : Counter }
+```
 
 Example:
 

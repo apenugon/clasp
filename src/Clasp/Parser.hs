@@ -92,6 +92,7 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   , exprSpan
   , mergeSourceSpans
   )
@@ -101,6 +102,7 @@ type Parser = Parsec Void Text
 data TopLevelItem
   = TopTypeDecl TypeDecl
   | TopRecordDecl RecordDecl
+  | TopWorkflowDecl WorkflowDecl
   | TopGuideDecl GuideDecl
   | TopHookDecl HookDecl
   | TopAgentRoleDecl AgentRoleDecl
@@ -189,6 +191,7 @@ topLevelItemParser =
     <|> try foreignDeclParser
     <|> try routeDeclParser
     <|> try recordDeclParser
+    <|> try workflowDeclParser
     <|> try typeDeclParser
     <|> try typeSignatureParser
     <|> (TopDecl <$> declParser)
@@ -646,6 +649,56 @@ recordFieldDeclParser = do
       , recordFieldDeclType = fieldType
       , recordFieldDeclClassification = fromMaybe "public" classification
       }
+
+data WorkflowAttr
+  = WorkflowStateAttr SourceSpan Type
+
+workflowDeclParser :: Parser TopLevelItem
+workflowDeclParser = do
+  start <- getSourcePos
+  keyword "workflow"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  attrs <- braces (workflowAttrParser `sepBy` symbolN ",")
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  (stateTypeSpan, stateType) <-
+    case foldM applyWorkflowAttr Nothing attrs of
+      Left message ->
+        fail message
+      Right (Just stateDecl) ->
+        pure stateDecl
+      Right Nothing ->
+        fail "workflow declaration requires a `state` attribute"
+  pure . TopWorkflowDecl $
+    WorkflowDecl
+      { workflowDeclName = name
+      , workflowDeclSpan = makeSourceSpan start end
+      , workflowDeclNameSpan = nameSpan
+      , workflowDeclIdentity = "workflow:" <> name
+      , workflowDeclStateType = stateType
+      , workflowDeclStateTypeSpan = stateTypeSpan
+      }
+
+workflowAttrParser :: Parser WorkflowAttr
+workflowAttrParser = do
+  keywordN "state"
+  start <- getSourcePos
+  _ <- symbolN ":"
+  stateType <- typeParser
+  end <- getSourcePos
+  pure (WorkflowStateAttr (makeSourceSpan start end) stateType)
+
+applyWorkflowAttr :: Maybe (SourceSpan, Type) -> WorkflowAttr -> Either String (Maybe (SourceSpan, Type))
+applyWorkflowAttr existing attr =
+  case attr of
+    WorkflowStateAttr stateTypeSpan stateType ->
+      case existing of
+        Just _ ->
+          Left "workflow declaration may only declare `state` once"
+        Nothing ->
+          Right (Just (stateTypeSpan, stateType))
 
 policyDeclParser :: Parser TopLevelItem
 policyDeclParser = do
@@ -1280,8 +1333,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
-    foldM step ([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -1289,6 +1342,7 @@ attachSignatures (name, imports, items) = do
         , moduleImports = imports
         , moduleTypeDecls = reverse typeDecls
         , moduleRecordDecls = reverse recordDecls
+        , moduleWorkflowDecls = reverse workflowDecls
         , moduleGuideDecls = reverse guideDecls
         , moduleHookDecls = reverse hookDecls
         , moduleAgentRoleDecls = reverse agentRoleDecls
@@ -1314,36 +1368,38 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopWorkflowDecl workflowDecl ->
+          pure (typeDecls, recordDecls, workflowDecl : workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopGuideDecl guideDecl ->
-          pure (typeDecls, recordDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopHookDecl hookDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentRoleDecl agentRoleDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentDecl agentDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopPolicyDecl policyDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopToolServerDecl toolServerDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecl : toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecl : toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopToolDecl toolDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecl : toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecl : toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopVerifierDecl verifierDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecl : verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecl : verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopMergeGateDecl mergeGateDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecl : mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecl : mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopProjectionDecl projectionDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -1359,6 +1415,7 @@ attachSignatures (name, imports, items) = do
               pure
                 ( typeDecls
                 , recordDecls
+                , workflowDecls
                 , guideDecls
                 , hookDecls
                 , agentRoleDecls
@@ -1386,7 +1443,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, workflowDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =
@@ -1407,6 +1464,7 @@ reservedWords :: [Text]
 reservedWords =
   [ "module"
   , "import"
+  , "workflow"
   , "role"
   , "agent"
   , "let"

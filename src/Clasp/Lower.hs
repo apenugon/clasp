@@ -40,6 +40,7 @@ import Clasp.Core
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
+  , CoreWorkflowDecl (..)
   , coreExprType
   )
 import Clasp.Syntax
@@ -62,12 +63,14 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl
+  , WorkflowDecl
   )
 
 data LowerModule = LowerModule
   { lowerModuleName :: ModuleName
   , lowerModuleTypeDecls :: [TypeDecl]
   , lowerModuleRecordDecls :: [RecordDecl]
+  , lowerModuleWorkflowDecls :: [WorkflowDecl]
   , lowerModuleGuideDecls :: [GuideDecl]
   , lowerModuleHookDecls :: [HookDecl]
   , lowerModuleAgentRoleDecls :: [AgentRoleDecl]
@@ -218,6 +221,7 @@ lowerModule modl =
     { lowerModuleName = coreModuleName modl
     , lowerModuleTypeDecls = coreModuleTypeDecls modl
     , lowerModuleRecordDecls = coreModuleRecordDecls modl
+    , lowerModuleWorkflowDecls = fmap coreWorkflowSourceDecl (coreModuleWorkflowDecls modl)
     , lowerModuleGuideDecls = coreModuleGuideDecls modl
     , lowerModuleHookDecls = fmap coreHookSourceDecl (coreModuleHookDecls modl)
     , lowerModuleAgentRoleDecls = fmap coreAgentRoleSourceDecl (coreModuleAgentRoleDecls modl)

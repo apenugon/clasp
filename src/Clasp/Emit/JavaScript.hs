@@ -50,8 +50,10 @@ import Clasp.Syntax
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl (..)
+  , WorkflowDecl (..)
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderType
   )
 
 emitModule :: LowerModule -> Text
@@ -1531,7 +1533,8 @@ emitPlatformBridgesExport =
 
 emitControlPlaneExports :: LowerModule -> [Text]
 emitControlPlaneExports modl =
-  emitGuides
+  emitWorkflows
+    <> emitGuides
     <> emitPolicies
     <> emitAgentRoles
     <> emitAgents
@@ -1545,6 +1548,7 @@ emitControlPlaneExports modl =
   where
     typeDecls = lowerModuleTypeDecls modl
     recordDecls = lowerModuleRecordDecls modl
+    workflows = lowerModuleWorkflowDecls modl
     guides = lowerModuleGuideDecls modl
     hooks = lowerModuleHookDecls modl
     agentRoles = lowerModuleAgentRoleDecls modl
@@ -1554,6 +1558,25 @@ emitControlPlaneExports modl =
     tools = lowerModuleToolDecls modl
     verifiers = lowerModuleVerifierDecls modl
     mergeGates = lowerModuleMergeGateDecls modl
+
+    emitWorkflows =
+      [ "export const __claspWorkflows = ["
+      ]
+        <> concatMap emitWorkflow workflows
+        <> [ "];"
+           , "for (const workflow of __claspWorkflows) {"
+           , "  Object.freeze(workflow);"
+           , "}"
+           , ""
+           ]
+
+    emitWorkflow workflowDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (workflowDeclName workflowDecl) <> ","
+      , "    id: " <> emitStringLiteral (workflowDeclIdentity workflowDecl) <> ","
+      , "    stateType: " <> emitStringLiteral (renderType (workflowDeclStateType workflowDecl))
+      , "  },"
+      ]
 
     emitGuides =
       [ "export const __claspGuides = ["
@@ -1849,6 +1872,7 @@ emitControlPlaneExports modl =
     emitControlPlaneContract =
       [ "export const __claspControlPlane = Object.freeze({"
       , "  version: 1,"
+      , "  workflows: __claspWorkflows,"
       , "  guides: __claspGuides,"
       , "  hooks: __claspHooks,"
       , "  agentRoles: __claspAgentRoles,"
@@ -1866,10 +1890,11 @@ emitControlPlaneExports modl =
 renderControlPlaneDocsMarkdown :: LowerModule -> Text
 renderControlPlaneDocsMarkdown modl =
   T.unlines $
-    [ "# Control Plane Docs"
+      [ "# Control Plane Docs"
     , ""
     , "This document is generated from the same Clasp declarations as the executable control-plane manifests."
     ]
+      <> renderDocsSection "Workflows" (fmap renderWorkflowDoc (lowerModuleWorkflowDecls modl))
       <> renderDocsSection "Guides" (fmap renderGuideDoc (lowerModuleGuideDecls modl))
       <> renderDocsSection "Policies" (fmap renderPolicyDoc (lowerModulePolicyDecls modl))
       <> renderDocsSection "Agent Roles" (fmap renderAgentRoleDoc (lowerModuleAgentRoleDecls modl))
@@ -1894,6 +1919,13 @@ renderDocsSection title entries =
         [ ""
         , T.intercalate "\n\n" entries
         ]
+
+renderWorkflowDoc :: WorkflowDecl -> Text
+renderWorkflowDoc workflowDecl =
+  T.unlines
+    [ "### " <> workflowDeclName workflowDecl
+    , "- State schema: " <> renderType (workflowDeclStateType workflowDecl)
+    ]
 
 renderGuideDoc :: GuideDecl -> Text
 renderGuideDoc guideDecl =
