@@ -69,16 +69,25 @@ node benchmarks/run-benchmark.mjs run ts-shared-priority \
   --agent-command "your-harness-command-here"
 ```
 
-Summarize recorded runs by task, harness, and model:
+Summarize recorded runs by task, harness, model, and repeated-run series:
 
 ```sh
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
 ```
 
+When notes end in `-<run-number>`, the summary report treats the shared prefix as a series label. For the mirrored `lead-segment` pair it also prints a comparative section with pass-rate, time-to-green, and token deltas between `Clasp` and `TypeScript`.
+
 Run a repeated Codex sample set with a consistent harness wrapper:
 
 ```sh
 bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
+```
+
+Run the mirrored repeated `lead-segment` series for both languages:
+
+```sh
+bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
 ```
 
 The runner is harness-agnostic on purpose. It standardizes task prep, verification, and result recording without hard-coding one vendor CLI.

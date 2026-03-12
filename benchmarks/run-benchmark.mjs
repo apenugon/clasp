@@ -132,24 +132,120 @@ async function summarizeCommand(args) {
     throw new Error("no results matched the supplied filters");
   }
 
-  const grouped = groupBy(filtered, (result) =>
-    [result.taskId, result.harness, result.model].join("\t")
-  );
+  const grouped = groupBy(filtered, (result) => {
+    const series = parseSeriesRun(result.notes).series ?? "";
+    return [result.taskId, result.harness, result.model, series].join("\t");
+  });
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [taskId, harness, model] = groupKey.split("\t");
-    const passed = groupResults.filter((result) => result.verification.passed).length;
-    const durations = groupResults.map((result) => result.durationMs);
-    const totals = groupResults.map((result) => result.tokenUsage.total);
-    const uncached = groupResults.map((result) => result.harnessUsage?.uncachedTotal ?? result.tokenUsage.total);
+    const [taskId, harness, model, series] = groupKey.split("\t");
+    const summary = summarizeGroup(groupResults);
 
     console.log(`${taskId}\t${harness}\t${model}`);
-    console.log(`  runs: ${groupResults.length}`);
-    console.log(`  passRate: ${(passed / groupResults.length * 100).toFixed(0)}%`);
-    console.log(`  medianDurationMs: ${median(durations)}`);
-    console.log(`  medianTokens: ${median(totals)}`);
-    console.log(`  medianUncachedTokens: ${median(uncached)}`);
+    if (series) {
+      console.log(`  series: ${series}`);
+    }
+    console.log(`  runs: ${summary.runs}`);
+    console.log(`  passRate: ${summary.passRate}`);
+    console.log(`  timeToGreenMs: ${summary.timeToGreenMs}`);
+    console.log(`  medianDurationMs: ${summary.medianDurationMs}`);
+    console.log(`  medianTokens: ${summary.medianTokens}`);
+    console.log(`  medianUncachedTokens: ${summary.medianUncachedTokens}`);
   }
+
+  const comparisons = buildLeadSegmentComparisons(filtered);
+  if (comparisons.length > 0) {
+    console.log("lead-segment-comparison");
+
+    for (const comparison of comparisons) {
+      console.log(
+        `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
+      );
+      console.log(`    claspPassRate: ${comparison.clasp.passRate}`);
+      console.log(`    tsPassRate: ${comparison.typescript.passRate}`);
+      console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
+      console.log(`    claspTimeToGreenMs: ${comparison.clasp.timeToGreenMs}`);
+      console.log(`    tsTimeToGreenMs: ${comparison.typescript.timeToGreenMs}`);
+      console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
+      console.log(`    claspMedianTokens: ${comparison.clasp.medianTokens}`);
+      console.log(`    tsMedianTokens: ${comparison.typescript.medianTokens}`);
+      console.log(`    tokenDelta: ${comparison.tokenDelta}`);
+      console.log(
+        `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
+      );
+    }
+  }
+}
+
+function summarizeGroup(groupResults) {
+  const ordered = [...groupResults].sort(compareRunOrder);
+  const passed = ordered.filter((result) => result.verification.passed).length;
+  const durations = ordered.map((result) => result.durationMs);
+  const totals = ordered.map((result) => result.tokenUsage.total);
+  const uncached = ordered.map(
+    (result) => result.harnessUsage?.uncachedTotal ?? result.tokenUsage.total
+  );
+  const firstGreenIndex = ordered.findIndex((result) => result.verification.passed);
+  const timeToGreenMs = firstGreenIndex === -1
+    ? "n/a"
+    : ordered
+      .slice(0, firstGreenIndex + 1)
+      .reduce((total, result) => total + result.durationMs, 0);
+
+  return {
+    runs: ordered.length,
+    passRate: `${(passed / ordered.length * 100).toFixed(0)}%`,
+    passRatePct: passed / ordered.length * 100,
+    timeToGreenMs,
+    medianDurationMs: median(durations),
+    medianTokens: median(totals),
+    medianUncachedTokens: median(uncached)
+  };
+}
+
+function buildLeadSegmentComparisons(results) {
+  const leadSegmentTaskIds = new Set(["clasp-lead-segment", "ts-lead-segment"]);
+  const relevant = results.filter((result) => leadSegmentTaskIds.has(result.taskId));
+  const grouped = groupBy(relevant, (result) => {
+    const series = parseSeriesRun(result.notes).series ?? "";
+    return [result.harness, result.model, series].join("\t");
+  });
+  const comparisons = [];
+
+  for (const [groupKey, groupResults] of grouped.entries()) {
+    const [harness, model, series] = groupKey.split("\t");
+    const byTask = groupBy(groupResults, (result) => result.taskId);
+    const claspResults = byTask.get("clasp-lead-segment");
+    const typescriptResults = byTask.get("ts-lead-segment");
+
+    if (!claspResults || !typescriptResults) {
+      continue;
+    }
+
+    const clasp = summarizeGroup(claspResults);
+    const typescript = summarizeGroup(typescriptResults);
+    comparisons.push({
+      harness,
+      model,
+      series: series || "(all-runs)",
+      clasp,
+      typescript,
+      passRateDeltaPct: Math.round(clasp.passRatePct - typescript.passRatePct),
+      timeToGreenDeltaMs:
+        typeof clasp.timeToGreenMs === "number" && typeof typescript.timeToGreenMs === "number"
+          ? clasp.timeToGreenMs - typescript.timeToGreenMs
+          : "n/a",
+      tokenDelta: clasp.medianTokens - typescript.medianTokens,
+      uncachedTokenDelta:
+        clasp.medianUncachedTokens - typescript.medianUncachedTokens
+    });
+  }
+
+  return comparisons.sort((left, right) =>
+    [left.harness, left.model, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.series].join("\t")
+    )
+  );
 }
 
 function buildResult(task, options, startedAt, finishedAt, verification, usage) {
@@ -400,6 +496,34 @@ function groupBy(values, keyFor) {
   }
 
   return groups;
+}
+
+function parseSeriesRun(notes) {
+  const note = String(notes ?? "").trim();
+  const match = /^(.*)-(\d+)$/.exec(note);
+
+  if (!match || match[1].length === 0) {
+    return {
+      series: null,
+      runNumber: null
+    };
+  }
+
+  return {
+    series: match[1],
+    runNumber: Number.parseInt(match[2], 10)
+  };
+}
+
+function compareRunOrder(left, right) {
+  const leftSeries = parseSeriesRun(left.notes);
+  const rightSeries = parseSeriesRun(right.notes);
+
+  if (leftSeries.runNumber !== null && rightSeries.runNumber !== null) {
+    return leftSeries.runNumber - rightSeries.runNumber;
+  }
+
+  return left.finishedAt.localeCompare(right.finishedAt);
 }
 
 function median(values) {
