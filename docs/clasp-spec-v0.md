@@ -246,8 +246,9 @@ Notes:
 - Records are currently restricted to primitive and nested-record fields so generated JSON codecs stay valid.
 - Foreign declarations are currently restricted to function capabilities.
 - Routes currently require record request and response types.
-- Routes may also return compiler-known `Page` values, which emit inert HTML rather than JSON.
+- Routes may also return compiler-known `Page` values, which emit stable default SSR HTML rather than JSON.
 - `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`.
+- Page-flow machine metadata is emitted through generated sidecar exports such as `__claspUiGraph`, `__claspNavigationGraph`, and `__claspActionGraph`; HTML flow attributes are available only through the opt-in `__claspRenderPage(value, __claspPageRenderModes.htmlWithFlowMetadata)` projection.
 - `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`.
 - Safe views escape text content, reject raw `script`/`style` tags, and keep styling explicit through `styled` references instead of raw host `class` or `style` strings.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong route handler signatures, and simple type mismatches before code generation.

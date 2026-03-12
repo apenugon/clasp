@@ -852,6 +852,8 @@ compileTests =
             assertFailure ("expected page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected page renderer" ("function $render_Page" `T.isInfixOf` emitted)
+            assertBool "expected render mode export" ("export { __claspPageRenderModes };" `T.isInfixOf` emitted)
+            assertBool "expected opt-in render helper" ("export function __claspRenderPage" `T.isInfixOf` emitted)
             assertBool "expected view renderer" ("function $claspRenderView" `T.isInfixOf` emitted)
             assertBool "expected page response kind" ("responseKind: \"page\"" `T.isInfixOf` emitted)
             assertBool "expected page route encoder" ("encodeResponse: $render_Page" `T.isInfixOf` emitted)
@@ -950,6 +952,34 @@ compileTests =
               assertBool "expected escaped subject" ("&lt;Quarterly &lt;review&gt;&gt;" `T.isInfixOf` renderedHtml)
               assertBool "expected escaped ampersand" ("Escaped &amp; archived" `T.isInfixOf` renderedHtml)
               assertBool "expected explicit style ref wrapper" ("data-clasp-style=\"inbox_shell\"" `T.isInfixOf` renderedHtml)
+              assertBool "expected stable default html without flow metadata attrs" (not ("data-clasp-route=" `T.isInfixOf` renderedHtml))
+    , testCase "opt-in page render mode emits flow metadata while default html stays stable" $
+        case compileSource "interactive-render" interactivePageSource of
+          Left err ->
+            assertFailure ("expected interactive page compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/interactive-render/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            renderOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const page = compiledModule.home({});"
+                , "const defaultHtml = compiledModule.__claspRenderPage(page);"
+                , "const flowHtml = compiledModule.__claspRenderPage(page, compiledModule.__claspPageRenderModes.htmlWithFlowMetadata);"
+                , "console.log(JSON.stringify({"
+                , "  defaultHasRoute: defaultHtml.includes('data-clasp-route='),"
+                , "  defaultHasFlow: defaultHtml.includes('data-clasp-flow='),"
+                , "  flowHasRoute: flowHtml.includes('data-clasp-route='),"
+                , "  flowHasFlow: flowHtml.includes('data-clasp-flow='),"
+                , "  sameTitle: defaultHtml.includes('<title>Inbox</title>') && flowHtml.includes('<title>Inbox</title>')"
+                , "}));"
+                ]
+            assertEqual
+              "expected stable default html and opt-in metadata projection"
+              "{\"defaultHasRoute\":false,\"defaultHasFlow\":false,\"flowHasRoute\":true,\"flowHasFlow\":true,\"sameTitle\":true}"
+              renderOutput
     , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
         withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
           result <- compileEntry (root </> "Main.clasp")
