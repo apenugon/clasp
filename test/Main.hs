@@ -57,9 +57,11 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreModule (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   )
 import Clasp.Diagnostic
   ( Diagnostic (..)
@@ -93,6 +95,8 @@ import Clasp.Syntax
   , HookDecl (..)
   , HookTriggerDecl (..)
   , MatchBranch (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , Module (..)
   , ModuleName (..)
   , Pattern (..)
@@ -112,6 +116,7 @@ import Clasp.Syntax
   , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , VerifierDecl (..)
   )
 
 main :: IO ()
@@ -303,6 +308,28 @@ parserTests =
                 assertEqual "tool response" "SearchResponse" (toolDeclResponseType toolDecl)
               other ->
                 assertFailure ("expected one tool declaration, got " <> show (length other))
+    , testCase "parses verifier rules and merge gates" $
+        case parseSource "inline" verifierSource of
+          Left err ->
+            assertFailure ("expected verifier source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleVerifierDecls modl of
+              [verifierDecl] -> do
+                assertEqual "verifier name" "repoChecks" (verifierDeclName verifierDecl)
+                assertEqual "verifier identity" "verifier:repoChecks" (verifierDeclIdentity verifierDecl)
+                assertEqual "verifier tool" "searchRepo" (verifierDeclToolName verifierDecl)
+              other ->
+                assertFailure ("expected one verifier declaration, got " <> show (length other))
+            case moduleMergeGateDecls modl of
+              [mergeGateDecl] -> do
+                assertEqual "merge gate name" "trunk" (mergeGateDeclName mergeGateDecl)
+                assertEqual "merge gate identity" "mergegate:trunk" (mergeGateDeclIdentity mergeGateDecl)
+                assertEqual
+                  "merge gate verifiers"
+                  [MergeGateVerifierRef "repoChecks" dummySpan]
+                  (fmap (\ref -> ref {mergeGateVerifierRefSpan = dummySpan}) (mergeGateDeclVerifierRefs mergeGateDecl))
+              other ->
+                assertFailure ("expected one merge gate declaration, got " <> show (length other))
     , testCase "parses foreign declarations, routes, and json boundaries" $
         case parseSource "inline" serviceSource of
           Left err ->
@@ -681,6 +708,21 @@ checkerTests =
                 assertEqual "tool contract response" "SearchResponse" (toolDeclResponseType toolDecl)
               other ->
                 assertFailure ("expected one checked tool declaration, got " <> show (length other))
+    , testCase "accepts verifier rules that bind tools into merge gates" $
+        case checkSource "verifier" verifierSource of
+          Left err ->
+            assertFailure ("expected verifier source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case coreModuleVerifierDecls checked of
+              [CoreVerifierDecl verifierDecl] ->
+                assertEqual "verifier tool binding" "searchRepo" (verifierDeclToolName verifierDecl)
+              other ->
+                assertFailure ("expected one checked verifier declaration, got " <> show (length other))
+            case coreModuleMergeGateDecls checked of
+              [CoreMergeGateDecl mergeGateDecl] ->
+                assertEqual "merge gate verifier count" 1 (length (mergeGateDeclVerifierRefs mergeGateDecl))
+              other ->
+                assertFailure ("expected one checked merge gate declaration, got " <> show (length other))
     , testCase "accepts compiler-known page primitives" $
         case checkSource "page" pageSource of
           Left err ->
@@ -872,6 +914,10 @@ checkerTests =
         assertHasCode "E_UNKNOWN_TOOLSERVER_POLICY" (checkSource "bad" unknownToolServerPolicySource)
     , testCase "rejects tools that reference unknown servers" $
         assertHasCode "E_UNKNOWN_TOOLSERVER" (checkSource "bad" unknownToolServerSource)
+    , testCase "rejects verifiers that reference unknown tools" $
+        assertHasCode "E_UNKNOWN_VERIFIER_TOOL" (checkSource "bad" unknownVerifierToolSource)
+    , testCase "rejects merge gates that reference unknown verifiers" $
+        assertHasCode "E_UNKNOWN_MERGE_GATE_VERIFIER" (checkSource "bad" unknownMergeGateVerifierSource)
     , testCase "rejects tools that use non-record schemas" $
         assertHasCode "E_TOOL_SCHEMA_TYPE" (checkSource "bad" badToolSchemaSource)
     , testCase "rejects heterogeneous list literals" $
@@ -1194,6 +1240,27 @@ airTests =
                 assertBool "expected response boundary" (("response", AirAttrObject [("type", AirAttrText "SearchResponse")]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected tool AIR node"
+    , testCase "air retains verifier rule and merge gate references" $
+        case airSource "verifier" verifierSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected verifier root" (AirNodeId "verifier:repoChecks" `elem` airModuleRootIds airModule)
+            assertBool "expected merge gate root" (AirNodeId "mergegate:trunk" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "verifier:repoChecks") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected verifier tool ref"
+                  (("tool", AirAttrObject [("name", AirAttrText "searchRepo"), ("ref", AirAttrNode (AirNodeId "tool:searchRepo"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected verifier AIR node"
+            case findAirNode (AirNodeId "mergegate:trunk") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected merge gate verifier refs"
+                  (("verifiers", AirAttrNodes [AirNodeId "verifier:repoChecks"]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected merge gate AIR node"
     , testCase "air serialization is replay-friendly and deterministic" $
         case renderAirSourceJson "adt" adtSource of
           Left err ->
@@ -1284,6 +1351,16 @@ contextTests =
             assertBool "expected tool server edge" ("\"tool-server\"" `T.isInfixOf` jsonText)
             assertBool "expected tool request edge" ("\"tool-request-schema\"" `T.isInfixOf` jsonText)
             assertBool "expected tool response edge" ("\"tool-response-schema\"" `T.isInfixOf` jsonText)
+    , testCase "context graph includes verifier-tool and merge-gate edges" $
+        case renderContextSourceJson "verifier" verifierSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected verifier node" ("\"verifier:repoChecks\"" `T.isInfixOf` jsonText)
+            assertBool "expected merge gate node" ("\"mergegate:trunk\"" `T.isInfixOf` jsonText)
+            assertBool "expected verifier tool edge" ("\"verifier-tool\"" `T.isInfixOf` jsonText)
+            assertBool "expected merge gate verifier edge" ("\"merge-gate-verifier\"" `T.isInfixOf` jsonText)
     , testCase "claspc context writes the default context artifact when -o is omitted" $
         withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2635,6 +2712,26 @@ toolSource =
     , "main = \"ok\""
     ]
 
+verifierSource :: Text
+verifierSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "verifier repoChecks = searchRepo"
+    , "mergegate trunk = repoChecks"
+    , ""
+    , "main = \"ok\""
+    ]
+
 missingGuideParentSource :: Text
 missingGuideParentSource =
   T.unlines
@@ -2722,6 +2819,42 @@ unknownToolServerSource =
     , "policy SupportDisclosure = public"
     , ""
     , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownVerifierToolSource :: Text
+unknownVerifierToolSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "verifier repoChecks = searchRepo"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownMergeGateVerifierSource :: Text
+unknownMergeGateVerifierSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "mergegate trunk = repoChecks"
     , ""
     , "main = \"ok\""
     ]

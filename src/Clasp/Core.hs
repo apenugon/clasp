@@ -6,6 +6,7 @@ module Clasp.Core
   , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -17,6 +18,7 @@ module Clasp.Core
   , CoreRouteContract (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   , SemanticEdit (..)
   , applySemanticEdit
   , coreExprType
@@ -31,6 +33,7 @@ import Clasp.Syntax
   , ForeignDecl (..)
   , GuideDecl (..)
   , HookDecl (..)
+  , MergeGateDecl (..)
   , ModuleName
   , PolicyDecl (..)
   , ProjectionDecl (..)
@@ -45,6 +48,7 @@ import Clasp.Syntax
   , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , VerifierDecl (..)
   )
 import Clasp.Diagnostic
   ( DiagnosticBundle
@@ -62,6 +66,8 @@ data CoreModule = CoreModule
   , coreModulePolicyDecls :: [CorePolicyDecl]
   , coreModuleToolServerDecls :: [CoreToolServerDecl]
   , coreModuleToolDecls :: [CoreToolDecl]
+  , coreModuleVerifierDecls :: [CoreVerifierDecl]
+  , coreModuleMergeGateDecls :: [CoreMergeGateDecl]
   , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]
   , coreModuleRouteDecls :: [RouteDecl]
@@ -96,6 +102,16 @@ data CoreToolServerDecl = CoreToolServerDecl
 
 data CoreToolDecl = CoreToolDecl
   { coreToolSourceDecl :: ToolDecl
+  }
+  deriving (Eq, Show)
+
+data CoreVerifierDecl = CoreVerifierDecl
+  { coreVerifierSourceDecl :: VerifierDecl
+  }
+  deriving (Eq, Show)
+
+data CoreMergeGateDecl = CoreMergeGateDecl
+  { coreMergeGateSourceDecl :: MergeGateDecl
   }
   deriving (Eq, Show)
 

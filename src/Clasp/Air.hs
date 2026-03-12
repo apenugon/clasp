@@ -26,6 +26,7 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -37,6 +38,7 @@ import Clasp.Core
   , CoreRouteContract (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   , coreExprType
   )
 import Clasp.Syntax
@@ -48,6 +50,8 @@ import Clasp.Syntax
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
@@ -65,6 +69,7 @@ import Clasp.Syntax
   , ToolServerDecl (..)
   , Type
   , TypeDecl (..)
+  , VerifierDecl (..)
   , renderType
   )
 
@@ -117,6 +122,8 @@ buildAirModule modl =
     policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
     toolServerNodes = fmap buildToolServerDeclNode (coreModuleToolServerDecls modl)
     toolNodes = fmap buildToolDeclNode (coreModuleToolDecls modl)
+    verifierNodes = fmap buildVerifierDeclNode (coreModuleVerifierDecls modl)
+    mergeGateNodes = fmap buildMergeGateDeclNode (coreModuleMergeGateDecls modl)
     projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
     routeNodes = fmap buildRouteDeclNode (coreModuleRouteDecls modl)
@@ -131,6 +138,8 @@ buildAirModule modl =
         <> policyNodes
         <> toolServerNodes
         <> toolNodes
+        <> verifierNodes
+        <> mergeGateNodes
         <> projectionNodes
         <> foreignNodes
         <> routeNodes
@@ -376,6 +385,38 @@ buildToolDeclNode coreToolDecl =
     }
   where
     toolDecl = coreToolSourceDecl coreToolDecl
+
+buildVerifierDeclNode :: CoreVerifierDecl -> AirNode
+buildVerifierDeclNode coreVerifierDecl =
+  AirNode
+    { airNodeId = verifierDeclId (verifierDeclName verifierDecl)
+    , airNodeKind = "verifierDecl"
+    , airNodeSpan = Just (verifierDeclSpan verifierDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (verifierDeclName verifierDecl))
+        , ("identity", AirAttrText (verifierDeclIdentity verifierDecl))
+        , ("tool", AirAttrObject [("name", AirAttrText (verifierDeclToolName verifierDecl)), ("ref", AirAttrNode (toolDeclId (verifierDeclToolName verifierDecl)))])
+        ]
+    }
+  where
+    verifierDecl = coreVerifierSourceDecl coreVerifierDecl
+
+buildMergeGateDeclNode :: CoreMergeGateDecl -> AirNode
+buildMergeGateDeclNode coreMergeGateDecl =
+  AirNode
+    { airNodeId = mergeGateDeclId (mergeGateDeclName mergeGateDecl)
+    , airNodeKind = "mergeGateDecl"
+    , airNodeSpan = Just (mergeGateDeclSpan mergeGateDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (mergeGateDeclName mergeGateDecl))
+        , ("identity", AirAttrText (mergeGateDeclIdentity mergeGateDecl))
+        , ("verifiers", AirAttrNodes (fmap (verifierDeclId . mergeGateVerifierRefName) (mergeGateDeclVerifierRefs mergeGateDecl)))
+        ]
+    }
+  where
+    mergeGateDecl = coreMergeGateSourceDecl coreMergeGateDecl
 
 buildProjectionDeclNodes :: CoreProjectionDecl -> [AirNode]
 buildProjectionDeclNodes coreProjectionDecl =
@@ -821,6 +862,12 @@ toolServerDeclId name = AirNodeId ("toolserver:" <> name)
 
 toolDeclId :: Text -> AirNodeId
 toolDeclId name = AirNodeId ("tool:" <> name)
+
+verifierDeclId :: Text -> AirNodeId
+verifierDeclId name = AirNodeId ("verifier:" <> name)
+
+mergeGateDeclId :: Text -> AirNodeId
+mergeGateDeclId name = AirNodeId ("mergegate:" <> name)
 
 projectionDeclId :: Text -> AirNodeId
 projectionDeclId name = AirNodeId ("projection:" <> name)

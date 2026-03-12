@@ -27,6 +27,7 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
   , CoreModule (..)
   , CoreParam (..)
@@ -38,6 +39,7 @@ import Clasp.Core
   , CoreRouteContract (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   , coreExprType
   )
 import Clasp.Diagnostic
@@ -59,6 +61,8 @@ import Clasp.Syntax
   , GuideEntryDecl (..)
   , HookDecl (..)
   , MatchBranch (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , Module (..)
   , Pattern (..)
   , PatternBinder (..)
@@ -77,6 +81,7 @@ import Clasp.Syntax
   , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , VerifierDecl (..)
   , exprSpan
   , renderType
   )
@@ -396,6 +401,8 @@ checkModule modl = do
       policyDecls = modulePolicyDecls modl
       toolServerDecls = moduleToolServerDecls modl
       toolDecls = moduleToolDecls modl
+      verifierDecls = moduleVerifierDecls modl
+      mergeGateDecls = moduleMergeGateDecls modl
       projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
       routeDecls = moduleRouteDecls modl
@@ -409,11 +416,15 @@ checkModule modl = do
   ensureUniquePolicyDecls policyDecls
   ensureUniqueToolServerDecls toolServerDecls
   ensureUniqueToolDecls toolDecls
+  ensureUniqueVerifierDecls verifierDecls
+  ensureUniqueMergeGateDecls mergeGateDecls
   ensureGuideHierarchy guideDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
   ensureKnownToolServerReferences policyDecls toolServerDecls
   ensureKnownToolReferences toolServerDecls toolDecls
+  ensureKnownVerifierToolReferences toolDecls verifierDecls
+  ensureKnownMergeGateVerifierReferences verifierDecls mergeGateDecls
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
   let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
@@ -459,6 +470,8 @@ checkModule modl = do
       , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
       , coreModuleToolServerDecls = fmap CoreToolServerDecl toolServerDecls
       , coreModuleToolDecls = fmap CoreToolDecl toolDecls
+      , coreModuleVerifierDecls = fmap CoreVerifierDecl verifierDecls
+      , coreModuleMergeGateDecls = fmap CoreMergeGateDecl mergeGateDecls
       , coreModuleProjectionDecls =
           zipWith
             (\projectionDecl projectionRecordDecl ->
@@ -759,6 +772,98 @@ ensureKnownToolReferences toolServerDecls =
               ("Tool `" <> toolDeclName toolDecl <> "` references unknown tool server `" <> toolDeclServerName toolDecl <> "`.")
               (Just (toolDeclServerSpan toolDecl))
               ["Declare the referenced tool server before using it in a tool contract."]
+              []
+          ]
+
+ensureUniqueVerifierDecls :: [VerifierDecl] -> Either DiagnosticBundle ()
+ensureUniqueVerifierDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (verifierDecl : rest) =
+      case Map.lookup (verifierDeclName verifierDecl) seen of
+        Just previousVerifierDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_VERIFIER"
+                ("Duplicate verifier declaration for `" <> verifierDeclName verifierDecl <> "`.")
+                (Just (verifierDeclNameSpan verifierDecl))
+                ["Each verifier rule name may only be declared once."]
+                [diagnosticRelated "previous verifier declaration" (verifierDeclNameSpan previousVerifierDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (verifierDeclName verifierDecl) verifierDecl seen) rest
+
+ensureUniqueMergeGateDecls :: [MergeGateDecl] -> Either DiagnosticBundle ()
+ensureUniqueMergeGateDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (mergeGateDecl : rest) =
+      case Map.lookup (mergeGateDeclName mergeGateDecl) seen of
+        Just previousMergeGateDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_MERGE_GATE"
+                ("Duplicate merge gate declaration for `" <> mergeGateDeclName mergeGateDecl <> "`.")
+                (Just (mergeGateDeclNameSpan mergeGateDecl))
+                ["Each merge gate name may only be declared once."]
+                [diagnosticRelated "previous merge gate declaration" (mergeGateDeclNameSpan previousMergeGateDecl)]
+            ]
+        Nothing -> do
+          ensureUniqueMergeGateVerifierRefs mergeGateDecl
+          go (Map.insert (mergeGateDeclName mergeGateDecl) mergeGateDecl seen) rest
+
+ensureUniqueMergeGateVerifierRefs :: MergeGateDecl -> Either DiagnosticBundle ()
+ensureUniqueMergeGateVerifierRefs mergeGateDecl = go Map.empty (mergeGateDeclVerifierRefs mergeGateDecl)
+  where
+    go _ [] = pure ()
+    go seen (verifierRef : rest) =
+      case Map.lookup (mergeGateVerifierRefName verifierRef) seen of
+        Just previousVerifierRef ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_MERGE_GATE_VERIFIER"
+                ("Merge gate `" <> mergeGateDeclName mergeGateDecl <> "` repeats verifier `" <> mergeGateVerifierRefName verifierRef <> "`.")
+                (Just (mergeGateVerifierRefSpan verifierRef))
+                ["List each verifier at most once per merge gate."]
+                [diagnosticRelated "previous verifier reference" (mergeGateVerifierRefSpan previousVerifierRef)]
+            ]
+        Nothing ->
+          go (Map.insert (mergeGateVerifierRefName verifierRef) verifierRef seen) rest
+
+ensureKnownVerifierToolReferences :: [ToolDecl] -> [VerifierDecl] -> Either DiagnosticBundle ()
+ensureKnownVerifierToolReferences toolDecls =
+  mapM_ checkVerifier
+  where
+    toolEnv = Map.fromList [(toolDeclName toolDecl, toolDecl) | toolDecl <- toolDecls]
+
+    checkVerifier verifierDecl =
+      unless (Map.member (verifierDeclToolName verifierDecl) toolEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_VERIFIER_TOOL"
+              ("Verifier `" <> verifierDeclName verifierDecl <> "` references unknown tool `" <> verifierDeclToolName verifierDecl <> "`.")
+              (Just (verifierDeclToolSpan verifierDecl))
+              ["Declare the referenced tool before using it in a verifier rule."]
+              []
+          ]
+
+ensureKnownMergeGateVerifierReferences :: [VerifierDecl] -> [MergeGateDecl] -> Either DiagnosticBundle ()
+ensureKnownMergeGateVerifierReferences verifierDecls =
+  mapM_ checkMergeGate
+  where
+    verifierEnv = Map.fromList [(verifierDeclName verifierDecl, verifierDecl) | verifierDecl <- verifierDecls]
+
+    checkMergeGate mergeGateDecl =
+      mapM_ (checkVerifierRef mergeGateDecl) (mergeGateDeclVerifierRefs mergeGateDecl)
+
+    checkVerifierRef mergeGateDecl verifierRef =
+      unless (Map.member (mergeGateVerifierRefName verifierRef) verifierEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_MERGE_GATE_VERIFIER"
+              ("Merge gate `" <> mergeGateDeclName mergeGateDecl <> "` references unknown verifier `" <> mergeGateVerifierRefName verifierRef <> "`.")
+              (Just (mergeGateVerifierRefSpan verifierRef))
+              ["Declare the referenced verifier before using it in a merge gate."]
               []
           ]
 

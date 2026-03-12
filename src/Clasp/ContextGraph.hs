@@ -26,10 +26,12 @@ import Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
   , CoreHookDecl (..)
+  , CoreMergeGateDecl (..)
   , CoreModule (..)
   , CorePolicyDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
+  , CoreVerifierDecl (..)
   )
 import Clasp.Lower
   ( LowerFormField (..)
@@ -47,6 +49,8 @@ import Clasp.Syntax
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , ModuleName (..)
   , PolicyClassificationDecl (..)
   , PolicyDecl (..)
@@ -59,6 +63,7 @@ import Clasp.Syntax
   , ToolDecl (..)
   , ToolServerDecl (..)
   , Type (..)
+  , VerifierDecl (..)
   )
 
 newtype ContextNodeId = ContextNodeId
@@ -116,6 +121,8 @@ buildContextGraph modl =
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
     toolServerNodes = fmap buildToolServerNode (coreModuleToolServerDecls modl)
     toolNodes = fmap buildToolNode (coreModuleToolDecls modl)
+    verifierNodes = fmap buildVerifierNode (coreModuleVerifierDecls modl)
+    mergeGateNodes = fmap buildMergeGateNode (coreModuleMergeGateDecls modl)
     agentRoleNodes = fmap buildAgentRoleNode (coreModuleAgentRoleDecls modl)
     agentNodes = fmap buildAgentNode (coreModuleAgentDecls modl)
     routeNodes = fmap buildRouteNode (coreModuleRouteDecls modl)
@@ -123,7 +130,7 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> toolServerNodes <> toolNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
@@ -132,6 +139,8 @@ buildContextGraph modl =
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
         <> concatMap buildToolServerEdges (coreModuleToolServerDecls modl)
         <> concatMap buildToolEdges (coreModuleToolDecls modl)
+        <> concatMap buildVerifierEdges (coreModuleVerifierDecls modl)
+        <> concatMap buildMergeGateEdges (coreModuleMergeGateDecls modl)
         <> concatMap buildAgentRoleEdges (coreModuleAgentRoleDecls modl)
         <> concatMap buildAgentEdges (coreModuleAgentDecls modl)
         <> concatMap buildRouteEdges (coreModuleRouteDecls modl)
@@ -293,6 +302,36 @@ buildToolNode coreToolDecl =
     }
   where
     toolDecl = coreToolSourceDecl coreToolDecl
+
+buildVerifierNode :: CoreVerifierDecl -> ContextNode
+buildVerifierNode coreVerifierDecl =
+  ContextNode
+    { contextNodeId = verifierNodeId (verifierDeclName verifierDecl)
+    , contextNodeKind = "verifier"
+    , contextNodeSpan = Just (verifierDeclSpan verifierDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (verifierDeclName verifierDecl))
+        , ("identity", ContextAttrText (verifierDeclIdentity verifierDecl))
+        , ("toolName", ContextAttrText (verifierDeclToolName verifierDecl))
+        ]
+    }
+  where
+    verifierDecl = coreVerifierSourceDecl coreVerifierDecl
+
+buildMergeGateNode :: CoreMergeGateDecl -> ContextNode
+buildMergeGateNode coreMergeGateDecl =
+  ContextNode
+    { contextNodeId = mergeGateNodeId (mergeGateDeclName mergeGateDecl)
+    , contextNodeKind = "mergeGate"
+    , contextNodeSpan = Just (mergeGateDeclSpan mergeGateDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (mergeGateDeclName mergeGateDecl))
+        , ("identity", ContextAttrText (mergeGateDeclIdentity mergeGateDecl))
+        , ("verifierNames", ContextAttrTexts (fmap mergeGateVerifierRefName (mergeGateDeclVerifierRefs mergeGateDecl)))
+        ]
+    }
+  where
+    mergeGateDecl = coreMergeGateSourceDecl coreMergeGateDecl
 
 buildAgentRoleNode :: CoreAgentRoleDecl -> ContextNode
 buildAgentRoleNode coreAgentRoleDecl =
@@ -561,6 +600,31 @@ buildToolEdges coreToolDecl =
   where
     toolDecl = coreToolSourceDecl coreToolDecl
 
+buildVerifierEdges :: CoreVerifierDecl -> [ContextEdge]
+buildVerifierEdges coreVerifierDecl =
+  [ ContextEdge
+      { contextEdgeKind = "verifier-tool"
+      , contextEdgeFrom = verifierNodeId (verifierDeclName verifierDecl)
+      , contextEdgeTo = toolNodeId (verifierDeclToolName verifierDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    verifierDecl = coreVerifierSourceDecl coreVerifierDecl
+
+buildMergeGateEdges :: CoreMergeGateDecl -> [ContextEdge]
+buildMergeGateEdges coreMergeGateDecl =
+  fmap buildVerifierEdge (mergeGateDeclVerifierRefs mergeGateDecl)
+  where
+    mergeGateDecl = coreMergeGateSourceDecl coreMergeGateDecl
+    buildVerifierEdge verifierRef =
+      ContextEdge
+        { contextEdgeKind = "merge-gate-verifier"
+        , contextEdgeFrom = mergeGateNodeId (mergeGateDeclName mergeGateDecl)
+        , contextEdgeTo = verifierNodeId (mergeGateVerifierRefName verifierRef)
+        , contextEdgeAttrs = []
+        }
+
 buildAgentRoleEdges :: CoreAgentRoleDecl -> [ContextEdge]
 buildAgentRoleEdges coreAgentRoleDecl =
   [ ContextEdge
@@ -718,6 +782,12 @@ toolServerNodeId name = ContextNodeId ("toolserver:" <> name)
 
 toolNodeId :: Text -> ContextNodeId
 toolNodeId name = ContextNodeId ("tool:" <> name)
+
+verifierNodeId :: Text -> ContextNodeId
+verifierNodeId name = ContextNodeId ("verifier:" <> name)
+
+mergeGateNodeId :: Text -> ContextNodeId
+mergeGateNodeId name = ContextNodeId ("mergegate:" <> name)
 
 agentRoleNodeId :: Text -> ContextNodeId
 agentRoleNodeId name = ContextNodeId ("agent-role:" <> name)

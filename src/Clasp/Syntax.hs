@@ -15,6 +15,8 @@ module Clasp.Syntax
   , MatchBranch (..)
   , Module (..)
   , ModuleName (..)
+  , MergeGateDecl (..)
+  , MergeGateVerifierRef (..)
   , PatternBinder (..)
   , Pattern (..)
   , PolicyClassificationDecl (..)
@@ -35,6 +37,7 @@ module Clasp.Syntax
   , ToolServerDecl (..)
   , TypeDecl (..)
   , Type (..)
+  , VerifierDecl (..)
   , exprSpan
   , mergeSourceSpans
   , renderType
@@ -104,6 +107,8 @@ data Module = Module
   , modulePolicyDecls :: [PolicyDecl]
   , moduleToolServerDecls :: [ToolServerDecl]
   , moduleToolDecls :: [ToolDecl]
+  , moduleVerifierDecls :: [VerifierDecl]
+  , moduleMergeGateDecls :: [MergeGateDecl]
   , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
   , moduleRouteDecls :: [RouteDecl]
@@ -203,6 +208,31 @@ data ToolDecl = ToolDecl
   , toolDeclResponseType :: Text
   , toolDeclResponseDecl :: RouteBoundaryDecl
   , toolDeclResponseTypeSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data VerifierDecl = VerifierDecl
+  { verifierDeclName :: Text
+  , verifierDeclSpan :: SourceSpan
+  , verifierDeclNameSpan :: SourceSpan
+  , verifierDeclIdentity :: Text
+  , verifierDeclToolName :: Text
+  , verifierDeclToolSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data MergeGateVerifierRef = MergeGateVerifierRef
+  { mergeGateVerifierRefName :: Text
+  , mergeGateVerifierRefSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data MergeGateDecl = MergeGateDecl
+  { mergeGateDeclName :: Text
+  , mergeGateDeclSpan :: SourceSpan
+  , mergeGateDeclNameSpan :: SourceSpan
+  , mergeGateDeclIdentity :: Text
+  , mergeGateDeclVerifierRefs :: [MergeGateVerifierRef]
   }
   deriving (Eq, Show)
 
