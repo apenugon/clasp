@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Clasp.Core
-  ( CoreDecl (..)
+  ( CoreAgentDecl (..)
+  , CoreAgentRoleDecl (..)
+  , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
@@ -21,7 +23,9 @@ module Clasp.Core
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ConstructorDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
   , HookDecl (..)
@@ -49,6 +53,8 @@ data CoreModule = CoreModule
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleGuideDecls :: [GuideDecl]
   , coreModuleHookDecls :: [CoreHookDecl]
+  , coreModuleAgentRoleDecls :: [CoreAgentRoleDecl]
+  , coreModuleAgentDecls :: [CoreAgentDecl]
   , coreModulePolicyDecls :: [CorePolicyDecl]
   , coreModuleProjectionDecls :: [CoreProjectionDecl]
   , coreModuleForeignDecls :: [ForeignDecl]
@@ -59,6 +65,16 @@ data CoreModule = CoreModule
 
 data CorePolicyDecl = CorePolicyDecl
   { corePolicySourceDecl :: PolicyDecl
+  }
+  deriving (Eq, Show)
+
+data CoreAgentRoleDecl = CoreAgentRoleDecl
+  { coreAgentRoleSourceDecl :: AgentRoleDecl
+  }
+  deriving (Eq, Show)
+
+data CoreAgentDecl = CoreAgentDecl
+  { coreAgentSourceDecl :: AgentDecl
   }
   deriving (Eq, Show)
 

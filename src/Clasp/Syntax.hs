@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
@@ -95,6 +97,8 @@ data Module = Module
   , moduleRecordDecls :: [RecordDecl]
   , moduleGuideDecls :: [GuideDecl]
   , moduleHookDecls :: [HookDecl]
+  , moduleAgentRoleDecls :: [AgentRoleDecl]
+  , moduleAgentDecls :: [AgentDecl]
   , modulePolicyDecls :: [PolicyDecl]
   , moduleProjectionDecls :: [ProjectionDecl]
   , moduleForeignDecls :: [ForeignDecl]
@@ -141,6 +145,28 @@ data HookDecl = HookDecl
   , hookDeclResponseTypeSpan :: SourceSpan
   , hookDeclHandlerName :: Text
   , hookDeclHandlerSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data AgentRoleDecl = AgentRoleDecl
+  { agentRoleDeclName :: Text
+  , agentRoleDeclSpan :: SourceSpan
+  , agentRoleDeclNameSpan :: SourceSpan
+  , agentRoleDeclIdentity :: Text
+  , agentRoleDeclGuideName :: Text
+  , agentRoleDeclGuideSpan :: SourceSpan
+  , agentRoleDeclPolicyName :: Text
+  , agentRoleDeclPolicySpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data AgentDecl = AgentDecl
+  { agentDeclName :: Text
+  , agentDeclSpan :: SourceSpan
+  , agentDeclNameSpan :: SourceSpan
+  , agentDeclIdentity :: Text
+  , agentDeclRoleName :: Text
+  , agentDeclRoleSpan :: SourceSpan
   }
   deriving (Eq, Show)
 

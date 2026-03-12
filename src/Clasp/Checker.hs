@@ -22,7 +22,9 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Core
-  ( CoreDecl (..)
+  ( CoreAgentDecl (..)
+  , CoreAgentRoleDecl (..)
+  , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
@@ -45,7 +47,9 @@ import Clasp.Diagnostic
   , singleDiagnosticAt
   )
 import Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ConstructorDecl (..)
   , Decl (..)
   , Expr (..)
   , ForeignDecl (..)
@@ -383,6 +387,8 @@ checkModule modl = do
       schemaRecordDecls = moduleRecordDecls modl
       guideDecls = moduleGuideDecls modl
       hookDecls = moduleHookDecls modl
+      agentRoleDecls = moduleAgentRoleDecls modl
+      agentDecls = moduleAgentDecls modl
       policyDecls = modulePolicyDecls modl
       projectionDecls = moduleProjectionDecls modl
       foreignDecls = moduleForeignDecls modl
@@ -392,8 +398,12 @@ checkModule modl = do
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
   ensureUniqueHooks hookDecls
+  ensureUniqueAgentRoleDecls agentRoleDecls
+  ensureUniqueAgentDecls agentDecls
   ensureUniquePolicyDecls policyDecls
   ensureGuideHierarchy guideDecls
+  ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
+  ensureKnownAgentReferences agentRoleDecls agentDecls
   projectionRecordDecls <- synthesizeProjectionRecordDecls schemaRecordDecls policyDecls projectionDecls
   let recordDecls = schemaRecordDecls <> projectionRecordDecls
   ensureUniqueRecordDecls recordDecls
@@ -434,6 +444,8 @@ checkModule modl = do
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleGuideDecls = guideDecls
       , coreModuleHookDecls = fmap CoreHookDecl hookDecls
+      , coreModuleAgentRoleDecls = fmap CoreAgentRoleDecl agentRoleDecls
+      , coreModuleAgentDecls = fmap CoreAgentDecl agentDecls
       , coreModulePolicyDecls = fmap CorePolicyDecl policyDecls
       , coreModuleProjectionDecls =
           zipWith
@@ -550,6 +562,86 @@ ensureUniqueHooks = go Map.empty
             ]
         Nothing ->
           go (Map.insert (hookDeclName hookDecl) hookDecl seen) rest
+
+ensureUniqueAgentRoleDecls :: [AgentRoleDecl] -> Either DiagnosticBundle ()
+ensureUniqueAgentRoleDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (agentRoleDecl : rest) =
+      case Map.lookup (agentRoleDeclName agentRoleDecl) seen of
+        Just previousAgentRoleDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_AGENT_ROLE"
+                ("Duplicate agent role declaration for `" <> agentRoleDeclName agentRoleDecl <> "`.")
+                (Just (agentRoleDeclNameSpan agentRoleDecl))
+                ["Each agent role name may only be declared once."]
+                [diagnosticRelated "previous agent role declaration" (agentRoleDeclNameSpan previousAgentRoleDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (agentRoleDeclName agentRoleDecl) agentRoleDecl seen) rest
+
+ensureUniqueAgentDecls :: [AgentDecl] -> Either DiagnosticBundle ()
+ensureUniqueAgentDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (agentDecl : rest) =
+      case Map.lookup (agentDeclName agentDecl) seen of
+        Just previousAgentDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_AGENT"
+                ("Duplicate agent declaration for `" <> agentDeclName agentDecl <> "`.")
+                (Just (agentDeclNameSpan agentDecl))
+                ["Each agent name may only be declared once."]
+                [diagnosticRelated "previous agent declaration" (agentDeclNameSpan previousAgentDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (agentDeclName agentDecl) agentDecl seen) rest
+
+ensureKnownAgentRoleReferences :: [GuideDecl] -> [PolicyDecl] -> [AgentRoleDecl] -> Either DiagnosticBundle ()
+ensureKnownAgentRoleReferences guideDecls policyDecls =
+  mapM_ (checkAgentRole guideEnv policyEnv)
+  where
+    guideEnv = Map.fromList [(guideDeclName guideDecl, guideDecl) | guideDecl <- guideDecls]
+    policyEnv = Map.fromList [(policyDeclName policyDecl, policyDecl) | policyDecl <- policyDecls]
+
+    checkAgentRole guideEnv' policyEnv' agentRoleDecl = do
+      unless (Map.member (agentRoleDeclGuideName agentRoleDecl) guideEnv') $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_AGENT_ROLE_GUIDE"
+              ("Agent role `" <> agentRoleDeclName agentRoleDecl <> "` references unknown guide `" <> agentRoleDeclGuideName agentRoleDecl <> "`.")
+              (Just (agentRoleDeclGuideSpan agentRoleDecl))
+              ["Declare the referenced guide before using it in an agent role."]
+              []
+          ]
+      unless (Map.member (agentRoleDeclPolicyName agentRoleDecl) policyEnv') $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_AGENT_ROLE_POLICY"
+              ("Agent role `" <> agentRoleDeclName agentRoleDecl <> "` references unknown policy `" <> agentRoleDeclPolicyName agentRoleDecl <> "`.")
+              (Just (agentRoleDeclPolicySpan agentRoleDecl))
+              ["Declare the referenced policy before using it in an agent role."]
+              []
+          ]
+
+ensureKnownAgentReferences :: [AgentRoleDecl] -> [AgentDecl] -> Either DiagnosticBundle ()
+ensureKnownAgentReferences agentRoleDecls =
+  mapM_ checkAgent
+  where
+    roleEnv = Map.fromList [(agentRoleDeclName agentRoleDecl, agentRoleDecl) | agentRoleDecl <- agentRoleDecls]
+
+    checkAgent agentDecl =
+      unless (Map.member (agentDeclRoleName agentDecl) roleEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_AGENT_ROLE"
+              ("Agent `" <> agentDeclName agentDecl <> "` references unknown role `" <> agentDeclRoleName agentDecl <> "`.")
+              (Just (agentDeclRoleSpan agentDecl))
+              ["Declare the referenced role before assigning it to an agent."]
+              []
+          ]
 
 ensureUniquePolicyDecls :: [PolicyDecl] -> Either DiagnosticBundle ()
 ensureUniquePolicyDecls = go Map.empty

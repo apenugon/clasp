@@ -23,8 +23,11 @@ import qualified Data.Set as Set
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as LT
 import Clasp.Core
-  ( CoreHookDecl (..)
+  ( CoreAgentDecl (..)
+  , CoreAgentRoleDecl (..)
+  , CoreHookDecl (..)
   , CoreModule (..)
+  , CorePolicyDecl (..)
   )
 import Clasp.Lower
   ( LowerFormField (..)
@@ -35,12 +38,16 @@ import Clasp.Lower
   , lowerPageFlows
   )
 import Clasp.Syntax
-  ( ForeignDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
   , ModuleName (..)
+  , PolicyClassificationDecl (..)
+  , PolicyDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RouteBoundaryDecl (..)
@@ -102,17 +109,23 @@ buildContextGraph modl =
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
+    policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
+    agentRoleNodes = fmap buildAgentRoleNode (coreModuleAgentRoleDecls modl)
+    agentNodes = fmap buildAgentNode (coreModuleAgentDecls modl)
     routeNodes = fmap buildRouteNode (coreModuleRouteDecls modl)
     pageNodes = fmap buildPageNode pageFlows
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> hookNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
+        <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
+        <> concatMap buildAgentRoleEdges (coreModuleAgentRoleDecls modl)
+        <> concatMap buildAgentEdges (coreModuleAgentDecls modl)
         <> concatMap buildRouteEdges (coreModuleRouteDecls modl)
         <> concatMap buildPageEdges pageFlows
         <> concatMap buildForeignEdges (coreModuleForeignDecls modl)
@@ -209,6 +222,65 @@ buildHookNodes coreHookDecl =
             , ("event", ContextAttrText (hookTriggerDeclEvent triggerDecl))
             ]
         }
+
+buildPolicyNodes :: CorePolicyDecl -> [ContextNode]
+buildPolicyNodes corePolicyDecl =
+  policyNode : fmap (buildPolicyClassificationNode (policyDeclName policyDecl)) (policyDeclAllowedClassifications policyDecl)
+  where
+    policyDecl = corePolicySourceDecl corePolicyDecl
+    policyNode =
+      ContextNode
+        { contextNodeId = policyNodeId (policyDeclName policyDecl)
+        , contextNodeKind = "policy"
+        , contextNodeSpan = Just (policyDeclSpan policyDecl)
+        , contextNodeAttrs =
+            [ ("name", ContextAttrText (policyDeclName policyDecl))
+            , ("allowedClassifications", ContextAttrTexts (fmap policyClassificationDeclName (policyDeclAllowedClassifications policyDecl)))
+            ]
+        }
+
+buildPolicyClassificationNode :: Text -> PolicyClassificationDecl -> ContextNode
+buildPolicyClassificationNode policyName classificationDecl =
+  ContextNode
+    { contextNodeId = policyClassificationNodeId policyName (policyClassificationDeclName classificationDecl)
+    , contextNodeKind = "policyClassification"
+    , contextNodeSpan = Just (policyClassificationDeclSpan classificationDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (policyClassificationDeclName classificationDecl))
+        , ("policyName", ContextAttrText policyName)
+        ]
+    }
+
+buildAgentRoleNode :: CoreAgentRoleDecl -> ContextNode
+buildAgentRoleNode coreAgentRoleDecl =
+  ContextNode
+    { contextNodeId = agentRoleNodeId (agentRoleDeclName agentRoleDecl)
+    , contextNodeKind = "agentRole"
+    , contextNodeSpan = Just (agentRoleDeclSpan agentRoleDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (agentRoleDeclName agentRoleDecl))
+        , ("identity", ContextAttrText (agentRoleDeclIdentity agentRoleDecl))
+        , ("guideName", ContextAttrText (agentRoleDeclGuideName agentRoleDecl))
+        , ("policyName", ContextAttrText (agentRoleDeclPolicyName agentRoleDecl))
+        ]
+    }
+  where
+    agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+
+buildAgentNode :: CoreAgentDecl -> ContextNode
+buildAgentNode coreAgentDecl =
+  ContextNode
+    { contextNodeId = agentNodeId (agentDeclName agentDecl)
+    , contextNodeKind = "agent"
+    , contextNodeSpan = Just (agentDeclSpan agentDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (agentDeclName agentDecl))
+        , ("identity", ContextAttrText (agentDeclIdentity agentDecl))
+        , ("roleName", ContextAttrText (agentDeclRoleName agentDecl))
+        ]
+    }
+  where
+    agentDecl = coreAgentSourceDecl coreAgentDecl
 
 builtinSchemaNode :: Text -> Maybe ContextNode
 builtinSchemaNode name =
@@ -397,6 +469,49 @@ buildHookEdges coreHookDecl =
   where
     hookDecl = coreHookSourceDecl coreHookDecl
 
+buildPolicyEdges :: CorePolicyDecl -> [ContextEdge]
+buildPolicyEdges corePolicyDecl =
+  fmap buildClassificationEdge (policyDeclAllowedClassifications policyDecl)
+  where
+    policyDecl = corePolicySourceDecl corePolicyDecl
+    buildClassificationEdge classificationDecl =
+      ContextEdge
+        { contextEdgeKind = "policy-allows-classification"
+        , contextEdgeFrom = policyNodeId (policyDeclName policyDecl)
+        , contextEdgeTo = policyClassificationNodeId (policyDeclName policyDecl) (policyClassificationDeclName classificationDecl)
+        , contextEdgeAttrs = []
+        }
+
+buildAgentRoleEdges :: CoreAgentRoleDecl -> [ContextEdge]
+buildAgentRoleEdges coreAgentRoleDecl =
+  [ ContextEdge
+      { contextEdgeKind = "agent-role-guide"
+      , contextEdgeFrom = agentRoleNodeId (agentRoleDeclName agentRoleDecl)
+      , contextEdgeTo = guideNodeId (agentRoleDeclGuideName agentRoleDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "agent-role-policy"
+      , contextEdgeFrom = agentRoleNodeId (agentRoleDeclName agentRoleDecl)
+      , contextEdgeTo = policyNodeId (agentRoleDeclPolicyName agentRoleDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+
+buildAgentEdges :: CoreAgentDecl -> [ContextEdge]
+buildAgentEdges coreAgentDecl =
+  [ ContextEdge
+      { contextEdgeKind = "agent-role"
+      , contextEdgeFrom = agentNodeId (agentDeclName agentDecl)
+      , contextEdgeTo = agentRoleNodeId (agentDeclRoleName agentDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+  where
+    agentDecl = coreAgentSourceDecl coreAgentDecl
+
 buildRouteEdges :: RouteDecl -> [ContextEdge]
 buildRouteEdges routeDecl =
   mapMaybe id
@@ -507,11 +622,23 @@ guideNodeId name = ContextNodeId ("guide:" <> name)
 guideEntryNodeId :: Text -> Text -> ContextNodeId
 guideEntryNodeId guideName entryName = ContextNodeId ("guide-entry:" <> guideName <> ":" <> entryName)
 
+policyNodeId :: Text -> ContextNodeId
+policyNodeId name = ContextNodeId ("policy:" <> name)
+
+policyClassificationNodeId :: Text -> Text -> ContextNodeId
+policyClassificationNodeId policyName classificationName = ContextNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
+
 hookNodeId :: Text -> ContextNodeId
 hookNodeId name = ContextNodeId ("hook:" <> name)
 
 hookTriggerNodeId :: Text -> ContextNodeId
 hookTriggerNodeId hookName = ContextNodeId ("hook-trigger:" <> hookName)
+
+agentRoleNodeId :: Text -> ContextNodeId
+agentRoleNodeId name = ContextNodeId ("agent-role:" <> name)
+
+agentNodeId :: Text -> ContextNodeId
+agentNodeId name = ContextNodeId ("agent:" <> name)
 
 routeNodeId :: Text -> ContextNodeId
 routeNodeId name = ContextNodeId ("route:" <> name)

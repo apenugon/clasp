@@ -21,7 +21,9 @@ import Data.Aeson.Text (encodeToLazyText)
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as LT
 import Clasp.Core
-  ( CoreDecl (..)
+  ( CoreAgentDecl (..)
+  , CoreAgentRoleDecl (..)
+  , CoreDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
@@ -36,7 +38,9 @@ import Clasp.Core
   , coreExprType
   )
 import Clasp.Syntax
-  ( ConstructorDecl (..)
+  ( AgentDecl (..)
+  , AgentRoleDecl (..)
+  , ConstructorDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
@@ -104,6 +108,8 @@ buildAirModule modl =
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
     guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookDeclNodes (coreModuleHookDecls modl)
+    agentRoleNodes = fmap buildAgentRoleDeclNode (coreModuleAgentRoleDecls modl)
+    agentNodes = fmap buildAgentDeclNode (coreModuleAgentDecls modl)
     policyNodes = concatMap buildPolicyDeclNodes (coreModulePolicyDecls modl)
     projectionNodes = concatMap buildProjectionDeclNodes (coreModuleProjectionDecls modl)
     foreignNodes = fmap buildForeignDeclNode (coreModuleForeignDecls modl)
@@ -114,6 +120,8 @@ buildAirModule modl =
         <> recordNodes
         <> guideNodes
         <> hookNodes
+        <> agentRoleNodes
+        <> agentNodes
         <> policyNodes
         <> projectionNodes
         <> foreignNodes
@@ -254,6 +262,39 @@ buildHookDeclNodes coreHookDecl =
             , ("hookName", AirAttrText (hookDeclName hookDecl))
             ]
         }
+
+buildAgentRoleDeclNode :: CoreAgentRoleDecl -> AirNode
+buildAgentRoleDeclNode coreAgentRoleDecl =
+  AirNode
+    { airNodeId = agentRoleDeclId (agentRoleDeclName agentRoleDecl)
+    , airNodeKind = "agentRoleDecl"
+    , airNodeSpan = Just (agentRoleDeclSpan agentRoleDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (agentRoleDeclName agentRoleDecl))
+        , ("identity", AirAttrText (agentRoleDeclIdentity agentRoleDecl))
+        , ("guide", AirAttrObject [("name", AirAttrText (agentRoleDeclGuideName agentRoleDecl)), ("ref", AirAttrNode (guideDeclId (agentRoleDeclGuideName agentRoleDecl)))])
+        , ("policy", AirAttrObject [("name", AirAttrText (agentRoleDeclPolicyName agentRoleDecl)), ("ref", AirAttrNode (policyDeclId (agentRoleDeclPolicyName agentRoleDecl)))])
+        ]
+    }
+  where
+    agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+
+buildAgentDeclNode :: CoreAgentDecl -> AirNode
+buildAgentDeclNode coreAgentDecl =
+  AirNode
+    { airNodeId = agentDeclId (agentDeclName agentDecl)
+    , airNodeKind = "agentDecl"
+    , airNodeSpan = Just (agentDeclSpan agentDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (agentDeclName agentDecl))
+        , ("identity", AirAttrText (agentDeclIdentity agentDecl))
+        , ("role", AirAttrObject [("name", AirAttrText (agentDeclRoleName agentDecl)), ("ref", AirAttrNode (agentRoleDeclId (agentDeclRoleName agentDecl)))])
+        ]
+    }
+  where
+    agentDecl = coreAgentSourceDecl coreAgentDecl
 
 buildPolicyDeclNodes :: CorePolicyDecl -> [AirNode]
 buildPolicyDeclNodes corePolicyDecl =
@@ -716,6 +757,12 @@ hookDeclId name = AirNodeId ("hook:" <> name)
 
 hookTriggerDeclId :: Text -> AirNodeId
 hookTriggerDeclId hookName = AirNodeId ("hook-trigger:" <> hookName)
+
+agentRoleDeclId :: Text -> AirNodeId
+agentRoleDeclId name = AirNodeId ("agent-role:" <> name)
+
+agentDeclId :: Text -> AirNodeId
+agentDeclId name = AirNodeId ("agent:" <> name)
 
 policyDeclId :: Text -> AirNodeId
 policyDeclId name = AirNodeId ("policy:" <> name)

@@ -20,6 +20,7 @@ It includes:
 - Top-level record declarations
 - Top-level foreign capability declarations
 - Top-level hook declarations for lifecycle triggers
+- Top-level agent-role and agent declarations for named subagents
 - Top-level route declarations
 - Top-level declarations
 - Declaration-level type signatures
@@ -90,7 +91,7 @@ Every `Clasp` source file in `v0` has:
 
 1. A required module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, guide, hook, foreign, or route declarations
+3. Zero or more top-level type, record, guide, hook, role, agent, foreign, or route declarations
 4. One or more top-level declarations
 
 Example:
@@ -252,7 +253,7 @@ module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name
 
-top-level   ::= type-decl | record-decl | guide-decl | hook-decl | policy-decl | projection-decl | foreign-decl | route-decl | signature | decl
+top-level   ::= type-decl | record-decl | guide-decl | hook-decl | role-decl | agent-decl | policy-decl | projection-decl | foreign-decl | route-decl | signature | decl
 type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
 constructor ::= upper-ident type-atom*
 record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
@@ -260,6 +261,8 @@ record-field-decl ::= lower-ident ":" type ("classified" lower-ident)?
 guide-decl ::= "guide" upper-ident ("extends" upper-ident)? "=" "{" guide-entry-decl ("," guide-entry-decl)* "}"
 guide-entry-decl ::= lower-ident ":" string
 hook-decl ::= "hook" lower-ident "=" string upper-ident "->" upper-ident lower-ident
+role-decl ::= "role" upper-ident "=" "guide" ":" upper-ident "," "policy" ":" upper-ident
+agent-decl ::= "agent" lower-ident "=" upper-ident
 policy-decl ::= "policy" upper-ident "=" lower-ident ("," lower-ident)*
 projection-decl ::= "projection" upper-ident "=" upper-ident "with" upper-ident "{" lower-ident ("," lower-ident)* "}"
 foreign-decl ::= "foreign" lower-ident ":" type "=" string
@@ -326,6 +329,8 @@ Notes:
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
 - Foreign declarations also emit structured host-binding manifests plus generated host-binding adapters so host code can register schema-shaped implementations without hand-written runtime glue.
 - Hook declarations bind a lifecycle trigger string to typed request/response schemas and a checked handler function.
+- Agent role declarations bind a reusable role to one guide and one policy declaration.
+- Agent declarations bind a named agent identity to a checked role declaration.
 - Route declarations emit typed route metadata with generated request decoders and response encoders.
 - Route declarations also emit generated route-client manifests with typed request preparation and response parsing helpers derived from the same schemas.
 - Generated JavaScript modules also export a versioned `__claspBindings` contract that collects host bindings, routes, route clients, schema contracts, mobile bridge descriptors, seeded fixtures, assets, head strategy, and page-flow metadata behind one stable Bun-facing surface.
@@ -348,7 +353,7 @@ Notes:
 - Page-flow machine metadata is emitted through generated sidecar exports such as `__claspUiGraph`, `__claspNavigationGraph`, and `__claspActionGraph`; HTML flow attributes are available only through the opt-in `__claspRenderPage(value, __claspPageRenderModes.htmlWithFlowMetadata)` projection.
 - `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`.
 - Safe views escape text content, reject raw `script`/`style` tags, and keep styling explicit through `styled` references instead of raw host `class` or `style` strings.
-- The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate hook names, duplicate route names/endpoints, unknown names, unknown types, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong hook or route handler signatures, and simple type mismatches before code generation.
+- The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate hook names, duplicate agent-role names, duplicate agent names, duplicate route names/endpoints, unknown names, unknown types, unknown guide/policy references in roles, unknown role references in agents, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong hook or route handler signatures, and simple type mismatches before code generation.
 - AIR JSON is emitted as `clasp-air-v1`, with stable node IDs, explicit `ref` edges, root node IDs, and a module-level node count so tools can replay declaration, policy, projection, route, and expression graphs without reconstructing them from raw files.
 - The CLI can persist that graph directly with `claspc air <input.clasp> [-o output.air.json]`.
 
