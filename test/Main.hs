@@ -2034,16 +2034,18 @@ compileTests =
           Right emitted -> do
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
-    , testCase "compile emits workflow checkpoint, replay, and idempotency helpers" $
+    , testCase "compile emits workflow lifecycle, retry, and idempotency helpers" $
         case compileSource "workflow" workflowSource of
           Left err ->
             assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected workflow checkpoint helper" ("checkpoint(value) { return $encode_Counter(value); }" `T.isInfixOf` emitted)
             assertBool "expected workflow resume helper" ("resume(snapshot) { return $decode_Counter(snapshot); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow start helper" ("start(snapshot) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow deliver helper" ("deliver(run, message, handler) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow deadline helper" ("withDeadline(run, deadlineAt) { return $claspWorkflowWithDeadline(\"CounterFlow\", run, deadlineAt); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
         case compileSource "let" letExpressionSource of
           Left err ->
@@ -2727,7 +2729,7 @@ compileTests =
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
-    , testCase "worker runtime exposes workflow replay and idempotency contracts" $
+    , testCase "worker runtime exposes workflow deadlines, cancellation, retries, and bounded backoff" $
         case compileSource "workflow-worker-runtime" workflowSource of
           Left err ->
             assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -2739,8 +2741,8 @@ compileTests =
             absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
-              "expected workflow replay and idempotency runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
+              "expected workflow lifecycle and retry runtime contract"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"]}"
               runtimeOutput
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
@@ -5080,15 +5082,37 @@ workflowRuntimeScript compiledPath runtimePath =
     , "const workflow = runtime.workflow('CounterFlow');"
     , "const checkpoint = workflow.checkpoint({ count: 7 });"
     , "const resumed = workflow.resume(checkpoint);"
-    , "const run = workflow.start(checkpoint);"
+    , "const run = workflow.start(checkpoint, {"
+    , "  deadlineAt: 1200,"
+    , "  retry: { maxAttempts: 3, initialBackoffMs: 50, backoffMultiplier: 2, maxBackoffMs: 80 }"
+    , "});"
     , "const deliverOnce = workflow.deliver(run, { id: 'm1', payload: 2 }, (state, payload) => ({"
     , "  state: { count: state.count + payload },"
     , "  result: payload"
-    , "}));"
+    , "}), { now: 1000 });"
     , "const deliverDuplicate = workflow.deliver(deliverOnce.run, { id: 'm1', payload: 99 }, (state, payload) => ({"
     , "  state: { count: state.count + payload },"
     , "  result: payload"
-    , "}));"
+    , "}), { now: 1000 });"
+    , "const retried = workflow.deliver(run, { id: 'm2', payload: 4 }, (state, payload, message, meta) => {"
+    , "  if (meta.attempt < 3) {"
+    , "    throw new Error(`retry-${meta.attempt}`);"
+    , "  }"
+    , "  return {"
+    , "    state: { count: state.count + payload },"
+    , "    result: meta.attempt"
+    , "  };"
+    , "}, { now: 1000 });"
+    , "const deadlineExceeded = workflow.deliver(run, { id: 'm3', payload: 1 }, (state, payload, message, meta) => {"
+    , "  throw new Error(`slow-${meta.attempt}`);"
+    , "}, {"
+    , "  now: 1000,"
+    , "  retry: { maxAttempts: 4, initialBackoffMs: 150, backoffMultiplier: 2, maxBackoffMs: 200 }"
+    , "});"
+    , "const cancelled = workflow.cancel(run, 'manual-stop');"
+    , "const cancelledDelivery = workflow.deliver(cancelled, { id: 'm4', payload: 1 }, (state, payload) => ({"
+    , "  count: state.count + payload"
+    , "}), { now: 1000 });"
     , "const replayed = workflow.replay(checkpoint, ["
     , "  { id: 'm1', payload: 2 },"
     , "  { id: 'm1', payload: 99 },"
@@ -5099,8 +5123,18 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  stateType: workflow.stateType,"
     , "  checkpoint,"
     , "  resumedValue: resumed.count,"
+    , "  deadlineAt: run.deadlineAt,"
     , "  duplicateSuppressed: deliverDuplicate.duplicate,"
     , "  duplicateResult: deliverDuplicate.result,"
+    , "  retriedStatus: retried.status,"
+    , "  retriedAttempts: retried.attempts,"
+    , "  retriedDelays: retried.retryDelaysMs,"
+    , "  retriedResult: retried.result,"
+    , "  deadlineStatus: deadlineExceeded.status,"
+    , "  deadlineAttempts: deadlineExceeded.attempts,"
+    , "  deadlineFailure: deadlineExceeded.failure?.message ?? null,"
+    , "  cancelledStatus: cancelledDelivery.status,"
+    , "  cancelReason: cancelled.cancelReason,"
     , "  replayedCount: replayed.state.count,"
     , "  replayedDeliveries: replayed.deliveries.length,"
     , "  replayedIds: replayed.processedIds"
