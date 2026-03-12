@@ -39,6 +39,9 @@ module Clasp.Syntax
   , RoutePathDecl (..)
   , RoutePathParamDecl (..)
   , SourceSpan (..)
+  , SupervisorChildDecl (..)
+  , SupervisorDecl (..)
+  , SupervisorRestartStrategy (..)
   , ToolDecl (..)
   , ToolServerDecl (..)
   , TypeDecl (..)
@@ -51,6 +54,7 @@ module Clasp.Syntax
   , renderType
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderSupervisorRestartStrategy
   , splitModuleName
   ) where
 
@@ -111,6 +115,7 @@ data Module = Module
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
   , moduleWorkflowDecls :: [WorkflowDecl]
+  , moduleSupervisorDecls :: [SupervisorDecl]
   , moduleGuideDecls :: [GuideDecl]
   , moduleHookDecls :: [HookDecl]
   , moduleAgentRoleDecls :: [AgentRoleDecl]
@@ -142,6 +147,40 @@ data WorkflowDecl = WorkflowDecl
   , workflowDeclIdentity :: Text
   , workflowDeclStateType :: Type
   , workflowDeclStateTypeSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data SupervisorRestartStrategy
+  = SupervisorOneForOne
+  | SupervisorOneForAll
+  | SupervisorRestForOne
+  deriving (Eq, Show)
+
+renderSupervisorRestartStrategy :: SupervisorRestartStrategy -> Text
+renderSupervisorRestartStrategy restartStrategy =
+  case restartStrategy of
+    SupervisorOneForOne -> "one_for_one"
+    SupervisorOneForAll -> "one_for_all"
+    SupervisorRestForOne -> "rest_for_one"
+
+data SupervisorChildDecl
+  = SupervisorWorkflowChild
+      { supervisorChildName :: Text
+      , supervisorChildSpan :: SourceSpan
+      }
+  | SupervisorSupervisorChild
+      { supervisorChildName :: Text
+      , supervisorChildSpan :: SourceSpan
+      }
+  deriving (Eq, Show)
+
+data SupervisorDecl = SupervisorDecl
+  { supervisorDeclName :: Text
+  , supervisorDeclSpan :: SourceSpan
+  , supervisorDeclNameSpan :: SourceSpan
+  , supervisorDeclIdentity :: Text
+  , supervisorDeclRestartStrategy :: SupervisorRestartStrategy
+  , supervisorDeclChildren :: [SupervisorChildDecl]
   }
   deriving (Eq, Show)
 
@@ -607,6 +646,7 @@ renderModule modl =
         [ fmap renderTypeDecl (moduleTypeDecls modl)
         , fmap renderRecordDecl (moduleRecordDecls modl)
         , fmap renderWorkflowDecl (moduleWorkflowDecls modl)
+        , fmap renderSupervisorDecl (moduleSupervisorDecls modl)
         , fmap renderGuideDecl (moduleGuideDecls modl)
         , fmap renderHookDecl (moduleHookDecls modl)
         , fmap renderAgentRoleDecl (moduleAgentRoleDecls modl)
@@ -683,6 +723,23 @@ renderWorkflowDecl workflowDecl =
     <> " = { state: "
     <> renderType (workflowDeclStateType workflowDecl)
     <> " }"
+
+renderSupervisorDecl :: SupervisorDecl -> Text
+renderSupervisorDecl supervisorDecl =
+  "supervisor "
+    <> supervisorDeclName supervisorDecl
+    <> " = "
+    <> renderSupervisorRestartStrategy (supervisorDeclRestartStrategy supervisorDecl)
+    <> " "
+    <> renderBracedInline (fmap renderSupervisorChildDecl (supervisorDeclChildren supervisorDecl))
+
+renderSupervisorChildDecl :: SupervisorChildDecl -> Text
+renderSupervisorChildDecl childDecl =
+  case childDecl of
+    SupervisorWorkflowChild {supervisorChildName = childName} ->
+      "workflow " <> childName
+    SupervisorSupervisorChild {supervisorChildName = childName} ->
+      "supervisor " <> childName
 
 renderHookDecl :: HookDecl -> Text
 renderHookDecl hookDecl =

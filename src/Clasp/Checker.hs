@@ -37,6 +37,7 @@ import Clasp.Core
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -80,6 +81,8 @@ import Clasp.Syntax
   , RouteMethod (..)
   , Position (..)
   , SourceSpan (..)
+  , SupervisorChildDecl (..)
+  , SupervisorDecl (..)
   , ToolDecl (..)
   , ToolServerDecl (..)
   , Type (..)
@@ -580,6 +583,7 @@ checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       schemaRecordDecls = moduleRecordDecls modl
       workflowDecls = moduleWorkflowDecls modl
+      supervisorDecls = moduleSupervisorDecls modl
       guideDecls = moduleGuideDecls modl
       hookDecls = moduleHookDecls modl
       agentRoleDecls = moduleAgentRoleDecls modl
@@ -599,6 +603,7 @@ checkModule modl = do
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
   ensureUniqueWorkflowDecls workflowDecls
+  ensureUniqueSupervisorDecls supervisorDecls
   ensureUniqueHooks hookDecls
   ensureUniqueAgentRoleDecls agentRoleDecls
   ensureUniqueAgentDecls agentDecls
@@ -608,6 +613,7 @@ checkModule modl = do
   ensureUniqueVerifierDecls verifierDecls
   ensureUniqueMergeGateDecls mergeGateDecls
   ensureGuideHierarchy guideDecls
+  ensureSupervisorHierarchy workflowDecls supervisorDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
   ensureKnownToolServerReferences policyDecls toolServerDecls
@@ -653,6 +659,7 @@ checkModule modl = do
       , coreModuleTypeDecls = allTypeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
+      , coreModuleSupervisorDecls = fmap CoreSupervisorDecl supervisorDecls
       , coreModuleGuideDecls = guideDecls
       , coreModuleHookDecls = fmap CoreHookDecl hookDecls
       , coreModuleAgentRoleDecls = fmap CoreAgentRoleDecl agentRoleDecls
@@ -713,6 +720,24 @@ ensureUniqueWorkflowDecls = go Map.empty
             ]
         Nothing ->
           go (Map.insert (workflowDeclName workflowDecl) workflowDecl seen) rest
+
+ensureUniqueSupervisorDecls :: [SupervisorDecl] -> Either DiagnosticBundle ()
+ensureUniqueSupervisorDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (supervisorDecl : rest) =
+      case Map.lookup (supervisorDeclName supervisorDecl) seen of
+        Just previousSupervisorDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_SUPERVISOR"
+                ("Duplicate supervisor declaration for `" <> supervisorDeclName supervisorDecl <> "`.")
+                (Just (supervisorDeclNameSpan supervisorDecl))
+                ["Each supervisor name may only be declared once."]
+                [diagnosticRelated "previous supervisor declaration" (supervisorDeclNameSpan previousSupervisorDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (supervisorDeclName supervisorDecl) supervisorDecl seen) rest
 
 ensureUniqueGuideEntries :: GuideDecl -> Either DiagnosticBundle ()
 ensureUniqueGuideEntries guideDecl = go Map.empty (guideDeclEntries guideDecl)
@@ -777,6 +802,162 @@ ensureGuideHierarchy guideDecls =
                   pure ()
                 Just parentGuideDecl ->
                   ensureGuideAcyclic env (guideDeclName guideDecl : seen) parentGuideDecl
+
+ensureSupervisorHierarchy :: [WorkflowDecl] -> [SupervisorDecl] -> Either DiagnosticBundle ()
+ensureSupervisorHierarchy workflowDecls supervisorDecls = do
+  traverse_ ensureSupervisorChildren supervisorDecls
+  ensureUniqueSupervisorParents workflowDecls supervisorDecls
+  traverse_ (ensureSupervisorAcyclic supervisorEnv []) supervisorDecls
+  where
+    workflowEnv = Map.fromList [(workflowDeclName workflowDecl, workflowDecl) | workflowDecl <- workflowDecls]
+    supervisorEnv = Map.fromList [(supervisorDeclName supervisorDecl, supervisorDecl) | supervisorDecl <- supervisorDecls]
+
+    ensureSupervisorChildren supervisorDecl
+      | null (supervisorDeclChildren supervisorDecl) =
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_EMPTY_SUPERVISOR"
+                ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` must declare at least one child.")
+                (Just (supervisorDeclNameSpan supervisorDecl))
+                ["Add one or more `workflow` or `supervisor` children to define the hierarchy."]
+                []
+            ]
+      | otherwise =
+          ensureDistinctSupervisorChildren supervisorDecl
+        *> traverse_ (ensureKnownSupervisorChild workflowEnv supervisorEnv supervisorDecl) (supervisorDeclChildren supervisorDecl)
+
+    ensureDistinctSupervisorChildren supervisorDecl = go Map.empty (supervisorDeclChildren supervisorDecl)
+      where
+        childKey :: SupervisorChildDecl -> (Text, Text)
+        childKey childDecl =
+          case childDecl of
+            SupervisorWorkflowChild {supervisorChildName = childName} -> ("workflow", childName)
+            SupervisorSupervisorChild {supervisorChildName = childName} -> ("supervisor", childName)
+
+        childLabel childDecl =
+          case childDecl of
+            SupervisorWorkflowChild {supervisorChildName = childName} -> "workflow `" <> childName <> "`"
+            SupervisorSupervisorChild {supervisorChildName = childName} -> "supervisor `" <> childName <> "`"
+
+        go _ [] = pure ()
+        go seen (childDecl : rest) =
+          case Map.lookup (childKey childDecl) seen of
+            Just previousChildDecl ->
+              Left . diagnosticBundle $
+                [ diagnostic
+                    "E_DUPLICATE_SUPERVISOR_CHILD"
+                    ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` repeats " <> childLabel childDecl <> ".")
+                    (Just (supervisorChildSpan childDecl))
+                    ["Each child may only appear once per supervisor declaration."]
+                    [diagnosticRelated "previous child declaration" (supervisorChildSpan previousChildDecl)]
+                ]
+            Nothing ->
+              go (Map.insert (childKey childDecl) childDecl seen) rest
+
+    ensureKnownSupervisorChild workflowEnv' supervisorEnv' supervisorDecl childDecl =
+      case childDecl of
+        SupervisorWorkflowChild {supervisorChildName = childName, supervisorChildSpan = childSpan} ->
+          unless (Map.member childName workflowEnv') $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_UNKNOWN_SUPERVISOR_WORKFLOW"
+                  ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` references unknown workflow `" <> childName <> "`.")
+                  (Just childSpan)
+                  ["Declare the workflow before attaching it to a supervisor hierarchy."]
+                  []
+              ]
+        SupervisorSupervisorChild {supervisorChildName = childName, supervisorChildSpan = childSpan} ->
+          unless (Map.member childName supervisorEnv') $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_UNKNOWN_SUPERVISOR_CHILD"
+                  ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` references unknown supervisor `" <> childName <> "`.")
+                  (Just childSpan)
+                  ["Declare the child supervisor before attaching it to a parent supervisor."]
+                  []
+              ]
+
+    ensureUniqueSupervisorParents _ supervisorDecls' =
+      goWorkflowParents Map.empty (concatMap expandSupervisorChildren supervisorDecls')
+        *> goSupervisorParents Map.empty (concatMap expandSupervisorChildren supervisorDecls')
+      where
+        expandSupervisorChildren supervisorDecl =
+          [ (supervisorDecl, childDecl)
+          | childDecl <- supervisorDeclChildren supervisorDecl
+          ]
+
+        goWorkflowParents _ [] = pure ()
+        goWorkflowParents seen ((supervisorDecl, childDecl) : rest) =
+          case childDecl of
+            SupervisorWorkflowChild {supervisorChildName = childName, supervisorChildSpan = childSpan} ->
+              case Map.lookup childName seen of
+                Just previousSupervisorDecl ->
+                  Left . diagnosticBundle $
+                    [ diagnostic
+                        "E_MULTIPLE_SUPERVISOR_PARENTS"
+                        ("Workflow `" <> childName <> "` is attached to multiple supervisors.")
+                        (Just childSpan)
+                        ["Attach each workflow to at most one supervisor in the hierarchy."]
+                        [diagnosticRelated "previous supervisor declaration" (supervisorDeclNameSpan previousSupervisorDecl)]
+                    ]
+                Nothing ->
+                  goWorkflowParents (Map.insert childName supervisorDecl seen) rest
+            SupervisorSupervisorChild {} ->
+              goWorkflowParents seen rest
+
+        goSupervisorParents _ [] = pure ()
+        goSupervisorParents seen ((supervisorDecl, childDecl) : rest) =
+          case childDecl of
+            SupervisorSupervisorChild {supervisorChildName = childName, supervisorChildSpan = childSpan} ->
+              if childName == supervisorDeclName supervisorDecl
+                then
+                  Left . diagnosticBundle $
+                    [ diagnostic
+                        "E_SUPERVISOR_SELF_REFERENCE"
+                        ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` cannot supervise itself.")
+                        (Just childSpan)
+                        ["Remove the self-reference so the supervisor hierarchy remains well-formed."]
+                        []
+                    ]
+                else
+                  case Map.lookup childName seen of
+                    Just previousSupervisorDecl ->
+                      Left . diagnosticBundle $
+                        [ diagnostic
+                            "E_MULTIPLE_SUPERVISOR_PARENTS"
+                            ("Supervisor `" <> childName <> "` is attached to multiple supervisors.")
+                            (Just childSpan)
+                            ["Attach each child supervisor to at most one parent supervisor."]
+                            [diagnosticRelated "previous supervisor declaration" (supervisorDeclNameSpan previousSupervisorDecl)]
+                        ]
+                    Nothing ->
+                      goSupervisorParents (Map.insert childName supervisorDecl seen) rest
+            SupervisorWorkflowChild {} ->
+              goSupervisorParents seen rest
+
+    ensureSupervisorAcyclic env seen supervisorDecl
+      | supervisorDeclName supervisorDecl `elem` seen =
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_SUPERVISOR_CYCLE"
+                ("Supervisor `" <> supervisorDeclName supervisorDecl <> "` participates in a supervision cycle.")
+                (Just (supervisorDeclNameSpan supervisorDecl))
+                ["Remove the cyclic supervisor references so the hierarchy stays acyclic."]
+                []
+            ]
+      | otherwise =
+          traverse_ checkChild (supervisorDeclChildren supervisorDecl)
+      where
+        checkChild childDecl =
+          case childDecl of
+            SupervisorWorkflowChild {} ->
+              pure ()
+            SupervisorSupervisorChild {supervisorChildName = childName} ->
+              case Map.lookup childName env of
+                Nothing ->
+                  pure ()
+                Just childSupervisorDecl ->
+                  ensureSupervisorAcyclic env (supervisorDeclName supervisorDecl : seen) childSupervisorDecl
 
 ensureUniqueHooks :: [HookDecl] -> Either DiagnosticBundle ()
 ensureUniqueHooks = go Map.empty

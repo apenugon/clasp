@@ -148,6 +148,7 @@ combineModules entryModule state =
         , moduleTypeDecls = concatMap moduleTypeDecls (importedModules <> [entryModule])
         , moduleRecordDecls = concatMap moduleRecordDecls (importedModules <> [entryModule])
         , moduleWorkflowDecls = concatMap moduleWorkflowDecls (importedModules <> [entryModule])
+        , moduleSupervisorDecls = concatMap moduleSupervisorDecls (importedModules <> [entryModule])
         , moduleGuideDecls = concatMap moduleGuideDecls (importedModules <> [entryModule])
         , moduleHookDecls = concatMap moduleHookDecls (importedModules <> [entryModule])
         , moduleAgentRoleDecls = concatMap moduleAgentRoleDecls (importedModules <> [entryModule])

@@ -16,6 +16,7 @@ module Clasp.Core
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
   , CoreRouteContract (..)
+  , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -55,6 +56,9 @@ import Clasp.Syntax
   , RouteMethod (..)
   , RoutePathDecl
   , SourceSpan (..)
+  , SupervisorChildDecl (..)
+  , SupervisorDecl (..)
+  , renderSupervisorRestartStrategy
   , ToolDecl (..)
   , ToolServerDecl (..)
   , Type (..)
@@ -74,6 +78,7 @@ data CoreModule = CoreModule
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleWorkflowDecls :: [CoreWorkflowDecl]
+  , coreModuleSupervisorDecls :: [CoreSupervisorDecl]
   , coreModuleGuideDecls :: [GuideDecl]
   , coreModuleHookDecls :: [CoreHookDecl]
   , coreModuleAgentRoleDecls :: [CoreAgentRoleDecl]
@@ -97,6 +102,11 @@ data CorePolicyDecl = CorePolicyDecl
 
 data CoreWorkflowDecl = CoreWorkflowDecl
   { coreWorkflowSourceDecl :: WorkflowDecl
+  }
+  deriving (Eq, Show)
+
+data CoreSupervisorDecl = CoreSupervisorDecl
+  { coreSupervisorSourceDecl :: SupervisorDecl
   }
   deriving (Eq, Show)
 
@@ -248,6 +258,7 @@ renderCoreModule modl =
       [ fmap renderTypeDecl (coreModuleTypeDecls modl)
       , fmap renderRecordDecl (coreModuleRecordDecls modl)
       , fmap renderWorkflowDecl (coreModuleWorkflowDecls modl)
+      , fmap renderSupervisorDecl (coreModuleSupervisorDecls modl)
       , fmap renderGuideDecl (coreModuleGuideDecls modl)
       , fmap renderHookDecl (coreModuleHookDecls modl)
       , fmap renderAgentRoleDecl (coreModuleAgentRoleDecls modl)
@@ -297,6 +308,25 @@ renderWorkflowDecl workflowDecl =
     <> " }"
   where
     sourceDecl = coreWorkflowSourceDecl workflowDecl
+
+renderSupervisorDecl :: CoreSupervisorDecl -> Text
+renderSupervisorDecl supervisorDecl =
+  "supervisor "
+    <> supervisorDeclName sourceDecl
+    <> " = "
+    <> renderSupervisorRestartStrategy (supervisorDeclRestartStrategy sourceDecl)
+    <> " "
+    <> renderBracedInline (fmap renderSupervisorChildDecl (supervisorDeclChildren sourceDecl))
+  where
+    sourceDecl = coreSupervisorSourceDecl supervisorDecl
+
+renderSupervisorChildDecl :: SupervisorChildDecl -> Text
+renderSupervisorChildDecl childDecl =
+  case childDecl of
+    SupervisorWorkflowChild {supervisorChildName = childName} ->
+      "workflow " <> childName
+    SupervisorSupervisorChild {supervisorChildName = childName} ->
+      "supervisor " <> childName
 
 renderRecordFieldDecl :: RecordFieldDecl -> Text
 renderRecordFieldDecl fieldDecl =

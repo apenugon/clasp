@@ -97,7 +97,7 @@ Every `Clasp` source file in `v0` has:
 
 1. An optional module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, workflow, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
+3. Zero or more top-level type, record, workflow, supervisor, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
 4. One or more top-level declarations
 
 When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
@@ -110,6 +110,15 @@ module Main
 record Counter = { value : Int }
 
 workflow CounterFlow = { state : Counter }
+```
+
+Supervisor declarations define BEAM-style restart strategy metadata over workflow or nested supervisor children:
+
+```clasp
+supervisor RootSupervisor = one_for_all {
+  workflow CounterFlow,
+  supervisor WorkerSupervisor
+}
 ```
 
 Example:

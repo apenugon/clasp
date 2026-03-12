@@ -46,6 +46,8 @@ import Clasp.Syntax
   , RouteMethod (..)
   , RoutePathDecl (..)
   , RoutePathParamDecl (..)
+  , SupervisorChildDecl (..)
+  , SupervisorDecl (..)
   , ToolDecl (..)
   , ToolServerDecl (..)
   , Type (..)
@@ -54,6 +56,7 @@ import Clasp.Syntax
   , WorkflowDecl (..)
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderSupervisorRestartStrategy
   , renderType
   )
 
@@ -2072,7 +2075,10 @@ emitPlatformBridgesExport =
 
 emitControlPlaneExports :: LowerModule -> [Text]
 emitControlPlaneExports modl =
-  emitWorkflows
+  emitModuleMetadataPrelude
+    <> emitWorkflows
+    <> emitSupervisors
+    <> emitModuleManifest
     <> emitGuides
     <> emitPolicies
     <> emitAgentRoles
@@ -2088,6 +2094,7 @@ emitControlPlaneExports modl =
     typeDecls = lowerModuleTypeDecls modl
     recordDecls = lowerModuleRecordDecls modl
     workflows = lowerModuleWorkflowDecls modl
+    supervisors = lowerModuleSupervisorDecls modl
     guides = lowerModuleGuideDecls modl
     hooks = lowerModuleHookDecls modl
     agentRoles = lowerModuleAgentRoleDecls modl
@@ -2112,29 +2119,13 @@ emitControlPlaneExports modl =
       ]
 
     emitWorkflows =
-      emitModuleMetadataPrelude
-        <> [ "export const __claspWorkflows = ["
+      [ "export const __claspWorkflows = ["
       ]
         <> concatMap emitWorkflow workflows
         <> [ "];"
            , "for (const workflow of __claspWorkflows) {"
            , "  Object.freeze(workflow);"
            , "}"
-           , ""
-           , "export const __claspModule = Object.freeze({"
-           , "  name: " <> emitStringLiteral moduleNameText <> ","
-           , "  versionId: $claspModuleVersionId,"
-           , "  upgradeWindow: $claspModuleUpgradeWindow,"
-           , "  compatibility: Object.freeze({"
-           , "    workflowCount: " <> T.pack (show (length workflows)) <> ","
-           , "    controlPlaneVersion: 1,"
-           , "    workflows: Object.freeze(__claspWorkflows.map((workflow) => Object.freeze({"
-           , "      name: workflow.name,"
-           , "      stateType: workflow.stateType,"
-           , "      compatibility: workflow.compatibility"
-           , "    })))"
-           , "  })"
-           , "});"
            , ""
            ]
 
@@ -2167,6 +2158,66 @@ emitControlPlaneExports modl =
       , "    upgrade(run, targetWorkflow, options) { return $claspWorkflowUpgrade(this, targetWorkflow ?? this, run, options); }"
       , "  },"
       ]
+
+    emitSupervisors =
+      [ "export const __claspSupervisors = ["
+      ]
+        <> concatMap emitSupervisor supervisors
+        <> [ "];"
+           , "for (const supervisor of __claspSupervisors) {"
+           , "  Object.freeze(supervisor.children);"
+           , "  Object.freeze(supervisor);"
+           , "}"
+           , ""
+           ]
+
+    emitModuleManifest =
+      [ "export const __claspModule = Object.freeze({"
+      , "  name: " <> emitStringLiteral moduleNameText <> ","
+      , "  versionId: $claspModuleVersionId,"
+      , "  upgradeWindow: $claspModuleUpgradeWindow,"
+      , "  compatibility: Object.freeze({"
+      , "    workflowCount: " <> T.pack (show (length workflows)) <> ","
+      , "    supervisorCount: " <> T.pack (show (length supervisors)) <> ","
+      , "    controlPlaneVersion: 1,"
+      , "    workflows: Object.freeze(__claspWorkflows.map((workflow) => Object.freeze({"
+      , "      name: workflow.name,"
+      , "      stateType: workflow.stateType,"
+      , "      compatibility: workflow.compatibility"
+      , "    }))),"
+      , "    supervisors: Object.freeze(__claspSupervisors.map((supervisor) => Object.freeze({"
+      , "      name: supervisor.name,"
+      , "      restartStrategy: supervisor.restartStrategy,"
+      , "      children: supervisor.children"
+      , "    })))"
+      , "  })"
+      , "});"
+      , ""
+      ]
+
+    emitSupervisor supervisorDecl =
+      [ "  {"
+      , "    name: " <> emitStringLiteral (supervisorDeclName supervisorDecl) <> ","
+      , "    id: " <> emitStringLiteral (supervisorDeclIdentity supervisorDecl) <> ","
+      , "    restartStrategy: " <> emitStringLiteral (renderSupervisorRestartStrategy (supervisorDeclRestartStrategy supervisorDecl)) <> ","
+      , "    children: Object.freeze(["
+      ]
+        <> concatMap emitSupervisorChild (supervisorDeclChildren supervisorDecl)
+        <> [ "    ])"
+           , "  },"
+           ]
+
+    emitSupervisorChild childDecl =
+      [ "      Object.freeze({"
+      , "        kind: " <> emitStringLiteral (supervisorChildKind childDecl) <> ","
+      , "        name: " <> emitStringLiteral (supervisorChildName childDecl)
+      , "      }),"
+      ]
+
+    supervisorChildKind childDecl =
+      case childDecl of
+        SupervisorWorkflowChild {} -> "workflow"
+        SupervisorSupervisorChild {} -> "supervisor"
 
     emitGuides =
       [ "export const __claspGuides = ["
@@ -2464,6 +2515,7 @@ emitControlPlaneExports modl =
       , "  version: 1,"
       , "  module: __claspModule,"
       , "  workflows: __claspWorkflows,"
+      , "  supervisors: __claspSupervisors,"
       , "  guides: __claspGuides,"
       , "  hooks: __claspHooks,"
       , "  agentRoles: __claspAgentRoles,"
@@ -2492,6 +2544,7 @@ renderControlPlaneDocsMarkdown modl =
     , "- Upgrade window: bounded-overlap"
     ]
       <> renderDocsSection "Workflows" (fmap renderWorkflowDoc (lowerModuleWorkflowDecls modl))
+      <> renderDocsSection "Supervisors" (fmap renderSupervisorDoc (lowerModuleSupervisorDecls modl))
       <> renderDocsSection "Guides" (fmap renderGuideDoc (lowerModuleGuideDecls modl))
       <> renderDocsSection "Policies" (fmap renderPolicyDoc (lowerModulePolicyDecls modl))
       <> renderDocsSection "Agent Roles" (fmap renderAgentRoleDoc (lowerModuleAgentRoleDecls modl))
@@ -2533,6 +2586,30 @@ renderWorkflowDoc workflowDecl =
     , "- Migrate: `workflow.migrate(snapshot, targetWorkflow?, { migrateState? })` applies an explicit state migration hook at a hot-swap boundary before re-checkpointing against the target workflow"
     , "- Upgrade: `workflow.upgrade(run, targetWorkflow?, { migrateState?, prepare?, activate? })` preserves durable run metadata while requiring explicit upgrade handlers for supervised hot swaps"
     ]
+
+renderSupervisorDoc :: SupervisorDecl -> Text
+renderSupervisorDoc supervisorDecl =
+  T.unlines
+    [ "### " <> supervisorDeclName supervisorDecl
+    , "- Restart strategy: `" <> renderSupervisorRestartStrategy (supervisorDeclRestartStrategy supervisorDecl) <> "`"
+    , "- Children: " <> renderSupervisorChildrenDoc (supervisorDeclChildren supervisorDecl)
+    ]
+
+renderSupervisorChildrenDoc :: [SupervisorChildDecl] -> Text
+renderSupervisorChildrenDoc childDecls =
+  case childDecls of
+    [] ->
+      "_None declared._"
+    _ ->
+      T.intercalate ", " (fmap renderSupervisorChildDoc childDecls)
+
+renderSupervisorChildDoc :: SupervisorChildDecl -> Text
+renderSupervisorChildDoc childDecl =
+  case childDecl of
+    SupervisorWorkflowChild {supervisorChildName = childName} ->
+      "`workflow " <> childName <> "`"
+    SupervisorSupervisorChild {supervisorChildName = childName} ->
+      "`supervisor " <> childName <> "`"
 
 renderGuideDoc :: GuideDecl -> Text
 renderGuideDoc guideDecl =

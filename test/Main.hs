@@ -64,6 +64,7 @@ import Clasp.Core
   , CoreModule (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -124,6 +125,9 @@ import Clasp.Syntax
   , RouteMethod (..)
   , RoutePathDecl (..)
   , SourceSpan (..)
+  , SupervisorChildDecl (..)
+  , SupervisorDecl (..)
+  , SupervisorRestartStrategy (..)
   , ToolDecl (..)
   , ToolServerDecl (..)
   , Type (..)
@@ -315,6 +319,25 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
+    , testCase "parses supervisor declarations with restart strategies and nested children" $
+        case parseSource "inline" supervisorSource of
+          Left err ->
+            assertFailure ("expected supervisor source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleSupervisorDecls modl of
+              [rootSupervisor, childSupervisor] -> do
+                assertEqual "root supervisor name" "RootSupervisor" (supervisorDeclName rootSupervisor)
+                assertEqual "root supervisor identity" "supervisor:RootSupervisor" (supervisorDeclIdentity rootSupervisor)
+                assertEqual "root supervisor restart strategy" SupervisorOneForAll (supervisorDeclRestartStrategy rootSupervisor)
+                assertEqual
+                  "root supervisor children"
+                  [ SupervisorWorkflowChild "CounterFlow" dummySpan
+                  , SupervisorSupervisorChild "WorkerSupervisor" dummySpan
+                  ]
+                  (normalizeSupervisorChildren (supervisorDeclChildren rootSupervisor))
+                assertEqual "child supervisor restart strategy" SupervisorRestForOne (supervisorDeclRestartStrategy childSupervisor)
+              other ->
+                assertFailure ("expected two supervisor declarations, got " <> show (length other))
     , testCase "parses agent roles and agent bindings" $
         case parseSource "inline" agentSource of
           Left err ->
@@ -860,6 +883,17 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
+    , testCase "accepts supervisor hierarchies with BEAM-style restart strategies" $
+        case checkSource "supervisor" supervisorSource of
+          Left err ->
+            assertFailure ("expected supervisor source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case coreModuleSupervisorDecls checked of
+              [CoreSupervisorDecl rootSupervisor, CoreSupervisorDecl childSupervisor] -> do
+                assertEqual "root restart strategy" SupervisorOneForAll (supervisorDeclRestartStrategy rootSupervisor)
+                assertEqual "child restart strategy" SupervisorRestForOne (supervisorDeclRestartStrategy childSupervisor)
+              other ->
+                assertFailure ("expected two checked supervisor declarations, got " <> show (length other))
     , testCase "accepts agent roles that bind guides and policies to agents" $
         case checkSource "agent" agentSource of
           Left err ->
@@ -1177,6 +1211,8 @@ checkerTests =
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects workflows whose state is not a record schema" $
         assertHasCode "E_WORKFLOW_STATE_TYPE" (checkSource "bad" badWorkflowStateSource)
+    , testCase "rejects supervisor hierarchies that attach a workflow to multiple parents" $
+        assertHasCode "E_MULTIPLE_SUPERVISOR_PARENTS" (checkSource "bad" duplicateSupervisorParentSource)
     , testCase "rejects agents that reference unknown roles" $
         assertHasCode "E_UNKNOWN_AGENT_ROLE" (checkSource "bad" unknownAgentRoleSource)
     , testCase "rejects tool servers that reference unknown policies" $
@@ -1769,6 +1805,17 @@ lowerTests =
                 assertEqual "lowered workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one lowered workflow declaration, got " <> show (length other))
+    , testCase "lowering preserves supervisor declarations for runtime metadata emission" $
+        case lowerChecked "supervisor" supervisorSource of
+          Left err ->
+            assertFailure ("expected supervisor lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case lowerModuleSupervisorDecls lowered of
+              [rootSupervisor, childSupervisor] -> do
+                assertEqual "lowered root strategy" SupervisorOneForAll (supervisorDeclRestartStrategy rootSupervisor)
+                assertEqual "lowered child strategy" SupervisorRestForOne (supervisorDeclRestartStrategy childSupervisor)
+              other ->
+                assertFailure ("expected two lowered supervisor declarations, got " <> show (length other))
     , testCase "lowering preserves list literals" $
         case lowerChecked "lists" listLiteralSource of
           Left err ->
@@ -2109,6 +2156,18 @@ compileTests =
             assertBool "expected workflow hot-swap compatibility metadata" ("explicitUpgradeHandlers: true," `T.isInfixOf` emitted)
             assertBool "expected workflow migration helper" ("migrate(snapshot, targetWorkflow, options) { return $claspWorkflowMigrateSnapshot(this, targetWorkflow ?? this, snapshot, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow upgrade helper" ("upgrade(run, targetWorkflow, options) { return $claspWorkflowUpgrade(this, targetWorkflow ?? this, run, options); }" `T.isInfixOf` emitted)
+    , testCase "compile emits supervisor hierarchy metadata and restart strategies" $
+        case compileSource "supervisor" supervisorSource of
+          Left err ->
+            assertFailure ("expected supervisor compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected supervisors export" ("export const __claspSupervisors = [" `T.isInfixOf` emitted)
+            assertBool "expected root supervisor metadata" ("name: \"RootSupervisor\"" `T.isInfixOf` emitted)
+            assertBool "expected root restart strategy" ("restartStrategy: \"one_for_all\"" `T.isInfixOf` emitted)
+            assertBool "expected nested supervisor child" ("kind: \"supervisor\"" `T.isInfixOf` emitted)
+            assertBool "expected workflow child reference" ("name: \"CounterFlow\"" `T.isInfixOf` emitted)
+            assertBool "expected module supervisor count" ("supervisorCount: 2," `T.isInfixOf` emitted)
+            assertBool "expected control plane supervisors contract" ("supervisors: __claspSupervisors," `T.isInfixOf` emitted)
     , testCase "compile evaluates local let expressions" $
         case compileSource "let" letExpressionSource of
           Left err ->
@@ -3288,6 +3347,10 @@ normalizeGuideEntries =
           }
     )
 
+normalizeSupervisorChildren :: [SupervisorChildDecl] -> [SupervisorChildDecl]
+normalizeSupervisorChildren =
+  fmap (\childDecl -> childDecl {supervisorChildSpan = dummySpan})
+
 normalizePolicyPermissions :: [PolicyPermissionDecl] -> [PolicyPermissionDecl]
 normalizePolicyPermissions =
   fmap (\permissionDecl -> permissionDecl {policyPermissionDeclSpan = dummySpan})
@@ -3533,6 +3596,29 @@ workflowSource =
     , "record Counter = { count : Int }"
     , ""
     , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "main = \"ok\""
+    ]
+
+supervisorSource :: Text
+supervisorSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , "record WorkerState = { active : Bool }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , "workflow WorkerFlow = { state : WorkerState }"
+    , ""
+    , "supervisor RootSupervisor = one_for_all {"
+    , "  workflow CounterFlow,"
+    , "  supervisor WorkerSupervisor"
+    , "}"
+    , ""
+    , "supervisor WorkerSupervisor = rest_for_one {"
+    , "  workflow WorkerFlow"
+    , "}"
     , ""
     , "main = \"ok\""
     ]
@@ -3859,6 +3945,26 @@ badWorkflowStateSource =
     , "type Counter = CounterValue"
     , ""
     , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "main = \"ok\""
+    ]
+
+duplicateSupervisorParentSource :: Text
+duplicateSupervisorParentSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "supervisor RootSupervisor = one_for_one {"
+    , "  workflow CounterFlow"
+    , "}"
+    , ""
+    , "supervisor BackupSupervisor = one_for_one {"
+    , "  workflow CounterFlow"
+    , "}"
     , ""
     , "main = \"ok\""
     ]
