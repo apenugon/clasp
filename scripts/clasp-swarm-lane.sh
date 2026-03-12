@@ -558,6 +558,11 @@ while IFS= read -r task_file; do
     continue
   fi
 
+  if clasp_swarm_completion_marker_exists "$global_completed_root" "$task_id"; then
+    mark_completed "$task_id" "$(clasp_swarm_completion_commit "$global_completed_root" "$task_id")" "$(clasp_swarm_completion_stamp "$global_completed_root" "$task_id")"
+    continue
+  fi
+
   if [[ -f "$blocked_root/$task_id.json" ]]; then
     echo "lane $lane_name is blocked on $task_id" >&2
     break

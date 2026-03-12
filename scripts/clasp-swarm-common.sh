@@ -110,6 +110,31 @@ clasp_swarm_normalize_completion_dir() {
   shopt -u nullglob
 }
 
+clasp_swarm_completion_marker_field() {
+  local markers_dir="$1"
+  local task_ref="$2"
+  local field_index="$3"
+  local key=""
+  local marker_path=""
+
+  key="$(clasp_swarm_completion_key "$task_ref")"
+  marker_path="$markers_dir/$key"
+
+  if [[ ! -f "$marker_path" ]]; then
+    return 1
+  fi
+
+  awk -F '\t' -v idx="$field_index" 'NR == 1 { print $idx }' "$marker_path"
+}
+
+clasp_swarm_completion_stamp() {
+  clasp_swarm_completion_marker_field "$1" "$2" 1
+}
+
+clasp_swarm_completion_commit() {
+  clasp_swarm_completion_marker_field "$1" "$2" 2
+}
+
 clasp_swarm_latest_task_run_dir() {
   local runs_root="$1"
   local task_ref="$2"
