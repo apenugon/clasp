@@ -705,6 +705,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered roster declaration: " <> show other)
+    , testCase "lowering preserves list json codec boundaries" $
+        case lowerChecked "list-json" listJsonBoundarySource of
+          Left err ->
+            assertFailure ("expected list json lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "encodeUsers" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["users"] (LCall (LVar "$encode_List_User") [LVar "users"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered encodeUsers declaration: " <> show other)
+            case findLowerDecl "decodeUsers" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["raw"] (LCall (LVar "$decode_List_User") [LVar "raw"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered decodeUsers declaration: " <> show other)
     , testCase "lowering preserves page and view primitives" $
         case lowerChecked "page" pageSource of
           Left err ->
@@ -884,6 +899,32 @@ compileTests =
             assertFailure ("expected list compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected array literal" ("[\"Ada\", \"Grace\"]" `T.isInfixOf` emitted)
+    , testCase "compile emits list json codecs for explicit encode and decode boundaries" $
+        case compileSource "list-json" listJsonBoundarySource of
+          Left err ->
+            assertFailure ("expected list json compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
+            assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
+    , testCase "compile round-trips list values through generated json codecs" $
+        case compileSource "list-json" listJsonBoundarySource of
+          Left err ->
+            assertFailure ("expected list json compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/list-json-boundaries.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            encoded <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "const raw = compiledModule.encodeUsers(compiledModule.defaultUsers);"
+                , "const decoded = compiledModule.decodeUsers(raw);"
+                , "console.log(JSON.stringify({ raw, decoded }));"
+                ]
+            assertBool "expected encoded list payload" ("\\\"name\\\":\\\"Ada\\\"" `T.isInfixOf` encoded)
+            assertBool "expected decoded first user" ("\"name\":\"Ada\"" `T.isInfixOf` encoded)
+            assertBool "expected decoded second user boolean" ("\"active\":false" `T.isInfixOf` encoded)
     , testCase "compile emits runtime bindings, codecs, and route metadata" $
         case compileSource "service" serviceSource of
           Left err ->
@@ -1709,6 +1750,26 @@ listLiteralSource =
     , ""
     , "emptyRoster : [Str]"
     , "emptyRoster = []"
+    ]
+
+listJsonBoundarySource :: Text
+listJsonBoundarySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "defaultUsers : [User]"
+    , "defaultUsers = [User { name = \"Ada\", active = true }, User { name = \"Grace\", active = false }]"
+    , ""
+    , "encodeUsers : [User] -> Str"
+    , "encodeUsers users = encode users"
+    , ""
+    , "decodeUsers : Str -> [User]"
+    , "decodeUsers raw = decode [User] raw"
     ]
 
 heterogeneousListSource :: Text

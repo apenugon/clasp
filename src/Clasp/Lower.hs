@@ -53,6 +53,7 @@ data LowerModule = LowerModule
   , lowerModuleRecordDecls :: [RecordDecl]
   , lowerModuleForeignDecls :: [ForeignDecl]
   , lowerModuleRoutes :: [LowerRoute]
+  , lowerModuleCodecTypes :: [Type]
   , lowerModuleDecls :: [LowerDecl]
   }
   deriving (Eq, Show)
@@ -182,10 +183,65 @@ lowerModule modl =
     , lowerModuleRecordDecls = coreModuleRecordDecls modl
     , lowerModuleForeignDecls = coreModuleForeignDecls modl
     , lowerModuleRoutes = fmap lowerRouteDecl (coreModuleRouteDecls modl)
+    , lowerModuleCodecTypes = collectModuleCodecTypes modl
     , lowerModuleDecls =
         concatMap lowerTypeDeclConstructors (coreModuleTypeDecls modl)
           <> fmap lowerCoreDecl (coreModuleDecls modl)
     }
+
+collectModuleCodecTypes :: CoreModule -> [Type]
+collectModuleCodecTypes modl =
+  Set.toList $
+    Set.fromList $
+      concatMap (collectExprCodecTypes . coreDeclBody) (coreModuleDecls modl)
+
+collectExprCodecTypes :: CoreExpr -> [Type]
+collectExprCodecTypes expr =
+  case expr of
+    CVar _ _ _ ->
+      []
+    CInt _ _ ->
+      []
+    CString _ _ ->
+      []
+    CBool _ _ ->
+      []
+    CList _ _ items ->
+      concatMap collectExprCodecTypes items
+    CPage _ title body ->
+      collectExprCodecTypes title <> collectExprCodecTypes body
+    CRedirect _ _ ->
+      []
+    CViewEmpty _ ->
+      []
+    CViewText _ value ->
+      collectExprCodecTypes value
+    CViewAppend _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CViewElement _ _ child ->
+      collectExprCodecTypes child
+    CViewStyled _ _ child ->
+      collectExprCodecTypes child
+    CViewLink _ _ _ child ->
+      collectExprCodecTypes child
+    CViewForm _ _ _ _ child ->
+      collectExprCodecTypes child
+    CViewInput _ _ _ value ->
+      collectExprCodecTypes value
+    CViewSubmit _ label ->
+      collectExprCodecTypes label
+    CCall _ _ fn args ->
+      collectExprCodecTypes fn <> concatMap collectExprCodecTypes args
+    CMatch _ _ subject branches ->
+      collectExprCodecTypes subject <> concatMap (collectExprCodecTypes . coreMatchBranchBody) branches
+    CRecord _ _ _ fields ->
+      concatMap (collectExprCodecTypes . coreRecordFieldValue) fields
+    CFieldAccess _ _ subject _ ->
+      collectExprCodecTypes subject
+    CDecodeJson _ typ rawJson ->
+      typ : collectExprCodecTypes rawJson
+    CEncodeJson _ value ->
+      coreExprType value : collectExprCodecTypes value
 
 lowerPageFlows :: LowerModule -> [LowerPageFlow]
 lowerPageFlows modl =

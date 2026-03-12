@@ -42,6 +42,7 @@ emitModule modl =
     ]
       <> emitRuntimePrelude
       <> emitPrimitiveCodecHelpers
+      <> emitListCodecHelpers (lowerModuleCodecTypes modl)
       <> emitRequestSchemaHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
       <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
@@ -402,6 +403,32 @@ emitPrimitiveCodecHelpers =
   , "function $encode_Redirect(value) { return JSON.stringify($claspExpectRedirect(value, \"value\")); }"
   , ""
   ]
+
+emitListCodecHelpers :: [Type] -> [Text]
+emitListCodecHelpers codecTypes =
+  concatMap emitListCodecHelper (filter isListType codecTypes)
+  where
+    isListType typ =
+      case typ of
+        TList _ ->
+          True
+        _ ->
+          False
+
+emitListCodecHelper :: Type -> [Text]
+emitListCodecHelper typ =
+  [ "function " <> decodeName <> "(jsonText) {"
+  , "  return " <> emitValidator typ "JSON.parse(jsonText)" "\"value\"" <> ";"
+  , "}"
+  , "function " <> encodeName <> "(value) {"
+  , "  const checkedValue = " <> emitInternalValidator typ "value" "\"value\"" <> ";"
+  , "  return JSON.stringify(" <> emitSerializer typ "checkedValue" <> ");"
+  , "}"
+  , ""
+  ]
+  where
+    decodeName = "$decode_" <> codecSuffix typ
+    encodeName = "$encode_" <> codecSuffix typ
 
 emitRequestSchemaHelpers :: [TypeDecl] -> [RecordDecl] -> [Text]
 emitRequestSchemaHelpers typeDecls recordDecls =
@@ -1182,6 +1209,22 @@ renderTypeName typ =
       name
     TFunction args result ->
       T.intercalate " -> " (fmap renderTypeName args <> [renderTypeName result])
+
+codecSuffix :: Type -> Text
+codecSuffix typ =
+  case typ of
+    TInt ->
+      "Int"
+    TStr ->
+      "Str"
+    TBool ->
+      "Bool"
+    TList itemType ->
+      "List_" <> codecSuffix itemType
+    TNamed name ->
+      name
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"
 
 isJsonEnumTypeDecl :: TypeDecl -> Bool
 isJsonEnumTypeDecl typeDecl =
