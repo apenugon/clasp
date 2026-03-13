@@ -58,6 +58,7 @@ import Clasp.Syntax
   , Decl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , ForeignPackageImport (..)
@@ -86,6 +87,7 @@ import Clasp.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -113,6 +115,8 @@ data TopLevelItem
   | TopDomainEventDecl DomainEventDecl
   | TopMetricDecl MetricDecl
   | TopGoalDecl GoalDecl
+  | TopExperimentDecl ExperimentDecl
+  | TopRolloutDecl RolloutDecl
   | TopWorkflowDecl WorkflowDecl
   | TopSupervisorDecl SupervisorDecl
   | TopGuideDecl GuideDecl
@@ -195,6 +199,8 @@ topLevelItemParser =
     <|> try domainDeclParser
     <|> try metricDeclParser
     <|> try goalDeclParser
+    <|> try experimentDeclParser
+    <|> try rolloutDeclParser
     <|> try agentDeclParser
     <|> try agentRoleDeclParser
     <|> try hookDeclParser
@@ -759,6 +765,46 @@ goalDeclParser = do
       , goalDeclIdentity = "goal:" <> name
       , goalDeclMetricName = metricName
       , goalDeclMetricSpan = metricSpan
+      }
+
+experimentDeclParser :: Parser TopLevelItem
+experimentDeclParser = do
+  start <- getSourcePos
+  keyword "experiment"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  (goalSpan, goalName) <- locatedUpperIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopExperimentDecl $
+    ExperimentDecl
+      { experimentDeclName = name
+      , experimentDeclSpan = makeSourceSpan start end
+      , experimentDeclNameSpan = nameSpan
+      , experimentDeclIdentity = "experiment:" <> name
+      , experimentDeclGoalName = goalName
+      , experimentDeclGoalSpan = goalSpan
+      }
+
+rolloutDeclParser :: Parser TopLevelItem
+rolloutDeclParser = do
+  start <- getSourcePos
+  keyword "rollout"
+  (nameSpan, name) <- locatedUpperIdentifier
+  _ <- symbol "="
+  (experimentSpan, experimentName) <- locatedUpperIdentifier
+  end <- getSourcePos
+  _ <- optional eol
+  scn
+  pure . TopRolloutDecl $
+    RolloutDecl
+      { rolloutDeclName = name
+      , rolloutDeclSpan = makeSourceSpan start end
+      , rolloutDeclNameSpan = nameSpan
+      , rolloutDeclIdentity = "rollout:" <> name
+      , rolloutDeclExperimentName = experimentName
+      , rolloutDeclExperimentSpan = experimentSpan
       }
 
 data WorkflowAttr
@@ -1485,8 +1531,8 @@ buildFunctionType manyTypes = TFunction (init manyTypes) (last manyTypes)
 
 attachSignatures :: (ModuleName, [ImportDecl], [TopLevelItem]) -> Either DiagnosticBundle Module
 attachSignatures (name, imports, items) = do
-  (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
-    foldM step ([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], Map.empty) items
+  (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) <-
+    foldM step ([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], Map.empty) items
   if null pendingSignatures
     then
       pure Module
@@ -1498,6 +1544,8 @@ attachSignatures (name, imports, items) = do
         , moduleDomainEventDecls = reverse domainEventDecls
         , moduleMetricDecls = reverse metricDecls
         , moduleGoalDecls = reverse goalDecls
+        , moduleExperimentDecls = reverse experimentDecls
+        , moduleRolloutDecls = reverse rolloutDecls
         , moduleWorkflowDecls = reverse workflowDecls
         , moduleSupervisorDecls = reverse supervisorDecls
         , moduleGuideDecls = reverse guideDecls
@@ -1525,48 +1573,52 @@ attachSignatures (name, imports, items) = do
         | (sigName, (_, signatureSpan)) <- Map.toList pendingSignatures
         ]
   where
-    step (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
+    step (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures) item =
       case item of
         TopTypeDecl typeDecl ->
-          pure (typeDecl : typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecl : typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopRecordDecl recordDecl ->
-          pure (typeDecls, recordDecl : recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecl : recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopDomainObjectDecl domainObjectDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecl : domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecl : domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopDomainEventDecl domainEventDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecl : domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecl : domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopMetricDecl metricDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecl : metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecl : metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopGoalDecl goalDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecl : goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecl : goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopExperimentDecl experimentDecl ->
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecl : experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+        TopRolloutDecl rolloutDecl ->
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecl : rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopWorkflowDecl workflowDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecl : workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecl : workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopSupervisorDecl supervisorDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecl : supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecl : supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopGuideDecl guideDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecl : guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopHookDecl hookDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecl : hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentRoleDecl agentRoleDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecl : agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopAgentDecl agentDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecl : agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopPolicyDecl policyDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecl : policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopToolServerDecl toolServerDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecl : toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecl : toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopToolDecl toolDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecl : toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecl : toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopVerifierDecl verifierDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecl : verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecl : verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopMergeGateDecl mergeGateDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecl : mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecl : mergeGateDecls, projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopProjectionDecl projectionDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecl : projectionDecls, foreignDecls, routeDecls, decls, pendingSignatures)
         TopForeignDecl foreignDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecl : foreignDecls, routeDecls, decls, pendingSignatures)
         TopRouteDecl routeDecl ->
-          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
+          pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecl : routeDecls, decls, pendingSignatures)
         TopSignature sigName sigType signatureSpan ->
           case Map.lookup sigName pendingSignatures of
             Just (_, existingSpan) ->
@@ -1586,6 +1638,8 @@ attachSignatures (name, imports, items) = do
                 , domainEventDecls
                 , metricDecls
                 , goalDecls
+                , experimentDecls
+                , rolloutDecls
                 , workflowDecls
                 , supervisorDecls
                 , guideDecls
@@ -1615,7 +1669,7 @@ attachSignatures (name, imports, items) = do
                   Nothing ->
                     decl
               remaining = Map.delete (declName decl) pendingSignatures
-           in pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
+           in pure (typeDecls, recordDecls, domainObjectDecls, domainEventDecls, metricDecls, goalDecls, experimentDecls, rolloutDecls, workflowDecls, supervisorDecls, guideDecls, hookDecls, agentRoleDecls, agentDecls, policyDecls, toolServerDecls, toolDecls, verifierDecls, mergeGateDecls, projectionDecls, foreignDecls, routeDecls, updatedDecl : decls, remaining)
 
 makeSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 makeSourceSpan start end =

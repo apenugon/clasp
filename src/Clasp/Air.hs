@@ -26,6 +26,7 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreExperimentDecl (..)
   , CoreExpr (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
@@ -39,6 +40,7 @@ import Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRolloutDecl (..)
   , CoreRouteContract (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
@@ -51,6 +53,7 @@ import Clasp.Syntax
   , ConstructorDecl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -69,6 +72,7 @@ import Clasp.Syntax
   , ProjectionFieldDecl (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -131,6 +135,8 @@ buildAirModule modl =
     domainEventNodes = fmap buildDomainEventDeclNode (coreModuleDomainEventDecls modl)
     metricNodes = fmap buildMetricDeclNode (coreModuleMetricDecls modl)
     goalNodes = fmap buildGoalDeclNode (coreModuleGoalDecls modl)
+    experimentNodes = fmap buildExperimentDeclNode (coreModuleExperimentDecls modl)
+    rolloutNodes = fmap buildRolloutDeclNode (coreModuleRolloutDecls modl)
     guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookDeclNodes (coreModuleHookDecls modl)
     agentRoleNodes = fmap buildAgentRoleDeclNode (coreModuleAgentRoleDecls modl)
@@ -151,6 +157,8 @@ buildAirModule modl =
         <> domainEventNodes
         <> metricNodes
         <> goalNodes
+        <> experimentNodes
+        <> rolloutNodes
         <> guideNodes
         <> hookNodes
         <> agentRoleNodes
@@ -283,6 +291,34 @@ buildGoalDeclNode (CoreGoalDecl goalDecl) =
         [ ("name", AirAttrText (goalDeclName goalDecl))
         , ("identity", AirAttrText (goalDeclIdentity goalDecl))
         , ("metric", AirAttrObject [("name", AirAttrText (goalDeclMetricName goalDecl)), ("ref", AirAttrNode (metricDeclId (goalDeclMetricName goalDecl)))])
+        ]
+    }
+
+buildExperimentDeclNode :: CoreExperimentDecl -> AirNode
+buildExperimentDeclNode (CoreExperimentDecl experimentDecl) =
+  AirNode
+    { airNodeId = experimentDeclId (experimentDeclName experimentDecl)
+    , airNodeKind = "experimentDecl"
+    , airNodeSpan = Just (experimentDeclSpan experimentDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (experimentDeclName experimentDecl))
+        , ("identity", AirAttrText (experimentDeclIdentity experimentDecl))
+        , ("goal", AirAttrObject [("name", AirAttrText (experimentDeclGoalName experimentDecl)), ("ref", AirAttrNode (goalDeclId (experimentDeclGoalName experimentDecl)))])
+        ]
+    }
+
+buildRolloutDeclNode :: CoreRolloutDecl -> AirNode
+buildRolloutDeclNode (CoreRolloutDecl rolloutDecl) =
+  AirNode
+    { airNodeId = rolloutDeclId (rolloutDeclName rolloutDecl)
+    , airNodeKind = "rolloutDecl"
+    , airNodeSpan = Just (rolloutDeclSpan rolloutDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (rolloutDeclName rolloutDecl))
+        , ("identity", AirAttrText (rolloutDeclIdentity rolloutDecl))
+        , ("experiment", AirAttrObject [("name", AirAttrText (rolloutDeclExperimentName rolloutDecl)), ("ref", AirAttrNode (experimentDeclId (rolloutDeclExperimentName rolloutDecl)))])
         ]
     }
 
@@ -978,6 +1014,12 @@ metricDeclId name = AirNodeId ("metric:" <> name)
 
 goalDeclId :: Text -> AirNodeId
 goalDeclId name = AirNodeId ("goal:" <> name)
+
+experimentDeclId :: Text -> AirNodeId
+experimentDeclId name = AirNodeId ("experiment:" <> name)
+
+rolloutDeclId :: Text -> AirNodeId
+rolloutDeclId name = AirNodeId ("rollout:" <> name)
 
 foreignDeclId :: Text -> AirNodeId
 foreignDeclId name = AirNodeId ("foreign:" <> name)

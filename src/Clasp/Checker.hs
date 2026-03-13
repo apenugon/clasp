@@ -27,6 +27,7 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreExperimentDecl (..)
   , CoreExpr (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
@@ -40,6 +41,7 @@ import Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRolloutDecl (..)
   , CoreRouteContract (..)
   , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
@@ -63,6 +65,7 @@ import Clasp.Syntax
   , Decl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , GoalDecl (..)
@@ -87,6 +90,7 @@ import Clasp.Syntax
   , ProjectionFieldDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
+  , RolloutDecl (..)
   , Position (..)
   , SourceSpan (..)
   , SupervisorChildDecl (..)
@@ -625,6 +629,8 @@ checkModule modl = do
       domainEventDecls = moduleDomainEventDecls modl
       metricDecls = moduleMetricDecls modl
       goalDecls = moduleGoalDecls modl
+      experimentDecls = moduleExperimentDecls modl
+      rolloutDecls = moduleRolloutDecls modl
       workflowDecls = moduleWorkflowDecls modl
       supervisorDecls = moduleSupervisorDecls modl
       guideDecls = moduleGuideDecls modl
@@ -649,6 +655,8 @@ checkModule modl = do
   ensureUniqueDomainEventDecls domainEventDecls
   ensureUniqueMetricDecls metricDecls
   ensureUniqueGoalDecls goalDecls
+  ensureUniqueExperimentDecls experimentDecls
+  ensureUniqueRolloutDecls rolloutDecls
   ensureUniqueWorkflowDecls workflowDecls
   ensureUniqueSupervisorDecls supervisorDecls
   ensureUniqueHooks hookDecls
@@ -664,6 +672,8 @@ checkModule modl = do
   ensureKnownDomainEventReferences schemaRecordDecls domainObjectDecls domainEventDecls
   ensureKnownMetricReferences schemaRecordDecls domainObjectDecls metricDecls
   ensureKnownGoalMetricReferences metricDecls goalDecls
+  ensureKnownExperimentGoalReferences goalDecls experimentDecls
+  ensureKnownRolloutExperimentReferences experimentDecls rolloutDecls
   ensureSupervisorHierarchy workflowDecls supervisorDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
@@ -713,6 +723,8 @@ checkModule modl = do
       , coreModuleDomainEventDecls = fmap CoreDomainEventDecl domainEventDecls
       , coreModuleMetricDecls = fmap CoreMetricDecl metricDecls
       , coreModuleGoalDecls = fmap CoreGoalDecl goalDecls
+      , coreModuleExperimentDecls = fmap CoreExperimentDecl experimentDecls
+      , coreModuleRolloutDecls = fmap CoreRolloutDecl rolloutDecls
       , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
       , coreModuleSupervisorDecls = fmap CoreSupervisorDecl supervisorDecls
       , coreModuleGuideDecls = guideDecls
@@ -911,6 +923,74 @@ ensureKnownGoalMetricReferences metricDecls goalDecls =
               ("Goal `" <> goalDeclName goalDecl <> "` references unknown metric `" <> goalDeclMetricName goalDecl <> "`.")
               (Just (goalDeclMetricSpan goalDecl))
               ["Declare the referenced metric before using it in a goal."]
+              []
+          ]
+
+ensureUniqueExperimentDecls :: [ExperimentDecl] -> Either DiagnosticBundle ()
+ensureUniqueExperimentDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (experimentDecl : rest) =
+      case Map.lookup (experimentDeclName experimentDecl) seen of
+        Just previousExperimentDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_EXPERIMENT"
+                ("Duplicate experiment declaration for `" <> experimentDeclName experimentDecl <> "`.")
+                (Just (experimentDeclNameSpan experimentDecl))
+                ["Each experiment name may only be declared once."]
+                [diagnosticRelated "previous experiment declaration" (experimentDeclNameSpan previousExperimentDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (experimentDeclName experimentDecl) experimentDecl seen) rest
+
+ensureKnownExperimentGoalReferences :: [GoalDecl] -> [ExperimentDecl] -> Either DiagnosticBundle ()
+ensureKnownExperimentGoalReferences goalDecls experimentDecls =
+  traverse_ checkExperiment experimentDecls
+  where
+    goalDeclEnv = Map.fromList [(goalDeclName goalDecl, goalDecl) | goalDecl <- goalDecls]
+    checkExperiment experimentDecl =
+      unless (Map.member (experimentDeclGoalName experimentDecl) goalDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_EXPERIMENT_GOAL"
+              ("Experiment `" <> experimentDeclName experimentDecl <> "` references unknown goal `" <> experimentDeclGoalName experimentDecl <> "`.")
+              (Just (experimentDeclGoalSpan experimentDecl))
+              ["Declare the referenced goal before using it in an experiment."]
+              []
+          ]
+
+ensureUniqueRolloutDecls :: [RolloutDecl] -> Either DiagnosticBundle ()
+ensureUniqueRolloutDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (rolloutDecl : rest) =
+      case Map.lookup (rolloutDeclName rolloutDecl) seen of
+        Just previousRolloutDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_ROLLOUT"
+                ("Duplicate rollout declaration for `" <> rolloutDeclName rolloutDecl <> "`.")
+                (Just (rolloutDeclNameSpan rolloutDecl))
+                ["Each rollout name may only be declared once."]
+                [diagnosticRelated "previous rollout declaration" (rolloutDeclNameSpan previousRolloutDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (rolloutDeclName rolloutDecl) rolloutDecl seen) rest
+
+ensureKnownRolloutExperimentReferences :: [ExperimentDecl] -> [RolloutDecl] -> Either DiagnosticBundle ()
+ensureKnownRolloutExperimentReferences experimentDecls rolloutDecls =
+  traverse_ checkRollout rolloutDecls
+  where
+    experimentDeclEnv = Map.fromList [(experimentDeclName experimentDecl, experimentDecl) | experimentDecl <- experimentDecls]
+    checkRollout rolloutDecl =
+      unless (Map.member (rolloutDeclExperimentName rolloutDecl) experimentDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_ROLLOUT_EXPERIMENT"
+              ("Rollout `" <> rolloutDeclName rolloutDecl <> "` references unknown experiment `" <> rolloutDeclExperimentName rolloutDecl <> "`.")
+              (Just (rolloutDeclExperimentSpan rolloutDecl))
+              ["Declare the referenced experiment before using it in a rollout."]
               []
           ]
 

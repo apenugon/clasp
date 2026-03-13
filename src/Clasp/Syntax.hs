@@ -9,6 +9,7 @@ module Clasp.Syntax
   , Decl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , ForeignPackageImport (..)
@@ -37,6 +38,7 @@ module Clasp.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -122,6 +124,8 @@ data Module = Module
   , moduleDomainEventDecls :: [DomainEventDecl]
   , moduleMetricDecls :: [MetricDecl]
   , moduleGoalDecls :: [GoalDecl]
+  , moduleExperimentDecls :: [ExperimentDecl]
+  , moduleRolloutDecls :: [RolloutDecl]
   , moduleWorkflowDecls :: [WorkflowDecl]
   , moduleSupervisorDecls :: [SupervisorDecl]
   , moduleGuideDecls :: [GuideDecl]
@@ -189,6 +193,26 @@ data GoalDecl = GoalDecl
   , goalDeclIdentity :: Text
   , goalDeclMetricName :: Text
   , goalDeclMetricSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data ExperimentDecl = ExperimentDecl
+  { experimentDeclName :: Text
+  , experimentDeclSpan :: SourceSpan
+  , experimentDeclNameSpan :: SourceSpan
+  , experimentDeclIdentity :: Text
+  , experimentDeclGoalName :: Text
+  , experimentDeclGoalSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data RolloutDecl = RolloutDecl
+  { rolloutDeclName :: Text
+  , rolloutDeclSpan :: SourceSpan
+  , rolloutDeclNameSpan :: SourceSpan
+  , rolloutDeclIdentity :: Text
+  , rolloutDeclExperimentName :: Text
+  , rolloutDeclExperimentSpan :: SourceSpan
   }
   deriving (Eq, Show)
 
@@ -702,6 +726,8 @@ renderModule modl =
         , fmap renderDomainEventDecl (moduleDomainEventDecls modl)
         , fmap renderMetricDecl (moduleMetricDecls modl)
         , fmap renderGoalDecl (moduleGoalDecls modl)
+        , fmap renderExperimentDecl (moduleExperimentDecls modl)
+        , fmap renderRolloutDecl (moduleRolloutDecls modl)
         , fmap renderWorkflowDecl (moduleWorkflowDecls modl)
         , fmap renderSupervisorDecl (moduleSupervisorDecls modl)
         , fmap renderGuideDecl (moduleGuideDecls modl)
@@ -783,6 +809,20 @@ renderGoalDecl goalDecl =
     <> goalDeclName goalDecl
     <> " = "
     <> goalDeclMetricName goalDecl
+
+renderExperimentDecl :: ExperimentDecl -> Text
+renderExperimentDecl experimentDecl =
+  "experiment "
+    <> experimentDeclName experimentDecl
+    <> " = "
+    <> experimentDeclGoalName experimentDecl
+
+renderRolloutDecl :: RolloutDecl -> Text
+renderRolloutDecl rolloutDecl =
+  "rollout "
+    <> rolloutDeclName rolloutDecl
+    <> " = "
+    <> rolloutDeclExperimentName rolloutDecl
 
 renderClassificationSuffix :: Text -> Text
 renderClassificationSuffix classification

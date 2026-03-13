@@ -6,6 +6,7 @@ module Clasp.Core
   , CoreDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreExperimentDecl (..)
   , CoreExpr (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
@@ -19,6 +20,7 @@ module Clasp.Core
   , CorePatternBinder (..)
   , CoreProjectionDecl (..)
   , CoreRecordField (..)
+  , CoreRolloutDecl (..)
   , CoreRouteContract (..)
   , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
@@ -40,6 +42,7 @@ import Clasp.Syntax
   , ConstructorDecl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -59,6 +62,7 @@ import Clasp.Syntax
   , Position (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -89,6 +93,8 @@ data CoreModule = CoreModule
   , coreModuleDomainEventDecls :: [CoreDomainEventDecl]
   , coreModuleMetricDecls :: [CoreMetricDecl]
   , coreModuleGoalDecls :: [CoreGoalDecl]
+  , coreModuleExperimentDecls :: [CoreExperimentDecl]
+  , coreModuleRolloutDecls :: [CoreRolloutDecl]
   , coreModuleWorkflowDecls :: [CoreWorkflowDecl]
   , coreModuleSupervisorDecls :: [CoreSupervisorDecl]
   , coreModuleGuideDecls :: [GuideDecl]
@@ -129,6 +135,16 @@ data CoreMetricDecl = CoreMetricDecl
 
 data CoreGoalDecl = CoreGoalDecl
   { coreGoalSourceDecl :: GoalDecl
+  }
+  deriving (Eq, Show)
+
+data CoreExperimentDecl = CoreExperimentDecl
+  { coreExperimentSourceDecl :: ExperimentDecl
+  }
+  deriving (Eq, Show)
+
+data CoreRolloutDecl = CoreRolloutDecl
+  { coreRolloutSourceDecl :: RolloutDecl
   }
   deriving (Eq, Show)
 
@@ -296,6 +312,8 @@ renderCoreModule modl =
       , fmap renderDomainEventDecl (coreModuleDomainEventDecls modl)
       , fmap renderMetricDecl (coreModuleMetricDecls modl)
       , fmap renderGoalDecl (coreModuleGoalDecls modl)
+      , fmap renderExperimentDecl (coreModuleExperimentDecls modl)
+      , fmap renderRolloutDecl (coreModuleRolloutDecls modl)
       , fmap renderWorkflowDecl (coreModuleWorkflowDecls modl)
       , fmap renderSupervisorDecl (coreModuleSupervisorDecls modl)
       , fmap renderGuideDecl (coreModuleGuideDecls modl)
@@ -369,6 +387,20 @@ renderGoalDecl (CoreGoalDecl goalDecl) =
     <> goalDeclName goalDecl
     <> " = "
     <> goalDeclMetricName goalDecl
+
+renderExperimentDecl :: CoreExperimentDecl -> Text
+renderExperimentDecl (CoreExperimentDecl experimentDecl) =
+  "experiment "
+    <> experimentDeclName experimentDecl
+    <> " = "
+    <> experimentDeclGoalName experimentDecl
+
+renderRolloutDecl :: CoreRolloutDecl -> Text
+renderRolloutDecl (CoreRolloutDecl rolloutDecl) =
+  "rollout "
+    <> rolloutDeclName rolloutDecl
+    <> " = "
+    <> rolloutDeclExperimentName rolloutDecl
 
 renderWorkflowDecl :: CoreWorkflowDecl -> Text
 renderWorkflowDecl workflowDecl =

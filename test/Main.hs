@@ -59,6 +59,7 @@ import Clasp.Core
   , CoreDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreExperimentDecl (..)
   , CoreExpr (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
@@ -68,6 +69,7 @@ import Clasp.Core
   , CoreMetricDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreRolloutDecl (..)
   , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
@@ -103,6 +105,7 @@ import Clasp.Syntax
   , Decl (..)
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , GoalDecl (..)
@@ -128,6 +131,7 @@ import Clasp.Syntax
   , RecordDecl (..)
   , RecordFieldDecl (..)
   , RecordFieldExpr (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -328,7 +332,7 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
-    , testCase "parses domain object, domain event, metric, and goal declarations" $
+    , testCase "parses domain object, domain event, metric, goal, experiment, and rollout declarations" $
         case parseSource "inline" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -363,6 +367,20 @@ parserTests =
                 assertEqual "goal metric" "CustomerChurnRate" (goalDeclMetricName goalDecl)
               other ->
                 assertFailure ("expected one goal declaration, got " <> show (length other))
+            case moduleExperimentDecls modl of
+              [experimentDecl] -> do
+                assertEqual "experiment name" "RetentionPromptTrial" (experimentDeclName experimentDecl)
+                assertEqual "experiment identity" "experiment:RetentionPromptTrial" (experimentDeclIdentity experimentDecl)
+                assertEqual "experiment goal" "RetainCustomers" (experimentDeclGoalName experimentDecl)
+              other ->
+                assertFailure ("expected one experiment declaration, got " <> show (length other))
+            case moduleRolloutDecls modl of
+              [rolloutDecl] -> do
+                assertEqual "rollout name" "RetentionPromptCanary" (rolloutDeclName rolloutDecl)
+                assertEqual "rollout identity" "rollout:RetentionPromptCanary" (rolloutDeclIdentity rolloutDecl)
+                assertEqual "rollout experiment" "RetentionPromptTrial" (rolloutDeclExperimentName rolloutDecl)
+              other ->
+                assertFailure ("expected one rollout declaration, got " <> show (length other))
     , testCase "parses supervisor declarations with restart strategies and nested children" $
         case parseSource "inline" supervisorSource of
           Left err ->
@@ -937,7 +955,7 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
-    , testCase "accepts domain objects, domain events, metrics, and goals bound to typed declarations" $
+    , testCase "accepts domain objects, domain events, metrics, goals, experiments, and rollouts bound to typed declarations" $
         case checkSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -963,6 +981,16 @@ checkerTests =
                 assertEqual "goal metric" "CustomerChurnRate" (goalDeclMetricName goalDecl)
               other ->
                 assertFailure ("expected one checked goal declaration, got " <> show (length other))
+            case coreModuleExperimentDecls checked of
+              [CoreExperimentDecl experimentDecl] ->
+                assertEqual "experiment goal" "RetainCustomers" (experimentDeclGoalName experimentDecl)
+              other ->
+                assertFailure ("expected one checked experiment declaration, got " <> show (length other))
+            case coreModuleRolloutDecls checked of
+              [CoreRolloutDecl rolloutDecl] ->
+                assertEqual "rollout experiment" "RetentionPromptTrial" (rolloutDeclExperimentName rolloutDecl)
+              other ->
+                assertFailure ("expected one checked rollout declaration, got " <> show (length other))
     , testCase "accepts supervisor hierarchies with BEAM-style restart strategies" $
         case checkSource "supervisor" supervisorSource of
           Left err ->
@@ -1289,6 +1317,10 @@ checkerTests =
         assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
     , testCase "rejects goals that reference unknown metrics" $
         assertHasCode "E_UNKNOWN_GOAL_METRIC" (checkSource "bad" unknownGoalMetricSource)
+    , testCase "rejects experiments that reference unknown goals" $
+        assertHasCode "E_UNKNOWN_EXPERIMENT_GOAL" (checkSource "bad" unknownExperimentGoalSource)
+    , testCase "rejects rollouts that reference unknown experiments" $
+        assertHasCode "E_UNKNOWN_ROLLOUT_EXPERIMENT" (checkSource "bad" unknownRolloutExperimentSource)
     , testCase "rejects hooks whose handlers do not match declared schemas" $
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects workflows whose state is not a record schema" $
@@ -1628,7 +1660,7 @@ airTests =
                 assertBool "expected lifecycle event" (("event", AirAttrText "worker.start") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected hook trigger AIR node"
-    , testCase "air retains domain object, domain event, metric, and goal graph identity" $
+    , testCase "air retains domain object, domain event, metric, goal, experiment, and rollout graph identity" $
         case airSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -1637,6 +1669,8 @@ airTests =
             assertBool "expected domain event root" (AirNodeId "domain-event:CustomerChurned" `elem` airModuleRootIds airModule)
             assertBool "expected metric root" (AirNodeId "metric:CustomerChurnRate" `elem` airModuleRootIds airModule)
             assertBool "expected goal root" (AirNodeId "goal:RetainCustomers" `elem` airModuleRootIds airModule)
+            assertBool "expected experiment root" (AirNodeId "experiment:RetentionPromptTrial" `elem` airModuleRootIds airModule)
+            assertBool "expected rollout root" (AirNodeId "rollout:RetentionPromptCanary" `elem` airModuleRootIds airModule)
             case findAirNode (AirNodeId "domain-object:Customer") (airModuleNodes airModule) of
               Just node ->
                 assertBool
@@ -1665,6 +1699,20 @@ airTests =
                   (("metric", AirAttrObject [("name", AirAttrText "CustomerChurnRate"), ("ref", AirAttrNode (AirNodeId "metric:CustomerChurnRate"))]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected goal AIR node"
+            case findAirNode (AirNodeId "experiment:RetentionPromptTrial") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected experiment goal ref"
+                  (("goal", AirAttrObject [("name", AirAttrText "RetainCustomers"), ("ref", AirAttrNode (AirNodeId "goal:RetainCustomers"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected experiment AIR node"
+            case findAirNode (AirNodeId "rollout:RetentionPromptCanary") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected rollout experiment ref"
+                  (("experiment", AirAttrObject [("name", AirAttrText "RetentionPromptTrial"), ("ref", AirAttrNode (AirNodeId "experiment:RetentionPromptTrial"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected rollout AIR node"
     , testCase "air retains agent roles and agent-to-role bindings" $
         case airSource "agent" agentSource of
           Left err ->
@@ -1805,7 +1853,7 @@ contextTests =
             assertBool "expected hook trigger node" ("\"hook-trigger:workerStart\"" `T.isInfixOf` jsonText)
             assertBool "expected hook trigger edge" ("\"hook-trigger\"" `T.isInfixOf` jsonText)
             assertBool "expected hook request edge" ("\"hook-request-schema\"" `T.isInfixOf` jsonText)
-    , testCase "context graph includes domain object, domain event, metric, and goal objective edges" $
+    , testCase "context graph includes domain object, domain event, metric, goal, experiment, and rollout objective edges" $
         case renderContextSourceJson "domain" domainModelSource of
           Left err ->
             assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -1815,10 +1863,14 @@ contextTests =
             assertBool "expected domain event node" ("\"domain-event:CustomerChurned\"" `T.isInfixOf` jsonText)
             assertBool "expected metric node" ("\"metric:CustomerChurnRate\"" `T.isInfixOf` jsonText)
             assertBool "expected goal node" ("\"goal:RetainCustomers\"" `T.isInfixOf` jsonText)
+            assertBool "expected experiment node" ("\"experiment:RetentionPromptTrial\"" `T.isInfixOf` jsonText)
+            assertBool "expected rollout node" ("\"rollout:RetentionPromptCanary\"" `T.isInfixOf` jsonText)
             assertBool "expected domain object schema edge" ("\"domain-object-schema\"" `T.isInfixOf` jsonText)
             assertBool "expected domain event object edge" ("\"domain-event-object\"" `T.isInfixOf` jsonText)
             assertBool "expected metric object edge" ("\"metric-object\"" `T.isInfixOf` jsonText)
             assertBool "expected goal metric edge" ("\"goal-metric\"" `T.isInfixOf` jsonText)
+            assertBool "expected experiment goal edge" ("\"experiment-goal\"" `T.isInfixOf` jsonText)
+            assertBool "expected rollout experiment edge" ("\"rollout-experiment\"" `T.isInfixOf` jsonText)
     , testCase "context graph includes agent roles, policies, and agent bindings" $
         case renderContextSourceJson "agent" agentSource of
           Left err ->
@@ -4718,6 +4770,8 @@ domainModelSource =
     , "domain event CustomerChurned = CustomerChurnEvent for Customer"
     , "metric CustomerChurnRate = CustomerMetric for Customer"
     , "goal RetainCustomers = CustomerChurnRate"
+    , "experiment RetentionPromptTrial = RetainCustomers"
+    , "rollout RetentionPromptCanary = RetentionPromptTrial"
     , ""
     , "main = \"ok\""
     ]
@@ -4964,6 +5018,26 @@ unknownGoalMetricSource =
     , ""
     , "domain object Customer = CustomerRecord"
     , "goal RetainCustomers = MissingMetric"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownExperimentGoalSource :: Text
+unknownExperimentGoalSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "experiment RetentionPromptTrial = MissingGoal"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownRolloutExperimentSource :: Text
+unknownRolloutExperimentSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "rollout RetentionPromptCanary = MissingExperiment"
     , ""
     , "main = \"ok\""
     ]

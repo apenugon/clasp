@@ -28,12 +28,14 @@ import Clasp.Core
   , CoreAgentRoleDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreExperimentDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
   , CoreMetricDecl (..)
   , CoreModule (..)
   , CorePolicyDecl (..)
+  , CoreRolloutDecl (..)
   , CoreToolDecl (..)
   , CoreToolServerDecl (..)
   , CoreVerifierDecl (..)
@@ -53,6 +55,7 @@ import Clasp.Syntax
   , AgentRoleSandboxPolicy
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
+  , ExperimentDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -69,6 +72,7 @@ import Clasp.Syntax
   , PolicyPermissionKind (..)
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , RolloutDecl (..)
   , RouteBoundaryDecl (..)
   , RouteDecl (..)
   , RouteMethod (..)
@@ -135,6 +139,8 @@ buildContextGraph modl =
     domainEventNodes = fmap buildDomainEventNode (coreModuleDomainEventDecls modl)
     metricNodes = fmap buildMetricNode (coreModuleMetricDecls modl)
     goalNodes = fmap buildGoalNode (coreModuleGoalDecls modl)
+    experimentNodes = fmap buildExperimentNode (coreModuleExperimentDecls modl)
+    rolloutNodes = fmap buildRolloutNode (coreModuleRolloutDecls modl)
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
@@ -150,7 +156,7 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> metricNodes <> goalNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> metricNodes <> goalNodes <> experimentNodes <> rolloutNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
@@ -158,6 +164,8 @@ buildContextGraph modl =
         <> concatMap buildDomainEventEdges (coreModuleDomainEventDecls modl)
         <> concatMap buildMetricEdges (coreModuleMetricDecls modl)
         <> concatMap buildGoalEdges (coreModuleGoalDecls modl)
+        <> concatMap buildExperimentEdges (coreModuleExperimentDecls modl)
+        <> concatMap buildRolloutEdges (coreModuleRolloutDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
@@ -256,6 +264,32 @@ buildGoalNode (CoreGoalDecl goalDecl) =
         [ ("name", ContextAttrText (goalDeclName goalDecl))
         , ("identity", ContextAttrText (goalDeclIdentity goalDecl))
         , ("metricName", ContextAttrText (goalDeclMetricName goalDecl))
+        ]
+    }
+
+buildExperimentNode :: CoreExperimentDecl -> ContextNode
+buildExperimentNode (CoreExperimentDecl experimentDecl) =
+  ContextNode
+    { contextNodeId = experimentNodeId (experimentDeclName experimentDecl)
+    , contextNodeKind = "experiment"
+    , contextNodeSpan = Just (experimentDeclSpan experimentDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (experimentDeclName experimentDecl))
+        , ("identity", ContextAttrText (experimentDeclIdentity experimentDecl))
+        , ("goalName", ContextAttrText (experimentDeclGoalName experimentDecl))
+        ]
+    }
+
+buildRolloutNode :: CoreRolloutDecl -> ContextNode
+buildRolloutNode (CoreRolloutDecl rolloutDecl) =
+  ContextNode
+    { contextNodeId = rolloutNodeId (rolloutDeclName rolloutDecl)
+    , contextNodeKind = "rollout"
+    , contextNodeSpan = Just (rolloutDeclSpan rolloutDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (rolloutDeclName rolloutDecl))
+        , ("identity", ContextAttrText (rolloutDeclIdentity rolloutDecl))
+        , ("experimentName", ContextAttrText (rolloutDeclExperimentName rolloutDecl))
         ]
     }
 
@@ -658,6 +692,26 @@ buildGoalEdges (CoreGoalDecl goalDecl) =
       }
   ]
 
+buildExperimentEdges :: CoreExperimentDecl -> [ContextEdge]
+buildExperimentEdges (CoreExperimentDecl experimentDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "experiment-goal"
+      , contextEdgeFrom = experimentNodeId (experimentDeclName experimentDecl)
+      , contextEdgeTo = goalNodeId (experimentDeclGoalName experimentDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
+buildRolloutEdges :: CoreRolloutDecl -> [ContextEdge]
+buildRolloutEdges (CoreRolloutDecl rolloutDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "rollout-experiment"
+      , contextEdgeFrom = rolloutNodeId (rolloutDeclName rolloutDecl)
+      , contextEdgeTo = experimentNodeId (rolloutDeclExperimentName rolloutDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
 buildGuideEdges :: GuideDecl -> [ContextEdge]
 buildGuideEdges guideDecl =
   entryEdges <> parentEdges
@@ -970,6 +1024,12 @@ metricNodeId name = ContextNodeId ("metric:" <> name)
 
 goalNodeId :: Text -> ContextNodeId
 goalNodeId name = ContextNodeId ("goal:" <> name)
+
+experimentNodeId :: Text -> ContextNodeId
+experimentNodeId name = ContextNodeId ("experiment:" <> name)
+
+rolloutNodeId :: Text -> ContextNodeId
+rolloutNodeId name = ContextNodeId ("rollout:" <> name)
 
 guideNodeId :: Text -> ContextNodeId
 guideNodeId name = ContextNodeId ("guide:" <> name)
