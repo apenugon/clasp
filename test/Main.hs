@@ -3324,6 +3324,30 @@ compileTests =
               "expected structured output validation failure"
               "suggestedReply must be a string"
               runtimeOutput
+    , testCase "compile emits app-facing secret consumers for routes tools workflows and provider bindings" $
+        case compileSource "secret-surface" secretSurfaceSource of
+          Left err ->
+            assertFailure ("expected secret surface source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected secret consumer export helper" ("export function __claspCreateSecretConsumerSurface(config = {}) {" `T.isInfixOf` emitted)
+            assertBool "expected route secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"route\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"workflow\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
+            assertBool "expected tool secret consumer helper" ("secretConsumer(boundary = this.server ?? null) { return $claspCreateSecretConsumer({ kind: \"tool\", name: this.name, id: this.id, boundary, secretNames: this.secretNames }); }" `T.isInfixOf` emitted)
+    , testCase "app-facing secret consumers resolve declared handles across routes tools workflows and providers" $ do
+        case compileSource "secret-surface-runtime" secretSurfaceSource of
+          Left err ->
+            assertFailure ("expected secret surface source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/secret-surface-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (secretSurfaceRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected declared secret-handle runtime output"
+              "{\"routeSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"routeSecretValue\":\"sk-live-openai\",\"workflowTracePolicy\":\"SupportSecrets\",\"workflowSecretValue\":\"tok-search-1\",\"toolSecretCount\":2,\"toolHasOpenAI\":true,\"providerSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerResolvedName\":\"SEARCH_API_TOKEN\",\"providerResolvedValue\":\"tok-search-1\",\"providerRequestSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerRequestResolvedValue\":\"tok-search-1\",\"providerPreview\":\"preview: tok-search-1\"}"
+              runtimeOutput
     , testCase "typed prompt functions compile to stable prompt values and text rendering" $ do
         case compileSource "prompt-runtime" promptFunctionSource of
           Left err ->
@@ -3989,6 +4013,40 @@ providerRuntimeSource =
     , ""
     , "route previewRoute = POST \"/preview\" TicketDraft -> Page previewPage"
     , "route customerRoute = GET \"/customer\" Empty -> Page customerPage"
+    ]
+
+secretSurfaceSource :: Text
+secretSurfaceSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , "record SearchState = { summary : Str }"
+    , ""
+    , "workflow SearchFlow = { state : SearchState }"
+    , ""
+    , "policy SupportSecrets = public permits {"
+    , "  secret \"OPENAI_API_KEY\","
+    , "  secret \"SEARCH_API_TOKEN\""
+    , "}"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportSecrets"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "foreign generateReplyPreview : SearchRequest -> SearchResponse = \"provider:replyPreview\""
+    , ""
+    , "providerPreview : SearchRequest -> SearchResponse"
+    , "providerPreview req = generateReplyPreview req"
+    , ""
+    , "preview : Empty -> SearchResponse"
+    , "preview req = SearchResponse { summary = \"ready\" }"
+    , ""
+    , "route previewRoute = GET \"/preview\" Empty -> SearchResponse preview"
+    , ""
+    , "main = \"ok\""
     ]
 
 promptFunctionSource :: Text
@@ -6706,6 +6764,59 @@ providerRuntimeInvalidOutputScript compiledPath runtimePath =
     , "} catch (error) {"
     , "  console.log(error.message);"
     , "}"
+    ]
+
+secretSurfaceRuntimeScript :: FilePath -> FilePath -> Text
+secretSurfaceRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createProviderRuntime, providerContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const boundary = compiledModule.__claspSecretBoundaries.find((candidate) => candidate.kind === 'toolServer');"
+    , "if (!boundary) { throw new Error('missing tool-server secret boundary'); }"
+    , "const secretProvider = { OPENAI_API_KEY: 'sk-live-openai', SEARCH_API_TOKEN: 'tok-search-1' };"
+    , "const route = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'previewRoute');"
+    , "const workflow = compiledModule.__claspWorkflows.find((candidate) => candidate.name === 'SearchFlow');"
+    , "const tool = compiledModule.__claspTools.find((candidate) => candidate.name === 'searchRepo');"
+    , "if (!route || !workflow || !tool) { throw new Error('missing secret consumer surfaces'); }"
+    , "const routeSecrets = route.secretConsumer(boundary);"
+    , "const workflowSecrets = workflow.secretConsumer(boundary);"
+    , "const toolSecrets = tool.secretConsumer();"
+    , "const providerContract = providerContractFor(compiledModule);"
+    , "const providerBinding = providerContract.bindings.find((candidate) => candidate.name === 'generateReplyPreview');"
+    , "if (!providerBinding) { throw new Error('missing provider binding'); }"
+    , "const providerSecrets = providerBinding.secretConsumer(boundary);"
+    , "let seenRequest = null;"
+    , "const providerRuntime = createProviderRuntime(compiledModule, {"
+    , "  providers: {"
+    , "    provider: {"
+    , "      invoke(request) {"
+    , "        seenRequest = {"
+    , "          secretNames: request.secretHandles.map((secretHandle) => secretHandle.name),"
+    , "          resolvedValue: request.resolveSecret('SEARCH_API_TOKEN').value"
+    , "        };"
+    , "        return JSON.stringify({ summary: `preview: ${request.resolveSecret(request.secretHandles[1]).value}` });"
+    , "      }"
+    , "    }"
+    , "  },"
+    , "  secrets: secretProvider,"
+    , "  secretBoundary: boundary"
+    , "});"
+    , "providerRuntime.install();"
+    , "const providerResult = compiledModule.providerPreview({ query: 'renewal' });"
+    , "console.log(JSON.stringify({"
+    , "  routeSecretNames: routeSecrets.secretHandles.map((secretHandle) => secretHandle.name),"
+    , "  routeSecretValue: routeSecrets.resolve('OPENAI_API_KEY', secretProvider).value,"
+    , "  workflowTracePolicy: workflowSecrets.traceAccess('SEARCH_API_TOKEN', secretProvider).policy,"
+    , "  workflowSecretValue: workflowSecrets.resolve('SEARCH_API_TOKEN', secretProvider).value,"
+    , "  toolSecretCount: toolSecrets.secretHandles.length,"
+    , "  toolHasOpenAI: toolSecrets.hasSecret('OPENAI_API_KEY'),"
+    , "  providerSecretNames: providerSecrets.secretHandles.map((secretHandle) => secretHandle.name),"
+    , "  providerResolvedName: providerSecrets.handle('SEARCH_API_TOKEN').name,"
+    , "  providerResolvedValue: providerSecrets.resolve('SEARCH_API_TOKEN', secretProvider).value,"
+    , "  providerRequestSecretNames: seenRequest?.secretNames ?? [],"
+    , "  providerRequestResolvedValue: seenRequest?.resolvedValue ?? null,"
+    , "  providerPreview: providerResult.summary"
+    , "}));"
     ]
 
 pythonInteropRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
