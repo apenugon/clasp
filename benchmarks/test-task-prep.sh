@@ -77,6 +77,21 @@ check_product_only_clasp_solution() {
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
 
+check_product_only_typescript_solution() {
+  local task_id="ts-lead-segment"
+  local workspace="$workspace_root/$task_id-product-only"
+  local task_root="$project_root/benchmarks/tasks/$task_id/repo"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+
+  cp "$project_root/examples/lead-app-ts/src/shared/lead.ts" "$workspace/src/shared/lead.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$workspace/src/server/main.ts"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null
+
+  assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+}
+
 check_nested_clasp_benchmark_prep() {
   local task_id="clasp-lead-priority"
   local workspace="$workspace_root/$task_id"
@@ -114,3 +129,4 @@ assert_not_contains "$ts_workspace/src/shared/lead.ts" "LeadSegment"
 assert_not_contains "$ts_workspace/src/server/main.ts" "segment:"
 
 check_product_only_clasp_solution
+check_product_only_typescript_solution

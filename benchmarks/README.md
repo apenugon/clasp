@@ -24,7 +24,10 @@ Each task includes:
 
 The baseline repos are intentionally incomplete. The acceptance tests should fail until the agent finishes the task, and `bash benchmarks/test-task-prep.sh` now enforces that the pristine prepared workspaces do not already pass.
 
-For the Clasp `lead-segment` task, the prep check also guards the intended mutation surface: swapping in the completed app schema file from `../examples/lead-app/Shared/Lead.clasp` must be enough to reach green without editing the benchmark-only `server.mjs` wrapper or `test/lead-app.test.mjs` scaffold.
+For the mirrored `lead-segment` tasks, the prep check also guards the intended mutation surface:
+
+- on the `Clasp` side, swapping in the completed app schema file from `../examples/lead-app/Shared/Lead.clasp` must be enough to reach green without editing the benchmark-only `server.mjs` wrapper or `test/lead-app.test.mjs` scaffold
+- on the `TypeScript` side, swapping in the canonical product files from `../examples/lead-app-ts/src/shared/lead.ts` and `../examples/lead-app-ts/src/server/main.ts` must be enough to reach green without editing `test/lead-app.test.mjs`
 
 The repo distinction matters:
 
@@ -180,6 +183,6 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
 
-The lead-segment pair should stay isomorphic at the acceptance surface: both tests drive one app-owned server entrypoint, and the Clasp variant should keep benchmark-only harness glue out of ordinary product-field propagation work.
+The lead-segment pair should stay isomorphic at the acceptance surface: both tests drive one app-owned server entrypoint, and both variants should keep benchmark-only harness glue out of ordinary product-field propagation work.
 
 The Clasp task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.
