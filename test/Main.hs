@@ -2656,6 +2656,32 @@ compileTests =
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("control-plane demo script failed:\n" <> stderrText)
+    , testCase "support-agent example runs a typed tool loop and validates structured outputs" $ do
+        result <- compileEntry ("examples" </> "support-agent" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected support-agent example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/support-agent/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "support-agent" </> "demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected typed tool and structured output demo result"
+                  "{\"agent\":\"renewalAgent\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"guideScope\":\"Resolve renewal blockers with typed repo tools and validated structured outputs.\",\"plan\":\"Look up customer context, fetch the renewal policy note, then emit either a reply draft or an escalation draft.\",\"dynamicSchemaNames\":[\"ReplyDraft\",\"EscalationDraft\"],\"scenarios\":[{\"ticket\":\"cust-42\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Northwind Studio\",\"plan\":\"standard\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Northwind Studio\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Renewal is blocked on legal review.\",\"decisionType\":\"ReplyDraft\",\"decisionAction\":\"reply\"},{\"ticket\":\"cust-99\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Blue Yonder Enterprise\",\"plan\":\"enterprise\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Blue Yonder Enterprise\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Enterprise renewal is blocked and the deadline is today.\",\"decisionType\":\"EscalationDraft\",\"decisionAction\":\"escalate\"}],\"invalidDecision\":\"decision did not match any dynamic schema candidate: ReplyDraft, EscalationDraft\",\"traceActions\":[\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\"]}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("support-agent demo script failed:\n" <> stderrText)
     , testCase "durable workflow example survives restart and supervised module replacement" $
         flip finally (cleanupProjectDir stateDir) $ do
           oldResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.clasp")
