@@ -1,0 +1,22 @@
+module Main
+
+import Compiler.Emit.JavaScript
+import Compiler.Lower
+
+record SelfHostSnapshot = {
+  loweredValue : Str,
+  loweredFunction : Str,
+  loweredModule : Str,
+  emittedModule : Str
+}
+
+snapshot : SelfHostSnapshot
+snapshot = SelfHostSnapshot {
+  loweredValue = renderLowerDecl loweredValueDecl,
+  loweredFunction = renderLowerDecl loweredFunctionDecl,
+  loweredModule = loweredSummary,
+  emittedModule = emittedModule
+}
+
+main : Str
+main = encode snapshot
