@@ -2982,6 +2982,21 @@ compileTests =
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
+    , testCase "worker runtime simulates dry-run routes, workflows, policy decisions, agent loops, and temporal behavior" $
+        case compileSource "simulation-worker-runtime" simulationSource of
+          Left err ->
+            assertFailure ("expected simulation source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/simulation-worker-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (simulationRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected deterministic simulation runtime output"
+              "{\"contractRoutes\":1,\"fixtureRoute\":\"summarizeLeadRoute\",\"controlPlaneAgents\":1,\"routeStatus\":\"dry_run\",\"routeSummary\":\"seed\",\"routeRequestCompany\":\"seed\",\"policyAllowed\":true,\"policyTraceActor\":\"builder-7\",\"temporalExpired\":false,\"temporalRemaining\":175,\"workflowStatus\":\"dry_run\",\"workflowCount\":10,\"workflowDeliveries\":2,\"workflowAuditCount\":3,\"agentStatus\":\"dry_run\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"agentAllowed\":true,\"agentStepKinds\":[\"process\",\"process\"],\"traceKinds\":[\"route\",\"policy\",\"temporal\",\"workflow\",\"agent_loop\"],\"auditKinds\":[\"route_dry_run\",\"policy_dry_run\",\"temporal_dry_run\",\"workflow_dry_run\",\"agent_loop_dry_run\"]}"
+              runtimeOutput
     , testCase "worker runtime exposes workflow deadlines, cancellation, retries, and bounded backoff" $
         case compileSource "workflow-worker-runtime" workflowSource of
           Left err ->
@@ -4017,6 +4032,39 @@ workflowSource =
     , "record Counter = { count : Int }"
     , ""
     , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "main = \"ok\""
+    ]
+
+simulationSource :: Text
+simulationSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , "record LeadRequest = { company : Str, budget : Int }"
+    , "record LeadSummary = { summary : Str, followUpRequired : Bool }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead lead = LeadSummary { summary = lead.company, followUpRequired = lead.budget >= 40 }"
+    , ""
+    , "guide Repo = {"
+    , "  verification: \"Run bash scripts/verify-all.sh before finishing.\""
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public permits {"
+    , "  file \"/workspace\","
+    , "  process \"rg\","
+    , "  process \"bash\""
+    , "}"
+    , ""
+    , "role WorkerRole = guide: Repo, policy: SupportDisclosure, approval: on_request, sandbox: workspace_write"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     , ""
     , "main = \"ok\""
     ]
@@ -5818,6 +5866,68 @@ workerJobRuntimeScript compiledPath runtimePath =
     , "  resultPriority: decoded.priority,"
     , "  resultFollowUpRequired: decoded.followUpRequired,"
     , "  invalid"
+    , "}));"
+    ]
+
+simulationRuntimeScript :: FilePath -> FilePath -> Text
+simulationRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(compiledModule);"
+    , "const simulation = runtime.simulation({ traceId: 'sim-1', now: 1000 });"
+    , "const routeDryRun = simulation.route('summarizeLeadRoute').dryRun();"
+    , "const policyDecision = simulation.policy('SupportDisclosure').decide('process', 'rg', { actor: { id: 'builder-7' } });"
+    , "const temporalClock = simulation.temporal.clock(1000);"
+    , "temporalClock.advanceBy(125);"
+    , "const temporalTtl = simulation.temporal.ttl('CounterFlow', { issuedAt: 1000, ttlMs: 300 }, { clock: temporalClock });"
+    , "const workflowDryRun = simulation.workflow('CounterFlow').dryRun({"
+    , "  state: { count: 5 },"
+    , "  messages: [{ id: 'm1', payload: 2 }, { id: 'm2', payload: 3 }]"
+    , "}, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}), { clock: temporalClock });"
+    , "const agentDryRun = simulation.agent('builder').dryRun({"
+    , "  steps: ["
+    , "    {"
+    , "      step: 'inspect',"
+    , "      kind: 'process',"
+    , "      target: 'rg',"
+    , "      request: { query: 'rg --files src test' },"
+    , "      result: { summary: 'src/Clasp/Compiler.hs' }"
+    , "    },"
+    , "    {"
+    , "      step: 'verify',"
+    , "      kind: 'process',"
+    , "      target: 'bash',"
+    , "      request: { query: 'bash scripts/verify-all.sh' },"
+    , "      result: { summary: 'verification:ok' }"
+    , "    }"
+    , "  ]"
+    , "}, { now: temporalClock.now() });"
+    , "console.log(JSON.stringify({"
+    , "  contractRoutes: runtime.contract.routes.length,"
+    , "  fixtureRoute: runtime.contract.seededFixtures[0]?.routeName ?? null,"
+    , "  controlPlaneAgents: runtime.contract.controlPlane?.agents.length ?? 0,"
+    , "  routeStatus: routeDryRun.status,"
+    , "  routeSummary: routeDryRun.response.summary,"
+    , "  routeRequestCompany: routeDryRun.request.company,"
+    , "  policyAllowed: policyDecision.allowed,"
+    , "  policyTraceActor: policyDecision.trace.context.actor.id,"
+    , "  temporalExpired: temporalTtl.expired,"
+    , "  temporalRemaining: temporalTtl.remainingMs,"
+    , "  workflowStatus: workflowDryRun.status,"
+    , "  workflowCount: workflowDryRun.run.state.count,"
+    , "  workflowDeliveries: workflowDryRun.run.deliveries.length,"
+    , "  workflowAuditCount: workflowDryRun.run.auditLog.length,"
+    , "  agentStatus: agentDryRun.status,"
+    , "  agentApproval: agentDryRun.approvalPolicy,"
+    , "  agentSandbox: agentDryRun.sandboxPolicy,"
+    , "  agentAllowed: agentDryRun.steps.every((step) => step.allowed),"
+    , "  agentStepKinds: agentDryRun.steps.map((step) => step.kind),"
+    , "  traceKinds: simulation.traces().map((entry) => entry.kind),"
+    , "  auditKinds: simulation.audits().map((entry) => entry.eventType)"
     , "}));"
     ]
 

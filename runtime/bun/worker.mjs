@@ -9,6 +9,12 @@ function bindingContractFor(compiledModule) {
     return {
       ...contract,
       module: contract.module ?? compiledModule?.__claspModule ?? null,
+      routes: contract.routes ?? compiledModule?.__claspRoutes ?? [],
+      routeClients: contract.routeClients ?? compiledModule?.__claspRouteClients ?? [],
+      seededFixtures: contract.seededFixtures ?? compiledModule?.__claspSeededFixtures ?? [],
+      controlPlane: contract.controlPlane ?? compiledModule?.__claspControlPlane ?? null,
+      controlPlaneDocs:
+        contract.controlPlaneDocs ?? compiledModule?.__claspControlPlaneDocs ?? null,
       nativeInterop:
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
@@ -20,7 +26,12 @@ function bindingContractFor(compiledModule) {
     kind: "clasp-generated-bindings",
     version: 1,
     module: compiledModule?.__claspModule ?? null,
+    routes: compiledModule?.__claspRoutes ?? [],
+    routeClients: compiledModule?.__claspRouteClients ?? [],
     schemas: compiledModule?.__claspSchemas ?? {},
+    seededFixtures: compiledModule?.__claspSeededFixtures ?? [],
+    controlPlane: compiledModule?.__claspControlPlane ?? null,
+    controlPlaneDocs: compiledModule?.__claspControlPlaneDocs ?? null,
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
       defaultNativeInterop(compiledModule?.__claspHostBindings ?? [])
@@ -493,6 +504,459 @@ function appendWorkflowAudit(run, auditEntry) {
   });
 }
 
+function freezeSimulationValue(value) {
+  if (value === null || value === undefined) {
+    return value ?? null;
+  }
+
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((entry) => freezeSimulationValue(entry)));
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  const normalized = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    normalized[key] = freezeSimulationValue(entry);
+  }
+
+  return Object.freeze(normalized);
+}
+
+function normalizeSimulationTimestamp(value, path) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${path} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function createSimulationClock(seedNow = 0) {
+  let currentNow = normalizeSimulationTimestamp(seedNow, "simulation.clock.seedNow");
+
+  return Object.freeze({
+    kind: "clasp-simulation-clock",
+    now() {
+      return currentNow;
+    },
+    set(now) {
+      currentNow = normalizeSimulationTimestamp(now, "simulation.clock.set");
+      return currentNow;
+    },
+    advanceBy(deltaMs) {
+      if (!Number.isInteger(deltaMs) || deltaMs < 0) {
+        throw new Error("simulation.clock.advanceBy must be a non-negative integer.");
+      }
+
+      currentNow += deltaMs;
+      return currentNow;
+    }
+  });
+}
+
+function resolveSimulationNow(clock, value, path) {
+  if (value === undefined || value === null) {
+    return clock.now();
+  }
+
+  return normalizeSimulationTimestamp(value, path);
+}
+
+function workflowTemporalOperation(workflow, operation) {
+  const temporal = workflow?.temporal;
+  const handler = temporal?.[operation];
+
+  if (typeof handler !== "function") {
+    throw new Error(
+      `Workflow ${String(workflow?.name ?? "unknown")} does not expose temporal.${operation}.`
+    );
+  }
+
+  return handler.bind(temporal);
+}
+
+export function createSimulationRuntime(compiledModule, options = {}) {
+  const contract = bindingContractFor(compiledModule);
+  const simulationClock =
+    options.clock && typeof options.clock.now === "function"
+      ? options.clock
+      : createSimulationClock(options.now ?? 0);
+  const traceId =
+    options.traceId === undefined || options.traceId === null
+      ? "simulation"
+      : normalizeHotSwapLabel(options.traceId, "simulation.traceId");
+  const routeMap = new Map(
+    (contract.routes ?? []).map((route) => [route?.name, route])
+  );
+  const fixtureMap = new Map(
+    (contract.seededFixtures ?? []).map((fixture) => [fixture?.routeName, fixture])
+  );
+  const workflows = Array.isArray(compiledModule?.__claspWorkflows)
+    ? compiledModule.__claspWorkflows
+    : [];
+  const workflowMap = new Map(workflows.map((workflow) => [workflow?.name, workflow]));
+  const controlPlane =
+    contract.controlPlane ??
+    (compiledModule?.__claspControlPlane && typeof compiledModule.__claspControlPlane === "object"
+      ? compiledModule.__claspControlPlane
+      : null);
+  const policyMap = new Map(
+    ((controlPlane?.policies ?? compiledModule?.__claspPolicies ?? [])).map((policy) => [
+      policy?.name,
+      policy
+    ])
+  );
+  const agentMap = new Map(
+    ((controlPlane?.agents ?? compiledModule?.__claspAgents ?? [])).map((agent) => [
+      agent?.name,
+      agent
+    ])
+  );
+  const traces = [];
+  const audits = [];
+
+  return Object.freeze({
+    kind: "clasp-simulation-runtime",
+    version: 1,
+    traceId,
+    contract,
+    clock: simulationClock,
+    temporal: Object.freeze({
+      clock(seedNow = simulationClock.now()) {
+        return createSimulationClock(seedNow);
+      },
+      deadline(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "deadline", spec, temporalOptions);
+      },
+      ttl(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "ttl", spec, temporalOptions);
+      },
+      expiration(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "expiration", spec, temporalOptions);
+      },
+      schedule(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "schedule", spec, temporalOptions);
+      },
+      rollout(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "rollout", spec, temporalOptions);
+      },
+      cache(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "cache", spec, temporalOptions);
+      },
+      capability(workflowName, spec, temporalOptions = {}) {
+        return runTemporalOperation(workflowName, "capability", spec, temporalOptions);
+      }
+    }),
+    route(name) {
+      const route = routeMap.get(name);
+
+      if (!route) {
+        throw new Error(`Missing Clasp simulation route: ${name}`);
+      }
+
+      const fixture = fixtureMap.get(name) ?? null;
+
+      return Object.freeze({
+        route,
+        fixture,
+        dryRun(input = {}, dryRunOptions = {}) {
+          const now = resolveSimulationNow(
+            simulationClock,
+            dryRunOptions.now,
+            "simulation.route.dryRun.now"
+          );
+          const requestSeed =
+            input.request ?? input.requestSeed ?? fixture?.requestSeed ?? null;
+          const responseSeed =
+            input.response ?? input.responseSeed ?? fixture?.responseSeed ?? null;
+          const request =
+            requestSeed === null ? null : route.decodeRequest(JSON.stringify(requestSeed));
+          const response =
+            route.responseKind === "json" && responseSeed !== null
+              ? schemaContractFor(compiledModule, route.responseType).toHost(
+                  schemaContractFor(compiledModule, route.responseType).fromHost(
+                    responseSeed,
+                    "response"
+                  ),
+                  "response"
+                )
+              : freezeSimulationValue(responseSeed);
+          const trace = freezeSimulationValue({
+            kind: "route",
+            mode: "dry_run",
+            traceId,
+            at: now,
+            routeName: route.name,
+            routeId: route.id,
+            request,
+            response,
+            fixture: fixture
+              ? {
+                  routeName: fixture.routeName,
+                  routeId: fixture.routeId
+                }
+              : null
+          });
+          const audit = freezeSimulationValue({
+            eventType: "route_dry_run",
+            traceId,
+            routeName: route.name,
+            routeId: route.id,
+            simulatedAt: now,
+            requestType: route.requestType,
+            responseType: route.responseType,
+            responseKind: route.responseKind,
+            fixtureUsed: fixture?.routeId ?? null
+          });
+          appendSimulationRecord(trace, audit);
+
+          return freezeSimulationValue({
+            status: "dry_run",
+            routeName: route.name,
+            routeId: route.id,
+            request,
+            response,
+            trace,
+            audit
+          });
+        }
+      });
+    },
+    workflow(name) {
+      const workflow = workflowMap.get(name);
+
+      if (!workflow) {
+        throw new Error(`Missing Clasp simulation workflow: ${name}`);
+      }
+
+      return Object.freeze({
+        workflow,
+        dryRun(input = {}, reducer, dryRunOptions = {}) {
+          if (typeof reducer !== "function") {
+            throw new Error(`simulation.workflow(${name}).dryRun requires a reducer function.`);
+          }
+
+          const now = resolveSimulationNow(
+            simulationClock,
+            dryRunOptions.now,
+            "simulation.workflow.dryRun.now"
+          );
+          const snapshot =
+            typeof input.snapshot === "string"
+              ? input.snapshot
+              : workflow.checkpoint(
+                  input.state ??
+                    schemaContractFor(compiledModule, workflow.stateType).seed
+                );
+          const messages = Array.isArray(input.messages) ? input.messages : [];
+          const replayOptions =
+            dryRunOptions.clock && typeof dryRunOptions.clock.now === "function"
+              ? { ...dryRunOptions, clock: dryRunOptions.clock }
+              : { ...dryRunOptions, now };
+          const run = workflow.replay(snapshot, messages, reducer, replayOptions);
+          const trace = freezeSimulationValue({
+            kind: "workflow",
+            mode: "dry_run",
+            traceId,
+            at: now,
+            workflowName: workflow.name,
+            workflowId: workflow.id,
+            delivered: run.deliveries.length,
+            processedIds: run.processedIds
+          });
+          const audit = freezeSimulationValue({
+            eventType: "workflow_dry_run",
+            traceId,
+            workflowName: workflow.name,
+            workflowId: workflow.id,
+            simulatedAt: now,
+            delivered: run.deliveries.length,
+            auditEntries: run.auditLog.length
+          });
+          appendSimulationRecord(trace, audit);
+
+          return freezeSimulationValue({
+            status: "dry_run",
+            workflowName: workflow.name,
+            run,
+            trace,
+            audit
+          });
+        }
+      });
+    },
+    policy(name) {
+      const policy = policyMap.get(name);
+
+      if (!policy) {
+        throw new Error(`Missing Clasp simulation policy: ${name}`);
+      }
+
+      return Object.freeze({
+        policy,
+        decide(kind, target, context = null) {
+          const decision = policy.decide(kind, target, context);
+          appendSimulationRecord(
+            freezeSimulationValue({
+              kind: "policy",
+              mode: "dry_run",
+              traceId,
+              at: simulationClock.now(),
+              policyName: policy.name,
+              decision: decision.trace
+            }),
+            freezeSimulationValue({
+              eventType: "policy_dry_run",
+              traceId,
+              policyName: policy.name,
+              decision: decision.audit
+            })
+          );
+          return decision;
+        }
+      });
+    },
+    agent(name) {
+      const agent = agentMap.get(name);
+
+      if (!agent) {
+        throw new Error(`Missing Clasp simulation agent: ${name}`);
+      }
+
+      if (!agent.policy || typeof agent.policy.decide !== "function") {
+        throw new Error(`Agent ${name} is missing a usable policy.`);
+      }
+
+      return Object.freeze({
+        agent,
+        dryRun(loopFixture = {}, dryRunOptions = {}) {
+          const now = resolveSimulationNow(
+            simulationClock,
+            dryRunOptions.now,
+            "simulation.agent.dryRun.now"
+          );
+          const steps = Array.isArray(loopFixture.steps) ? loopFixture.steps : [];
+          const results = steps.map((step, index) => {
+            const stepName =
+              step?.step && typeof step.step === "string" && step.step !== ""
+                ? step.step
+                : `step-${index + 1}`;
+            const kind =
+              step?.kind && typeof step.kind === "string" && step.kind !== ""
+                ? step.kind
+                : "process";
+            const target =
+              step?.target && typeof step.target === "string" && step.target !== ""
+                ? step.target
+                : "";
+            const decision = agent.policy.decide(kind, target, step?.context ?? null);
+
+            return freezeSimulationValue({
+              step: stepName,
+              kind,
+              target,
+              allowed: decision.allowed,
+              request: step?.request ?? null,
+              result: step?.result ?? null,
+              trace: decision.trace,
+              audit: decision.audit
+            });
+          });
+          const trace = freezeSimulationValue({
+            kind: "agent_loop",
+            mode: "dry_run",
+            traceId,
+            at: now,
+            agentName: agent.name,
+            approvalPolicy: agent.role?.approvalPolicy ?? null,
+            sandboxPolicy: agent.role?.sandboxPolicy ?? null,
+            steps: results.map((result) => ({
+              step: result.step,
+              allowed: result.allowed
+            }))
+          });
+          const audit = freezeSimulationValue({
+            eventType: "agent_loop_dry_run",
+            traceId,
+            agentName: agent.name,
+            simulatedAt: now,
+            stepCount: results.length,
+            deniedSteps: results.filter((result) => !result.allowed).length
+          });
+          appendSimulationRecord(trace, audit);
+
+          return freezeSimulationValue({
+            status: "dry_run",
+            agentName: agent.name,
+            approvalPolicy: agent.role?.approvalPolicy ?? null,
+            sandboxPolicy: agent.role?.sandboxPolicy ?? null,
+            steps: results,
+            trace,
+            audit
+          });
+        }
+      });
+    },
+    traces() {
+      return freezeSimulationValue(traces);
+    },
+    audits() {
+      return freezeSimulationValue(audits);
+    }
+  });
+
+  function appendSimulationRecord(trace, audit) {
+    traces.push(trace);
+    audits.push(audit);
+  }
+
+  function runTemporalOperation(workflowName, operation, spec, temporalOptions = {}) {
+    const workflow = workflowMap.get(workflowName);
+
+    if (!workflow) {
+      throw new Error(`Missing Clasp simulation workflow: ${workflowName}`);
+    }
+
+    const temporalClock =
+      temporalOptions.clock && typeof temporalOptions.clock.now === "function"
+        ? temporalOptions.clock
+        : simulationClock;
+    const now = resolveSimulationNow(
+      temporalClock,
+      temporalOptions.now,
+      `simulation.temporal.${operation}.now`
+    );
+    const result = workflowTemporalOperation(workflow, operation)(spec, {
+      ...temporalOptions,
+      now,
+      clock: temporalClock
+    });
+    const trace = freezeSimulationValue({
+      kind: "temporal",
+      mode: "dry_run",
+      traceId,
+      at: now,
+      workflowName,
+      operation,
+      spec,
+      result
+    });
+    const audit = freezeSimulationValue({
+      eventType: "temporal_dry_run",
+      traceId,
+      workflowName,
+      operation,
+      simulatedAt: now,
+      status: result?.status ?? null
+    });
+    appendSimulationRecord(trace, audit);
+    return result;
+  }
+}
+
 function patchRollbackWorkflowCompatibility(workflow, acceptedModuleVersionId) {
   const compatibleModuleVersionIds = Array.isArray(
     workflow?.compatibility?.compatibleModuleVersionIds
@@ -744,6 +1208,12 @@ export function createWorkerRuntime(compiledModule, options = {}) {
         targetCompiledModule,
         hotSwapOptions
       );
+    },
+    simulation(simulationOptions = {}) {
+      return createSimulationRuntime(compiledModule, simulationOptions);
+    },
+    simulate(simulationOptions = {}) {
+      return createSimulationRuntime(compiledModule, simulationOptions);
     },
     registerJob(jobOrOptions) {
       return registerJob(jobOrOptions);
