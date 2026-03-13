@@ -48,6 +48,8 @@ import Clasp.Compiler
   , compileSource
   , explainSource
   , formatSource
+  , nativeEntry
+  , nativeSource
   , parseSource
   , renderAirSourceJson
   , renderContextSourceJson
@@ -96,6 +98,18 @@ import Clasp.Lower
   , LowerRouteContract (..)
   , lowerPageFlows
   , lowerModule
+  )
+import Clasp.Native
+  ( NativeCompareOp (..)
+  , NativeDecl (..)
+  , NativeExpr (..)
+  , NativeFunction (..)
+  , NativeGlobal (..)
+  , NativeIntrinsic (..)
+  , NativeLiteral (..)
+  , NativeMatchBranch (..)
+  , NativeModule (..)
+  , NativeMutability (..)
   )
 import Clasp.Syntax
   ( AgentDecl (..)
@@ -167,6 +181,7 @@ tests =
     , contextTests
     , diagnosticTests
     , lowerTests
+    , nativeTests
     , docsTests
     , compileTests
     ]
@@ -2424,6 +2439,80 @@ lowerTests =
                 assertFailure ("unexpected lowered auth identity declaration: " <> show other)
     ]
 
+nativeTests :: TestTree
+nativeTests =
+  testGroup
+    "native"
+    [ testCase "native lowering defines backend-native globals and functions" $
+        case nativeSource "adt" adtSource of
+          Left err ->
+            assertFailure ("expected native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            assertEqual "native exports" ["Idle", "Busy", "describe", "main"] (nativeModuleExports nativeMod)
+            case findNativeDecl "Idle" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl (NativeGlobal _ (NativeConstruct "Idle" []))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native Idle declaration: " <> show other)
+            case findNativeDecl "Busy" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["$0"] (NativeConstruct "Busy" [NativeLocal "$0"]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native Busy declaration: " <> show other)
+            case findNativeDecl "describe" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["status"] (NativeMatch (NativeLocal "status") [NativeMatchBranch "Idle" [] (NativeLiteralExpr (NativeString "idle")), NativeMatchBranch "Busy" ["note"] (NativeLocal "note")]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native describe declaration: " <> show other)
+    , testCase "native lowering preserves mutable bindings and backend comparison ops" $ do
+        case nativeSource "mutable-block" mutableBlockAssignmentSource of
+          Left err ->
+            assertFailure ("expected mutable native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod ->
+            case findNativeDecl "greeting" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl (NativeGlobal _ (NativeLet NativeMutable "message" (NativeLiteralExpr (NativeString "Ada")) (NativeAssign "message" (NativeLiteralExpr (NativeString "Grace")) (NativeLocal "message"))))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native greeting declaration: " <> show other)
+        case nativeSource "comparison" integerComparisonSource of
+          Left err ->
+            assertFailure ("expected comparison native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod ->
+            case findNativeDecl "isLatest" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["left", "right"] (NativeCompare NativeGreaterThanOrEqual (NativeLocal "left") (NativeLocal "right")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native isLatest declaration: " <> show other)
+    , testCase "native entry lowers page runtime forms into explicit intrinsics" $
+        withProjectFiles "native-entry" [("Main.clasp", interactivePageSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          nativeResult <- nativeEntry inputPath
+          case nativeResult of
+            Left err ->
+              assertFailure ("expected native entry to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right nativeMod ->
+              case findNativeDecl "home" (nativeModuleDecls nativeMod) of
+                Just
+                  ( NativeFunctionDecl
+                      ( NativeFunction
+                          _ ["req"]
+                          ( NativeIntrinsic
+                              ( NativePageIntrinsic
+                                  (NativeLiteralExpr (NativeString "Inbox"))
+                                  ( NativeIntrinsic
+                                      (NativeViewAppendIntrinsic (NativeIntrinsic (NativeViewLinkIntrinsic routeLink "/lead/primary" _)) (NativeIntrinsic (NativeViewFormIntrinsic routeForm "POST" "/leads" _))
+                                      )
+                                  )
+                              )
+                          )
+                      )
+                    ) -> do
+                      assertEqual "link route contract" "route:leadRoute" (lowerRouteContractIdentity routeLink)
+                      assertEqual "form route contract" "route:createLeadRoute" (lowerRouteContractIdentity routeForm)
+                other ->
+                  assertFailure ("unexpected native home declaration: " <> show other)
+    ]
+
 docsTests :: TestTree
 docsTests =
   testGroup
@@ -4634,6 +4723,17 @@ findAirNode target =
     go (node : rest)
       | airNodeId node == target = Just node
       | otherwise = go rest
+
+findNativeDecl :: Text -> [NativeDecl] -> Maybe NativeDecl
+findNativeDecl target =
+  find matchesName
+  where
+    matchesName decl =
+      case decl of
+        NativeGlobalDecl globalDecl ->
+          nativeGlobalName globalDecl == target
+        NativeFunctionDecl functionDecl ->
+          nativeFunctionName functionDecl == target
 
 lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do

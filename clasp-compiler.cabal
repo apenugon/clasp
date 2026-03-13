@@ -36,6 +36,7 @@ library
       Clasp.Emit.JavaScript
       Clasp.Loader
       Clasp.Lower
+      Clasp.Native
       Clasp.Parser
       Clasp.Syntax
 

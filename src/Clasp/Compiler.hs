@@ -16,6 +16,8 @@ module Clasp.Compiler
   , explainSource
   , explainEntry
   , formatSource
+  , nativeSource
+  , nativeEntry
   , parseSource
   , renderAirEntryJson
   , renderAirSourceJson
@@ -44,6 +46,7 @@ import Clasp.Diagnostic (DiagnosticBundle, singleDiagnostic)
 import Clasp.Emit.JavaScript (emitModule)
 import Clasp.Loader (loadEntryModule)
 import Clasp.Lower (lowerModule)
+import Clasp.Native (NativeModule, buildNativeModule)
 import Clasp.Parser (parseModule)
 import Clasp.Syntax (Module, renderModule)
 
@@ -90,6 +93,10 @@ renderContextSourceJson :: FilePath -> Text -> Either DiagnosticBundle LT.Text
 renderContextSourceJson path source =
   renderContextGraphJson <$> contextSource path source
 
+nativeSource :: FilePath -> Text -> Either DiagnosticBundle NativeModule
+nativeSource path source =
+  buildNativeModule . lowerModule <$> checkSource path source
+
 airEntry :: FilePath -> IO (Either DiagnosticBundle AirModule)
 airEntry entryPath = do
   checkedModule <- checkEntry entryPath
@@ -109,6 +116,11 @@ renderContextEntryJson :: FilePath -> IO (Either DiagnosticBundle LT.Text)
 renderContextEntryJson entryPath = do
   contextGraph <- contextEntry entryPath
   pure (renderContextGraphJson <$> contextGraph)
+
+nativeEntry :: FilePath -> IO (Either DiagnosticBundle NativeModule)
+nativeEntry entryPath = do
+  checkedModule <- checkEntry entryPath
+  pure ((buildNativeModule . lowerModule) <$> checkedModule)
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do
