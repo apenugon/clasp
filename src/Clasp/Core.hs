@@ -7,9 +7,11 @@ module Clasp.Core
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
   , CoreExpr (..)
+  , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
+  , CoreMetricDecl (..)
   , CoreModule (..)
   , CoreParam (..)
   , CorePolicyDecl (..)
@@ -39,10 +41,12 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ForeignDecl (..)
+  , GoalDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
   , ModuleName
@@ -83,6 +87,8 @@ data CoreModule = CoreModule
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleDomainObjectDecls :: [CoreDomainObjectDecl]
   , coreModuleDomainEventDecls :: [CoreDomainEventDecl]
+  , coreModuleMetricDecls :: [CoreMetricDecl]
+  , coreModuleGoalDecls :: [CoreGoalDecl]
   , coreModuleWorkflowDecls :: [CoreWorkflowDecl]
   , coreModuleSupervisorDecls :: [CoreSupervisorDecl]
   , coreModuleGuideDecls :: [GuideDecl]
@@ -113,6 +119,16 @@ data CoreDomainObjectDecl = CoreDomainObjectDecl
 
 data CoreDomainEventDecl = CoreDomainEventDecl
   { coreDomainEventSourceDecl :: DomainEventDecl
+  }
+  deriving (Eq, Show)
+
+data CoreMetricDecl = CoreMetricDecl
+  { coreMetricSourceDecl :: MetricDecl
+  }
+  deriving (Eq, Show)
+
+data CoreGoalDecl = CoreGoalDecl
+  { coreGoalSourceDecl :: GoalDecl
   }
   deriving (Eq, Show)
 
@@ -278,6 +294,8 @@ renderCoreModule modl =
       , fmap renderRecordDecl (coreModuleRecordDecls modl)
       , fmap renderDomainObjectDecl (coreModuleDomainObjectDecls modl)
       , fmap renderDomainEventDecl (coreModuleDomainEventDecls modl)
+      , fmap renderMetricDecl (coreModuleMetricDecls modl)
+      , fmap renderGoalDecl (coreModuleGoalDecls modl)
       , fmap renderWorkflowDecl (coreModuleWorkflowDecls modl)
       , fmap renderSupervisorDecl (coreModuleSupervisorDecls modl)
       , fmap renderGuideDecl (coreModuleGuideDecls modl)
@@ -335,6 +353,22 @@ renderDomainEventDecl (CoreDomainEventDecl domainEventDecl) =
     <> domainEventDeclSchemaName domainEventDecl
     <> " for "
     <> domainEventDeclObjectName domainEventDecl
+
+renderMetricDecl :: CoreMetricDecl -> Text
+renderMetricDecl (CoreMetricDecl metricDecl) =
+  "metric "
+    <> metricDeclName metricDecl
+    <> " = "
+    <> metricDeclSchemaName metricDecl
+    <> " for "
+    <> metricDeclObjectName metricDecl
+
+renderGoalDecl :: CoreGoalDecl -> Text
+renderGoalDecl (CoreGoalDecl goalDecl) =
+  "goal "
+    <> goalDeclName goalDecl
+    <> " = "
+    <> goalDeclMetricName goalDecl
 
 renderWorkflowDecl :: CoreWorkflowDecl -> Text
 renderWorkflowDecl workflowDecl =

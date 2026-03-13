@@ -28,8 +28,10 @@ import Clasp.Core
   , CoreAgentRoleDecl (..)
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
+  , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
+  , CoreMetricDecl (..)
   , CoreModule (..)
   , CorePolicyDecl (..)
   , CoreToolDecl (..)
@@ -52,10 +54,12 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ForeignDecl (..)
+  , GoalDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
   , ModuleName (..)
@@ -129,6 +133,8 @@ buildContextGraph modl =
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
     domainObjectNodes = fmap buildDomainObjectNode (coreModuleDomainObjectDecls modl)
     domainEventNodes = fmap buildDomainEventNode (coreModuleDomainEventDecls modl)
+    metricNodes = fmap buildMetricNode (coreModuleMetricDecls modl)
+    goalNodes = fmap buildGoalNode (coreModuleGoalDecls modl)
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
@@ -144,12 +150,14 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> metricNodes <> goalNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildDomainObjectEdges (coreModuleDomainObjectDecls modl)
         <> concatMap buildDomainEventEdges (coreModuleDomainEventDecls modl)
+        <> concatMap buildMetricEdges (coreModuleMetricDecls modl)
+        <> concatMap buildGoalEdges (coreModuleGoalDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
@@ -221,6 +229,33 @@ buildDomainEventNode (CoreDomainEventDecl domainEventDecl) =
         , ("identity", ContextAttrText (domainEventDeclIdentity domainEventDecl))
         , ("schemaName", ContextAttrText (domainEventDeclSchemaName domainEventDecl))
         , ("domainObjectName", ContextAttrText (domainEventDeclObjectName domainEventDecl))
+        ]
+    }
+
+buildMetricNode :: CoreMetricDecl -> ContextNode
+buildMetricNode (CoreMetricDecl metricDecl) =
+  ContextNode
+    { contextNodeId = metricNodeId (metricDeclName metricDecl)
+    , contextNodeKind = "metric"
+    , contextNodeSpan = Just (metricDeclSpan metricDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (metricDeclName metricDecl))
+        , ("identity", ContextAttrText (metricDeclIdentity metricDecl))
+        , ("schemaName", ContextAttrText (metricDeclSchemaName metricDecl))
+        , ("domainObjectName", ContextAttrText (metricDeclObjectName metricDecl))
+        ]
+    }
+
+buildGoalNode :: CoreGoalDecl -> ContextNode
+buildGoalNode (CoreGoalDecl goalDecl) =
+  ContextNode
+    { contextNodeId = goalNodeId (goalDeclName goalDecl)
+    , contextNodeKind = "goal"
+    , contextNodeSpan = Just (goalDeclSpan goalDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (goalDeclName goalDecl))
+        , ("identity", ContextAttrText (goalDeclIdentity goalDecl))
+        , ("metricName", ContextAttrText (goalDeclMetricName goalDecl))
         ]
     }
 
@@ -597,6 +632,32 @@ buildDomainEventEdges (CoreDomainEventDecl domainEventDecl) =
       }
   ]
 
+buildMetricEdges :: CoreMetricDecl -> [ContextEdge]
+buildMetricEdges (CoreMetricDecl metricDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "metric-schema"
+      , contextEdgeFrom = metricNodeId (metricDeclName metricDecl)
+      , contextEdgeTo = schemaNodeId (metricDeclSchemaName metricDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "metric-object"
+      , contextEdgeFrom = metricNodeId (metricDeclName metricDecl)
+      , contextEdgeTo = domainObjectNodeId (metricDeclObjectName metricDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
+buildGoalEdges :: CoreGoalDecl -> [ContextEdge]
+buildGoalEdges (CoreGoalDecl goalDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "goal-metric"
+      , contextEdgeFrom = goalNodeId (goalDeclName goalDecl)
+      , contextEdgeTo = metricNodeId (goalDeclMetricName goalDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
 buildGuideEdges :: GuideDecl -> [ContextEdge]
 buildGuideEdges guideDecl =
   entryEdges <> parentEdges
@@ -903,6 +964,12 @@ domainObjectNodeId name = ContextNodeId ("domain-object:" <> name)
 
 domainEventNodeId :: Text -> ContextNodeId
 domainEventNodeId name = ContextNodeId ("domain-event:" <> name)
+
+metricNodeId :: Text -> ContextNodeId
+metricNodeId name = ContextNodeId ("metric:" <> name)
+
+goalNodeId :: Text -> ContextNodeId
+goalNodeId name = ContextNodeId ("goal:" <> name)
 
 guideNodeId :: Text -> ContextNodeId
 guideNodeId name = ContextNodeId ("guide:" <> name)

@@ -19,6 +19,7 @@ It includes:
 - Top-level type declarations
 - Top-level record declarations
 - Top-level domain-object and domain-event declarations bound to record schemas
+- Top-level metric and goal declarations bound to typed domain declarations
 - Top-level workflow declarations for isolated long-running processes with typed durable state
 - Top-level foreign capability declarations
 - Top-level hook declarations for lifecycle triggers
@@ -63,7 +64,7 @@ It does not yet include:
 - Effects
 - Dedicated schema syntax separate from records
 - Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
-- External-objective declarations such as goals, metrics, experiments, and rollout policies
+- External-objective declarations such as experiments and rollout policies beyond the current domain, metric, and goal slices
 - Compiler-emitted context graphs over declarations, capabilities, traces, and external-objective structure
 - Rich LLM-specific syntax beyond foreign/runtime boundaries, including provider strategies
 
@@ -99,7 +100,7 @@ Every `Clasp` source file in `v0` has:
 
 1. An optional module declaration
 2. Zero or more file-level imports
-3. Zero or more top-level type, record, domain object, domain event, workflow, supervisor, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
+3. Zero or more top-level type, record, domain object, domain event, metric, goal, workflow, supervisor, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
 4. One or more top-level declarations
 
 When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
@@ -121,9 +122,12 @@ module Main
 
 record CustomerRecord = { customerId : Str, tier : Str }
 record CustomerChurnEvent = { customerId : Str, reason : Str }
+record CustomerMetric = { customerId : Str, churnRate : Int }
 
 domain object Customer = CustomerRecord
 domain event CustomerChurned = CustomerChurnEvent for Customer
+metric CustomerChurnRate = CustomerMetric for Customer
+goal RetainCustomers = CustomerChurnRate
 ```
 
 Supervisor declarations define BEAM-style restart strategy metadata over workflow or nested supervisor children:

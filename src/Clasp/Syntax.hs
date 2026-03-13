@@ -13,12 +13,14 @@ module Clasp.Syntax
   , ForeignDecl (..)
   , ForeignPackageImport (..)
   , ForeignPackageImportKind (..)
+  , GoalDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
   , ImportDecl (..)
   , MatchBranch (..)
+  , MetricDecl (..)
   , Module (..)
   , ModuleName (..)
   , MergeGateDecl (..)
@@ -118,6 +120,8 @@ data Module = Module
   , moduleRecordDecls :: [RecordDecl]
   , moduleDomainObjectDecls :: [DomainObjectDecl]
   , moduleDomainEventDecls :: [DomainEventDecl]
+  , moduleMetricDecls :: [MetricDecl]
+  , moduleGoalDecls :: [GoalDecl]
   , moduleWorkflowDecls :: [WorkflowDecl]
   , moduleSupervisorDecls :: [SupervisorDecl]
   , moduleGuideDecls :: [GuideDecl]
@@ -163,6 +167,28 @@ data DomainEventDecl = DomainEventDecl
   , domainEventDeclSchemaSpan :: SourceSpan
   , domainEventDeclObjectName :: Text
   , domainEventDeclObjectSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data MetricDecl = MetricDecl
+  { metricDeclName :: Text
+  , metricDeclSpan :: SourceSpan
+  , metricDeclNameSpan :: SourceSpan
+  , metricDeclIdentity :: Text
+  , metricDeclSchemaName :: Text
+  , metricDeclSchemaSpan :: SourceSpan
+  , metricDeclObjectName :: Text
+  , metricDeclObjectSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data GoalDecl = GoalDecl
+  { goalDeclName :: Text
+  , goalDeclSpan :: SourceSpan
+  , goalDeclNameSpan :: SourceSpan
+  , goalDeclIdentity :: Text
+  , goalDeclMetricName :: Text
+  , goalDeclMetricSpan :: SourceSpan
   }
   deriving (Eq, Show)
 
@@ -674,6 +700,8 @@ renderModule modl =
         , fmap renderRecordDecl (moduleRecordDecls modl)
         , fmap renderDomainObjectDecl (moduleDomainObjectDecls modl)
         , fmap renderDomainEventDecl (moduleDomainEventDecls modl)
+        , fmap renderMetricDecl (moduleMetricDecls modl)
+        , fmap renderGoalDecl (moduleGoalDecls modl)
         , fmap renderWorkflowDecl (moduleWorkflowDecls modl)
         , fmap renderSupervisorDecl (moduleSupervisorDecls modl)
         , fmap renderGuideDecl (moduleGuideDecls modl)
@@ -739,6 +767,22 @@ renderDomainEventDecl domainEventDecl =
     <> domainEventDeclSchemaName domainEventDecl
     <> " for "
     <> domainEventDeclObjectName domainEventDecl
+
+renderMetricDecl :: MetricDecl -> Text
+renderMetricDecl metricDecl =
+  "metric "
+    <> metricDeclName metricDecl
+    <> " = "
+    <> metricDeclSchemaName metricDecl
+    <> " for "
+    <> metricDeclObjectName metricDecl
+
+renderGoalDecl :: GoalDecl -> Text
+renderGoalDecl goalDecl =
+  "goal "
+    <> goalDeclName goalDecl
+    <> " = "
+    <> goalDeclMetricName goalDecl
 
 renderClassificationSuffix :: Text -> Text
 renderClassificationSuffix classification

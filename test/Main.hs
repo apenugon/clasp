@@ -60,10 +60,12 @@ import Clasp.Core
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
   , CoreExpr (..)
+  , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
   , CoreMergeGateDecl (..)
   , CoreModule (..)
+  , CoreMetricDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
   , CoreSupervisorDecl (..)
@@ -103,6 +105,7 @@ import Clasp.Syntax
   , DomainObjectDecl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GoalDecl (..)
   , ForeignPackageImport (..)
   , ForeignPackageImportKind (..)
   , GuideDecl (..)
@@ -110,6 +113,7 @@ import Clasp.Syntax
   , HookDecl (..)
   , HookTriggerDecl (..)
   , MatchBranch (..)
+  , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
   , Module (..)
@@ -323,7 +327,7 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
-    , testCase "parses domain object and domain event declarations" $
+    , testCase "parses domain object, domain event, metric, and goal declarations" $
         case parseSource "inline" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -343,6 +347,21 @@ parserTests =
                 assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
               other ->
                 assertFailure ("expected one domain event declaration, got " <> show (length other))
+            case moduleMetricDecls modl of
+              [metricDecl] -> do
+                assertEqual "metric name" "CustomerChurnRate" (metricDeclName metricDecl)
+                assertEqual "metric identity" "metric:CustomerChurnRate" (metricDeclIdentity metricDecl)
+                assertEqual "metric schema" "CustomerMetric" (metricDeclSchemaName metricDecl)
+                assertEqual "metric object" "Customer" (metricDeclObjectName metricDecl)
+              other ->
+                assertFailure ("expected one metric declaration, got " <> show (length other))
+            case moduleGoalDecls modl of
+              [goalDecl] -> do
+                assertEqual "goal name" "RetainCustomers" (goalDeclName goalDecl)
+                assertEqual "goal identity" "goal:RetainCustomers" (goalDeclIdentity goalDecl)
+                assertEqual "goal metric" "CustomerChurnRate" (goalDeclMetricName goalDecl)
+              other ->
+                assertFailure ("expected one goal declaration, got " <> show (length other))
     , testCase "parses supervisor declarations with restart strategies and nested children" $
         case parseSource "inline" supervisorSource of
           Left err ->
@@ -917,7 +936,7 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
-    , testCase "accepts domain objects and domain events bound to record schemas" $
+    , testCase "accepts domain objects, domain events, metrics, and goals bound to typed declarations" $
         case checkSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -932,6 +951,17 @@ checkerTests =
                 assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
               other ->
                 assertFailure ("expected one checked domain event declaration, got " <> show (length other))
+            case coreModuleMetricDecls checked of
+              [CoreMetricDecl metricDecl] -> do
+                assertEqual "metric schema" "CustomerMetric" (metricDeclSchemaName metricDecl)
+                assertEqual "metric object" "Customer" (metricDeclObjectName metricDecl)
+              other ->
+                assertFailure ("expected one checked metric declaration, got " <> show (length other))
+            case coreModuleGoalDecls checked of
+              [CoreGoalDecl goalDecl] ->
+                assertEqual "goal metric" "CustomerChurnRate" (goalDeclMetricName goalDecl)
+              other ->
+                assertFailure ("expected one checked goal declaration, got " <> show (length other))
     , testCase "accepts supervisor hierarchies with BEAM-style restart strategies" $
         case checkSource "supervisor" supervisorSource of
           Left err ->
@@ -1256,6 +1286,8 @@ checkerTests =
         assertHasCode "E_UNKNOWN_GUIDE_PARENT" (checkSource "bad" missingGuideParentSource)
     , testCase "rejects cyclic guide inheritance" $
         assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
+    , testCase "rejects goals that reference unknown metrics" $
+        assertHasCode "E_UNKNOWN_GOAL_METRIC" (checkSource "bad" unknownGoalMetricSource)
     , testCase "rejects hooks whose handlers do not match declared schemas" $
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects workflows whose state is not a record schema" $
@@ -1595,13 +1627,15 @@ airTests =
                 assertBool "expected lifecycle event" (("event", AirAttrText "worker.start") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected hook trigger AIR node"
-    , testCase "air retains domain object and domain event graph identity" $
+    , testCase "air retains domain object, domain event, metric, and goal graph identity" $
         case airSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right airModule -> do
             assertBool "expected domain object root" (AirNodeId "domain-object:Customer" `elem` airModuleRootIds airModule)
             assertBool "expected domain event root" (AirNodeId "domain-event:CustomerChurned" `elem` airModuleRootIds airModule)
+            assertBool "expected metric root" (AirNodeId "metric:CustomerChurnRate" `elem` airModuleRootIds airModule)
+            assertBool "expected goal root" (AirNodeId "goal:RetainCustomers" `elem` airModuleRootIds airModule)
             case findAirNode (AirNodeId "domain-object:Customer") (airModuleNodes airModule) of
               Just node ->
                 assertBool
@@ -1616,6 +1650,20 @@ airTests =
                   (("domainObject", AirAttrObject [("name", AirAttrText "Customer"), ("ref", AirAttrNode (AirNodeId "domain-object:Customer"))]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected domain event AIR node"
+            case findAirNode (AirNodeId "metric:CustomerChurnRate") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected metric object ref"
+                  (("domainObject", AirAttrObject [("name", AirAttrText "Customer"), ("ref", AirAttrNode (AirNodeId "domain-object:Customer"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected metric AIR node"
+            case findAirNode (AirNodeId "goal:RetainCustomers") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected goal metric ref"
+                  (("metric", AirAttrObject [("name", AirAttrText "CustomerChurnRate"), ("ref", AirAttrNode (AirNodeId "metric:CustomerChurnRate"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected goal AIR node"
     , testCase "air retains agent roles and agent-to-role bindings" $
         case airSource "agent" agentSource of
           Left err ->
@@ -1756,7 +1804,7 @@ contextTests =
             assertBool "expected hook trigger node" ("\"hook-trigger:workerStart\"" `T.isInfixOf` jsonText)
             assertBool "expected hook trigger edge" ("\"hook-trigger\"" `T.isInfixOf` jsonText)
             assertBool "expected hook request edge" ("\"hook-request-schema\"" `T.isInfixOf` jsonText)
-    , testCase "context graph includes domain object and domain event objective edges" $
+    , testCase "context graph includes domain object, domain event, metric, and goal objective edges" $
         case renderContextSourceJson "domain" domainModelSource of
           Left err ->
             assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -1764,8 +1812,12 @@ contextTests =
             let jsonText = LT.toStrict rendered
             assertBool "expected domain object node" ("\"domain-object:Customer\"" `T.isInfixOf` jsonText)
             assertBool "expected domain event node" ("\"domain-event:CustomerChurned\"" `T.isInfixOf` jsonText)
+            assertBool "expected metric node" ("\"metric:CustomerChurnRate\"" `T.isInfixOf` jsonText)
+            assertBool "expected goal node" ("\"goal:RetainCustomers\"" `T.isInfixOf` jsonText)
             assertBool "expected domain object schema edge" ("\"domain-object-schema\"" `T.isInfixOf` jsonText)
             assertBool "expected domain event object edge" ("\"domain-event-object\"" `T.isInfixOf` jsonText)
+            assertBool "expected metric object edge" ("\"metric-object\"" `T.isInfixOf` jsonText)
+            assertBool "expected goal metric edge" ("\"goal-metric\"" `T.isInfixOf` jsonText)
     , testCase "context graph includes agent roles, policies, and agent bindings" $
         case renderContextSourceJson "agent" agentSource of
           Left err ->
@@ -4572,9 +4624,12 @@ domainModelSource =
     , ""
     , "record CustomerRecord = { customerId : Str, tier : Str }"
     , "record CustomerChurnEvent = { customerId : Str, reason : Str }"
+    , "record CustomerMetric = { customerId : Str, churnRate : Int }"
     , ""
     , "domain object Customer = CustomerRecord"
     , "domain event CustomerChurned = CustomerChurnEvent for Customer"
+    , "metric CustomerChurnRate = CustomerMetric for Customer"
+    , "goal RetainCustomers = CustomerChurnRate"
     , ""
     , "main = \"ok\""
     ]
@@ -4779,8 +4834,11 @@ formatterRoundTripSource =
     , "record Worker={name:Str classified pii, aliases:[Str]}"
     , "record LeadRequest={company:Str, budget:Int}"
     , "record LeadSummary={summary:Str}"
+    , "record LeadMetric={workerId:Str, conversionRate:Int}"
     , "domain object WorkerProfile=Worker"
     , "domain event LeadRequested=LeadRequest for WorkerProfile"
+    , "metric LeadConversionRate=LeadMetric for WorkerProfile"
+    , "goal ImproveLeadConversion=LeadConversionRate"
     , "type Status=Idle|Busy Str"
     , "guide Repo extends Base={verification:\"Run bash scripts/verify-all.sh\"}"
     , "hook workerStart=\"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
@@ -4807,6 +4865,19 @@ formatterRoundTripSource =
     , "  Idle -> decode LeadSummary (mockLeadSummaryModel (LeadRequest {company=lead.company, budget=1}))"
     , " }"
     , "}"
+    ]
+
+unknownGoalMetricSource :: Text
+unknownGoalMetricSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record CustomerRecord = { customerId : Str }"
+    , ""
+    , "domain object Customer = CustomerRecord"
+    , "goal RetainCustomers = MissingMetric"
+    , ""
+    , "main = \"ok\""
     ]
 
 controlPlaneSource :: Text

@@ -28,9 +28,11 @@ import Clasp.Core
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
   , CoreExpr (..)
+  , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
+  , CoreMetricDecl (..)
   , CoreModule (..)
   , CoreParam (..)
   , CorePolicyDecl (..)
@@ -63,10 +65,12 @@ import Clasp.Syntax
   , DomainObjectDecl (..)
   , Expr (..)
   , ForeignDecl (..)
+  , GoalDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , MatchBranch (..)
+  , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
   , Module (..)
@@ -619,6 +623,8 @@ checkModule modl = do
       schemaRecordDecls = moduleRecordDecls modl
       domainObjectDecls = moduleDomainObjectDecls modl
       domainEventDecls = moduleDomainEventDecls modl
+      metricDecls = moduleMetricDecls modl
+      goalDecls = moduleGoalDecls modl
       workflowDecls = moduleWorkflowDecls modl
       supervisorDecls = moduleSupervisorDecls modl
       guideDecls = moduleGuideDecls modl
@@ -641,6 +647,8 @@ checkModule modl = do
   ensureUniqueGuideDecls guideDecls
   ensureUniqueDomainObjectDecls domainObjectDecls
   ensureUniqueDomainEventDecls domainEventDecls
+  ensureUniqueMetricDecls metricDecls
+  ensureUniqueGoalDecls goalDecls
   ensureUniqueWorkflowDecls workflowDecls
   ensureUniqueSupervisorDecls supervisorDecls
   ensureUniqueHooks hookDecls
@@ -654,6 +662,8 @@ checkModule modl = do
   ensureGuideHierarchy guideDecls
   ensureKnownDomainObjectSchemaReferences schemaRecordDecls domainObjectDecls
   ensureKnownDomainEventReferences schemaRecordDecls domainObjectDecls domainEventDecls
+  ensureKnownMetricReferences schemaRecordDecls domainObjectDecls metricDecls
+  ensureKnownGoalMetricReferences metricDecls goalDecls
   ensureSupervisorHierarchy workflowDecls supervisorDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
@@ -701,6 +711,8 @@ checkModule modl = do
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleDomainObjectDecls = fmap CoreDomainObjectDecl domainObjectDecls
       , coreModuleDomainEventDecls = fmap CoreDomainEventDecl domainEventDecls
+      , coreModuleMetricDecls = fmap CoreMetricDecl metricDecls
+      , coreModuleGoalDecls = fmap CoreGoalDecl goalDecls
       , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
       , coreModuleSupervisorDecls = fmap CoreSupervisorDecl supervisorDecls
       , coreModuleGuideDecls = guideDecls
@@ -821,6 +833,84 @@ ensureKnownDomainEventReferences recordDecls domainObjectDecls domainEventDecls 
               ("Domain event `" <> domainEventDeclName domainEventDecl <> "` references unknown domain object `" <> domainEventDeclObjectName domainEventDecl <> "`.")
               (Just (domainEventDeclObjectSpan domainEventDecl))
               ["Declare the referenced domain object before using it in a domain event."]
+              []
+          ]
+
+ensureUniqueMetricDecls :: [MetricDecl] -> Either DiagnosticBundle ()
+ensureUniqueMetricDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (metricDecl : rest) =
+      case Map.lookup (metricDeclName metricDecl) seen of
+        Just previousMetricDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_METRIC"
+                ("Duplicate metric declaration for `" <> metricDeclName metricDecl <> "`.")
+                (Just (metricDeclNameSpan metricDecl))
+                ["Each metric name may only be declared once."]
+                [diagnosticRelated "previous metric declaration" (metricDeclNameSpan previousMetricDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (metricDeclName metricDecl) metricDecl seen) rest
+
+ensureUniqueGoalDecls :: [GoalDecl] -> Either DiagnosticBundle ()
+ensureUniqueGoalDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (goalDecl : rest) =
+      case Map.lookup (goalDeclName goalDecl) seen of
+        Just previousGoalDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_GOAL"
+                ("Duplicate goal declaration for `" <> goalDeclName goalDecl <> "`.")
+                (Just (goalDeclNameSpan goalDecl))
+                ["Each goal name may only be declared once."]
+                [diagnosticRelated "previous goal declaration" (goalDeclNameSpan previousGoalDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (goalDeclName goalDecl) goalDecl seen) rest
+
+ensureKnownMetricReferences :: [RecordDecl] -> [DomainObjectDecl] -> [MetricDecl] -> Either DiagnosticBundle ()
+ensureKnownMetricReferences recordDecls domainObjectDecls metricDecls =
+  traverse_ checkMetric metricDecls
+  where
+    recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+    domainObjectDeclEnv = Map.fromList [(domainObjectDeclName domainObjectDecl, domainObjectDecl) | domainObjectDecl <- domainObjectDecls]
+    checkMetric metricDecl = do
+      unless (Map.member (metricDeclSchemaName metricDecl) recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_METRIC_SCHEMA"
+              ("Metric `" <> metricDeclName metricDecl <> "` references unknown schema `" <> metricDeclSchemaName metricDecl <> "`.")
+              (Just (metricDeclSchemaSpan metricDecl))
+              ["Declare the referenced record before using it in a metric."]
+              []
+          ]
+      unless (Map.member (metricDeclObjectName metricDecl) domainObjectDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_METRIC_OBJECT"
+              ("Metric `" <> metricDeclName metricDecl <> "` references unknown domain object `" <> metricDeclObjectName metricDecl <> "`.")
+              (Just (metricDeclObjectSpan metricDecl))
+              ["Declare the referenced domain object before using it in a metric."]
+              []
+          ]
+
+ensureKnownGoalMetricReferences :: [MetricDecl] -> [GoalDecl] -> Either DiagnosticBundle ()
+ensureKnownGoalMetricReferences metricDecls goalDecls =
+  traverse_ checkGoal goalDecls
+  where
+    metricDeclEnv = Map.fromList [(metricDeclName metricDecl, metricDecl) | metricDecl <- metricDecls]
+    checkGoal goalDecl =
+      unless (Map.member (goalDeclMetricName goalDecl) metricDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_GOAL_METRIC"
+              ("Goal `" <> goalDeclName goalDecl <> "` references unknown metric `" <> goalDeclMetricName goalDecl <> "`.")
+              (Just (goalDeclMetricSpan goalDecl))
+              ["Declare the referenced metric before using it in a goal."]
               []
           ]
 

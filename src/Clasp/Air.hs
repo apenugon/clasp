@@ -27,9 +27,11 @@ import Clasp.Core
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
   , CoreExpr (..)
+  , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
   , CoreMatchBranch (..)
+  , CoreMetricDecl (..)
   , CoreModule (..)
   , CoreParam (..)
   , CorePolicyDecl (..)
@@ -50,10 +52,12 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ForeignDecl (..)
+  , GoalDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
   , ModuleName (..)
@@ -125,6 +129,8 @@ buildAirModule modl =
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
     domainObjectNodes = fmap buildDomainObjectDeclNode (coreModuleDomainObjectDecls modl)
     domainEventNodes = fmap buildDomainEventDeclNode (coreModuleDomainEventDecls modl)
+    metricNodes = fmap buildMetricDeclNode (coreModuleMetricDecls modl)
+    goalNodes = fmap buildGoalDeclNode (coreModuleGoalDecls modl)
     guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookDeclNodes (coreModuleHookDecls modl)
     agentRoleNodes = fmap buildAgentRoleDeclNode (coreModuleAgentRoleDecls modl)
@@ -143,6 +149,8 @@ buildAirModule modl =
         <> recordNodes
         <> domainObjectNodes
         <> domainEventNodes
+        <> metricNodes
+        <> goalNodes
         <> guideNodes
         <> hookNodes
         <> agentRoleNodes
@@ -246,6 +254,35 @@ buildDomainEventDeclNode (CoreDomainEventDecl domainEventDecl) =
         , ("identity", AirAttrText (domainEventDeclIdentity domainEventDecl))
         , ("schema", AirAttrObject [("name", AirAttrText (domainEventDeclSchemaName domainEventDecl)), ("ref", AirAttrNode (recordDeclId (domainEventDeclSchemaName domainEventDecl)))])
         , ("domainObject", AirAttrObject [("name", AirAttrText (domainEventDeclObjectName domainEventDecl)), ("ref", AirAttrNode (domainObjectDeclId (domainEventDeclObjectName domainEventDecl)))])
+        ]
+    }
+
+buildMetricDeclNode :: CoreMetricDecl -> AirNode
+buildMetricDeclNode (CoreMetricDecl metricDecl) =
+  AirNode
+    { airNodeId = metricDeclId (metricDeclName metricDecl)
+    , airNodeKind = "metricDecl"
+    , airNodeSpan = Just (metricDeclSpan metricDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (metricDeclName metricDecl))
+        , ("identity", AirAttrText (metricDeclIdentity metricDecl))
+        , ("schema", AirAttrObject [("name", AirAttrText (metricDeclSchemaName metricDecl)), ("ref", AirAttrNode (recordDeclId (metricDeclSchemaName metricDecl)))])
+        , ("domainObject", AirAttrObject [("name", AirAttrText (metricDeclObjectName metricDecl)), ("ref", AirAttrNode (domainObjectDeclId (metricDeclObjectName metricDecl)))])
+        ]
+    }
+
+buildGoalDeclNode :: CoreGoalDecl -> AirNode
+buildGoalDeclNode (CoreGoalDecl goalDecl) =
+  AirNode
+    { airNodeId = goalDeclId (goalDeclName goalDecl)
+    , airNodeKind = "goalDecl"
+    , airNodeSpan = Just (goalDeclSpan goalDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (goalDeclName goalDecl))
+        , ("identity", AirAttrText (goalDeclIdentity goalDecl))
+        , ("metric", AirAttrObject [("name", AirAttrText (goalDeclMetricName goalDecl)), ("ref", AirAttrNode (metricDeclId (goalDeclMetricName goalDecl)))])
         ]
     }
 
@@ -935,6 +972,12 @@ domainObjectDeclId name = AirNodeId ("domain-object:" <> name)
 
 domainEventDeclId :: Text -> AirNodeId
 domainEventDeclId name = AirNodeId ("domain-event:" <> name)
+
+metricDeclId :: Text -> AirNodeId
+metricDeclId name = AirNodeId ("metric:" <> name)
+
+goalDeclId :: Text -> AirNodeId
+goalDeclId name = AirNodeId ("goal:" <> name)
 
 foreignDeclId :: Text -> AirNodeId
 foreignDeclId name = AirNodeId ("foreign:" <> name)
