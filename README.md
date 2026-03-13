@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="version" src="https://img.shields.io/badge/version-v0.01-0f766e?style=flat-square">
   <img alt="status" src="https://img.shields.io/badge/status-experimental-b45309?style=flat-square">
-  <img alt="compiler" src="https://img.shields.io/badge/compiler-Haskell-4338ca?style=flat-square">
+  <img alt="compiler" src="https://img.shields.io/badge/compiler-Clasp%20primary%20%7C%20Haskell%20bootstrap-4338ca?style=flat-square">
   <img alt="target" src="https://img.shields.io/badge/target-JavaScript-111827?style=flat-square">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun-f59e0b?style=flat-square">
   <img alt="benchmark" src="https://img.shields.io/badge/benchmark-Codex%20gpt--5.4-1d4ed8?style=flat-square">
@@ -175,6 +175,7 @@ cabal run claspc -- check examples/hello.clasp
 cabal run claspc -- check examples/status.clasp
 cabal run claspc -- check examples/records.clasp
 cabal run claspc -- check examples/lead-app/Main.clasp
+cabal run claspc -- check examples/compiler-selfhost/Main.clasp --json
 
 cabal run claspc -- context examples/lead-app/Main.clasp
 cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js

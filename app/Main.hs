@@ -4,13 +4,23 @@ module Main (main) where
 
 import Data.Aeson (object, (.=))
 import Data.Aeson.Text (encodeToLazyText)
+import Data.List (stripPrefix)
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy.IO as LTIO
 import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
-import Clasp.Compiler (checkEntry, compileEntry, explainEntry, parseSource, renderAirEntryJson, renderContextEntryJson)
+import Clasp.Compiler
+  ( CompilerImplementation (..)
+  , CompilerPreference (..)
+  , checkEntryWithPreference
+  , compileEntry
+  , explainEntry
+  , parseSource
+  , renderAirEntryJson
+  , renderContextEntryJson
+  )
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
 data OutputFormat
@@ -20,12 +30,12 @@ data OutputFormat
 main :: IO ()
 main = do
   rawArgs <- getArgs
-  let (format, args) = parseOutputFormat rawArgs
+  let (format, compilerPreference, args) = parseCliOptions rawArgs
   case args of
     ["parse", inputPath] ->
       runParse format inputPath
     ["check", inputPath] ->
-      runCheck format inputPath
+      runCheck format compilerPreference inputPath
     ["explain", inputPath] ->
       runExplain format inputPath
     ["air", inputPath] ->
@@ -49,11 +59,26 @@ main = do
     _ ->
       die usage
 
-parseOutputFormat :: [String] -> (OutputFormat, [String])
-parseOutputFormat args =
-  if "--json" `elem` args
-    then (Json, filter (/= "--json") args)
-    else (Pretty, args)
+parseCliOptions :: [String] -> (OutputFormat, CompilerPreference, [String])
+parseCliOptions args =
+  foldl parseOption (Pretty, CompilerPreferenceAuto, []) args
+  where
+    parseOption (format, preference, remaining) arg =
+      case arg of
+        "--json" ->
+          (Json, preference, remaining)
+        _ ->
+          case stripPrefix "--compiler=" arg of
+            Just "clasp" ->
+              (format, CompilerPreferenceClasp, remaining)
+            Just "bootstrap" ->
+              (format, CompilerPreferenceBootstrap, remaining)
+            Just "auto" ->
+              (format, CompilerPreferenceAuto, remaining)
+            Just _ ->
+              (format, preference, remaining <> [arg])
+            Nothing ->
+              (format, preference, remaining <> [arg])
 
 runParse :: OutputFormat -> FilePath -> IO ()
 runParse format inputPath = do
@@ -75,9 +100,9 @@ runParse format inputPath = do
                 , "input" .= inputPath
                 ]
 
-runCheck :: OutputFormat -> FilePath -> IO ()
-runCheck format inputPath = do
-  result <- checkEntry inputPath
+runCheck :: OutputFormat -> CompilerPreference -> FilePath -> IO ()
+runCheck format compilerPreference inputPath = do
+  (implementation, result) <- checkEntryWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -85,7 +110,7 @@ runCheck format inputPath = do
     Right _ ->
       case format of
         Pretty ->
-          hPutStrLn stderr ("Checked " <> inputPath)
+          hPutStrLn stderr ("Checked " <> inputPath <> " with " <> renderCompilerImplementation implementation)
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
@@ -93,6 +118,7 @@ runCheck format inputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("check" :: String)
                 , "input" .= inputPath
+                , "implementation" .= renderCompilerImplementation implementation
                 ]
 
 runExplain :: OutputFormat -> FilePath -> IO ()
@@ -198,9 +224,17 @@ usage =
   unlines
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
-    , "  claspc check <input.clasp> [--json]"
+    , "  claspc check <input.clasp> [--json] [--compiler=auto|clasp|bootstrap]"
     , "  claspc explain <input.clasp> [--json]"
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json]"
     ]
+
+renderCompilerImplementation :: CompilerImplementation -> String
+renderCompilerImplementation implementation =
+  case implementation of
+    CompilerImplementationClasp ->
+      "clasp"
+    CompilerImplementationBootstrap ->
+      "haskell-bootstrap"

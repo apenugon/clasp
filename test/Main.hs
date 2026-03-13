@@ -1286,6 +1286,72 @@ checkerTests =
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler self-hosting example source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "claspc check prefers the hosted Clasp compiler for the self-hosting entrypoint" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-selfhost/Main.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler check to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted primary compiler json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc check falls back to the Haskell bootstrap compiler for ordinary programs" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected bootstrap fallback check to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected bootstrap fallback json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc check can force the Haskell bootstrap fallback for the self-hosting entrypoint" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-selfhost/Main.clasp", "--json", "--compiler=bootstrap"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected forced bootstrap compiler check to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected forced bootstrap json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc check reports unsupported explicit Clasp-primary requests" $ do
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=clasp"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected explicit unsupported primary compiler request to fail"
+          ExitFailure _ ->
+            pure ()
+        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
+          Left decodeErr ->
+            assertFailure ("expected explicit primary compiler failure json to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+          Just (Array diagnosticsJson) ->
+            case toList diagnosticsJson of
+              firstDiagnostic : _ ->
+                pure firstDiagnostic
+              [] ->
+                assertFailure "expected at least one diagnostic for unsupported primary compiler request"
+          _ ->
+            assertFailure "expected diagnostics array for unsupported primary compiler request"
+        assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
+        assertEqual "diagnostic code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
