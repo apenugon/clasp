@@ -70,6 +70,146 @@ export function bindingContractFor(compiledModule) {
   };
 }
 
+export function schemaContractFor(compiledModule, typeName) {
+  const contract = bindingContractFor(compiledModule);
+  const schema = contract.schemas?.[typeName];
+
+  if (!schema) {
+    throw new Error(`Missing Clasp schema contract: ${typeName}`);
+  }
+
+  return schema;
+}
+
+export function createDynamicSchema(compiledModule, typeNames) {
+  const normalizedTypeNames = normalizeDynamicSchemaTypeNames(typeNames);
+  const entries = normalizedTypeNames.map((typeName) => [
+    typeName,
+    schemaContractFor(compiledModule, typeName)
+  ]);
+  const schemaMap = new Map(entries);
+  const schemas = Object.freeze(
+    Object.fromEntries(entries.map(([typeName, contract]) => [typeName, contract.schema ?? null]))
+  );
+  const seeds = Object.freeze(
+    Object.fromEntries(entries.map(([typeName, contract]) => [typeName, contract.seed ?? null]))
+  );
+
+  return Object.freeze({
+    kind: "clasp-dynamic-schema",
+    version: 1,
+    schemaNames: Object.freeze(normalizedTypeNames),
+    schemas,
+    seeds,
+    schema(typeName) {
+      const contract = schemaMap.get(typeName);
+
+      if (!contract) {
+        throw new Error(
+          `Dynamic schema does not allow ${String(typeName)}. Expected one of: ${normalizedTypeNames.join(", ")}`
+        );
+      }
+
+      return contract;
+    },
+    match(value, path = "value") {
+      return selectDynamicSchemaMatch(entries, value, path);
+    },
+    select(value, path = "value") {
+      return this.match(value, path);
+    },
+    decodeJson(jsonText, path = "value") {
+      return selectDynamicSchemaDecode(entries, jsonText, path).value;
+    },
+    selectJson(jsonText, path = "value") {
+      return selectDynamicSchemaDecode(entries, jsonText, path);
+    },
+    encodeJson(value, path = "value") {
+      const selection = this.match(value, path);
+      return selection.schema.encodeJson(selection.value);
+    }
+  });
+}
+
+function normalizeDynamicSchemaTypeNames(typeNames) {
+  if (!Array.isArray(typeNames) || typeNames.length === 0) {
+    throw new Error("Dynamic schemas require a non-empty array of schema names.");
+  }
+
+  const normalized = [];
+  const seen = new Set();
+
+  for (const typeName of typeNames) {
+    if (typeof typeName !== "string" || typeName === "") {
+      throw new Error("Dynamic schemas require schema names to be non-empty strings.");
+    }
+
+    if (!seen.has(typeName)) {
+      normalized.push(typeName);
+      seen.add(typeName);
+    }
+  }
+
+  return normalized;
+}
+
+function selectDynamicSchemaMatch(entries, value, path) {
+  const matches = [];
+
+  for (const [typeName, contract] of entries) {
+    try {
+      const matchedValue = contract.toHost(contract.fromHost(value, path), path);
+      matches.push(
+        Object.freeze({
+          typeName,
+          schema: contract,
+          value: matchedValue
+        })
+      );
+    } catch (_error) {
+      // Try the remaining constrained schema candidates.
+    }
+  }
+
+  return expectDynamicSchemaSelection(entries, matches, path);
+}
+
+function selectDynamicSchemaDecode(entries, jsonText, path) {
+  const matches = [];
+
+  for (const [typeName, contract] of entries) {
+    try {
+      matches.push(
+        Object.freeze({
+          typeName,
+          schema: contract,
+          value: contract.decodeJson(jsonText)
+        })
+      );
+    } catch (_error) {
+      // Try the remaining constrained schema candidates.
+    }
+  }
+
+  return expectDynamicSchemaSelection(entries, matches, path);
+}
+
+function expectDynamicSchemaSelection(entries, matches, path) {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  const typeNames = entries.map(([typeName]) => typeName).join(", ");
+
+  if (matches.length === 0) {
+    throw new Error(`${path} did not match any dynamic schema candidate: ${typeNames}`);
+  }
+
+  throw new Error(
+    `${path} matched multiple dynamic schema candidates: ${matches.map((match) => match.typeName).join(", ")}`
+  );
+}
+
 function defaultProviderContract(compiledModule, hostBindings) {
   const bindings = (hostBindings ?? [])
     .map((binding) => defaultProviderBinding(compiledModule, binding))

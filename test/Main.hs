@@ -3054,6 +3054,21 @@ compileTests =
               "expected typed worker job contract and dispatch"
               "{\"contractVersion\":1,\"schemaKind\":\"record\",\"seedBudget\":0,\"jobCount\":1,\"jobInputType\":\"LeadRequest\",\"jobOutputType\":\"LeadSummary\",\"outputSchemaKind\":\"record\",\"outputSeedPriority\":\"Low\",\"resultPriority\":\"high\",\"resultFollowUpRequired\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
+    , testCase "worker runtime constrains runtime-selected job outputs to declared schemas" $
+        case compileSource "dynamic-schema-worker-runtime" dynamicSchemaSource of
+          Left err ->
+            assertFailure ("expected dynamic schema source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/dynamic-schema-worker-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (dynamicSchemaWorkerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected constrained dynamic worker outputs"
+              "{\"schemaNames\":[\"LeadEscalation\",\"LeadSummary\"],\"jobOutputTypes\":[\"LeadSummary\",\"LeadEscalation\"],\"lowPriority\":\"low\",\"lowFollowUpRequired\":false,\"highOwner\":\"ae-team\",\"highReason\":\"enterprise-budget\",\"invalid\":\"result did not match any dynamic schema candidate: LeadSummary, LeadEscalation\"}"
+              runtimeOutput
     , testCase "worker runtime simulates dry-run routes, workflows, policy decisions, agent loops, and temporal behavior" $
         case compileSource "simulation-worker-runtime" simulationSource of
           Left err ->
@@ -3356,6 +3371,21 @@ compileTests =
             assertEqual
               "expected structured output validation failure"
               "suggestedReply must be a string"
+              runtimeOutput
+    , testCase "server runtime routes can decode constrained dynamic-schema outputs across request boundaries" $ do
+        case compileSource "dynamic-schema-server-runtime" dynamicSchemaSource of
+          Left err ->
+            assertFailure ("expected dynamic schema source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/dynamic-schema-server-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (dynamicSchemaServerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected route-level constrained dynamic schema decoding"
+              "{\"routePath\":\"/lead/triage\",\"schemaNames\":[\"LeadEscalation\",\"LeadSummary\"],\"lowType\":\"LeadSummary\",\"lowPriority\":\"low\",\"highType\":\"LeadEscalation\",\"highOwner\":\"ae-team\",\"invalid\":\"result did not match any dynamic schema candidate: LeadSummary, LeadEscalation\"}"
               runtimeOutput
     , testCase "compile emits app-facing secret consumers for routes tools workflows and provider bindings" $
         case compileSource "secret-surface" secretSurfaceSource of
@@ -4044,6 +4074,43 @@ serviceSource =
     , "})"
     , ""
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
+    ]
+
+dynamicSchemaSource :: Text
+dynamicSchemaSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type LeadPriority = Low | Medium | High"
+    , ""
+    , "record LeadRequest = {"
+    , "  company : Str,"
+    , "  budget : Int,"
+    , "  priorityHint : LeadPriority"
+    , "}"
+    , ""
+    , "record LeadSummary = {"
+    , "  summary : Str,"
+    , "  priority : LeadPriority,"
+    , "  followUpRequired : Bool"
+    , "}"
+    , ""
+    , "record LeadEscalation = {"
+    , "  escalationReason : Str,"
+    , "  owner : Str"
+    , "}"
+    , ""
+    , "foreign classifyLead : LeadRequest -> Str = \"classifyLead\""
+    , ""
+    , "triageLead : LeadRequest -> Str"
+    , "triageLead lead = classifyLead lead"
+    , ""
+    , "triagePage : LeadRequest -> Page"
+    , "triagePage lead = page \"Lead triage\" (element \"main\" (text lead.company))"
+    , ""
+    , "route triageLeadRoute = POST \"/lead/triage\" LeadRequest -> Page triagePage"
+    , ""
+    , "main = \"ok\""
     ]
 
 providerRuntimeSource :: Text
@@ -6104,6 +6171,55 @@ workerJobRuntimeScript compiledPath runtimePath =
     , "}));"
     ]
 
+dynamicSchemaWorkerRuntimeScript :: FilePath -> FilePath -> Text
+dynamicSchemaWorkerRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(compiledModule);"
+    , "const outputSchema = runtime.dynamicSchema(['LeadSummary', 'LeadEscalation']);"
+    , "const job = runtime.registerJob({"
+    , "  name: 'triageLeadJob',"
+    , "  inputType: 'LeadRequest',"
+    , "  outputType: outputSchema,"
+    , "  async handler(payload) {"
+    , "    if (payload.budget >= 50000) {"
+    , "      return { escalationReason: 'enterprise-budget', owner: 'ae-team' };"
+    , "    }"
+    , "    return {"
+    , "      summary: `${payload.company}:${payload.budget}`,"
+    , "      priority: payload.priorityHint,"
+    , "      followUpRequired: false"
+    , "    };"
+    , "  }"
+    , "});"
+    , "const low = job.decodeOutput(await runtime.dispatch('triageLeadJob', JSON.stringify({"
+    , "  company: 'Acme',"
+    , "  budget: 25,"
+    , "  priorityHint: 'low'"
+    , "})));"
+    , "const high = job.decodeOutput(await runtime.dispatch('triageLeadJob', JSON.stringify({"
+    , "  company: 'SynthSpeak',"
+    , "  budget: 90000,"
+    , "  priorityHint: 'high'"
+    , "})));"
+    , "let invalid = null;"
+    , "try {"
+    , "  job.encodeOutput({ summary: 42 });"
+    , "} catch (error) {"
+    , "  invalid = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  schemaNames: Object.keys(outputSchema.schemas).sort(),"
+    , "  jobOutputTypes: job.outputTypes,"
+    , "  lowPriority: low.priority,"
+    , "  lowFollowUpRequired: low.followUpRequired,"
+    , "  highOwner: high.owner,"
+    , "  highReason: high.escalationReason,"
+    , "  invalid"
+    , "}));"
+    ]
+
 simulationRuntimeScript :: FilePath -> FilePath -> Text
 simulationRuntimeScript compiledPath runtimePath =
   T.pack . unlines $
@@ -6850,6 +6966,58 @@ providerRuntimeInvalidOutputScript compiledPath runtimePath =
     , "} catch (error) {"
     , "  console.log(error.message);"
     , "}"
+    ]
+
+dynamicSchemaServerRuntimeScript :: FilePath -> FilePath -> Text
+dynamicSchemaServerRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { bindingContractFor, createDynamicSchema, installCompiledModule, requestPayloadJson } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const contract = bindingContractFor(compiledModule);"
+    , "const route = contract.routes.find((candidate) => candidate.name === 'triageLeadRoute');"
+    , "if (!route) { throw new Error('missing triage route'); }"
+    , "const outputSchema = createDynamicSchema(compiledModule, ['LeadSummary', 'LeadEscalation']);"
+    , "installCompiledModule(compiledModule, {"
+    , "  classifyLead(lead) {"
+    , "    if (lead.budget >= 50000) {"
+    , "      return JSON.stringify({ escalationReason: 'enterprise-budget', owner: 'ae-team' });"
+    , "    }"
+    , "    return JSON.stringify({"
+    , "      summary: `${lead.company}:${lead.budget}`,"
+    , "      priority: lead.priorityHint,"
+    , "      followUpRequired: false"
+    , "    });"
+    , "  }"
+    , "});"
+    , "const lowRequest = new Request('http://example.test/lead/triage', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/json' },"
+    , "  body: JSON.stringify({ company: 'Acme', budget: 25, priorityHint: 'low' })"
+    , "});"
+    , "const highRequest = new Request('http://example.test/lead/triage', {"
+    , "  method: 'POST',"
+    , "  headers: { 'content-type': 'application/json' },"
+    , "  body: JSON.stringify({ company: 'SynthSpeak', budget: 90000, priorityHint: 'high' })"
+    , "});"
+    , "const lowPayload = route.decodeRequest(await requestPayloadJson(route, lowRequest));"
+    , "const highPayload = route.decodeRequest(await requestPayloadJson(route, highRequest));"
+    , "const lowSelection = outputSchema.selectJson(compiledModule.triageLead(lowPayload), 'result');"
+    , "const highSelection = outputSchema.selectJson(compiledModule.triageLead(highPayload), 'result');"
+    , "let invalid = null;"
+    , "try {"
+    , "  outputSchema.selectJson(JSON.stringify({ summary: 42 }), 'result');"
+    , "} catch (error) {"
+    , "  invalid = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  routePath: route.path,"
+    , "  schemaNames: Object.keys(outputSchema.schemas).sort(),"
+    , "  lowType: lowSelection.typeName,"
+    , "  lowPriority: lowSelection.value.priority,"
+    , "  highType: highSelection.typeName,"
+    , "  highOwner: highSelection.value.owner,"
+    , "  invalid"
+    , "}));"
     ]
 
 secretSurfaceRuntimeScript :: FilePath -> FilePath -> Text

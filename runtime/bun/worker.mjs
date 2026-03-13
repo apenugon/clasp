@@ -84,6 +84,135 @@ export function schemaContractFor(compiledModule, typeName) {
   return schema;
 }
 
+export function createDynamicSchema(compiledModule, typeNames) {
+  const normalizedTypeNames = normalizeDynamicSchemaTypeNames(typeNames);
+  const entries = normalizedTypeNames.map((typeName) => [
+    typeName,
+    schemaContractFor(compiledModule, typeName)
+  ]);
+  const schemaMap = new Map(entries);
+  const schemas = Object.freeze(
+    Object.fromEntries(entries.map(([typeName, contract]) => [typeName, contract.schema ?? null]))
+  );
+  const seeds = Object.freeze(
+    Object.fromEntries(entries.map(([typeName, contract]) => [typeName, contract.seed ?? null]))
+  );
+
+  return Object.freeze({
+    kind: "clasp-dynamic-schema",
+    version: 1,
+    schemaNames: Object.freeze(normalizedTypeNames),
+    schemas,
+    seeds,
+    schema(typeName) {
+      const contract = schemaMap.get(typeName);
+
+      if (!contract) {
+        throw new Error(
+          `Dynamic schema does not allow ${String(typeName)}. Expected one of: ${normalizedTypeNames.join(", ")}`
+        );
+      }
+
+      return contract;
+    },
+    match(value, path = "value") {
+      return selectDynamicSchemaMatch(entries, value, path);
+    },
+    select(value, path = "value") {
+      return this.match(value, path);
+    },
+    decodeJson(jsonText, path = "value") {
+      return selectDynamicSchemaDecode(entries, jsonText, path).value;
+    },
+    selectJson(jsonText, path = "value") {
+      return selectDynamicSchemaDecode(entries, jsonText, path);
+    },
+    encodeJson(value, path = "value") {
+      const selection = this.match(value, path);
+      return selection.schema.encodeJson(selection.value);
+    }
+  });
+}
+
+function normalizeDynamicSchemaTypeNames(typeNames) {
+  if (!Array.isArray(typeNames) || typeNames.length === 0) {
+    throw new Error("Dynamic schemas require a non-empty array of schema names.");
+  }
+
+  const normalized = [];
+  const seen = new Set();
+
+  for (const typeName of typeNames) {
+    if (typeof typeName !== "string" || typeName === "") {
+      throw new Error("Dynamic schemas require schema names to be non-empty strings.");
+    }
+
+    if (!seen.has(typeName)) {
+      normalized.push(typeName);
+      seen.add(typeName);
+    }
+  }
+
+  return normalized;
+}
+
+function selectDynamicSchemaMatch(entries, value, path) {
+  const matches = [];
+
+  for (const [typeName, contract] of entries) {
+    try {
+      const matchedValue = contract.toHost(contract.fromHost(value, path), path);
+      matches.push(
+        Object.freeze({
+          typeName,
+          schema: contract,
+          value: matchedValue
+        })
+      );
+    } catch (_error) {
+      // Try the remaining constrained schema candidates.
+    }
+  }
+
+  return expectDynamicSchemaSelection(entries, matches, path);
+}
+
+function selectDynamicSchemaDecode(entries, jsonText, path) {
+  const matches = [];
+
+  for (const [typeName, contract] of entries) {
+    try {
+      matches.push(
+        Object.freeze({
+          typeName,
+          schema: contract,
+          value: contract.decodeJson(jsonText)
+        })
+      );
+    } catch (_error) {
+      // Try the remaining constrained schema candidates.
+    }
+  }
+
+  return expectDynamicSchemaSelection(entries, matches, path);
+}
+
+function expectDynamicSchemaSelection(entries, matches, path) {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  const typeNames = entries.map(([typeName]) => typeName).join(", ");
+
+  if (matches.length === 0) {
+    throw new Error(`${path} did not match any dynamic schema candidate: ${typeNames}`);
+  }
+
+  throw new Error(
+    `${path} matched multiple dynamic schema candidates: ${matches.map((match) => match.typeName).join(", ")}`
+  );
+}
+
 export function workflowContractFor(compiledModule, workflowName) {
   const workflows = Array.isArray(compiledModule?.__claspWorkflows)
     ? compiledModule.__claspWorkflows
@@ -1340,7 +1469,7 @@ export function createWorkerJob(compiledModule, options) {
   }
 
   const input = schemaContractFor(compiledModule, inputType);
-  const output = schemaContractFor(compiledModule, outputType);
+  const output = normalizeWorkerOutputContract(compiledModule, outputType);
 
   return Object.freeze({
     kind: "clasp-worker-job",
@@ -1349,9 +1478,12 @@ export function createWorkerJob(compiledModule, options) {
     inputType,
     inputSchema: input.schema ?? null,
     inputSeed: input.seed ?? null,
-    outputType,
-    outputSchema: output.schema ?? null,
-    outputSeed: output.seed ?? null,
+    outputType: output.typeName,
+    outputTypes: output.typeNames,
+    outputSchema: output.schema,
+    outputSchemas: output.schemas,
+    outputSeed: output.seed,
+    outputSeeds: output.seeds,
     decodeInput(jsonText) {
       return input.decodeJson(jsonText);
     },
@@ -1359,21 +1491,69 @@ export function createWorkerJob(compiledModule, options) {
       return input.encodeJson(value);
     },
     decodeOutput(jsonText) {
-      return output.decodeJson(jsonText);
+      return output.decodeJson(jsonText, "result");
     },
     encodeOutput(value) {
-      return output.encodeJson(value);
+      return output.encodeJson(value, "result");
     },
     async run(value, context = {}) {
       const preparedInput = input.toHost(input.fromHost(value, "value"), "value");
       const result = await handler(preparedInput, context);
-      return output.toHost(output.fromHost(result, "result"), "result");
+      return output.validate(result, "result");
     },
     async dispatch(jsonText, context = {}) {
       const result = await this.run(this.decodeInput(jsonText), context);
       return this.encodeOutput(result);
     }
   });
+}
+
+function normalizeWorkerOutputContract(compiledModule, outputType) {
+  if (typeof outputType === "string") {
+    const contract = schemaContractFor(compiledModule, outputType);
+
+    return Object.freeze({
+      typeName: outputType,
+      typeNames: Object.freeze([outputType]),
+      schema: contract.schema ?? null,
+      schemas: Object.freeze({ [outputType]: contract.schema ?? null }),
+      seed: contract.seed ?? null,
+      seeds: Object.freeze({ [outputType]: contract.seed ?? null }),
+      validate(value, path = "result") {
+        return contract.toHost(contract.fromHost(value, path), path);
+      },
+      decodeJson(jsonText) {
+        return contract.decodeJson(jsonText);
+      },
+      encodeJson(value, path = "result") {
+        return contract.encodeJson(this.validate(value, path));
+      }
+    });
+  }
+
+  if (outputType?.kind === "clasp-dynamic-schema") {
+    return Object.freeze({
+      typeName: null,
+      typeNames: outputType.schemaNames,
+      schema: null,
+      schemas: outputType.schemas,
+      seed: null,
+      seeds: outputType.seeds,
+      validate(value, path = "result") {
+        return outputType.match(value, path).value;
+      },
+      decodeJson(jsonText, path = "result") {
+        return outputType.decodeJson(jsonText, path);
+      },
+      encodeJson(value, path = "result") {
+        return outputType.encodeJson(value, path);
+      }
+    });
+  }
+
+  throw new Error(
+    "Worker jobs require outputType to be a schema name or a dynamic schema."
+  );
 }
 
 export function createWorkerRuntime(compiledModule, options = {}) {
@@ -1388,6 +1568,9 @@ export function createWorkerRuntime(compiledModule, options = {}) {
     contract: bindingContractFor(compiledModule),
     schema(typeName) {
       return schemaContractFor(compiledModule, typeName);
+    },
+    dynamicSchema(typeNames) {
+      return createDynamicSchema(compiledModule, typeNames);
     },
     workflow(name) {
       return workflowContractFor(compiledModule, name);
