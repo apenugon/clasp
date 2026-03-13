@@ -208,7 +208,25 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
+- `clasp-syntax-compact`: compact-source authoring microbenchmark for a single-file Clasp change
+- `clasp-syntax-verbose`: the same authoring microbenchmark with an added compiler-generated explain surface
 
 The lead-segment pair should stay isomorphic at the acceptance surface: both tests drive one app-owned server entrypoint, and both variants should keep benchmark-only harness glue out of ordinary product-field propagation work.
 
 The Clasp task is intentionally built around generated validation and route metadata, because that is the first part of the language/runtime stack that should create measurable harness uplift.
+
+For the syntax-form A/B slice, the prepared `clasp-syntax-verbose` workspace includes `benchmark-prep/Main.explain.txt`, which is generated from `claspc explain` and gives a more verbose human-readable rendering of the same compact source.
+
+Run the syntax-form A/B series for Codex:
+
+```sh
+bash benchmarks/run-codex-series.sh syntax-form 5 syntax-a gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes syntax-a
+```
+
+Run the same syntax-form A/B series for Claude Code:
+
+```sh
+bash benchmarks/run-claude-series.sh syntax-form 5 syntax-a sonnet
+node benchmarks/run-benchmark.mjs summarize --harness claude-code --model sonnet --notes syntax-a
+```

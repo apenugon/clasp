@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "usage: $0 <task-id|control-plane|lead-priority|lead-rejection|lead-segment> <count> <note-prefix> [model]" >&2
+  echo "usage: $0 <task-id|control-plane|lead-priority|lead-rejection|lead-segment|syntax-form> <count> <note-prefix> [model]" >&2
   exit 1
 fi
 
@@ -35,6 +35,12 @@ case "$task_id" in
     task_ids=(
       "clasp-lead-segment"
       "ts-lead-segment"
+    )
+    ;;
+  syntax-form)
+    task_ids=(
+      "clasp-syntax-compact"
+      "clasp-syntax-verbose"
     )
     ;;
   *)

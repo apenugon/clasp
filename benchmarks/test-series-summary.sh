@@ -89,6 +89,10 @@ write_result "2026-03-01T10-10-58.000Z--ts-control-plane--codex.json" "ts-contro
 write_result "2026-03-01T10-10-59.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:59.000Z" 170 170 150 false 1
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
+write_result "2026-03-01T10-12-05.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:05.000Z" 80 90 82 true 0
+write_result "2026-03-01T10-12-10.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-2" "2026-03-01T10:12:10.000Z" 70 88 80 true 0
+write_result "2026-03-01T10-12-15.000Z--clasp-syntax-verbose--codex.json" "clasp-syntax-verbose" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:15.000Z" 100 120 108 false 1
+write_result "2026-03-01T10-12-20.000Z--clasp-syntax-verbose--codex.json" "clasp-syntax-verbose" "clasp" "codex" "gpt-5.4" "syntax-a-2" "2026-03-01T10:12:20.000Z" 110 130 118 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -180,6 +184,23 @@ printf '%s\n' "$python_summary_output" | grep -Fq '  medianDurationMs: 100'
 printf '%s\n' "$python_summary_output" | grep -Fq '  medianTokens: 120'
 printf '%s\n' "$python_summary_output" | grep -Fq '  medianUncachedTokens: 103'
 
+syntax_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes syntax-a)"
+printf '%s\n' "$syntax_summary_output" | grep -Fq $'clasp-syntax-compact\tcodex\tgpt-5.4'
+printf '%s\n' "$syntax_summary_output" | grep -Fq $'clasp-syntax-verbose\tcodex\tgpt-5.4'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '  series: syntax-a'
+printf '%s\n' "$syntax_summary_output" | grep -Fq 'syntax-form-comparison'
+printf '%s\n' "$syntax_summary_output" | grep -Fq $'  codex\tgpt-5.4\tsyntax-a'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactPassRate: 100%'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    verbosePassRate: 50%'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactTimeToGreenMs: 80'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseTimeToGreenMs: 210'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    timeToGreenDeltaMs: -130'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactMedianTokens: 89'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseMedianTokens: 125'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    tokenDelta: -36'
+printf '%s\n' "$syntax_summary_output" | grep -Fq '    uncachedTokenDelta: -32'
+
 durable_workflow_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \
     --task-id clasp-durable-workflow \
@@ -231,6 +252,14 @@ printf '%s\n' "$rejection_command_log" | grep -Fq 'run ts-lead-rejection'
 printf '%s\n' "$rejection_command_log" | grep -Fq -- '--notes rejection-a-1'
 printf '%s\n' "$rejection_command_log" | grep -Fq -- '--notes rejection-a-2'
 
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" syntax-form 2 syntax-a gpt-5.4
+syntax_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$syntax_command_log" | grep -Fq 'run clasp-syntax-compact'
+printf '%s\n' "$syntax_command_log" | grep -Fq 'run clasp-syntax-verbose'
+printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
+printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
+
 claude_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness claude-code --model sonnet --notes claude-a)"
 printf '%s\n' "$claude_summary_output" | grep -Fq $'clasp-lead-priority\tclaude-code\tsonnet'
 printf '%s\n' "$claude_summary_output" | grep -Fq $'ts-lead-priority\tclaude-code\tsonnet'
@@ -252,6 +281,16 @@ printf '%s\n' "$claude_command_log" | grep -Fq -- '--harness claude-code'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--model sonnet'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-1'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-claude-series.sh" syntax-form 2 syntax-a sonnet
+claude_syntax_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq 'run clasp-syntax-compact'
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq 'run clasp-syntax-verbose'
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--harness claude-code'
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--model sonnet'
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
+printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
 
 claude_workspace="$project_root/benchmarks/workspaces/claude-usage-check"
 rm -rf "$claude_workspace"

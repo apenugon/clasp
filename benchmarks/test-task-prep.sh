@@ -15,6 +15,8 @@ printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
 
 check_incomplete_task() {
   local task_id="$1"
@@ -176,6 +178,8 @@ check_incomplete_task ts-control-plane
 check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
 check_incomplete_task clasp-durable-workflow
+check_incomplete_task clasp-syntax-compact
+check_incomplete_task clasp-syntax-verbose
 check_nested_clasp_benchmark_prep
 check_fixture_seed_override
 
@@ -227,6 +231,20 @@ assert_contains "$durable_workspace/test/durable-workflow.test.mjs" 'import { ru
 assert_contains "$durable_workspace/demo.mjs" "overlapStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "autoRollbackStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "manualRollbackStatus: null"
+
+syntax_compact_workspace="$workspace_root/clasp-syntax-compact"
+assert_file_exists "$syntax_compact_workspace/benchmark-prep/Main.context.json"
+assert_not_contains "$syntax_compact_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.explain.txt`'
+if [[ -f "$syntax_compact_workspace/benchmark-prep/Main.explain.txt" ]]; then
+  echo "expected compact syntax workspace to omit explain artifact" >&2
+  exit 1
+fi
+
+syntax_verbose_workspace="$workspace_root/clasp-syntax-verbose"
+assert_file_exists "$syntax_verbose_workspace/benchmark-prep/Main.context.json"
+assert_file_exists "$syntax_verbose_workspace/benchmark-prep/Main.explain.txt"
+assert_contains "$syntax_verbose_workspace/benchmark-prep/Main.explain.txt" 'leadSummary : Lead -> Str'
+assert_contains "$syntax_verbose_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.explain.txt`'
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution

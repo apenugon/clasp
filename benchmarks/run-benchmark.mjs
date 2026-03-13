@@ -9,30 +9,41 @@ import { pathToFileURL } from "node:url";
 const benchmarkRoot = path.resolve("benchmarks");
 const tasksRoot = path.join(benchmarkRoot, "tasks");
 const resultsRoot = path.join(benchmarkRoot, "results");
-const mirroredTaskFamilies = [
+const comparisonTaskFamilies = [
   {
-    familyId: "control-plane",
     comparisonLabel: "control-plane-comparison",
-    claspTaskId: "clasp-control-plane",
-    typescriptTaskId: "ts-control-plane"
+    leftTaskId: "clasp-control-plane",
+    rightTaskId: "ts-control-plane",
+    leftLabel: "clasp",
+    rightLabel: "ts"
   },
   {
-    familyId: "lead-priority",
     comparisonLabel: "lead-priority-comparison",
-    claspTaskId: "clasp-lead-priority",
-    typescriptTaskId: "ts-lead-priority"
+    leftTaskId: "clasp-lead-priority",
+    rightTaskId: "ts-lead-priority",
+    leftLabel: "clasp",
+    rightLabel: "ts"
   },
   {
-    familyId: "lead-rejection",
     comparisonLabel: "lead-rejection-comparison",
-    claspTaskId: "clasp-lead-rejection",
-    typescriptTaskId: "ts-lead-rejection"
+    leftTaskId: "clasp-lead-rejection",
+    rightTaskId: "ts-lead-rejection",
+    leftLabel: "clasp",
+    rightLabel: "ts"
   },
   {
-    familyId: "lead-segment",
     comparisonLabel: "lead-segment-comparison",
-    claspTaskId: "clasp-lead-segment",
-    typescriptTaskId: "ts-lead-segment"
+    leftTaskId: "clasp-lead-segment",
+    rightTaskId: "ts-lead-segment",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "syntax-form-comparison",
+    leftTaskId: "clasp-syntax-compact",
+    rightTaskId: "clasp-syntax-verbose",
+    leftLabel: "compact",
+    rightLabel: "verbose"
   }
 ];
 
@@ -161,6 +172,9 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
   const contextPath = path.join(prepRoot, `${moduleName}.context.json`);
   const airPath = path.join(prepRoot, `${moduleName}.air.json`);
   const uiPath = path.join(prepRoot, `${moduleName}.ui.json`);
+  const explainPath = task.surfaceForm === "verbose"
+    ? path.join(prepRoot, `${moduleName}.explain.txt`)
+    : null;
 
   await mkdir(prepRoot, { recursive: true });
   await runClaspCompilerCommand("context", entryPath, contextPath, env);
@@ -168,6 +182,11 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
 
   const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
   await writeFile(uiPath, JSON.stringify(uiGraph, null, 2) + "\n", "utf8");
+
+  if (explainPath) {
+    const explanation = await renderClaspExplain(entryPath, env);
+    await writeFile(explainPath, explanation, "utf8");
+  }
 
   const context = JSON.parse(await readFile(contextPath, "utf8"));
   const air = JSON.parse(await readFile(airPath, "utf8"));
@@ -177,6 +196,7 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     entryPath,
     prepRoot,
     moduleName,
+    explainPath,
     context,
     air,
     uiGraph
@@ -235,11 +255,35 @@ async function renderClaspUiGraph(entryPath, prepRoot, env) {
   }
 }
 
+async function renderClaspExplain(entryPath, env) {
+  const result = await runClaspStdoutCommand("explain", entryPath, env);
+
+  if (result.exitCode !== 0) {
+    throw new Error(`failed to generate Clasp explain artifact for ${entryPath}`);
+  }
+
+  return result.stdout;
+}
+
+async function runClaspStdoutCommand(command, inputPath, env) {
+  const script = [
+    "set -euo pipefail",
+    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
+    `cabal run claspc -- ${command} ${shellQuote(inputPath)}`
+  ].join(" && ");
+  return runProcessCapture(
+    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
+    env.CLASP_PROJECT_ROOT,
+    env
+  );
+}
+
 function renderClaspLanguageGuide({
   workspace,
   entryPath,
   prepRoot,
   moduleName,
+  explainPath,
   context,
   air,
   uiGraph
@@ -251,7 +295,13 @@ function renderClaspLanguageGuide({
     path.join(prepRoot, `${moduleName}.context.json`),
     path.join(prepRoot, `${moduleName}.air.json`),
     path.join(prepRoot, `${moduleName}.ui.json`)
-  ].map((targetPath) => path.relative(workspace, targetPath));
+  ];
+
+  if (explainPath) {
+    artifactPaths.push(explainPath);
+  }
+
+  const relativeArtifactPaths = artifactPaths.map((targetPath) => path.relative(workspace, targetPath));
 
   const lines = [
     "# Clasp Workspace Guide",
@@ -272,8 +322,17 @@ function renderClaspLanguageGuide({
 
   lines.push("", "## Semantic pack");
   lines.push("");
-  for (const artifactPath of artifactPaths) {
+  for (const artifactPath of relativeArtifactPaths) {
     lines.push(`- \`${artifactPath}\``);
+  }
+
+  if (explainPath) {
+    lines.push(
+      "",
+      "## Expanded surface",
+      "",
+      `- \`${path.relative(workspace, explainPath)}\` is the compiler-generated human-readable rendering of the entry module.`
+    );
   }
 
   lines.push("", "## Routes and boundaries", "");
@@ -425,7 +484,7 @@ async function summarizeCommand(args) {
     console.log(`  medianUncachedTokens: ${summary.medianUncachedTokens}`);
   }
 
-  const comparisonSections = buildMirroredTaskFamilyComparisons(filtered);
+  const comparisonSections = buildTaskFamilyComparisons(filtered);
   for (const section of comparisonSections) {
     console.log(section.comparisonLabel);
 
@@ -433,14 +492,26 @@ async function summarizeCommand(args) {
       console.log(
         `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
       );
-      console.log(`    claspPassRate: ${comparison.clasp.passRate}`);
-      console.log(`    tsPassRate: ${comparison.typescript.passRate}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "PassRate")}: ${comparison.left.passRate}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "PassRate")}: ${comparison.right.passRate}`
+      );
       console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
-      console.log(`    claspTimeToGreenMs: ${comparison.clasp.timeToGreenMs}`);
-      console.log(`    tsTimeToGreenMs: ${comparison.typescript.timeToGreenMs}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "TimeToGreenMs")}: ${comparison.left.timeToGreenMs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "TimeToGreenMs")}: ${comparison.right.timeToGreenMs}`
+      );
       console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
-      console.log(`    claspMedianTokens: ${comparison.clasp.medianTokens}`);
-      console.log(`    tsMedianTokens: ${comparison.typescript.medianTokens}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "MedianTokens")}: ${comparison.left.medianTokens}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "MedianTokens")}: ${comparison.right.medianTokens}`
+      );
       console.log(`    tokenDelta: ${comparison.tokenDelta}`);
       console.log(
         `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
@@ -475,17 +546,17 @@ function summarizeGroup(groupResults) {
   };
 }
 
-function buildMirroredTaskFamilyComparisons(results) {
-  return mirroredTaskFamilies
+function buildTaskFamilyComparisons(results) {
+  return comparisonTaskFamilies
     .map((family) => ({
       comparisonLabel: family.comparisonLabel,
-      comparisons: buildMirroredTaskComparisons(results, family)
+      comparisons: buildTaskComparisons(results, family)
     }))
     .filter((section) => section.comparisons.length > 0);
 }
 
-function buildMirroredTaskComparisons(results, family) {
-  const relevantTaskIds = new Set([family.claspTaskId, family.typescriptTaskId]);
+function buildTaskComparisons(results, family) {
+  const relevantTaskIds = new Set([family.leftTaskId, family.rightTaskId]);
   const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
@@ -496,29 +567,31 @@ function buildMirroredTaskComparisons(results, family) {
   for (const [groupKey, groupResults] of grouped.entries()) {
     const [harness, model, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
-    const claspResults = byTask.get(family.claspTaskId);
-    const typescriptResults = byTask.get(family.typescriptTaskId);
+    const leftResults = byTask.get(family.leftTaskId);
+    const rightResults = byTask.get(family.rightTaskId);
 
-    if (!claspResults || !typescriptResults) {
+    if (!leftResults || !rightResults) {
       continue;
     }
 
-    const clasp = summarizeGroup(claspResults);
-    const typescript = summarizeGroup(typescriptResults);
+    const left = summarizeGroup(leftResults);
+    const right = summarizeGroup(rightResults);
     comparisons.push({
       harness,
       model,
       series: series || "(all-runs)",
-      clasp,
-      typescript,
-      passRateDeltaPct: Math.round(clasp.passRatePct - typescript.passRatePct),
+      leftLabel: family.leftLabel,
+      rightLabel: family.rightLabel,
+      left,
+      right,
+      passRateDeltaPct: Math.round(left.passRatePct - right.passRatePct),
       timeToGreenDeltaMs:
-        typeof clasp.timeToGreenMs === "number" && typeof typescript.timeToGreenMs === "number"
-          ? clasp.timeToGreenMs - typescript.timeToGreenMs
+        typeof left.timeToGreenMs === "number" && typeof right.timeToGreenMs === "number"
+          ? left.timeToGreenMs - right.timeToGreenMs
           : "n/a",
-      tokenDelta: clasp.medianTokens - typescript.medianTokens,
+      tokenDelta: left.medianTokens - right.medianTokens,
       uncachedTokenDelta:
-        clasp.medianUncachedTokens - typescript.medianUncachedTokens
+        left.medianUncachedTokens - right.medianUncachedTokens
     });
   }
 
@@ -527,6 +600,10 @@ function buildMirroredTaskComparisons(results, family) {
       [right.harness, right.model, right.series].join("\t")
     )
   );
+}
+
+function buildComparisonMetricKey(label, suffix) {
+  return `${label}${suffix}`;
 }
 
 function buildResult(task, options, startedAt, finishedAt, verification, usage) {
@@ -898,6 +975,29 @@ async function runProcess(command, cwd, env = process.env) {
     child.on("exit", (exitCode) => {
       resolve({
         exitCode: exitCode ?? 1
+      });
+    });
+  });
+}
+
+async function runProcessCapture(command, cwd, env = process.env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command[0], command.slice(1), {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "inherit"]
+    });
+    let stdout = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("exit", (exitCode) => {
+      resolve({
+        exitCode: exitCode ?? 1,
+        stdout
       });
     });
   });
