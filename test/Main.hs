@@ -2449,6 +2449,7 @@ compileTests =
             assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
             assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
             assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
+            assertBool "expected tool-call contracts export" ("export const __claspToolCallContracts = Object.freeze(__claspTools.map((tool) => tool.callContract));" `T.isInfixOf` emitted)
             assertBool "expected control-plane module metadata export" ("export const __claspModule = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected human-readable control-plane docs export" ("export const __claspControlPlaneDocs = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected control-plane contract export" ("export const __claspControlPlane = Object.freeze({" `T.isInfixOf` emitted)
@@ -2466,9 +2467,12 @@ compileTests =
             assertBool "expected missing secret diagnostic helper" ("Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}" `T.isInfixOf` emitted)
             assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
             assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
+            assertBool "expected tool call parser" ("parseCall(jsonText) { return this.decodeCall(JSON.parse(jsonText)); }" `T.isInfixOf` emitted)
+            assertBool "expected tool result envelope parser" ("parseResultEnvelope(jsonText) { return this.decodeResultEnvelope(JSON.parse(jsonText)); }" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane entry" ("controlPlane: __claspControlPlane" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane docs entry" ("controlPlaneDocs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract tool-call entry" ("toolCallContracts: __claspToolCallContracts" `T.isInfixOf` emitted)
             let compiledPath = "dist/control-plane.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -2480,6 +2484,7 @@ compileTests =
                 , "const agent = compiledModule.__claspAgents[0];"
                 , "const hook = compiledModule.__claspHooks[0];"
                 , "const tool = compiledModule.__claspTools[0];"
+                , "const toolCall = compiledModule.__claspToolCallContracts[0];"
                 , "const verifier = compiledModule.__claspVerifiers[0];"
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
@@ -2546,6 +2551,12 @@ compileTests =
                 , "  toolMethod: tool.prepareCall({ query: 'search' }, 7).method,"
                 , "  toolParam: tool.prepareCall({ query: 'search' }, 7).params.query,"
                 , "  parsedSummary: tool.parseResult({ summary: 'done' }).summary,"
+                , "  toolCallVersion: toolCall.version,"
+                , "  toolCallProtocol: toolCall.serverProtocol,"
+                , "  toolCallType: toolCall.requestType,"
+                , "  parsedCallQuery: toolCall.parseCall('{\"jsonrpc\":\"2.0\",\"id\":\"req-9\",\"method\":\"search_repo\",\"params\":{\"query\":\"search\"}}').params.query,"
+                , "  parsedEnvelopeSummary: toolCall.parseResultEnvelope('{\"jsonrpc\":\"2.0\",\"id\":\"req-9\",\"result\":{\"summary\":\"framed\"}}').result.summary,"
+                , "  formattedEnvelope: toolCall.formatResultEnvelope({ summary: 'wrapped' }, 'req-10'),"
                 , "  verifierMethod: verifier.prepareRun({ query: 'check' }, 8).method,"
                 , "  mergeGatePlan: mergeGate.plan({ query: 'gate' }, 'trunk').map((request) => request.id).join(','),"
                 , "  docsFormat: docs.format,"
@@ -2560,12 +2571,14 @@ compileTests =
                 , "  controlPlaneModuleVersionTagged: compiledModule.__claspControlPlane.module.versionId.startsWith('module:Main:'),"
                 , "  bindingModuleVersionTagged: compiledModule.__claspBindings.module.versionId.startsWith('module:Main:'),"
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
-                , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version"
+                , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version,"
+                , "  bindingToolCallContracts: compiledModule.__claspBindings.toolCallContracts.length,"
+                , "  controlPlaneToolCallContracts: compiledModule.__claspControlPlane.toolCallContracts.length"
                 , "}));"
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"toolCallVersion\":1,\"toolCallProtocol\":\"mcp\",\"toolCallType\":\"SearchRequest\",\"parsedCallQuery\":\"search\",\"parsedEnvelopeSummary\":\"framed\",\"formattedEnvelope\":\"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"req-10\\\",\\\"result\\\":{\\\"summary\\\":\\\"wrapped\\\"}}\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1,\"bindingToolCallContracts\":1,\"controlPlaneToolCallContracts\":1}"
               runtimeOutput
     , testCase "typed schema streams merge nested partial results and require completion" $
         case compileSource "streaming-partials" streamingToolSource of

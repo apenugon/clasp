@@ -6,7 +6,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
   const compiledModule = await import(moduleUrl);
   const agent = compiledModule.__claspAgents.find((entry) => entry.name === "builder");
   const hook = compiledModule.__claspHooks.find((entry) => entry.name === "workerStart");
-  const tool = compiledModule.__claspTools.find((entry) => entry.name === "searchRepo");
+  const tool = compiledModule.__claspToolCallContracts.find((entry) => entry.name === "searchRepo");
   const verifier = compiledModule.__claspVerifiers.find((entry) => entry.name === "repoChecks");
   const mergeGate = compiledModule.__claspMergeGates.find((entry) => entry.name === "trunk");
   if (!agent || !hook || !tool || !verifier || !mergeGate) {
@@ -42,15 +42,15 @@ export async function runControlPlaneDemo(compiledModulePath) {
   const queue = [
     {
       step: "inspect",
-      request: tool.prepareCall({ query: "rg --files src test" }, "release:inspect"),
+      request: tool.prepare({ query: "rg --files src test" }, "release:inspect"),
       process: "rg",
-      parser: (payload) => tool.parseResult(payload)
+      parser: (response) => tool.decodeResultEnvelope(response).result
     },
     {
       step: "verify",
       request: plannedVerifierRequests[0],
       process: "bash",
-      parser: (payload) => verifier.parseResult(payload)
+      parser: (response) => verifier.parseResult(response.result)
     }
   ];
   const steps = [];
@@ -60,7 +60,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
     const processDecision = agent.policy.decideProcess(current.process, { step: current.step });
     agent.policy.assertProcess(current.process);
     const response = runTool(current.request);
-    const parsed = current.parser(response.result);
+    const parsed = current.parser(response);
     steps.push({
       step: current.step,
       requestId: current.request.id,
