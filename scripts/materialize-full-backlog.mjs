@@ -238,6 +238,33 @@ const specialDependencies = {
   "TY-028": ["TY-027"],
 };
 
+const specialScopeBullets = {
+  "DB-007": [
+    "Require storage-facing schemas, table declarations, and generated constraints to use shared semantic/domain types instead of bare primitives",
+    "Ensure generated storage metadata preserves the same semantic type identities used at route, schema, and application boundaries",
+  ],
+  "DB-008": [
+    "Keep transaction inputs, mutation outputs, and row-mapping surfaces in shared semantic types rather than exposing raw primitive rows",
+    "Reject transaction or mutation APIs that reintroduce bare primitive storage-facing types where shared semantic types already exist",
+  ],
+  "DB-010": [
+    "Require protected row and field access to preserve policy proofs and shared semantic types end to end instead of degrading to primitive storage values",
+    "Ensure policy-aware query and mutation surfaces do not fall back to bare primitives on storage-facing declarations, row contracts, or protected projections",
+  ],
+};
+
+const specialAcceptanceBullets = {
+  "DB-007": [
+    "Storage-facing declarations reject bare primitives where shared semantic/domain types are required",
+  ],
+  "DB-008": [
+    "Transaction and mutation surfaces preserve semantic storage types instead of raw primitive rows",
+  ],
+  "DB-010": [
+    "Policy-aware storage access preserves proof-gated semantic types without primitive fallback at protected row or field boundaries",
+  ],
+};
+
 const trackNames = {
   SW: "Swarm Infrastructure",
   LG: "Core Language Surface",
@@ -370,6 +397,9 @@ for (const task of taskRecords) {
   content.push("- If the task changes runtime behavior, trust boundaries, workflows, interop, or app/user-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path");
   content.push("- Update docs or examples only where the new surface changes visible behavior");
   content.push("- Avoid unrelated refactors or broad rewrites");
+  for (const bullet of specialScopeBullets[task.id] || []) {
+    content.push(`- ${bullet}`);
+  }
   content.push("", "## Likely Files", "");
   for (const file of task.likelyFiles) {
     content.push(`- \`${file}\``);
@@ -386,6 +416,9 @@ for (const task of taskRecords) {
   content.push(`- \`${task.id}\` is implemented without breaking previously integrated tasks`);
   content.push("- Tests or regressions cover the new behavior");
   content.push("- Runtime, boundary, workflow, interop, or app-surface changes are backed by scenario-level or end-to-end verification, not only a local unit-style regression");
+  for (const bullet of specialAcceptanceBullets[task.id] || []) {
+    content.push(`- ${bullet}`);
+  }
   content.push("- `bash scripts/verify-all.sh` passes");
   content.push("", "## Verification", "", "```sh", "bash scripts/verify-all.sh", "```", "");
 

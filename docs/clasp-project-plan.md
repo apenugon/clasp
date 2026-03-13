@@ -597,10 +597,10 @@ Critical path:
 - `DB-004` Add schema migration and compatibility hooks for SQLite-backed apps.
 - `DB-005` Integrate SQLite into the dogfood SaaS app.
 - `DB-006` Add persistence-bearing benchmarks and failure-mode tests.
-- `DB-007` Add schema-derived table declarations and generated database constraints.
-- `DB-008` Add typed transactions, isolation boundaries, and mutation semantics for storage effects.
+- `DB-007` Add schema-derived table declarations, generated database constraints, and semantic storage types that reject bare primitives at storage-facing boundaries.
+- `DB-008` Add typed transactions, isolation boundaries, and mutation semantics for storage effects while preserving semantic storage types rather than raw primitive rows.
 - `DB-009` Add explicit unsafe SQL escape hatches with typed row contracts and audit metadata.
-- `DB-010` Add policy-aware queries, mutations, and proof-gated row or field access for protected storage models.
+- `DB-010` Add policy-aware queries, mutations, and proof-gated row or field access for protected storage models without falling back to bare primitive storage-facing types.
 
 ## Suggested Dispatch Waves
 
