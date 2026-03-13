@@ -24,6 +24,8 @@ It is trying to make one idea real:
 - a language surface optimized for agent reasoning, repair, and change propagation
 - machine-native compiler artifacts and protocol surfaces instead of text-only tooling by default
 
+The guiding goal is that agents should spend tokens only on matters of taste, judgment, prioritization, and other genuinely open decisions. Anything that can be proved, propagated, optimized, simulated, quarantined, or routed mechanically should be owned by the compiler and runtime instead of being rediscovered in every task.
+
 Long term, `Clasp` is not trying to replace every low-level substrate. The aim is to become the default system language for most software-building agents while letting JavaScript, native code, databases, and provider SDKs live behind typed, auditable boundaries when that is the more practical choice.
 
 This repository is the public `v0.01` release.

@@ -276,6 +276,8 @@ Exit criteria:
 
 - Add a backend-oriented native IR beneath the lowered IR
 - Define a runtime ABI and data layout for native execution
+- Define an explicit native memory-management strategy, allocation model, and ownership rules instead of leaving memory behavior implicit in host runtimes
+- Define native object layout, root discovery, and lifetime invariants for the chosen memory strategy before code generation expands the runtime surface
 - Emit real backend-native bytecode or native-target IR instead of depending only on JavaScript for server workloads
 - Support the same compiler-owned boundary projections on the native path, including later binary codecs where they matter for backend transport
 - Run the self-hosted compiler and backend services through the native path
@@ -284,6 +286,7 @@ Exit criteria:
 
 - `Clasp` can run backend/compiler workloads without Bun
 - The native path shares the same front end and type system as the JS path
+- The native runtime has an explicit memory model and object-lifetime story rather than quietly depending on ambient host GC behavior
 - Backend benchmarks can compare JS/Bun and native execution on the same language implementation
 
 ## Phase 14: Native Storage With SQLite First

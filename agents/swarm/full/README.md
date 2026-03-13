@@ -20,10 +20,10 @@ Lanes in this wave:
 - `10-benchmarks`: Benchmark Program (36 tasks)
 - `11-saas-dogfood`: SaaS Dogfooding (10 tasks)
 - `12-self-hosting`: Self-Hosting (10 tasks)
-- `13-native-backend`: Native Backend And Bytecode (9 tasks)
+- `13-native-backend`: Native Backend And Bytecode (11 tasks)
 - `14-sqlite`: SQLite Storage (10 tasks)
 
-Total tasks: 240
+Total tasks: 242
 
 Regenerate with:
 

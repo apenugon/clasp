@@ -1,8 +1,8 @@
-# NB-003 Emit A First Native Bytecode Or Native-Target IR Path For Compiler Workloads
+# NB-011 Define Native Object Layout, Root Discovery, And Lifetime Invariants For The Chosen Memory Strategy
 
 ## Goal
 
-Emit a first native bytecode or native-target IR path for compiler workloads
+Define native object layout, root discovery, and lifetime invariants for the chosen memory strategy
 
 ## Why
 
@@ -10,7 +10,7 @@ Clasp needs a path beyond JavaScript for backend and compiler workloads once the
 
 ## Scope
 
-- Implement `NB-003` as one narrow slice of work: Emit a first native bytecode or native-target IR path for compiler workloads
+- Implement `NB-011` as one narrow slice of work: Define native object layout, root discovery, and lifetime invariants for the chosen memory strategy
 - Add or update regression coverage for the new behavior
 - If the task changes runtime behavior, trust boundaries, workflows, interop, or app/user-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path
 - Update docs or examples only where the new surface changes visible behavior
@@ -26,11 +26,11 @@ Clasp needs a path beyond JavaScript for backend and compiler workloads once the
 
 ## Dependencies
 
-- `NB-011`
+- `NB-010`
 
 ## Acceptance
 
-- `NB-003` is implemented without breaking previously integrated tasks
+- `NB-011` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - Runtime, boundary, workflow, interop, or app-surface changes are backed by scenario-level or end-to-end verification, not only a local unit-style regression
 - `bash scripts/verify-all.sh` passes

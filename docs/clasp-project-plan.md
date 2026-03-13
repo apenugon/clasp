@@ -567,6 +567,8 @@ Critical path:
 
 - `NB-001` Define a backend-native IR below the current lowered IR.
 - `NB-002` Define runtime ABI and data-layout rules for the native backend.
+- `NB-010` Define the first native memory-management strategy, allocation model, and runtime ownership rules for compiler and backend workloads.
+- `NB-011` Define native object layout, root discovery, and lifetime invariants for the chosen memory strategy.
 - `NB-003` Emit a first native bytecode or native-target IR path for compiler workloads.
 - `NB-004` Add a minimal native runtime suitable for compiler and backend execution.
 - `NB-005` Add code generation for functions, ADTs, records, and control flow on the native path.
@@ -682,7 +684,7 @@ Reason:
 
 Dispatch after Wave 7:
 
-- `NB-001` through `NB-008`
+- `NB-001` through `NB-011`
 - `BM-014`
 
 Reason:

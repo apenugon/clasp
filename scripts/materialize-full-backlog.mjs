@@ -225,6 +225,9 @@ const specialDependencies = {
   "BM-023": ["BM-022", "CP-013", "FS-015", "TY-015"],
   "BM-024": ["BM-023", "FS-022"],
   "FS-017": ["FS-015"],
+  "NB-010": ["NB-002"],
+  "NB-011": ["NB-010"],
+  "NB-003": ["NB-011"],
 };
 
 const trackNames = {
