@@ -363,6 +363,7 @@ Critical path:
 - `TY-020` Add obligation-discharge guidance so unresolved proofs, unsafe boundaries, and refinement failures report the concrete missing evidence, legal refinement options, and remaining human or agent choice points.
 - `TY-021` Add transactional semantic edits with preview, atomic apply, and semantic rollback support for compiler-known change plans.
 - `TY-022` Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily.
+- `TY-023` Add cross-repo semantic graph federation and compatibility reasoning for multi-package changes.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -443,6 +444,9 @@ Critical path:
 - `CP-023` Add cheapest-valid-path planning queries that suggest the smallest legal semantic change plan and cheapest sufficient verification plan for a requested objective.
 - `CP-024` Add interference and commutativity analysis for candidate changes and parallel workstreams so the compiler can decide when plans can proceed independently and when they must serialize.
 - `CP-025` Add trusted computing base reporting for proofs, simulations, deploy projections, and verification results so remaining compiler, runtime, foreign, host, and snapshot assumptions stay explicit.
+- `CP-026` Add compiler-known resource-budget declarations and enforcement for compute, model, storage, network, concurrency, and rollout limits.
+- `CP-027` Add deploy/runtime attestation and provenance reporting for artifacts, environments, and world snapshots.
+- `CP-028` Add generalized delegated capabilities for tools, deployment, budgets, and environment authority.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -463,6 +467,7 @@ Critical path:
 - `WF-015` Add first-class temporal semantics for deadlines, TTLs, expirations, schedules, rollout windows, cache staleness, and delegated-capability expiry with simulated-time support.
 - `WF-016` Add deterministic simulation and dry-run mode for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures, simulated time, traces, and audit output.
 - `WF-017` Add world snapshots that capture relevant fixtures, storage slices, environment or deployment state, provider responses, and simulated time so replay and simulation stay trustworthy.
+- `WF-018` Add behavioral property declarations and bounded verification hooks for workflows, policies, rollouts, and concurrent changes.
 
 ### Track 7: AI-Native Platform
 
@@ -491,6 +496,7 @@ Critical path:
 - `EO-005` Add typed ingestion of external operational or business feedback.
 - `EO-006` Add traceability from runtime signals back to routes, prompts, workflows, tests, and policies.
 - `EO-007` Build one bounded external-feedback-to-change demo path.
+- `EO-008` Add declarative learning loops linking incidents, evals, benchmarks, budgets, objectives, and bounded remediation plans.
 
 ### Track 9: Benchmark Program
 
@@ -528,6 +534,8 @@ Critical path:
 - `BM-032` Add trust-and-autofix benchmarks proving unsafe-quarantine containment, proof-ledger clarity, and proof-preserving propagation or autofix quality on cross-stack product changes.
 - `BM-033` Add agent-planning benchmarks measuring obligation-discharge guidance quality, semantic-memory freshness, parallel-agent lease coordination, transactional-edit rollback behavior, and cheapest-valid-path planning efficiency.
 - `BM-034` Add caching-and-trust benchmarks measuring semantic proof or result cache reuse, world-snapshot fidelity, interference-analysis quality, and trusted-computing-base reporting clarity across repeated agent tasks.
+- `BM-035` Add cross-repo and operational-trust benchmarks for graph federation, budget enforcement, attestation, and delegated capabilities.
+- `BM-036` Add learning-loop and behavioral-verification benchmarks for budget-aware remediation and bounded workflow, policy, and rollout checks.
 
 ### Track 10: SaaS Dogfooding
 

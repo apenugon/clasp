@@ -895,6 +895,21 @@ It means eventually supporting compiler-known declarations for things like:
 
 The compiler should then be able to project those declarations into host artifacts such as platform config, infra manifests, and deploy plans while preserving one semantic source of truth.
 
+### Resource budgets should be compiler-known
+
+Agents do not only need to know what is allowed. They also need to know what is affordable.
+
+`Clasp` should eventually support compiler-known resource-budget semantics for things like:
+
+- model spend
+- compute time
+- queue or workflow concurrency
+- storage and network use
+- rollout blast radius
+- experiment and retry budgets
+
+These budgets should participate in the same semantic model as routes, workflows, tools, deployment targets, and external objectives so the compiler can reason about whether a proposed change is not only valid, but affordable and policy-compliant.
+
 ### Built-in context graphs
 
 `Clasp` should emit first-class context graphs from the same semantic model used for checking, code generation, policy enforcement, and tracing.
@@ -927,6 +942,18 @@ Before editing, an agent should eventually be able to ask the compiler:
 That is much stronger than simple "find references."
 
 It is a compiler-owned counterfactual preview over the semantic graph of the system.
+
+### Deploy/runtime attestation and provenance should be first-class
+
+If the compiler claims that a projection, simulation, rollout, or proof is valid, it should also be able to say:
+
+- which compiler version produced it
+- which source graph or package set it was based on
+- which deployment target or runtime environment it was meant for
+- which world snapshot or external assumptions it depended on
+- which artifacts were signed, attested, or merely trusted
+
+That keeps operational trust explicit instead of hidden behind opaque CI or deployment infrastructure.
 
 ### Interference and commutativity analysis should be built in
 
@@ -998,6 +1025,8 @@ These layers should share stable identifiers so a runtime event can be traced ba
 - controlling policies
 - affected business or domain objects
 - tests, evals, and rollout gates
+
+The same semantic graph should eventually be able to federate across package and repository boundaries so agents can reason about coordinated changes, compatibility, and rollout consequences beyond one checkout.
 
 ### Context graph nodes
 
@@ -1139,6 +1168,20 @@ Dry-run and simulation become much more valuable when they can capture the relev
 
 That makes replay, counterfactual preview, and bounded dry-run much more trustworthy because the compiler and runtime can say what outside-world assumptions the result depended on.
 
+### Behavioral verification should go beyond tests
+
+Type safety, fixtures, and replay are necessary, but they are not the whole story for systems that coordinate workflows, policies, rollouts, retries, and concurrent agents.
+
+`Clasp` should eventually support stronger behavioral verification hooks such as:
+
+- declarative safety or liveness properties over workflows and approvals
+- bounded model-checking or state-space exploration where it materially helps
+- rollout and rollback property checks
+- concurrency and interference assertions
+- simulation-backed evidence tied back to specific behavioral claims
+
+The point is not to prove everything. The point is to let the compiler make stronger statements about the behavior that actually matters operationally.
+
 ### Tooling products should consume first-class artifacts
 
 Products like a playground, prompt inspector, eval runner, or trace browser should be official and excellent, but they do not need to be part of the semantic core.
@@ -1237,6 +1280,20 @@ The compiler and tooling should eventually make it easy to answer questions like
 
 If `Clasp` cannot answer that kind of question directly from its semantic model, agents remain file editors rather than operators acting on external objectives.
 
+### Learning loops should be declarative and bounded
+
+Self-improving systems should not rely only on ad hoc log review or human memory.
+
+`Clasp` should eventually support declarations that tie together:
+
+- incidents and failure clusters
+- evals and benchmarks
+- domain goals and budget limits
+- candidate remediations or bounded fix plans
+- rollout and rollback conditions
+
+That lets the compiler and runtime represent a disciplined learning loop rather than a vague aspiration to "improve over time."
+
 ## Verification and Trust
 
 ### 15. More than type safety
@@ -1293,6 +1350,7 @@ That means:
 - file, network, process, secret, and model authority should be separately grantable
 - approval boundaries should be part of the semantic model, not shell wrapper behavior
 - capability narrowing should be easy and capability escalation should be deliberate and auditable
+- delegated capability handles should generalize beyond secrets to cover tools, deployment rights, budgets, environment operations, and bounded multi-agent handoffs
 
 For application data, this should eventually combine with authorization proofs and data classification so least-privilege applies not only to tools and side effects, but also to which rows, fields, and UI projections code is allowed to touch.
 
@@ -1312,6 +1370,8 @@ At a minimum, the platform should support:
 - blame-carrying diagnostics that identify the secret declaration, consuming boundary, and failed path when a secret is missing, redacted incorrectly, or used outside policy
 - delegated secret capabilities that attenuate access by audience, operation, TTL, use count, or scope instead of copying raw secret material between agents or workflows
 - auditable delegation chains so secret use can always be traced back to the declaration, delegator, attenuation rules, and consuming boundary
+
+That should be one special case of a broader attenuated-capability system rather than a one-off secret mechanism.
 
 This matters for both classical security and agent-specific risks such as prompt injection, tool misuse, and accidental secret exfiltration.
 

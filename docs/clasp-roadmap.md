@@ -168,6 +168,9 @@ Exit criteria:
 - Add first-class audit log declarations, sink routing, retention rules, and redaction policy so auditability is compiler-owned instead of bolted onto host logging
 - Make audit trails and policy decisions part of standard trace output
 - Add compiler-known environment and deployment declarations for services, queues, schedules, regions, secrets, budgets, rollout targets, and topology constraints, then project them into host deploy artifacts instead of ambient config
+- Add compiler-known resource-budget semantics for compute, model spend, storage, network, concurrency, and rollout blast radius instead of leaving cost and quota behavior to host-side convention
+- Add deploy/runtime attestation and provenance reporting so compiled artifacts, deploy projections, execution environments, and world snapshots can state exactly what was built, where it ran, and what still had to be trusted
+- Add generalized delegated capability handles for tools, deployment rights, budgets, and environment authority rather than limiting attenuation and delegation to secrets alone
 - Add counterfactual impact preview queries so agents can ask what declarations, proofs, policies, migrations, rollouts, and runtime checks would change before editing
 - Add interference and commutativity analysis so the compiler can decide when parallel change plans can proceed independently and when they must serialize
 - Add minimal valid context-pack synthesis so the compiler can produce the smallest sound semantic neighborhood for a change, failure, or objective instead of forcing repository-wide search
@@ -234,6 +237,9 @@ Exit criteria:
 - Extend context graphs with objective-layer nodes and edges for domain objects, metrics, goals, experiments, and rollouts
 - Make eval and rollout gates expressible in terms of external outcomes rather than code-only correctness
 - Add safe rollout, automatic rollback, and kill-switch semantics for bounded autonomous change
+- Add cross-repo and cross-package semantic-graph federation so objectives, policies, proofs, and rollout reasoning can extend beyond one repository or package graph
+- Add declarative learning loops that tie incidents, failure clusters, evals, benchmarks, budget limits, and bounded remediation plans together instead of relying on ad hoc postmortems
+- Add stronger behavioral verification hooks over workflows, policies, rollouts, and concurrent change plans using simulations, model-checking, or other bounded analysis where it materially improves confidence
 
 Exit criteria:
 
