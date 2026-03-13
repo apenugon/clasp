@@ -1984,6 +1984,7 @@ emitPrimitiveCodecHelpers =
 emitAssetHeadArtifacts :: LowerModule -> [Text]
 emitAssetHeadArtifacts modl =
   emitStaticAssetStrategy assetBasePath generatedBasePath
+    <> emitStyleIR styleRefs
     <> emitStyleBundleAssets styleBundle
     <> emitHeadStrategy
   where
@@ -2005,6 +2006,53 @@ emitStaticAssetStrategy assetBasePath generatedBasePath =
   [ "export const __claspStaticAssetStrategy = Object.freeze({"
   , "  assetBasePath: " <> emitStringLiteral assetBasePath <> ","
   , "  generatedAssetBasePath: " <> emitStringLiteral generatedBasePath
+  , "});"
+  , ""
+  ]
+
+emitStyleIR :: [Text] -> [Text]
+emitStyleIR styleRefs =
+  [ "export const __claspStyleIR = Object.freeze({"
+  , "  kind: \"clasp-style-ir\","
+  , "  version: 1,"
+  , "  tokens: Object.freeze({"
+  , "    color: Object.freeze({"
+  , "      backgroundCanvas: \"#f8fafc\","
+  , "      backgroundSurface: \"#ffffff\","
+  , "      textDefault: \"#0f172a\","
+  , "      borderSubtle: \"#cbd5e1\","
+  , "      accentBrand: \"#2563eb\""
+  , "    }),"
+  , "    spacing: Object.freeze({"
+  , "      xs: \"0.25rem\","
+  , "      sm: \"0.5rem\","
+  , "      md: \"1rem\","
+  , "      lg: \"1.5rem\""
+  , "    }),"
+  , "    radius: Object.freeze({"
+  , "      md: \"0.75rem\""
+  , "    }),"
+  , "    typography: Object.freeze({"
+  , "      body: Object.freeze({"
+  , "        fontFamily: \"ui-sans-serif, system-ui, sans-serif\","
+  , "        fontSize: \"1rem\","
+  , "        lineHeight: \"1.5\""
+  , "      })"
+  , "    }),"
+  , "    motion: Object.freeze({"
+  , "      fast: \"120ms ease-out\""
+  , "    })"
+  , "  }),"
+  , "  variants: Object.freeze({"
+  , "    breakpoint: Object.freeze([Object.freeze({ name: \"base\", minWidth: null })]),"
+  , "    theme: Object.freeze([Object.freeze({ name: \"default\", selector: \":root\" })]),"
+  , "    state: Object.freeze([Object.freeze({ name: \"rest\", pseudoClass: null })])"
+  , "  }),"
+  , "  escapeHatches: Object.freeze(["
+  , "    Object.freeze({ name: \"hostClass\", kind: \"raw-class\", availability: \"explicit-only\", safeViewStatus: \"rejected\" }),"
+  , "    Object.freeze({ name: \"hostStyle\", kind: \"raw-style\", availability: \"explicit-only\", safeViewStatus: \"rejected\" })"
+  , "  ]),"
+  , "  styles: Object.freeze([" <> T.intercalate ", " (fmap emitStyleEntryLiteral styleRefs) <> "])"
   , "});"
   , ""
   ]
@@ -2041,10 +2089,106 @@ emitHeadStrategy =
   , ""
   ]
 
+emitStyleEntryLiteral :: Text -> Text
+emitStyleEntryLiteral styleRef =
+  "Object.freeze({ ref: "
+    <> emitStringLiteral styleRef
+    <> ", tokens: Object.freeze(["
+    <> T.intercalate ", " (fmap emitStringLiteral styleTokenRefs)
+    <> "]), variants: Object.freeze(["
+    <> T.intercalate ", " (fmap emitStyleVariantLiteral styleVariantRefs)
+    <> "]), targets: Object.freeze({ web: Object.freeze({ className: "
+    <> emitStringLiteral (styleWebClassName styleRef)
+    <> ", selector: "
+    <> emitStringLiteral (styleWebSelector styleRef)
+    <> ", declarations: Object.freeze({ display: \"block\", padding: \"var(--clasp-space-md)\", color: \"var(--clasp-color-text-default)\", backgroundColor: \"var(--clasp-color-background-surface)\", border: \"1px solid var(--clasp-color-border-subtle)\", borderRadius: \"var(--clasp-radius-md)\", transition: \"all var(--clasp-motion-fast)\", fontFamily: \"var(--clasp-font-body-family)\", fontSize: \"var(--clasp-font-body-size)\", lineHeight: \"var(--clasp-font-body-line-height)\" }), cssText: "
+    <> emitStringLiteral (emitStyleBlock styleRef)
+    <> " }), reactNative: Object.freeze({ display: \"flex\", padding: 16, color: \"#0f172a\", backgroundColor: \"#ffffff\", borderColor: \"#cbd5e1\", borderWidth: 1, borderRadius: 12 }), expo: Object.freeze({ display: \"flex\", padding: 16, color: \"#0f172a\", backgroundColor: \"#ffffff\", borderColor: \"#cbd5e1\", borderWidth: 1, borderRadius: 12 }) }), hostEscapes: Object.freeze({ rawClassName: \"hostClass\", rawStyle: \"hostStyle\", availability: \"explicit-only\" }) })"
+
+emitStyleVariantLiteral :: (Text, Text) -> Text
+emitStyleVariantLiteral (axis, value) =
+  "Object.freeze({ axis: " <> emitStringLiteral axis <> ", value: " <> emitStringLiteral value <> " })"
+
 emitStyleBundleContent :: [Text] -> Text
 emitStyleBundleContent styleRefs =
   let refComment = T.intercalate ", " styleRefs
-   in "/* Generated Clasp style bundle placeholder. */\n/* style refs: " <> refComment <> " */\n"
+      tokenLines =
+        [ ":root {"
+        , "  --clasp-color-background-canvas: #f8fafc;"
+        , "  --clasp-color-background-surface: #ffffff;"
+        , "  --clasp-color-text-default: #0f172a;"
+        , "  --clasp-color-border-subtle: #cbd5e1;"
+        , "  --clasp-color-accent-brand: #2563eb;"
+        , "  --clasp-space-xs: 0.25rem;"
+        , "  --clasp-space-sm: 0.5rem;"
+        , "  --clasp-space-md: 1rem;"
+        , "  --clasp-space-lg: 1.5rem;"
+        , "  --clasp-radius-md: 0.75rem;"
+        , "  --clasp-font-body-family: ui-sans-serif, system-ui, sans-serif;"
+        , "  --clasp-font-body-size: 1rem;"
+        , "  --clasp-font-body-line-height: 1.5;"
+        , "  --clasp-motion-fast: 120ms ease-out;"
+        , "}"
+        ]
+      styleBlocks =
+        if null styleRefs
+          then []
+          else "" : fmap emitStyleBlock styleRefs
+   in
+        T.unlines
+          ( [ "/* Generated Clasp style bundle. */"
+            , "/* style refs: " <> refComment <> " */"
+            ]
+              <> tokenLines
+              <> styleBlocks
+          )
+
+styleTokenRefs :: [Text]
+styleTokenRefs =
+  [ "color.backgroundSurface"
+  , "color.textDefault"
+  , "color.borderSubtle"
+  , "spacing.md"
+  , "radius.md"
+  , "typography.body"
+  , "motion.fast"
+  ]
+
+styleVariantRefs :: [(Text, Text)]
+styleVariantRefs =
+  [ ("breakpoint", "base")
+  , ("theme", "default")
+  , ("state", "rest")
+  ]
+
+styleWebSelector :: Text -> Text
+styleWebSelector styleRef =
+  "[data-clasp-style=" <> emitStringLiteral styleRef <> "]"
+
+styleWebClassName :: Text -> Text
+styleWebClassName styleRef =
+  "clasp-style-" <> T.map replace styleRef
+  where
+    replace '-' = '-'
+    replace '_' = '-'
+    replace char = char
+
+emitStyleBlock :: Text -> Text
+emitStyleBlock styleRef =
+  T.unlines
+    [ styleWebSelector styleRef <> " {"
+    , "  display: block;"
+    , "  padding: var(--clasp-space-md);"
+    , "  color: var(--clasp-color-text-default);"
+    , "  background: var(--clasp-color-background-surface);"
+    , "  border: 1px solid var(--clasp-color-border-subtle);"
+    , "  border-radius: var(--clasp-radius-md);"
+    , "  transition: all var(--clasp-motion-fast);"
+    , "  font-family: var(--clasp-font-body-family);"
+    , "  font-size: var(--clasp-font-body-size);"
+    , "  line-height: var(--clasp-font-body-line-height);"
+    , "}"
+    ]
 
 moduleAssetSlug :: ModuleName -> Text
 moduleAssetSlug moduleName =
@@ -3953,6 +4097,7 @@ emitGeneratedBindingsExport =
   , "  seededFixtures: __claspSeededFixtures,"
   , "  staticAssetStrategy: __claspStaticAssetStrategy,"
   , "  staticAssets: __claspStaticAssets,"
+  , "  styleIR: __claspStyleIR,"
   , "  styleBundles: __claspStyleBundles,"
   , "  headStrategy: __claspHeadStrategy,"
   , "  uiGraph: __claspUiGraph,"

@@ -2700,10 +2700,15 @@ compileTests =
             assertBool "expected view renderer" ("function $claspRenderView" `T.isInfixOf` emitted)
             assertBool "expected static asset strategy export" ("export const __claspStaticAssetStrategy" `T.isInfixOf` emitted)
             assertBool "expected static asset registry" ("export const __claspStaticAssets" `T.isInfixOf` emitted)
+            assertBool "expected style ir export" ("export const __claspStyleIR" `T.isInfixOf` emitted)
             assertBool "expected style bundle registry" ("export const __claspStyleBundles" `T.isInfixOf` emitted)
+            assertBool "expected style ir kind" ("kind: \"clasp-style-ir\"" `T.isInfixOf` emitted)
+            assertBool "expected style escape hatch metadata" ("safeViewStatus: \"rejected\"" `T.isInfixOf` emitted)
+            assertBool "expected style ir in generated bindings" ("styleIR: __claspStyleIR" `T.isInfixOf` emitted)
             assertBool "expected head strategy export" ("export const __claspHeadStrategy" `T.isInfixOf` emitted)
             assertBool "expected default viewport meta" ("viewport: \"width=device-width, initial-scale=1\"" `T.isInfixOf` emitted)
             assertBool "expected generated stylesheet href" ("href: \"/assets/clasp/Main.styles.css\"" `T.isInfixOf` emitted)
+            assertBool "expected generated css tokens" ("--clasp-color-background-surface: #ffffff;" `T.isInfixOf` emitted)
             assertBool "expected page response kind" ("responseKind: \"page\"" `T.isInfixOf` emitted)
             assertBool "expected page route encoder" ("encodeResponse: $render_Page" `T.isInfixOf` emitted)
     , testCase "compile emits link and form renderers for interactive pages" $
@@ -2897,7 +2902,7 @@ compileTests =
             runtimeOutput <- runNodeScript (pageAssetRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected generated asset, head, and style bundle strategy"
-              "{\"assetBasePath\":\"/assets\",\"generatedAssetBasePath\":\"/assets/clasp\",\"headTitle\":\"Inbox\",\"headViewport\":\"width=device-width, initial-scale=1\",\"headStylesheet\":\"/assets/clasp/Main.styles.css\",\"bundleId\":\"module:Main:styles\",\"bundleHref\":\"/assets/clasp/Main.styles.css\",\"bundleRefs\":[\"inbox_shell\"],\"assetContentType\":\"text/css; charset=utf-8\",\"assetHasRefComment\":true}"
+              "{\"assetBasePath\":\"/assets\",\"generatedAssetBasePath\":\"/assets/clasp\",\"headTitle\":\"Inbox\",\"headViewport\":\"width=device-width, initial-scale=1\",\"headStylesheet\":\"/assets/clasp/Main.styles.css\",\"styleIrKind\":\"clasp-style-ir\",\"styleRef\":\"inbox_shell\",\"styleToken\":\"color.backgroundSurface\",\"styleVariant\":\"breakpoint:base\",\"styleEscape\":\"hostStyle\",\"bindingHasStyleIR\":true,\"bundleId\":\"module:Main:styles\",\"bundleHref\":\"/assets/clasp/Main.styles.css\",\"bundleRefs\":[\"inbox_shell\"],\"assetContentType\":\"text/css; charset=utf-8\",\"assetHasRefComment\":true,\"assetHasCssToken\":true}"
               runtimeOutput
     , testCase "opt-in page render mode emits flow metadata while default html stays stable" $
         case compileSource "interactive-render" interactivePageSource of
@@ -2954,7 +2959,7 @@ compileTests =
             runtimeOutput <- runNodeScript (reactNativeBridgeRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected react native and expo bridge models to stay stable for future mobile reuse"
-              "{\"modulePath\":\"runtime/bun/react.mjs\",\"nativeEntry\":\"createReactNativeBridge\",\"expoEntry\":\"createExpoBridge\",\"nativeKind\":\"clasp-native-bridge\",\"nativePlatform\":\"react-native\",\"expoPlatform\":\"expo\",\"pageKind\":\"clasp-native-page\",\"pageTitle\":\"Inbox\",\"bodyKind\":\"styled\",\"styleRef\":\"inbox_shell\",\"childKind\":\"element\",\"childTag\":\"section\",\"textKind\":\"text\",\"textValue\":\"Safe <markup>\",\"linkHref\":null}"
+              "{\"modulePath\":\"runtime/bun/react.mjs\",\"nativeEntry\":\"createReactNativeBridge\",\"expoEntry\":\"createExpoBridge\",\"nativeKind\":\"clasp-native-bridge\",\"nativePlatform\":\"react-native\",\"expoPlatform\":\"expo\",\"pageKind\":\"clasp-native-page\",\"pageTitle\":\"Inbox\",\"bodyKind\":\"styled\",\"styleRef\":\"inbox_shell\",\"stylePadding\":16,\"styleVariantCount\":3,\"styleEscape\":\"hostStyle\",\"childKind\":\"element\",\"childTag\":\"section\",\"textKind\":\"text\",\"textValue\":\"Safe <markup>\",\"linkHref\":null}"
               runtimeOutput
     , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
         withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
@@ -5785,6 +5790,7 @@ pageAssetRuntimeScript compiledPath runtimePath =
     , "const page = compiledModule.home({});"
     , "const head = compiledModule.__claspPageHead(page);"
     , "const bundle = compiledModule.__claspStyleBundles[0] ?? null;"
+    , "const styleEntry = compiledModule.__claspStyleIR.styles[0] ?? null;"
     , "const assetResponse = bundle ? await responseForAssetRequest(compiledModule, bundle.href) : null;"
     , "const assetBody = assetResponse ? await assetResponse.text() : '';"
     , "console.log(JSON.stringify({"
@@ -5793,11 +5799,18 @@ pageAssetRuntimeScript compiledPath runtimePath =
     , "  headTitle: head.title,"
     , "  headViewport: head.meta.find((entry) => entry.name === 'viewport')?.content ?? null,"
     , "  headStylesheet: head.links[0]?.href ?? null,"
+    , "  styleIrKind: compiledModule.__claspStyleIR.kind,"
+    , "  styleRef: styleEntry?.ref ?? null,"
+    , "  styleToken: styleEntry?.tokens?.[0] ?? null,"
+    , "  styleVariant: styleEntry ? `${styleEntry.variants?.[0]?.axis ?? ''}:${styleEntry.variants?.[0]?.value ?? ''}` : null,"
+    , "  styleEscape: styleEntry?.hostEscapes?.rawStyle ?? null,"
+    , "  bindingHasStyleIR: compiledModule.__claspBindings.styleIR === compiledModule.__claspStyleIR,"
     , "  bundleId: bundle?.id ?? null,"
     , "  bundleHref: bundle?.href ?? null,"
     , "  bundleRefs: bundle?.refs ?? [],"
     , "  assetContentType: assetResponse?.headers.get('content-type') ?? null,"
-    , "  assetHasRefComment: assetBody.includes('inbox_shell')"
+    , "  assetHasRefComment: assetBody.includes('inbox_shell'),"
+    , "  assetHasCssToken: assetBody.includes('--clasp-color-background-surface')"
     , "}));"
     ]
 
@@ -5849,6 +5862,9 @@ reactNativeBridgeRuntimeScript compiledPath runtimePath =
     , "  pageTitle: pageModel.title,"
     , "  bodyKind: pageModel.body.kind,"
     , "  styleRef: pageModel.body.styleRef,"
+    , "  stylePadding: pageModel.body.style?.lowered?.padding ?? null,"
+    , "  styleVariantCount: pageModel.body.style?.variants?.length ?? 0,"
+    , "  styleEscape: pageModel.body.style?.hostEscapes?.rawStyle ?? null,"
     , "  childKind: pageModel.body.child.kind,"
     , "  childTag: pageModel.body.child.tag,"
     , "  textKind: firstText?.kind ?? null,"

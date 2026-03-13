@@ -37,7 +37,8 @@ export function createReactNativeBridge(frontend, options = {}) {
   assertFrontendModule(frontend);
 
   const platform = normalizePlatform(options.platform);
-  const renderViewModel = (value) => renderNativeViewModel(value);
+  const styleRegistry = normalizeStyleRegistry(frontend.__claspStyleIR);
+  const renderViewModel = (value) => renderNativeViewModel(value, platform, styleRegistry);
   const renderPageModel = (value) => {
     const page = normalizePageValue(value);
     const head = frontend.__claspPageHead(page);
@@ -48,7 +49,7 @@ export function createReactNativeBridge(frontend, options = {}) {
       platform,
       title: head?.title ?? page.title ?? "",
       head,
-      body: renderNativeViewModel(page.body)
+      body: renderNativeViewModel(page.body, platform, styleRegistry)
     });
   };
 
@@ -150,7 +151,7 @@ function normalizePageValue(value) {
   return value;
 }
 
-function renderNativeViewModel(view) {
+function renderNativeViewModel(view, platform, styleRegistry) {
   if (!view || typeof view !== "object") {
     throw new Error("Expected a generated Clasp View value for native interop.");
   }
@@ -163,32 +164,45 @@ function renderNativeViewModel(view) {
     case "append":
       return Object.freeze({
         kind: "fragment",
-        children: flattenNativeChildren(view)
+        children: flattenNativeChildren(view, platform, styleRegistry)
       });
     case "element":
       return Object.freeze({
         kind: "element",
         tag: view.tag ?? "",
-        child: renderNativeViewModel(view.child)
+        child: renderNativeViewModel(view.child, platform, styleRegistry)
       });
-    case "styled":
+    case "styled": {
+      const styleRef = view.styleRef ?? "";
+      const styleEntry = styleRegistry.get(styleRef) ?? null;
+      const loweredStyle = resolveNativeStyleTarget(styleEntry, platform);
+
       return Object.freeze({
         kind: "styled",
-        styleRef: view.styleRef ?? "",
-        child: renderNativeViewModel(view.child)
+        styleRef,
+        style: styleEntry
+          ? Object.freeze({
+              ref: styleEntry.ref ?? styleRef,
+              variants: Object.freeze(styleEntry.variants ?? []),
+              hostEscapes: styleEntry.hostEscapes ?? null,
+              lowered: loweredStyle
+            })
+          : null,
+        child: renderNativeViewModel(view.child, platform, styleRegistry)
       });
+    }
     case "link":
       return Object.freeze({
         kind: "link",
         href: view.href ?? "",
-        child: renderNativeViewModel(view.child)
+        child: renderNativeViewModel(view.child, platform, styleRegistry)
       });
     case "form":
       return Object.freeze({
         kind: "form",
         method: view.method ?? "GET",
         action: view.action ?? "",
-        child: renderNativeViewModel(view.child)
+        child: renderNativeViewModel(view.child, platform, styleRegistry)
       });
     case "input":
       return Object.freeze({
@@ -207,17 +221,17 @@ function renderNativeViewModel(view) {
   }
 }
 
-function flattenNativeChildren(view) {
+function flattenNativeChildren(view, platform, styleRegistry) {
   const children = [];
 
-  appendNativeChild(children, view.left);
-  appendNativeChild(children, view.right);
+  appendNativeChild(children, view.left, platform, styleRegistry);
+  appendNativeChild(children, view.right, platform, styleRegistry);
 
   return Object.freeze(children);
 }
 
-function appendNativeChild(children, view) {
-  const child = renderNativeViewModel(view);
+function appendNativeChild(children, view, platform, styleRegistry) {
+  const child = renderNativeViewModel(view, platform, styleRegistry);
 
   if (child.kind === "fragment") {
     children.push(...child.children);
@@ -225,4 +239,27 @@ function appendNativeChild(children, view) {
   }
 
   children.push(child);
+}
+
+function normalizeStyleRegistry(styleIR) {
+  const registry = new Map();
+  const styles = Array.isArray(styleIR?.styles) ? styleIR.styles : [];
+
+  for (const style of styles) {
+    if (style && typeof style === "object" && typeof style.ref === "string") {
+      registry.set(style.ref, style);
+    }
+  }
+
+  return registry;
+}
+
+function resolveNativeStyleTarget(styleEntry, platform) {
+  if (!styleEntry || typeof styleEntry !== "object") {
+    return null;
+  }
+
+  const targetKey = platform === "react-native" ? "reactNative" : platform;
+  const target = styleEntry.targets?.[targetKey];
+  return target && typeof target === "object" ? target : null;
 }

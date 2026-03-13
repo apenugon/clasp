@@ -52,6 +52,7 @@ export function bindingContractFor(compiledModule) {
         generatedAssetBasePath: "/assets/clasp"
       },
     staticAssets: compiledModule?.__claspStaticAssets ?? [],
+    styleIR: compiledModule?.__claspStyleIR ?? null,
     styleBundles: compiledModule?.__claspStyleBundles ?? [],
     headStrategy:
       compiledModule?.__claspHeadStrategy ?? {
