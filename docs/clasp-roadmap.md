@@ -204,6 +204,7 @@ Exit criteria:
 - Add degraded-mode and operator-handoff semantics for partial failure
 - Add supervisor trees, restart strategies, and mailbox-style coordination where needed
 - Add supervised module hot-swap and self-update semantics with dual-version upgrade windows and explicit state-upgrade handlers
+- Add a runtime-managed lightweight scheduler that can execute isolated processes or workflows in true parallel across cores while preserving mailbox ordering, supervision, and upgrade safety guarantees
 - Add deterministic simulation and dry-run support for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures and simulated time
 - Add world snapshots that capture the relevant external state for replay, simulation, and counterfactual preview instead of relying only on in-memory fixtures
 
@@ -211,6 +212,7 @@ Exit criteria:
 
 - Long-running programs remain type-safe and replayable across restarts.
 - Hot upgrades follow supervised, BEAM-inspired handoff rules rather than arbitrary in-place mutation.
+- The runtime can scale from concurrency-only execution to real parallel process scheduling without changing the workflow or supervision model.
 
 ## Phase 9: AI-Native Platform
 

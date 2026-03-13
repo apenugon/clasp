@@ -524,6 +524,7 @@ That means the language and runtime should eventually support:
 - a two-version window for old and new code during upgrade
 - explicit safe-to-swap points
 - rollback if activation fails
+- runtime-managed lightweight process scheduling that can later map those semantics onto true parallel execution across cores without changing the programming model
 
 Even the “core module” should be replaceable in principle, but not through arbitrary in-place mutation.
 
@@ -539,6 +540,8 @@ The safer model is:
 That approach is much more realistic for self-updating agents, durable workflows, and eventually robots or other embodied systems than trying to rewrite active logic at an arbitrary instruction boundary.
 
 In other words, the hot-swap semantics should be inspired more by `BEAM` operational semantics than by "edit the code that is currently executing."
+
+The first implementation does not need to be deeply parallel to be valid. It can start with semantically concurrent process/workflow execution and a single scheduler path. But the long-term runtime should be able to move from concurrency-only semantics to true parallel execution on multicore hosts without breaking the isolation, mailbox, supervision, and hot-upgrade model.
 
 ### 5. Explicit effects and capabilities
 

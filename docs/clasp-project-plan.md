@@ -470,6 +470,7 @@ Critical path:
 - `WF-016` Add deterministic simulation and dry-run mode for routes, workflows, agent loops, policy decisions, and temporal behavior using declared fixtures, simulated time, traces, and audit output.
 - `WF-017` Add world snapshots that capture relevant fixtures, storage slices, environment or deployment state, provider responses, and simulated time so replay and simulation stay trustworthy.
 - `WF-018` Add behavioral property declarations and bounded verification hooks for workflows, policies, rollouts, and concurrent changes.
+- `WF-019` Add runtime-managed parallel execution for isolated workflow or process units so the BEAM-inspired mailbox, supervision, and hot-upgrade model can scale across cores without changing the programming model.
 
 ### Track 7: AI-Native Platform
 
@@ -539,6 +540,7 @@ Critical path:
 - `BM-035` Add cross-repo and operational-trust benchmarks for graph federation, budget enforcement, attestation, and delegated capabilities.
 - `BM-036` Add learning-loop and behavioral-verification benchmarks for budget-aware remediation and bounded workflow, policy, and rollout checks.
 - `BM-037` Add semantic-type-discipline benchmarks.
+- `BM-038` Add parallel-runtime benchmarks proving mailbox safety, supervision correctness, hot-upgrade safety, and multicore scalability for isolated workflow or process execution.
 
 ### Track 10: SaaS Dogfooding
 

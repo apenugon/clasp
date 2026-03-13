@@ -56,6 +56,20 @@ The goal is:
 - fewer human interventions
 - more correctness caught before runtime
 
+More specifically, the integrated `Clasp` model is intended to eliminate whole seam-bug classes that survive in split stacks:
+
+- shared-schema drift across UI, API, workflows, storage, tools, and evals
+- encoder or decoder mismatches between layers
+- route, form, page, and redirect contract mismatches
+- workflow resume or upgrade failures caused by state-version drift
+- policy, auth, or field-disclosure mismatches between app code and enforcement layers
+- secret leaks into logs, prompts, traces, or tools through ambient string plumbing
+- audit omissions where one codepath forgets to emit the required event or redaction
+- foreign-boundary bugs where `any`, dynamic, or untyped values fail far downstream instead of at the import boundary
+- deploy or config drift where code assumptions and runtime topology no longer match
+
+The point is not just stronger typing inside one module. The point is reducing the bugs created when the same fact is represented differently in several different systems.
+
 ## What Is In `v0.01`
 
 This repo already includes a working compiler scaffold and benchmark harness.
