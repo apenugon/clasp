@@ -14,6 +14,7 @@ printf '%s\n' "$list_output" | grep -q '^clasp-lead-rejection[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
 
 check_incomplete_task() {
   local task_id="$1"
@@ -174,6 +175,7 @@ check_incomplete_task clasp-lead-rejection
 check_incomplete_task ts-control-plane
 check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
+check_incomplete_task clasp-durable-workflow
 check_nested_clasp_benchmark_prep
 check_fixture_seed_override
 
@@ -215,6 +217,16 @@ assert_contains "$ts_control_workspace/src/controlPlane.ts" 'process: ["rg", "gi
 assert_contains "$ts_control_workspace/src/controlPlane.ts" 'secret: []'
 assert_contains "$ts_control_workspace/src/controlPlane.ts" 'approvalPolicy: "never"'
 assert_contains "$ts_control_workspace/src/controlPlane.ts" 'sandboxPolicy: "read_only"'
+
+durable_workspace="$workspace_root/clasp-durable-workflow"
+assert_file_exists "$durable_workspace/benchmark-prep/Main.context.json"
+assert_file_exists "$durable_workspace/LANGUAGE_GUIDE.md"
+assert_contains "$durable_workspace/benchmark-prep/Main.context.json" '"schema:Counter"'
+assert_contains "$durable_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_contains "$durable_workspace/test/durable-workflow.test.mjs" 'import { runDurableWorkflowDemo } from "../demo.mjs";'
+assert_contains "$durable_workspace/demo.mjs" "overlapStatus: null"
+assert_contains "$durable_workspace/demo.mjs" "autoRollbackStatus: null"
+assert_contains "$durable_workspace/demo.mjs" "manualRollbackStatus: null"
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution

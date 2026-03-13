@@ -90,6 +90,35 @@ write_result "2026-03-01T10-10-59.000Z--ts-control-plane--codex.json" "ts-contro
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 
+durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
+synthetic_files+=("$durable_result_path")
+cat >"$durable_result_path" <<EOF
+{
+  "taskId": "clasp-durable-workflow",
+  "suite": "durable-workflow",
+  "language": "clasp",
+  "harness": "scenario",
+  "model": "deterministic",
+  "startedAt": "2026-03-01T10:12:00.000Z",
+  "finishedAt": "2026-03-01T10:12:30.000Z",
+  "durationMs": 784,
+  "humanInterventions": 0,
+  "notes": "durable-a-1",
+  "tokenUsage": {
+    "prompt": 0,
+    "completion": 0,
+    "retry": 0,
+    "debug": 0,
+    "total": 0
+  },
+  "verification": {
+    "passed": true,
+    "command": ["bash", "scripts/verify.sh"],
+    "exitCode": 0
+  }
+}
+EOF
+
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
 printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
 printf '%s\n' "$summary_output" | grep -Fq '  series: remediation-a'

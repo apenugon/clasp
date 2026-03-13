@@ -47,6 +47,7 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/py-agent-escalation`: mirrored `Python` agent-boundary baseline
 - `benchmarks/tasks/clasp-lead-rejection`: `Clasp` trust-boundary rejection task
 - `benchmarks/tasks/ts-lead-rejection`: mirrored `TypeScript` trust-boundary rejection task
+- `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 
 ## Benchmark Modes
 
@@ -63,6 +64,8 @@ Do not collapse these into one number. They answer different questions:
 - `Oracle` asks whether `Clasp` helps once the agent is already on the exact edit surface.
 
 The current mirrored `lead-segment` task pair should remain compatible with all three modes. Prompt variants may differ only in the presence or absence of those file hints; the acceptance surface should stay identical.
+
+For long-running workflow behavior, the suite also includes `clasp-durable-workflow`, a single-task durable upgrade benchmark that exercises supervised handoff, bounded overlap, health-gated activation, rollback, and version-drain reporting against the worker runtime.
 
 `Raw Repo` is the primary benchmark scorecard. That is the most realistic mode because a real harness has to inspect and understand the environment. `File-Hinted` and `Oracle` are supporting diagnostic modes used to explain *why* one side won, not to replace the main benchmark.
 
@@ -204,6 +207,7 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `clasp-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
+- `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
 
 The lead-segment pair should stay isomorphic at the acceptance surface: both tests drive one app-owned server entrypoint, and both variants should keep benchmark-only harness glue out of ordinary product-field propagation work.
 
