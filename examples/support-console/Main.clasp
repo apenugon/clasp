@@ -2,8 +2,8 @@ module Main
 
 import Shared.Customer
 
-foreign generateReplyPreview : TicketDraft -> Str = "provider:replyPreview"
-foreign publishCustomer : SupportCustomer -> Str = "storage:publishCustomer"
+foreign generateReplyPreview : TicketDraft -> TicketPreview = "provider:replyPreview"
+foreign publishCustomer : SupportCustomer -> SupportCustomer = "storage:publishCustomer"
 
 currentCustomer : SupportCustomer
 currentCustomer = SupportCustomer {
@@ -21,10 +21,10 @@ supportTenantId : AuthSession -> Str
 supportTenantId session = session.tenant.id
 
 previewTicket : TicketDraft -> TicketPreview
-previewTicket draft = decode TicketPreview (generateReplyPreview draft)
+previewTicket draft = generateReplyPreview draft
 
 publishedCustomer : Empty -> SupportCustomer
-publishedCustomer req = decode SupportCustomer (publishCustomer currentCustomer)
+publishedCustomer req = publishCustomer currentCustomer
 
 dashboard : Empty -> Page
 dashboard req = page "Support console" (styled "support_shell" dashboardBody)

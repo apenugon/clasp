@@ -3255,6 +3255,21 @@ compileTests =
               "expected provider contract and provider-backed page flow"
               "{\"providerKind\":\"clasp-provider-contract\",\"providerVersion\":1,\"providerNames\":[\"provider\"],\"providerOperation\":\"replyPreview\",\"providerBinding\":\"generateReplyPreview\",\"runtimeInstalled\":true,\"runtimeBindingVisible\":true,\"seenProvider\":\"provider\",\"seenOperation\":\"replyPreview\",\"seenCustomerId\":\"cust-42\",\"previewHasReply\":true,\"customerHasExport\":true}"
               runtimeOutput
+    , testCase "provider runtime validates structured JSON-text outputs against declared schemas" $ do
+        case compileSource "provider-runtime-invalid" providerRuntimeSource of
+          Left err ->
+            assertFailure ("expected provider runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/provider-runtime-invalid/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (providerRuntimeInvalidOutputScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected structured output validation failure"
+              "suggestedReply must be a string"
+              runtimeOutput
     , testCase "typed prompt functions compile to stable prompt values and text rendering" $ do
         case compileSource "prompt-runtime" promptFunctionSource of
           Left err ->
@@ -3879,8 +3894,8 @@ providerRuntimeSource =
     , ""
     , "record Empty = {}"
     , ""
-    , "foreign generateReplyPreview : TicketDraft -> Str = \"provider:replyPreview\""
-    , "foreign publishCustomer : SupportCustomer -> Str = \"storage:publishCustomer\""
+    , "foreign generateReplyPreview : TicketDraft -> TicketPreview = \"provider:replyPreview\""
+    , "foreign publishCustomer : SupportCustomer -> SupportCustomer = \"storage:publishCustomer\""
     , ""
     , "currentCustomer : SupportCustomer"
     , "currentCustomer = SupportCustomer {"
@@ -3889,13 +3904,13 @@ providerRuntimeSource =
     , "}"
     , ""
     , "previewText : TicketDraft -> Str"
-    , "previewText draft = (decode TicketPreview (generateReplyPreview draft)).suggestedReply"
+    , "previewText draft = (generateReplyPreview draft).suggestedReply"
     , ""
     , "previewPage : TicketDraft -> Page"
     , "previewPage draft = page \"Reply preview\" (element \"main\" (element \"p\" (text (previewText draft))))"
     , ""
     , "customerPage : Empty -> Page"
-    , "customerPage req = page \"Customer export\" (element \"main\" (append (element \"p\" (text currentCustomer.company)) (element \"p\" (text ((decode SupportCustomer (publishCustomer currentCustomer)).contactEmail)))))"
+    , "customerPage req = page \"Customer export\" (element \"main\" (append (element \"p\" (text currentCustomer.company)) (element \"p\" (text (publishCustomer currentCustomer).contactEmail))))"
     , ""
     , "route previewRoute = POST \"/preview\" TicketDraft -> Page previewPage"
     , "route customerRoute = GET \"/customer\" Empty -> Page customerPage"
@@ -6444,6 +6459,31 @@ providerRuntimeScript compiledPath runtimePath =
     , "  previewHasReply: previewHtml.includes('Reply for cust-42: Renewal is blocked on legal review.'),"
     , "  customerHasExport: customerHtml.includes('Northwind Studio') && customerHtml.includes('ops@northwind.example')"
     , "}));"
+    ]
+
+providerRuntimeInvalidOutputScript :: FilePath -> FilePath -> Text
+providerRuntimeInvalidOutputScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createProviderRuntime, installCompiledModule } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const providerRuntime = createProviderRuntime(compiledModule, {"
+    , "  provider: {"
+    , "    invoke() {"
+    , "      return JSON.stringify({ suggestedReply: 42 });"
+    , "    }"
+    , "  }"
+    , "});"
+    , "providerRuntime.install();"
+    , "installCompiledModule(compiledModule, {"
+    , "  publishCustomer(customer) {"
+    , "    return JSON.stringify(customer);"
+    , "  }"
+    , "});"
+    , "try {"
+    , "  compiledModule.previewText({ customerId: 'cust-42', summary: 'Renewal is blocked.' });"
+    , "} catch (error) {"
+    , "  console.log(error.message);"
+    , "}"
     ]
 
 pythonInteropRuntimeScript :: FilePath -> FilePath -> FilePath -> Text

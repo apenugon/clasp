@@ -123,6 +123,17 @@ emitRuntimePrelude =
   , "  };"
   , "}"
   , ""
+  , "function $claspParseStructuredHostValue(value, path) {"
+  , "  if (typeof value !== \"string\") {"
+  , "    return value;"
+  , "  }"
+  , "  try {"
+  , "    return JSON.parse(value);"
+  , "  } catch (_error) {"
+  , "    throw new Error(`${path} expected valid JSON text`);"
+  , "  }"
+  , "}"
+  , ""
   , "function $claspEarlyReturn(value) {"
   , "  return { $claspEarlyReturn: true, value };"
   , "}"
@@ -3905,13 +3916,13 @@ emitHostDeserializer typ valueRef pathRef =
     TBool ->
       "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
     TList itemType ->
-      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+      "$claspExpectArray($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ").map((item, index) => "
         <> emitHostDeserializer itemType "item" ("`${" <> pathRef <> "}[${index}]`")
         <> ")"
     TNamed name ->
       if name == "Prompt"
-        then "$validate_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
-        else "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+        then "$validate_Prompt($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ")"
+        else "$validate_" <> name <> "($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
