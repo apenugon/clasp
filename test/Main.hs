@@ -2606,26 +2606,7 @@ compileTests =
           ExitSuccess -> do
             absoluteCompiledPath <- makeAbsolute compiledPath
             emittedModulePath <- makeAbsolute "dist/compiler-selfhost-emitted.mjs"
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "import { writeFileSync } from 'node:fs';"
-                , "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
-                , "const snapshot = JSON.parse(compiledModule.main);"
-                , "writeFileSync(" <> show emittedModulePath <> ", snapshot.emittedModule);"
-                , "const emittedModule = await import(" <> show ("file://" <> emittedModulePath) <> ");"
-                , "console.log(JSON.stringify({"
-                , "  loweredValue: snapshot.loweredValue,"
-                , "  loweredFunction: snapshot.loweredFunction,"
-                , "  loweredModule: snapshot.loweredModule,"
-                , "  checkedValueType: snapshot.checkedValueType,"
-                , "  checkedFunctionType: snapshot.checkedFunctionType,"
-                , "  checkedModule: snapshot.checkedModule,"
-                , "  mismatchDiagnostic: snapshot.mismatchDiagnostic,"
-                , "  emittedModule: snapshot.emittedModule,"
-                , "  emittedGreeting: emittedModule.greeting,"
-                , "  emittedRender: emittedModule.renderLead(42)"
-                , "}));"
-                ]
+            runtimeOutput <- runBunScript ["examples/compiler-selfhost/demo.mjs", absoluteCompiledPath, emittedModulePath]
             runtimeValue <- case eitherDecodeStrictText runtimeOutput of
               Left decodeErr ->
                 assertFailure ("expected compiler self-hosting runtime output json to decode:\n" <> decodeErr)
@@ -4678,6 +4659,19 @@ runNodeScript script = do
       pure (T.strip (T.pack stdoutText))
     ExitFailure _ ->
       assertFailure ("node script failed:\n" <> stderrText)
+
+runBunScript :: [FilePath] -> IO Text
+runBunScript args = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "bun"
+      args
+      ""
+  case exitCode of
+    ExitSuccess ->
+      pure (T.strip (T.pack stdoutText))
+    ExitFailure _ ->
+      assertFailure ("bun script failed:\n" <> stderrText)
 
 runClaspc :: [String] -> IO (ExitCode, String, String)
 runClaspc args =

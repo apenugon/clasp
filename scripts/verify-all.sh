@@ -24,6 +24,7 @@ nix develop -c bash -lc "
   cabal run claspc -- check examples/durable-workflow/Main.clasp
   cabal run claspc -- check examples/durable-workflow/Main.next.clasp
   bash examples/interop-ts/scripts/verify.sh
+  bash examples/compiler-selfhost/scripts/verify.sh
   bash examples/prompt-functions/scripts/verify.sh
   bash examples/support-agent/scripts/verify.sh
   bash examples/lead-app/scripts/verify.sh
