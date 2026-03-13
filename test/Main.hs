@@ -4181,6 +4181,47 @@ compileTests =
                 assertEqual "upgraded audit log tail" (Just [String "upgrade"]) (jsonArrayValues (KeyMap.lookup "upgradedAuditLogTail" value))
               Right other ->
                 assertFailure ("expected JSON object from workflow runtime, got " <> show other)
+    , testCase "worker runtime schedules isolated workflow units in parallel while preserving mailbox and upgrade ordering" $
+        case (compileSource "workflow-parallel-old" workflowSource, compileSource "workflow-parallel-new" workflowHotSwapTargetSource) of
+          (Left err, _) ->
+            assertFailure ("expected old workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (_, Left err) ->
+            assertFailure ("expected new workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (Right oldEmitted, Right newEmitted) -> do
+            let oldCompiledPath = "dist/test-projects/workflow-parallel-runtime/old-compiled.mjs"
+            let newCompiledPath = "dist/test-projects/workflow-parallel-runtime/new-compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+            TIO.writeFile oldCompiledPath oldEmitted
+            TIO.writeFile newCompiledPath newEmitted
+            absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+            absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowParallelRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected parallel runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "scheduler kind" (Just (String "clasp-parallel-scheduler")) (KeyMap.lookup "schedulerKind" value)
+                assertEqual "max parallelism" (Just (Number 2)) (KeyMap.lookup "maxParallelism" value)
+                assertEqual "max active" (Just (Number 2)) (KeyMap.lookup "maxActive" value)
+                assertEqual "beta overlapped alpha" (Just (Bool True)) (KeyMap.lookup "betaOverlappedAlpha" value)
+                assertEqual "same unit serialized" (Just (Bool True)) (KeyMap.lookup "sameUnitSerialized" value)
+                assertEqual "upgrade serialized" (Just (Bool True)) (KeyMap.lookup "upgradeSerialized" value)
+                assertEqual "scheduler drained" (Just (Number 0)) (KeyMap.lookup "activeAfter" value)
+                assertEqual "unit count" (Just (Number 2)) (KeyMap.lookup "unitCount" value)
+                assertEqual "alpha first status" (Just (String "delivered")) (KeyMap.lookup "alphaFirstStatus" value)
+                assertEqual "alpha second status" (Just (String "delivered")) (KeyMap.lookup "alphaSecondStatus" value)
+                assertEqual "alpha upgrade status" (Just (String "upgraded")) (KeyMap.lookup "alphaUpgradeStatus" value)
+                assertEqual "alpha upgrade protocol" (Just (String "clasp-module-hot-swap")) (KeyMap.lookup "alphaUpgradeProtocol" value)
+                assertEqual "alpha final count" (Just (Number 106)) (KeyMap.lookup "alphaFinalCount" value)
+                assertEqual "alpha supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "alphaSupervisor" value)
+                assertEqual "alpha target tagged" (Just (Bool True)) (KeyMap.lookup "alphaTargetTagged" value)
+                assertEqual "alpha processed ids" (Just [String "alpha-1", String "alpha-2"]) (jsonArrayValues (KeyMap.lookup "alphaProcessedIds" value))
+                assertEqual "beta status" (Just (String "delivered")) (KeyMap.lookup "betaStatus" value)
+                assertEqual "beta final count" (Just (Number 14)) (KeyMap.lookup "betaFinalCount" value)
+                assertEqual "beta processed ids" (Just [String "beta-1"]) (jsonArrayValues (KeyMap.lookup "betaProcessedIds" value))
+              Right other ->
+                assertFailure ("expected JSON object from parallel runtime, got " <> show other)
     , testCase "worker runtime stages supervised module hot swaps with bounded overlap" $
         case (compileSource "workflow-hot-swap-old" workflowSource, compileSource "workflow-hot-swap-new" workflowHotSwapTargetSource) of
           (Left err, _) ->
@@ -7915,6 +7956,134 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  upgradedActivateHook: upgraded.handlers.activate,"
     , "  upgradedAuditType: upgraded.audit.eventType,"
     , "  upgradedAuditLogTail: upgraded.run.auditLog.slice(-1).map((entry) => entry.eventType)"
+    , "}));"
+    ]
+
+workflowParallelRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+workflowParallelRuntimeScript oldCompiledPath newCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as oldCompiledModule from " <> show ("file://" <> oldCompiledPath) <> ";"
+    , "import * as newCompiledModule from " <> show ("file://" <> newCompiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "function patchTargetCompiledModule(sourceCompiledModule, targetCompiledModule) {"
+    , "  const sourceVersionId = sourceCompiledModule.__claspModule.versionId;"
+    , "  const patchedTargetModule = Object.freeze({"
+    , "    ...targetCompiledModule.__claspModule,"
+    , "    upgradeWindow: Object.freeze({"
+    , "      ...targetCompiledModule.__claspModule.upgradeWindow,"
+    , "      fromVersionIds: Object.freeze(["
+    , "        ...new Set(["
+    , "          ...(targetCompiledModule.__claspModule.upgradeWindow.fromVersionIds ?? []),"
+    , "          sourceVersionId"
+    , "        ])"
+    , "      ])"
+    , "    })"
+    , "  });"
+    , "  const patchedTargetWorkflows = Object.freeze((targetCompiledModule.__claspWorkflows ?? []).map((workflow) => Object.freeze({"
+    , "    ...workflow,"
+    , "    compatibility: Object.freeze({"
+    , "      ...workflow.compatibility,"
+    , "      compatibleModuleVersionIds: Object.freeze(["
+    , "        ...new Set(["
+    , "          ...(workflow.compatibility?.compatibleModuleVersionIds ?? []),"
+    , "          sourceVersionId"
+    , "        ])"
+    , "      ])"
+    , "    })"
+    , "  })));"
+    , "  const patchedTargetBindings = Object.freeze({"
+    , "    ...(targetCompiledModule.__claspBindings ?? {}),"
+    , "    module: patchedTargetModule"
+    , "  });"
+    , "  return Object.freeze({"
+    , "    ...targetCompiledModule,"
+    , "    __claspModule: patchedTargetModule,"
+    , "    __claspWorkflows: patchedTargetWorkflows,"
+    , "    __claspBindings: patchedTargetBindings"
+    , "  });"
+    , "}"
+    , "function reduceCounter(state, payload) {"
+    , "  return {"
+    , "    state: { count: state.count + payload },"
+    , "    result: payload"
+    , "  };"
+    , "}"
+    , "const patchedTargetCompiledModule = patchTargetCompiledModule(oldCompiledModule, newCompiledModule);"
+    , "const runtime = createWorkerRuntime(oldCompiledModule);"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "let active = 0;"
+    , "let maxActive = 0;"
+    , "const trace = [];"
+    , "const scheduler = runtime.parallel({"
+    , "  maxParallelism: 2,"
+    , "  executor: async (task, meta) => {"
+    , "    active += 1;"
+    , "    maxActive = Math.max(maxActive, active);"
+    , "    trace.push(`start:${meta.unitId}:${meta.operation}:${meta.sequence}`);"
+    , "    const delayMs = meta.operation === 'upgrade' ? 10 : (meta.unitId === 'beta' ? 70 : 30);"
+    , "    try {"
+    , "      await new Promise((resolve) => setTimeout(resolve, delayMs));"
+    , "      return await task();"
+    , "    } finally {"
+    , "      trace.push(`end:${meta.unitId}:${meta.operation}:${meta.sequence}`);"
+    , "      active -= 1;"
+    , "    }"
+    , "  }"
+    , "});"
+    , "const alpha = scheduler.workflow('CounterFlow', 'alpha', workflow.checkpoint({ count: 1 }), {"
+    , "  supervisor: 'ParallelSupervisor'"
+    , "});"
+    , "const beta = scheduler.workflow('CounterFlow', 'beta', workflow.checkpoint({ count: 10 }), {"
+    , "  supervisor: 'ParallelSupervisor'"
+    , "});"
+    , "const alphaFirst = alpha.deliver({ id: 'alpha-1', payload: 2 }, reduceCounter);"
+    , "const alphaSecond = alpha.deliver({ id: 'alpha-2', payload: 3 }, reduceCounter);"
+    , "const alphaUpgrade = alpha.upgrade(patchedTargetCompiledModule, {"
+    , "  migrateState: (state) => ({ count: state.count + 100 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  })"
+    , "}, { supervisor: 'UpgradeSupervisor' });"
+    , "const betaDelivery = beta.deliver({ id: 'beta-1', payload: 4 }, reduceCounter);"
+    , "const [alphaFirstResult, alphaSecondResult, alphaUpgradeResult, betaResult] = await Promise.all(["
+    , "  alphaFirst,"
+    , "  alphaSecond,"
+    , "  alphaUpgrade,"
+    , "  betaDelivery"
+    , "]);"
+    , "const alphaRun = alpha.run();"
+    , "const betaRun = beta.run();"
+    , "const metrics = scheduler.metrics();"
+    , "const alphaFirstStart = trace.indexOf('start:alpha:deliver:1');"
+    , "const alphaFirstEnd = trace.indexOf('end:alpha:deliver:1');"
+    , "const alphaSecondStart = trace.indexOf('start:alpha:deliver:2');"
+    , "const alphaSecondEnd = trace.indexOf('end:alpha:deliver:2');"
+    , "const alphaUpgradeStart = trace.indexOf('start:alpha:upgrade:3');"
+    , "const betaStart = trace.indexOf('start:beta:deliver:4');"
+    , "console.log(JSON.stringify({"
+    , "  schedulerKind: scheduler.kind,"
+    , "  maxParallelism: scheduler.maxParallelism,"
+    , "  maxActive,"
+    , "  betaOverlappedAlpha: betaStart > alphaFirstStart && betaStart < alphaFirstEnd,"
+    , "  sameUnitSerialized: alphaSecondStart > alphaFirstEnd,"
+    , "  upgradeSerialized: alphaUpgradeStart > alphaSecondEnd,"
+    , "  activeAfter: metrics.activeCount,"
+    , "  unitCount: metrics.unitCount,"
+    , "  alphaFirstStatus: alphaFirstResult.status,"
+    , "  alphaSecondStatus: alphaSecondResult.status,"
+    , "  alphaUpgradeStatus: alphaUpgradeResult.status,"
+    , "  alphaUpgradeProtocol: alphaUpgradeResult.protocol.kind,"
+    , "  alphaFinalCount: alphaRun.state.count,"
+    , "  alphaSupervisor: alphaRun.supervision.supervisor,"
+    , "  alphaTargetTagged: alphaUpgradeResult.protocol.targetVersionId.startsWith('module:Main:'),"
+    , "  alphaProcessedIds: alphaRun.processedIds,"
+    , "  betaStatus: betaResult.status,"
+    , "  betaFinalCount: betaRun.state.count,"
+    , "  betaProcessedIds: betaRun.processedIds"
     , "}));"
     ]
 

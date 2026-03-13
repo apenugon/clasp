@@ -1709,6 +1709,491 @@ function normalizeWorkerOutputContract(compiledModule, outputType) {
   );
 }
 
+export function createParallelScheduler(compiledModule, options = {}) {
+  const schedulerOptions = normalizeParallelSchedulerOptions(options);
+  const units = new Map();
+  const queues = new Map();
+  const readyUnits = [];
+  const readySet = new Set();
+  const activeUnits = new Set();
+  let activeCount = 0;
+  let sequence = 0;
+
+  return Object.freeze({
+    kind: "clasp-parallel-scheduler",
+    version: 1,
+    maxParallelism: schedulerOptions.maxParallelism,
+    workflow(workflowName, unitId, snapshot, startOptions = {}) {
+      const normalizedUnitId = normalizeParallelUnitId(unitId);
+      ensureWorkflowUnit(workflowName, normalizedUnitId, snapshot, startOptions);
+      return Object.freeze({
+        kind: "clasp-parallel-workflow-unit",
+        unitId: normalizedUnitId,
+        workflowName,
+        run() {
+          return expectWorkflowUnit(workflowName, normalizedUnitId).run;
+        },
+        contract() {
+          return expectWorkflowUnit(workflowName, normalizedUnitId).workflow;
+        },
+        enqueue(message) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "enqueue",
+            (record) => {
+              const queued = record.workflow.enqueue(record.run, message);
+              return workflowOperationResult(record, queued.run, queued);
+            }
+          );
+        },
+        deliver(message, handler, deliveryOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "deliver",
+            (record) => {
+              const delivery = record.workflow.deliver(
+                record.run,
+                message,
+                handler,
+                deliveryOptions
+              );
+              return workflowOperationResult(record, delivery.run, delivery);
+            }
+          );
+        },
+        processNext(handler, deliveryOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "processNext",
+            (record) => {
+              const processed = record.workflow.processNext(
+                record.run,
+                handler,
+                deliveryOptions
+              );
+              return workflowOperationResult(record, processed.run, processed);
+            }
+          );
+        },
+        drainMailbox(handler, deliveryOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "drainMailbox",
+            (record) => {
+              const drained = record.workflow.drainMailbox(
+                record.run,
+                handler,
+                deliveryOptions
+              );
+              return workflowOperationResult(record, drained.run, drained);
+            }
+          );
+        },
+        withDeadline(deadlineAt) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "withDeadline",
+            (record) => {
+              const nextRun = record.workflow.withDeadline(record.run, deadlineAt);
+              return workflowOperationResult(record, nextRun, nextRun);
+            }
+          );
+        },
+        cancel(reason = null) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "cancel",
+            (record) => {
+              const nextRun = record.workflow.cancel(record.run, reason);
+              return workflowOperationResult(record, nextRun, nextRun);
+            }
+          );
+        },
+        degrade(reason, supervisionOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "degrade",
+            (record) => {
+              const nextRun = record.workflow.degrade(
+                record.run,
+                reason,
+                supervisionOptions
+              );
+              return workflowOperationResult(record, nextRun, nextRun);
+            }
+          );
+        },
+        handoff(operator, reason, supervisionOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "handoff",
+            (record) => {
+              const nextRun = record.workflow.handoff(
+                record.run,
+                operator,
+                reason,
+                supervisionOptions
+              );
+              return workflowOperationResult(record, nextRun, nextRun);
+            }
+          );
+        },
+        upgrade(targetCompiledModule, workflowOptions = {}, protocolOptions = {}) {
+          return enqueueWorkflowOperation(
+            workflowName,
+            normalizedUnitId,
+            "upgrade",
+            (record) => {
+              const protocol = createModuleHotSwapProtocol(
+                record.compiledModule,
+                targetCompiledModule,
+                protocolOptions
+              );
+              const upgraded = protocol.upgrade(
+                workflowName,
+                record.run,
+                workflowOptions
+              );
+              const nextWorkflow = workflowContractFor(
+                targetCompiledModule,
+                workflowName
+              );
+              const nextRecord = Object.freeze({
+                ...record,
+                compiledModule: targetCompiledModule,
+                workflow: nextWorkflow,
+                run: upgraded.run
+              });
+              return Object.freeze({
+                record: nextRecord,
+                result: Object.freeze({
+                  ...upgraded,
+                  protocol: Object.freeze({
+                    kind: protocol.kind,
+                    supervisor: protocol.supervisor,
+                    sourceVersionId: protocol.source.versionId,
+                    targetVersionId: protocol.target.versionId
+                  })
+                })
+              });
+            }
+          );
+        }
+      });
+    },
+    unit(unitId, initialState = null) {
+      const normalizedUnitId = normalizeParallelUnitId(unitId);
+      ensureGenericUnit(normalizedUnitId, initialState);
+      return Object.freeze({
+        kind: "clasp-parallel-unit",
+        unitId: normalizedUnitId,
+        state() {
+          return expectGenericUnit(normalizedUnitId).state;
+        },
+        run(operation, operationOptions = {}) {
+          if (typeof operation !== "function") {
+            throw new Error(
+              `Parallel unit ${normalizedUnitId} requires operation to be a function.`
+            );
+          }
+
+          const operationName =
+            typeof operationOptions.operation === "string" &&
+            operationOptions.operation !== ""
+              ? operationOptions.operation
+              : "run";
+
+          return enqueueOperation(
+            normalizedUnitId,
+            operationName,
+            null,
+            async (record, meta) => {
+              const outcome = await Promise.resolve(operation(record.state, meta));
+              return normalizeGenericUnitOutcome(record, outcome);
+            }
+          );
+        }
+      });
+    },
+    metrics() {
+      return Object.freeze({
+        unitCount: units.size,
+        queuedCount: Array.from(queues.values()).reduce(
+          (count, entries) => count + entries.length,
+          0
+        ),
+        activeCount,
+        activeUnits: Object.freeze(Array.from(activeUnits))
+      });
+    }
+  });
+
+  function ensureWorkflowUnit(workflowName, unitId, snapshot, startOptions) {
+    const existing = units.get(unitId);
+
+    if (existing) {
+      if (existing.kind !== "workflow" || existing.workflowName !== workflowName) {
+        throw new Error(
+          `Parallel unit ${unitId} is already registered for ${existing.workflowName ?? existing.kind}.`
+        );
+      }
+
+      return existing;
+    }
+
+    const workflow = workflowContractFor(compiledModule, workflowName);
+    const run = workflow.start(snapshot, startOptions);
+    const record = Object.freeze({
+      kind: "workflow",
+      unitId,
+      workflowName,
+      compiledModule,
+      workflow,
+      run
+    });
+    units.set(unitId, record);
+    return record;
+  }
+
+  function ensureGenericUnit(unitId, initialState) {
+    const existing = units.get(unitId);
+
+    if (existing) {
+      if (existing.kind !== "generic") {
+        throw new Error(
+          `Parallel unit ${unitId} is already registered for workflow ${existing.workflowName}.`
+        );
+      }
+
+      return existing;
+    }
+
+    const record = Object.freeze({
+      kind: "generic",
+      unitId,
+      state: initialState
+    });
+    units.set(unitId, record);
+    return record;
+  }
+
+  function expectWorkflowUnit(workflowName, unitId) {
+    const record = units.get(unitId);
+
+    if (!record || record.kind !== "workflow" || record.workflowName !== workflowName) {
+      throw new Error(`Missing parallel workflow unit ${unitId} for ${workflowName}.`);
+    }
+
+    return record;
+  }
+
+  function expectGenericUnit(unitId) {
+    const record = units.get(unitId);
+
+    if (!record || record.kind !== "generic") {
+      throw new Error(`Missing parallel unit ${unitId}.`);
+    }
+
+    return record;
+  }
+
+  function enqueueWorkflowOperation(workflowName, unitId, operation, execute) {
+    expectWorkflowUnit(workflowName, unitId);
+    return enqueueOperation(unitId, operation, workflowName, execute);
+  }
+
+  function enqueueOperation(unitId, operation, workflowName, execute) {
+    return new Promise((resolve, reject) => {
+      const job = Object.freeze({
+        unitId,
+        workflowName,
+        operation,
+        sequence: ++sequence,
+        execute,
+        resolve,
+        reject
+      });
+      const queue = queues.get(unitId) ?? [];
+      queue.push(job);
+      queues.set(unitId, queue);
+      markReady(unitId);
+      pump();
+    });
+  }
+
+  function markReady(unitId) {
+    if (activeUnits.has(unitId) || readySet.has(unitId)) {
+      return;
+    }
+
+    readySet.add(unitId);
+    readyUnits.push(unitId);
+  }
+
+  function pump() {
+    while (activeCount < schedulerOptions.maxParallelism && readyUnits.length > 0) {
+      const unitId = readyUnits.shift();
+      readySet.delete(unitId);
+
+      const queue = queues.get(unitId) ?? [];
+      const job = queue.shift();
+
+      if (queue.length === 0) {
+        queues.delete(unitId);
+      } else {
+        queues.set(unitId, queue);
+      }
+
+      if (job) {
+        void runJob(job);
+      }
+    }
+  }
+
+  async function runJob(job) {
+    const record = units.get(job.unitId);
+
+    if (!record) {
+      job.reject(new Error(`Missing parallel unit ${job.unitId}.`));
+      pump();
+      return;
+    }
+
+    activeUnits.add(job.unitId);
+    activeCount += 1;
+
+    try {
+      const meta = parallelMeta(job.unitId, job.operation, job.workflowName, job.sequence);
+      const outcome = await schedulerOptions.executor(
+        () => Promise.resolve(job.execute(record, meta)),
+        meta
+      );
+      const normalized = normalizeParallelOperationOutcome(record, outcome);
+      units.set(job.unitId, normalized.record);
+      job.resolve(normalized.result);
+    } catch (error) {
+      job.reject(error);
+    } finally {
+      activeCount -= 1;
+      activeUnits.delete(job.unitId);
+      if ((queues.get(job.unitId) ?? []).length > 0) {
+        markReady(job.unitId);
+      }
+      pump();
+    }
+  }
+}
+
+function workflowOperationResult(record, nextRun, result) {
+  return Object.freeze({
+    record: Object.freeze({
+      ...record,
+      run: nextRun
+    }),
+    result
+  });
+}
+
+function normalizeParallelSchedulerOptions(options) {
+  const rawOptions = options && typeof options === "object" ? options : {};
+  const rawParallelism =
+    rawOptions.maxParallelism ?? rawOptions.maxConcurrency ?? defaultParallelism();
+  const maxParallelism = normalizeParallelism(rawParallelism, "parallel.maxParallelism");
+  const executor =
+    typeof rawOptions.executor === "function"
+      ? rawOptions.executor
+      : async (task) => task();
+
+  return Object.freeze({
+    maxParallelism,
+    executor
+  });
+}
+
+function defaultParallelism() {
+  const hostConcurrency = globalThis.navigator?.hardwareConcurrency;
+  return Number.isInteger(hostConcurrency) && hostConcurrency > 0 ? hostConcurrency : 1;
+}
+
+function normalizeParallelism(value, path) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${path} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function normalizeParallelUnitId(unitId) {
+  if (typeof unitId !== "string" || unitId === "") {
+    throw new Error("Parallel workflow units require a non-empty unitId.");
+  }
+
+  return unitId;
+}
+
+function parallelMeta(unitId, operation, workflowName, sequence) {
+  return Object.freeze({
+    kind: "clasp-parallel-operation",
+    unitId,
+    workflowName,
+    operation,
+    sequence
+  });
+}
+
+function normalizeGenericUnitOutcome(record, outcome) {
+  if (outcome && typeof outcome === "object" && !Array.isArray(outcome)) {
+    if ("record" in outcome) {
+      return normalizeParallelOperationOutcome(record, outcome);
+    }
+
+    if ("state" in outcome || "result" in outcome) {
+      const nextState = "state" in outcome ? outcome.state : record.state;
+      return Object.freeze({
+        record: Object.freeze({
+          ...record,
+          state: nextState
+        }),
+        result: "result" in outcome ? outcome.result : nextState
+      });
+    }
+  }
+
+  return Object.freeze({
+    record: Object.freeze({
+      ...record,
+      state: outcome
+    }),
+    result: outcome
+  });
+}
+
+function normalizeParallelOperationOutcome(record, outcome) {
+  if (
+    !outcome ||
+    typeof outcome !== "object" ||
+    Array.isArray(outcome) ||
+    !("record" in outcome)
+  ) {
+    throw new Error(
+      `Parallel unit ${record.unitId} operations must return { record, result }.`
+    );
+  }
+
+  return Object.freeze({
+    record: outcome.record,
+    result: outcome.result
+  });
+}
+
 export function createWorkerRuntime(compiledModule, options = {}) {
   const jobs = new Map();
   const initialJobs = Array.isArray(options.jobs) ? options.jobs : [];
@@ -1727,6 +2212,9 @@ export function createWorkerRuntime(compiledModule, options = {}) {
     },
     workflow(name) {
       return workflowContractFor(compiledModule, name);
+    },
+    parallel(parallelOptions = {}) {
+      return createParallelScheduler(compiledModule, parallelOptions);
     },
     hotSwap(targetCompiledModule, hotSwapOptions = {}) {
       return createModuleHotSwapProtocol(
