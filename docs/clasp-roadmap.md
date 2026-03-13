@@ -190,6 +190,10 @@ Exit criteria:
 - Add semantic ownership or lease primitives so parallel agents can coordinate responsibility over declarations, workflows, policies, and rollout surfaces
 - Add cheapest-valid-path planning so the compiler can suggest the smallest legal change plan and cheapest sufficient verification path for a requested objective
 - Add trusted computing base reporting so proofs, simulations, and deploy projections state exactly which compiler, runtime, host, foreign, or snapshot assumptions still had to be trusted
+- Add a typed interactive session model so turn state, resumability, interrupts, cancellations, approvals, and human handoff stop living in ad hoc runtime state
+- Add a unified plugin, hook, command, tool, and skill ABI with compatibility checks, capability metadata, and upgrade rules instead of independent extension silos
+- Add first-class host-surface semantics for workspaces, filesystem actions, git operations, patch application, undo, and merge lifecycles so agent operating-system behavior is compiler-known
+- Add explicit human-in-the-loop protocol semantics for approvals, escalation, explanations, and reversible actions instead of leaving them to UI convention
 
 Exit criteria:
 
@@ -234,6 +238,8 @@ Exit criteria:
 - Add prompt-injection-resistant separation between content, tool authority, and policy
 - Add secret-redaction and provenance rules for prompts, traces, and tool calls
 - Add secret-aware prompt and tool-input surfaces that consume declared secret handles rather than raw ambient strings
+- Add first-class subagent spawn, join, supervision, and handoff semantics with delegated capabilities and scoped context packs
+- Add turn-level context economics and compaction planning so interactive sessions and subagent trees can choose what to retain, summarize, or drop based on semantic relevance and token cost
 - Preserve clean interoperability with systems like `BAML` while making the core model native to `Clasp`
 - Extend interoperability beyond AI-specific systems so higher-level `Clasp` programs can consume `npm`, `PyPI`, and `Cargo` ecosystems through compiler-managed foreign package surfaces rather than bespoke runtime glue
 

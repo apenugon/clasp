@@ -454,6 +454,10 @@ Critical path:
 - `CP-026` Add compiler-known resource-budget declarations and enforcement for compute, model, storage, network, concurrency, and rollout limits.
 - `CP-027` Add deploy/runtime attestation and provenance reporting for artifacts, environments, and world snapshots.
 - `CP-028` Add generalized delegated capabilities for tools, deployment, budgets, and environment authority.
+- `CP-029` Add a typed interactive session model covering turn state, resumability, interrupts, cancellations, approvals, and human handoff semantics.
+- `CP-030` Add a unified plugin, hook, command, tool, and skill ABI with compatibility checks, capability metadata, and upgrade rules.
+- `CP-031` Add explicit human-in-the-loop protocol semantics for approvals, escalation, explanations, and reversible actions.
+- `CP-032` Add first-class host-surface semantics for workspaces, filesystem actions, git operations, patch application, undo, and merge lifecycles.
 
 ### Track 6: Durable Workflows and Hot Swap
 
@@ -494,6 +498,8 @@ Critical path:
 - `AI-013` Add source-to-AIR and prompt-or-plan-to-AIR projection hooks for higher-level agent builders.
 - `AI-014` Add secret-aware prompt and tool-input surfaces that consume declared secret handles instead of raw ambient strings.
 - `AI-015` Add delegated secret-handle passing for agent, tool, and workflow handoffs without exposing raw secret values.
+- `AI-016` Add first-class subagent spawn, join, supervision, and handoff semantics with delegated capabilities and scoped context packs.
+- `AI-017` Add turn-level context economics and compaction planning for interactive sessions and subagent trees.
 
 ### Track 8: External-Objective Adaptation
 
@@ -548,6 +554,7 @@ Critical path:
 - `BM-038` Add parallel-runtime benchmarks proving mailbox safety, supervision correctness, hot-upgrade safety, and multicore scalability for isolated workflow or process execution.
 - `BM-039` Add protocol-and-method ergonomics benchmarks that compare receiver-style and protocol-oriented Clasp code against equivalent function-only and baseline-language implementations on realistic product logic changes.
 - `BM-040` Add manifest-and-package-tool benchmarks that measure cold setup, reproducible installs, workspace graph changes, and cross-ecosystem dependency sync friction against manual multi-tool workflows.
+- `BM-041` Add agent-runtime benchmarks proving subagent contract safety, delegated-capability containment, plugin or hook ABI compatibility, session resumability, approval-flow correctness, and host-surface patch lifecycle integrity.
 
 ### Track 10: SaaS Dogfooding
 

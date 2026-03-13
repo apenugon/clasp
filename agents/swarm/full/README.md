@@ -13,17 +13,17 @@ Lanes in this wave:
 - `03-type-system`: Type System And Diagnostics (28 tasks)
 - `04-schemas`: Schemas And Trust Boundaries (23 tasks)
 - `05-full-stack`: Full-Stack Runtime And App Layer (25 tasks)
-- `06-control-plane`: Control Plane (28 tasks)
+- `06-control-plane`: Control Plane (32 tasks)
 - `07-workflows`: Durable Workflows And Hot Swap (19 tasks)
-- `08-ai-platform`: AI-Native Platform (15 tasks)
+- `08-ai-platform`: AI-Native Platform (17 tasks)
 - `09-external-objectives`: External-Objective Adaptation (8 tasks)
-- `10-benchmarks`: Benchmark Program (40 tasks)
+- `10-benchmarks`: Benchmark Program (41 tasks)
 - `11-saas-dogfood`: SaaS Dogfooding (10 tasks)
 - `12-self-hosting`: Self-Hosting (14 tasks)
 - `13-native-backend`: Native Backend And Bytecode (11 tasks)
 - `14-sqlite`: SQLite Storage (10 tasks)
 
-Total tasks: 258
+Total tasks: 265
 
 Regenerate with:
 

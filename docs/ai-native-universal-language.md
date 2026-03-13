@@ -944,6 +944,37 @@ These declarations should:
 - participate in the same package graph
 - be validated by the compiler rather than interpreted as untyped sidecars
 
+### Agent runtime semantics should be first-class
+
+If `Clasp` is meant to be the best substrate for systems like `Codex` and `Claude Code`, it cannot stop at application semantics.
+
+It also needs compiler-known semantics for:
+
+- interactive sessions and resumable turn state
+- subagent spawn, join, supervision, and handoff
+- plugin, command, hook, tool, and skill compatibility
+- scoped context packs and context-compaction strategy
+- human approvals, escalations, and explanation artifacts
+- patch/apply/undo flows over semantic edits
+- workspace, filesystem, git, and patch lifecycle contracts
+
+Without that layer, these systems still accumulate stringly glue and hidden orchestration rules outside the language.
+
+The payoff is not only nicer architecture. It is the ability to eliminate whole orchestration bug classes such as:
+
+- subagent contract drift
+- capability over-delegation
+- context overexposure
+- plugin and hook ABI mismatch
+- unsafe parallel work overlap
+- broken join or merge assumptions
+- approval or sandbox drift
+- session-state schema drift
+- stale semantic memory use
+- host-surface mismatch across filesystem, git, and patch operations
+
+This is the point where `Clasp` stops being only a better app language and becomes a better implementation substrate for agent operating systems.
+
 ### Typed environment and deployment model
 
 If `Clasp` is meant to own end-to-end system semantics, environment and deployment intent cannot remain permanently outside the language.

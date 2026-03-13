@@ -47,6 +47,7 @@ builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-900}"
 verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-600}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
 dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
+infra_retry_delay_seconds="${CLASP_SWARM_INFRA_RETRY_DELAY_SECONDS:-5}"
 owns_runtime_state=0
 
 mkdir -p \
@@ -513,6 +514,57 @@ try {
 } catch (_) {
   logTail = "";
 }
+
+report_is_valid() {
+  local report_file="$1"
+  local report_kind="$2"
+
+  node - <<'EOF' "$report_file" "$report_kind"
+const fs = require("fs");
+const [reportPath, kind] = process.argv.slice(2);
+
+let raw = "";
+try {
+  raw = fs.readFileSync(reportPath, "utf8");
+} catch (_) {
+  process.exit(10);
+}
+
+if (raw.trim().length === 0) {
+  process.exit(11);
+}
+
+let data;
+try {
+  data = JSON.parse(raw);
+} catch (_) {
+  process.exit(12);
+}
+
+const hasString = (value) => typeof value === "string" && value.trim().length > 0;
+const hasArray = (value) => Array.isArray(value);
+
+if (kind === "builder") {
+  if (!hasString(data.summary) || !hasArray(data.files_touched) || !hasArray(data.tests_run) || !hasArray(data.residual_risks)) {
+    process.exit(13);
+  }
+  process.exit(0);
+}
+
+if (kind === "verifier") {
+  if (!hasString(data.verdict) || !hasString(data.summary) || !hasArray(data.findings) || !hasArray(data.tests_run) || !hasArray(data.follow_up)) {
+    process.exit(14);
+  }
+  process.exit(0);
+}
+
+process.exit(15);
+EOF
+}
+
+cooldown_after_infra_failure() {
+  sleep "$infra_retry_delay_seconds"
+}
 const report = {
   verdict: "fail",
   summary,
@@ -755,6 +807,26 @@ while true; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      cooldown_after_infra_failure
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    if report_is_valid "$builder_report" builder; then
+      :
+    else
+      builder_report_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Builder exited without producing a valid builder report." \
+        "$builder_log" \
+        "$task_id" \
+        "builder-report" \
+        "$builder_report_exit"
+      archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+      feedback_file="$verifier_report"
+      remove_worktree_if_present "$baseline_worktree"
+      cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
     fi
@@ -773,6 +845,7 @@ while true; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
     fi
@@ -799,6 +872,25 @@ while true; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      cooldown_after_infra_failure
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    if report_is_valid "$verifier_report" verifier; then
+      :
+    else
+      verifier_report_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Verifier exited without producing a valid verifier report." \
+        "$verifier_log" \
+        "$task_id" \
+        "verifier-report" \
+        "$verifier_report_exit"
+      archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+      feedback_file="$verifier_report"
+      cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
     fi
