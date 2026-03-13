@@ -2167,6 +2167,9 @@ compileTests =
             assertBool "expected workflow module version metadata" ("moduleVersionId: $claspModuleVersionId," `T.isInfixOf` emitted)
             assertBool "expected workflow upgrade window metadata" ("upgradeWindow: $claspModuleUpgradeWindow," `T.isInfixOf` emitted)
             assertBool "expected workflow compatibility metadata" ("compatibleModuleVersionIds: $claspModuleUpgradeWindow.fromVersionIds" `T.isInfixOf` emitted)
+            assertBool "expected workflow temporal clock helper" ("clock(seedNow) { return $claspTemporalClock(seedNow); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow temporal ttl helper" ("ttl(ttl, options) { return $claspTemporalTtl(ttl, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow temporal cache helper" ("cache(cacheEntry, options) { return $claspTemporalCache(cacheEntry, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deadline helper" ("withDeadline(run, deadlineAt) { return $claspWorkflowWithDeadline(\"CounterFlow\", run, deadlineAt); }" `T.isInfixOf` emitted)
             assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
@@ -2176,6 +2179,7 @@ compileTests =
             assertBool "expected workflow process-next helper" ("processNext(run, handler, options) { return $claspWorkflowProcessNext(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow drain-mailbox helper" ("drainMailbox(run, handler, options) { return $claspWorkflowDrainMailbox(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow deliver clock support" ("now: $claspTemporalResolveNow(rawOptions, `${workflowName}.delivery`)," `T.isInfixOf` emitted)
             assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow hot-swap compatibility metadata" ("explicitUpgradeHandlers: true," `T.isInfixOf` emitted)
             assertBool "expected workflow migration helper" ("migrate(snapshot, targetWorkflow, options) { return $claspWorkflowMigrateSnapshot(this, targetWorkflow ?? this, snapshot, options); }" `T.isInfixOf` emitted)
@@ -3005,6 +3009,26 @@ compileTests =
                 assertEqual "checkpoint" (Just (String "{\"count\":7}")) (KeyMap.lookup "checkpoint" value)
                 assertEqual "resumed value" (Just (Number 7)) (KeyMap.lookup "resumedValue" value)
                 assertEqual "deadline" (Just (Number 1200)) (KeyMap.lookup "deadlineAt" value)
+                assertEqual "simulated clock kind" (Just (String "clasp-simulated-clock")) (KeyMap.lookup "temporalClockKind" value)
+                assertEqual "simulated clock start" (Just (Number 1000)) (KeyMap.lookup "temporalClockStart" value)
+                assertEqual "deadline remaining with simulated clock" (Just (Number 100)) (KeyMap.lookup "temporalDeadlineRemaining" value)
+                assertEqual "ttl active remaining" (Just (Number 25)) (KeyMap.lookup "ttlActiveRemaining" value)
+                assertEqual "ttl expired" (Just (Bool True)) (KeyMap.lookup "ttlExpired" value)
+                assertEqual "expiration active status" (Just (String "active")) (KeyMap.lookup "expirationActiveStatus" value)
+                assertEqual "expiration expired status" (Just (String "expired")) (KeyMap.lookup "expirationExpiredStatus" value)
+                assertEqual "schedule status" (Just (String "active")) (KeyMap.lookup "scheduleStatus" value)
+                assertEqual "schedule last at" (Just (Number 1100)) (KeyMap.lookup "scheduleLastAt" value)
+                assertEqual "schedule next at" (Just (Number 1200)) (KeyMap.lookup "scheduleNextAt" value)
+                assertEqual "rollout pending status" (Just (String "pending")) (KeyMap.lookup "rolloutPendingStatus" value)
+                assertEqual "rollout active status" (Just (String "active")) (KeyMap.lookup "rolloutActiveStatus" value)
+                assertEqual "rollout expired status" (Just (String "expired")) (KeyMap.lookup "rolloutExpiredStatus" value)
+                assertEqual "cache active status" (Just (String "stale")) (KeyMap.lookup "cacheActiveStatus" value)
+                assertEqual "cache expired status" (Just (String "expired")) (KeyMap.lookup "cacheExpiredStatus" value)
+                assertEqual "capability pending status" (Just (String "pending")) (KeyMap.lookup "capabilityPendingStatus" value)
+                assertEqual "capability active status" (Just (String "active")) (KeyMap.lookup "capabilityActiveStatus" value)
+                assertEqual "capability expired status" (Just (String "expired")) (KeyMap.lookup "capabilityExpiredStatus" value)
+                assertEqual "simulated deadline status" (Just (String "deadline_exceeded")) (KeyMap.lookup "simulatedDeadlineStatus" value)
+                assertEqual "simulated clock end" (Just (Number 1350)) (KeyMap.lookup "temporalClockEnd" value)
                 assertEqual "initial queue size" (Just (Number 1)) (KeyMap.lookup "initiallyQueued" value)
                 assertEqual "queued status" (Just (String "queued")) (KeyMap.lookup "queuedStatus" value)
                 assertEqual "queued mailbox size" (Just (Number 2)) (KeyMap.lookup "queuedMailboxSize" value)
@@ -5739,6 +5763,28 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  retry: { maxAttempts: 3, initialBackoffMs: 50, backoffMultiplier: 2, maxBackoffMs: 80 },"
     , "  mailbox: [{ id: 'queued-0', payload: 1 }]"
     , "});"
+    , "const temporalClock = workflow.temporal.clock(1000);"
+    , "const temporalRun = workflow.start(checkpoint, { deadlineAt: 1100 });"
+    , "const temporalDeadline = workflow.temporal.deadline(temporalRun.deadlineAt, { clock: temporalClock });"
+    , "const capabilityPending = workflow.temporal.capability({ delegatedAt: 1000, ttlMs: 300, notBefore: 1050 }, { clock: temporalClock });"
+    , "const rolloutPending = workflow.temporal.rollout({ startAt: 1100, endAt: 1300 }, { clock: temporalClock });"
+    , "temporalClock.advanceBy(125);"
+    , "const ttlActive = workflow.temporal.ttl({ issuedAt: 1000, ttlMs: 150 }, { clock: temporalClock });"
+    , "const expirationActive = workflow.temporal.expiration({ notBefore: 1050, expiresAt: 1200 }, { clock: temporalClock });"
+    , "const scheduleActive = workflow.temporal.schedule({ startAt: 900, everyMs: 100, endAt: 1400 }, { clock: temporalClock });"
+    , "const rolloutActive = workflow.temporal.rollout({ startAt: 1100, endAt: 1300 }, { clock: temporalClock });"
+    , "const cacheActive = workflow.temporal.cache({ refreshedAt: 1000, staleAfterMs: 75, expireAfterMs: 200 }, { clock: temporalClock });"
+    , "const capabilityActive = workflow.temporal.capability({ delegatedAt: 1000, ttlMs: 300, notBefore: 1050 }, { clock: temporalClock });"
+    , "const simulatedDeadline = workflow.deliver(temporalRun, { id: 'm-clock', payload: 1 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}), { clock: temporalClock });"
+    , "temporalClock.advanceBy(225);"
+    , "const ttlExpired = workflow.temporal.ttl({ issuedAt: 1000, ttlMs: 150 }, { clock: temporalClock });"
+    , "const expirationExpired = workflow.temporal.expiration({ notBefore: 1050, expiresAt: 1200 }, { clock: temporalClock });"
+    , "const rolloutExpired = workflow.temporal.rollout({ startAt: 1100, endAt: 1300 }, { clock: temporalClock });"
+    , "const cacheExpired = workflow.temporal.cache({ refreshedAt: 1000, staleAfterMs: 75, expireAfterMs: 200 }, { clock: temporalClock });"
+    , "const capabilityExpired = workflow.temporal.capability({ delegatedAt: 1000, ttlMs: 300, notBefore: 1050 }, { clock: temporalClock });"
     , "const initiallyQueued = run.mailbox.length;"
     , "const queued = workflow.enqueue(run, { id: 'queued-1', payload: 4 });"
     , "const queuedDuplicate = workflow.enqueue(queued.run, { id: 'queued-1', payload: 9 });"
@@ -5853,6 +5899,26 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  checkpoint,"
     , "  resumedValue: resumed.count,"
     , "  deadlineAt: run.deadlineAt,"
+    , "  temporalClockKind: temporalClock.kind,"
+    , "  temporalClockStart: 1000,"
+    , "  temporalDeadlineRemaining: temporalDeadline.remainingMs,"
+    , "  ttlActiveRemaining: ttlActive.remainingMs,"
+    , "  ttlExpired: ttlExpired.expired,"
+    , "  expirationActiveStatus: expirationActive.status,"
+    , "  expirationExpiredStatus: expirationExpired.status,"
+    , "  scheduleStatus: scheduleActive.status,"
+    , "  scheduleLastAt: scheduleActive.lastAt,"
+    , "  scheduleNextAt: scheduleActive.nextAt,"
+    , "  rolloutPendingStatus: rolloutPending.status,"
+    , "  rolloutActiveStatus: rolloutActive.status,"
+    , "  rolloutExpiredStatus: rolloutExpired.status,"
+    , "  cacheActiveStatus: cacheActive.status,"
+    , "  cacheExpiredStatus: cacheExpired.status,"
+    , "  capabilityPendingStatus: capabilityPending.status,"
+    , "  capabilityActiveStatus: capabilityActive.status,"
+    , "  capabilityExpiredStatus: capabilityExpired.status,"
+    , "  simulatedDeadlineStatus: simulatedDeadline.status,"
+    , "  temporalClockEnd: temporalClock.now(),"
     , "  initiallyQueued,"
     , "  queuedStatus: queued.status,"
     , "  queuedMailboxSize: queued.mailboxSize,"
