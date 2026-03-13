@@ -131,8 +131,38 @@ In practical terms, that means:
 - `Option` and `Result`-style modeling for absence and failure
 - Immutable values by default
 - Explicit effects and capabilities
+- Bare primitives treated as low-level representation types, not the default shape of domain-facing function signatures
 
 For long-running programs, this matters even more. Workflows, agents, and background systems benefit disproportionately from strong typing because subtle interface drift compounds over time.
+
+### Shared semantic types, not signature-level primitives
+
+If the language is serious about preserving meaning for agents, then `Str`, `Int`, and `Bool` cannot remain the normal surface-level types for application code.
+
+A person name is not "just a string." A retry limit is not "just an int." A lead count, display label, deadline, and tenant identifier all carry different meaning even if they share the same representation underneath.
+
+`Clasp` should therefore move toward this discipline:
+
+- user-facing function signatures should not use bare primitives directly
+- exported declarations, schemas, routes, pages, tools, workflows, storage models, and policy surfaces should use shared semantic aliases or nominal types instead
+- raw primitives should survive only as representation types underneath the language, compiler IR, and runtime, not as a normal source-level escape hatch
+
+That does not require the language to become painful.
+
+The ergonomics should come from:
+
+- cheap nominal aliases over primitives
+- literals coercing by context into semantic types
+- operators lifting over semantic wrappers where valid
+- local bindings inheriting semantic types from surrounding context instead of collapsing back to bare primitives
+- compiler suggestions and autofixes that promote repeated local wrappers into shared project-level domain modules
+- duplicate or competing semantic wrappers for the same shared concept being detected early
+
+The important design principle is:
+
+`bare primitives should be implementation detail, not the main semantic model that agents work against`
+
+For real projects, that implies a shared domain-type area such as `Domain/` or `Types/`, where the canonical semantic aliases live and from which signatures across the project draw their meaning.
 
 Informative diagnostics are part of the type-system design, not a separate concern.
 

@@ -364,6 +364,7 @@ Critical path:
 - `TY-021` Add transactional semantic edits with preview, atomic apply, and semantic rollback support for compiler-known change plans.
 - `TY-022` Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily.
 - `TY-023` Add cross-repo semantic graph federation and compatibility reasoning for multi-package changes.
+- `TY-024` Add semantic primitive aliases and primitive discipline so source-level code uses project-meaningful types instead of bare `Str`, `Int`, or `Bool`.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -389,6 +390,7 @@ Critical path:
 - `SC-020` Add typed audit event schemas and standard audit envelopes carrying actor, resource, action, timestamp, and provenance metadata.
 - `SC-021` Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation chains.
 - `SC-022` Add unsafe-quarantine and taint-propagation semantics so foreign-trusted, dynamic, or unresolved values remain explicitly marked until they pass a proved or checked refinement boundary.
+- `SC-023` Add shared domain-type modules and boundary primitive discipline so exported or boundary-facing surfaces cannot fall back to bare primitives.
 
 ### Track 4: Full-Stack Runtime and App Layer
 
@@ -536,6 +538,7 @@ Critical path:
 - `BM-034` Add caching-and-trust benchmarks measuring semantic proof or result cache reuse, world-snapshot fidelity, interference-analysis quality, and trusted-computing-base reporting clarity across repeated agent tasks.
 - `BM-035` Add cross-repo and operational-trust benchmarks for graph federation, budget enforcement, attestation, and delegated capabilities.
 - `BM-036` Add learning-loop and behavioral-verification benchmarks for budget-aware remediation and bounded workflow, policy, and rollout checks.
+- `BM-037` Add semantic-type-discipline benchmarks.
 
 ### Track 10: SaaS Dogfooding
 

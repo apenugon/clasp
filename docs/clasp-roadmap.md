@@ -100,6 +100,10 @@ Exit criteria:
 - Add obligation discharge guidance so unresolved proofs and unsafe boundaries come with concrete refinement options, missing evidence, and bounded choice points
 - Add transactional semantic edits so compiler-known changes can be previewed, applied atomically, and rolled back coherently when downstream verification fails
 - Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily
+- Add shared semantic primitive aliases and nominal domain types so ordinary function signatures stop defaulting to bare `Str`, `Int`, and `Bool`
+- Treat primitives as representation-only beneath the source language rather than as a normal source-level escape hatch for project-facing declarations
+- Add compiler guidance that promotes repeated local semantic aliases into canonical shared `Domain/` modules and flags competing file-local wrappers for the same concept
+- Keep local bindings on the semantic type path as well, so agents do not regain a primitive escape route simply by packing more logic into larger functions
 
 Exit criteria:
 
@@ -146,6 +150,7 @@ Exit criteria:
 - Add non-loggable, non-serializable secret value semantics with explicit reveal or redaction boundaries instead of ambient string access
 - Add delegated secret capabilities with compiler-known attenuation rules for audience, action, TTL, and bounded-use delegation
 - Add typed audit event schemas and standard audit envelopes for boundary decisions, data disclosures, tool calls, and state changes
+- Reject bare primitives on schemas, routes, tools, pages, workflows, storage models, and other shared boundary surfaces so project-level meaning must stay explicit
 - Start separating untrusted content from authority-bearing instructions and capabilities
 - Keep unsafe, foreign-trusted, and unresolved values quarantined so trust and blame remain explicit through downstream use sites
 - Start designing versioned state handoff for future hot swapping
