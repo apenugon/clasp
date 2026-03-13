@@ -3626,10 +3626,20 @@ compileTests =
           Right emitted -> do
             assertBool "expected secret consumer export helper" ("export function __claspCreateSecretConsumerSurface(config = {}) {" `T.isInfixOf` emitted)
             assertBool "expected prompt input export helper" ("export function __claspCreatePromptInputSurface(config = {}) {" `T.isInfixOf` emitted)
+            assertBool "expected secret delegation helper" ("delegate(secretHandleOrName, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected secret handoff helper" ("handoff(consumer, options = null) {" `T.isInfixOf` emitted)
             assertBool "expected route secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"route\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected workflow secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"workflow\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected tool secret consumer helper" ("secretConsumer(boundary = this.server ?? null) { return $claspCreateSecretConsumer({ kind: \"tool\", name: this.name, id: this.id, boundary, secretNames: this.secretNames }); }" `T.isInfixOf` emitted)
             assertBool "expected tool input surface helper" ("inputSurface(value, options = null) { return $claspCreateToolInputSurface(this, value, options); }" `T.isInfixOf` emitted)
+    , testCase "compile emits agent secret consumers for delegated handoffs" $
+        case compileSource "delegated-secret-handoff" delegatedSecretHandoffSource of
+          Left err ->
+            assertFailure ("expected delegated secret handoff source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool
+              "expected agent secret consumer helper"
+              ("secretConsumer(boundary = this.role ?? null) { return $claspCreateSecretConsumer({ kind: \"agent\", name: this.name, id: this.id, boundary, secretNames: this.role?.policy?.permissions?.secret ?? [] }); }" `T.isInfixOf` emitted)
     , testCase "app-facing secret consumers resolve declared handles across routes tools workflows and providers" $ do
         case compileSource "secret-surface-runtime" secretSurfaceSource of
           Left err ->
@@ -3644,6 +3654,20 @@ compileTests =
             assertEqual
               "expected declared secret-handle runtime output"
               "{\"routeSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"routeSecretValue\":\"sk-live-openai\",\"workflowTracePolicy\":\"SupportSecrets\",\"workflowSecretValue\":\"tok-search-1\",\"toolSecretCount\":2,\"toolHasOpenAI\":true,\"providerSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerResolvedName\":\"SEARCH_API_TOKEN\",\"providerResolvedValue\":\"tok-search-1\",\"providerRequestSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerRequestResolvedValue\":\"tok-search-1\",\"providerPreview\":\"preview: tok-search-1\"}"
+              runtimeOutput
+    , testCase "delegated secret handoffs pass handles across agent tool and workflow boundaries without raw values" $ do
+        case compileSource "delegated-secret-handoff-runtime" delegatedSecretHandoffSource of
+          Left err ->
+            assertFailure ("expected delegated secret handoff source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/delegated-secret-handoff-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (delegatedSecretHandoffRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected delegated handoff runtime output"
+              "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
               runtimeOutput
     , testCase "prompt and tool input surfaces resolve secrets from declared handles" $ do
         result <- compileEntry ("examples" </> "prompt-functions" </> "Main.clasp")
@@ -4513,6 +4537,37 @@ secretSurfaceSource =
     , "preview req = SearchResponse { summary = \"ready\" }"
     , ""
     , "route previewRoute = GET \"/preview\" Empty -> SearchResponse preview"
+    , ""
+    , "main = \"ok\""
+    ]
+
+delegatedSecretHandoffSource :: Text
+delegatedSecretHandoffSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , "record SearchState = { summary : Str }"
+    , ""
+    , "workflow SearchFlow = { state : SearchState }"
+    , ""
+    , "guide Worker = {"
+    , "  scope: \"Handle repo work.\""
+    , "}"
+    , ""
+    , "policy SupportSecrets = public permits {"
+    , "  secret \"OPENAI_API_KEY\","
+    , "  secret \"SEARCH_API_TOKEN\""
+    , "}"
+    , ""
+    , "role WorkerRole = guide: Worker, policy: SupportSecrets"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportSecrets"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
     , ""
     , "main = \"ok\""
     ]
@@ -7501,6 +7556,50 @@ secretSurfaceRuntimeScript compiledPath runtimePath =
     , "  providerRequestSecretNames: seenRequest?.secretNames ?? [],"
     , "  providerRequestResolvedValue: seenRequest?.resolvedValue ?? null,"
     , "  providerPreview: providerResult.summary"
+    , "}));"
+    ]
+
+delegatedSecretHandoffRuntimeScript :: FilePath -> Text
+delegatedSecretHandoffRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const agent = compiledModule.__claspAgents[0];"
+    , "const tool = compiledModule.__claspTools[0];"
+    , "const workflow = compiledModule.__claspWorkflows[0];"
+    , "if (!agent || !tool || !workflow) { throw new Error('missing delegated handoff surfaces'); }"
+    , "const agentBoundary = compiledModule.__claspSecretBoundaries.find((boundary) => boundary.kind === 'agentRole');"
+    , "if (!agentBoundary) { throw new Error('missing agent secret boundary'); }"
+    , "const provider = { OPENAI_API_KEY: 'sk-agent-live', SEARCH_API_TOKEN: 'tok-workflow-live' };"
+    , "const agentSecrets = agent.secretConsumer();"
+    , "const toolSecrets = tool.secretConsumer();"
+    , "const workflowSecrets = workflow.secretConsumer(agentBoundary);"
+    , "const agentToTool = agentSecrets.handoff(toolSecrets, { reason: 'invoke-tool' });"
+    , "const toolResolved = toolSecrets.resolve(agentToTool.secretHandles[0], provider);"
+    , "let workflowRejected = null;"
+    , "try {"
+    , "  workflowSecrets.resolve(agentToTool.secretHandles[1], provider);"
+    , "} catch (error) {"
+    , "  workflowRejected = error.message;"
+    , "}"
+    , "const toolToWorkflow = toolSecrets.handoff(workflowSecrets, {"
+    , "  reason: 'resume-workflow',"
+    , "  secretHandles: [agentToTool.secretHandles[1]]"
+    , "});"
+    , "const workflowAccepted = workflowSecrets.handle(toolToWorkflow.secretHandles[0]);"
+    , "const workflowResolved = workflowSecrets.resolve(toolToWorkflow.secretHandles[0], provider);"
+    , "console.log(JSON.stringify({"
+    , "  agentHandoffKind: agentToTool.kind,"
+    , "  agentSecretNames: agentToTool.secretHandles.map((secretHandle) => secretHandle.name),"
+    , "  agentDelegationTarget: `${agentToTool.secretHandles[0].target.kind}:${agentToTool.secretHandles[0].target.name}`,"
+    , "  agentDelegated: agentToTool.secretHandles[0].kind === 'clasp-secret-delegation',"
+    , "  agentHasRawValue: Object.prototype.hasOwnProperty.call(agentToTool.secretHandles[0], 'value'),"
+    , "  agentRawValueLeaked: JSON.stringify(agentToTool).includes('sk-agent-live'),"
+    , "  toolResolvedName: toolResolved.name,"
+    , "  toolResolvedValue: toolResolved.value,"
+    , "  workflowRejected,"
+    , "  workflowAcceptedName: workflowAccepted.name,"
+    , "  workflowResolvedValue: workflowResolved.value,"
+    , "  workflowTracePolicy: workflowResolved.trace.policy"
     , "}));"
     ]
 
