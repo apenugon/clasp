@@ -592,8 +592,8 @@ function invokeProviderBinding(compiledModule, binding, args, runtimeOptions) {
     args: Object.freeze(args.slice()),
     secretConsumer,
     secretHandles: secretConsumer.secretHandles,
-    resolveSecret(secretHandleOrName, options = null) {
-      return secretConsumer.resolve(secretHandleOrName, runtimeOptions.secrets, options);
+    resolveSecret(secretHandle, options = null) {
+      return secretConsumer.resolve(secretHandle, runtimeOptions.secrets, options);
     },
     resolveAllSecrets(options = null) {
       return secretConsumer.resolveAll(runtimeOptions.secrets, options);

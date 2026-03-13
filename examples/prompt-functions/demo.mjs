@@ -31,13 +31,19 @@ const evalHooks = compiledModule.__claspEvalHooks.create({
     traceCollector.record(trace);
   }
 });
-const preparedCall = compiledModule.__claspToolCallContracts[0].prepare(
-  { query: compiledModule.replyPromptText },
-  "prompt-call-1",
-  { traceId: "prompt-tool-call", hooks: evalHooks, context: traceContext }
-);
-const collectedTraces = traceCollector.entries();
 const tool = compiledModule.__claspTools[0];
+const toolInput = tool.inputSurface(
+  { query: compiledModule.replyPromptText },
+  { boundary: secretBoundary }
+);
+const promptInput = toolInput.promptSurface(compiledModule.replyPromptValue);
+const declaredSecretHandle = toolInput.secretHandles[0];
+const preparedCall = toolInput.prepare("prompt-call-1", {
+  traceId: "prompt-tool-call",
+  hooks: evalHooks,
+  context: traceContext
+});
+const collectedTraces = traceCollector.entries();
 
 console.log(
   JSON.stringify({
@@ -57,10 +63,24 @@ console.log(
     traceActor: secretTrace.context.actor.id,
     traceHasSecretValue: JSON.stringify(secretTrace).includes("sk-live-openai"),
     resolvedSecretName: resolvedSecret.name,
+    promptInputKind: promptInput.kind,
+    promptInputSecretName: promptInput.resolveSecret(
+      declaredSecretHandle,
+      { OPENAI_API_KEY: "sk-live-openai" },
+      { context: traceContext }
+    ).name,
+    toolInputKind: toolInput.kind,
+    toolInputSecretName: toolInput.resolveSecret(
+      declaredSecretHandle,
+      { OPENAI_API_KEY: "sk-live-openai" },
+      { context: traceContext }
+    ).name,
     toolMethod: preparedCall.method,
     toolQuery: preparedCall.params.query,
     toolCallHasSecretValue: JSON.stringify(preparedCall).includes("sk-live-openai"),
-    toolKnowsDeclaredSecret: tool.secretConsumer().hasSecret("OPENAI_API_KEY"),
+    toolKnowsDeclaredSecret: toolInput.secretHandles.some(
+      (secretHandle) => secretHandle.name === "OPENAI_API_KEY"
+    ),
     evalTraceCount: collectedTraces.length,
     evalTraceAction: collectedTraces[0]?.action ?? null,
     evalTraceActor: collectedTraces[0]?.context?.actor?.id ?? null

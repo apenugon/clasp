@@ -3625,9 +3625,11 @@ compileTests =
             assertFailure ("expected secret surface source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected secret consumer export helper" ("export function __claspCreateSecretConsumerSurface(config = {}) {" `T.isInfixOf` emitted)
+            assertBool "expected prompt input export helper" ("export function __claspCreatePromptInputSurface(config = {}) {" `T.isInfixOf` emitted)
             assertBool "expected route secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"route\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected workflow secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"workflow\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected tool secret consumer helper" ("secretConsumer(boundary = this.server ?? null) { return $claspCreateSecretConsumer({ kind: \"tool\", name: this.name, id: this.id, boundary, secretNames: this.secretNames }); }" `T.isInfixOf` emitted)
+            assertBool "expected tool input surface helper" ("inputSurface(value, options = null) { return $claspCreateToolInputSurface(this, value, options); }" `T.isInfixOf` emitted)
     , testCase "app-facing secret consumers resolve declared handles across routes tools workflows and providers" $ do
         case compileSource "secret-surface-runtime" secretSurfaceSource of
           Left err ->
@@ -3642,6 +3644,21 @@ compileTests =
             assertEqual
               "expected declared secret-handle runtime output"
               "{\"routeSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"routeSecretValue\":\"sk-live-openai\",\"workflowTracePolicy\":\"SupportSecrets\",\"workflowSecretValue\":\"tok-search-1\",\"toolSecretCount\":2,\"toolHasOpenAI\":true,\"providerSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerResolvedName\":\"SEARCH_API_TOKEN\",\"providerResolvedValue\":\"tok-search-1\",\"providerRequestSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerRequestResolvedValue\":\"tok-search-1\",\"providerPreview\":\"preview: tok-search-1\"}"
+              runtimeOutput
+    , testCase "prompt and tool input surfaces resolve secrets from declared handles" $ do
+        result <- compileEntry ("examples" </> "prompt-functions" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected prompt-functions example to compile for prompt/tool input surfaces:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/prompt-input-surface-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (promptInputSurfaceRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected prompt and tool input surfaces to resolve declared handles"
+              "{\"promptKind\":\"clasp-prompt-input\",\"promptText\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\",\"promptHandleName\":\"OPENAI_API_KEY\",\"toolKind\":\"clasp-tool-input\",\"toolHandleName\":\"OPENAI_API_KEY\",\"toolMethod\":\"summarize_draft\",\"toolQuery\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\",\"invalidHandle\":\"prompt secretHandle must reference a declared Clasp secret handle.\"}"
               runtimeOutput
     , testCase "typed prompt functions compile to stable prompt values and text rendering" $ do
         case compileSource "prompt-runtime" promptFunctionSource of
@@ -7460,7 +7477,7 @@ secretSurfaceRuntimeScript compiledPath runtimePath =
     , "      invoke(request) {"
     , "        seenRequest = {"
     , "          secretNames: request.secretHandles.map((secretHandle) => secretHandle.name),"
-    , "          resolvedValue: request.resolveSecret('SEARCH_API_TOKEN').value"
+    , "          resolvedValue: request.resolveSecret(request.secretHandles[1]).value"
     , "        };"
     , "        return JSON.stringify({ summary: `preview: ${request.resolveSecret(request.secretHandles[1]).value}` });"
     , "      }"
@@ -7484,6 +7501,34 @@ secretSurfaceRuntimeScript compiledPath runtimePath =
     , "  providerRequestSecretNames: seenRequest?.secretNames ?? [],"
     , "  providerRequestResolvedValue: seenRequest?.resolvedValue ?? null,"
     , "  providerPreview: providerResult.summary"
+    , "}));"
+    ]
+
+promptInputSurfaceRuntimeScript :: FilePath -> Text
+promptInputSurfaceRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const tool = compiledModule.__claspTools[0];"
+    , "const secretBoundary = compiledModule.__claspSecretBoundaries.find((boundary) => boundary.kind === 'toolServer');"
+    , "if (!tool || !secretBoundary) { throw new Error('missing prompt input surfaces'); }"
+    , "const toolInput = tool.inputSurface({ query: compiledModule.replyPromptText }, { boundary: secretBoundary });"
+    , "const promptInput = toolInput.promptSurface(compiledModule.replyPromptValue);"
+    , "const secretHandle = toolInput.secretHandles[0];"
+    , "let invalidHandle = null;"
+    , "try {"
+    , "  promptInput.resolveSecret('OPENAI_API_KEY', { OPENAI_API_KEY: 'sk-live-openai' });"
+    , "} catch (error) {"
+    , "  invalidHandle = error.message;"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  promptKind: promptInput.kind,"
+    , "  promptText: promptInput.text,"
+    , "  promptHandleName: promptInput.resolveSecret(secretHandle, { OPENAI_API_KEY: 'sk-live-openai' }).name,"
+    , "  toolKind: toolInput.kind,"
+    , "  toolHandleName: toolInput.resolveSecret(secretHandle, { OPENAI_API_KEY: 'sk-live-openai' }).name,"
+    , "  toolMethod: toolInput.prepare('prompt-call-1').method,"
+    , "  toolQuery: toolInput.prepare('prompt-call-1').params.query,"
+    , "  invalidHandle"
     , "}));"
     ]
 
