@@ -565,6 +565,54 @@ function resolveSimulationNow(clock, value, path) {
   return normalizeSimulationTimestamp(value, path);
 }
 
+function normalizeSimulationFixtureSnapshot(fixtures) {
+  return freezeSimulationValue(
+    Object.fromEntries(
+      (Array.isArray(fixtures) ? fixtures : [])
+        .filter((fixture) => fixture && typeof fixture === "object")
+        .map((fixture, index) => [
+          fixture.routeName ?? fixture.routeId ?? `fixture-${index + 1}`,
+          {
+            routeName: fixture.routeName ?? null,
+            routeId: fixture.routeId ?? null,
+            requestType: fixture.requestType ?? null,
+            responseType: fixture.responseType ?? null,
+            responseKind: fixture.responseKind ?? null,
+            requestSeed: fixture.requestSeed ?? null,
+            responseSeed: fixture.responseSeed ?? null
+          }
+        ])
+    )
+  );
+}
+
+function normalizeSimulationWorldState(state, defaults = {}) {
+  const rawState = state && typeof state === "object" ? state : {};
+
+  return freezeSimulationValue({
+    fixtures:
+      rawState.fixtures === undefined
+        ? defaults.fixtures ?? freezeSimulationValue({})
+        : rawState.fixtures,
+    storage:
+      rawState.storage === undefined
+        ? defaults.storage ?? freezeSimulationValue({})
+        : rawState.storage,
+    environment:
+      rawState.environment === undefined
+        ? defaults.environment ?? freezeSimulationValue({})
+        : rawState.environment,
+    deployment:
+      rawState.deployment === undefined
+        ? defaults.deployment ?? freezeSimulationValue({})
+        : rawState.deployment,
+    providerResponses:
+      rawState.providerResponses === undefined
+        ? defaults.providerResponses ?? freezeSimulationValue({})
+        : rawState.providerResponses
+  });
+}
+
 function workflowTemporalOperation(workflow, operation) {
   const temporal = workflow?.temporal;
   const handler = temporal?.[operation];
@@ -580,6 +628,7 @@ function workflowTemporalOperation(workflow, operation) {
 
 export function createSimulationRuntime(compiledModule, options = {}) {
   const contract = bindingContractFor(compiledModule);
+  const moduleContract = contract.module ?? null;
   const simulationClock =
     options.clock && typeof options.clock.now === "function"
       ? options.clock
@@ -615,6 +664,13 @@ export function createSimulationRuntime(compiledModule, options = {}) {
       agent
     ])
   );
+  const baseWorldState = normalizeSimulationWorldState(options, {
+    fixtures: normalizeSimulationFixtureSnapshot(contract.seededFixtures ?? []),
+    storage: freezeSimulationValue({}),
+    environment: freezeSimulationValue({}),
+    deployment: freezeSimulationValue({}),
+    providerResponses: freezeSimulationValue({})
+  });
   const traces = [];
   const audits = [];
 
@@ -624,6 +680,9 @@ export function createSimulationRuntime(compiledModule, options = {}) {
     traceId,
     contract,
     clock: simulationClock,
+    worldSnapshot(snapshotOptions = {}) {
+      return captureWorldSnapshot(null, snapshotOptions);
+    },
     temporal: Object.freeze({
       clock(seedNow = simulationClock.now()) {
         return createSimulationClock(seedNow);
@@ -684,6 +743,32 @@ export function createSimulationRuntime(compiledModule, options = {}) {
                   "response"
                 )
               : freezeSimulationValue(responseSeed);
+          const worldSnapshot = captureWorldSnapshot(
+            freezeSimulationValue({
+              kind: "route",
+              routeName: route.name,
+              routeId: route.id,
+              fixtureRouteId: fixture?.routeId ?? null,
+              requestSeed,
+              responseSeed
+            }),
+            {
+              now,
+              fixtures: freezeSimulationValue({
+                ...baseWorldState.fixtures,
+                [route.name]: {
+                  routeName: route.name,
+                  routeId: route.id,
+                  requestType: route.requestType,
+                  responseType: route.responseType,
+                  responseKind: route.responseKind,
+                  requestSeed,
+                  responseSeed
+                }
+              }),
+              ...(dryRunOptions.worldSnapshot ?? {})
+            }
+          );
           const trace = freezeSimulationValue({
             kind: "route",
             mode: "dry_run",
@@ -693,6 +778,7 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             routeId: route.id,
             request,
             response,
+            worldSnapshot,
             fixture: fixture
               ? {
                   routeName: fixture.routeName,
@@ -719,6 +805,7 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             routeId: route.id,
             request,
             response,
+            worldSnapshot,
             trace,
             audit
           });
@@ -757,6 +844,19 @@ export function createSimulationRuntime(compiledModule, options = {}) {
               ? { ...dryRunOptions, clock: dryRunOptions.clock }
               : { ...dryRunOptions, now };
           const run = workflow.replay(snapshot, messages, reducer, replayOptions);
+          const worldSnapshot = captureWorldSnapshot(
+            freezeSimulationValue({
+              kind: "workflow",
+              workflowName: workflow.name,
+              workflowId: workflow.id,
+              snapshot,
+              messages
+            }),
+            {
+              now,
+              ...(dryRunOptions.worldSnapshot ?? {})
+            }
+          );
           const trace = freezeSimulationValue({
             kind: "workflow",
             mode: "dry_run",
@@ -765,7 +865,8 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             workflowName: workflow.name,
             workflowId: workflow.id,
             delivered: run.deliveries.length,
-            processedIds: run.processedIds
+            processedIds: run.processedIds,
+            worldSnapshot
           });
           const audit = freezeSimulationValue({
             eventType: "workflow_dry_run",
@@ -782,6 +883,7 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             status: "dry_run",
             workflowName: workflow.name,
             run,
+            worldSnapshot,
             trace,
             audit
           });
@@ -799,6 +901,15 @@ export function createSimulationRuntime(compiledModule, options = {}) {
         policy,
         decide(kind, target, context = null) {
           const decision = policy.decide(kind, target, context);
+          const worldSnapshot = captureWorldSnapshot(
+            freezeSimulationValue({
+              kind: "policy",
+              policyName: policy.name,
+              targetKind: kind,
+              target,
+              context
+            })
+          );
           appendSimulationRecord(
             freezeSimulationValue({
               kind: "policy",
@@ -806,7 +917,8 @@ export function createSimulationRuntime(compiledModule, options = {}) {
               traceId,
               at: simulationClock.now(),
               policyName: policy.name,
-              decision: decision.trace
+              decision: decision.trace,
+              worldSnapshot
             }),
             freezeSimulationValue({
               eventType: "policy_dry_run",
@@ -815,7 +927,10 @@ export function createSimulationRuntime(compiledModule, options = {}) {
               decision: decision.audit
             })
           );
-          return decision;
+          return freezeSimulationValue({
+            ...decision,
+            worldSnapshot
+          });
         }
       });
     },
@@ -865,6 +980,22 @@ export function createSimulationRuntime(compiledModule, options = {}) {
               audit: decision.audit
             });
           });
+          const worldSnapshot = captureWorldSnapshot(
+            freezeSimulationValue({
+              kind: "agent_loop",
+              agentName: agent.name,
+              steps: results.map((result) => ({
+                step: result.step,
+                kind: result.kind,
+                target: result.target,
+                allowed: result.allowed
+              }))
+            }),
+            {
+              now,
+              ...(dryRunOptions.worldSnapshot ?? {})
+            }
+          );
           const trace = freezeSimulationValue({
             kind: "agent_loop",
             mode: "dry_run",
@@ -873,6 +1004,7 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             agentName: agent.name,
             approvalPolicy: agent.role?.approvalPolicy ?? null,
             sandboxPolicy: agent.role?.sandboxPolicy ?? null,
+            worldSnapshot,
             steps: results.map((result) => ({
               step: result.step,
               allowed: result.allowed
@@ -894,6 +1026,7 @@ export function createSimulationRuntime(compiledModule, options = {}) {
             approvalPolicy: agent.role?.approvalPolicy ?? null,
             sandboxPolicy: agent.role?.sandboxPolicy ?? null,
             steps: results,
+            worldSnapshot,
             trace,
             audit
           });
@@ -934,6 +1067,18 @@ export function createSimulationRuntime(compiledModule, options = {}) {
       now,
       clock: temporalClock
     });
+    const worldSnapshot = captureWorldSnapshot(
+      freezeSimulationValue({
+        kind: "temporal",
+        workflowName,
+        operation,
+        spec
+      }),
+      {
+        now,
+        ...(temporalOptions.worldSnapshot ?? {})
+      }
+    );
     const trace = freezeSimulationValue({
       kind: "temporal",
       mode: "dry_run",
@@ -942,7 +1087,8 @@ export function createSimulationRuntime(compiledModule, options = {}) {
       workflowName,
       operation,
       spec,
-      result
+      result,
+      worldSnapshot
     });
     const audit = freezeSimulationValue({
       eventType: "temporal_dry_run",
@@ -953,7 +1099,47 @@ export function createSimulationRuntime(compiledModule, options = {}) {
       status: result?.status ?? null
     });
     appendSimulationRecord(trace, audit);
-    return result;
+    return freezeSimulationValue({
+      ...result,
+      worldSnapshot
+    });
+  }
+
+  function captureWorldSnapshot(surface = null, snapshotOptions = {}) {
+    const snapshotClock =
+      snapshotOptions.clock && typeof snapshotOptions.clock.now === "function"
+        ? snapshotOptions.clock
+        : simulationClock;
+    const capturedAt = resolveSimulationNow(
+      snapshotClock,
+      snapshotOptions.now,
+      "simulation.worldSnapshot.now"
+    );
+    const worldState = normalizeSimulationWorldState(snapshotOptions, baseWorldState);
+
+    return freezeSimulationValue({
+      kind: "clasp-world-snapshot",
+      version: 1,
+      traceId,
+      module: moduleContract
+        ? {
+            name: moduleContract.name ?? null,
+            versionId: moduleContract.versionId ?? null
+          }
+        : null,
+      capturedAt,
+      time: {
+        simulated: true,
+        now: capturedAt,
+        clockKind: snapshotClock.kind ?? "custom"
+      },
+      fixtures: worldState.fixtures,
+      storage: worldState.storage,
+      environment: worldState.environment,
+      deployment: worldState.deployment,
+      providerResponses: worldState.providerResponses,
+      surface
+    });
   }
 }
 
