@@ -31,7 +31,9 @@ This directory has two kinds of examples:
 - [lead-app/client-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/client-demo.mjs): exercises the lead app's generated JSON route clients against the compiled route surface with no handwritten request codecs
 - [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage structured outputs validated against declared schemas
+- [support-console/demo.mjs](/home/akul/DevProjects/synthspeak/examples/support-console/demo.mjs): exercises the dashboard page, projected customer export route, and typed reply-preview form against runtime-installed provider and storage bindings
 - [release-gate/Main.clasp](/home/akul/DevProjects/synthspeak/examples/release-gate/Main.clasp): release review pages, typed redirects, audit envelopes with auth and resource identity primitives, and a provider-backed decision boundary
+- [release-gate/demo.mjs](/home/akul/DevProjects/synthspeak/examples/release-gate/demo.mjs): runs the release dashboard through review, audit, redirect, and acknowledgement flows with one typed provider binding
 
 ## Useful Commands
 
@@ -63,6 +65,18 @@ Verify the support-agent example:
 
 ```sh
 bash examples/support-agent/scripts/verify.sh
+```
+
+Verify the support-console example:
+
+```sh
+bash examples/support-console/scripts/verify.sh
+```
+
+Verify the release-gate example:
+
+```sh
+bash examples/release-gate/scripts/verify.sh
 ```
 
 Emit the context graph:

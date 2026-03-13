@@ -2768,6 +2768,58 @@ compileTests =
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("support-agent demo script failed:\n" <> stderrText)
+    , testCase "support-console example drives typed support dashboard, export, and preview flows" $ do
+        result <- compileEntry ("examples" </> "support-console" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected support-console example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/support-console/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "support-console" </> "demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected support-console demo result"
+                  "{\"routeCount\":4,\"routeNames\":[\"supportDashboardRoute\",\"supportCustomerRoute\",\"supportCustomerPageRoute\",\"previewReplyRoute\"],\"hostBindingNames\":[\"generateReplyPreview\",\"publishCustomer\"],\"dashboardHasPreviewForm\":true,\"dashboardHasCustomerLink\":true,\"customerCompany\":\"Northwind Studio\",\"customerEmail\":\"ops@northwind.example\",\"customerPageHasExport\":true,\"previewReply\":\"Thanks for the update. Renewal is blocked on legal review. We will send the next renewal step today.\",\"previewEscalationNeeded\":true,\"previewPageHasReply\":true,\"invalid\":\"summary must be a string\"}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("support-console demo script failed:\n" <> stderrText)
+    , testCase "release-gate example drives review, audit, and redirect flows" $ do
+        result <- compileEntry ("examples" </> "release-gate" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected release-gate example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/release-gate/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "release-gate" </> "demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected release-gate demo result"
+                  "{\"routeCount\":5,\"routeNames\":[\"releaseGateRoute\",\"releaseAuditRoute\",\"releaseAckRoute\",\"releaseReviewRoute\",\"releaseAcceptRoute\"],\"hostBindingNames\":[\"reviewRelease\"],\"dashboardHasReviewForm\":true,\"auditTenant\":\"operations\",\"auditStatus\":\"Pending\",\"decisionStatus\":\"Approved\",\"decisionNote\":\"Approved after typed policy review.\",\"decisionPageHasBackLink\":true,\"redirectStatus\":303,\"redirectLocation\":\"/release/ack\",\"ackHasBackLink\":true,\"invalid\":\"releaseId must be a string\"}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("release-gate demo script failed:\n" <> stderrText)
     , testCase "durable workflow example survives restart and supervised module replacement" $
         flip finally (cleanupProjectDir stateDir) $ do
           oldResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.clasp")

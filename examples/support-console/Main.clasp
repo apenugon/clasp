@@ -29,12 +29,6 @@ publishedCustomer req = publishCustomer currentCustomer
 dashboard : Empty -> Page
 dashboard req = page "Support console" (styled "support_shell" dashboardBody)
 
-dashboardBody : View
-dashboardBody = element "main" dashboardContent
-
-dashboardContent : View
-dashboardContent = append headlineView (append introView (append tenantView (append previewSection dashboardLinks)))
-
 headlineView : View
 headlineView = element "h1" (text "Support console")
 
@@ -44,14 +38,20 @@ introView = element "p" (text "Model-assisted reply previews with policy-approve
 tenantView : View
 tenantView = element "p" (text (supportTenantId supportSession))
 
-dashboardLinks : View
-dashboardLinks = element "section" (append (element "p" (link "/support/customer/page" (text "Open the customer export preview"))) (element "p" (text "Raw SupportCustomer route: /support/customer")))
+previewForm : View
+previewForm = form "POST" "/support/preview" (element "section" (append (input "customerId" "hidden" "cust-42") (append (element "label" (append (text "Conversation summary") (input "summary" "text" "Renewal is blocked on legal review."))) (submit "Preview reply"))))
 
 previewSection : View
 previewSection = element "section" (append (element "h2" (text "Reply preview")) previewForm)
 
-previewForm : View
-previewForm = form "POST" "/support/preview" (element "section" (append (input "customerId" "hidden" "cust-42") (append (element "label" (append (text "Conversation summary") (input "summary" "text" "Renewal is blocked on legal review."))) (submit "Preview reply"))))
+dashboardLinks : View
+dashboardLinks = element "section" (append (element "p" (link "/support/customer/page" (text "Open the customer export preview"))) (element "p" (text "Raw SupportCustomer route: /support/customer")))
+
+dashboardContent : View
+dashboardContent = append headlineView (append introView (append tenantView (append previewSection dashboardLinks)))
+
+dashboardBody : View
+dashboardBody = element "main" dashboardContent
 
 previewResultPage : TicketDraft -> Page
 previewResultPage draft = renderPreviewPage (previewTicket draft)

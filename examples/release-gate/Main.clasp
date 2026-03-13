@@ -25,11 +25,11 @@ reviewDecision request = decode ReleaseDecision (reviewRelease request)
 dashboard : Empty -> Page
 dashboard req = page "Release gate" (styled "ops_shell" (element "main" (append (element "h1" (text "Release gate")) (append (element "p" (text (opsTenantId opsSession))) (append reviewSection (append fastTrackSection (element "p" (text "Typed audit route: /release/audit"))))))))
 
-reviewSection : View
-reviewSection = element "section" (append (element "h2" (text "Policy review")) reviewForm)
-
 reviewForm : View
 reviewForm = form "POST" "/release/review" (element "section" (append (element "label" (append (text "Release ID") (input "releaseId" "text" "rel-204"))) (append (element "label" (append (text "Change summary") (input "summary" "text" "Ship the support automation pipeline."))) (submit "Run policy review"))))
+
+reviewSection : View
+reviewSection = element "section" (append (element "h2" (text "Policy review")) reviewForm)
 
 fastTrackSection : View
 fastTrackSection = element "section" (append (element "h2" (text "Fast track")) (form "POST" "/release/accept" (element "section" (submit "Fast-track release"))))

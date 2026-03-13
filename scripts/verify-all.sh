@@ -22,6 +22,8 @@ nix develop -c bash -lc "
   bash examples/prompt-functions/scripts/verify.sh
   bash examples/support-agent/scripts/verify.sh
   bash examples/lead-app/scripts/verify.sh
+  bash examples/support-console/scripts/verify.sh
+  bash examples/release-gate/scripts/verify.sh
   cabal run claspc -- check examples/lead-app/Main.clasp
   cabal run claspc -- check examples/support-console/Main.clasp
   cabal run claspc -- check examples/release-gate/Main.clasp
