@@ -2161,6 +2161,9 @@ compileTests =
             assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
             assertBool "expected workflow degrade helper" ("degrade(run, reason, options) { return $claspWorkflowDegrade(\"CounterFlow\", run, reason, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow handoff helper" ("handoff(run, operator, reason, options) { return $claspWorkflowHandoff(\"CounterFlow\", run, operator, reason, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow enqueue helper" ("enqueue(run, message) { return $claspWorkflowEnqueue(\"CounterFlow\", run, message); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow process-next helper" ("processNext(run, handler, options) { return $claspWorkflowProcessNext(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow drain-mailbox helper" ("drainMailbox(run, handler, options) { return $claspWorkflowDrainMailbox(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow hot-swap compatibility metadata" ("explicitUpgradeHandlers: true," `T.isInfixOf` emitted)
@@ -2891,7 +2894,7 @@ compileTests =
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected workflow lifecycle and retry runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"hotSwapHandlersExplicit\":true,\"hotSwapMigrationHooks\":true,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"],\"migratedStatus\":\"migrated\",\"migratedCount\":12,\"migratedHook\":true,\"upgradedStatus\":\"upgraded\",\"upgradedCount\":27,\"upgradedDeadlineAt\":1250,\"upgradedSupervisor\":\"UpgradeSupervisor\",\"upgradedPrepareHook\":true,\"upgradedActivateHook\":true}"
+              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"hotSwapHandlersExplicit\":true,\"hotSwapMigrationHooks\":true,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"initiallyQueued\":1,\"queuedStatus\":\"queued\",\"queuedMailboxSize\":2,\"queuedDuplicate\":true,\"processedQueuedStatus\":\"delivered\",\"processedQueuedResult\":\"queued-1\",\"drainedStatus\":\"drained\",\"drainedMailboxSize\":0,\"drainedQueuedResults\":[4],\"blockedMailboxStatus\":\"operator_handoff\",\"blockedMailboxSize\":2,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"],\"migratedStatus\":\"migrated\",\"migratedCount\":12,\"migratedHook\":true,\"upgradedStatus\":\"upgraded\",\"upgradedCount\":27,\"upgradedDeadlineAt\":1250,\"upgradedSupervisor\":\"UpgradeSupervisor\",\"upgradedPrepareHook\":true,\"upgradedActivateHook\":true}"
               runtimeOutput
     , testCase "worker runtime stages supervised module hot swaps with bounded overlap" $
         case (compileSource "workflow-hot-swap-old" workflowSource, compileSource "workflow-hot-swap-new" workflowHotSwapTargetSource) of
@@ -2930,6 +2933,8 @@ compileTests =
                 assertEqual "remaining version count" (Just (Number 1)) (KeyMap.lookup "remainingVersionCount" value)
                 assertEqual "upgraded status" (Just (String "upgraded")) (KeyMap.lookup "upgradedStatus" value)
                 assertEqual "upgraded count" (Just (Number 8)) (KeyMap.lookup "upgradedCount" value)
+                assertEqual "upgraded mailbox size" (Just (Number 1)) (KeyMap.lookup "upgradedMailboxSize" value)
+                assertEqual "upgraded queued id" (Just (String "queued-upgrade")) (KeyMap.lookup "upgradedQueuedId" value)
                 assertEqual "upgraded supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "upgradedSupervisor" value)
                 assertEqual "upgraded target version tagged" (Just (Bool True)) (KeyMap.lookup "upgradedTargetVersionTagged" value)
               Right other ->
@@ -5503,8 +5508,24 @@ workflowRuntimeScript compiledPath runtimePath =
     , "const resumed = workflow.resume(checkpoint);"
     , "const run = workflow.start(checkpoint, {"
     , "  deadlineAt: 1200,"
-    , "  retry: { maxAttempts: 3, initialBackoffMs: 50, backoffMultiplier: 2, maxBackoffMs: 80 }"
+    , "  retry: { maxAttempts: 3, initialBackoffMs: 50, backoffMultiplier: 2, maxBackoffMs: 80 },"
+    , "  mailbox: [{ id: 'queued-0', payload: 1 }]"
     , "});"
+    , "const initiallyQueued = run.mailbox.length;"
+    , "const queued = workflow.enqueue(run, { id: 'queued-1', payload: 4 });"
+    , "const queuedDuplicate = workflow.enqueue(queued.run, { id: 'queued-1', payload: 9 });"
+    , "const processNext = workflow.processNext(queued.run, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: `queued-${payload}`"
+    , "}), { now: 1000 });"
+    , "const queueDrained = workflow.drainMailbox(processNext.run, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}), { now: 1000 });"
+    , "const blockedMailbox = workflow.drainMailbox(workflow.handoff(queued.run, 'queue-ops', 'manual-drain'), (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: payload"
+    , "}));"
     , "const deliverOnce = workflow.deliver(run, { id: 'm1', payload: 2 }, (state, payload) => ({"
     , "  state: { count: state.count + payload },"
     , "  result: payload"
@@ -5597,6 +5618,17 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  checkpoint,"
     , "  resumedValue: resumed.count,"
     , "  deadlineAt: run.deadlineAt,"
+    , "  initiallyQueued,"
+    , "  queuedStatus: queued.status,"
+    , "  queuedMailboxSize: queued.mailboxSize,"
+    , "  queuedDuplicate: queuedDuplicate.duplicate,"
+    , "  processedQueuedStatus: processNext.status,"
+    , "  processedQueuedResult: processNext.delivery?.result ?? null,"
+    , "  drainedStatus: queueDrained.status,"
+    , "  drainedMailboxSize: queueDrained.mailboxSize,"
+    , "  drainedQueuedResults: queueDrained.deliveries.map((delivery) => delivery.result),"
+    , "  blockedMailboxStatus: blockedMailbox.status,"
+    , "  blockedMailboxSize: blockedMailbox.mailboxSize,"
     , "  duplicateSuppressed: deliverDuplicate.duplicate,"
     , "  duplicateResult: deliverDuplicate.result,"
     , "  retriedStatus: retried.status,"
@@ -5677,7 +5709,10 @@ workflowHotSwapRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "});"
     , "const protocol = runtime.hotSwap(patchedTargetCompiledModule, { supervisor: 'UpgradeSupervisor' });"
     , "const workflow = runtime.workflow('CounterFlow');"
-    , "const run = workflow.start(workflow.checkpoint({ count: 5 }), { deadlineAt: 100 });"
+    , "const run = workflow.start(workflow.checkpoint({ count: 5 }), {"
+    , "  deadlineAt: 100,"
+    , "  mailbox: [{ id: 'queued-upgrade', payload: 4 }]"
+    , "});"
     , "const overlap = protocol.begin({ startedAt: 1000 });"
     , "const upgraded = protocol.upgrade('CounterFlow', run, {"
     , "  migrateState: (state) => ({ count: state.count + 3 }),"
@@ -5709,6 +5744,8 @@ workflowHotSwapRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  remainingVersionCount: retired.activeVersionIds.length,"
     , "  upgradedStatus: upgraded.status,"
     , "  upgradedCount: upgraded.run.state.count,"
+    , "  upgradedMailboxSize: upgraded.run.mailbox.length,"
+    , "  upgradedQueuedId: upgraded.run.mailbox[0]?.id ?? null,"
     , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
     , "  upgradedTargetVersionTagged: upgraded.context.toModuleVersionId.startsWith('module:Main:')"
     , "}));"
