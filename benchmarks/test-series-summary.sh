@@ -151,6 +151,20 @@ printf '%s\n' "$python_summary_output" | grep -Fq '  medianDurationMs: 100'
 printf '%s\n' "$python_summary_output" | grep -Fq '  medianTokens: 120'
 printf '%s\n' "$python_summary_output" | grep -Fq '  medianUncachedTokens: 103'
 
+durable_workflow_summary_output="$(
+  node "$project_root/benchmarks/run-benchmark.mjs" summarize \
+    --task-id clasp-durable-workflow \
+    --harness scenario \
+    --model deterministic
+)"
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq $'clasp-durable-workflow\tscenario\tdeterministic'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  runs: 1'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  passRate: 100%'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  timeToGreenMs: 784'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianDurationMs: 784'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianTokens: 0'
+printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianUncachedTokens: 0'
+
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"$tmp_bin/nix.log"
