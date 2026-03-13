@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createDynamicSchema } from "../../runtime/bun/server.mjs";
+import { createBamlShim } from "../../runtime/bun/server.mjs";
 
 function runTool(call) {
   if (call.method === "lookup_customer") {
@@ -72,10 +72,10 @@ function runScenario(compiledModule, dynamicDecision, lookupCustomer, lookupPoli
     context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
   });
   const customerEnvelope = runTool(customerCall);
-  const customer = lookupCustomer.evaluateResult(customerEnvelope.result, {
+  const customer = lookupCustomer.parse(customerEnvelope.result, {
     collector: traceCollector,
     context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  }).result;
+  });
 
   const policyRequest = compiledModule.lookupPolicyRequest(ticket);
   const policyCall = lookupPolicy.prepare(policyRequest, `${ticket.customerId}:policy`, {
@@ -83,10 +83,10 @@ function runScenario(compiledModule, dynamicDecision, lookupCustomer, lookupPoli
     context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
   });
   const policyEnvelope = runTool(policyCall);
-  const policy = lookupPolicy.evaluateResult(policyEnvelope.result, {
+  const policy = lookupPolicy.parse(policyEnvelope.result, {
     collector: traceCollector,
     context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  }).result;
+  });
 
   const prompt = compiledModule.decisionPrompt(ticket, customer, policy);
   const promptText = compiledModule.decisionPromptText(ticket, customer, policy);
@@ -111,22 +111,16 @@ export async function runSupportAgentDemo(compiledModulePath) {
   const moduleUrl = pathToFileURL(path.resolve(compiledModulePath)).href;
   const compiledModule = await import(moduleUrl);
   const agent = compiledModule.__claspAgents.find((entry) => entry.name === "renewalAgent");
-  const lookupCustomer = compiledModule.__claspToolCallContracts.find(
-    (entry) => entry.name === "lookupCustomer"
-  );
-  const lookupPolicy = compiledModule.__claspToolCallContracts.find(
-    (entry) => entry.name === "lookupPolicy"
-  );
+  const baml = createBamlShim(compiledModule);
+  const lookupCustomer = baml.tool("lookupCustomer");
+  const lookupPolicy = baml.tool("lookupPolicy");
 
   if (!agent || !lookupCustomer || !lookupPolicy) {
     throw new Error("Missing expected support-agent exports");
   }
 
   const traceCollector = compiledModule.__claspTraceCollector.create();
-  const dynamicDecision = createDynamicSchema(compiledModule, [
-    "ReplyDraft",
-    "EscalationDraft"
-  ]);
+  const dynamicDecision = baml.dynamicType(["ReplyDraft", "EscalationDraft"]);
   const scenarios = [
     runScenario(
       compiledModule,
@@ -152,6 +146,8 @@ export async function runSupportAgentDemo(compiledModulePath) {
     sandbox: agent.role.sandboxPolicy,
     guideScope: agent.instructions.scope,
     plan: agent.instructions.plan,
+    bamlShimKind: baml.kind,
+    bamlToolNames: Object.keys(baml.tools),
     dynamicSchemaNames: dynamicDecision.schemaNames,
     scenarios,
     invalidDecision: (() => {

@@ -2748,7 +2748,7 @@ compileTests =
               ExitSuccess ->
                 assertEqual
                   "expected typed tool and structured output demo result"
-                  "{\"agent\":\"renewalAgent\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"guideScope\":\"Resolve renewal blockers with typed repo tools and validated structured outputs.\",\"plan\":\"Look up customer context, fetch the renewal policy note, then emit either a reply draft or an escalation draft.\",\"dynamicSchemaNames\":[\"ReplyDraft\",\"EscalationDraft\"],\"scenarios\":[{\"ticket\":\"cust-42\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Northwind Studio\",\"plan\":\"standard\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Northwind Studio\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Renewal is blocked on legal review.\",\"decisionType\":\"ReplyDraft\",\"decisionAction\":\"reply\"},{\"ticket\":\"cust-99\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Blue Yonder Enterprise\",\"plan\":\"enterprise\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Blue Yonder Enterprise\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Enterprise renewal is blocked and the deadline is today.\",\"decisionType\":\"EscalationDraft\",\"decisionAction\":\"escalate\"}],\"invalidDecision\":\"decision did not match any dynamic schema candidate: ReplyDraft, EscalationDraft\",\"traceActions\":[\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\"]}"
+                  "{\"agent\":\"renewalAgent\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"guideScope\":\"Resolve renewal blockers with typed repo tools and validated structured outputs.\",\"plan\":\"Look up customer context, fetch the renewal policy note, then emit either a reply draft or an escalation draft.\",\"bamlShimKind\":\"clasp-baml-shim\",\"bamlToolNames\":[\"lookupCustomer\",\"lookupPolicy\"],\"dynamicSchemaNames\":[\"ReplyDraft\",\"EscalationDraft\"],\"scenarios\":[{\"ticket\":\"cust-42\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Northwind Studio\",\"plan\":\"standard\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Northwind Studio\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Renewal is blocked on legal review.\",\"decisionType\":\"ReplyDraft\",\"decisionAction\":\"reply\"},{\"ticket\":\"cust-99\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Blue Yonder Enterprise\",\"plan\":\"enterprise\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Blue Yonder Enterprise\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Enterprise renewal is blocked and the deadline is today.\",\"decisionType\":\"EscalationDraft\",\"decisionAction\":\"escalate\"}],\"invalidDecision\":\"decision did not match any dynamic schema candidate: ReplyDraft, EscalationDraft\",\"traceActions\":[\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\"]}"
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("support-agent demo script failed:\n" <> stderrText)
@@ -3482,6 +3482,22 @@ compileTests =
             assertEqual
               "expected route-level constrained dynamic schema decoding"
               "{\"routePath\":\"/lead/triage\",\"schemaNames\":[\"LeadEscalation\",\"LeadSummary\"],\"lowType\":\"LeadSummary\",\"lowPriority\":\"low\",\"highType\":\"LeadEscalation\",\"highOwner\":\"ae-team\",\"invalid\":\"result did not match any dynamic schema candidate: LeadSummary, LeadEscalation\"}"
+              runtimeOutput
+    , testCase "server runtime exposes a BAML-style shim over compiled schemas tools and output boundaries" $ do
+        result <- compileEntry ("examples" </> "support-agent" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected support-agent example to compile for BAML shim runtime:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/support-agent-baml-shim/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (bamlShimRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected BAML shim to normalize tools schemas and typed outputs"
+              "{\"kind\":\"clasp-baml-shim\",\"schemaKind\":\"record\",\"toolNames\":[\"lookupCustomer\",\"lookupPolicy\"],\"preparedMethod\":\"lookup_customer\",\"preparedCustomerId\":\"cust-42\",\"parsedCompany\":\"Northwind Studio\",\"replyAction\":\"reply\",\"escalateQueue\":\"renewals-desk\",\"dynamicType\":\"ReplyDraft\"}"
               runtimeOutput
     , testCase "compile emits app-facing secret consumers for routes tools workflows and provider bindings" $
         case compileSource "secret-surface" secretSurfaceSource of
@@ -7129,6 +7145,75 @@ dynamicSchemaServerRuntimeScript compiledPath runtimePath =
     , "  highType: highSelection.typeName,"
     , "  highOwner: highSelection.value.owner,"
     , "  invalid"
+    , "}));"
+    ]
+
+bamlShimRuntimeScript :: FilePath -> FilePath -> Text
+bamlShimRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createBamlShim } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const baml = createBamlShim(compiledModule, {"
+    , "  functions: {"
+    , "    decideDraft: {"
+    , "      input: 'TicketDraft',"
+    , "      output: ['ReplyDraft', 'EscalationDraft'],"
+    , "      execute(ticket) {"
+    , "        if (ticket.priority === 'high') {"
+    , "          return JSON.stringify({"
+    , "            action: 'escalate',"
+    , "            customerId: ticket.customerId,"
+    , "            queue: 'renewals-desk',"
+    , "            reason: 'legal-review-deadline',"
+    , "            brief: 'Enterprise renewal blocked on legal review.'"
+    , "          });"
+    , "        }"
+    , "        return JSON.stringify({"
+    , "          action: 'reply',"
+    , "          customerId: ticket.customerId,"
+    , "          subject: 'Renewal update',"
+    , "          reply: 'We are coordinating with legal and will send the next update window shortly.'"
+    , "        });"
+    , "      }"
+    , "    }"
+    , "  }"
+    , "});"
+    , "const lookupCustomer = baml.tool('lookupCustomer');"
+    , "const prepared = lookupCustomer.call({ customerId: 'cust-42' }, 'call-7');"
+    , "const parsed = lookupCustomer.parse({"
+    , "  customerId: 'cust-42',"
+    , "  company: 'Northwind Studio',"
+    , "  plan: 'standard',"
+    , "  renewalAtRisk: false"
+    , "});"
+    , "const reply = baml.function('decideDraft').call({"
+    , "  customerId: 'cust-42',"
+    , "  issue: 'Renewal is blocked on legal review.',"
+    , "  priority: 'normal'"
+    , "});"
+    , "const escalate = baml.function('decideDraft').parseJson(JSON.stringify({"
+    , "  action: 'escalate',"
+    , "  customerId: 'cust-99',"
+    , "  queue: 'renewals-desk',"
+    , "  reason: 'legal-review-deadline',"
+    , "  brief: 'Enterprise renewal blocked on legal review.'"
+    , "}));"
+    , "const selection = baml.dynamicSchema(['ReplyDraft', 'EscalationDraft']).select({"
+    , "  action: 'reply',"
+    , "  customerId: 'cust-42',"
+    , "  subject: 'Renewal update',"
+    , "  reply: 'Pending legal update.'"
+    , "});"
+    , "console.log(JSON.stringify({"
+    , "  kind: baml.kind,"
+    , "  schemaKind: baml.type('CustomerProfile').schema.kind,"
+    , "  toolNames: Object.keys(baml.tools),"
+    , "  preparedMethod: prepared.method,"
+    , "  preparedCustomerId: prepared.params.customerId,"
+    , "  parsedCompany: parsed.company,"
+    , "  replyAction: reply.action,"
+    , "  escalateQueue: escalate.queue,"
+    , "  dynamicType: selection.typeName"
     , "}));"
     ]
 

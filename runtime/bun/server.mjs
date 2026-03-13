@@ -131,6 +131,219 @@ export function createDynamicSchema(compiledModule, typeNames) {
   });
 }
 
+export function createBamlShim(compiledModule, options = {}) {
+  const contract = bindingContractFor(compiledModule);
+  const schemaNames = Object.keys(contract.schemas ?? {});
+  const schemaEntries = schemaNames.map((typeName) => [
+    typeName,
+    schemaContractFor(compiledModule, typeName)
+  ]);
+  const schemaMap = new Map(schemaEntries);
+  const toolContracts = Array.isArray(compiledModule?.__claspToolCallContracts)
+    ? compiledModule.__claspToolCallContracts
+    : [];
+  const toolMap = new Map(toolContracts.map((tool) => [tool.name, createBamlToolShim(tool)]));
+  const functionEntries = Object.entries(normalizeBamlFunctionDescriptors(options.functions));
+  const functionMap = new Map(
+    functionEntries.map(([name, descriptor]) => [
+      name,
+      createBamlFunctionShim(compiledModule, name, descriptor)
+    ])
+  );
+
+  return Object.freeze({
+    kind: "clasp-baml-shim",
+    version: 1,
+    contract,
+    schemas: Object.freeze(Object.fromEntries(schemaEntries)),
+    types: Object.freeze(Object.fromEntries(schemaEntries)),
+    tools: Object.freeze(Object.fromEntries(toolMap)),
+    functions: Object.freeze(Object.fromEntries(functionMap)),
+    schema(typeName) {
+      const schema = schemaMap.get(typeName);
+
+      if (!schema) {
+        throw new Error(`Unknown Clasp schema in BAML shim: ${String(typeName)}`);
+      }
+
+      return schema;
+    },
+    type(typeName) {
+      return this.schema(typeName);
+    },
+    dynamicType(typeNames) {
+      return createDynamicSchema(compiledModule, typeNames);
+    },
+    dynamicSchema(typeNames) {
+      return this.dynamicType(typeNames);
+    },
+    tool(name) {
+      const tool = toolMap.get(name);
+
+      if (!tool) {
+        throw new Error(`Unknown Clasp tool in BAML shim: ${String(name)}`);
+      }
+
+      return tool;
+    },
+    function(name) {
+      const fn = functionMap.get(name);
+
+      if (!fn) {
+        throw new Error(`Unknown Clasp function in BAML shim: ${String(name)}`);
+      }
+
+      return fn;
+    }
+  });
+}
+
+function normalizeBamlFunctionDescriptors(functions) {
+  if (!functions || typeof functions !== "object" || Array.isArray(functions)) {
+    return {};
+  }
+
+  return functions;
+}
+
+function createBamlToolShim(tool) {
+  return Object.freeze({
+    kind: "clasp-baml-tool",
+    version: 1,
+    name: tool.name,
+    operation: tool.operation,
+    requestType: tool.requestType,
+    responseType: tool.responseType,
+    requestSchema: tool.requestSchema,
+    responseSchema: tool.responseSchema,
+    prepare(input, id = null, options = null) {
+      return tool.prepare(input, id, options);
+    },
+    call(input, id = null, options = null) {
+      return tool.prepare(input, id, options);
+    },
+    parse(payload, options = null) {
+      return tool.evaluateResult(payload, options).result;
+    },
+    parseEnvelope(payload) {
+      if (typeof payload === "string") {
+        return tool.parseResultEnvelope(payload);
+      }
+
+      return tool.decodeResultEnvelope(payload);
+    },
+    stream(initial = null) {
+      return tool.streamResult(initial);
+    }
+  });
+}
+
+function createBamlFunctionShim(compiledModule, name, descriptor) {
+  const normalized = normalizeBamlFunctionDescriptor(name, descriptor);
+  const inputSchema = normalized.input ? schemaContractFor(compiledModule, normalized.input) : null;
+  const outputSchema = normalizeBamlOutputSchema(compiledModule, normalized.output);
+  const execute =
+    typeof normalized.execute === "function"
+      ? (input) => normalized.execute(input, compiledModule)
+      : resolveBamlExport(compiledModule, normalized.exportName);
+
+  return Object.freeze({
+    kind: "clasp-baml-function",
+    version: 1,
+    name,
+    exportName: normalized.exportName,
+    inputType: normalized.input ?? null,
+    outputType: normalized.output ?? null,
+    schema: outputSchema,
+    call(input, path = "input") {
+      const normalizedInput = inputSchema
+        ? inputSchema.toHost(inputSchema.fromHost(input, path), path)
+        : input;
+      return decodeBamlOutput(outputSchema, execute(normalizedInput), "result");
+    },
+    invoke(input, path = "input") {
+      return this.call(input, path);
+    },
+    parse(value, path = "result") {
+      return decodeBamlOutput(outputSchema, value, path);
+    },
+    parseJson(jsonText, path = "result") {
+      return decodeBamlJsonOutput(outputSchema, jsonText, path);
+    }
+  });
+}
+
+function normalizeBamlFunctionDescriptor(name, descriptor) {
+  if (typeof descriptor === "string") {
+    return { exportName: descriptor, input: null, output: null };
+  }
+
+  if (Array.isArray(descriptor)) {
+    return { exportName: name, input: null, output: descriptor };
+  }
+
+  if (!descriptor || typeof descriptor !== "object") {
+    return { exportName: name, input: null, output: null };
+  }
+
+  return {
+    exportName: descriptor.export ?? descriptor.exportName ?? name,
+    input: descriptor.input ?? null,
+    output: descriptor.output ?? null,
+    execute: descriptor.execute
+  };
+}
+
+function normalizeBamlOutputSchema(compiledModule, output) {
+  if (Array.isArray(output)) {
+    return createDynamicSchema(compiledModule, output);
+  }
+
+  if (typeof output === "string" && output !== "") {
+    return schemaContractFor(compiledModule, output);
+  }
+
+  return null;
+}
+
+function resolveBamlExport(compiledModule, exportName) {
+  const exportValue = compiledModule?.[exportName];
+
+  if (typeof exportValue !== "function") {
+    throw new Error(`Missing Clasp export for BAML shim: ${String(exportName)}`);
+  }
+
+  return exportValue;
+}
+
+function decodeBamlOutput(schema, value, path) {
+  if (!schema) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return decodeBamlJsonOutput(schema, value, path);
+  }
+
+  if (schema.kind === "clasp-dynamic-schema") {
+    return schema.select(value, path).value;
+  }
+
+  return schema.toHost(schema.fromHost(value, path), path);
+}
+
+function decodeBamlJsonOutput(schema, jsonText, path) {
+  if (!schema) {
+    return JSON.parse(jsonText);
+  }
+
+  if (schema.kind === "clasp-dynamic-schema") {
+    return schema.selectJson(jsonText, path).value;
+  }
+
+  return schema.decodeJson(jsonText, path);
+}
+
 function normalizeDynamicSchemaTypeNames(typeNames) {
   if (!Array.isArray(typeNames) || typeNames.length === 0) {
     throw new Error("Dynamic schemas require a non-empty array of schema names.");
