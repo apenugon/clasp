@@ -83,6 +83,10 @@ write_result "2026-03-01T10-10-30.000Z--clasp-lead-rejection--codex.json" "clasp
 write_result "2026-03-01T10-10-45.000Z--clasp-lead-rejection--codex.json" "clasp-lead-rejection" "clasp" "codex" "gpt-5.4" "rejection-a-2" "2026-03-01T10:10:45.000Z" 120 125 100 true 0
 write_result "2026-03-01T10-10-50.000Z--ts-lead-rejection--codex.json" "ts-lead-rejection" "typescript" "codex" "gpt-5.4" "rejection-a-1" "2026-03-01T10:10:50.000Z" 160 150 130 false 1
 write_result "2026-03-01T10-10-55.000Z--ts-lead-rejection--codex.json" "ts-lead-rejection" "typescript" "codex" "gpt-5.4" "rejection-a-2" "2026-03-01T10:10:55.000Z" 170 155 135 true 0
+write_result "2026-03-01T10-10-56.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "containment-a-1" "2026-03-01T10:10:56.000Z" 130 145 120 false 1
+write_result "2026-03-01T10-10-57.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:57.000Z" 90 120 95 true 0
+write_result "2026-03-01T10-10-58.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-1" "2026-03-01T10:10:58.000Z" 150 165 145 false 1
+write_result "2026-03-01T10-10-59.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:59.000Z" 170 170 150 false 1
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 
@@ -125,6 +129,18 @@ printf '%s\n' "$rejection_summary_output" | grep -Fq '    timeToGreenDeltaMs: -7
 printf '%s\n' "$rejection_summary_output" | grep -Fq '    tokenDelta: -23'
 printf '%s\n' "$rejection_summary_output" | grep -Fq '    uncachedTokenDelta: -28'
 
+containment_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes containment-a)"
+printf '%s\n' "$containment_summary_output" | grep -Fq $'clasp-control-plane\tcodex\tgpt-5.4'
+printf '%s\n' "$containment_summary_output" | grep -Fq $'ts-control-plane\tcodex\tgpt-5.4'
+printf '%s\n' "$containment_summary_output" | grep -Fq 'control-plane-comparison'
+printf '%s\n' "$containment_summary_output" | grep -Fq $'  codex\tgpt-5.4\tcontainment-a'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    tsPassRate: 0%'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    tokenDelta: -35'
+printf '%s\n' "$containment_summary_output" | grep -Fq '    uncachedTokenDelta: -40'
+
 python_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes py-escalation)"
 printf '%s\n' "$python_summary_output" | grep -Fq $'py-agent-escalation\tcodex\tgpt-5.4'
 printf '%s\n' "$python_summary_output" | grep -Fq '  series: py-escalation'
@@ -147,6 +163,14 @@ printf '%s\n' "$command_log" | grep -Fq 'run clasp-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq 'run ts-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-1'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" control-plane 2 containment-a gpt-5.4
+control_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$control_command_log" | grep -Fq 'run clasp-control-plane'
+printf '%s\n' "$control_command_log" | grep -Fq 'run ts-control-plane'
+printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-1'
+printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-2'
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4

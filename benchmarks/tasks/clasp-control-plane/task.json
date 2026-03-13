@@ -1,0 +1,11 @@
+{
+  "id": "clasp-control-plane",
+  "title": "Tighten the Clasp control-plane policy so the verifier can run without widening containment",
+  "suite": "agent-control-plane",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

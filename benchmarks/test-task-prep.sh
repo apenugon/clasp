@@ -11,6 +11,8 @@ printf '%s\n' "$list_output" | grep -q '^ts-lead-segment[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-segment[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-lead-rejection[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-rejection[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 
 check_incomplete_task() {
@@ -117,6 +119,8 @@ check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
 check_incomplete_task ts-lead-rejection
 check_incomplete_task clasp-lead-rejection
+check_incomplete_task ts-control-plane
+check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
 check_nested_clasp_benchmark_prep
 
@@ -142,6 +146,22 @@ ts_rejection_workspace="$workspace_root/ts-lead-rejection"
 assert_contains "$ts_rejection_workspace/test/rejection.test.mjs" 'import { createServer } from "../dist/server/main.js";'
 assert_not_contains "$ts_rejection_workspace/src/shared/lead.ts" "priorityHint"
 assert_not_contains "$ts_rejection_workspace/src/shared/lead.ts" "priority:"
+
+clasp_control_workspace="$workspace_root/clasp-control-plane"
+assert_contains "$clasp_control_workspace/Main.clasp" 'approval: never'
+assert_contains "$clasp_control_workspace/Main.clasp" 'sandbox: read_only'
+assert_contains "$clasp_control_workspace/Main.clasp" 'process "rg"'
+assert_not_contains "$clasp_control_workspace/Main.clasp" 'process "bash"'
+assert_not_contains "$clasp_control_workspace/Main.clasp" 'secret "OPENAI_API_KEY"'
+assert_not_contains "$clasp_control_workspace/Main.clasp" 'verification: "Run bash scripts/verify-all.sh before finishing."'
+
+ts_control_workspace="$workspace_root/ts-control-plane"
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'file: ["/workspace", "/tmp"]'
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'network: ["api.openai.com", "example.com"]'
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'process: ["rg", "git"]'
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'secret: []'
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'approvalPolicy: "never"'
+assert_contains "$ts_control_workspace/src/controlPlane.ts" 'sandboxPolicy: "read_only"'
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution

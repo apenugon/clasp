@@ -11,6 +11,12 @@ const tasksRoot = path.join(benchmarkRoot, "tasks");
 const resultsRoot = path.join(benchmarkRoot, "results");
 const mirroredTaskFamilies = [
   {
+    familyId: "control-plane",
+    comparisonLabel: "control-plane-comparison",
+    claspTaskId: "clasp-control-plane",
+    typescriptTaskId: "ts-control-plane"
+  },
+  {
     familyId: "lead-priority",
     comparisonLabel: "lead-priority-comparison",
     claspTaskId: "clasp-lead-priority",

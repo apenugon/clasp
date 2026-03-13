@@ -41,6 +41,8 @@ The canonical lead-inbox slice used to shape new benchmark tasks lives in:
 
 For agent-boundary and orchestration-heavy work, the benchmark suite also includes:
 
+- `benchmarks/tasks/clasp-control-plane`: `Clasp` control-plane and permission-containment task
+- `benchmarks/tasks/ts-control-plane`: mirrored `TypeScript` control-plane baseline
 - `benchmarks/tasks/ts-agent-escalation`: typed `TypeScript` agent-boundary task
 - `benchmarks/tasks/py-agent-escalation`: mirrored `Python` agent-boundary baseline
 - `benchmarks/tasks/clasp-lead-rejection`: `Clasp` trust-boundary rejection task
@@ -135,6 +137,13 @@ Run a repeated Codex sample set with a consistent harness wrapper:
 bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
 ```
 
+Run the mirrored repeated control-plane containment pair:
+
+```sh
+bash benchmarks/run-codex-series.sh control-plane 5 containment-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes containment-1
+```
+
 Run the same repeated sample set through Claude Code:
 
 ```sh
@@ -185,6 +194,8 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 ## Initial Tasks
 
 - `ts-shared-priority`: shared-type change across frontend and backend
+- `clasp-control-plane`: repo-level control-plane correction with least-privilege permission containment
+- `ts-control-plane`: handwritten repo-level control-plane correction with least-privilege permission containment
 - `ts-agent-escalation`: structured agent-output validation with stricter boundary behavior
 - `py-agent-escalation`: structured agent-output validation with the same escalation contract in a Python baseline
 - `clasp-lead-rejection`: typed route plus foreign-boundary rejection with generated Clasp codecs
