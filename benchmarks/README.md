@@ -7,6 +7,8 @@ The goal is to measure whether AI coding harnesses perform better on realistic s
 ## Layout
 
 - `run-benchmark.mjs`: task preparation and verification runner
+- `run-codex-harness.sh` / `run-claude-harness.sh`: harness wrappers for repeated runs
+- `run-codex-series.sh` / `run-claude-series.sh`: repeated-run helpers for mirrored task families
 - `result-schema.json`: result record format
 - `tasks`: benchmark task manifests, prompts, and baseline repos
 - `results`: machine-readable benchmark outputs
@@ -123,6 +125,12 @@ Run a repeated Codex sample set with a consistent harness wrapper:
 bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
 ```
 
+Run the same repeated sample set through Claude Code:
+
+```sh
+bash benchmarks/run-claude-series.sh clasp-lead-priority 5 sonnet-series sonnet
+```
+
 Run the mirrored schema-propagation pair for both languages:
 
 ```sh
@@ -137,6 +145,13 @@ bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
 ```
 
+Run the mirrored repeated series for Claude Code:
+
+```sh
+bash benchmarks/run-claude-series.sh lead-segment 5 remediation-1 sonnet
+node benchmarks/run-benchmark.mjs summarize --harness claude-code --model sonnet --notes remediation-1
+```
+
 The runner is harness-agnostic on purpose. It standardizes task prep, verification, and result recording without hard-coding one vendor CLI.
 
 The runner itself is plain ESM and can be executed with either `node` or `bun`. It exports a few environment variables into prepare, verify, and run commands:
@@ -148,7 +163,7 @@ The runner itself is plain ESM and can be executed with either `node` or `bun`. 
 
 That lets Clasp task repos compile against the current compiler without hard-coded local paths. The existing TypeScript task manifests still use `npm` on purpose, because the public benchmark story should avoid changing both the language and the surrounding runtime/tooling at the same time.
 
-When a `codex` run writes `codex-run.jsonl` in the workspace, the runner now extracts token usage automatically from the final `turn.completed` event. The machine-readable result file records both the benchmark-normalized `tokenUsage` and raw provider counts under `harnessUsage`.
+When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extracts token usage automatically from the final `turn.completed` event. When a `claude-code` run writes `claude-run.jsonl`, the runner sums the streamed assistant usage records from Claude Code's `stream-json` output. The machine-readable result file records both the benchmark-normalized `tokenUsage` and raw provider counts under `harnessUsage`.
 
 ## Initial Tasks
 

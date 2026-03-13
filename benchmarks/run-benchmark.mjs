@@ -656,13 +656,29 @@ async function resolveTokenUsage(options, workspace) {
 
   const agentLogFile = options.agentLogFile
     ? path.resolve(options.agentLogFile)
-    : path.join(workspace, "codex-run.jsonl");
+    : defaultAgentLogFile(options.harness, workspace);
 
-  if (options.harness === "codex" && (await fileExists(agentLogFile))) {
+  if (!(await fileExists(agentLogFile))) {
+    return null;
+  }
+
+  if (options.harness === "codex") {
     return readCodexUsage(agentLogFile);
   }
 
+  if (options.harness === "claude-code") {
+    return readClaudeCodeUsage(agentLogFile);
+  }
+
   return null;
+}
+
+function defaultAgentLogFile(harness, workspace) {
+  if (harness === "claude-code") {
+    return path.join(workspace, "claude-run.jsonl");
+  }
+
+  return path.join(workspace, "codex-run.jsonl");
 }
 
 function parseNumber(value) {
@@ -717,6 +733,52 @@ async function readCodexUsage(agentLogFile) {
       outputTokens: output,
       uncachedInputTokens: Math.max(0, input - cachedInput),
       uncachedTotal: Math.max(0, input - cachedInput) + output
+    }
+  };
+}
+
+async function readClaudeCodeUsage(agentLogFile) {
+  const content = await readFile(agentLogFile, "utf8");
+  const lines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
+  const usageRecords = lines
+    .filter((line) => line.type === "assistant" && line.message?.usage)
+    .map((line) => line.message.usage);
+
+  if (usageRecords.length === 0) {
+    throw new Error(`no Claude Code assistant usage found in ${agentLogFile}`);
+  }
+
+  const totals = usageRecords.reduce(
+    (aggregate, usage) => ({
+      input: aggregate.input + parseNumber(String(usage.input_tokens ?? 0)),
+      cacheCreation:
+        aggregate.cacheCreation +
+        parseNumber(String(usage.cache_creation_input_tokens ?? 0)),
+      cacheRead:
+        aggregate.cacheRead + parseNumber(String(usage.cache_read_input_tokens ?? 0)),
+      output: aggregate.output + parseNumber(String(usage.output_tokens ?? 0))
+    }),
+    { input: 0, cacheCreation: 0, cacheRead: 0, output: 0 }
+  );
+  const prompt = totals.input + totals.cacheCreation + totals.cacheRead;
+
+  return {
+    prompt,
+    completion: totals.output,
+    retry: 0,
+    debug: 0,
+    harnessUsage: {
+      provider: "claude-code",
+      agentLogFile,
+      inputTokens: prompt,
+      cachedInputTokens: totals.cacheRead,
+      outputTokens: totals.output,
+      uncachedInputTokens: totals.input + totals.cacheCreation,
+      uncachedTotal: totals.input + totals.cacheCreation + totals.output
     }
   };
 }
