@@ -9,6 +9,8 @@ mkdir -p "$workspace_root"
 list_output="$(node "$project_root/benchmarks/run-benchmark.mjs" list)"
 printf '%s\n' "$list_output" | grep -q '^ts-lead-segment[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-segment[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-lead-rejection[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-lead-rejection[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 
 check_incomplete_task() {
@@ -113,6 +115,8 @@ check_nested_clasp_benchmark_prep() {
 
 check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
+check_incomplete_task ts-lead-rejection
+check_incomplete_task clasp-lead-rejection
 check_incomplete_task py-agent-escalation
 check_nested_clasp_benchmark_prep
 
@@ -127,6 +131,17 @@ ts_workspace="$workspace_root/ts-lead-segment"
 assert_contains "$ts_workspace/test/lead-app.test.mjs" 'import { createServer } from "../dist/server/main.js";'
 assert_not_contains "$ts_workspace/src/shared/lead.ts" "LeadSegment"
 assert_not_contains "$ts_workspace/src/server/main.ts" "segment:"
+
+clasp_rejection_workspace="$workspace_root/clasp-lead-rejection"
+assert_contains "$clasp_rejection_workspace/test/rejection.test.mjs" 'import { installRuntime, serveCompiledModule } from "../runtime/server.mjs";'
+assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "type Priority"
+assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "priorityHint"
+assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "priority :"
+
+ts_rejection_workspace="$workspace_root/ts-lead-rejection"
+assert_contains "$ts_rejection_workspace/test/rejection.test.mjs" 'import { createServer } from "../dist/server/main.js";'
+assert_not_contains "$ts_rejection_workspace/src/shared/lead.ts" "priorityHint"
+assert_not_contains "$ts_rejection_workspace/src/shared/lead.ts" "priority:"
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution

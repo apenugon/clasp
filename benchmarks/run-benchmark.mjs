@@ -17,6 +17,12 @@ const mirroredTaskFamilies = [
     typescriptTaskId: "ts-lead-priority"
   },
   {
+    familyId: "lead-rejection",
+    comparisonLabel: "lead-rejection-comparison",
+    claspTaskId: "clasp-lead-rejection",
+    typescriptTaskId: "ts-lead-rejection"
+  },
+  {
     familyId: "lead-segment",
     comparisonLabel: "lead-segment-comparison",
     claspTaskId: "clasp-lead-segment",
