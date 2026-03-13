@@ -129,6 +129,9 @@ data LowerExpr
   | LViewForm LowerRouteContract Text Text LowerExpr
   | LViewInput Text Text LowerExpr
   | LViewSubmit LowerExpr
+  | LPromptMessage Text LowerExpr
+  | LPromptAppend LowerExpr LowerExpr
+  | LPromptText LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
@@ -306,6 +309,12 @@ collectExprCodecTypes expr =
       collectExprCodecTypes value
     CViewSubmit _ label ->
       collectExprCodecTypes label
+    CPromptMessage _ _ content ->
+      collectExprCodecTypes content
+    CPromptAppend _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
+    CPromptText _ promptExpr ->
+      collectExprCodecTypes promptExpr
     CCall _ _ fn args ->
       collectExprCodecTypes fn <> concatMap collectExprCodecTypes args
     CMatch _ _ subject branches ->
@@ -437,6 +446,12 @@ lowerCoreExpr expr =
       LViewInput fieldName inputKind (lowerCoreExpr value)
     CViewSubmit _ label ->
       LViewSubmit (lowerCoreExpr label)
+    CPromptMessage _ role content ->
+      LPromptMessage role (lowerCoreExpr content)
+    CPromptAppend _ left right ->
+      LPromptAppend (lowerCoreExpr left) (lowerCoreExpr right)
+    CPromptText _ promptExpr ->
+      LPromptText (lowerCoreExpr promptExpr)
     CCall _ _ fn args ->
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->
@@ -575,6 +590,12 @@ expandExpr declEnv subst visited expr =
       LViewInput fieldName inputKind (expandExpr declEnv subst visited value)
     LViewSubmit label ->
       LViewSubmit (expandExpr declEnv subst visited label)
+    LPromptMessage role content ->
+      LPromptMessage role (expandExpr declEnv subst visited content)
+    LPromptAppend left right ->
+      LPromptAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
+    LPromptText promptExpr ->
+      LPromptText (expandExpr declEnv subst visited promptExpr)
     LCall fn args ->
       let fn' = expandExpr declEnv subst visited fn
           args' = fmap (expandExpr declEnv subst visited) args

@@ -1232,6 +1232,70 @@ emitRuntimePrelude =
   , "  return $claspExpectRedirect(value, \"value\");"
   , "}"
   , ""
+  , "function $claspPromptMessage(role, content) {"
+  , "  return Object.freeze({"
+  , "    $kind: \"prompt\","
+  , "    messages: Object.freeze([Object.freeze({"
+  , "      role: $claspExpectStr(role, \"prompt.role\"),"
+  , "      content: $claspExpectStr(content, \"prompt.content\")"
+  , "    })])"
+  , "  });"
+  , "}"
+  , ""
+  , "function $claspExpectPrompt(value, path = \"value\") {"
+  , "  const objectValue = $claspExpectObject(value, path);"
+  , "  if ($claspRequireField(objectValue, \"$kind\", path) !== \"prompt\") {"
+  , "    throw new Error(`${path} expected a Prompt value`);"
+  , "  }"
+  , "  const messages = $claspExpectArray($claspRequireField(objectValue, \"messages\", path), `${path}.messages`).map((message, index) => {"
+  , "    const messagePath = `${path}.messages[${index}]`;"
+  , "    const messageObject = $claspExpectObject(message, messagePath);"
+  , "    return Object.freeze({"
+  , "      role: $claspExpectStr($claspRequireField(messageObject, \"role\", messagePath), `${messagePath}.role`),"
+  , "      content: $claspExpectStr($claspRequireField(messageObject, \"content\", messagePath), `${messagePath}.content`)"
+  , "    });"
+  , "  });"
+  , "  return Object.freeze({ $kind: \"prompt\", messages: Object.freeze(messages) });"
+  , "}"
+  , ""
+  , "function $serialize_Prompt(value) {"
+  , "  const prompt = $claspExpectPrompt(value, \"value\");"
+  , "  return {"
+  , "    $kind: \"prompt\","
+  , "    messages: prompt.messages.map((message) => ({ role: message.role, content: message.content }))"
+  , "  };"
+  , "}"
+  , ""
+  , "function $validate_Prompt(value, path = \"value\") {"
+  , "  return $claspExpectPrompt(value, path);"
+  , "}"
+  , ""
+  , "function $validateInternal_Prompt(value, path = \"value\") {"
+  , "  return $claspExpectPrompt(value, path);"
+  , "}"
+  , ""
+  , "function $decode_Prompt(jsonText) {"
+  , "  return $validate_Prompt(JSON.parse(jsonText), \"value\");"
+  , "}"
+  , ""
+  , "function $encode_Prompt(value) {"
+  , "  return JSON.stringify($serialize_Prompt($validateInternal_Prompt(value, \"value\")));"
+  , "}"
+  , ""
+  , "function $claspPromptAppend(left, right) {"
+  , "  const leftPrompt = $claspExpectPrompt(left, \"left\");"
+  , "  const rightPrompt = $claspExpectPrompt(right, \"right\");"
+  , "  return Object.freeze({"
+  , "    $kind: \"prompt\","
+  , "    messages: Object.freeze([...leftPrompt.messages, ...rightPrompt.messages].map((message) => Object.freeze({ role: message.role, content: message.content })))"
+  , "  });"
+  , "}"
+  , ""
+  , "function $claspPromptText(value) {"
+  , "  const prompt = $claspExpectPrompt(value, \"value\");"
+  , "  return prompt.messages.map((message) => `${message.role}: ${message.content}`).join(\"\\n\\n\");"
+  , "}"
+  , ""
   , "const __claspPageRenderModes = Object.freeze({"
   , "  html: \"html\","
   , "  htmlWithFlowMetadata: \"html+flow\""
@@ -1616,6 +1680,12 @@ collectStyledRefsExpr expr =
       collectStyledRefsExpr value
     LViewSubmit value ->
       collectStyledRefsExpr value
+    LPromptMessage _ content ->
+      collectStyledRefsExpr content
+    LPromptAppend left right ->
+      collectStyledRefsExpr left <> collectStyledRefsExpr right
+    LPromptText promptExpr ->
+      collectStyledRefsExpr promptExpr
     LList items ->
       concatMap collectStyledRefsExpr items
     LCall fn args ->
@@ -1694,6 +1764,12 @@ lowerExprContainsReturn expr =
       lowerExprContainsReturn value
     LViewSubmit value ->
       lowerExprContainsReturn value
+    LPromptMessage _ content ->
+      lowerExprContainsReturn content
+    LPromptAppend left right ->
+      lowerExprContainsReturn left || lowerExprContainsReturn right
+    LPromptText promptExpr ->
+      lowerExprContainsReturn promptExpr
     LCall fn args ->
       lowerExprContainsReturn fn || any lowerExprContainsReturn args
     LConstruct _ fields ->
@@ -3476,7 +3552,9 @@ emitValidator typ valueRef pathRef =
         <> emitValidator itemType "item" ("`${" <> pathRef <> "}[${index}]`")
         <> ")"
     TNamed name ->
-      "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+      if name == "Prompt"
+        then "$validate_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
+        else "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
@@ -3494,7 +3572,9 @@ emitInternalValidator typ valueRef pathRef =
         <> emitInternalValidator itemType "item" ("`${" <> pathRef <> "}[${index}]`")
         <> ")"
     TNamed name ->
-      "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+      if name == "Prompt"
+        then "$validateInternal_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
+        else "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
@@ -3512,7 +3592,9 @@ emitSerializer typ valueRef =
         <> emitSerializer itemType "item"
         <> ")"
     TNamed name ->
-      "$serialize_" <> name <> "(" <> valueRef <> ")"
+      if name == "Prompt"
+        then "$serialize_Prompt(" <> valueRef <> ")"
+        else "$serialize_" <> name <> "(" <> valueRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
@@ -3530,7 +3612,9 @@ emitHostSerializer typ valueRef pathRef =
         <> emitHostSerializer itemType "item" ("`${" <> pathRef <> "}[${index}]`")
         <> ")"
     TNamed name ->
-      "$serialize_" <> name <> "($validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
+      if name == "Prompt"
+        then "$serialize_Prompt($validateInternal_Prompt(" <> valueRef <> ", " <> pathRef <> "))"
+        else "$serialize_" <> name <> "($validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
@@ -3548,7 +3632,9 @@ emitHostDeserializer typ valueRef pathRef =
         <> emitHostDeserializer itemType "item" ("`${" <> pathRef <> "}[${index}]`")
         <> ")"
     TNamed name ->
-      "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+      if name == "Prompt"
+        then "$validate_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
+        else "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
@@ -3804,6 +3890,16 @@ emitExpr counter expr =
     LViewSubmit label ->
       let (nextCounter, labelText) = emitExpr counter label
        in (nextCounter, "{ $kind: \"submit\", label: " <> labelText <> " }")
+    LPromptMessage role content ->
+      let (nextCounter, contentText) = emitExpr counter content
+       in (nextCounter, "$claspPromptMessage(" <> emitStringLiteral role <> ", " <> contentText <> ")")
+    LPromptAppend left right ->
+      let (counterAfterLeft, leftText) = emitExpr counter left
+          (counterAfterRight, rightText) = emitExpr counterAfterLeft right
+       in (counterAfterRight, "$claspPromptAppend(" <> leftText <> ", " <> rightText <> ")")
+    LPromptText promptExpr ->
+      let (nextCounter, promptText) = emitExpr counter promptExpr
+       in (nextCounter, "$claspPromptText(" <> promptText <> ")")
     LCall fn args ->
       let (counterAfterFn, fnText) = emitExpr counter fn
           (counterAfterArgs, argTexts) = emitExprList counterAfterFn args

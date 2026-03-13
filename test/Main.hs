@@ -3231,6 +3231,22 @@ compileTests =
               "expected provider contract and provider-backed page flow"
               "{\"providerKind\":\"clasp-provider-contract\",\"providerVersion\":1,\"providerNames\":[\"provider\"],\"providerOperation\":\"replyPreview\",\"providerBinding\":\"generateReplyPreview\",\"runtimeInstalled\":true,\"runtimeBindingVisible\":true,\"seenProvider\":\"provider\",\"seenOperation\":\"replyPreview\",\"seenCustomerId\":\"cust-42\",\"previewHasReply\":true,\"customerHasExport\":true}"
               runtimeOutput
+    , testCase "typed prompt functions compile to stable prompt values and text rendering" $ do
+        case compileSource "prompt-runtime" promptFunctionSource of
+          Left err ->
+            assertFailure ("expected prompt runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected prompt helper" ("function $claspPromptMessage(role, content)" `T.isInfixOf` emitted)
+            assertBool "expected Prompt serializer" ("function $serialize_Prompt(value)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/test-projects/prompt-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (promptRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected prompt payload and rendered text"
+              "{\"messageCount\":3,\"roles\":[\"system\",\"assistant\",\"user\"],\"content\":[\"You are a support agent.\",\"Draft a concise reply.\",\"Renewal is blocked on legal review.\"],\"text\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\"}"
+              runtimeOutput
     , testCase "compile emits Python worker and service interop contracts" $
         case compileSource "python-interop" pythonInteropSource of
           Left err ->
@@ -3497,6 +3513,18 @@ packageImportRuntimeScript compiledPath runtimePath =
     , "  packageKinds: contract.packageImports.map((entry) => entry.kind).sort(),"
     , "  upper: compiledModule.shout('hello ada'),"
     , "  formatted: compiledModule.describe({ company: 'Acme Labs', budget: 7 })"
+    , "}));"
+    ]
+
+promptRuntimeScript :: FilePath -> Text
+promptRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "console.log(JSON.stringify({"
+    , "  messageCount: compiledModule.replyPromptValue.messages.length,"
+    , "  roles: compiledModule.replyPromptValue.messages.map((message) => message.role),"
+    , "  content: compiledModule.replyPromptValue.messages.map((message) => message.content),"
+    , "  text: compiledModule.replyPromptText"
     , "}));"
     ]
 
@@ -3847,6 +3875,35 @@ providerRuntimeSource =
     , ""
     , "route previewRoute = POST \"/preview\" TicketDraft -> Page previewPage"
     , "route customerRoute = GET \"/customer\" Empty -> Page customerPage"
+    ]
+
+promptFunctionSource :: Text
+promptFunctionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record TicketDraft = {"
+    , "  customerId : Str,"
+    , "  summary : Str"
+    , "}"
+    , ""
+    , "sampleDraft : TicketDraft"
+    , "sampleDraft = TicketDraft {"
+    , "  customerId = \"cust-42\","
+    , "  summary = \"Renewal is blocked on legal review.\""
+    , "}"
+    , ""
+    , "replyPrompt : TicketDraft -> Prompt"
+    , "replyPrompt draft = appendPrompt (appendPrompt (systemPrompt \"You are a support agent.\") (assistantPrompt \"Draft a concise reply.\")) (userPrompt draft.summary)"
+    , ""
+    , "replyPromptValue : Prompt"
+    , "replyPromptValue = replyPrompt sampleDraft"
+    , ""
+    , "replyPromptText : Str"
+    , "replyPromptText = promptText replyPromptValue"
+    , ""
+    , "main : Str"
+    , "main = replyPromptText"
     ]
 
 packageForeignSource :: Text

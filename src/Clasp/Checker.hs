@@ -207,6 +207,9 @@ data DraftExprNode
   | DraftViewForm RouteDecl Text Text DraftExpr
   | DraftViewInput Text Text DraftExpr
   | DraftViewSubmit DraftExpr
+  | DraftPromptMessage Text DraftExpr
+  | DraftPromptAppend DraftExpr DraftExpr
+  | DraftPromptText DraftExpr
   | DraftCall DraftExpr [DraftExpr]
   | DraftMatch DraftExpr [DraftMatchBranch]
   | DraftRecord Text [DraftRecordField]
@@ -256,6 +259,9 @@ redirectTypeName = "Redirect"
 viewTypeName :: Text
 viewTypeName = "View"
 
+promptTypeName :: Text
+promptTypeName = "Prompt"
+
 authSessionTypeName :: Text
 authSessionTypeName = "AuthSession"
 
@@ -294,6 +300,21 @@ hostClassBuiltinName = "hostClass"
 
 hostStyleBuiltinName :: Text
 hostStyleBuiltinName = "hostStyle"
+
+systemPromptBuiltinName :: Text
+systemPromptBuiltinName = "systemPrompt"
+
+assistantPromptBuiltinName :: Text
+assistantPromptBuiltinName = "assistantPrompt"
+
+userPromptBuiltinName :: Text
+userPromptBuiltinName = "userPrompt"
+
+appendPromptBuiltinName :: Text
+appendPromptBuiltinName = "appendPrompt"
+
+promptTextBuiltinName :: Text
+promptTextBuiltinName = "promptText"
 
 builtinSpan :: SourceSpan
 builtinSpan =
@@ -366,7 +387,7 @@ isBuiltinRecordTypeName name = Map.member name builtinRecordDeclEnv
 
 isBuiltinTypeName :: Text -> Bool
 isBuiltinTypeName name =
-  name `elem` [pageTypeName, redirectTypeName, viewTypeName, resultTypeName] || isBuiltinRecordTypeName name
+  name `elem` [pageTypeName, redirectTypeName, viewTypeName, promptTypeName, resultTypeName] || isBuiltinRecordTypeName name
 
 builtinTypeDeclsForModule :: Module -> [TypeDecl]
 builtinTypeDeclsForModule modl
@@ -497,6 +518,16 @@ typeUsesBuiltinResult typ =
 isBuiltinViewFunctionName :: Text -> Bool
 isBuiltinViewFunctionName name =
   name `elem` ["page", "redirect", "text", "append", "element", "styled", "link", "form", "input", "submit", hostClassBuiltinName, hostStyleBuiltinName]
+
+isBuiltinPromptFunctionName :: Text -> Bool
+isBuiltinPromptFunctionName name =
+  name `elem`
+    [ systemPromptBuiltinName
+    , assistantPromptBuiltinName
+    , userPromptBuiltinName
+    , appendPromptBuiltinName
+    , promptTextBuiltinName
+    ]
 
 isBuiltinAuthFunctionName :: Text -> Bool
 isBuiltinAuthFunctionName name =
@@ -2275,6 +2306,10 @@ inferExpr ctx termEnv localEnv expr =
           , Map.notMember name localEnv
           , Map.notMember name termEnv ->
               inferBuiltinViewCall ctx termEnv localEnv callSpan name args
+          | isBuiltinPromptFunctionName name
+          , Map.notMember name localEnv
+          , Map.notMember name termEnv ->
+              inferBuiltinPromptCall ctx termEnv localEnv callSpan name args
           | isBuiltinAuthFunctionName name
           , Map.notMember name localEnv
           , Map.notMember name termEnv ->
@@ -2695,6 +2730,73 @@ inferBuiltinViewCall ctx termEnv localEnv callSpan builtinName args =
             ]
     _ ->
       inferRegularCall ctx termEnv localEnv callSpan (EVar callSpan builtinName) args
+
+inferBuiltinPromptCall :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Text -> [Expr] -> InferM DraftExpr
+inferBuiltinPromptCall ctx termEnv localEnv callSpan builtinName args =
+  case builtinName of
+    name
+      | name `elem` [systemPromptBuiltinName, assistantPromptBuiltinName, userPromptBuiltinName] ->
+          case args of
+            [contentExpr] -> do
+              draftContent <- inferExpr ctx termEnv localEnv contentExpr
+              unifyPromptBuiltinArg (name <> " content") draftContent IStr
+              let role =
+                    case name of
+                      builtin | builtin == systemPromptBuiltinName -> "system"
+                      builtin | builtin == assistantPromptBuiltinName -> "assistant"
+                      _ -> "user"
+              pure (DraftExpr callSpan (INamed promptTypeName) (DraftPromptMessage role draftContent))
+            _ ->
+              throwPromptBuiltinArity callSpan builtinName 1 (length args)
+      | name == appendPromptBuiltinName ->
+          case args of
+            [leftExpr, rightExpr] -> do
+              draftLeft <- inferExpr ctx termEnv localEnv leftExpr
+              draftRight <- inferExpr ctx termEnv localEnv rightExpr
+              unifyPromptBuiltinArg "appendPrompt left" draftLeft (INamed promptTypeName)
+              unifyPromptBuiltinArg "appendPrompt right" draftRight (INamed promptTypeName)
+              pure (DraftExpr callSpan (INamed promptTypeName) (DraftPromptAppend draftLeft draftRight))
+            _ ->
+              throwPromptBuiltinArity callSpan builtinName 2 (length args)
+      | name == promptTextBuiltinName ->
+          case args of
+            [promptExpr] -> do
+              draftPrompt <- inferExpr ctx termEnv localEnv promptExpr
+              unifyPromptBuiltinArg "promptText prompt" draftPrompt (INamed promptTypeName)
+              pure (DraftExpr callSpan IStr (DraftPromptText draftPrompt))
+            _ ->
+              throwPromptBuiltinArity callSpan builtinName 1 (length args)
+    _ ->
+      inferRegularCall ctx termEnv localEnv callSpan (EVar callSpan builtinName) args
+
+unifyPromptBuiltinArg :: Text -> DraftExpr -> InferType -> InferM ()
+unifyPromptBuiltinArg _ draftExpr expectedType =
+  unify
+    ( UnifyContext
+        { unifyCode = "E_TYPE_MISMATCH"
+        , unifySummary = "Prompt builtin argument type does not match the expected shape."
+        , unifyPrimarySpan = draftExprSpan draftExpr
+        , unifyRelated = []
+        }
+    )
+    (draftExprType draftExpr)
+    expectedType
+
+throwPromptBuiltinArity :: SourceSpan -> Text -> Int -> Int -> InferM a
+throwPromptBuiltinArity callSpan builtinName expectedArity actualArity =
+  throwDiagnostic . diagnosticBundle $
+    [ diagnostic
+        "E_CALL_ARITY"
+        ("Prompt builtin `" <> builtinName <> "` does not match the expected arity.")
+        (Just callSpan)
+        [ "Expected "
+            <> T.pack (show expectedArity)
+            <> " arguments but got "
+            <> T.pack (show actualArity)
+            <> "."
+        ]
+        []
+    ]
 
 unifyViewBuiltinArg :: Text -> DraftExpr -> InferType -> InferM ()
 unifyViewBuiltinArg _ draftExpr expectedType =
@@ -3568,6 +3670,16 @@ freezeDraftExpr ctx decl inferState draftExpr =
     DraftViewSubmit label -> do
       frozenLabel <- freezeDraftExpr ctx decl inferState label
       pure (CViewSubmit (draftExprSpan draftExpr) frozenLabel)
+    DraftPromptMessage role content -> do
+      frozenContent <- freezeDraftExpr ctx decl inferState content
+      pure (CPromptMessage (draftExprSpan draftExpr) role frozenContent)
+    DraftPromptAppend left right -> do
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CPromptAppend (draftExprSpan draftExpr) frozenLeft frozenRight)
+    DraftPromptText promptExpr -> do
+      frozenPrompt <- freezeDraftExpr ctx decl inferState promptExpr
+      pure (CPromptText (draftExprSpan draftExpr) frozenPrompt)
     DraftCall fn args -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenFn <- freezeDraftExpr ctx decl inferState fn

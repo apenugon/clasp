@@ -42,6 +42,7 @@ It includes:
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
+- Compiler-known `Prompt` primitives and typed prompt-building functions for AI-facing prompt composition
 - Generated JavaScript page modules that export static-asset, head, and shared style-bundle metadata for compiler-known page/view output
 - Compiler-known `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` primitives for shared application identity data
 - Minimal name resolution and typechecking
@@ -63,7 +64,7 @@ It does not yet include:
 - Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
 - External-objective declarations such as goals, metrics, experiments, and rollout policies
 - Compiler-emitted context graphs over declarations, capabilities, traces, and external-objective structure
-- Rich LLM-specific syntax beyond foreign/runtime boundaries, including typed prompt functions and provider strategies
+- Rich LLM-specific syntax beyond foreign/runtime boundaries, including provider strategies
 
 Those features remain part of the language direction, but they should be layered onto a stable front-end rather than mixed into the first parser/emitter prototype.
 

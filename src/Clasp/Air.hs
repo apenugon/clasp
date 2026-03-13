@@ -682,6 +682,18 @@ buildExprGraph nodeId expr =
         CViewSubmit _ label ->
           let labelId = exprChildId "label"
            in ([("label", AirAttrNode labelId)], buildExprGraph labelId label)
+        CPromptMessage _ role content ->
+          let contentId = exprChildId "content"
+           in ([("role", AirAttrText role), ("content", AirAttrNode contentId)], buildExprGraph contentId content)
+        CPromptAppend _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
+        CPromptText _ promptExpr ->
+          let promptId = exprChildId "prompt"
+           in ([("prompt", AirAttrNode promptId)], buildExprGraph promptId promptExpr)
         CCall _ _ fn args ->
           let calleeId = exprChildId "callee"
               argIds = fmap (\index -> childSegmentId nodeId ("arg" <> showText index)) [(0 :: Int) .. length args - 1]
@@ -817,6 +829,9 @@ exprKind expr =
     CViewForm {} -> "viewForm"
     CViewInput {} -> "viewInput"
     CViewSubmit {} -> "viewSubmit"
+    CPromptMessage {} -> "promptMessage"
+    CPromptAppend {} -> "promptAppend"
+    CPromptText {} -> "promptText"
     CCall {} -> "call"
     CMatch {} -> "match"
     CRecord {} -> "record"
@@ -854,6 +869,9 @@ exprSpan expr =
     CViewForm span' _ _ _ _ -> span'
     CViewInput span' _ _ _ -> span'
     CViewSubmit span' _ -> span'
+    CPromptMessage span' _ _ -> span'
+    CPromptAppend span' _ _ -> span'
+    CPromptText span' _ -> span'
     CCall span' _ _ _ -> span'
     CMatch span' _ _ _ -> span'
     CRecord span' _ _ _ -> span'

@@ -232,6 +232,9 @@ data CoreExpr
   | CViewForm SourceSpan CoreRouteContract Text Text CoreExpr
   | CViewInput SourceSpan Text Text CoreExpr
   | CViewSubmit SourceSpan CoreExpr
+  | CPromptMessage SourceSpan Text CoreExpr
+  | CPromptAppend SourceSpan CoreExpr CoreExpr
+  | CPromptText SourceSpan CoreExpr
   | CCall SourceSpan Type CoreExpr [CoreExpr]
   | CMatch SourceSpan Type CoreExpr [CoreMatchBranch]
   | CRecord SourceSpan Type Text [CoreRecordField]
@@ -556,6 +559,12 @@ renderCoreExpr parentPrecedence expr =
       renderTypedAtom ("input " <> renderStringLiteral fieldName <> " " <> renderStringLiteral inputKind <> " " <> renderCoreExpr 4 value) (TNamed "View")
     CViewSubmit _ label ->
       renderTypedAtom ("submit " <> renderCoreExpr 4 label) (TNamed "View")
+    CPromptMessage _ role content ->
+      renderTypedAtom (role <> "Prompt " <> renderCoreExpr 4 content) (TNamed "Prompt")
+    CPromptAppend _ left right ->
+      renderTypedAtom ("appendPrompt " <> renderCoreExpr 4 left <> " " <> renderCoreExpr 4 right) (TNamed "Prompt")
+    CPromptText _ promptExpr ->
+      renderTypedAtom ("promptText " <> renderCoreExpr 4 promptExpr) TStr
     CCall _ typ fn args ->
       renderTypedExpr parentPrecedence 3 (T.unwords (renderCoreExpr 3 fn : fmap (renderCoreExpr 4) args)) typ
     CMatch _ typ subject branches ->
@@ -707,6 +716,12 @@ coreExprType expr =
       TNamed "View"
     CViewSubmit _ _ ->
       TNamed "View"
+    CPromptMessage _ _ _ ->
+      TNamed "Prompt"
+    CPromptAppend _ _ _ ->
+      TNamed "Prompt"
+    CPromptText _ _ ->
+      TStr
     CCall _ typ _ _ ->
       typ
     CMatch _ typ _ _ ->
@@ -780,6 +795,12 @@ renameDecl oldName newName modl
           CViewInput span' fieldName inputKind (renameDeclExpr boundNames body)
         CViewSubmit span' body ->
           CViewSubmit span' (renameDeclExpr boundNames body)
+        CPromptMessage span' role content ->
+          CPromptMessage span' role (renameDeclExpr boundNames content)
+        CPromptAppend span' left right ->
+          CPromptAppend span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
+        CPromptText span' promptExpr ->
+          CPromptText span' (renameDeclExpr boundNames promptExpr)
         CList span' typ items ->
           CList span' typ (fmap (renameDeclExpr boundNames) items)
         CEqual span' left right ->
@@ -975,6 +996,12 @@ renameSchema oldName newName modl
           CViewInput span' fieldName inputKind (renameExprTypes body)
         CViewSubmit span' body ->
           CViewSubmit span' (renameExprTypes body)
+        CPromptMessage span' role content ->
+          CPromptMessage span' role (renameExprTypes content)
+        CPromptAppend span' left right ->
+          CPromptAppend span' (renameExprTypes left) (renameExprTypes right)
+        CPromptText span' promptExpr ->
+          CPromptText span' (renameExprTypes promptExpr)
         CList span' typ items ->
           CList span' (renameType typ) (fmap renameExprTypes items)
         CEqual span' left right ->
@@ -1068,6 +1095,7 @@ builtinSchemaNames =
   [ "Page"
   , "Redirect"
   , "View"
+  , "Prompt"
   , "AuthSession"
   , "Principal"
   , "Tenant"

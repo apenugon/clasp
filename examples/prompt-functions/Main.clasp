@@ -1,0 +1,24 @@
+module Main
+
+record TicketDraft = {
+  customerId : Str,
+  summary : Str
+}
+
+sampleDraft : TicketDraft
+sampleDraft = TicketDraft {
+  customerId = "cust-42",
+  summary = "Renewal is blocked on legal review."
+}
+
+replyPrompt : TicketDraft -> Prompt
+replyPrompt draft = appendPrompt (appendPrompt (systemPrompt "You are a support agent.") (assistantPrompt "Draft a concise reply.")) (userPrompt draft.summary)
+
+replyPromptValue : Prompt
+replyPromptValue = replyPrompt sampleDraft
+
+replyPromptText : Str
+replyPromptText = promptText replyPromptValue
+
+main : Str
+main = replyPromptText

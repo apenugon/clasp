@@ -23,6 +23,8 @@ This directory has two kinds of examples:
 - [durable-workflow/demo.mjs](/home/akul/DevProjects/synthspeak/examples/durable-workflow/demo.mjs): persists a workflow run to disk, reloads it after a simulated restart, then performs supervised hot-swap activation and retirement
 - [interop-ts/Main.clasp](/home/akul/DevProjects/synthspeak/examples/interop-ts/Main.clasp): compiler-managed `npm` and `TypeScript` package imports through foreign declarations with declaration ingestion and generated adapters
 - [interop-ts/demo.mjs](/home/akul/DevProjects/synthspeak/examples/interop-ts/demo.mjs): runs the compiled example through the generated package-adapter runtime and prints the resolved results
+- [prompt-functions/Main.clasp](/home/akul/DevProjects/synthspeak/examples/prompt-functions/Main.clasp): typed prompt functions built from compiler-known `Prompt` values with explicit system, assistant, and user message composition
+- [prompt-functions/demo.mjs](/home/akul/DevProjects/synthspeak/examples/prompt-functions/demo.mjs): compiles a typed prompt function module and prints the resulting prompt payload plus rendered text
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
 - [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage boundaries
@@ -46,6 +48,12 @@ Verify the `npm`/`TypeScript` interop example:
 
 ```sh
 bash examples/interop-ts/scripts/verify.sh
+```
+
+Verify the typed prompt-function example:
+
+```sh
+bash examples/prompt-functions/scripts/verify.sh
 ```
 
 Emit the context graph:

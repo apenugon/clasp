@@ -167,7 +167,22 @@ node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
   --model sonnet \
   --notes claude-usage-check >/dev/null
 
-latest_result="$(ls -1t "$results_root"/*.json | head -n1)"
+latest_result=""
+latest_result_mtime=0
+for candidate in "$results_root"/*.json; do
+  [[ -e "$candidate" ]] || continue
+  candidate_mtime="$(stat -c '%Y' "$candidate")"
+  if [[ -z "$latest_result" || "$candidate_mtime" -gt "$latest_result_mtime" ]]; then
+    latest_result="$candidate"
+    latest_result_mtime="$candidate_mtime"
+  fi
+done
+
+if [[ -z "$latest_result" ]]; then
+  echo "expected at least one benchmark result artifact" >&2
+  exit 1
+fi
+
 synthetic_files+=("$latest_result")
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"harness": "claude-code"'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"model": "sonnet"'
