@@ -142,6 +142,18 @@ Summarize recorded runs by task, harness, model, and repeated-run series:
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
 ```
 
+Package a filtered result set into a reproducible benchmark bundle:
+
+```sh
+node benchmarks/run-benchmark.mjs package \
+  --harness codex \
+  --model gpt-5.4 \
+  --notes public-app \
+  --output dist/benchmarks/public-app.tar.gz
+```
+
+The package command writes a stable `tar.gz` archive with the selected result JSON files, the referenced task snapshots, the benchmark runner and harness wrappers, `AGENTS.md`, and a `benchmarks/package-manifest.json` manifest that records the included file digests plus the exact result filters used to build the bundle.
+
 When notes end in `-<run-number>`, the summary report treats the shared prefix as a series label. For the mirrored `lead-segment` pair it also prints a comparative section with pass-rate, time-to-green, and token deltas between `Clasp` and `TypeScript`.
 
 Run a repeated Codex sample set with a consistent harness wrapper:

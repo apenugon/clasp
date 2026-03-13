@@ -407,3 +407,52 @@ printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"total": 125'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"cachedInputTokens": 30'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedInputTokens": 75'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedTotal": 95'
+
+package_a="$tmp_bin/remediation-a.tar.gz"
+package_b="$tmp_bin/remediation-b.tar.gz"
+node "$project_root/benchmarks/run-benchmark.mjs" package \
+  --harness codex \
+  --model gpt-5.4 \
+  --notes remediation-a \
+  --output "$package_a" >/dev/null
+node "$project_root/benchmarks/run-benchmark.mjs" package \
+  --harness codex \
+  --model gpt-5.4 \
+  --notes remediation-a \
+  --output "$package_b" >/dev/null
+
+cmp -s "$package_a" "$package_b"
+package_sha_a="$(sha256sum "$package_a" | awk '{print $1}')"
+package_sha_b="$(sha256sum "$package_b" | awk '{print $1}')"
+[[ "$package_sha_a" == "$package_sha_b" ]]
+
+package_listing="$(tar -tzf "$package_a")"
+printf '%s\n' "$package_listing" | grep -Fq './AGENTS.md'
+printf '%s\n' "$package_listing" | grep -Fq './benchmarks/package-manifest.json'
+printf '%s\n' "$package_listing" | grep -Fq './benchmarks/results/2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json'
+printf '%s\n' "$package_listing" | grep -Fq './benchmarks/results/2026-03-01T10-04-00.000Z--ts-lead-segment--codex.json'
+printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/clasp-lead-segment/task.json'
+printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/ts-lead-segment/task.json'
+
+manifest_path="$tmp_bin/package-manifest.json"
+tar -xOzf "$package_a" ./benchmarks/package-manifest.json >"$manifest_path"
+node -e '
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (manifest.resultCount !== 4) {
+  throw new Error(`expected 4 packaged results, received ${manifest.resultCount}`);
+}
+if (manifest.filters.harness !== "codex" || manifest.filters.model !== "gpt-5.4" || manifest.filters.notes !== "remediation-a") {
+  throw new Error("package filters were not preserved");
+}
+const taskIds = manifest.taskIds.join(",");
+if (taskIds !== "clasp-lead-segment,ts-lead-segment") {
+  throw new Error(`unexpected task ids: ${taskIds}`);
+}
+if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
+  throw new Error("package manifest is missing file digests");
+}
+if (!manifest.reproducibility || manifest.reproducibility.archiveFormat !== "tar.gz") {
+  throw new Error("package manifest is missing reproducibility metadata");
+}
+' "$manifest_path"

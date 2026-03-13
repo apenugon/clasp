@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
@@ -88,6 +90,11 @@ async function main() {
       break;
     case "run":
       await runCommand(maybeTaskId, rest);
+      break;
+    case "package":
+      await packageCommand(
+        [maybeTaskId, ...rest].filter((value) => value !== undefined)
+      );
       break;
     case "summarize":
       await summarizeCommand(
@@ -588,6 +595,49 @@ async function summarizeCommand(args) {
   }
 }
 
+async function packageCommand(args) {
+  const options = parseOptions(args);
+  if (!options.output) {
+    throw new Error("package requires --output");
+  }
+
+  const results = (await loadResults())
+    .filter((result) => matchesSummaryFilter(result, options))
+    .sort((left, right) => left.fileName.localeCompare(right.fileName));
+
+  if (results.length === 0) {
+    throw new Error("no results matched the supplied filters");
+  }
+
+  const taskIds = [...new Set(results.map((result) => result.taskId))]
+    .sort((left, right) => left.localeCompare(right));
+  const tasks = [];
+
+  for (const taskId of taskIds) {
+    tasks.push(await loadTask(taskId));
+  }
+
+  const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "clasp-benchmark-package-"));
+  const bundleRoot = path.join(stagingRoot, "bundle");
+  const outputPath = path.resolve(options.output);
+
+  try {
+    await mkdir(path.join(bundleRoot, "benchmarks"), { recursive: true });
+    await copyPackageFiles(bundleRoot, results, tasks);
+
+    const manifestPath = path.join(bundleRoot, "benchmarks", "package-manifest.json");
+    const manifest = await buildPackageManifest(bundleRoot, results, tasks, options);
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    await createDeterministicTarball(bundleRoot, outputPath);
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
+
+  console.log(`Packaged ${results.length} results`);
+  console.log(`Tasks: ${taskIds.join(", ")}`);
+  console.log(`Archive: ${outputPath}`);
+}
+
 function summarizeGroup(groupResults) {
   const ordered = [...groupResults].sort(compareRunOrder);
   const passed = ordered.filter((result) => result.verification.passed).length;
@@ -831,7 +881,10 @@ async function loadResults() {
 
     const resultPath = path.join(resultsRoot, entry.name);
     const result = JSON.parse(await readFile(resultPath, "utf8"));
-    results.push(result);
+    results.push({
+      ...result,
+      fileName: entry.name
+    });
   }
 
   return results.sort((left, right) => left.finishedAt.localeCompare(right.finishedAt));
@@ -1185,7 +1238,184 @@ function usage() {
   console.error("  node benchmarks/run-benchmark.mjs prepare <task-id> [--workspace path]");
   console.error("  node benchmarks/run-benchmark.mjs verify <task-id> --workspace path [--harness name --model name --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text]");
+  console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
+}
+
+async function copyPackageFiles(bundleRoot, results, tasks) {
+  const benchmarkDir = path.join(bundleRoot, "benchmarks");
+  const resultsDir = path.join(benchmarkDir, "results");
+  const tasksDir = path.join(benchmarkDir, "tasks");
+
+  await mkdir(resultsDir, { recursive: true });
+  await mkdir(tasksDir, { recursive: true });
+
+  const repoFiles = [
+    { source: path.resolve("AGENTS.md"), target: path.join(bundleRoot, "AGENTS.md") },
+    { source: path.join(benchmarkRoot, "README.md"), target: path.join(benchmarkDir, "README.md") },
+    {
+      source: path.join(benchmarkRoot, "result-schema.json"),
+      target: path.join(benchmarkDir, "result-schema.json")
+    },
+    {
+      source: path.join(benchmarkRoot, "run-benchmark.mjs"),
+      target: path.join(benchmarkDir, "run-benchmark.mjs")
+    },
+    {
+      source: path.join(benchmarkRoot, "run-codex-harness.sh"),
+      target: path.join(benchmarkDir, "run-codex-harness.sh")
+    },
+    {
+      source: path.join(benchmarkRoot, "run-claude-harness.sh"),
+      target: path.join(benchmarkDir, "run-claude-harness.sh")
+    },
+    {
+      source: path.join(benchmarkRoot, "run-codex-series.sh"),
+      target: path.join(benchmarkDir, "run-codex-series.sh")
+    },
+    {
+      source: path.join(benchmarkRoot, "run-claude-series.sh"),
+      target: path.join(benchmarkDir, "run-claude-series.sh")
+    }
+  ];
+
+  for (const file of repoFiles) {
+    if (await fileExists(file.source)) {
+      await mkdir(path.dirname(file.target), { recursive: true });
+      await cp(file.source, file.target);
+    }
+  }
+
+  for (const result of results) {
+    await cp(
+      path.join(resultsRoot, result.fileName),
+      path.join(resultsDir, result.fileName)
+    );
+  }
+
+  for (const task of tasks) {
+    await cp(task.dir, path.join(tasksDir, task.id), {
+      recursive: true,
+      force: true
+    });
+  }
+}
+
+async function buildPackageManifest(bundleRoot, results, tasks, options) {
+  const files = await collectPackageFileRecords(bundleRoot);
+
+  return {
+    schemaVersion: 1,
+    bundleType: "clasp-benchmark-results",
+    filters: packageFilters(options),
+    resultCount: results.length,
+    taskIds: tasks.map((task) => task.id),
+    tasks: tasks.map((task) => ({
+      id: task.id,
+      suite: task.suite,
+      language: task.language,
+      title: task.title,
+      prompt: task.prompt,
+      repo: task.repo,
+      prepare: task.prepare,
+      verify: task.verify
+    })),
+    results: results.map((result) => ({
+      file: posixJoin("benchmarks", "results", result.fileName),
+      taskId: result.taskId,
+      harness: result.harness,
+      model: result.model,
+      language: result.language,
+      notes: result.notes ?? "",
+      finishedAt: result.finishedAt,
+      verificationPassed: result.verification.passed
+    })),
+    reproducibility: {
+      archiveFormat: "tar.gz",
+      tarOptions: ["--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0"],
+      gzipOptions: ["-n"]
+    },
+    files
+  };
+}
+
+function packageFilters(options) {
+  const filters = {};
+  const keys = ["taskId", "harness", "model", "language", "notes"];
+
+  for (const key of keys) {
+    if (options[key]) {
+      filters[key] = options[key];
+    }
+  }
+
+  return filters;
+}
+
+async function collectPackageFileRecords(rootDir) {
+  const entries = await collectFiles(rootDir);
+  const records = [];
+
+  for (const relativePath of entries) {
+    const absolutePath = path.join(rootDir, relativePath);
+    const content = await readFile(absolutePath);
+    records.push({
+      path: posixJoin(...relativePath.split(path.sep)),
+      size: content.length,
+      sha256: createHash("sha256").update(content).digest("hex")
+    });
+  }
+
+  return records;
+}
+
+async function collectFiles(rootDir, relativeDir = "") {
+  const directory = path.join(rootDir, relativeDir);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await collectFiles(rootDir, relativePath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
+async function createDeterministicTarball(sourceDir, outputPath) {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const command = [
+    "tar",
+    "--sort=name",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mtime=@0",
+    "-cf",
+    "-",
+    ".",
+    "|",
+    "gzip",
+    "-n",
+    ">",
+    shellQuote(outputPath)
+  ].join(" ");
+  const result = await runProcess(["bash", "-lc", command], sourceDir);
+
+  if (result.exitCode !== 0) {
+    throw new Error(`failed to create benchmark package: ${outputPath}`);
+  }
+}
+
+function posixJoin(...segments) {
+  return segments.join("/");
 }
 
 await main();
