@@ -178,6 +178,83 @@ export function createModuleHotSwapProtocol(
         normalizeHotSwapWorkflowUpgradeOptions(workflowOptions, "hotSwap.upgrade")
       );
     },
+    activate(workflowName, run, activationOptions = {}) {
+      const plan = getWorkflowPlan(workflowName);
+      const normalizedOptions = normalizeHotSwapActivationOptions(
+        activationOptions,
+        "hotSwap.activate"
+      );
+      const upgraded = plan.sourceWorkflow.upgrade(
+        run,
+        plan.targetWorkflow,
+        normalizedOptions.upgrade
+      );
+      const health = evaluateHotSwapHealthCheck(
+        normalizedOptions.healthCheck,
+        upgraded.run,
+        Object.freeze({
+          workflowName: plan.name,
+          supervisor: upgraded.run.supervision.supervisor,
+          sourceVersionId: sourceModule.versionId,
+          targetVersionId: targetModule.versionId,
+          context: upgraded.context,
+          upgrade: upgraded
+        }),
+        "hotSwap.activate.healthCheck"
+      );
+
+      if (health.healthy) {
+        return Object.freeze({
+          status: "activated",
+          workflowName: plan.name,
+          supervisor: upgraded.run.supervision.supervisor,
+          sourceVersionId: sourceModule.versionId,
+          targetVersionId: targetModule.versionId,
+          rollbackVersionId: sourceModule.versionId,
+          rollbackAvailable: true,
+          run: upgraded.run,
+          health,
+          upgrade: upgraded
+        });
+      }
+
+      if (!normalizedOptions.rollbackOnFail) {
+        return Object.freeze({
+          status: "blocked",
+          workflowName: plan.name,
+          supervisor: upgraded.run.supervision.supervisor,
+          sourceVersionId: sourceModule.versionId,
+          targetVersionId: targetModule.versionId,
+          rollbackVersionId: sourceModule.versionId,
+          rollbackAvailable: true,
+          run: upgraded.run,
+          health,
+          upgrade: upgraded
+        });
+      }
+
+      const rolledBack = performRollback(
+        plan,
+        upgraded.run,
+        normalizedOptions.rollback,
+        normalizedOptions.rollbackTrigger
+      );
+
+      return Object.freeze({
+        status: rolledBack.status,
+        workflowName: plan.name,
+        supervisor: rolledBack.supervisor,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        rollbackVersionId: sourceModule.versionId,
+        rollbackAvailable: rolledBack.rollbackAvailable,
+        run: rolledBack.run,
+        health,
+        upgrade: upgraded,
+        rollback: rolledBack,
+        trigger: rolledBack.trigger
+      });
+    },
     handoff(workflowName, run, operator, reason, handoffOptions = {}) {
       const plan = getWorkflowPlan(workflowName);
       const supervisor =
@@ -255,30 +332,11 @@ export function createModuleHotSwapProtocol(
     },
     rollback(workflowName, run, workflowOptions = {}) {
       const plan = getWorkflowPlan(workflowName);
-      const rollbackWorkflow = patchRollbackWorkflowCompatibility(
-        plan.sourceWorkflow,
-        plan.targetWorkflow.moduleVersionId
-      );
-      const rolledBack = plan.targetWorkflow.upgrade(
-        run,
-        rollbackWorkflow,
-        normalizeHotSwapWorkflowUpgradeOptions(workflowOptions, "hotSwap.rollback")
-      );
-
-      return Object.freeze({
-        status: "rolled_back",
-        workflowName: plan.name,
-        supervisor: rolledBack.run.supervision.supervisor,
-        sourceVersionId: sourceModule.versionId,
-        targetVersionId: targetModule.versionId,
-        rollbackVersionId: sourceModule.versionId,
-        rollbackTargetVersionId: targetModule.versionId,
-        rollbackAvailable: false,
-        run: rolledBack.run,
-        migration: rolledBack.migration,
-        context: rolledBack.context,
-        handlers: rolledBack.handlers
-      });
+      return performRollback(plan, run, workflowOptions);
+    },
+    triggerRollback(workflowName, run, trigger, workflowOptions = {}) {
+      const plan = getWorkflowPlan(workflowName);
+      return performRollback(plan, run, workflowOptions, trigger);
     },
     begin(beginOptions = {}) {
       return Object.freeze({
@@ -319,6 +377,38 @@ export function createModuleHotSwapProtocol(
     }
 
     return plan;
+  }
+
+  function performRollback(plan, run, workflowOptions = {}, trigger = null) {
+    const rollbackWorkflow = patchRollbackWorkflowCompatibility(
+      plan.sourceWorkflow,
+      plan.targetWorkflow.moduleVersionId
+    );
+    const rolledBack = plan.targetWorkflow.upgrade(
+      run,
+      rollbackWorkflow,
+      normalizeHotSwapWorkflowUpgradeOptions(workflowOptions, "hotSwap.rollback")
+    );
+    const normalizedTrigger =
+      trigger === null
+        ? null
+        : normalizeHotSwapRollbackTrigger(trigger, "hotSwap.rollback.trigger");
+
+    return Object.freeze({
+      status: "rolled_back",
+      workflowName: plan.name,
+      supervisor: rolledBack.run.supervision.supervisor,
+      sourceVersionId: sourceModule.versionId,
+      targetVersionId: targetModule.versionId,
+      rollbackVersionId: sourceModule.versionId,
+      rollbackTargetVersionId: targetModule.versionId,
+      rollbackAvailable: false,
+      run: rolledBack.run,
+      migration: rolledBack.migration,
+      context: rolledBack.context,
+      handlers: rolledBack.handlers,
+      trigger: normalizedTrigger
+    });
   }
 }
 
@@ -433,6 +523,132 @@ function normalizeHotSwapWorkflowUpgradeOptions(options, path) {
   }
 
   return normalized;
+}
+
+function normalizeHotSwapActivationOptions(options, path) {
+  const rawOptions = options && typeof options === "object" ? options : {};
+  const normalized = {
+    upgrade: normalizeHotSwapWorkflowUpgradeOptions(rawOptions, path),
+    healthCheck: null,
+    rollbackOnFail:
+      rawOptions.rollbackOnFail === undefined ? true : rawOptions.rollbackOnFail,
+    rollback: {},
+    rollbackTrigger: Object.freeze({
+      kind: "health_check_failed",
+      reason: "health_check_failed",
+      at: null
+    })
+  };
+
+  if (
+    rawOptions.healthCheck !== undefined &&
+    rawOptions.healthCheck !== null &&
+    typeof rawOptions.healthCheck !== "function"
+  ) {
+    throw new Error(`${path}.healthCheck must be a function.`);
+  }
+
+  if (typeof normalized.rollbackOnFail !== "boolean") {
+    throw new Error(`${path}.rollbackOnFail must be a boolean.`);
+  }
+
+  if (
+    rawOptions.rollback !== undefined &&
+    rawOptions.rollback !== null &&
+    typeof rawOptions.rollback !== "object"
+  ) {
+    throw new Error(`${path}.rollback must be an object.`);
+  }
+
+  if (rawOptions.rollbackTrigger !== undefined && rawOptions.rollbackTrigger !== null) {
+    normalized.rollbackTrigger = normalizeHotSwapRollbackTrigger(
+      rawOptions.rollbackTrigger,
+      `${path}.rollbackTrigger`
+    );
+  }
+
+  normalized.healthCheck = rawOptions.healthCheck ?? null;
+  normalized.rollback = rawOptions.rollback ?? {};
+  return Object.freeze(normalized);
+}
+
+function evaluateHotSwapHealthCheck(healthCheck, run, context, path) {
+  if (healthCheck === null) {
+    return Object.freeze({
+      healthy: true,
+      status: "healthy",
+      reason: null,
+      details: null
+    });
+  }
+
+  return normalizeHotSwapHealthReport(healthCheck(run, context), path);
+}
+
+function normalizeHotSwapHealthReport(value, path) {
+  if (typeof value === "boolean") {
+    return Object.freeze({
+      healthy: value,
+      status: value ? "healthy" : "unhealthy",
+      reason: value ? null : "health_check_failed",
+      details: null
+    });
+  }
+
+  if (!value || typeof value !== "object") {
+    throw new Error(`${path} must return a boolean or object.`);
+  }
+
+  if (typeof value.healthy !== "boolean") {
+    throw new Error(`${path}.healthy must be a boolean.`);
+  }
+
+  const status =
+    value.status === undefined || value.status === null
+      ? value.healthy
+        ? "healthy"
+        : "unhealthy"
+      : normalizeHotSwapLabel(value.status, `${path}.status`);
+  const reason =
+    value.reason === undefined || value.reason === null
+      ? value.healthy
+        ? null
+        : status
+      : normalizeHotSwapLabel(value.reason, `${path}.reason`);
+
+  return Object.freeze({
+    healthy: value.healthy,
+    status,
+    reason,
+    details: value.details ?? null
+  });
+}
+
+function normalizeHotSwapRollbackTrigger(trigger, path) {
+  if (typeof trigger === "string") {
+    const kind = normalizeHotSwapLabel(trigger, `${path}.kind`);
+    return Object.freeze({
+      kind,
+      reason: kind,
+      at: null
+    });
+  }
+
+  if (!trigger || typeof trigger !== "object") {
+    throw new Error(`${path} must be a string or object.`);
+  }
+
+  const kind = normalizeHotSwapLabel(trigger.kind, `${path}.kind`);
+  const reason =
+    trigger.reason === undefined || trigger.reason === null
+      ? kind
+      : normalizeHotSwapLabel(trigger.reason, `${path}.reason`);
+
+  return Object.freeze({
+    kind,
+    reason,
+    at: normalizeHotSwapTimestamp(trigger.at, `${path}.at`)
+  });
 }
 
 export function createWorkerJob(compiledModule, options) {

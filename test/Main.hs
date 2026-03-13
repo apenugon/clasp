@@ -3021,6 +3021,48 @@ compileTests =
                 assertEqual "rollback activation hook" (Just (Bool True)) (KeyMap.lookup "rollbackActivationHook" value)
               Right other ->
                 assertFailure ("expected JSON object from self-update runtime, got " <> show other)
+    , testCase "worker runtime health-gates activation and attaches rollback triggers" $
+        case (compileSource "workflow-health-gated-old" workflowSource, compileSource "workflow-health-gated-new" workflowHotSwapTargetSource) of
+          (Left err, _) ->
+            assertFailure ("expected old workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (_, Left err) ->
+            assertFailure ("expected new workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (Right oldEmitted, Right newEmitted) -> do
+            let oldCompiledPath = "dist/test-projects/workflow-health-gated-runtime/old-compiled.mjs"
+            let newCompiledPath = "dist/test-projects/workflow-health-gated-runtime/new-compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+            TIO.writeFile oldCompiledPath oldEmitted
+            TIO.writeFile newCompiledPath newEmitted
+            absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+            absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowHealthGatedRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected health-gated runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "activated status" (Just (String "activated")) (KeyMap.lookup "activatedStatus" value)
+                assertEqual "activated health" (Just (String "healthy")) (KeyMap.lookup "activatedHealthStatus" value)
+                assertEqual "activated rollback available" (Just (Bool True)) (KeyMap.lookup "activatedRollbackAvailable" value)
+                assertEqual "activated count" (Just (Number 8)) (KeyMap.lookup "activatedCount" value)
+                assertEqual "activated target tagged" (Just (Bool True)) (KeyMap.lookup "activatedTargetTagged" value)
+                assertEqual "blocked status" (Just (String "blocked")) (KeyMap.lookup "blockedStatus" value)
+                assertEqual "blocked health" (Just (String "probe-warming")) (KeyMap.lookup "blockedHealthStatus" value)
+                assertEqual "blocked rollback available" (Just (Bool True)) (KeyMap.lookup "blockedRollbackAvailable" value)
+                assertEqual "blocked count" (Just (Number 8)) (KeyMap.lookup "blockedCount" value)
+                assertEqual "auto rollback status" (Just (String "rolled_back")) (KeyMap.lookup "autoRollbackStatus" value)
+                assertEqual "auto rollback trigger" (Just (String "health_check_failed")) (KeyMap.lookup "autoRollbackTriggerKind" value)
+                assertEqual "auto rollback reason" (Just (String "probe-failed")) (KeyMap.lookup "autoRollbackTriggerReason" value)
+                assertEqual "auto rollback at" (Just (Number 1004)) (KeyMap.lookup "autoRollbackTriggerAt" value)
+                assertEqual "auto rollback count" (Just (Number 5)) (KeyMap.lookup "autoRollbackCount" value)
+                assertEqual "manual rollback status" (Just (String "rolled_back")) (KeyMap.lookup "manualRollbackStatus" value)
+                assertEqual "manual rollback trigger" (Just (String "error_budget")) (KeyMap.lookup "manualRollbackTriggerKind" value)
+                assertEqual "manual rollback reason" (Just (String "latency-spike")) (KeyMap.lookup "manualRollbackTriggerReason" value)
+                assertEqual "manual rollback at" (Just (Number 1005)) (KeyMap.lookup "manualRollbackTriggerAt" value)
+                assertEqual "manual rollback count" (Just (Number 5)) (KeyMap.lookup "manualRollbackCount" value)
+                assertEqual "manual rollback supervisor" (Just (String "RollbackSupervisor")) (KeyMap.lookup "manualRollbackSupervisor" value)
+              Right other ->
+                assertFailure ("expected JSON object from health-gated runtime, got " <> show other)
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
           Left err ->
@@ -5879,6 +5921,139 @@ workflowSelfUpdateRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  rollbackSupervision: rolledBack.run.supervision.status,"
     , "  rollbackMigrationHook: rolledBack.handlers.migrateState,"
     , "  rollbackActivationHook: rolledBack.handlers.activate"
+    , "}));"
+    ]
+
+workflowHealthGatedRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+workflowHealthGatedRuntimeScript oldCompiledPath newCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as oldCompiledModule from " <> show ("file://" <> oldCompiledPath) <> ";"
+    , "import * as newCompiledModule from " <> show ("file://" <> newCompiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(oldCompiledModule);"
+    , "const sourceVersionId = oldCompiledModule.__claspModule.versionId;"
+    , "const patchedTargetModule = Object.freeze({"
+    , "  ...newCompiledModule.__claspModule,"
+    , "  upgradeWindow: Object.freeze({"
+    , "    ...newCompiledModule.__claspModule.upgradeWindow,"
+    , "    fromVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(newCompiledModule.__claspModule.upgradeWindow.fromVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "});"
+    , "const patchedTargetWorkflows = Object.freeze((newCompiledModule.__claspWorkflows ?? []).map((workflow) => Object.freeze({"
+    , "  ...workflow,"
+    , "  compatibility: Object.freeze({"
+    , "    ...workflow.compatibility,"
+    , "    compatibleModuleVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(workflow.compatibility?.compatibleModuleVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "})));"
+    , "const patchedTargetBindings = Object.freeze({"
+    , "  ...(newCompiledModule.__claspBindings ?? {}),"
+    , "  module: patchedTargetModule"
+    , "});"
+    , "const patchedTargetCompiledModule = Object.freeze({"
+    , "  ...newCompiledModule,"
+    , "  __claspModule: patchedTargetModule,"
+    , "  __claspWorkflows: patchedTargetWorkflows,"
+    , "  __claspBindings: patchedTargetBindings"
+    , "});"
+    , "const protocol = runtime.hotSwap(patchedTargetCompiledModule, { supervisor: 'UpgradeSupervisor' });"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const baseRun = workflow.start(workflow.checkpoint({ count: 5 }), { deadlineAt: 100 });"
+    , "const handoff = protocol.handoff('CounterFlow', baseRun, 'release-bot', 'self-update', { updatedAt: 1001 });"
+    , "const draining = protocol.drain('CounterFlow', handoff.run, { updatedAt: 1002 });"
+    , "const activated = protocol.activate('CounterFlow', draining.run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  }),"
+    , "  healthCheck: (nextRun, meta) => ({"
+    , "    healthy: nextRun.state.count === 8 && meta.targetVersionId.startsWith('module:Main:'),"
+    , "    status: 'healthy'"
+    , "  })"
+    , "});"
+    , "const blocked = protocol.activate('CounterFlow', draining.run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  }),"
+    , "  healthCheck: () => ({ healthy: false, status: 'probe-warming', reason: 'probe-warming' }),"
+    , "  rollbackOnFail: false"
+    , "});"
+    , "const autoRolledBack = protocol.activate('CounterFlow', draining.run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  }),"
+    , "  healthCheck: () => ({ healthy: false, status: 'unhealthy', reason: 'probe-failed' }),"
+    , "  rollbackTrigger: { kind: 'health_check_failed', reason: 'probe-failed', at: 1004 },"
+    , "  rollback: {"
+    , "    migrateState: (state) => ({ count: state.count - 3 }),"
+    , "    activate: (nextRun) => ({"
+    , "      ...nextRun,"
+    , "      supervision: {"
+    , "        ...nextRun.supervision,"
+    , "        supervisor: 'RollbackSupervisor'"
+    , "      }"
+    , "    })"
+    , "  }"
+    , "});"
+    , "const manualRolledBack = protocol.triggerRollback('CounterFlow', activated.run, {"
+    , "  kind: 'error_budget',"
+    , "  reason: 'latency-spike',"
+    , "  at: 1005"
+    , "}, {"
+    , "  migrateState: (state) => ({ count: state.count - 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'RollbackSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
+    , "console.log(JSON.stringify({"
+    , "  activatedStatus: activated.status,"
+    , "  activatedHealthStatus: activated.health.status,"
+    , "  activatedRollbackAvailable: activated.rollbackAvailable,"
+    , "  activatedCount: activated.run.state.count,"
+    , "  activatedTargetTagged: activated.targetVersionId.startsWith('module:Main:'),"
+    , "  blockedStatus: blocked.status,"
+    , "  blockedHealthStatus: blocked.health.status,"
+    , "  blockedRollbackAvailable: blocked.rollbackAvailable,"
+    , "  blockedCount: blocked.run.state.count,"
+    , "  autoRollbackStatus: autoRolledBack.status,"
+    , "  autoRollbackTriggerKind: autoRolledBack.trigger.kind,"
+    , "  autoRollbackTriggerReason: autoRolledBack.trigger.reason,"
+    , "  autoRollbackTriggerAt: autoRolledBack.trigger.at,"
+    , "  autoRollbackCount: autoRolledBack.run.state.count,"
+    , "  manualRollbackStatus: manualRolledBack.status,"
+    , "  manualRollbackTriggerKind: manualRolledBack.trigger.kind,"
+    , "  manualRollbackTriggerReason: manualRolledBack.trigger.reason,"
+    , "  manualRollbackTriggerAt: manualRolledBack.trigger.at,"
+    , "  manualRollbackCount: manualRolledBack.run.state.count,"
+    , "  manualRollbackSupervisor: manualRolledBack.run.supervision.supervisor"
     , "}));"
     ]
 
