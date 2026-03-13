@@ -515,6 +515,23 @@ try {
   logTail = "";
 }
 
+const report = {
+  verdict: "fail",
+  summary,
+  findings: [
+    `${role} exited with code ${exitCode} while processing ${taskId}.`,
+    ...(logTail.length > 0 ? [`Recent ${role} log lines:\n${logTail}`] : []),
+  ],
+  tests_run: [],
+  follow_up: [
+    "Retry the task from the current swarm trunk branch.",
+    "If the failure repeats, split the task further or block the lane on this task.",
+  ],
+};
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+EOF
+}
+
 report_is_valid() {
   local report_file="$1"
   local report_kind="$2"
@@ -564,22 +581,6 @@ EOF
 
 cooldown_after_infra_failure() {
   sleep "$infra_retry_delay_seconds"
-}
-const report = {
-  verdict: "fail",
-  summary,
-  findings: [
-    `${role} exited with code ${exitCode} while processing ${taskId}.`,
-    ...(logTail.length > 0 ? [`Recent ${role} log lines:\n${logTail}`] : []),
-  ],
-  tests_run: [],
-  follow_up: [
-    "Retry the task from the current swarm trunk branch.",
-    "If the failure repeats, split the task further or block the lane on this task.",
-  ],
-};
-fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-EOF
 }
 
 archive_task_state() {
