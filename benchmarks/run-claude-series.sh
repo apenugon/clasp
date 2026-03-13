@@ -21,6 +21,8 @@ case "$task_id" in
       "ts-lead-rejection"
       "clasp-lead-segment"
       "ts-lead-segment"
+      "clasp-external-adaptation"
+      "ts-external-adaptation"
     )
     ;;
   control-plane)

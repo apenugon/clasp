@@ -69,6 +69,10 @@ const publicAppBenchmark = {
     {
       leftTaskId: "clasp-lead-segment",
       rightTaskId: "ts-lead-segment"
+    },
+    {
+      leftTaskId: "clasp-external-adaptation",
+      rightTaskId: "ts-external-adaptation"
     }
   ],
   leftLabel: "clasp",
@@ -587,6 +591,13 @@ async function summarizeCommand(args) {
       console.log(
         `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteMedianTokens")}: ${comparison.right.suiteMedianTokens}`
       );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "FeatureThroughputPerHour")}: ${comparison.left.featureThroughputPerHour}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "FeatureThroughputPerHour")}: ${comparison.right.featureThroughputPerHour}`
+      );
+      console.log(`    throughputDeltaPct: ${comparison.throughputDeltaPct}`);
       console.log(`    tokenDelta: ${comparison.tokenDelta}`);
       console.log(
         `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
@@ -725,6 +736,16 @@ function buildPublicAppComparisons(results) {
         typeof left.suiteTimeToGreenMs === "number" && typeof right.suiteTimeToGreenMs === "number"
           ? left.suiteTimeToGreenMs - right.suiteTimeToGreenMs
           : "n/a",
+      throughputDeltaPct:
+        typeof left.featureThroughputPerHour === "number" &&
+          typeof right.featureThroughputPerHour === "number" &&
+          right.featureThroughputPerHour !== 0
+          ? Math.round(
+            (left.featureThroughputPerHour - right.featureThroughputPerHour)
+              / right.featureThroughputPerHour
+              * 100
+          )
+          : "n/a",
       tokenDelta: left.suiteMedianTokens - right.suiteMedianTokens,
       uncachedTokenDelta:
         left.suiteMedianUncachedTokens - right.suiteMedianUncachedTokens
@@ -747,12 +768,16 @@ function summarizeBenchmarkSuite(taskSummaries) {
   const suiteTimeToGreenMs = completedTasks === taskSummaries.length
     ? taskSummaries.reduce((sum, summary) => sum + summary.timeToGreenMs, 0)
     : "n/a";
+  const featureThroughputPerHour = typeof suiteTimeToGreenMs === "number" && suiteTimeToGreenMs > 0
+    ? Number((completedTasks * 3600000 / suiteTimeToGreenMs).toFixed(2))
+    : "n/a";
 
   return {
     completedTasks,
     runPassRate: `${(totalPassedRuns / totalRuns * 100).toFixed(0)}%`,
     runPassRatePct: totalPassedRuns / totalRuns * 100,
     suiteTimeToGreenMs,
+    featureThroughputPerHour,
     suiteMedianTokens: taskSummaries.reduce((sum, summary) => sum + summary.medianTokens, 0),
     suiteMedianUncachedTokens: taskSummaries.reduce(
       (sum, summary) => sum + summary.medianUncachedTokens,

@@ -71,13 +71,14 @@ For long-running workflow behavior, the suite also includes `clasp-durable-workf
 
 `Raw Repo` is the primary benchmark scorecard. That is the most realistic mode because a real harness has to inspect and understand the environment. `File-Hinted` and `Oracle` are supporting diagnostic modes used to explain *why* one side won, not to replace the main benchmark.
 
-For public scorecards, the main comparison should roll up the mirrored app task trio:
+For public scorecards, the main comparison should roll up the mirrored moderate-SaaS app task suite:
 
 - `clasp-lead-priority` vs `ts-lead-priority`
 - `clasp-lead-rejection` vs `ts-lead-rejection`
 - `clasp-lead-segment` vs `ts-lead-segment`
+- `clasp-external-adaptation` vs `ts-external-adaptation`
 
-`node benchmarks/run-benchmark.mjs summarize` now emits this roll-up as `main-public-app-comparison`, with completed-task counts plus suite-level time-to-green and token totals for `Clasp` versus `TypeScript`.
+`node benchmarks/run-benchmark.mjs summarize` now emits this roll-up as `main-public-app-comparison`, with completed-task counts plus suite-level time-to-green, product-feature throughput per hour, and token totals for `Clasp` versus `TypeScript`.
 
 ## Publication-Grade Fairness
 
