@@ -2465,14 +2465,21 @@ compileTests =
             assertBool "expected secret boundaries export" ("export const __claspSecretBoundaries = [" `T.isInfixOf` emitted)
             assertBool "expected secret trace helper" ("traceAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).trace; }" `T.isInfixOf` emitted)
             assertBool "expected missing secret diagnostic helper" ("Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}" `T.isInfixOf` emitted)
-            assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
-            assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
+            assertBool "expected eval hooks export" ("export const __claspEvalHooks = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected trace collector export" ("export const __claspTraceCollector = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected hook evaluate helper" ("evaluate(value, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected hook invoke helper" ("invoke(value, options = null) { return this.evaluate(value, options).encoded; }" `T.isInfixOf` emitted)
+            assertBool "expected tool request preparation" ("prepareCall(value, id = null, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected tool call evaluation helper" ("evaluateCall(value, id = null, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected tool result evaluation helper" ("evaluateResult(payload, options = null) {" `T.isInfixOf` emitted)
             assertBool "expected tool call parser" ("parseCall(jsonText) { return this.decodeCall(JSON.parse(jsonText)); }" `T.isInfixOf` emitted)
             assertBool "expected tool result envelope parser" ("parseResultEnvelope(jsonText) { return this.decodeResultEnvelope(JSON.parse(jsonText)); }" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane entry" ("controlPlane: __claspControlPlane" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane docs entry" ("controlPlaneDocs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract tool-call entry" ("toolCallContracts: __claspToolCallContracts" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract eval-hooks entry" ("evalHooks: __claspEvalHooks" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract trace entry" ("traces: __claspTraceCollector" `T.isInfixOf` emitted)
             let compiledPath = "dist/control-plane.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -2489,6 +2496,13 @@ compileTests =
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
                 , "const policy = agent.policy;"
+                , "const collector = compiledModule.__claspTraceCollector.create();"
+                , "const evalLifecycle = [];"
+                , "const evalHooks = compiledModule.__claspEvalHooks.create({"
+                , "  before(event) { evalLifecycle.push(`${event.kind}:${event.action}:before`); },"
+                , "  after(event) { evalLifecycle.push(`${event.kind}:${event.action}:after:${event.trace.status}`); },"
+                , "  trace(trace) { evalLifecycle.push(`trace:${trace.kind}:${trace.action}:${trace.status}`); }"
+                , "});"
                 , "const secretInput = compiledModule.__claspControlPlane.secretInputs[0];"
                 , "const agentSecretBoundary = compiledModule.__claspControlPlane.secretBoundaries.find((boundary) => boundary.kind === 'agentRole');"
                 , "const toolSecretBoundary = compiledModule.__claspControlPlane.secretBoundaries.find((boundary) => boundary.kind === 'toolServer');"
@@ -2515,6 +2529,10 @@ compileTests =
                 , "} catch (error) {"
                 , "  missingSecret = error.message;"
                 , "}"
+                , "const hookEval = hook.evaluate({ workerId: 'worker-7' }, { traceId: 'hook-1', collector, hooks: evalHooks, context: { actor: { id: 'runner-1' } } });"
+                , "const toolEval = tool.evaluateCall({ query: 'search' }, 7, { traceId: 'tool-1', collector, hooks: evalHooks, context: { actor: { id: 'runner-2' } } });"
+                , "const toolResultEval = tool.evaluateResult({ summary: 'done' }, { traceId: 'tool-2', collector, hooks: evalHooks, context: { actor: { id: 'runner-3' } } });"
+                , "const collected = collector.entries();"
                 , "console.log(JSON.stringify({"
                 , "  guideExtends: guide.extends,"
                 , "  guideScope: guide.resolvedEntries.scope,"
@@ -2548,9 +2566,15 @@ compileTests =
                 , "  missingSecret,"
                 , "  hookEvent: hook.event,"
                 , "  hookAccepted: hook.invoke({ workerId: 'worker-7' }).accepted,"
+                , "  hookEvalRequest: hookEval.request.workerId,"
+                , "  hookEvalTraceStatus: hookEval.trace.status,"
                 , "  toolMethod: tool.prepareCall({ query: 'search' }, 7).method,"
                 , "  toolParam: tool.prepareCall({ query: 'search' }, 7).params.query,"
                 , "  parsedSummary: tool.parseResult({ summary: 'done' }).summary,"
+                , "  toolEvalTraceAction: toolEval.trace.action,"
+                , "  toolEvalMethod: toolEval.call.method,"
+                , "  toolResultTraceStatus: toolResultEval.trace.status,"
+                , "  toolResultSummary: toolResultEval.result.summary,"
                 , "  toolCallVersion: toolCall.version,"
                 , "  toolCallProtocol: toolCall.serverProtocol,"
                 , "  toolCallType: toolCall.requestType,"
@@ -2573,12 +2597,21 @@ compileTests =
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
                 , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version,"
                 , "  bindingToolCallContracts: compiledModule.__claspBindings.toolCallContracts.length,"
-                , "  controlPlaneToolCallContracts: compiledModule.__claspControlPlane.toolCallContracts.length"
+                , "  controlPlaneToolCallContracts: compiledModule.__claspControlPlane.toolCallContracts.length,"
+                , "  bindingEvalHooksVersion: compiledModule.__claspBindings.evalHooks.version,"
+                , "  bindingTraceVersion: compiledModule.__claspBindings.traces.version,"
+                , "  controlPlaneEvalHooksVersion: compiledModule.__claspControlPlane.evalHooks.version,"
+                , "  controlPlaneTraceVersion: compiledModule.__claspControlPlane.traces.version,"
+                , "  collectedTraceCount: collected.length,"
+                , "  collectedKinds: collected.map((entry) => `${entry.kind}:${entry.action}:${entry.status}`),"
+                , "  collectedActors: collected.map((entry) => entry.context?.actor?.id ?? null),"
+                , "  collectedFrozen: collected.every((entry) => Object.isFrozen(entry) && Object.isFrozen(entry.surface)),"
+                , "  evalLifecycle"
                 , "}));"
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"toolCallVersion\":1,\"toolCallProtocol\":\"mcp\",\"toolCallType\":\"SearchRequest\",\"parsedCallQuery\":\"search\",\"parsedEnvelopeSummary\":\"framed\",\"formattedEnvelope\":\"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"req-10\\\",\\\"result\\\":{\\\"summary\\\":\\\"wrapped\\\"}}\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1,\"bindingToolCallContracts\":1,\"controlPlaneToolCallContracts\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"hookEvalRequest\":\"worker-7\",\"hookEvalTraceStatus\":\"ok\",\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"toolEvalTraceAction\":\"prepare_call\",\"toolEvalMethod\":\"search_repo\",\"toolResultTraceStatus\":\"ok\",\"toolResultSummary\":\"done\",\"toolCallVersion\":1,\"toolCallProtocol\":\"mcp\",\"toolCallType\":\"SearchRequest\",\"parsedCallQuery\":\"search\",\"parsedEnvelopeSummary\":\"framed\",\"formattedEnvelope\":\"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"req-10\\\",\\\"result\\\":{\\\"summary\\\":\\\"wrapped\\\"}}\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1,\"bindingToolCallContracts\":1,\"controlPlaneToolCallContracts\":1,\"bindingEvalHooksVersion\":1,\"bindingTraceVersion\":1,\"controlPlaneEvalHooksVersion\":1,\"controlPlaneTraceVersion\":1,\"collectedTraceCount\":3,\"collectedKinds\":[\"hook:invoke:ok\",\"tool:prepare_call:ok\",\"tool:parse_result:ok\"],\"collectedActors\":[\"runner-1\",\"runner-2\",\"runner-3\"],\"collectedFrozen\":true,\"evalLifecycle\":[\"hook:invoke:before\",\"trace:hook:invoke:ok\",\"hook:invoke:after:ok\",\"tool:prepare_call:before\",\"trace:tool:prepare_call:ok\",\"tool:prepare_call:after:ok\",\"tool:parse_result:before\",\"trace:tool:parse_result:ok\",\"tool:parse_result:after:ok\"]}"
               runtimeOutput
     , testCase "typed schema streams merge nested partial results and require completion" $
         case compileSource "streaming-partials" streamingToolSource of

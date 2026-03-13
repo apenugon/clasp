@@ -24,7 +24,9 @@ export function bindingContractFor(compiledModule) {
       nativeInterop:
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
-        defaultNativeInterop(hostBindings)
+        defaultNativeInterop(hostBindings),
+      evalHooks: contract.evalHooks ?? compiledModule?.__claspEvalHooks ?? null,
+      traces: contract.traces ?? compiledModule?.__claspTraceCollector ?? null
     };
   }
 
@@ -62,7 +64,9 @@ export function bindingContractFor(compiledModule) {
       },
     uiGraph: compiledModule?.__claspUiGraph ?? [],
     navigationGraph: compiledModule?.__claspNavigationGraph ?? [],
-    actionGraph: compiledModule?.__claspActionGraph ?? []
+    actionGraph: compiledModule?.__claspActionGraph ?? [],
+    evalHooks: compiledModule?.__claspEvalHooks ?? null,
+    traces: compiledModule?.__claspTraceCollector ?? null
   };
 }
 

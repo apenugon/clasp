@@ -25,10 +25,18 @@ const resolvedSecret = secretInput.resolve(
   { OPENAI_API_KEY: "sk-live-openai" },
   traceContext
 );
+const traceCollector = compiledModule.__claspTraceCollector.create();
+const evalHooks = compiledModule.__claspEvalHooks.create({
+  trace(trace) {
+    traceCollector.record(trace);
+  }
+});
 const preparedCall = compiledModule.__claspToolCallContracts[0].prepare(
   { query: compiledModule.replyPromptText },
-  "prompt-call-1"
+  "prompt-call-1",
+  { traceId: "prompt-tool-call", hooks: evalHooks, context: traceContext }
 );
+const collectedTraces = traceCollector.entries();
 const tool = compiledModule.__claspTools[0];
 
 console.log(
@@ -52,6 +60,9 @@ console.log(
     toolMethod: preparedCall.method,
     toolQuery: preparedCall.params.query,
     toolCallHasSecretValue: JSON.stringify(preparedCall).includes("sk-live-openai"),
-    toolKnowsDeclaredSecret: tool.secretConsumer().hasSecret("OPENAI_API_KEY")
+    toolKnowsDeclaredSecret: tool.secretConsumer().hasSecret("OPENAI_API_KEY"),
+    evalTraceCount: collectedTraces.length,
+    evalTraceAction: collectedTraces[0]?.action ?? null,
+    evalTraceActor: collectedTraces[0]?.context?.actor?.id ?? null
   })
 );
