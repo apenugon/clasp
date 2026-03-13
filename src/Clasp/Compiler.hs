@@ -196,7 +196,7 @@ runPrimaryCheck entryPath
             singleDiagnostic
               "E_PRIMARY_COMPILER_UNSUPPORTED"
               "The primary Clasp compiler does not support this entrypoint yet."
-              ["Use --compiler=bootstrap for this command, or run the self-hosting entrypoint at examples/compiler-selfhost/Main.clasp."]
+              ["Use --compiler=bootstrap for this command, or run the hosted compiler entrypoint at compiler/hosted/Main.clasp."]
         )
   | otherwise = do
       bootstrapResult <- checkEntryBootstrap entryPath
@@ -209,7 +209,7 @@ runPrimaryCheck entryPath
 
 supportsPrimaryCheck :: FilePath -> Bool
 supportsPrimaryCheck entryPath =
-  let target = normalise ("examples" </> "compiler-selfhost" </> "Main.clasp")
+  let target = hostedCompilerEntryPath
       normalizedPath = normalise entryPath
    in normalizedPath == target || target `isSuffixOf` normalizedPath
 
@@ -236,7 +236,7 @@ verifyHostedPrimaryCheck entryPath = do
         (exitCode, stdoutText, stderrText) <-
           readProcessWithExitCode
             "bun"
-            ["examples/compiler-selfhost/demo.mjs", stage1Path, stage2CompilerPath, stage2OutputPath]
+            [hostedCompilerDemoPath, stage1Path, stage2CompilerPath, stage2OutputPath]
             ""
         pure $
           case exitCode of
@@ -259,8 +259,18 @@ verifyHostedPrimaryCheck entryPath = do
     expectedChecks =
       [ "\"stage2MatchesStage1Snapshot\":true"
       , "\"stage2CompilerMatchesStage1Snapshot\":true"
+      , "\"stage2CheckMatchesStage1\":true"
+      , "\"stage2ExplainMatchesStage1\":true"
       , "\"stage2OutputMatchesStage1\":true"
       ]
+
+hostedCompilerEntryPath :: FilePath
+hostedCompilerEntryPath =
+  normalise ("compiler" </> "hosted" </> "Main.clasp")
+
+hostedCompilerDemoPath :: FilePath
+hostedCompilerDemoPath =
+  "compiler" </> "hosted" </> "demo.mjs"
 
 compileEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntryBootstrap entryPath = do

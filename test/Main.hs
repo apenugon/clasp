@@ -1311,15 +1311,15 @@ checkerTests =
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler parser example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler self-hosting checker, lowering, and emitter example file" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-selfhost/Main.clasp"]
+    , testCase "typechecks the hosted compiler entrypoint file" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
-            assertFailure ("expected compiler self-hosting example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "claspc check prefers the hosted Clasp compiler for the self-hosting entrypoint" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-selfhost/Main.clasp", "--json"]
+            assertFailure ("expected hosted compiler entrypoint source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "claspc check prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp", "--json"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -1347,8 +1347,8 @@ checkerTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check can force the Haskell bootstrap fallback for the self-hosting entrypoint" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-selfhost/Main.clasp", "--json", "--compiler=bootstrap"]
+    , testCase "claspc check can force the Haskell bootstrap fallback for the hosted compiler entrypoint" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -2991,21 +2991,21 @@ compileTests =
               "expected first declaration body"
               (Just (String "source"))
               (lookupObjectKey "firstDeclarationBody" runtimeValue)
-    , testCase "compile evaluates the compiler self-hosting lowering and emitter example end-to-end" $ do
+    , testCase "compile evaluates the hosted compiler entrypoint end-to-end" $ do
         let compiledPath = "dist/compiler-selfhost.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-selfhost/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler self-hosting compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
             absoluteCompiledPath <- makeAbsolute compiledPath
             stage2CompilerPath <- makeAbsolute "dist/compiler-selfhost-stage2.mjs"
             emittedModulePath <- makeAbsolute "dist/compiler-selfhost-emitted.mjs"
-            runtimeOutput <- runBunScript ["examples/compiler-selfhost/demo.mjs", absoluteCompiledPath, stage2CompilerPath, emittedModulePath]
+            runtimeOutput <- runBunScript ["compiler/hosted/demo.mjs", absoluteCompiledPath, stage2CompilerPath, emittedModulePath]
             runtimeValue <- case eitherDecodeStrictText runtimeOutput of
               Left decodeErr ->
-                assertFailure ("expected compiler self-hosting runtime output json to decode:\n" <> decodeErr)
+                assertFailure ("expected hosted compiler runtime output json to decode:\n" <> decodeErr)
               Right value ->
                 pure value
             stage2CompilerExists <- doesFileExist stage2CompilerPath
@@ -3018,6 +3018,14 @@ compileTests =
               "expected stage2 compiler snapshot object to match stage1"
               (Just (Bool True))
               (lookupObjectKey "stage2CompilerMatchesStage1Snapshot" runtimeValue)
+            assertEqual
+              "expected stage2 check entrypoint to match stage1 output"
+              (Just (Bool True))
+              (lookupObjectKey "stage2CheckMatchesStage1" runtimeValue)
+            assertEqual
+              "expected stage2 explain entrypoint to match stage1 output"
+              (Just (Bool True))
+              (lookupObjectKey "stage2ExplainMatchesStage1" runtimeValue)
             assertEqual
               "expected stage2 compiler output to match stage1 output"
               (Just (Bool True))
@@ -3047,6 +3055,10 @@ compileTests =
               (Just (String "greeting : Str\nrenderLead : Int -> Str"))
               (lookupObjectKey "checkedModule" runtimeValue)
             assertEqual
+              "expected explain module summary"
+              (Just (String "greeting : Str\nrenderLead : Int -> Str\n\nconst greeting = literal:hello\nfunction renderLead(lead) = call String(lead)"))
+              (lookupObjectKey "explainModule" runtimeValue)
+            assertEqual
               "expected mismatch diagnostic"
               (Just (String "Type mismatch for `greeting`: expected Int, found Str."))
               (lookupObjectKey "mismatchDiagnostic" runtimeValue)
@@ -3058,6 +3070,14 @@ compileTests =
               "expected stage2 emitted module text"
               (Just (String "// Generated by compiler-selfhost\nexport const greeting = \"hello\";\nexport function renderLead(lead) { return String(lead); }"))
               (lookupObjectKey "stage2EmittedModule" runtimeValue)
+            assertEqual
+              "expected stage2 check output"
+              (Just (String "greeting : Str\nrenderLead : Int -> Str"))
+              (lookupObjectKey "stage2CheckOutput" runtimeValue)
+            assertEqual
+              "expected stage2 explain output"
+              (Just (String "greeting : Str\nrenderLead : Int -> Str\n\nconst greeting = literal:hello\nfunction renderLead(lead) = call String(lead)"))
+              (lookupObjectKey "stage2ExplainOutput" runtimeValue)
             assertEqual
               "expected emitted greeting export"
               (Just (String "hello"))
