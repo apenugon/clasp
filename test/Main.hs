@@ -1263,6 +1263,13 @@ checkerTests =
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler renderers example source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "typechecks the compiler loader example file" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-loader.clasp"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected compiler loader example source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2469,6 +2476,49 @@ compileTests =
               "expected main render"
               (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]\n\nE_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\n\n{\"code\":\"E_DUPLICATE_DECL\",\"summary\":\"Declaration `renderPosition` is already defined.\",\"primarySpan\":\"Compiler/Formatter.clasp:3:1-3:18\",\"detail\":\"Formatter helper names must be unique within a module.\",\"fixHint\":\"Rename the helper or merge the duplicate definitions.\",\"related\":\"- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\"}"))
               (lookupObjectKey "main" runtimeValue)
+    , testCase "compile evaluates the compiler loader example end-to-end" $ do
+        let compiledPath = "dist/compiler-loader.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-loader.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler loader compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "globalThis.__claspRuntime = {"
+                , "  readFile(path) {"
+                , "    switch (path) {"
+                , "      case 'workspace/src/App/Main.clasp':"
+                , "        return { $tag: 'Ok', $0: 'module App.Main\\nmain = \"workspace\"' };"
+                , "      case 'packages/stdlib/clasp/Compiler/Loader.clasp':"
+                , "        return { $tag: 'Ok', $0: 'module Compiler.Loader\\nload = \"stdlib\"' };"
+                , "      default:"
+                , "        return { $tag: 'Err', $0: `missing:${path}` };"
+                , "    }"
+                , "  }"
+                , "};"
+                , "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
+                , "console.log(compiledModule.snapshotJson);"
+                ]
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected compiler loader runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected local module resolution"
+              (Just (String "workspace|App.Main|workspace/src/App/Main.clasp|module App.Main"))
+              (lookupObjectKey "localModule" runtimeValue)
+            assertEqual
+              "expected package module resolution"
+              (Just (String "stdlib|Compiler.Loader|packages/stdlib/clasp/Compiler/Loader.clasp|module Compiler.Loader"))
+              (lookupObjectKey "packageModule" runtimeValue)
+            assertEqual
+              "expected missing module summary"
+              (Just (String "missing:Compiler.Emit"))
+              (lookupObjectKey "missingModule" runtimeValue)
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->

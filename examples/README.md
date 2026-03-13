@@ -14,6 +14,7 @@ This directory has two kinds of examples:
 - [let.clasp](/home/akul/DevProjects/synthspeak/examples/let.clasp): local `let` bindings at the top level and inside `match` branches
 - [blocks.clasp](/home/akul/DevProjects/synthspeak/examples/blocks.clasp): multiline block expressions with local declarations, mutable locals, `for` loops, and early `return`
 - [compiler-renderers.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-renderers.clasp): self-hosting formatter and diagnostic rendering helpers expressed in Clasp
+- [compiler-loader.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-loader.clasp): self-hosting module loading and package search-order helpers expressed in Clasp
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples
