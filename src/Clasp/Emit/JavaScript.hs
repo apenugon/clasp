@@ -204,8 +204,66 @@ emitAirExports airModule =
 emitRuntimePrelude :: [Text]
 emitRuntimePrelude =
   [ ""
+  , "function $claspNormalizePathSegments(parts, path = \"parts\") {"
+  , "  if (!Array.isArray(parts)) {"
+  , "    throw new Error(`${path} expected a list of strings`);"
+  , "  }"
+  , "  return parts.map((part, index) => $claspExpectStr(part, `${path}[${index}]`));"
+  , "}"
+  , ""
+  , "function $claspNormalizePath(value) {"
+  , "  const trimmed = value.replace(/\\\\+/g, \"/\");"
+  , "  const collapsed = trimmed.replace(/\\/+/g, \"/\");"
+  , "  return collapsed === \"\" ? \".\" : collapsed;"
+  , "}"
+  , ""
+  , "const $claspBuiltinRuntime = Object.freeze({"
+  , "  textConcat(parts) {"
+  , "    return $claspNormalizePathSegments(parts, \"parts\").join(\"\");"
+  , "  },"
+  , "  textJoin(separator, parts) {"
+  , "    return $claspNormalizePathSegments(parts, \"parts\").join($claspExpectStr(separator, \"separator\"));"
+  , "  },"
+  , "  textSplit(value, separator) {"
+  , "    return Object.freeze($claspExpectStr(value, \"value\").split($claspExpectStr(separator, \"separator\")));"
+  , "  },"
+  , "  pathJoin(parts) {"
+  , "    const normalized = $claspNormalizePathSegments(parts)"
+  , "      .filter((part) => part !== \"\")"
+  , "      .join(\"/\");"
+  , "    return $claspNormalizePath(normalized);"
+  , "  },"
+  , "  pathDirname(path) {"
+  , "    const normalized = $claspNormalizePath($claspExpectStr(path, \"path\"));"
+  , "    if (normalized === \"/\") {"
+  , "      return \"/\";"
+  , "    }"
+  , "    const trimmed = normalized.endsWith(\"/\") && normalized.length > 1 ? normalized.slice(0, -1) : normalized;"
+  , "    const index = trimmed.lastIndexOf(\"/\");"
+  , "    if (index < 0) {"
+  , "      return \".\";"
+  , "    }"
+  , "    if (index === 0) {"
+  , "      return \"/\";"
+  , "    }"
+  , "    return trimmed.slice(0, index);"
+  , "  },"
+  , "  pathBasename(path) {"
+  , "    const normalized = $claspNormalizePath($claspExpectStr(path, \"path\"));"
+  , "    if (normalized === \"/\") {"
+  , "      return \"/\";"
+  , "    }"
+  , "    const trimmed = normalized.endsWith(\"/\") && normalized.length > 1 ? normalized.slice(0, -1) : normalized;"
+  , "    const index = trimmed.lastIndexOf(\"/\");"
+  , "    return index < 0 ? trimmed : trimmed.slice(index + 1);"
+  , "  }"
+  , "});"
+  , ""
   , "function $claspRuntime(name) {"
   , "  const runtime = globalThis.__claspRuntime;"
+  , "  if (name in $claspBuiltinRuntime) {"
+  , "    return $claspBuiltinRuntime[name];"
+  , "  }"
   , "  if (!runtime || !(name in runtime)) {"
   , "    throw new Error(`Missing Clasp runtime binding: ${name}`);"
   , "  }"
@@ -2984,12 +3042,38 @@ emitTypeCodecHelpers typeDecl
            , "  const tag = typeof value === \"object\" && value !== null ? value.$tag : null;"
            , "  switch (tag) {"
            ]
-        <> concatMap emitValidateInternalCase constructors
+        <> concatMap emitEnumValidateInternalCase constructors
         <> [ "    default: throw new Error(`${path} expected a " <> typeDeclName typeDecl <> " value`);"
            , "  }"
            , "}"
            , "function " <> serializeName <> "(value, path = \"value\") {"
            , "  const tag = typeof value === \"object\" && value !== null ? value.$tag : null;"
+           , "  switch (tag) {"
+           ]
+        <> concatMap emitEnumSerializeCase constructors
+        <> [ "    default: throw new Error(`${path} expected a " <> typeDeclName typeDecl <> " value`);"
+           , "  }"
+           , "}"
+           , "function " <> decodeName <> "(jsonText) { return " <> validateName <> "(JSON.parse(jsonText), \"value\"); }"
+           , "function " <> encodeName <> "(value) { return JSON.stringify(" <> serializeName <> "(value, \"value\")); }"
+           , ""
+           ]
+  | otherwise =
+      [ "function " <> validateName <> "(value, path = \"value\") {"
+      , "  return " <> validateInternalName <> "(value, path);"
+      , "}"
+      , "function " <> validateInternalName <> "(value, path = \"value\") {"
+      , "  const objectValue = $claspExpectObject(value, path);"
+      , "  const tag = typeof objectValue.$tag === \"string\" ? objectValue.$tag : null;"
+      , "  switch (tag) {"
+      ]
+        <> concatMap emitValidateInternalCase constructors
+        <> [ "    default: throw new Error(`${path} expected a " <> typeDeclName typeDecl <> " value`);"
+           , "  }"
+           , "}"
+           , "function " <> serializeName <> "(value, path = \"value\") {"
+           , "  const objectValue = $claspExpectObject(value, path);"
+           , "  const tag = typeof objectValue.$tag === \"string\" ? objectValue.$tag : null;"
            , "  switch (tag) {"
            ]
         <> concatMap emitSerializeCase constructors
@@ -3000,8 +3084,6 @@ emitTypeCodecHelpers typeDecl
            , "function " <> encodeName <> "(value) { return JSON.stringify(" <> serializeName <> "(value, \"value\")); }"
            , ""
            ]
-  | otherwise =
-      []
   where
     constructors = typeDeclConstructors typeDecl
     expectedValues = T.intercalate ", " (fmap constructorWireValue constructors)
@@ -3019,19 +3101,81 @@ emitTypeCodecHelpers typeDecl
           <> ";"
       ]
 
-    emitValidateInternalCase constructorDecl =
+    emitEnumValidateInternalCase constructorDecl =
       [ "    case "
           <> emitStringLiteral (constructorDeclName constructorDecl)
           <> ": return value;"
       ]
 
-    emitSerializeCase constructorDecl =
+    emitEnumSerializeCase constructorDecl =
       [ "    case "
           <> emitStringLiteral (constructorDeclName constructorDecl)
           <> ": return "
           <> emitStringLiteral (constructorWireValue constructorDecl)
           <> ";"
       ]
+
+    emitValidateInternalCase constructorDecl
+      | null (constructorDeclFields constructorDecl) =
+          [ "    case "
+              <> emitStringLiteral (constructorDeclName constructorDecl)
+              <> ": return objectValue;"
+          ]
+      | otherwise =
+          [ "    case "
+              <> emitStringLiteral (constructorDeclName constructorDecl)
+              <> ": {"
+          ]
+            <> concatMap emitValidateInternalField (zip [(0 :: Int) ..] (constructorDeclFields constructorDecl))
+            <> [ "      return { "
+                    <> T.intercalate ", " ("$tag: objectValue.$tag" : fmap emitFieldReturn [0 .. length (constructorDeclFields constructorDecl) - 1])
+                    <> " };"
+               , "    }"
+               ]
+
+    emitValidateInternalField (index, fieldType) =
+      let fieldName = emitFieldName index
+          path = "`${path}." <> fieldName <> "`"
+       in [ "      const "
+              <> fieldName
+              <> " = "
+              <> emitHostDeserializer fieldType ("objectValue." <> fieldName) path
+              <> ";"
+          ]
+
+    emitSerializeCase constructorDecl
+      | null (constructorDeclFields constructorDecl) =
+          [ "    case "
+              <> emitStringLiteral (constructorDeclName constructorDecl)
+              <> ": return "
+              <> "{ $tag: objectValue.$tag };"
+              <> ";"
+          ]
+      | otherwise =
+          [ "    case "
+              <> emitStringLiteral (constructorDeclName constructorDecl)
+              <> ": {"
+          ]
+            <> concatMap emitSerializeField (zip [(0 :: Int) ..] (constructorDeclFields constructorDecl))
+            <> [ "      return { "
+                    <> T.intercalate ", " ("$tag: objectValue.$tag" : fmap emitFieldReturn [0 .. length (constructorDeclFields constructorDecl) - 1])
+                    <> " };"
+               , "    }"
+               ]
+
+    emitSerializeField (index, fieldType) =
+      let fieldName = emitFieldName index
+          path = "`${path}." <> fieldName <> "`"
+       in [ "      const "
+              <> fieldName
+              <> " = "
+              <> emitHostSerializer fieldType ("objectValue." <> fieldName) path
+              <> ";"
+          ]
+
+    emitFieldReturn index =
+      let fieldName = emitFieldName index
+       in fieldName <> ": " <> fieldName
 
 emitRecordCodecHelpers :: [TypeDecl] -> [RecordDecl] -> RecordDecl -> [Text]
 emitRecordCodecHelpers typeDecls recordDecls recordDecl =

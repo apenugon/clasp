@@ -377,6 +377,113 @@ builtinResultTypeDecl =
         ]
     }
 
+builtinForeignDecl :: Text -> Type -> ForeignDecl
+builtinForeignDecl name typ =
+  ForeignDecl
+    { foreignDeclName = name
+    , foreignDeclSpan = builtinSpan
+    , foreignDeclNameSpan = builtinSpan
+    , foreignDeclUnsafeInterop = False
+    , foreignDeclAnnotationSpan = builtinSpan
+    , foreignDeclType = typ
+    , foreignDeclRuntimeName = name
+    , foreignDeclRuntimeSpan = builtinSpan
+    , foreignDeclPackageImport = Nothing
+    }
+
+builtinStdlibForeignDecls :: [ForeignDecl]
+builtinStdlibForeignDecls =
+  [ builtinForeignDecl "textConcat" (TFunction [TList TStr] TStr)
+  , builtinForeignDecl "textJoin" (TFunction [TStr, TList TStr] TStr)
+  , builtinForeignDecl "textSplit" (TFunction [TStr, TStr] (TList TStr))
+  , builtinForeignDecl "pathJoin" (TFunction [TList TStr] TStr)
+  , builtinForeignDecl "pathDirname" (TFunction [TStr] TStr)
+  , builtinForeignDecl "pathBasename" (TFunction [TStr] TStr)
+  , builtinForeignDecl "fileExists" (TFunction [TStr] TBool)
+  , builtinForeignDecl "readFile" (TFunction [TStr] (TNamed resultTypeName))
+  ]
+
+builtinStdlibForeignDeclsForModule :: Module -> [ForeignDecl]
+builtinStdlibForeignDeclsForModule modl =
+  [ foreignDecl
+  | foreignDecl <- builtinStdlibForeignDecls
+  , moduleUsesBuiltinStdlibForeignDecl (foreignDeclName foreignDecl) modl
+  ]
+
+moduleUsesBuiltinStdlibForeignDecl :: Text -> Module -> Bool
+moduleUsesBuiltinStdlibForeignDecl name modl =
+  any (declUsesBuiltinStdlibForeignDecl name) (moduleDecls modl)
+
+declUsesBuiltinStdlibForeignDecl :: Text -> Decl -> Bool
+declUsesBuiltinStdlibForeignDecl name decl =
+  exprUsesBuiltinStdlibForeignDecl name (declBody decl)
+
+exprUsesBuiltinStdlibForeignDecl :: Text -> Expr -> Bool
+exprUsesBuiltinStdlibForeignDecl name expr =
+  case expr of
+    EVar _ _ ->
+      False
+    EInt _ _ ->
+      False
+    EString _ _ ->
+      False
+    EBool _ _ ->
+      False
+    EList _ values ->
+      any (exprUsesBuiltinStdlibForeignDecl name) values
+    EReturn _ value ->
+      exprUsesBuiltinStdlibForeignDecl name value
+    EBlock _ body ->
+      exprUsesBuiltinStdlibForeignDecl name body
+    EEqual _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    ENotEqual _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    ELessThan _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    ELessThanOrEqual _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    EGreaterThan _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    EGreaterThanOrEqual _ left right ->
+      exprUsesBuiltinStdlibForeignDecl name left || exprUsesBuiltinStdlibForeignDecl name right
+    ECall _ fn args ->
+      callTargetsBuiltinStdlibForeignDecl name fn
+        || exprUsesBuiltinStdlibForeignDecl name fn
+        || any (exprUsesBuiltinStdlibForeignDecl name) args
+    ELet _ _ _ value body ->
+      exprUsesBuiltinStdlibForeignDecl name value || exprUsesBuiltinStdlibForeignDecl name body
+    EMutableLet _ _ _ value body ->
+      exprUsesBuiltinStdlibForeignDecl name value || exprUsesBuiltinStdlibForeignDecl name body
+    EAssign _ _ _ value body ->
+      exprUsesBuiltinStdlibForeignDecl name value || exprUsesBuiltinStdlibForeignDecl name body
+    EFor _ _ _ iterable loopBody body ->
+      exprUsesBuiltinStdlibForeignDecl name iterable
+        || exprUsesBuiltinStdlibForeignDecl name loopBody
+        || exprUsesBuiltinStdlibForeignDecl name body
+    EMatch _ subject branches ->
+      exprUsesBuiltinStdlibForeignDecl name subject || any (matchBranchUsesBuiltinStdlibForeignDecl name) branches
+    ERecord _ _ fields ->
+      any (exprUsesBuiltinStdlibForeignDecl name . recordFieldExprValue) fields
+    EFieldAccess _ subject _ ->
+      exprUsesBuiltinStdlibForeignDecl name subject
+    EDecode _ _ value ->
+      exprUsesBuiltinStdlibForeignDecl name value
+    EEncode _ value ->
+      exprUsesBuiltinStdlibForeignDecl name value
+
+callTargetsBuiltinStdlibForeignDecl :: Text -> Expr -> Bool
+callTargetsBuiltinStdlibForeignDecl targetName fn =
+  case fn of
+    EVar _ name ->
+      name == targetName
+    _ ->
+      False
+
+matchBranchUsesBuiltinStdlibForeignDecl :: Text -> MatchBranch -> Bool
+matchBranchUsesBuiltinStdlibForeignDecl name branch =
+  exprUsesBuiltinStdlibForeignDecl name (matchBranchBody branch)
+
 builtinRecordDecls :: [RecordDecl]
 builtinRecordDecls =
   [ builtinRecordDecl principalTypeName [("id", TStr)]
@@ -646,7 +753,10 @@ checkModule modl = do
       foreignDecls = moduleForeignDecls modl
       routeDecls = moduleRouteDecls modl
       decls = moduleDecls modl
-      builtinTypeDecls = builtinTypeDeclsForModule modl
+      builtinForeignDecls = builtinStdlibForeignDeclsForModule modl
+      allForeignDecls = builtinForeignDecls <> foreignDecls
+      moduleWithBuiltinForeignDecls = modl {moduleForeignDecls = allForeignDecls}
+      builtinTypeDecls = builtinTypeDeclsForModule moduleWithBuiltinForeignDecls
       allTypeDecls = builtinTypeDecls <> typeDecls
 
   ensureUniqueTypeDecls typeDecls
@@ -687,15 +797,15 @@ checkModule modl = do
   let typeDeclEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- allTypeDecls]
       recordDeclEnv = Map.union builtinRecordDeclEnv (Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls])
   ensureDistinctNamedTypes typeDeclEnv recordDecls
-  ensureKnownTypes typeDeclEnv recordDeclEnv allTypeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls
+  ensureKnownTypes typeDeclEnv recordDeclEnv allTypeDecls recordDecls workflowDecls allForeignDecls decls hookDecls toolDecls routeDecls
 
   constructorEnv <- buildConstructorEnv allTypeDecls
-  ensureUniqueForeignDecls foreignDecls decls constructorEnv
-  ensureUniqueDecls decls foreignDecls constructorEnv
+  ensureUniqueForeignDecls allForeignDecls decls constructorEnv
+  ensureUniqueDecls decls allForeignDecls constructorEnv
   ensureUniqueRoutes routeDecls
   mapM_ ensureUniqueParams decls
 
-  let foreignDeclEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDecl) | foreignDecl <- foreignDecls]
+  let foreignDeclEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDecl) | foreignDecl <- allForeignDecls]
       ctx =
         ModuleContext
           { contextTypeDeclEnv = typeDeclEnv
@@ -708,7 +818,7 @@ checkModule modl = do
           }
 
   declTypeEnv <- inferDeclTypes ctx decls
-  let foreignTypeEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDeclType foreignDecl) | foreignDecl <- foreignDecls]
+  let foreignTypeEnv = Map.fromList [(foreignDeclName foreignDecl, foreignDeclType foreignDecl) | foreignDecl <- allForeignDecls]
       termEnv = Map.unions [declTypeEnv, foreignTypeEnv, Map.map constructorInfoType constructorEnv]
 
   traverse_ (checkHookDecl ctx termEnv) hookDecls
@@ -746,7 +856,7 @@ checkModule modl = do
             )
             projectionDecls
             projectionRecordDecls
-      , coreModuleForeignDecls = foreignDecls
+      , coreModuleForeignDecls = allForeignDecls
       , coreModuleRouteDecls = routeDecls
       , coreModuleDecls = coreDecls
       }

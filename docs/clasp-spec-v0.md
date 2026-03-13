@@ -47,6 +47,7 @@ It includes:
 - Compiler-known `Prompt` primitives and typed prompt-building functions for AI-facing prompt composition
 - Generated JavaScript page modules that export static-asset, head, and shared style-bundle metadata for compiler-known page/view output
 - Compiler-known `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` primitives for shared application identity data
+- Compiler-known self-hosting stdlib helpers for text joining/splitting, path shaping, and file-loading host calls
 - Minimal name resolution and typechecking
 - A typed core IR produced by checking
 - A stable AIR graph with compiler-known node identity and JSON serialization for tooling/replay
@@ -85,6 +86,19 @@ The current `module Main`-style surface should be treated as provisional. Future
 The v0 compiler now implements a first slice of those features through nominal sum types and constructor-based match expressions, but the design should still assume a broader static-semantics story later.
 
 `Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`. Modules may use `Result`, `Ok`, and `Err` without declaring the type locally.
+
+The self-hosting slice also reserves a small compiler-known stdlib surface:
+
+- `textConcat : [Str] -> Str`
+- `textJoin : Str -> [Str] -> Str`
+- `textSplit : Str -> Str -> [Str]`
+- `pathJoin : [Str] -> Str`
+- `pathDirname : Str -> Str`
+- `pathBasename : Str -> Str`
+- `fileExists : Str -> Bool`
+- `readFile : Str -> Result`
+
+The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime.
 
 ## Design Constraints
 

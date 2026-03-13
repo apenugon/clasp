@@ -1189,6 +1189,20 @@ checkerTests =
                     assertFailure ("expected checked Result match expression, got " <> show other)
               Nothing ->
                 assertFailure "expected unwrap declaration"
+    , testCase "typechecks compiler-known self-hosting stdlib helpers" $
+        case checkSource "compiler-stdlib" compilerStdlibSource of
+          Left err ->
+            assertFailure ("expected compiler stdlib source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
+            assertBool "expected textJoin builtin" ("textJoin" `elem` foreignNames)
+            assertBool "expected pathJoin builtin" ("pathJoin" `elem` foreignNames)
+            assertBool "expected readFile builtin" ("readFile" `elem` foreignNames)
+            case find ((== "loadSummary") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "loadSummary type" (TFunction [TStr] TStr) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected loadSummary declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -1209,6 +1223,17 @@ checkerTests =
             case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
               Just decl ->
                 assertEqual "main type" (TList (TNamed "User")) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected main declaration"
+    , testCase "typechecks the compiler stdlib example file" $ do
+        source <- readExampleSource "compiler-stdlib.clasp"
+        case checkSource "examples/compiler-stdlib.clasp" source of
+          Left err ->
+            assertFailure ("expected compiler stdlib example source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "main type" TStr (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
     , testCase "typechecks equality operators for primitive values" $
@@ -2319,6 +2344,40 @@ compileTests =
                 , "console.log(compiledModule.unwrap(compiledModule.Err(\"problem\")));"
                 ]
             assertEqual "expected Result runtime output" "done\nproblem" runtimeOutput
+    , testCase "compile emits compiler-known self-hosting stdlib helpers and evaluates them end-to-end" $
+        case compileSource "compiler-stdlib" compilerStdlibSource of
+          Left err ->
+            assertFailure ("expected compiler stdlib compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected textJoin host binding" ("\"textJoin\"" `T.isInfixOf` emitted)
+            assertBool "expected pathJoin builtin runtime" ("pathJoin(parts) {" `T.isInfixOf` emitted)
+            assertBool "expected readFile host binding" ("\"readFile\"" `T.isInfixOf` emitted)
+            let compiledPath = "dist/compiler-stdlib.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "globalThis.__claspRuntime = {"
+                , "  fileExists(path) { return path === 'fixtures/ok.txt'; },"
+                , "  readFile(path) {"
+                , "    return path === 'fixtures/ok.txt' ? compiledModule.Ok('ready') : compiledModule.Err('missing');"
+                , "  }"
+                , "};"
+                , "console.log(JSON.stringify({"
+                , "  main: compiledModule.main,"
+                , "  split: compiledModule.splitSummary('alpha:beta'),"
+                , "  existsOk: compiledModule.filePresent('fixtures/ok.txt'),"
+                , "  existsMissing: compiledModule.filePresent('fixtures/missing.txt'),"
+                , "  readOk: compiledModule.loadSummary('fixtures/ok.txt'),"
+                , "  readMissing: compiledModule.loadSummary('fixtures/missing.txt')"
+                , "}));"
+                ]
+            assertEqual
+              "expected compiler stdlib runtime output"
+              "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
+              runtimeOutput
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->
@@ -4436,6 +4495,30 @@ builtinResultSource =
     , ""
     , "main : Str"
     , "main = unwrap (Ok \"done\")"
+    ]
+
+compilerStdlibSource :: Text
+compilerStdlibSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "joinedPath : Str"
+    , "joinedPath = pathJoin [\"src\", \"Clasp\", \"Checker.hs\"]"
+    , ""
+    , "splitSummary : Str -> [Str]"
+    , "splitSummary value = textSplit value \":\""
+    , ""
+    , "filePresent : Str -> Bool"
+    , "filePresent path = fileExists path"
+    , ""
+    , "loadSummary : Str -> Str"
+    , "loadSummary path = match readFile path {"
+    , "  Ok contents -> textJoin \"::\" [pathBasename path, contents],"
+    , "  Err message -> message"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = textJoin \" :: \" [pathDirname joinedPath, pathBasename joinedPath]"
     ]
 
 recordSource :: Text
