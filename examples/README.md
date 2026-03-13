@@ -30,6 +30,7 @@ This directory has two kinds of examples:
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
 - [lead-app/client-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/client-demo.mjs): exercises the lead app's generated JSON route clients against the compiled route surface with no handwritten request codecs
 - [lead-app/mobile-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/mobile-demo.mjs): a mobile-adjacent projection of the lead inbox that reuses the same compiled Clasp routes and business logic through the React Native bridge
+- [lead-app/workflow-demo.mjs](/home/akul/DevProjects/synthspeak/examples/lead-app/workflow-demo.mjs): drives a workflow-backed lead follow-up path that starts from the app's typed API routes and continues in the worker runtime
 - [support-console/Main.clasp](/home/akul/DevProjects/synthspeak/examples/support-console/Main.clasp): classified customer data, policy-approved projections, typed page flows, auth identity data, and provider/storage structured outputs validated against declared schemas
 - [support-console/demo.mjs](/home/akul/DevProjects/synthspeak/examples/support-console/demo.mjs): exercises the dashboard page, projected customer export route, and typed reply-preview form against runtime-installed provider and storage bindings
 - [release-gate/Main.clasp](/home/akul/DevProjects/synthspeak/examples/release-gate/Main.clasp): release review pages, typed redirects, audit envelopes with auth and resource identity primitives, and a provider-backed decision boundary
@@ -112,4 +113,10 @@ Project the same app into a mobile-friendly model after compiling `Main.clasp` t
 
 ```sh
 node examples/lead-app/mobile-demo.mjs examples/lead-app/Main.js
+```
+
+Drive the lead app's workflow-backed follow-up path after compiling `Main.clasp` to `Main.js`:
+
+```sh
+node examples/lead-app/workflow-demo.mjs examples/lead-app/Main.js
 ```

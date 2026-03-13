@@ -3789,6 +3789,32 @@ compileTests =
               "expected mobile demo to project shared lead flows into a stable native model"
               "{\"platform\":\"react-native\",\"landingTitle\":\"Lead inbox\",\"landingFormAction\":\"/leads\",\"landingFieldNames\":[\"company\",\"contact\",\"budget\",\"segment\"],\"createdTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: new\",\"Add an internal note before handing this lead off.\",\"Review note\",\"Back to inbox\"],\"reviewedTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: reviewed\",\"Ready for field pilot\",\"Review note\",\"Back to inbox\"]}"
               runtimeOutput
+    , testCase "lead app workflow demo drives a worker-backed follow-up path from the typed api routes" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-workflow.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "workflow-demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected workflow demo to continue the lead app flow in the worker runtime"
+                  "{\"workflowCount\":1,\"workflowName\":\"LeadFollowUpFlow\",\"checkpointLeadId\":\"lead-3\",\"createdLeadId\":\"lead-3\",\"createdPriority\":\"High\",\"preparedStatus\":\"delivered\",\"preparedResult\":\"schedule-discovery\",\"reviewedStatus\":\"Reviewed\",\"finalNextAction\":\"await-reply\",\"finalTouchCount\":2,\"finalReviewNote\":\"Schedule executive discovery\",\"remainingMailboxSize\":0}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("lead-app workflow demo script failed:\n" <> stderrText)
     , testCase "lead inbox app emits machine-readable ui, navigation, and action graphs" $ do
         result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
         case result of

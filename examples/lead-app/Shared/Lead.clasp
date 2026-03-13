@@ -38,6 +38,17 @@ record LeadRecord = {
   reviewNote : Str
 }
 
+record LeadFollowUpState = {
+  leadId : Str,
+  company : Str,
+  priority : LeadPriority,
+  segment : LeadSegment,
+  reviewStatus : ReviewStatus,
+  reviewNote : Str,
+  nextAction : Str,
+  touchCount : Int
+}
+
 record InboxSnapshot = {
   headline : Str,
   primaryLeadLabel : Str,

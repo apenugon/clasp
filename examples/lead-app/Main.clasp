@@ -27,6 +27,8 @@ secondaryLead req = decode LeadRecord (loadSecondaryLead req)
 reviewedLead : LeadReview -> LeadRecord
 reviewedLead review = decode LeadRecord (reviewLead review)
 
+workflow LeadFollowUpFlow = { state : LeadFollowUpState }
+
 landingPage : Empty -> Page
 landingPage req = renderLandingPage (inboxSnapshot req)
 
