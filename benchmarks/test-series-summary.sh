@@ -87,6 +87,12 @@ write_result "2026-03-01T10-10-56.000Z--clasp-control-plane--codex.json" "clasp-
 write_result "2026-03-01T10-10-57.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:57.000Z" 90 120 95 true 0
 write_result "2026-03-01T10-10-58.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-1" "2026-03-01T10:10:58.000Z" 150 165 145 false 1
 write_result "2026-03-01T10-10-59.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:59.000Z" 170 170 150 false 1
+write_result "2026-03-01T10-11-01.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:01.000Z" 180 160 150 true 0
+write_result "2026-03-01T10-11-02.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:02.000Z" 220 190 170 true 0
+write_result "2026-03-01T10-11-03.000Z--clasp-lead-rejection--codex.json" "clasp-lead-rejection" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:03.000Z" 140 120 100 true 0
+write_result "2026-03-01T10-11-04.000Z--ts-lead-rejection--codex.json" "ts-lead-rejection" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:04.000Z" 200 145 130 true 0
+write_result "2026-03-01T10-11-05.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:05.000Z" 160 130 120 true 0
+write_result "2026-03-01T10-11-06.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:06.000Z" 210 155 140 true 0
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 write_result "2026-03-01T10-12-05.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:05.000Z" 80 90 82 true 0
@@ -201,6 +207,23 @@ printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseMedianTokens: 125'
 printf '%s\n' "$syntax_summary_output" | grep -Fq '    tokenDelta: -36'
 printf '%s\n' "$syntax_summary_output" | grep -Fq '    uncachedTokenDelta: -32'
 
+public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
+printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
+printf '%s\n' "$public_app_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpublic-app'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    taskPairs: 3'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspCompletedTasks: 3/3'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsCompletedTasks: 3/3'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspRunPassRate: 100%'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsRunPassRate: 100%'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    passRateDeltaPct: 0'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspSuiteTimeToGreenMs: 480'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsSuiteTimeToGreenMs: 630'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    timeToGreenDeltaMs: -150'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspSuiteMedianTokens: 410'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsSuiteMedianTokens: 490'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    tokenDelta: -80'
+printf '%s\n' "$public_app_summary_output" | grep -Fq '    uncachedTokenDelta: -70'
+
 durable_workflow_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \
     --task-id clasp-durable-workflow \
@@ -260,6 +283,18 @@ printf '%s\n' "$syntax_command_log" | grep -Fq 'run clasp-syntax-verbose'
 printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
 printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
 
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" app 2 public-app gpt-5.4
+app_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-priority'
+printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-priority'
+printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-rejection'
+printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-rejection'
+printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-segment'
+printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-segment'
+printf '%s\n' "$app_command_log" | grep -Fq -- '--notes public-app-1'
+printf '%s\n' "$app_command_log" | grep -Fq -- '--notes public-app-2'
+
 claude_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness claude-code --model sonnet --notes claude-a)"
 printf '%s\n' "$claude_summary_output" | grep -Fq $'clasp-lead-priority\tclaude-code\tsonnet'
 printf '%s\n' "$claude_summary_output" | grep -Fq $'ts-lead-priority\tclaude-code\tsonnet'
@@ -291,6 +326,20 @@ printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--harness claude-code'
 printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--model sonnet'
 printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
 printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-claude-series.sh" app 2 public-app sonnet
+claude_app_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-priority'
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-priority'
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-rejection'
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-rejection'
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-segment'
+printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-segment'
+printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--harness claude-code'
+printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--model sonnet'
+printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--notes public-app-1'
+printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--notes public-app-2'
 
 claude_workspace="$project_root/benchmarks/workspaces/claude-usage-check"
 rm -rf "$claude_workspace"

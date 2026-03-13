@@ -69,6 +69,14 @@ For long-running workflow behavior, the suite also includes `clasp-durable-workf
 
 `Raw Repo` is the primary benchmark scorecard. That is the most realistic mode because a real harness has to inspect and understand the environment. `File-Hinted` and `Oracle` are supporting diagnostic modes used to explain *why* one side won, not to replace the main benchmark.
 
+For public scorecards, the main comparison should roll up the mirrored app task trio:
+
+- `clasp-lead-priority` vs `ts-lead-priority`
+- `clasp-lead-rejection` vs `ts-lead-rejection`
+- `clasp-lead-segment` vs `ts-lead-segment`
+
+`node benchmarks/run-benchmark.mjs summarize` now emits this roll-up as `main-public-app-comparison`, with completed-task counts plus suite-level time-to-green and token totals for `Clasp` versus `TypeScript`.
+
 ## Publication-Grade Fairness
 
 The most defensible benchmark publication mode should freeze a full benchmark bundle:
@@ -165,6 +173,13 @@ Run the mirrored repeated trust-boundary rejection series for both languages:
 ```sh
 bash benchmarks/run-codex-series.sh lead-rejection 5 rejection-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes rejection-1
+```
+
+Run the full mirrored app benchmark that the public scorecard should center on:
+
+```sh
+bash benchmarks/run-codex-series.sh app 5 public-app-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes public-app-1
 ```
 
 Run the mirrored repeated `lead-segment` series for both languages:

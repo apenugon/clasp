@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "usage: $0 <task-id|control-plane|lead-priority|lead-rejection|lead-segment|syntax-form> <count> <note-prefix> [model]" >&2
+  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|syntax-form> <count> <note-prefix> [model]" >&2
   exit 1
 fi
 
@@ -13,6 +13,16 @@ model="${4:-sonnet}"
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "$task_id" in
+  app)
+    task_ids=(
+      "clasp-lead-priority"
+      "ts-lead-priority"
+      "clasp-lead-rejection"
+      "ts-lead-rejection"
+      "clasp-lead-segment"
+      "ts-lead-segment"
+    )
+    ;;
   control-plane)
     task_ids=(
       "clasp-control-plane"

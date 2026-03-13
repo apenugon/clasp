@@ -46,6 +46,25 @@ const comparisonTaskFamilies = [
     rightLabel: "verbose"
   }
 ];
+const publicAppBenchmark = {
+  comparisonLabel: "main-public-app-comparison",
+  taskPairs: [
+    {
+      leftTaskId: "clasp-lead-priority",
+      rightTaskId: "ts-lead-priority"
+    },
+    {
+      leftTaskId: "clasp-lead-rejection",
+      rightTaskId: "ts-lead-rejection"
+    },
+    {
+      leftTaskId: "clasp-lead-segment",
+      rightTaskId: "ts-lead-segment"
+    }
+  ],
+  leftLabel: "clasp",
+  rightLabel: "ts"
+};
 
 async function main() {
   const [command, maybeTaskId, ...rest] = process.argv.slice(2);
@@ -518,6 +537,48 @@ async function summarizeCommand(args) {
       );
     }
   }
+
+  const publicAppComparisons = buildPublicAppComparisons(filtered);
+  if (publicAppComparisons.length > 0) {
+    console.log(publicAppBenchmark.comparisonLabel);
+
+    for (const comparison of publicAppComparisons) {
+      console.log(
+        `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
+      );
+      console.log(`    taskPairs: ${comparison.taskPairs}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "CompletedTasks")}: ${comparison.right.completedTasks}/${comparison.taskPairs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "RunPassRate")}: ${comparison.left.runPassRate}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "RunPassRate")}: ${comparison.right.runPassRate}`
+      );
+      console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteTimeToGreenMs")}: ${comparison.left.suiteTimeToGreenMs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteTimeToGreenMs")}: ${comparison.right.suiteTimeToGreenMs}`
+      );
+      console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteMedianTokens")}: ${comparison.left.suiteMedianTokens}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteMedianTokens")}: ${comparison.right.suiteMedianTokens}`
+      );
+      console.log(`    tokenDelta: ${comparison.tokenDelta}`);
+      console.log(
+        `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
+      );
+    }
+  }
 }
 
 function summarizeGroup(groupResults) {
@@ -537,6 +598,7 @@ function summarizeGroup(groupResults) {
 
   return {
     runs: ordered.length,
+    passedRuns: passed,
     passRate: `${(passed / ordered.length * 100).toFixed(0)}%`,
     passRatePct: passed / ordered.length * 100,
     timeToGreenMs,
@@ -553,6 +615,93 @@ function buildTaskFamilyComparisons(results) {
       comparisons: buildTaskComparisons(results, family)
     }))
     .filter((section) => section.comparisons.length > 0);
+}
+
+function buildPublicAppComparisons(results) {
+  const relevantTaskIds = new Set(
+    publicAppBenchmark.taskPairs.flatMap((pair) => [pair.leftTaskId, pair.rightTaskId])
+  );
+  const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
+  const grouped = groupBy(relevant, (result) => {
+    const series = parseSeriesRun(result.notes).series ?? "";
+    return [result.harness, result.model, series].join("\t");
+  });
+  const comparisons = [];
+
+  for (const [groupKey, groupResults] of grouped.entries()) {
+    const [harness, model, series] = groupKey.split("\t");
+    const byTask = groupBy(groupResults, (result) => result.taskId);
+    const leftTaskSummaries = [];
+    const rightTaskSummaries = [];
+
+    for (const pair of publicAppBenchmark.taskPairs) {
+      const leftResults = byTask.get(pair.leftTaskId);
+      const rightResults = byTask.get(pair.rightTaskId);
+
+      if (!leftResults || !rightResults) {
+        leftTaskSummaries.length = 0;
+        rightTaskSummaries.length = 0;
+        break;
+      }
+
+      leftTaskSummaries.push(summarizeGroup(leftResults));
+      rightTaskSummaries.push(summarizeGroup(rightResults));
+    }
+
+    if (leftTaskSummaries.length !== publicAppBenchmark.taskPairs.length) {
+      continue;
+    }
+
+    const left = summarizeBenchmarkSuite(leftTaskSummaries);
+    const right = summarizeBenchmarkSuite(rightTaskSummaries);
+    comparisons.push({
+      harness,
+      model,
+      series: series || "(all-runs)",
+      taskPairs: publicAppBenchmark.taskPairs.length,
+      leftLabel: publicAppBenchmark.leftLabel,
+      rightLabel: publicAppBenchmark.rightLabel,
+      left,
+      right,
+      passRateDeltaPct: Math.round(left.runPassRatePct - right.runPassRatePct),
+      timeToGreenDeltaMs:
+        typeof left.suiteTimeToGreenMs === "number" && typeof right.suiteTimeToGreenMs === "number"
+          ? left.suiteTimeToGreenMs - right.suiteTimeToGreenMs
+          : "n/a",
+      tokenDelta: left.suiteMedianTokens - right.suiteMedianTokens,
+      uncachedTokenDelta:
+        left.suiteMedianUncachedTokens - right.suiteMedianUncachedTokens
+    });
+  }
+
+  return comparisons.sort((left, right) =>
+    [left.harness, left.model, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.series].join("\t")
+    )
+  );
+}
+
+function summarizeBenchmarkSuite(taskSummaries) {
+  const totalRuns = taskSummaries.reduce((sum, summary) => sum + summary.runs, 0);
+  const totalPassedRuns = taskSummaries.reduce((sum, summary) => sum + summary.passedRuns, 0);
+  const completedTasks = taskSummaries.filter(
+    (summary) => typeof summary.timeToGreenMs === "number"
+  ).length;
+  const suiteTimeToGreenMs = completedTasks === taskSummaries.length
+    ? taskSummaries.reduce((sum, summary) => sum + summary.timeToGreenMs, 0)
+    : "n/a";
+
+  return {
+    completedTasks,
+    runPassRate: `${(totalPassedRuns / totalRuns * 100).toFixed(0)}%`,
+    runPassRatePct: totalPassedRuns / totalRuns * 100,
+    suiteTimeToGreenMs,
+    suiteMedianTokens: taskSummaries.reduce((sum, summary) => sum + summary.medianTokens, 0),
+    suiteMedianUncachedTokens: taskSummaries.reduce(
+      (sum, summary) => sum + summary.medianUncachedTokens,
+      0
+    )
+  };
 }
 
 function buildTaskComparisons(results, family) {
