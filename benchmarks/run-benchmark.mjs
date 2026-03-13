@@ -625,8 +625,14 @@ function benchmarkEnv(task, workspace) {
     CLASP_PROJECT_ROOT: path.resolve("."),
     CLASP_BENCHMARK_ROOT: benchmarkRoot,
     CLASP_BENCHMARK_TASK_ID: task.id,
-    CLASP_BENCHMARK_WORKSPACE: workspace
+    CLASP_BENCHMARK_WORKSPACE: workspace,
+    CLASP_APP_FIXTURE_SEED: resolveFixtureSeed(task.id)
   };
+}
+
+function resolveFixtureSeed(taskId) {
+  const suppliedSeed = process.env.CLASP_APP_FIXTURE_SEED;
+  return suppliedSeed && suppliedSeed.length > 0 ? suppliedSeed : taskId;
 }
 
 function resolveWorkspace(taskId, suppliedWorkspace) {

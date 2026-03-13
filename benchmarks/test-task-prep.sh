@@ -66,6 +66,58 @@ assert_file_exists() {
   fi
 }
 
+check_fixture_seed_override() {
+  local task_id="fixture-seed-env-check"
+  local task_dir="$project_root/benchmarks/tasks/$task_id"
+  local override_workspace="$workspace_root/$task_id-override"
+  local fallback_workspace="$workspace_root/$task_id-fallback"
+
+  rm -rf "$task_dir" "$override_workspace" "$fallback_workspace"
+  mkdir -p "$task_dir/repo"
+
+  cat <<'JSON' >"$task_dir/task.json"
+{
+  "id": "fixture-seed-env-check",
+  "title": "Fixture seed env check",
+  "suite": "harness-regression",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [
+    ["python3", "-c", "from pathlib import Path; import os; Path('prepare-seed.txt').write_text(os.environ['CLASP_APP_FIXTURE_SEED'] + '\\n', encoding='utf8')"]
+  ],
+  "verify": ["python3", "-c", "from pathlib import Path; import os, sys; Path('verify-seed.txt').write_text(os.environ['CLASP_APP_FIXTURE_SEED'] + '\\n', encoding='utf8'); sys.exit(0 if os.environ['CLASP_APP_FIXTURE_SEED'] == Path('expected-seed.txt').read_text(encoding='utf8').strip() else 1)"]
+}
+JSON
+
+  cat <<'EOF' >"$task_dir/prompt.md"
+Fixture seed env regression.
+EOF
+
+  cat <<'EOF' >"$task_dir/repo/expected-seed.txt"
+override-seed
+EOF
+
+  CLASP_APP_FIXTURE_SEED="override-seed" \
+    node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$override_workspace" >/dev/null
+  assert_contains "$override_workspace/prepare-seed.txt" "override-seed"
+
+  CLASP_APP_FIXTURE_SEED="override-seed" \
+    node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$override_workspace" --harness prep-check --model local >/dev/null
+  assert_contains "$override_workspace/verify-seed.txt" "override-seed"
+
+  printf '%s\n' "$task_id" >"$task_dir/repo/expected-seed.txt"
+  CLASP_APP_FIXTURE_SEED="" \
+    node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$fallback_workspace" >/dev/null
+  assert_contains "$fallback_workspace/prepare-seed.txt" "$task_id"
+
+  CLASP_APP_FIXTURE_SEED="" \
+    node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$fallback_workspace" --harness prep-check --model local >/dev/null
+  assert_contains "$fallback_workspace/verify-seed.txt" "$task_id"
+
+  rm -rf "$task_dir" "$override_workspace" "$fallback_workspace"
+}
+
 check_product_only_clasp_solution() {
   local task_id="clasp-lead-segment"
   local workspace="$workspace_root/$task_id-product-only"
@@ -123,6 +175,7 @@ check_incomplete_task ts-control-plane
 check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
 check_nested_clasp_benchmark_prep
+check_fixture_seed_override
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'import { createServer } from "../server.mjs";'
