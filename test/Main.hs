@@ -160,6 +160,7 @@ tests =
     , contextTests
     , diagnosticTests
     , lowerTests
+    , docsTests
     , compileTests
     ]
 
@@ -2213,6 +2214,21 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered auth identity declaration: " <> show other)
+    ]
+
+docsTests :: TestTree
+docsTests =
+  testGroup
+    "docs"
+    [ testCase "self-hosting plan defines the subset and bootstrap boundary" $ do
+        plan <- TIO.readFile ("docs" </> "clasp-self-hosting-plan.md")
+        assertBool "expected self-hosting subset section" ("## Self-Hosting Subset" `T.isInfixOf` plan)
+        assertBool "expected subset to include compiler-oriented language forms" ("- package-aware modules and imports" `T.isInfixOf` plan)
+        assertBool "expected subset to exclude app-facing runtime features" ("- workflow, worker, or durable execution features" `T.isInfixOf` plan)
+        assertBool "expected bootstrap boundary section" ("## Bootstrap And Primary Compiler Boundary" `T.isInfixOf` plan)
+        assertBool "expected bootstrap compiler responsibility" ("- remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass" `T.isInfixOf` plan)
+        assertBool "expected primary compiler responsibility" ("- staying within the self-hosting subset until `SH-010` promotes it to the default compiler path" `T.isInfixOf` plan)
+        assertBool "expected subset admission rule" ("A language or runtime feature enters the self-hosting subset only when:" `T.isInfixOf` plan)
     ]
 
 compileTests :: TestTree

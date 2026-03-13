@@ -40,6 +40,64 @@ Before a serious self-hosting push, the repo should already have:
 - deterministic build outputs where practical
 - enough standard-library support for text processing, collections, filesystem access, schema projections, and protocol-serving behavior
 
+## Self-Hosting Subset
+
+The first self-hosted compiler should target a deliberately narrow subset of `Clasp`.
+
+That subset is the part of the language needed to express compiler passes and compiler-support libraries without depending on app-facing runtime features.
+
+The initial self-hosting subset includes:
+
+- package-aware modules and imports
+- top-level value and function declarations
+- local `let`, block expressions, and ordinary control flow
+- `Int`, `Float`, `Bool`, `Str`, `List`, records, ADTs, and pattern matching
+- `Option`, `Result`, and generic data structures needed for compiler state
+- JSON, schema, and protocol projection support used to exchange compiler-owned artifacts
+- filesystem, path, and text helpers required by compiler loading, diagnostics, and emitters
+
+The initial self-hosting subset explicitly does not require compiler code itself to depend on:
+
+- page/view declarations
+- route handlers as the way compiler passes are composed internally
+- workflow, worker, or durable execution features
+- agent, policy, hook, tool-server, or secret-management declarations
+- foreign-package interop as a required way to implement core compiler passes
+- native-backend-only capabilities
+
+Those surfaces still need to be compiled correctly for user programs, but they are outside the minimum language/runtime surface the compiler implementation may rely on before hosted self-hosting is established.
+
+## Bootstrap And Primary Compiler Boundary
+
+The bootstrap compiler and the primary compiler should have different responsibilities during the hosted self-hosting transition.
+
+The bootstrap compiler implementation in Haskell is responsible for:
+
+- remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass
+- supporting the self-hosting subset before the `Clasp` compiler is allowed to depend on it
+- serving as the semantic reference when the hosted compiler disagrees with expected output
+- compiling the `Clasp` compiler to the first runnable JS/Bun artifact
+
+The primary compiler implementation in `Clasp` is responsible for:
+
+- owning all newly ported compiler passes once their stage checks are stable
+- staying within the self-hosting subset until `SH-010` promotes it to the default compiler path
+- producing the same typed core, lowered IR, diagnostics, and emitted JavaScript expected from the bootstrap path
+- becoming the default implementation only after reproducibility and compatibility checks are reliable
+
+The practical boundary is:
+
+- new compiler logic should land in `Clasp` once the needed subset features and library support exist
+- new language features for end users still land in the Haskell compiler first if the `Clasp` compiler cannot yet compile or exercise them
+- the Haskell compiler remains the compatibility oracle and bootstrap path, not the place for ongoing duplicate feature work, once a pass has moved across successfully
+
+A language or runtime feature enters the self-hosting subset only when:
+
+- the Haskell bootstrap compiler already supports it
+- the runtime or standard-library contract it needs is stable enough for compiler code
+- regression coverage exists for both direct behavior and stage/compatibility behavior
+- depending on that feature reduces overall bootstrap debt instead of increasing it
+
 ## Migration Order
 
 ### Stage 1: Compiler-Support Library
