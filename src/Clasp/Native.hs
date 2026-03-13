@@ -2,6 +2,8 @@
 
 module Clasp.Native
   ( NativeAbi (..)
+  , NativeAllocationModel (..)
+  , NativeAllocationRegion (..)
   , NativeBuiltinLayout (..)
   , NativeCompareOp (..)
   , NativeConstructorLayout (..)
@@ -16,6 +18,8 @@ module Clasp.Native
   , NativeLiteral (..)
   , NativeMatchBranch (..)
   , NativeModule (..)
+  , NativeOwnershipRule (..)
+  , NativeMemoryStrategy (..)
   , NativeMutability (..)
   , NativeRecordLayout (..)
   , NativeSlotLayout (..)
@@ -54,10 +58,37 @@ data NativeModule = NativeModule
 data NativeAbi = NativeAbi
   { nativeAbiVersion :: Text
   , nativeAbiWordBytes :: Int
+  , nativeAbiMemoryStrategy :: NativeMemoryStrategy
+  , nativeAbiAllocationModel :: NativeAllocationModel
+  , nativeAbiOwnershipRules :: [NativeOwnershipRule]
   , nativeAbiBuiltinLayouts :: [NativeBuiltinLayout]
   , nativeAbiRecordLayouts :: [NativeRecordLayout]
   , nativeAbiVariantLayouts :: [NativeVariantLayout]
   }
+  deriving (Eq, Show)
+
+data NativeMemoryStrategy
+  = NativeReferenceCounting
+  deriving (Eq, Show)
+
+data NativeAllocationRegion
+  = NativeStackRegion
+  | NativeHeapRegion
+  | NativeStaticRegion
+  deriving (Eq, Show)
+
+data NativeAllocationModel = NativeAllocationModel
+  { nativeAllocationImmediateRegion :: NativeAllocationRegion
+  , nativeAllocationHandleRegion :: NativeAllocationRegion
+  , nativeAllocationGlobalRegion :: NativeAllocationRegion
+  }
+  deriving (Eq, Show)
+
+data NativeOwnershipRule
+  = NativeCallerOwnsReturns
+  | NativeCalleeBorrowsArguments
+  | NativeAggregatesRetainHandleFields
+  | NativeGlobalsAreStaticRoots
   deriving (Eq, Show)
 
 data NativeLayoutStorage
@@ -214,6 +245,19 @@ buildNativeAbi modl =
   NativeAbi
     { nativeAbiVersion = "clasp-native-v1"
     , nativeAbiWordBytes = 8
+    , nativeAbiMemoryStrategy = NativeReferenceCounting
+    , nativeAbiAllocationModel =
+        NativeAllocationModel
+          { nativeAllocationImmediateRegion = NativeStackRegion
+          , nativeAllocationHandleRegion = NativeHeapRegion
+          , nativeAllocationGlobalRegion = NativeStaticRegion
+          }
+    , nativeAbiOwnershipRules =
+        [ NativeCallerOwnsReturns
+        , NativeCalleeBorrowsArguments
+        , NativeAggregatesRetainHandleFields
+        , NativeGlobalsAreStaticRoots
+        ]
     , nativeAbiBuiltinLayouts = builtinLayouts
     , nativeAbiRecordLayouts = fmap (buildRecordLayout recordEnv typeEnv) recordDecls
     , nativeAbiVariantLayouts = fmap (buildVariantLayout recordEnv typeEnv) typeDecls

@@ -101,6 +101,8 @@ import Clasp.Lower
   )
 import Clasp.Native
   ( NativeAbi (..)
+  , NativeAllocationModel (..)
+  , NativeAllocationRegion (..)
   , NativeBuiltinLayout (..)
   , NativeCompareOp (..)
   , NativeConstructorLayout (..)
@@ -113,8 +115,10 @@ import Clasp.Native
   , NativeLayoutStorage (..)
   , NativeLiteral (..)
   , NativeMatchBranch (..)
+  , NativeMemoryStrategy (..)
   , NativeModule (..)
   , NativeMutability (..)
+  , NativeOwnershipRule (..)
   , NativeRecordLayout (..)
   , NativeSlotLayout (..)
   , NativeVariantLayout (..)
@@ -2525,6 +2529,24 @@ nativeTests =
             assertFailure ("expected native ABI lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right nativeMod -> do
             let abi = nativeModuleAbi nativeMod
+            assertEqual "memory strategy" NativeReferenceCounting (nativeAbiMemoryStrategy abi)
+            assertEqual
+              "allocation model"
+              ( NativeAllocationModel
+                  { nativeAllocationImmediateRegion = NativeStackRegion
+                  , nativeAllocationHandleRegion = NativeHeapRegion
+                  , nativeAllocationGlobalRegion = NativeStaticRegion
+                  }
+              )
+              (nativeAbiAllocationModel abi)
+            assertEqual
+              "ownership rules"
+              [ NativeCallerOwnsReturns
+              , NativeCalleeBorrowsArguments
+              , NativeAggregatesRetainHandleFields
+              , NativeGlobalsAreStaticRoots
+              ]
+              (nativeAbiOwnershipRules abi)
             case findBuiltinLayout "Str" (nativeAbiBuiltinLayouts abi) of
               Just layout -> do
                 assertEqual "string builtin storage" NativeHandleStorage (nativeBuiltinLayoutStorage layout)
@@ -2576,6 +2598,16 @@ nativeTests =
               let abi = nativeModuleAbi nativeMod
               assertEqual "abi version" "clasp-native-v1" (nativeAbiVersion abi)
               assertEqual "abi word bytes" 8 (nativeAbiWordBytes abi)
+              assertEqual "abi memory strategy" NativeReferenceCounting (nativeAbiMemoryStrategy abi)
+              assertEqual "handle allocation region" NativeHeapRegion (nativeAllocationHandleRegion (nativeAbiAllocationModel abi))
+              assertEqual
+                "abi ownership rules"
+                [ NativeCallerOwnsReturns
+                , NativeCalleeBorrowsArguments
+                , NativeAggregatesRetainHandleFields
+                , NativeGlobalsAreStaticRoots
+                ]
+                (nativeAbiOwnershipRules abi)
               case findVariantLayout "UiSurface" (nativeAbiVariantLayouts abi) of
                 Just layout -> do
                   assertEqual "ui surface max payload words" 1 (nativeVariantLayoutMaxPayloadWords layout)
@@ -2615,6 +2647,13 @@ docsTests =
         assertBool "expected bootstrap compiler responsibility" ("- remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass" `T.isInfixOf` plan)
         assertBool "expected primary compiler responsibility" ("- staying within the self-hosting subset until `SH-010` promotes it to the default compiler path" `T.isInfixOf` plan)
         assertBool "expected subset admission rule" ("A language or runtime feature enters the self-hosting subset only when:" `T.isInfixOf` plan)
+    , testCase "roadmap defines the first native memory-management model" $ do
+        roadmap <- TIO.readFile ("docs" </> "clasp-roadmap.md")
+        assertBool "expected native memory model section" ("### First Native Memory Model" `T.isInfixOf` roadmap)
+        assertBool "expected reference-counted handle strategy" ("- handle-backed values use deterministic reference counting" `T.isInfixOf` roadmap)
+        assertBool "expected stack and heap allocation split" ("- immediate values and activation records stay in stack storage while handle-backed values allocate in heap storage" `T.isInfixOf` roadmap)
+        assertBool "expected ownership rule for calls" ("- callees borrow incoming arguments and transfer returned handle ownership back to the caller" `T.isInfixOf` roadmap)
+        assertBool "expected ownership rule for globals" ("- module globals stay in static storage and act as permanent roots for shared runtime state" `T.isInfixOf` roadmap)
     ]
 
 compileTests :: TestTree

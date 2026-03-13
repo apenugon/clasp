@@ -302,6 +302,16 @@ Exit criteria:
 - The native runtime has an explicit memory model and object-lifetime story rather than quietly depending on ambient host GC behavior
 - Backend benchmarks can compare JS/Bun and native execution on the same language implementation
 
+### First Native Memory Model
+
+The first native runtime slice for compiler and backend workloads should stay explicit and narrow:
+
+- handle-backed values use deterministic reference counting
+- immediate values and activation records stay in stack storage while handle-backed values allocate in heap storage
+- module globals stay in static storage and act as permanent roots for shared runtime state
+- callees borrow incoming arguments and transfer returned handle ownership back to the caller
+- records, variants, and lists retain the handle-backed fields or payloads they capture so aggregate lifetimes stay explicit
+
 ## Phase 14: Native Storage With SQLite First
 
 - Add a language-native storage model with `SQLite` as the first backend
