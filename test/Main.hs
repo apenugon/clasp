@@ -2442,6 +2442,10 @@ compileTests =
           Left err ->
             assertFailure ("expected control-plane compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
+            assertBool "expected partial response schema metadata" ("responsePartialSchema: $claspPartialSchema_SearchResponse" `T.isInfixOf` emitted)
+            assertBool "expected partial response decoder" ("decodePartialResponse(value, path = \"result\")" `T.isInfixOf` emitted)
+            assertBool "expected partial response parser" ("parsePartialResponse(jsonText) { return $decodePartial_SearchResponse(jsonText); }" `T.isInfixOf` emitted)
+            assertBool "expected stream result helper" ("streamResult(initial = null) {" `T.isInfixOf` emitted)
             assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
             assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
             assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
@@ -2562,6 +2566,23 @@ compileTests =
             assertEqual
               "expected executable control-plane runtime result"
               "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              runtimeOutput
+    , testCase "typed schema streams merge nested partial results and require completion" $
+        case compileSource "streaming-partials" streamingToolSource of
+          Left err ->
+            assertFailure ("expected streaming partial source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected partial schema registry entry" ("partialSchema: $claspPartialSchema_StreamReply" `T.isInfixOf` emitted)
+            assertBool "expected partial record decoder" ("function $decodePartial_StreamReply(jsonText)" `T.isInfixOf` emitted)
+            assertBool "expected schema stream helper" ("stream(initial = null) { return $claspCreateSchemaStream(this, initial); }" `T.isInfixOf` emitted)
+            let compiledPath = "dist/test-projects/streaming-partials/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (streamingPartialRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected nested partial merge and completion checks"
+              "{\"parsedPartial\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12}},\"first\":{\"summary\":\"Ready\"},\"second\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12}},\"third\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12,\"completion\":7},\"done\":true},\"final\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12,\"completion\":7},\"done\":true},\"formattedPartial\":\"{\\\"usage\\\":{\\\"completion\\\":7}}\",\"incomplete\":\"completion must be an integer\"}"
               runtimeOutput
     , testCase "control-plane example drives one repo-level agent loop" $ do
         result <- compileEntry ("examples" </> "control-plane" </> "Main.clasp")
@@ -3582,6 +3603,27 @@ promptRuntimeScript compiledPath =
     , "}));"
     ]
 
+streamingPartialRuntimeScript :: FilePath -> Text
+streamingPartialRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const tool = compiledModule.__claspTools[0];"
+    , "const stream = tool.streamResult();"
+    , "const parsedPartial = tool.parsePartialResponse('{\"summary\":\"Ready\",\"usage\":{\"prompt\":12}}');"
+    , "const first = stream.push({ summary: 'Ready' });"
+    , "const second = stream.push({ usage: { prompt: 12 } });"
+    , "const third = stream.push({ usage: { completion: 7 }, done: true });"
+    , "const final = stream.result();"
+    , "const formattedPartial = tool.formatPartialResponse({ usage: { completion: 7 } });"
+    , "let incomplete = null;"
+    , "try {"
+    , "  tool.streamResult({ summary: 'Ready', usage: { prompt: 12 }, done: true }).finish();"
+    , "} catch (error) {"
+    , "  incomplete = error.message;"
+    , "}"
+    , "console.log(JSON.stringify({ parsedPartial, first, second, third, final, formattedPartial, incomplete }));"
+    ]
+
 runNodeModule :: FilePath -> IO Text
 runNodeModule compiledPath = do
   absolutePath <- makeAbsolute compiledPath
@@ -4304,6 +4346,26 @@ controlPlaneSource =
     , ""
     , "verifier repoChecks = searchRepo"
     , "mergegate trunk = repoChecks"
+    , ""
+    , "main = \"ok\""
+    ]
+
+streamingToolSource :: Text
+streamingToolSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SearchRequest = { query : Str }"
+    , "record TokenUsage = { prompt : Int, completion : Int }"
+    , "record StreamReply = { summary : Str, usage : TokenUsage, done : Bool }"
+    , ""
+    , "policy SupportDisclosure = public permits {"
+    , "  network \"api.openai.com\""
+    , "}"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool streamReply = RepoTools \"stream_reply\" SearchRequest -> StreamReply"
     , ""
     , "main = \"ok\""
     ]

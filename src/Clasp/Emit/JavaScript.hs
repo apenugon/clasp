@@ -5,9 +5,9 @@ module Clasp.Emit.JavaScript
   ) where
 
 import Data.Char (ord)
+import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.List (nub)
 import Clasp.Lower
   ( LowerDecl (..)
   , LowerFormField (..)
@@ -72,7 +72,7 @@ emitModule modl =
       <> emitListCodecHelpers (lowerModuleCodecTypes modl)
       <> emitRequestSchemaHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)
       <> concatMap emitTypeCodecHelpers (lowerModuleTypeDecls modl)
-      <> concatMap emitRecordCodecHelpers (lowerModuleRecordDecls modl)
+      <> concatMap (emitRecordCodecHelpers (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl)) (lowerModuleRecordDecls modl)
       <> emitForeignBindings (lowerModuleTypeDecls modl) (lowerModuleRecordDecls modl) (lowerModuleForeignDecls modl)
       <> emitNativeInteropExport (lowerModuleForeignDecls modl)
       <> snd (emitDecls 0 (lowerModuleDecls modl))
@@ -187,6 +187,62 @@ emitRuntimePrelude =
   , "    return Object.freeze(snapshot);"
   , "  }"
   , "  return value;"
+  , "}"
+  , ""
+  , "function $claspHasOwn(value, fieldName) {"
+  , "  return Object.prototype.hasOwnProperty.call(value, fieldName);"
+  , "}"
+  , ""
+  , "function $claspFieldSchema(field) {"
+  , "  if (field && typeof field === \"object\" && $claspHasOwn(field, \"schema\")) {"
+  , "    return field.schema;"
+  , "  }"
+  , "  return field;"
+  , "}"
+  , ""
+  , "function $claspMergePartialValue(schema, currentValue, patchValue) {"
+  , "  if (patchValue === undefined) {"
+  , "    return $claspSnapshotValue(currentValue);"
+  , "  }"
+  , "  const kind = schema && typeof schema === \"object\" ? schema.kind : null;"
+  , "  if (kind === \"record\" || kind === \"partial-record\") {"
+  , "    const currentObject = currentValue && typeof currentValue === \"object\" && !Array.isArray(currentValue) ? currentValue : {};"
+  , "    const patchObject = patchValue && typeof patchValue === \"object\" && !Array.isArray(patchValue) ? patchValue : {};"
+  , "    const next = { ...currentObject };"
+  , "    const fields = schema && typeof schema.fields === \"object\" && schema.fields !== null ? schema.fields : {};"
+  , "    for (const [fieldName, fieldSchema] of Object.entries(fields)) {"
+  , "      if ($claspHasOwn(patchObject, fieldName)) {"
+  , "        next[fieldName] = $claspMergePartialValue($claspFieldSchema(fieldSchema), currentObject[fieldName], patchObject[fieldName]);"
+  , "      }"
+  , "    }"
+  , "    return $claspSnapshotValue(next);"
+  , "  }"
+  , "  return $claspSnapshotValue(patchValue);"
+  , "}"
+  , ""
+  , "function $claspCreateSchemaStream(contract, initial = null) {"
+  , "  let current = initial === null || initial === undefined ? null : contract.fromHost(initial, \"stream.initial\");"
+  , "  return Object.freeze({"
+  , "    schema: contract.schema ?? null,"
+  , "    partialSchema: contract.partialSchema ?? contract.schema ?? null,"
+  , "    push(value, path = \"stream.chunk\") {"
+  , "      const partial = contract.fromPartialHost(value, path);"
+  , "      current = $claspMergePartialValue(this.partialSchema, current, partial);"
+  , "      return this.partial();"
+  , "    },"
+  , "    partial() {"
+  , "      return $claspSnapshotValue(current);"
+  , "    },"
+  , "    result(path = \"stream.result\") {"
+  , "      return contract.fromHost(current, path);"
+  , "    },"
+  , "    finish(value = undefined, path = \"stream.finish\") {"
+  , "      if (value !== undefined) {"
+  , "        current = contract.fromHost(value, path);"
+  , "      }"
+  , "      return this.result(path);"
+  , "    }"
+  , "  });"
   , "}"
   , ""
   , "function $claspWorkflowNormalizeMessage(message) {"
@@ -2092,6 +2148,7 @@ emitRequestSchemaHelpers typeDecls recordDecls =
   ]
     <> concatMap emitTypeSchema typeDecls
     <> concatMap emitRecordSchema recordDecls
+    <> concatMap emitPartialRecordSchema recordDecls
     <> [""]
   where
     emitTypeSchema typeDecl
@@ -2114,12 +2171,33 @@ emitRequestSchemaHelpers typeDecls recordDecls =
            , "};"
            ]
 
+    emitPartialRecordSchema recordDecl =
+      [ "const $claspPartialSchema_" <> recordDeclName recordDecl <> " = {"
+      , "  kind: \"partial-record\","
+      , "  name: " <> emitStringLiteral (recordDeclName recordDecl) <> ","
+      , "  fields: {"
+      ]
+        <> fmap emitPartialRecordFieldSchema (recordDeclFields recordDecl)
+        <> [ "  }"
+           , "};"
+           ]
+
     emitRecordFieldSchema fieldDecl =
       "    "
         <> recordFieldDeclName fieldDecl
         <> ": {"
         <> " schema: "
         <> emitRequestSchemaRef (recordFieldDeclType fieldDecl)
+        <> ", classification: "
+        <> emitStringLiteral (recordFieldDeclClassification fieldDecl)
+        <> " },"
+
+    emitPartialRecordFieldSchema fieldDecl =
+      "    "
+        <> recordFieldDeclName fieldDecl
+        <> ": {"
+        <> " schema: "
+        <> emitPartialSchemaRef typeDecls recordDecls (recordFieldDeclType fieldDecl)
         <> ", classification: "
         <> emitStringLiteral (recordFieldDeclClassification fieldDecl)
         <> " },"
@@ -2212,8 +2290,8 @@ emitTypeCodecHelpers typeDecl
           <> ";"
       ]
 
-emitRecordCodecHelpers :: RecordDecl -> [Text]
-emitRecordCodecHelpers recordDecl =
+emitRecordCodecHelpers :: [TypeDecl] -> [RecordDecl] -> RecordDecl -> [Text]
+emitRecordCodecHelpers typeDecls recordDecls recordDecl =
   [ "function " <> validateName <> "(value, path = \"value\") {"
   , "  const objectValue = $claspExpectObject(value, path);"
   ]
@@ -2231,16 +2309,43 @@ emitRecordCodecHelpers recordDecl =
     <> concatMap emitSerializeField (recordDeclFields recordDecl)
     <> [ "  return { " <> T.intercalate ", " (fmap (\fieldDecl -> recordFieldDeclName fieldDecl <> ": " <> recordFieldDeclName fieldDecl) (recordDeclFields recordDecl)) <> " };"
        , "}"
+       , "function " <> validatePartialName <> "(value, path = \"value\") {"
+       , "  const objectValue = $claspExpectObject(value, path);"
+       , "  const partialValue = {};"
+       ]
+    <> concatMap emitValidatePartialField (recordDeclFields recordDecl)
+    <> [ "  return partialValue;"
+       , "}"
+       , "function " <> validateInternalPartialName <> "(value, path = \"value\") {"
+       , "  const objectValue = $claspExpectObject(value, path);"
+       , "  const partialValue = {};"
+       ]
+    <> concatMap emitValidateInternalPartialField (recordDeclFields recordDecl)
+    <> [ "  return partialValue;"
+       , "}"
+       , "function " <> serializePartialName <> "(value) {"
+       , "  const partialValue = {};"
+       ]
+    <> concatMap emitSerializePartialField (recordDeclFields recordDecl)
+    <> [ "  return partialValue;"
+       , "}"
        , "function " <> decodeName <> "(jsonText) { return " <> validateName <> "(JSON.parse(jsonText), \"value\"); }"
        , "function " <> encodeName <> "(value) { return JSON.stringify(" <> serializeName <> "(" <> validateInternalName <> "(value, \"value\"))); }"
+       , "function " <> decodePartialName <> "(jsonText) { return " <> validatePartialName <> "(JSON.parse(jsonText), \"value\"); }"
+       , "function " <> encodePartialName <> "(value) { return JSON.stringify(" <> serializePartialName <> "(" <> validateInternalPartialName <> "(value, \"value\"))); }"
        , ""
        ]
   where
     validateName = "$validate_" <> recordDeclName recordDecl
     validateInternalName = "$validateInternal_" <> recordDeclName recordDecl
     serializeName = "$serialize_" <> recordDeclName recordDecl
+    validatePartialName = "$validatePartial_" <> recordDeclName recordDecl
+    validateInternalPartialName = "$validateInternalPartial_" <> recordDeclName recordDecl
+    serializePartialName = "$serializePartial_" <> recordDeclName recordDecl
     decodeName = "$decode_" <> recordDeclName recordDecl
     encodeName = "$encode_" <> recordDeclName recordDecl
+    decodePartialName = "$decodePartial_" <> recordDeclName recordDecl
+    encodePartialName = "$encodePartial_" <> recordDeclName recordDecl
 
     emitValidateField fieldDecl =
       let fieldName = recordFieldDeclName fieldDecl
@@ -2259,6 +2364,29 @@ emitRecordCodecHelpers recordDecl =
     emitSerializeField fieldDecl =
       let fieldName = recordFieldDeclName fieldDecl
        in [ "  const " <> fieldName <> " = " <> emitSerializer (recordFieldDeclType fieldDecl) ("value." <> fieldName) <> ";" ]
+
+    emitValidatePartialField fieldDecl =
+      let fieldName = recordFieldDeclName fieldDecl
+          fieldPath = "path + " <> emitStringLiteral ("." <> fieldName)
+       in [ "  if ($claspHasOwn(objectValue, " <> emitStringLiteral fieldName <> ")) {"
+          , "    partialValue[" <> emitStringLiteral fieldName <> "] = " <> emitPartialValidator typeDecls recordDecls (recordFieldDeclType fieldDecl) ("objectValue[" <> emitStringLiteral fieldName <> "]") fieldPath <> ";"
+          , "  }"
+          ]
+
+    emitValidateInternalPartialField fieldDecl =
+      let fieldName = recordFieldDeclName fieldDecl
+          fieldPath = "path + " <> emitStringLiteral ("." <> fieldName)
+       in [ "  if ($claspHasOwn(objectValue, " <> emitStringLiteral fieldName <> ")) {"
+          , "    partialValue[" <> emitStringLiteral fieldName <> "] = " <> emitInternalPartialValidator typeDecls recordDecls (recordFieldDeclType fieldDecl) ("objectValue[" <> emitStringLiteral fieldName <> "]") fieldPath <> ";"
+          , "  }"
+          ]
+
+    emitSerializePartialField fieldDecl =
+      let fieldName = recordFieldDeclName fieldDecl
+       in [ "  if ($claspHasOwn(value, " <> emitStringLiteral fieldName <> ")) {"
+          , "    partialValue[" <> emitStringLiteral fieldName <> "] = " <> emitPartialSerializer typeDecls recordDecls (recordFieldDeclType fieldDecl) ("value." <> fieldName) <> ";"
+          , "  }"
+          ]
 
 emitForeignBindings :: [TypeDecl] -> [RecordDecl] -> [ForeignDecl] -> [Text]
 emitForeignBindings typeDecls recordDecls foreignDecls =
@@ -2784,11 +2912,22 @@ emitSchemaRegistryExport codecTypes typeDecls recordDecls =
        in [ "  " <> emitStringLiteral typeName <> ": {"
           , "    type: " <> emitStringLiteral typeName <> ","
           , "    schema: " <> schemaRef <> ","
+          , "    partialSchema: " <> emitPartialSchemaRef typeDecls recordDecls typ <> ","
           , "    seed: " <> emitSeedValueForType typeDecls recordDecls typ <> ","
           , "    fromHost(value, path = \"value\") { return " <> emitHostDeserializer typ "value" "path" <> "; },"
           , "    toHost(value, path = \"value\") { return " <> emitHostSerializer typ "value" "path" <> "; },"
+          , "    fromPartialHost(value, path = \"value\") { return " <> emitPartialHostDeserializer typeDecls recordDecls typ "value" "path" <> "; },"
+          , "    toPartialHost(value, path = \"value\") { return " <> emitPartialHostSerializer typeDecls recordDecls typ "value" "path" <> "; },"
           , "    decodeJson(jsonText) { return this.toHost(this.fromHost(JSON.parse(jsonText), \"value\"), \"value\"); },"
-          , "    encodeJson(value) { return JSON.stringify(this.toHost(this.fromHost(value, \"value\"), \"value\")); }"
+          , "    encodeJson(value) { return JSON.stringify(this.toHost(this.fromHost(value, \"value\"), \"value\")); },"
+          , "    decodePartialJson(jsonText) { return this.toPartialHost(this.fromPartialHost(JSON.parse(jsonText), \"value\"), \"value\"); },"
+          , "    encodePartialJson(value) { return JSON.stringify(this.toPartialHost(this.fromPartialHost(value, \"value\"), \"value\")); },"
+          , "    mergePartial(baseValue, patchValue, path = \"value\") {"
+          , "      const base = baseValue === null || baseValue === undefined ? null : this.fromHost(baseValue, `${path}.base`);"
+          , "      const patch = this.fromPartialHost(patchValue, `${path}.patch`);"
+          , "      return $claspMergePartialValue(this.partialSchema, base, patch);"
+          , "    },"
+          , "    stream(initial = null) { return $claspCreateSchemaStream(this, initial); }"
           , "  },"
           ]
 
@@ -3272,18 +3411,27 @@ emitControlPlaneExports modl =
       , "    requestSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (toolDeclRequestType toolDecl) <> ","
       , "    responseType: " <> emitStringLiteral (toolDeclResponseType toolDecl) <> ","
       , "    responseSchema: " <> emitRouteRequestSchemaFor typeDecls recordDecls (toolDeclResponseType toolDecl) <> ","
+      , "    responsePartialSchema: " <> emitPartialSchemaRef typeDecls recordDecls (TNamed (toolDeclResponseType toolDecl)) <> ","
       , "    decodeRequest(value, path = \"params\") { return " <> emitHostDeserializer (TNamed (toolDeclRequestType toolDecl)) "value" "path" <> "; },"
       , "    encodeRequest(value, path = \"params\") { return " <> emitHostSerializer (TNamed (toolDeclRequestType toolDecl)) "value" "path" <> "; },"
       , "    parseRequest(jsonText) { return $decode_" <> toolDeclRequestType toolDecl <> "(jsonText); },"
       , "    formatRequest(value) { return $encode_" <> toolDeclRequestType toolDecl <> "(value); },"
       , "    decodeResponse(value, path = \"result\") { return " <> emitHostDeserializer (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
       , "    encodeResponse(value, path = \"result\") { return " <> emitHostSerializer (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
+      , "    decodePartialResponse(value, path = \"result\") { return " <> emitPartialHostDeserializer typeDecls recordDecls (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
+      , "    encodePartialResponse(value, path = \"result\") { return " <> emitPartialHostSerializer typeDecls recordDecls (TNamed (toolDeclResponseType toolDecl)) "value" "path" <> "; },"
       , "    parseResponse(jsonText) { return $decode_" <> toolDeclResponseType toolDecl <> "(jsonText); },"
       , "    formatResponse(value) { return $encode_" <> toolDeclResponseType toolDecl <> "(value); },"
+      , "    parsePartialResponse(jsonText) { return $decodePartial_" <> toolDeclResponseType toolDecl <> "(jsonText); },"
+      , "    formatPartialResponse(value) { return $encodePartial_" <> toolDeclResponseType toolDecl <> "(value); },"
       , "    prepareCall(value, id = null) {"
       , "      return { jsonrpc: \"2.0\", id, method: this.operation, params: this.encodeRequest(value) };"
       , "    },"
-      , "    parseResult(payload) { return this.decodeResponse(payload); }"
+      , "    parseResult(payload) { return this.decodeResponse(payload); },"
+      , "    parsePartialResult(payload) { return this.decodePartialResponse(payload); },"
+      , "    streamResult(initial = null) {"
+      , "      return (__claspSchemas[" <> emitStringLiteral (toolDeclResponseType toolDecl) <> "] ?? { stream() { throw new Error(\"Missing response schema contract\"); } }).stream(initial);"
+      , "    }"
       , "  },"
       ]
 
@@ -3926,6 +4074,126 @@ emitHostDeserializer typ valueRef pathRef =
     TFunction _ _ ->
       "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
 
+emitPartialValidator :: [TypeDecl] -> [RecordDecl] -> Type -> Text -> Text -> Text
+emitPartialValidator typeDecls recordDecls typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitPartialValidator typeDecls recordDecls itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$validatePartial_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+        Nothing ->
+          if name == "Prompt"
+            then "$validate_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
+            else "$validate_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitInternalPartialValidator :: [TypeDecl] -> [RecordDecl] -> Type -> Text -> Text -> Text
+emitInternalPartialValidator typeDecls recordDecls typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitInternalPartialValidator typeDecls recordDecls itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$validateInternalPartial_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+        Nothing ->
+          if name == "Prompt"
+            then "$validateInternal_Prompt(" <> valueRef <> ", " <> pathRef <> ")"
+            else "$validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> ")"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitPartialSerializer :: [TypeDecl] -> [RecordDecl] -> Type -> Text -> Text
+emitPartialSerializer typeDecls recordDecls typ valueRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", \"value\")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", \"value\")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", \"value\")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", \"value\").map((item, index) => "
+        <> emitPartialSerializer typeDecls recordDecls itemType "item"
+        <> ")"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$serializePartial_" <> name <> "(" <> valueRef <> ")"
+        Nothing ->
+          if name == "Prompt"
+            then "$serialize_Prompt(" <> valueRef <> ")"
+            else "$serialize_" <> name <> "(" <> valueRef <> ")"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitPartialHostSerializer :: [TypeDecl] -> [RecordDecl] -> Type -> Text -> Text -> Text
+emitPartialHostSerializer typeDecls recordDecls typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray(" <> valueRef <> ", " <> pathRef <> ").map((item, index) => "
+        <> emitPartialHostSerializer typeDecls recordDecls itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$serializePartial_" <> name <> "($validateInternalPartial_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
+        Nothing ->
+          if name == "Prompt"
+            then "$serialize_Prompt($validateInternal_Prompt(" <> valueRef <> ", " <> pathRef <> "))"
+            else "$serialize_" <> name <> "($validateInternal_" <> name <> "(" <> valueRef <> ", " <> pathRef <> "))"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
+emitPartialHostDeserializer :: [TypeDecl] -> [RecordDecl] -> Type -> Text -> Text -> Text
+emitPartialHostDeserializer typeDecls recordDecls typ valueRef pathRef =
+  case typ of
+    TInt ->
+      "$claspExpectInt(" <> valueRef <> ", " <> pathRef <> ")"
+    TStr ->
+      "$claspExpectStr(" <> valueRef <> ", " <> pathRef <> ")"
+    TBool ->
+      "$claspExpectBool(" <> valueRef <> ", " <> pathRef <> ")"
+    TList itemType ->
+      "$claspExpectArray($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ").map((item, index) => "
+        <> emitPartialHostDeserializer typeDecls recordDecls itemType "item" ("`${" <> pathRef <> "}[${index}]`")
+        <> ")"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$validatePartial_" <> name <> "($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ")"
+        Nothing ->
+          if name == "Prompt"
+            then "$validate_Prompt($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ")"
+            else "$validate_" <> name <> "($claspParseStructuredHostValue(" <> valueRef <> ", " <> pathRef <> "), " <> pathRef <> ")"
+    TFunction _ _ ->
+      "(() => { throw new Error(\"Functions are not JSON serializable\"); })()"
+
 emitSchemaRef :: [TypeDecl] -> [RecordDecl] -> Type -> Text
 emitSchemaRef typeDecls recordDecls typ =
   case typ of
@@ -3941,6 +4209,28 @@ emitSchemaRef typeDecls recordDecls typ =
       if hasSchemaContractName typeDecls recordDecls name
         then "$claspSchema_" <> name
         else "null"
+    TFunction _ _ ->
+      "null"
+
+emitPartialSchemaRef :: [TypeDecl] -> [RecordDecl] -> Type -> Text
+emitPartialSchemaRef typeDecls recordDecls typ =
+  case typ of
+    TInt ->
+      "$claspSchema_Int"
+    TStr ->
+      "$claspSchema_Str"
+    TBool ->
+      "$claspSchema_Bool"
+    TList itemType ->
+      "{ kind: \"list\", item: " <> emitPartialSchemaRef typeDecls recordDecls itemType <> " }"
+    TNamed name ->
+      case findRecordDecl name recordDecls of
+        Just _ ->
+          "$claspPartialSchema_" <> name
+        Nothing ->
+          if hasSchemaContractName typeDecls recordDecls name
+            then "$claspSchema_" <> name
+            else "null"
     TFunction _ _ ->
       "null"
 
