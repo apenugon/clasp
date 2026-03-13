@@ -24,6 +24,8 @@ module Clasp.Native
   , NativeMemoryStrategy (..)
   , NativeMutability (..)
   , NativeRecordLayout (..)
+  , NativeRuntime (..)
+  , NativeRuntimeBinding (..)
   , NativeRootDiscoveryRule (..)
   , NativeSlotLayout (..)
   , NativeLifetimeInvariant (..)
@@ -32,6 +34,7 @@ module Clasp.Native
   , renderNativeModule
   ) where
 
+import Data.Char (isAlphaNum, isUpper, toLower)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -45,6 +48,7 @@ import Clasp.Lower
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
+  , ForeignDecl (..)
   , ModuleName
   , RecordDecl (..)
   , RecordFieldDecl (..)
@@ -58,6 +62,7 @@ data NativeModule = NativeModule
   { nativeModuleName :: ModuleName
   , nativeModuleExports :: [Text]
   , nativeModuleAbi :: NativeAbi
+  , nativeModuleRuntime :: NativeRuntime
   , nativeModuleDecls :: [NativeDecl]
   }
   deriving (Eq, Show)
@@ -183,6 +188,22 @@ data NativeVariantLayout = NativeVariantLayout
   }
   deriving (Eq, Show)
 
+data NativeRuntime = NativeRuntime
+  { nativeRuntimeProfile :: Text
+  , nativeRuntimeArtifacts :: [Text]
+  , nativeRuntimeMemorySymbols :: [Text]
+  , nativeRuntimeBindings :: [NativeRuntimeBinding]
+  }
+  deriving (Eq, Show)
+
+data NativeRuntimeBinding = NativeRuntimeBinding
+  { nativeRuntimeBindingName :: Text
+  , nativeRuntimeBindingRuntimeName :: Text
+  , nativeRuntimeBindingSymbol :: Text
+  , nativeRuntimeBindingType :: Type
+  }
+  deriving (Eq, Show)
+
 data NativeDecl
   = NativeGlobalDecl NativeGlobal
   | NativeFunctionDecl NativeFunction
@@ -274,6 +295,7 @@ buildNativeModule modl =
     { nativeModuleName = lowerModuleName modl
     , nativeModuleExports = fmap lowerDeclName (lowerModuleDecls modl)
     , nativeModuleAbi = buildNativeAbi modl
+    , nativeModuleRuntime = buildNativeRuntime modl
     , nativeModuleDecls = fmap lowerDeclToNative (lowerModuleDecls modl)
     }
 
@@ -287,6 +309,11 @@ renderNativeModule nativeMod =
     , "abi {"
     ]
       <> indentBlock (renderNativeAbi (nativeModuleAbi nativeMod))
+      <> [ "}"
+         , ""
+         , "runtime {"
+         ]
+      <> indentBlock (renderNativeRuntime (nativeModuleRuntime nativeMod))
       <> [ "}"
          , ""
          ]
@@ -336,6 +363,25 @@ renderVariantLayout layout =
 renderObjectLayout :: NativeObjectLayout -> Text
 renderObjectLayout layout =
   "object_layout " <> nativeObjectLayoutName layout <> " { kind = " <> renderObjectKind (nativeObjectLayoutKind layout) <> ", header_words = " <> renderInt (nativeObjectLayoutHeaderWords layout) <> ", words = " <> renderInt (nativeObjectLayoutWordCount layout) <> ", roots = [" <> commaSeparated (fmap renderInt (nativeObjectLayoutRootOffsets layout)) <> "] }"
+
+renderNativeRuntime :: NativeRuntime -> [Text]
+renderNativeRuntime runtime =
+  [ "profile " <> nativeRuntimeProfile runtime
+  , "artifacts [" <> commaSeparated (fmap renderQuoted (nativeRuntimeArtifacts runtime)) <> "]"
+  , "memory_symbols [" <> commaSeparated (nativeRuntimeMemorySymbols runtime) <> "]"
+  , "bindings [" <> commaSeparated (fmap renderRuntimeBinding (nativeRuntimeBindings runtime)) <> "]"
+  ]
+
+renderRuntimeBinding :: NativeRuntimeBinding -> Text
+renderRuntimeBinding binding =
+  nativeRuntimeBindingName binding
+    <> "{runtime="
+    <> nativeRuntimeBindingRuntimeName binding
+    <> ", symbol="
+    <> nativeRuntimeBindingSymbol binding
+    <> ", type="
+    <> renderType (nativeRuntimeBindingType binding)
+    <> "}"
 
 renderFieldLayout :: NativeFieldLayout -> Text
 renderFieldLayout fieldLayout =
@@ -575,6 +621,63 @@ buildNativeAbi modl =
       , NativeBuiltinLayout "View" NativeHandleStorage 1
       , NativeBuiltinLayout "Prompt" NativeHandleStorage 1
       ]
+
+buildNativeRuntime :: LowerModule -> NativeRuntime
+buildNativeRuntime modl =
+  NativeRuntime
+    { nativeRuntimeProfile = "compiler_backend_minimal"
+    , nativeRuntimeArtifacts =
+        [ "runtime/native/clasp_runtime.h"
+        , "runtime/native/clasp_runtime.c"
+        ]
+    , nativeRuntimeMemorySymbols =
+        [ "clasp_rt_init"
+        , "clasp_rt_register_static_root"
+        , "clasp_rt_alloc_object"
+        , "clasp_rt_retain"
+        , "clasp_rt_release"
+        , "clasp_rt_string_from_utf8"
+        , "clasp_rt_string_list_new"
+        , "clasp_rt_result_ok_string"
+        , "clasp_rt_result_err_string"
+        ]
+    , nativeRuntimeBindings = fmap lowerForeignDeclToRuntimeBinding (lowerModuleForeignDecls modl)
+    }
+
+lowerForeignDeclToRuntimeBinding :: ForeignDecl -> NativeRuntimeBinding
+lowerForeignDeclToRuntimeBinding foreignDecl =
+  NativeRuntimeBinding
+    { nativeRuntimeBindingName = foreignDeclName foreignDecl
+    , nativeRuntimeBindingRuntimeName = foreignDeclRuntimeName foreignDecl
+    , nativeRuntimeBindingSymbol = nativeRuntimeSymbol (foreignDeclRuntimeName foreignDecl)
+    , nativeRuntimeBindingType = foreignDeclType foreignDecl
+    }
+
+nativeRuntimeSymbol :: Text -> Text
+nativeRuntimeSymbol runtimeName =
+  "clasp_rt_" <> normalizeRuntimeName runtimeName
+
+normalizeRuntimeName :: Text -> Text
+normalizeRuntimeName =
+  T.dropWhileEnd (== '_')
+    . T.dropWhile (== '_')
+    . snd
+    . T.foldl' step (False, "")
+  where
+    step (seenAlphaNum, acc) char
+      | isAlphaNum char =
+          let needsSeparator = seenAlphaNum && isUpper char && not (T.null acc) && T.last acc /= '_'
+              nextAcc =
+                if needsSeparator
+                  then acc <> "_" <> T.singleton (toLower char)
+                  else acc <> T.singleton (toLower char)
+           in (True, nextAcc)
+      | otherwise =
+          let nextAcc =
+                if T.null acc || T.last acc == '_'
+                  then acc
+                  else acc <> "_"
+           in (seenAlphaNum, nextAcc)
 
 buildRecordLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> RecordDecl -> NativeRecordLayout
 buildRecordLayout recordEnv typeEnv recordDecl =

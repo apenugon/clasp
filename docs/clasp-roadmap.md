@@ -325,6 +325,7 @@ The first native runtime slice for compiler and backend workloads should stay ex
 - every heap object starts with a two-word header containing a layout identifier and retain count before the object payload
 - root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects
 - retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage
+- ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives
 
 ## Phase 14: Native Storage With SQLite First
 

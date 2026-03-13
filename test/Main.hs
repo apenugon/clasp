@@ -124,6 +124,8 @@ import Clasp.Native
   , NativeObjectLayout (..)
   , NativeOwnershipRule (..)
   , NativeRecordLayout (..)
+  , NativeRuntime (..)
+  , NativeRuntimeBinding (..)
   , NativeRootDiscoveryRule (..)
   , NativeSlotLayout (..)
   , NativeVariantLayout (..)
@@ -2723,9 +2725,36 @@ nativeTests =
             assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
             assertBool "expected native IR module header" ("module Main" `T.isInfixOf` nativeIr)
             assertBool "expected native IR ABI version" ("version clasp-native-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime profile" ("profile compiler_backend_minimal" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime artifact" ("\"runtime/native/clasp_runtime.c\"" `T.isInfixOf` nativeIr)
             assertBool "expected native IR record layout" ("record_layout LeadEnvelope { words = 3, fields = [title:Str@word0/handle, tags:[Str]@word1/handle, owner:Principal@word2/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR object layout" ("object_layout RenderResult.RenderedFlag { kind = variant, header_words = 2, words = 4, roots = [] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR decl emission" ("global main = string(\"ok\")" `T.isInfixOf` nativeIr)
+    , testCase "native runtime exposes compiler stdlib bindings and bundled runtime artifacts" $
+        case nativeSource "compiler-stdlib" compilerStdlibSource of
+          Left err ->
+            assertFailure ("expected compiler stdlib native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let runtime = nativeModuleRuntime nativeMod
+            assertEqual "runtime profile" "compiler_backend_minimal" (nativeRuntimeProfile runtime)
+            assertEqual
+              "runtime artifacts"
+              ["runtime/native/clasp_runtime.h", "runtime/native/clasp_runtime.c"]
+              (nativeRuntimeArtifacts runtime)
+            assertBool "expected alloc symbol" ("clasp_rt_alloc_object" `elem` nativeRuntimeMemorySymbols runtime)
+            assertBool "expected release symbol" ("clasp_rt_release" `elem` nativeRuntimeMemorySymbols runtime)
+            case findRuntimeBinding "textSplit" (nativeRuntimeBindings runtime) of
+              Just binding -> do
+                assertEqual "textSplit runtime name" "textSplit" (nativeRuntimeBindingRuntimeName binding)
+                assertEqual "textSplit symbol" "clasp_rt_text_split" (nativeRuntimeBindingSymbol binding)
+                assertEqual "textSplit type" (TFunction [TStr, TStr] (TList TStr)) (nativeRuntimeBindingType binding)
+              Nothing ->
+                assertFailure "expected textSplit runtime binding"
+            case findRuntimeBinding "readFile" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "readFile symbol" "clasp_rt_read_file" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected readFile runtime binding"
     , testCase "claspc native emits a native IR artifact for compiler workloads end to end" $ do
         let outputPath = "dist/compiler-parser.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
@@ -2738,9 +2767,26 @@ nativeTests =
             assertBool "expected native IR artifact to exist" outputExists
             nativeIr <- TIO.readFile outputPath
             assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime section" ("runtime {" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime header artifact" ("\"runtime/native/clasp_runtime.h\"" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime textSplit binding" ("textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime textPrefix binding" ("textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" `T.isInfixOf` nativeIr)
             assertBool "expected parser state record layout" ("record_layout ParserState { words = 4, fields = [moduleName:Str@word0/handle, imports:Str@word1/handle, signatures:Str@word2/handle, declarations:Str@word3/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser variant object layout" ("object_layout LineKind.ModuleLine { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser function emission" ("function parseModuleSummary(source) =" `T.isInfixOf` nativeIr)
+    , testCase "native runtime bundle files declare the compiler/backend runtime surface" $ do
+        headerExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.h")
+        sourceExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.c")
+        assertBool "expected native runtime header to exist" headerExists
+        assertBool "expected native runtime source to exist" sourceExists
+        header <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.h")
+        source <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.c")
+        assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
+        assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
+        assertBool "expected runtime stdlib text split export" ("ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);" `T.isInfixOf` header)
+        assertBool "expected runtime static root registration" ("void clasp_rt_register_static_root(ClaspRtRuntime *runtime, ClaspRtHeader **slot)" `T.isInfixOf` source)
+        assertBool "expected runtime object destroy path" ("static void clasp_rt_destroy_object" `T.isInfixOf` source)
+        assertBool "expected runtime file read helper" ("ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path)" `T.isInfixOf` source)
     ]
 
 docsTests :: TestTree
@@ -2766,6 +2812,7 @@ docsTests =
         assertBool "expected object header layout" ("- every heap object starts with a two-word header containing a layout identifier and retain count before the object payload" `T.isInfixOf` roadmap)
         assertBool "expected root discovery rule" ("- root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects" `T.isInfixOf` roadmap)
         assertBool "expected release invariant" ("- retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage" `T.isInfixOf` roadmap)
+        assertBool "expected runtime bundle rule" ("- ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives" `T.isInfixOf` roadmap)
     ]
 
 compileTests :: TestTree
@@ -5035,6 +5082,10 @@ findNativeDecl target =
           nativeGlobalName globalDecl == target
         NativeFunctionDecl functionDecl ->
           nativeFunctionName functionDecl == target
+
+findRuntimeBinding :: Text -> [NativeRuntimeBinding] -> Maybe NativeRuntimeBinding
+findRuntimeBinding target =
+  find ((== target) . nativeRuntimeBindingName)
 
 findBuiltinLayout :: Text -> [NativeBuiltinLayout] -> Maybe NativeBuiltinLayout
 findBuiltinLayout target =
