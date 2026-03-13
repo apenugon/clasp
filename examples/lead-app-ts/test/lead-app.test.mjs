@@ -77,6 +77,12 @@ await withServer((lead) => {
   assert.match(inboxHtml, /href="\/lead\/primary"/);
   assert.match(inboxHtml, /SynthSpeak \(high, enterprise\)/);
 
+  const secondaryLead = await request(port, "/lead/secondary");
+  const secondaryLeadHtml = await secondaryLead.text();
+  assert.equal(secondaryLead.status, 200);
+  assert.match(secondaryLeadHtml, /Northwind Studio/);
+  assert.match(secondaryLeadHtml, /Priority: medium/);
+
   const primaryLead = await request(port, "/lead/primary");
   const primaryLeadHtml = await primaryLead.text();
   assert.equal(primaryLead.status, 200);
@@ -96,6 +102,23 @@ await withServer((lead) => {
   assert.equal(reviewed.status, 200);
   assert.match(reviewedHtml, /Review status: reviewed/);
   assert.match(reviewedHtml, /Ready for product demo next week\./);
+
+  const unknownLead = await request(port, "/review", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      leadId: "lead-404",
+      note: "Missing lead"
+    })
+  });
+  assert.equal(unknownLead.status, 502);
+  assert.equal(await unknownLead.text(), "Unknown lead: lead-404");
+
+  const missing = await request(port, "/missing");
+  assert.equal(missing.status, 404);
+  assert.equal(await missing.text(), "not_found");
 });
 
 await withServer((lead) =>
