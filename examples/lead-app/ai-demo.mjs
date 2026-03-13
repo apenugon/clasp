@@ -59,6 +59,31 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
   const prompt = compiledModule.outreachPrompt(lead, playbook);
   const promptText = compiledModule.outreachPromptText(lead, playbook);
   const draft = compiledModule.draftLeadOutreach(lead, playbook);
+  const signalCollector = contract.traces?.create?.() ?? null;
+  const signalTrace = contract.traceability?.recordSignal(
+    {
+      name: "lead_outreach_draft_ready",
+      summary: "A typed outreach draft is ready for delivery.",
+      value: {
+        leadId: lead.leadId,
+        channel: draft.channel
+      },
+      severity: "info",
+      source: "examples/lead-app/ai-demo"
+    },
+    {
+      routes: [primaryLeadRoute.name],
+      prompts: ["outreachPrompt"],
+      workflows: ["LeadFollowUpFlow"],
+      policies: ["LeadAssistOps"],
+      tests: [{ name: "lead-app.ai-demo", file: "examples/lead-app/ai-demo.mjs" }]
+    },
+    {
+      collector: signalCollector,
+      traceId: `${lead.leadId}:lead-outreach-draft-ready`,
+      context: { actor: { id: "lead-ai-demo" } }
+    }
+  );
 
   let invalidTool = null;
   try {
@@ -103,6 +128,19 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
     draftChannel: draft.channel,
     draftSubject: draft.subject,
     draftCallToAction: draft.callToAction,
+    signalKind: signalTrace?.kind ?? null,
+    signalName: signalTrace?.signal?.name ?? null,
+    signalRefKinds: [
+      ...signalTrace.refs.routes.map((entry) => entry.kind),
+      ...signalTrace.refs.prompts.map((entry) => entry.kind),
+      ...signalTrace.refs.workflows.map((entry) => entry.kind),
+      ...signalTrace.refs.policies.map((entry) => entry.kind),
+      ...signalTrace.refs.tests.map((entry) => entry.kind)
+    ],
+    signalRefIds: signalTrace?.refs?.ids ?? [],
+    signalPromptId: signalTrace?.refs?.prompts?.[0]?.id ?? null,
+    signalTestFile: signalTrace?.refs?.tests?.[0]?.file ?? null,
+    collectedSignalCount: signalCollector?.entries?.().length ?? 0,
     invalidTool,
     invalidModel
   };

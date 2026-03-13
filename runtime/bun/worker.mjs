@@ -22,7 +22,9 @@ function bindingContractFor(compiledModule) {
       air: contract.air ?? compiledModule?.__claspAir ?? null,
       airProjectors: contract.airProjectors ?? compiledModule?.__claspAirProjectors ?? null,
       evalHooks: contract.evalHooks ?? compiledModule?.__claspEvalHooks ?? null,
-      traces: contract.traces ?? compiledModule?.__claspTraceCollector ?? null
+      traces: contract.traces ?? compiledModule?.__claspTraceCollector ?? null,
+      traceability:
+        contract.traceability ?? compiledModule?.__claspTraceability ?? null
     };
   }
 
@@ -42,7 +44,8 @@ function bindingContractFor(compiledModule) {
     air: compiledModule?.__claspAir ?? null,
     airProjectors: compiledModule?.__claspAirProjectors ?? null,
     evalHooks: compiledModule?.__claspEvalHooks ?? null,
-    traces: compiledModule?.__claspTraceCollector ?? null
+    traces: compiledModule?.__claspTraceCollector ?? null,
+    traceability: compiledModule?.__claspTraceability ?? null
   };
 }
 

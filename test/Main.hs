@@ -2807,6 +2807,7 @@ compileTests =
             assertBool "expected missing secret diagnostic helper" ("Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}" `T.isInfixOf` emitted)
             assertBool "expected eval hooks export" ("export const __claspEvalHooks = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected trace collector export" ("export const __claspTraceCollector = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected traceability export" ("export const __claspTraceability = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected AIR export" ("export const __claspAir = __claspAirSource;" `T.isInfixOf` emitted)
             assertBool "expected AIR projector export" ("export const __claspAirProjectors = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected source AIR projector hook" ("projectSource() { return __claspAir; }" `T.isInfixOf` emitted)
@@ -2827,6 +2828,8 @@ compileTests =
             assertBool "expected generated binding contract tool-call entry" ("toolCallContracts: __claspToolCallContracts" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract eval-hooks entry" ("evalHooks: __claspEvalHooks" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract trace entry" ("traces: __claspTraceCollector" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract traceability entry" ("traceability: __claspTraceability" `T.isInfixOf` emitted)
+            assertBool "expected generated control-plane traceability entry" ("traceability: __claspTraceability," `T.isInfixOf` emitted)
             let compiledPath = "dist/control-plane.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -4186,7 +4189,7 @@ compileTests =
               ExitSuccess ->
                 assertEqual
                   "expected ai demo to load a lead, resolve the typed playbook tool, and reject invalid tool/model payloads"
-                  "{\"routeName\":\"primaryLeadRecordRoute\",\"toolName\":\"lookupLeadPlaybook\",\"toolMethod\":\"lookup_lead_playbook\",\"leadId\":\"lead-2\",\"leadPriority\":\"Medium\",\"leadSegment\":\"Growth\",\"playbookChannel\":\"email\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the lead outreach assistant.\\n\\nassistant: Northwind Studio\\n\\nassistant: Northwind Studio is ready for a design-system migration this quarter.\\n\\nassistant: medium\\n\\nassistant: growth\\n\\nassistant: Keep the note concise, mention the current pilot, and ask for a next step.\\n\\nuser: Ask for the best time to send a tailored rollout plan.\",\"draftChannel\":\"email\",\"draftSubject\":\"Northwind Studio email follow-up\",\"draftCallToAction\":\"Ask for the best time to send a tailored rollout plan.\",\"invalidTool\":\"guidance must be a string\",\"invalidModel\":\"subject must be a string\"}"
+                  "{\"routeName\":\"primaryLeadRecordRoute\",\"toolName\":\"lookupLeadPlaybook\",\"toolMethod\":\"lookup_lead_playbook\",\"leadId\":\"lead-2\",\"leadPriority\":\"Medium\",\"leadSegment\":\"Growth\",\"playbookChannel\":\"email\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the lead outreach assistant.\\n\\nassistant: Northwind Studio\\n\\nassistant: Northwind Studio is ready for a design-system migration this quarter.\\n\\nassistant: medium\\n\\nassistant: growth\\n\\nassistant: Keep the note concise, mention the current pilot, and ask for a next step.\\n\\nuser: Ask for the best time to send a tailored rollout plan.\",\"draftChannel\":\"email\",\"draftSubject\":\"Northwind Studio email follow-up\",\"draftCallToAction\":\"Ask for the best time to send a tailored rollout plan.\",\"signalKind\":\"runtime_signal\",\"signalName\":\"lead_outreach_draft_ready\",\"signalRefKinds\":[\"route\",\"prompt\",\"workflow\",\"policy\",\"test\"],\"signalRefIds\":[\"route:primaryLeadRecordRoute\",\"decl:outreachPrompt\",\"workflow:LeadFollowUpFlow\",\"policy:LeadAssistOps\",\"test:lead-app.ai-demo\"],\"signalPromptId\":\"decl:outreachPrompt\",\"signalTestFile\":\"examples/lead-app/ai-demo.mjs\",\"collectedSignalCount\":1,\"invalidTool\":\"guidance must be a string\",\"invalidModel\":\"subject must be a string\"}"
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("lead-app ai demo script failed:\n" <> stderrText)
