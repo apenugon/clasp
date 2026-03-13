@@ -2585,6 +2585,62 @@ compileTests =
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("control-plane demo script failed:\n" <> stderrText)
+    , testCase "durable workflow example survives restart and supervised module replacement" $
+        flip finally (cleanupProjectDir stateDir) $ do
+          oldResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.clasp")
+          newResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.next.clasp")
+          case (oldResult, newResult) of
+            (Left err, _) ->
+              assertFailure ("expected durable workflow example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            (_, Left err) ->
+              assertFailure ("expected durable workflow replacement example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            (Right oldEmitted, Right newEmitted) -> do
+              let oldCompiledPath = "dist/test-projects/durable-workflow/compiled-v1.mjs"
+              let newCompiledPath = "dist/test-projects/durable-workflow/compiled-v2.mjs"
+              createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+              TIO.writeFile oldCompiledPath oldEmitted
+              TIO.writeFile newCompiledPath newEmitted
+              absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+              absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+              absoluteDemoPath <- makeAbsolute ("examples" </> "durable-workflow" </> "demo.mjs")
+              absoluteStateDir <- makeAbsolute stateDir
+              (exitCode, stdoutText, stderrText) <-
+                readProcessWithExitCode
+                  "node"
+                  [ absoluteDemoPath
+                  , absoluteOldCompiledPath
+                  , absoluteNewCompiledPath
+                  , absoluteStateDir
+                  ]
+                  ""
+              case exitCode of
+                ExitSuccess ->
+                  case eitherDecodeStrictText (T.strip (T.pack stdoutText)) of
+                    Left err ->
+                      assertFailure ("expected durable workflow demo output to be valid JSON:\n" <> err)
+                    Right (Object value) -> do
+                      assertEqual "initial count" (Just (Number 8)) (KeyMap.lookup "initialCount" value)
+                      assertEqual "restart recovered" (Just (Bool True)) (KeyMap.lookup "restartRecovered" value)
+                      assertEqual "restarted count" (Just (Number 10)) (KeyMap.lookup "restartedCount" value)
+                      assertEqual "restarted mailbox size" (Just (Number 0)) (KeyMap.lookup "restartedMailboxSize" value)
+                      assertEqual "handoff status" (Just (String "handoff")) (KeyMap.lookup "handoffStatus" value)
+                      assertEqual "handoff operator" (Just (String "release-bot")) (KeyMap.lookup "handoffOperator" value)
+                      assertEqual "draining status" (Just (String "draining")) (KeyMap.lookup "drainingStatus" value)
+                      assertEqual "activated status" (Just (String "activated")) (KeyMap.lookup "activatedStatus" value)
+                      assertEqual "activated count" (Just (Number 15)) (KeyMap.lookup "activatedCount" value)
+                      assertEqual "activated supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "activatedSupervisor" value)
+                      assertEqual "retired status" (Just (String "retired")) (KeyMap.lookup "retiredStatus" value)
+                      assertEqual "retired reason" (Just (String "promoted")) (KeyMap.lookup "retiredReason" value)
+                      case KeyMap.lookup "statePath" value of
+                        Just (String statePathText) -> do
+                          exists <- doesFileExist (T.unpack statePathText)
+                          assertBool "expected demo to persist restart state on disk" exists
+                        other ->
+                          assertFailure ("expected statePath string, got " <> show other)
+                    Right other ->
+                      assertFailure ("expected JSON object from durable workflow demo, got " <> show other)
+                ExitFailure _ ->
+                  assertFailure ("durable workflow demo script failed:\n" <> stderrText)
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->
@@ -3782,6 +3838,9 @@ workflowSource =
     , ""
     , "main = \"ok\""
     ]
+
+stateDir :: FilePath
+stateDir = "dist/test-projects/durable-workflow/state"
 
 supervisorSource :: Text
 supervisorSource =

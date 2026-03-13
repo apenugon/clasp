@@ -18,6 +18,9 @@ This directory has two kinds of examples:
 
 - [control-plane/Main.clasp](/home/akul/DevProjects/synthspeak/examples/control-plane/Main.clasp): a repo-level control-plane declaration set with guides, policies, hooks, tools, verifiers, and a merge gate for one builder loop
 - [control-plane/demo.mjs](/home/akul/DevProjects/synthspeak/examples/control-plane/demo.mjs): runs the compiled control-plane exports through one real agent loop with a simulated repo tool transport
+- [durable-workflow/Main.clasp](/home/akul/DevProjects/synthspeak/examples/durable-workflow/Main.clasp): a minimal durable workflow module used for restart and hot-swap demos
+- [durable-workflow/Main.next.clasp](/home/akul/DevProjects/synthspeak/examples/durable-workflow/Main.next.clasp): the supervised replacement module for the durable workflow demo
+- [durable-workflow/demo.mjs](/home/akul/DevProjects/synthspeak/examples/durable-workflow/demo.mjs): persists a workflow run to disk, reloads it after a simulated restart, then performs supervised hot-swap activation and retirement
 - [interop-ts/Main.clasp](/home/akul/DevProjects/synthspeak/examples/interop-ts/Main.clasp): compiler-managed `npm` and `TypeScript` package imports through foreign declarations with declaration ingestion and generated adapters
 - [interop-ts/demo.mjs](/home/akul/DevProjects/synthspeak/examples/interop-ts/demo.mjs): runs the compiled example through the generated package-adapter runtime and prints the resolved results
 - [lead-app/Main.clasp](/home/akul/DevProjects/synthspeak/examples/lead-app/Main.clasp): the browser-runnable lead inbox app with typed routes, page rendering, forms, redirects, and one AI-shaped foreign boundary
@@ -57,6 +60,15 @@ Run the control-plane demo after compiling `Main.clasp` into `dist/`:
 mkdir -p dist/control-plane
 cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js
 node examples/control-plane/demo.mjs dist/control-plane/Main.js
+```
+
+Run the durable workflow restart and supervised hot-swap demo after compiling both module versions:
+
+```sh
+mkdir -p dist/durable-workflow
+cabal run claspc -- compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js
+cabal run claspc -- compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js
+node examples/durable-workflow/demo.mjs dist/durable-workflow/Main.js dist/durable-workflow/Main.next.js
 ```
 
 Run the browser demo:
