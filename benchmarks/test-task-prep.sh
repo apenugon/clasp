@@ -17,6 +17,7 @@ printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-external-adaptation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-external-adaptation[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
 
@@ -182,6 +183,7 @@ check_incomplete_task py-agent-escalation
 check_incomplete_task clasp-durable-workflow
 check_incomplete_task clasp-external-adaptation
 check_incomplete_task ts-external-adaptation
+check_incomplete_task clasp-compiler-maintenance
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
 check_nested_clasp_benchmark_prep
@@ -235,6 +237,17 @@ assert_contains "$durable_workspace/test/durable-workflow.test.mjs" 'import { ru
 assert_contains "$durable_workspace/demo.mjs" "overlapStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "autoRollbackStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "manualRollbackStatus: null"
+
+compiler_maintenance_workspace="$workspace_root/clasp-compiler-maintenance"
+assert_file_exists "$compiler_maintenance_workspace/benchmark-prep/Main.context.json"
+assert_file_exists "$compiler_maintenance_workspace/LANGUAGE_GUIDE.md"
+assert_contains "$compiler_maintenance_workspace/benchmark-prep/Main.context.json" '"schema:SelfHostSnapshot"'
+assert_contains "$compiler_maintenance_workspace/LANGUAGE_GUIDE.md" 'Compiler/Checker.clasp'
+assert_contains "$compiler_maintenance_workspace/LANGUAGE_GUIDE.md" 'Compiler/Lower.clasp'
+assert_contains "$compiler_maintenance_workspace/LANGUAGE_GUIDE.md" 'Compiler/Emit/JavaScript.clasp'
+assert_contains "$compiler_maintenance_workspace/test/compiler-maintenance.test.mjs" 'previewEnabled = true'
+assert_not_contains "$compiler_maintenance_workspace/Main.clasp" "loweredPreviewFlag"
+assert_not_contains "$compiler_maintenance_workspace/Compiler/Lower.clasp" "CoreBool"
 
 syntax_compact_workspace="$workspace_root/clasp-syntax-compact"
 assert_file_exists "$syntax_compact_workspace/benchmark-prep/Main.context.json"

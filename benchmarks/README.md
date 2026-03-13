@@ -50,6 +50,7 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/clasp-external-adaptation`: `Clasp` external-objective adaptation task grounded in the lead outreach reply-rate signal
 - `benchmarks/tasks/ts-external-adaptation`: mirrored `TypeScript` external-objective adaptation baseline for the same bounded reply-rate remediation
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
+- `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
 
 ## Benchmark Modes
 
@@ -247,6 +248,7 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
 - `clasp-external-adaptation`: reply-rate-driven bounded adaptation over the Clasp lead outreach demo
 - `ts-external-adaptation`: mirrored TypeScript reply-rate adaptation benchmark with the same bounded remediation contract
+- `clasp-compiler-maintenance`: hosted self-hosted compiler maintenance over the staged compiler bootstrap path
 - `clasp-syntax-compact`: compact-source authoring microbenchmark for a single-file Clasp change
 - `clasp-syntax-verbose`: the same authoring microbenchmark with an added compiler-generated explain surface
 

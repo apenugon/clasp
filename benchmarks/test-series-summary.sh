@@ -105,6 +105,8 @@ write_result "2026-03-01T10-12-05.000Z--clasp-syntax-compact--codex.json" "clasp
 write_result "2026-03-01T10-12-10.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-2" "2026-03-01T10:12:10.000Z" 70 88 80 true 0
 write_result "2026-03-01T10-12-15.000Z--clasp-syntax-verbose--codex.json" "clasp-syntax-verbose" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:15.000Z" 100 120 108 false 1
 write_result "2026-03-01T10-12-20.000Z--clasp-syntax-verbose--codex.json" "clasp-syntax-verbose" "clasp" "codex" "gpt-5.4" "syntax-a-2" "2026-03-01T10:12:20.000Z" 110 130 118 true 0
+write_result "2026-03-01T10-12-25.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "compiler-a-1" "2026-03-01T10:12:25.000Z" 260 180 150 false 1
+write_result "2026-03-01T10-12-26.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "compiler-a-2" "2026-03-01T10:12:26.000Z" 220 170 140 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -224,6 +226,16 @@ printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactMedianTokens: 89'
 printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseMedianTokens: 125'
 printf '%s\n' "$syntax_summary_output" | grep -Fq '    tokenDelta: -36'
 printf '%s\n' "$syntax_summary_output" | grep -Fq '    uncachedTokenDelta: -32'
+
+compiler_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes compiler-a)"
+printf '%s\n' "$compiler_summary_output" | grep -Fq $'clasp-compiler-maintenance\tcodex\tgpt-5.4'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  series: compiler-a'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  runs: 2'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  passRate: 50%'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  timeToGreenMs: 480'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianDurationMs: 240'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianTokens: 175'
+printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianUncachedTokens: 145'
 
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
 printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
