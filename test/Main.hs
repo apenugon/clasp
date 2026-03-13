@@ -49,6 +49,7 @@ import Clasp.Compiler
   , explainSource
   , formatSource
   , nativeEntry
+  , renderNativeSource
   , nativeSource
   , parseSource
   , renderAirSourceJson
@@ -2714,6 +2715,32 @@ nativeTests =
                     layout
                 Nothing ->
                   assertFailure "expected UiSurface.Next object layout"
+    , testCase "native renderer emits a stable textual IR artifact" $
+        case renderNativeSource "native-abi" nativeAbiSource of
+          Left err ->
+            assertFailure ("expected native IR rendering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeIr -> do
+            assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR module header" ("module Main" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR ABI version" ("version clasp-native-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR record layout" ("record_layout LeadEnvelope { words = 3, fields = [title:Str@word0/handle, tags:[Str]@word1/handle, owner:Principal@word2/handle] }" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR object layout" ("object_layout RenderResult.RenderedFlag { kind = variant, header_words = 2, words = 4, roots = [] }" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR decl emission" ("global main = string(\"ok\")" `T.isInfixOf` nativeIr)
+    , testCase "claspc native emits a native IR artifact for compiler workloads end to end" $ do
+        let outputPath = "dist/compiler-parser.native.ir"
+        createDirectoryIfMissing True (takeDirectory outputPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler parser native emission to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            outputExists <- doesFileExist outputPath
+            assertBool "expected native IR artifact to exist" outputExists
+            nativeIr <- TIO.readFile outputPath
+            assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected parser state record layout" ("record_layout ParserState { words = 4, fields = [moduleName:Str@word0/handle, imports:Str@word1/handle, signatures:Str@word2/handle, declarations:Str@word3/handle] }" `T.isInfixOf` nativeIr)
+            assertBool "expected parser variant object layout" ("object_layout LineKind.ModuleLine { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
+            assertBool "expected parser function emission" ("function parseModuleSummary(source) =" `T.isInfixOf` nativeIr)
     ]
 
 docsTests :: TestTree

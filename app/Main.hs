@@ -20,6 +20,7 @@ import Clasp.Compiler
   , parseSource
   , renderAirEntryJson
   , renderContextEntryJson
+  , renderNativeEntry
   )
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
@@ -56,6 +57,12 @@ main = do
       runCompile format inputPath (Just outputPath)
     ["compile", "-o", outputPath, inputPath] ->
       runCompile format inputPath (Just outputPath)
+    ["native", inputPath] ->
+      runNative format inputPath Nothing
+    ["native", inputPath, "-o", outputPath] ->
+      runNative format inputPath (Just outputPath)
+    ["native", "-o", outputPath, inputPath] ->
+      runNative format inputPath (Just outputPath)
     _ ->
       die usage
 
@@ -211,6 +218,29 @@ runCompile format inputPath outputPath = do
                 , "output" .= resolvedOutput
                 ]
 
+runNative :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
+runNative format inputPath outputPath = do
+  result <- renderNativeEntry inputPath
+  case result of
+    Left err -> do
+      writeFailure format err
+      exitFailure
+    Right nativeIr -> do
+      let resolvedOutput = maybe (replaceExtension inputPath "native.ir") id outputPath
+      TIO.writeFile resolvedOutput nativeIr
+      case format of
+        Pretty ->
+          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("native" :: String)
+                , "input" .= inputPath
+                , "output" .= resolvedOutput
+                ]
+
 writeFailure :: OutputFormat -> DiagnosticBundle -> IO ()
 writeFailure format err =
   case format of
@@ -229,6 +259,7 @@ usage =
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json]"
+    , "  claspc native <input.clasp> [-o output.native.ir] [--json]"
     ]
 
 renderCompilerImplementation :: CompilerImplementation -> String

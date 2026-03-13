@@ -29,6 +29,7 @@ module Clasp.Native
   , NativeLifetimeInvariant (..)
   , NativeVariantLayout (..)
   , buildNativeModule
+  , renderNativeModule
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -40,7 +41,7 @@ import Clasp.Lower
   , LowerMatchBranch (..)
   , LowerModule (..)
   , LowerRecordField (..)
-  , LowerRouteContract
+  , LowerRouteContract (..)
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
@@ -49,6 +50,8 @@ import Clasp.Syntax
   , RecordFieldDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , renderType
+  , splitModuleName
   )
 
 data NativeModule = NativeModule
@@ -273,6 +276,253 @@ buildNativeModule modl =
     , nativeModuleAbi = buildNativeAbi modl
     , nativeModuleDecls = fmap lowerDeclToNative (lowerModuleDecls modl)
     }
+
+renderNativeModule :: NativeModule -> Text
+renderNativeModule nativeMod =
+  T.unlines $
+    [ "format clasp-native-ir-v1"
+    , "module " <> renderModuleNameText (nativeModuleName nativeMod)
+    , "exports [" <> commaSeparated (nativeModuleExports nativeMod) <> "]"
+    , ""
+    , "abi {"
+    ]
+      <> indentBlock (renderNativeAbi (nativeModuleAbi nativeMod))
+      <> [ "}"
+         , ""
+         ]
+      <> concatMap renderNativeDecl (nativeModuleDecls nativeMod)
+
+renderNativeAbi :: NativeAbi -> [Text]
+renderNativeAbi abi =
+  [ "version " <> nativeAbiVersion abi
+  , "word_bytes " <> renderInt (nativeAbiWordBytes abi)
+  , "memory_strategy " <> renderMemoryStrategy (nativeAbiMemoryStrategy abi)
+  , "allocation { immediate = " <> renderAllocationRegion (nativeAllocationImmediateRegion allocation) <> ", handle = " <> renderAllocationRegion (nativeAllocationHandleRegion allocation) <> ", global = " <> renderAllocationRegion (nativeAllocationGlobalRegion allocation) <> " }"
+  , "ownership_rules [" <> commaSeparated (fmap renderOwnershipRule (nativeAbiOwnershipRules abi)) <> "]"
+  , "root_discovery_rules [" <> commaSeparated (fmap renderRootDiscoveryRule (nativeAbiRootDiscoveryRules abi)) <> "]"
+  , "lifetime_invariants [" <> commaSeparated (fmap renderLifetimeInvariant (nativeAbiLifetimeInvariants abi)) <> "]"
+  ]
+    <> fmap renderBuiltinLayout (nativeAbiBuiltinLayouts abi)
+    <> fmap renderRecordLayout (nativeAbiRecordLayouts abi)
+    <> fmap renderVariantLayout (nativeAbiVariantLayouts abi)
+    <> fmap renderObjectLayout (nativeAbiObjectLayouts abi)
+  where
+    allocation = nativeAbiAllocationModel abi
+
+renderNativeDecl :: NativeDecl -> [Text]
+renderNativeDecl decl =
+  case decl of
+    NativeGlobalDecl globalDecl ->
+      [ "global " <> nativeGlobalName globalDecl <> " = " <> renderNativeExpr (nativeGlobalBody globalDecl)
+      , ""
+      ]
+    NativeFunctionDecl functionDecl ->
+      [ "function " <> nativeFunctionName functionDecl <> "(" <> commaSeparated (nativeFunctionParams functionDecl) <> ") = " <> renderNativeExpr (nativeFunctionBody functionDecl)
+      , ""
+      ]
+
+renderBuiltinLayout :: NativeBuiltinLayout -> Text
+renderBuiltinLayout layout =
+  "builtin_layout " <> nativeBuiltinLayoutName layout <> " { storage = " <> renderLayoutStorage (nativeBuiltinLayoutStorage layout) <> ", words = " <> renderInt (nativeBuiltinLayoutWordCount layout) <> " }"
+
+renderRecordLayout :: NativeRecordLayout -> Text
+renderRecordLayout layout =
+  "record_layout " <> nativeRecordLayoutName layout <> " { words = " <> renderInt (nativeRecordLayoutWordCount layout) <> ", fields = [" <> commaSeparated (fmap renderFieldLayout (nativeRecordLayoutFields layout)) <> "] }"
+
+renderVariantLayout :: NativeVariantLayout -> Text
+renderVariantLayout layout =
+  "variant_layout " <> nativeVariantLayoutName layout <> " { tag_word = " <> renderInt (nativeVariantLayoutTagWord layout) <> ", max_payload_words = " <> renderInt (nativeVariantLayoutMaxPayloadWords layout) <> ", words = " <> renderInt (nativeVariantLayoutWordCount layout) <> ", constructors = [" <> commaSeparated (fmap renderConstructorLayout (nativeVariantLayoutConstructors layout)) <> "] }"
+
+renderObjectLayout :: NativeObjectLayout -> Text
+renderObjectLayout layout =
+  "object_layout " <> nativeObjectLayoutName layout <> " { kind = " <> renderObjectKind (nativeObjectLayoutKind layout) <> ", header_words = " <> renderInt (nativeObjectLayoutHeaderWords layout) <> ", words = " <> renderInt (nativeObjectLayoutWordCount layout) <> ", roots = [" <> commaSeparated (fmap renderInt (nativeObjectLayoutRootOffsets layout)) <> "] }"
+
+renderFieldLayout :: NativeFieldLayout -> Text
+renderFieldLayout fieldLayout =
+  nativeFieldLayoutName fieldLayout <> ":" <> renderType (nativeFieldLayoutType fieldLayout) <> "@word" <> renderInt (nativeFieldLayoutWordOffset fieldLayout) <> "/" <> renderLayoutStorage (nativeFieldLayoutStorage fieldLayout)
+
+renderConstructorLayout :: NativeConstructorLayout -> Text
+renderConstructorLayout layout =
+  nativeConstructorLayoutName layout <> "{tag_word=" <> renderInt (nativeConstructorLayoutTagWord layout) <> ", payload_words=" <> renderInt (nativeConstructorLayoutPayloadWords layout) <> ", words=" <> renderInt (nativeConstructorLayoutWordCount layout) <> ", payloads=[" <> commaSeparated (fmap renderSlotLayout (nativeConstructorLayoutPayloads layout)) <> "]}"
+
+renderSlotLayout :: NativeSlotLayout -> Text
+renderSlotLayout slotLayout =
+  nativeSlotLayoutName slotLayout <> ":" <> renderType (nativeSlotLayoutType slotLayout) <> "@word" <> renderInt (nativeSlotLayoutWordOffset slotLayout) <> "/" <> renderLayoutStorage (nativeSlotLayoutStorage slotLayout)
+
+renderNativeExpr :: NativeExpr -> Text
+renderNativeExpr expr =
+  case expr of
+    NativeLocal name ->
+      "local(" <> name <> ")"
+    NativeLiteralExpr literal ->
+      renderLiteral literal
+    NativeList items ->
+      "list[" <> commaSeparated (fmap renderNativeExpr items) <> "]"
+    NativeReturn value ->
+      "return(" <> renderNativeExpr value <> ")"
+    NativeCompare op left right ->
+      "compare." <> renderCompareOp op <> "(" <> renderNativeExpr left <> ", " <> renderNativeExpr right <> ")"
+    NativeLet mutability name value body ->
+      "let." <> renderMutability mutability <> " " <> name <> " = " <> renderNativeExpr value <> " in " <> renderNativeExpr body
+    NativeAssign name value body ->
+      "assign " <> name <> " = " <> renderNativeExpr value <> " then " <> renderNativeExpr body
+    NativeForEach name iterable loopBody body ->
+      "for_each " <> name <> " in " <> renderNativeExpr iterable <> " do " <> renderNativeExpr loopBody <> " then " <> renderNativeExpr body
+    NativeIntrinsic intrinsic ->
+      renderIntrinsic intrinsic
+    NativeCall callee args ->
+      "call(" <> renderNativeExpr callee <> ", [" <> commaSeparated (fmap renderNativeExpr args) <> "])"
+    NativeConstruct name args ->
+      "construct " <> name <> "(" <> commaSeparated (fmap renderNativeExpr args) <> ")"
+    NativeMatch scrutinee branches ->
+      "match " <> renderNativeExpr scrutinee <> " [" <> commaSeparated (fmap renderMatchBranch branches) <> "]"
+    NativeRecord fields ->
+      "record {" <> commaSeparated (fmap renderField fields) <> "}"
+    NativeFieldAccess target fieldName ->
+      "field(" <> renderNativeExpr target <> ", " <> fieldName <> ")"
+
+renderLiteral :: NativeLiteral -> Text
+renderLiteral literal =
+  case literal of
+    NativeInt value ->
+      "int(" <> renderInteger value <> ")"
+    NativeString value ->
+      "string(" <> renderQuoted value <> ")"
+    NativeBool value ->
+      "bool(" <> renderBool value <> ")"
+
+renderIntrinsic :: NativeIntrinsic -> Text
+renderIntrinsic intrinsic =
+  case intrinsic of
+    NativePageIntrinsic title body ->
+      "intrinsic.page(" <> renderNativeExpr title <> ", " <> renderNativeExpr body <> ")"
+    NativeRedirectIntrinsic targetPath ->
+      "intrinsic.redirect(" <> renderQuoted targetPath <> ")"
+    NativeViewEmptyIntrinsic ->
+      "intrinsic.view.empty"
+    NativeViewTextIntrinsic value ->
+      "intrinsic.view.text(" <> renderNativeExpr value <> ")"
+    NativeViewAppendIntrinsic left right ->
+      "intrinsic.view.append(" <> renderNativeExpr left <> ", " <> renderNativeExpr right <> ")"
+    NativeViewElementIntrinsic tagName body ->
+      "intrinsic.view.element(" <> renderQuoted tagName <> ", " <> renderNativeExpr body <> ")"
+    NativeViewStyledIntrinsic className body ->
+      "intrinsic.view.styled(" <> renderQuoted className <> ", " <> renderNativeExpr body <> ")"
+    NativeViewLinkIntrinsic routeContract href body ->
+      "intrinsic.view.link(" <> renderRouteContract routeContract <> ", " <> renderQuoted href <> ", " <> renderNativeExpr body <> ")"
+    NativeViewFormIntrinsic routeContract method action body ->
+      "intrinsic.view.form(" <> renderRouteContract routeContract <> ", " <> renderQuoted method <> ", " <> renderQuoted action <> ", " <> renderNativeExpr body <> ")"
+    NativeViewInputIntrinsic name inputKind value ->
+      "intrinsic.view.input(" <> renderQuoted name <> ", " <> renderQuoted inputKind <> ", " <> renderNativeExpr value <> ")"
+    NativeViewSubmitIntrinsic value ->
+      "intrinsic.view.submit(" <> renderNativeExpr value <> ")"
+    NativePromptMessageIntrinsic role value ->
+      "intrinsic.prompt.message(" <> renderQuoted role <> ", " <> renderNativeExpr value <> ")"
+    NativePromptAppendIntrinsic left right ->
+      "intrinsic.prompt.append(" <> renderNativeExpr left <> ", " <> renderNativeExpr right <> ")"
+    NativePromptTextIntrinsic value ->
+      "intrinsic.prompt.text(" <> renderNativeExpr value <> ")"
+
+renderMatchBranch :: NativeMatchBranch -> Text
+renderMatchBranch branch =
+  nativeMatchBranchTag branch <> "(" <> commaSeparated (nativeMatchBranchBinders branch) <> ") -> " <> renderNativeExpr (nativeMatchBranchBody branch)
+
+renderField :: NativeField -> Text
+renderField field =
+  nativeFieldName field <> " = " <> renderNativeExpr (nativeFieldValue field)
+
+renderRouteContract :: LowerRouteContract -> Text
+renderRouteContract routeContract =
+  "route[" <> lowerRouteContractIdentity routeContract <> " " <> lowerRouteContractMethod routeContract <> " " <> renderQuoted (lowerRouteContractPath routeContract) <> "]"
+
+renderModuleNameText :: ModuleName -> Text
+renderModuleNameText =
+  T.intercalate "." . splitModuleName
+
+renderMemoryStrategy :: NativeMemoryStrategy -> Text
+renderMemoryStrategy NativeReferenceCounting = "reference_counting"
+
+renderAllocationRegion :: NativeAllocationRegion -> Text
+renderAllocationRegion region =
+  case region of
+    NativeStackRegion -> "stack"
+    NativeHeapRegion -> "heap"
+    NativeStaticRegion -> "static"
+
+renderOwnershipRule :: NativeOwnershipRule -> Text
+renderOwnershipRule rule =
+  case rule of
+    NativeCallerOwnsReturns -> "caller_owns_returns"
+    NativeCalleeBorrowsArguments -> "callee_borrows_arguments"
+    NativeAggregatesRetainHandleFields -> "aggregates_retain_handle_fields"
+    NativeGlobalsAreStaticRoots -> "globals_are_static_roots"
+
+renderRootDiscoveryRule :: NativeRootDiscoveryRule -> Text
+renderRootDiscoveryRule rule =
+  case rule of
+    NativeDiscoverStaticRootsFromGlobals -> "static_globals"
+    NativeDiscoverStackRootsFromHandleSlots -> "stack_handle_slots"
+    NativeDiscoverHeapRootsFromObjectLayouts -> "heap_object_layouts"
+
+renderLifetimeInvariant :: NativeLifetimeInvariant -> Text
+renderLifetimeInvariant invariant =
+  case invariant of
+    NativeHeapObjectsCarryLayoutAndRetainHeaders -> "layout_and_retain_headers"
+    NativeOnlyDeclaredRootOffsetsRetainChildren -> "declared_root_offsets_only"
+    NativeReleaseTraversesRootOffsetsBeforeFree -> "release_children_before_free"
+    NativeBorrowedHandlesDoNotMutateRetainCounts -> "borrowed_handles_do_not_retain"
+
+renderLayoutStorage :: NativeLayoutStorage -> Text
+renderLayoutStorage storage =
+  case storage of
+    NativeImmediateStorage -> "immediate"
+    NativeHandleStorage -> "handle"
+
+renderObjectKind :: NativeObjectKind -> Text
+renderObjectKind kind =
+  case kind of
+    NativeRecordObject -> "record"
+    NativeVariantObject -> "variant"
+
+renderCompareOp :: NativeCompareOp -> Text
+renderCompareOp op =
+  case op of
+    NativeEqual -> "eq"
+    NativeNotEqual -> "ne"
+    NativeLessThan -> "lt"
+    NativeLessThanOrEqual -> "le"
+    NativeGreaterThan -> "gt"
+    NativeGreaterThanOrEqual -> "ge"
+
+renderMutability :: NativeMutability -> Text
+renderMutability mutability =
+  case mutability of
+    NativeImmutable -> "immutable"
+    NativeMutable -> "mutable"
+
+commaSeparated :: [Text] -> Text
+commaSeparated =
+  T.intercalate ", "
+
+indentBlock :: [Text] -> [Text]
+indentBlock =
+  fmap ("  " <>)
+
+renderQuoted :: Text -> Text
+renderQuoted value =
+  T.pack (show (T.unpack value))
+
+renderInt :: Int -> Text
+renderInt =
+  T.pack . show
+
+renderInteger :: Integer -> Text
+renderInteger =
+  T.pack . show
+
+renderBool :: Bool -> Text
+renderBool value =
+  if value then "true" else "false"
 
 buildNativeAbi :: LowerModule -> NativeAbi
 buildNativeAbi modl =

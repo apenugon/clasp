@@ -16,6 +16,8 @@ module Clasp.Compiler
   , explainSource
   , explainEntry
   , formatSource
+  , renderNativeSource
+  , renderNativeEntry
   , nativeSource
   , nativeEntry
   , parseSource
@@ -46,7 +48,7 @@ import Clasp.Diagnostic (DiagnosticBundle, singleDiagnostic)
 import Clasp.Emit.JavaScript (emitModule)
 import Clasp.Loader (loadEntryModule)
 import Clasp.Lower (lowerModule)
-import Clasp.Native (NativeModule, buildNativeModule)
+import Clasp.Native (NativeModule, buildNativeModule, renderNativeModule)
 import Clasp.Parser (parseModule)
 import Clasp.Syntax (Module, renderModule)
 
@@ -97,6 +99,10 @@ nativeSource :: FilePath -> Text -> Either DiagnosticBundle NativeModule
 nativeSource path source =
   buildNativeModule . lowerModule <$> checkSource path source
 
+renderNativeSource :: FilePath -> Text -> Either DiagnosticBundle Text
+renderNativeSource path source =
+  renderNativeModule <$> nativeSource path source
+
 airEntry :: FilePath -> IO (Either DiagnosticBundle AirModule)
 airEntry entryPath = do
   checkedModule <- checkEntry entryPath
@@ -121,6 +127,11 @@ nativeEntry :: FilePath -> IO (Either DiagnosticBundle NativeModule)
 nativeEntry entryPath = do
   checkedModule <- checkEntry entryPath
   pure ((buildNativeModule . lowerModule) <$> checkedModule)
+
+renderNativeEntry :: FilePath -> IO (Either DiagnosticBundle Text)
+renderNativeEntry entryPath = do
+  nativeModule <- nativeEntry entryPath
+  pure (renderNativeModule <$> nativeModule)
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do
