@@ -367,6 +367,8 @@ Critical path:
 - `TY-024` Add semantic primitive aliases and primitive discipline so source-level code uses project-meaningful types instead of bare `Str`, `Int`, or `Bool`.
 - `TY-025` Add protocol or trait declarations for shared behavior without inheritance, override chains, or class-heavy mutable object models.
 - `TY-026` Add attached methods, `impl`-style blocks, and receiver syntax as sugar over ordinary functions and protocol implementations.
+- `TY-027` Add a root `clasp.toml` project manifest and workspace model that declares packages, source roots, targets, profiles, and foreign dependency metadata in one compiler-known graph.
+- `TY-028` Add a `clasp.lock` lockfile and reproducible dependency-resolution pipeline for workspace packages and foreign package graphs.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -420,6 +422,7 @@ Critical path:
 - `FS-022` Add compiler-managed `Rust` crate and native-library interop with generated bindings, capability metadata, and target-aware build integration.
 - `FS-023` Add static foreign-signature compatibility checks and explicit unsafe interop for `any`, untyped, or opaque package values.
 - `FS-024` Add app-facing secret-consumption surfaces for routes, tools, workflows, and providers that require declared secret handles instead of ambient host reads.
+- `FS-025` Add a compiler-managed package tool that syncs manifest-declared `Clasp`, `npm`, `Python`, and `Rust` dependencies through generated adapters and host package-manager projections.
 
 ### Track 5: Control Plane Declarations
 
@@ -544,6 +547,7 @@ Critical path:
 - `BM-037` Add semantic-type-discipline benchmarks.
 - `BM-038` Add parallel-runtime benchmarks proving mailbox safety, supervision correctness, hot-upgrade safety, and multicore scalability for isolated workflow or process execution.
 - `BM-039` Add protocol-and-method ergonomics benchmarks that compare receiver-style and protocol-oriented Clasp code against equivalent function-only and baseline-language implementations on realistic product logic changes.
+- `BM-040` Add manifest-and-package-tool benchmarks that measure cold setup, reproducible installs, workspace graph changes, and cross-ecosystem dependency sync friction against manual multi-tool workflows.
 
 ### Track 10: SaaS Dogfooding
 

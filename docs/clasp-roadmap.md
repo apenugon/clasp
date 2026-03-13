@@ -126,9 +126,12 @@ Exit criteria:
 - Add compiler-known state-transition or typestate surfaces where they prove benchmark value for app correctness
 - Add typed asset/head/style bundle declarations so UI outputs remain part of one semantic model
 - Formalize stable host interop contracts with structured capability identities so the first benchmark can reuse existing ecosystems without stringly binding drift
+- Add a root `clasp.toml` project manifest and workspace model so packages, source roots, targets, profiles, and foreign dependency metadata live in one compiler-known graph
+- Add a `clasp.lock` lockfile and reproducible dependency-resolution pipeline for both Clasp packages and foreign package graphs
 - Add compiler-managed foreign package imports so `npm` and `TypeScript` ecosystems can be consumed through typed manifests, declaration ingestion, and generated adapters instead of handwritten glue
 - Add compiler-managed `Python` package and module interop as typed worker or service boundaries with generated schema bindings, transport, and lifecycle management
 - Add compiler-managed `Rust` crate or native-library interop for performance-critical extensions, using generated bindings, capability metadata, and target-aware build integration
+- Add one compiler-managed package workflow that syncs manifest-declared `Clasp`, `npm`, `Python`, and `Rust` dependencies through generated host projections instead of manual multi-tool setup
 - Treat untyped or weakly typed foreign values as explicit boundary-only `Dynamic` or `Unknown` values rather than ambient `Any`
 - Require explicit unsafe refinement when the compiler cannot prove a foreign declaration matches the claimed `Clasp` type
 - Preserve blame-carrying boundary diagnostics so runtime type failures identify the exact foreign import, declaration, expected type, observed path, and unsafe assertion site

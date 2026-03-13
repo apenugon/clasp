@@ -623,6 +623,12 @@ Interoperability should eventually go beyond host runtimes and hand-written fore
 - `Python` packages imported through compiler-managed worker or service boundaries with generated schema bindings and lifecycle control
 - `Rust` crates or native libraries imported through compiler-managed bindings, capability metadata, and target-aware build integration
 
+That in turn implies one compiler-known project and dependency surface above those imports:
+
+- a root `clasp.toml` manifest for workspace members, source roots, targets, profiles, and foreign dependency metadata
+- a `clasp.lock` lockfile for reproducible dependency graphs
+- one compiler-managed package workflow that coordinates `Clasp`, `npm`, `Python`, and `Rust` dependencies without forcing agents to juggle multiple package managers manually
+
 The key point is that these imports should not dissolve the semantic model.
 
 The compiler should still own:
