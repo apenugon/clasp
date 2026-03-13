@@ -79,6 +79,8 @@ write_result "2026-03-01T10-07-00.000Z--ts-lead-priority--codex.json" "ts-lead-p
 write_result "2026-03-01T10-08-00.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "codex" "gpt-5.4" "priority-a-2" "2026-03-01T10:08:00.000Z" 210 165 135 true 0
 write_result "2026-03-01T10-09-00.000Z--clasp-lead-priority--claude-code.json" "clasp-lead-priority" "clasp" "claude-code" "sonnet" "claude-a-1" "2026-03-01T10:09:00.000Z" 190 175 140 true 0
 write_result "2026-03-01T10-10-00.000Z--ts-lead-priority--claude-code.json" "ts-lead-priority" "typescript" "claude-code" "sonnet" "claude-a-1" "2026-03-01T10:10:00.000Z" 230 210 190 false 1
+write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
+write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
 printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
@@ -106,6 +108,16 @@ printf '%s\n' "$priority_summary_output" | grep -Fq '    passRateDeltaPct: 50'
 printf '%s\n' "$priority_summary_output" | grep -Fq '    timeToGreenDeltaMs: -190'
 printf '%s\n' "$priority_summary_output" | grep -Fq '    tokenDelta: -3'
 printf '%s\n' "$priority_summary_output" | grep -Fq '    uncachedTokenDelta: -3'
+
+python_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes py-escalation)"
+printf '%s\n' "$python_summary_output" | grep -Fq $'py-agent-escalation\tcodex\tgpt-5.4'
+printf '%s\n' "$python_summary_output" | grep -Fq '  series: py-escalation'
+printf '%s\n' "$python_summary_output" | grep -Fq '  runs: 2'
+printf '%s\n' "$python_summary_output" | grep -Fq '  passRate: 50%'
+printf '%s\n' "$python_summary_output" | grep -Fq '  timeToGreenMs: 200'
+printf '%s\n' "$python_summary_output" | grep -Fq '  medianDurationMs: 100'
+printf '%s\n' "$python_summary_output" | grep -Fq '  medianTokens: 120'
+printf '%s\n' "$python_summary_output" | grep -Fq '  medianUncachedTokens: 103'
 
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash

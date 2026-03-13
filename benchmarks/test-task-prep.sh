@@ -9,6 +9,7 @@ mkdir -p "$workspace_root"
 list_output="$(node "$project_root/benchmarks/run-benchmark.mjs" list)"
 printf '%s\n' "$list_output" | grep -q '^ts-lead-segment[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-segment[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 
 check_incomplete_task() {
   local task_id="$1"
@@ -97,6 +98,7 @@ check_nested_clasp_benchmark_prep() {
 
 check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
+check_incomplete_task py-agent-escalation
 check_nested_clasp_benchmark_prep
 
 clasp_workspace="$workspace_root/clasp-lead-segment"

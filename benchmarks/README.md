@@ -36,6 +36,11 @@ The canonical lead-inbox slice used to shape new benchmark tasks lives in:
 - `examples/lead-app`: `Clasp` baseline
 - `examples/lead-app-ts`: `TypeScript` baseline
 
+For agent-boundary and orchestration-heavy work, the benchmark suite also includes:
+
+- `benchmarks/tasks/ts-agent-escalation`: typed `TypeScript` agent-boundary task
+- `benchmarks/tasks/py-agent-escalation`: mirrored `Python` agent-boundary baseline
+
 ## Benchmark Modes
 
 The lead-inbox benchmark should be reported in three official modes:
@@ -169,6 +174,7 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 
 - `ts-shared-priority`: shared-type change across frontend and backend
 - `ts-agent-escalation`: structured agent-output validation with stricter boundary behavior
+- `py-agent-escalation`: structured agent-output validation with the same escalation contract in a Python baseline
 - `ts-lead-priority`: shared-schema change across a typed route, decoders, and an LLM-shaped model boundary
 - `clasp-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
