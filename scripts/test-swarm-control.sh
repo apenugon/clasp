@@ -5,9 +5,13 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runs_root=""
 markers_root=""
 repo_root=""
+lane_root=""
+completed_root=""
+blocked_root=""
+global_completed_root=""
 
 cleanup() {
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}"
 }
 
 trap cleanup EXIT
@@ -129,4 +133,52 @@ bash -lc "
   clasp_swarm_completion_marker_exists '$markers_root' 'SW-001'
   [[ -f '$markers_root/SW-001' ]]
   [[ ! -f '$markers_root/SW-001-some-slug' ]]
+" >/dev/null
+
+lane_root="$(mktemp -d)"
+completed_root="$(mktemp -d)"
+blocked_root="$(mktemp -d)"
+global_completed_root="$(mktemp -d)"
+
+cat > "$lane_root/ZZ-001-late-consumer.md" <<'EOF'
+# ZZ-001
+
+## Dependencies
+
+- `ZZ-003`
+
+## Acceptance
+
+- done
+EOF
+
+cat > "$lane_root/ZZ-002-ready-now.md" <<'EOF'
+# ZZ-002
+
+## Acceptance
+
+- done
+EOF
+
+cat > "$lane_root/ZZ-003-prerequisite.md" <<'EOF'
+# ZZ-003
+
+## Acceptance
+
+- done
+EOF
+
+bash -lc "
+  set -euo pipefail
+  source '$project_root/scripts/clasp-swarm-common.sh'
+  next=\$(clasp_swarm_select_next_ready_task '$lane_root' '$completed_root' '$global_completed_root' '$blocked_root')
+  [[ \$(basename \"\$next\") == 'ZZ-002-ready-now.md' ]]
+
+  printf '%s\t%s\n' '2026-03-13T00:00:00Z' 'deadbeef' > '$global_completed_root/ZZ-002'
+  next=\$(clasp_swarm_select_next_ready_task '$lane_root' '$completed_root' '$global_completed_root' '$blocked_root')
+  [[ \$(basename \"\$next\") == 'ZZ-003-prerequisite.md' ]]
+
+  printf '%s\t%s\n' '2026-03-13T00:00:01Z' 'feedface' > '$global_completed_root/ZZ-003'
+  next=\$(clasp_swarm_select_next_ready_task '$lane_root' '$completed_root' '$global_completed_root' '$blocked_root')
+  [[ \$(basename \"\$next\") == 'ZZ-001-late-consumer.md' ]]
 " >/dev/null

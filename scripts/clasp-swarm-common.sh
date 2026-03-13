@@ -29,6 +29,12 @@ clasp_swarm_lane_dirs() {
   find "$wave_dir" -mindepth 1 -maxdepth 1 -type d | sort
 }
 
+clasp_swarm_task_files() {
+  local lane_dir="$1"
+
+  find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
+}
+
 clasp_swarm_lane_name() {
   basename "$1"
 }
@@ -174,6 +180,70 @@ clasp_swarm_retry_limit_is_bounded() {
   local retry_limit="$1"
 
   [[ "$retry_limit" =~ ^[0-9]+$ ]] && (( retry_limit > 0 ))
+}
+
+clasp_swarm_task_dependencies() {
+  local task_file="$1"
+
+  sed -n '/^## Dependencies$/,/^## /p' "$task_file" | grep -oE '[A-Z]{2,3}-[0-9]{3}' || true
+}
+
+clasp_swarm_task_dependencies_met() {
+  local task_file="$1"
+  local completed_root="$2"
+  local dep=""
+
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    if ! clasp_swarm_completion_marker_exists "$completed_root" "$dep"; then
+      return 1
+    fi
+  done < <(clasp_swarm_task_dependencies "$task_file")
+
+  return 0
+}
+
+clasp_swarm_select_next_ready_task() {
+  local lane_dir="$1"
+  local completed_root="$2"
+  local global_completed_root="$3"
+  local blocked_root="$4"
+  local task_file=""
+  local task_id=""
+  local first_pending=""
+
+  while IFS= read -r task_file; do
+    task_id="$(clasp_swarm_completion_key "$task_file")"
+
+    if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
+      continue
+    fi
+
+    if clasp_swarm_completion_marker_exists "$global_completed_root" "$task_id"; then
+      continue
+    fi
+
+    if [[ -f "$blocked_root/$task_id.json" ]]; then
+      printf '__BLOCKED__:%s\n' "$task_file"
+      return 0
+    fi
+
+    if clasp_swarm_task_dependencies_met "$task_file" "$global_completed_root"; then
+      printf '%s\n' "$task_file"
+      return 0
+    fi
+
+    if [[ -z "$first_pending" ]]; then
+      first_pending="$task_file"
+    fi
+  done < <(clasp_swarm_task_files "$lane_dir")
+
+  if [[ -n "$first_pending" ]]; then
+    printf '__WAIT__:%s\n' "$first_pending"
+    return 0
+  fi
+
+  return 1
 }
 
 clasp_swarm_git_is_clean() {

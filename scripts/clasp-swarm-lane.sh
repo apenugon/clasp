@@ -18,7 +18,7 @@ if [[ "${1:-}" == "--list-tasks" ]]; then
     usage
     exit 1
   fi
-  find "$2" -maxdepth 1 -type f -name '*.md' | sort
+  clasp_swarm_task_files "$2"
   exit 0
 fi
 
@@ -118,7 +118,7 @@ task_worktree_of() {
 }
 
 task_file_list() {
-  find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
+  clasp_swarm_task_files "$lane_dir"
 }
 
 task_worktree_registered() {
@@ -147,6 +147,26 @@ next_attempt_number_for_task() {
 }
 
 resume_feedback_file=""
+
+sync_completed_markers_from_global() {
+  local task_file=""
+  local task_id=""
+
+  while IFS= read -r task_file; do
+    task_id="$(task_id_of "$task_file")"
+
+    if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
+      continue
+    fi
+
+    if clasp_swarm_completion_marker_exists "$global_completed_root" "$task_id"; then
+      mark_completed \
+        "$task_id" \
+        "$(clasp_swarm_completion_commit "$global_completed_root" "$task_id")" \
+        "$(clasp_swarm_completion_stamp "$global_completed_root" "$task_id")"
+    fi
+  done < <(task_file_list)
+}
 
 resume_incomplete_run() {
   local task_file="$1"
@@ -273,12 +293,6 @@ resume_incomplete_run() {
   return 2
 }
 
-task_dependencies() {
-  local task_file="$1"
-
-  sed -n '/^## Dependencies$/,/^## /p' "$task_file" | grep -oE '[A-Z]{2}-[0-9]{3}' || true
-}
-
 dependency_is_complete() {
   local dependency_id="$1"
   clasp_swarm_completion_marker_exists "$global_completed_root" "$dependency_id"
@@ -291,7 +305,7 @@ wait_for_dependencies() {
   local deps=()
   local unmet=()
 
-  mapfile -t deps < <(task_dependencies "$task_file")
+  mapfile -t deps < <(clasp_swarm_task_dependencies "$task_file")
 
   if [[ "${#deps[@]}" -eq 0 ]]; then
     return 0
@@ -570,25 +584,33 @@ ensure_trunk_branch
 clasp_swarm_normalize_completion_dir "$completed_root"
 clasp_swarm_normalize_completion_dir "$global_completed_root"
 
-while IFS= read -r task_file; do
-  task_id="$(task_id_of "$task_file")"
+while true; do
+  sync_completed_markers_from_global
 
-  if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
-    continue
+  selected_task="$(clasp_swarm_select_next_ready_task "$lane_dir" "$completed_root" "$global_completed_root" "$blocked_root" || true)"
+
+  if [[ -z "$selected_task" ]]; then
+    break
   fi
 
-  if clasp_swarm_completion_marker_exists "$global_completed_root" "$task_id"; then
-    mark_completed "$task_id" "$(clasp_swarm_completion_commit "$global_completed_root" "$task_id")" "$(clasp_swarm_completion_stamp "$global_completed_root" "$task_id")"
-    continue
-  fi
-
-  if [[ -f "$blocked_root/$task_id.json" ]]; then
+  if [[ "$selected_task" == __BLOCKED__:* ]]; then
+    task_file="${selected_task#__BLOCKED__:}"
+    task_id="$(task_id_of "$task_file")"
     echo "lane $lane_name is blocked on $task_id" >&2
     break
   fi
 
+  if [[ "$selected_task" == __WAIT__:* ]]; then
+    task_file="${selected_task#__WAIT__:}"
+    task_id="$(task_id_of "$task_file")"
+    printf '%s\n' "$task_id" > "$current_task_file"
+    wait_for_dependencies "$task_file" "$task_id"
+    continue
+  fi
+
+  task_file="$selected_task"
+  task_id="$(task_id_of "$task_file")"
   printf '%s\n' "$task_id" > "$current_task_file"
-  wait_for_dependencies "$task_file" "$task_id"
   task_branch="$(task_branch_of "$task_id")"
   feedback_file=""
   attempt="$(next_attempt_number_for_task "$task_id")"
@@ -749,4 +771,4 @@ while IFS= read -r task_file; do
     fi
   done
 
-done < <(task_file_list)
+done
