@@ -84,6 +84,89 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
       context: { actor: { id: "lead-ai-demo" } }
     }
   );
+  const feedbackSignal = contract.traceability?.recordSignal(
+    {
+      name: "growth_reply_rate_below_goal",
+      summary: "Growth leads are not replying to the default email call to action.",
+      value: {
+        segment: normalizeTag(lead.segment),
+        channel: playbook.channel,
+        objective: "reply-rate"
+      },
+      severity: "warn",
+      source: "examples/lead-app/ai-demo"
+    },
+    {
+      routes: [primaryLeadRoute.name],
+      prompts: ["outreachPrompt"],
+      workflows: ["LeadFollowUpFlow"],
+      policies: ["LeadAssistOps"],
+      tests: [{ name: "lead-app.ai-demo", file: "examples/lead-app/ai-demo.mjs" }]
+    },
+    {
+      collector: signalCollector,
+      traceId: `${lead.leadId}:growth-reply-rate-below-goal`,
+      context: { actor: { id: "lead-ai-demo" }, objective: "reply-rate" }
+    }
+  );
+
+  let invalidChange = null;
+  try {
+    contract.traceability?.proposeChange(
+      feedbackSignal,
+      {
+        name: "growth-outreach-too-broad",
+        summary: "Touch an unrelated route outside the observed signal.",
+        targets: {
+          routes: ["secondaryLeadRecordRoute"]
+        },
+        steps: ["Expand the remediation beyond the observed lead path."]
+      },
+      {
+        collector: signalCollector,
+        traceId: `${lead.leadId}:growth-outreach-too-broad`,
+        context: { actor: { id: "lead-ai-demo" }, objective: "reply-rate" }
+      }
+    );
+  } catch (error) {
+    invalidChange = error instanceof Error ? error.message : String(error);
+  }
+
+  const changePlan = contract.traceability?.proposeChange(
+    feedbackSignal,
+    {
+      name: "growth-outreach-tune",
+      summary: "Tighten the growth outreach CTA and keep verification local.",
+      rationale:
+        "The reply-rate signal is already linked to the current prompt, workflow, policy, and demo test.",
+      targets: {
+        prompts: ["outreachPrompt"],
+        tests: [{ name: "lead-app.ai-demo", file: "examples/lead-app/ai-demo.mjs" }]
+      },
+      steps: [
+        {
+          title: "Update growth outreach guidance.",
+          detail:
+            "Revise the outreach prompt guidance and CTA for the Growth segment without changing route or policy scope."
+        },
+        {
+          title: "Re-run the typed AI demo.",
+          detail:
+            "Run the lead-app AI demo again to confirm the prompt and draft remain schema-valid after the prompt-only change."
+        }
+      ],
+      bounds: {
+        maxSteps: 2,
+        requireTests: true,
+        requireReview: true
+      }
+    },
+    {
+      collector: signalCollector,
+      traceId: `${lead.leadId}:growth-outreach-tune`,
+      context: { actor: { id: "lead-ai-demo" }, objective: "reply-rate" }
+    }
+  );
 
   let invalidTool = null;
   try {
@@ -130,6 +213,7 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
     draftCallToAction: draft.callToAction,
     signalKind: signalTrace?.kind ?? null,
     signalName: signalTrace?.signal?.name ?? null,
+    feedbackSignalName: feedbackSignal?.signal?.name ?? null,
     signalRefKinds: [
       ...signalTrace.refs.routes.map((entry) => entry.kind),
       ...signalTrace.refs.prompts.map((entry) => entry.kind),
@@ -140,7 +224,15 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
     signalRefIds: signalTrace?.refs?.ids ?? [],
     signalPromptId: signalTrace?.refs?.prompts?.[0]?.id ?? null,
     signalTestFile: signalTrace?.refs?.tests?.[0]?.file ?? null,
+    changePlanKind: changePlan?.kind ?? null,
+    changePlanName: changePlan?.change?.name ?? null,
+    changePlanTargetIds: changePlan?.change?.targets?.ids ?? [],
+    changePlanStepCount: changePlan?.change?.steps?.length ?? 0,
+    changePlanAirRootKind:
+      changePlan?.air?.nodes?.find((node) => node.id === "plan:growth-outreach-tune")?.kind ??
+      null,
     collectedSignalCount: signalCollector?.entries?.().length ?? 0,
+    invalidChange,
     invalidTool,
     invalidModel
   };
