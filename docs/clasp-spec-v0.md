@@ -405,6 +405,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
 - Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.
+- `Prompt` host values carry prompt-message content only; authority-bearing policy, permission, and tool-grant metadata must remain on declared control-plane surfaces instead of being embedded into prompt payloads.
 - Projections derive boundary-facing record schemas from a source record plus a policy, and the checker rejects projected fields whose classifications are not allowed by that policy.
 - `decode` validates and decodes JSON text into a primitive or record type.
 - `encode` serializes a primitive or record value into JSON text.

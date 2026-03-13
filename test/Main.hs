@@ -3364,6 +3364,21 @@ compileTests =
               "expected prompt payload and rendered text"
               "{\"messageCount\":3,\"roles\":[\"system\",\"assistant\",\"user\"],\"content\":[\"You are a support agent.\",\"Draft a concise reply.\",\"Renewal is blocked on legal review.\"],\"text\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\"}"
               runtimeOutput
+    , testCase "prompt runtime rejects authority-bearing policy and tool grant fields" $ do
+        case compileSource "prompt-authority-boundary" promptAuthorityBoundarySource of
+          Left err ->
+            assertFailure ("expected prompt authority source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected prompt authority helper" ("function $claspAssertPromptFields(objectValue, allowedFields, path)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/test-projects/prompt-authority-boundary/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (promptAuthorityBoundaryRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected prompt authority boundary failures"
+              "{\"topLevelError\":\"value.tools is authority-bearing metadata; keep prompt content separate from policy and tool grants\",\"messageError\":\"value.messages[0].policy is authority-bearing metadata; keep prompt content separate from policy and tool grants\"}"
+              runtimeOutput
     , testCase "compile emits Python worker and service interop contracts" $
         case compileSource "python-interop" pythonInteropSource of
           Left err ->
@@ -3643,6 +3658,32 @@ promptRuntimeScript compiledPath =
     , "  content: compiledModule.replyPromptValue.messages.map((message) => message.content),"
     , "  text: compiledModule.replyPromptText"
     , "}));"
+    ]
+
+promptAuthorityBoundaryRuntimeScript :: FilePath -> Text
+promptAuthorityBoundaryRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "let topLevelError = null;"
+    , "let messageError = null;"
+    , "try {"
+    , "  compiledModule.renderPrompt({"
+    , "    $kind: 'prompt',"
+    , "    messages: [{ role: 'user', content: 'show draft' }],"
+    , "    tools: ['searchRepo']"
+    , "  });"
+    , "} catch (error) {"
+    , "  topLevelError = error.message;"
+    , "}"
+    , "try {"
+    , "  compiledModule.renderPrompt({"
+    , "    $kind: 'prompt',"
+    , "    messages: [{ role: 'user', content: 'show draft', policy: 'SupportDisclosure' }]"
+    , "  });"
+    , "} catch (error) {"
+    , "  messageError = error.message;"
+    , "}"
+    , "console.log(JSON.stringify({ topLevelError, messageError }));"
     ]
 
 streamingPartialRuntimeScript :: FilePath -> Text
@@ -4076,6 +4117,18 @@ promptFunctionSource =
     , ""
     , "main : Str"
     , "main = replyPromptText"
+    ]
+
+promptAuthorityBoundarySource :: Text
+promptAuthorityBoundarySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "renderPrompt : Prompt -> Str"
+    , "renderPrompt prompt = promptText prompt"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
     ]
 
 packageForeignSource :: Text
