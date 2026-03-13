@@ -574,6 +574,8 @@ Critical path:
 - `SH-008` Build the hosted Clasp compiler in Clasp and run it through JS/Bun.
 - `SH-009` Add stage0/stage1/stage2 bootstrap reproducibility checks.
 - `SH-010` Switch the primary compiler implementation to Clasp while retaining the Haskell bootstrap fallback.
+- `SH-011` Promote the hosted Clasp compiler from `examples/compiler-selfhost` into a real compiler implementation tree that can serve ordinary compiler entrypoints instead of only the special self-hosting proof harness.
+- `SH-012` Switch ordinary `check`, `compile`, `explain`, manifest, and package-tool flows to the Clasp compiler by default while retaining the Haskell bootstrap fallback and explicit compatibility checks.
 
 ### Track 12: Native Backend And Bytecode
 
@@ -685,7 +687,7 @@ Reason:
 
 Dispatch after Wave 6:
 
-- `SH-001` through `SH-010`
+- `SH-001` through `SH-012`
 - `BM-013`
 
 Reason:

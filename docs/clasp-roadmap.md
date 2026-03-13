@@ -278,10 +278,13 @@ Exit criteria:
 - Port the compiler gradually from Haskell to `Clasp`
 - Keep the first self-hosted compiler path running on `JS/Bun`
 - Add stage1 and stage2 bootstrap checks so the compiler can compile itself reproducibly
+- Promote the hosted compiler from the proof-harness example tree into a real compiler implementation tree
+- Switch ordinary compiler commands to the Clasp compiler by default while retaining an explicit Haskell bootstrap fallback
 
 Exit criteria:
 
 - The primary compiler implementation is written in `Clasp`
+- The ordinary `check`, `compile`, and `explain` entrypoints default to the Clasp compiler rather than a self-hosting-only special case
 - The Haskell compiler remains available as a bootstrap fallback
 - Bootstrap reproducibility checks pass for the self-hosted path
 
