@@ -16,12 +16,19 @@ reasoning_effort="${CODEX_REASONING_EFFORT:-medium}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 schema_file="$project_root/agents/schemas/verifier-report.schema.json"
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-verifier-prompt.XXXXXX")"
+shared_codex_home="${CODEX_HOME:-$HOME/.codex}"
+run_dir="$(dirname "$report_json")"
+isolated_codex_home="$run_dir/codex-home"
+
+source "$project_root/scripts/clasp-codex-home.sh"
 
 cleanup() {
   rm -f "$prompt_file"
 }
 
 trap cleanup EXIT
+
+clasp_prepare_isolated_codex_home "$shared_codex_home" "$isolated_codex_home"
 
 cat <<'EOF' > "$prompt_file"
 You are the verifier subagent for the Clasp language repository.
@@ -48,7 +55,7 @@ EOF
 printf 'Baseline workspace: %s\n\n' "$baseline_workspace" >> "$prompt_file"
 cat "$task_file" >> "$prompt_file"
 
-codex exec - \
+CODEX_HOME="$isolated_codex_home" codex exec - \
   --json \
   -m "$model" \
   -c "model_reasoning_effort=\"$reasoning_effort\"" \
