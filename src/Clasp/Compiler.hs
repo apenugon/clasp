@@ -89,7 +89,7 @@ renderContextEntryJson entryPath = do
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do
   modl <- checkSource path source
-  pure (emitModule (lowerModule modl))
+  pure (emitModule (buildAirModule modl) (lowerModule modl))
 
 explainSource :: FilePath -> Text -> Either DiagnosticBundle Text
 explainSource path source =
@@ -108,7 +108,7 @@ semanticEditEntry edit entryPath = do
 compileEntry :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntry entryPath = do
   checkedModule <- checkEntry entryPath
-  pure (emitModule . lowerModule <$> checkedModule)
+  pure ((\modl -> emitModule (buildAirModule modl) (lowerModule modl)) <$> checkedModule)
 
 explainEntry :: FilePath -> IO (Either DiagnosticBundle Text)
 explainEntry entryPath = do

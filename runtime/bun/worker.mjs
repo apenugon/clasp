@@ -19,6 +19,8 @@ function bindingContractFor(compiledModule) {
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
         defaultNativeInterop(compiledModule?.__claspHostBindings ?? []),
+      air: contract.air ?? compiledModule?.__claspAir ?? null,
+      airProjectors: contract.airProjectors ?? compiledModule?.__claspAirProjectors ?? null,
       evalHooks: contract.evalHooks ?? compiledModule?.__claspEvalHooks ?? null,
       traces: contract.traces ?? compiledModule?.__claspTraceCollector ?? null
     };
@@ -37,6 +39,8 @@ function bindingContractFor(compiledModule) {
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
       defaultNativeInterop(compiledModule?.__claspHostBindings ?? []),
+    air: compiledModule?.__claspAir ?? null,
+    airProjectors: compiledModule?.__claspAirProjectors ?? null,
     evalHooks: compiledModule?.__claspEvalHooks ?? null,
     traces: compiledModule?.__claspTraceCollector ?? null
   };
