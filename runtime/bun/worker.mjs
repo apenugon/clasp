@@ -252,7 +252,8 @@ export function createModuleHotSwapProtocol(
         health,
         upgrade: upgraded,
         rollback: rolledBack,
-        trigger: rolledBack.trigger
+        trigger: rolledBack.trigger,
+        audit: rolledBack.audit
       });
     },
     handoff(workflowName, run, operator, reason, handoffOptions = {}) {
@@ -393,21 +394,30 @@ export function createModuleHotSwapProtocol(
       trigger === null
         ? null
         : normalizeHotSwapRollbackTrigger(trigger, "hotSwap.rollback.trigger");
+    const audit = Object.freeze({
+      eventType: "rollback",
+      workflowName: plan.name,
+      sourceVersionId: sourceModule.versionId,
+      targetVersionId: targetModule.versionId,
+      trigger: normalizedTrigger
+    });
+    const runWithAudit = appendWorkflowAudit(rolledBack.run, audit);
 
     return Object.freeze({
       status: "rolled_back",
       workflowName: plan.name,
-      supervisor: rolledBack.run.supervision.supervisor,
+      supervisor: runWithAudit.supervision.supervisor,
       sourceVersionId: sourceModule.versionId,
       targetVersionId: targetModule.versionId,
       rollbackVersionId: sourceModule.versionId,
       rollbackTargetVersionId: targetModule.versionId,
       rollbackAvailable: false,
-      run: rolledBack.run,
+      run: runWithAudit,
       migration: rolledBack.migration,
       context: rolledBack.context,
       handlers: rolledBack.handlers,
-      trigger: normalizedTrigger
+      trigger: normalizedTrigger,
+      audit
     });
   }
 }
@@ -472,6 +482,15 @@ function normalizeHotSwapTimestamp(value, path) {
   }
 
   return value;
+}
+
+function appendWorkflowAudit(run, auditEntry) {
+  const auditLog = Array.isArray(run?.auditLog) ? run.auditLog : [];
+
+  return Object.freeze({
+    ...run,
+    auditLog: Object.freeze([...auditLog, Object.freeze(auditEntry)])
+  });
 }
 
 function patchRollbackWorkflowCompatibility(workflow, acceptedModuleVersionId) {

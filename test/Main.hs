@@ -2989,10 +2989,85 @@ compileTests =
             absoluteCompiledPath <- makeAbsolute compiledPath
             absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
-            assertEqual
-              "expected workflow lifecycle and retry runtime contract"
-              "{\"workflowName\":\"CounterFlow\",\"stateType\":\"Counter\",\"moduleVersionTagged\":true,\"upgradeWindowPolicy\":\"bounded-overlap\",\"compatibleVersionCount\":1,\"hotSwapHandlersExplicit\":true,\"hotSwapMigrationHooks\":true,\"runtimeModuleVersionTagged\":true,\"runtimeWorkflowCount\":1,\"checkpoint\":\"{\\\"count\\\":7}\",\"resumedValue\":7,\"deadlineAt\":1200,\"initiallyQueued\":1,\"queuedStatus\":\"queued\",\"queuedMailboxSize\":2,\"queuedDuplicate\":true,\"processedQueuedStatus\":\"delivered\",\"processedQueuedResult\":\"queued-1\",\"drainedStatus\":\"drained\",\"drainedMailboxSize\":0,\"drainedQueuedResults\":[4],\"blockedMailboxStatus\":\"operator_handoff\",\"blockedMailboxSize\":2,\"duplicateSuppressed\":true,\"duplicateResult\":2,\"retriedStatus\":\"delivered\",\"retriedAttempts\":3,\"retriedDelays\":[50,80],\"retriedResult\":3,\"deadlineStatus\":\"deadline_exceeded\",\"deadlineAttempts\":2,\"deadlineFailure\":\"slow-2\",\"cancelledStatus\":\"cancelled\",\"cancelReason\":\"manual-stop\",\"degradedStatus\":\"degraded\",\"degradedReason\":\"provider-outage\",\"degradedSupervisor\":\"SupportSupervisor\",\"degradedFallbackStatus\":\"delivered\",\"degradedFallbackResult\":\"fallback-1\",\"degradedFallbackMode\":\"degraded\",\"handoffStatus\":\"operator_handoff\",\"handoffOperator\":\"case-ops\",\"handoffReason\":\"manual-review\",\"handoffSupervisor\":\"SupportSupervisor\",\"replayedCount\":12,\"replayedDeliveries\":2,\"replayedIds\":[\"m1\",\"m2\"],\"migratedStatus\":\"migrated\",\"migratedCount\":12,\"migratedHook\":true,\"upgradedStatus\":\"upgraded\",\"upgradedCount\":27,\"upgradedDeadlineAt\":1250,\"upgradedSupervisor\":\"UpgradeSupervisor\",\"upgradedPrepareHook\":true,\"upgradedActivateHook\":true}"
-              runtimeOutput
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected workflow runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "workflow name" (Just (String "CounterFlow")) (KeyMap.lookup "workflowName" value)
+                assertEqual "state type" (Just (String "Counter")) (KeyMap.lookup "stateType" value)
+                assertEqual "module version tagged" (Just (Bool True)) (KeyMap.lookup "moduleVersionTagged" value)
+                assertEqual "upgrade window policy" (Just (String "bounded-overlap")) (KeyMap.lookup "upgradeWindowPolicy" value)
+                assertEqual "compatible version count" (Just (Number 1)) (KeyMap.lookup "compatibleVersionCount" value)
+                assertEqual "hot swap handlers explicit" (Just (Bool True)) (KeyMap.lookup "hotSwapHandlersExplicit" value)
+                assertEqual "hot swap migration hooks" (Just (Bool True)) (KeyMap.lookup "hotSwapMigrationHooks" value)
+                assertEqual "runtime module version tagged" (Just (Bool True)) (KeyMap.lookup "runtimeModuleVersionTagged" value)
+                assertEqual "runtime workflow count" (Just (Number 1)) (KeyMap.lookup "runtimeWorkflowCount" value)
+                assertEqual "checkpoint" (Just (String "{\"count\":7}")) (KeyMap.lookup "checkpoint" value)
+                assertEqual "resumed value" (Just (Number 7)) (KeyMap.lookup "resumedValue" value)
+                assertEqual "deadline" (Just (Number 1200)) (KeyMap.lookup "deadlineAt" value)
+                assertEqual "initial queue size" (Just (Number 1)) (KeyMap.lookup "initiallyQueued" value)
+                assertEqual "queued status" (Just (String "queued")) (KeyMap.lookup "queuedStatus" value)
+                assertEqual "queued mailbox size" (Just (Number 2)) (KeyMap.lookup "queuedMailboxSize" value)
+                assertEqual "queued duplicate" (Just (Bool True)) (KeyMap.lookup "queuedDuplicate" value)
+                assertEqual "processed queued status" (Just (String "delivered")) (KeyMap.lookup "processedQueuedStatus" value)
+                assertEqual "processed queued result" (Just (String "queued-1")) (KeyMap.lookup "processedQueuedResult" value)
+                assertEqual "drained status" (Just (String "drained")) (KeyMap.lookup "drainedStatus" value)
+                assertEqual "drained mailbox size" (Just (Number 0)) (KeyMap.lookup "drainedMailboxSize" value)
+                assertEqual "blocked mailbox status" (Just (String "operator_handoff")) (KeyMap.lookup "blockedMailboxStatus" value)
+                assertEqual "blocked mailbox size" (Just (Number 2)) (KeyMap.lookup "blockedMailboxSize" value)
+                assertEqual "duplicate suppressed" (Just (Bool True)) (KeyMap.lookup "duplicateSuppressed" value)
+                assertEqual "duplicate result" (Just (Number 2)) (KeyMap.lookup "duplicateResult" value)
+                assertEqual "retried status" (Just (String "delivered")) (KeyMap.lookup "retriedStatus" value)
+                assertEqual "retried attempts" (Just (Number 3)) (KeyMap.lookup "retriedAttempts" value)
+                assertEqual "retried result" (Just (Number 3)) (KeyMap.lookup "retriedResult" value)
+                assertEqual "deadline status" (Just (String "deadline_exceeded")) (KeyMap.lookup "deadlineStatus" value)
+                assertEqual "deadline attempts" (Just (Number 2)) (KeyMap.lookup "deadlineAttempts" value)
+                assertEqual "deadline failure" (Just (String "slow-2")) (KeyMap.lookup "deadlineFailure" value)
+                assertEqual "failed status" (Just (String "failed")) (KeyMap.lookup "failedStatus" value)
+                assertEqual "failed attempts" (Just (Number 2)) (KeyMap.lookup "failedAttempts" value)
+                assertEqual "failed failure" (Just (String "fatal-2")) (KeyMap.lookup "failedFailure" value)
+                assertEqual "cancelled status" (Just (String "cancelled")) (KeyMap.lookup "cancelledStatus" value)
+                assertEqual "cancel reason" (Just (String "manual-stop")) (KeyMap.lookup "cancelReason" value)
+                assertEqual "degraded status" (Just (String "degraded")) (KeyMap.lookup "degradedStatus" value)
+                assertEqual "degraded reason" (Just (String "provider-outage")) (KeyMap.lookup "degradedReason" value)
+                assertEqual "degraded supervisor" (Just (String "SupportSupervisor")) (KeyMap.lookup "degradedSupervisor" value)
+                assertEqual "degraded fallback status" (Just (String "delivered")) (KeyMap.lookup "degradedFallbackStatus" value)
+                assertEqual "degraded fallback result" (Just (String "fallback-1")) (KeyMap.lookup "degradedFallbackResult" value)
+                assertEqual "degraded fallback mode" (Just (String "degraded")) (KeyMap.lookup "degradedFallbackMode" value)
+                assertEqual "handoff status" (Just (String "operator_handoff")) (KeyMap.lookup "handoffStatus" value)
+                assertEqual "handoff operator" (Just (String "case-ops")) (KeyMap.lookup "handoffOperator" value)
+                assertEqual "handoff reason" (Just (String "manual-review")) (KeyMap.lookup "handoffReason" value)
+                assertEqual "handoff supervisor" (Just (String "SupportSupervisor")) (KeyMap.lookup "handoffSupervisor" value)
+                assertEqual "replayed count" (Just (Number 12)) (KeyMap.lookup "replayedCount" value)
+                assertEqual "replayed deliveries" (Just (Number 2)) (KeyMap.lookup "replayedDeliveries" value)
+                assertEqual "replayed audit count" (Just (Number 4)) (KeyMap.lookup "replayedAuditCount" value)
+                assertEqual "replayed first audit" (Just (String "started")) (KeyMap.lookup "replayedAuditFirst" value)
+                assertEqual "replayed excludes cancelled audit" (Just (Bool False)) (KeyMap.lookup "replayedHasCancelledAudit" value)
+                assertEqual "replay seed audit count" (Just (Number 3)) (KeyMap.lookup "replaySeedAuditCount" value)
+                assertEqual "migrated status" (Just (String "migrated")) (KeyMap.lookup "migratedStatus" value)
+                assertEqual "migrated count" (Just (Number 12)) (KeyMap.lookup "migratedCount" value)
+                assertEqual "migrated hook" (Just (Bool True)) (KeyMap.lookup "migratedHook" value)
+                assertEqual "migrated audit type" (Just (String "upgrade")) (KeyMap.lookup "migratedAuditType" value)
+                assertEqual "upgraded status" (Just (String "upgraded")) (KeyMap.lookup "upgradedStatus" value)
+                assertEqual "upgraded count" (Just (Number 27)) (KeyMap.lookup "upgradedCount" value)
+                assertEqual "upgraded deadline" (Just (Number 1250)) (KeyMap.lookup "upgradedDeadlineAt" value)
+                assertEqual "upgraded supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "upgradedSupervisor" value)
+                assertEqual "upgraded prepare hook" (Just (Bool True)) (KeyMap.lookup "upgradedPrepareHook" value)
+                assertEqual "upgraded activate hook" (Just (Bool True)) (KeyMap.lookup "upgradedActivateHook" value)
+                assertEqual "upgraded audit type" (Just (String "upgrade")) (KeyMap.lookup "upgradedAuditType" value)
+                assertEqual "retried delays" (Just [Number 50, Number 80]) (jsonArrayValues (KeyMap.lookup "retriedDelays" value))
+                assertEqual "retried audit kinds" (Just [String "retry", String "retry", String "transition"]) (jsonArrayValues (KeyMap.lookup "retriedAuditKinds" value))
+                assertEqual "retried audit tail" (Just [String "retry", String "retry", String "transition"]) (jsonArrayValues (KeyMap.lookup "retriedAuditLogTail" value))
+                assertEqual "deadline audit kinds" (Just [String "retry", String "retry", String "retry"]) (jsonArrayValues (KeyMap.lookup "deadlineAuditKinds" value))
+                assertEqual "deadline audit outcome" (Just (String "deadline_exceeded")) (KeyMap.lookup "deadlineAuditOutcome" value)
+                assertEqual "failed audit kinds" (Just [String "retry", String "retry"]) (jsonArrayValues (KeyMap.lookup "failedAuditKinds" value))
+                assertEqual "failed audit outcome" (Just (String "failed")) (KeyMap.lookup "failedAuditOutcome" value)
+                assertEqual "failed audit exhausted" (Just (Bool True)) (KeyMap.lookup "failedAuditExhausted" value)
+                assertEqual "replayed ids" (Just [String "m1", String "m2"]) (jsonArrayValues (KeyMap.lookup "replayedIds" value))
+                assertEqual "drained queued results" (Just [Number 4]) (jsonArrayValues (KeyMap.lookup "drainedQueuedResults" value))
+                assertEqual "upgraded audit log tail" (Just [String "upgrade"]) (jsonArrayValues (KeyMap.lookup "upgradedAuditLogTail" value))
+              Right other ->
+                assertFailure ("expected JSON object from workflow runtime, got " <> show other)
     , testCase "worker runtime stages supervised module hot swaps with bounded overlap" $
         case (compileSource "workflow-hot-swap-old" workflowSource, compileSource "workflow-hot-swap-new" workflowHotSwapTargetSource) of
           (Left err, _) ->
@@ -3075,6 +3150,9 @@ compileTests =
                 assertEqual "rollback handoff preserved" (Just (String "operator_handoff")) (KeyMap.lookup "rollbackSupervision" value)
                 assertEqual "rollback migration hook" (Just (Bool True)) (KeyMap.lookup "rollbackMigrationHook" value)
                 assertEqual "rollback activation hook" (Just (Bool True)) (KeyMap.lookup "rollbackActivationHook" value)
+                assertEqual "rollback audit type" (Just (String "rollback")) (KeyMap.lookup "rollbackAuditType" value)
+                assertEqual "rollback audit trigger kind" (Just Null) (KeyMap.lookup "rollbackAuditTriggerKind" value)
+                assertEqual "rollback audit log tail" (Just [String "upgrade", String "rollback"]) (jsonArrayValues (KeyMap.lookup "rollbackAuditLogTail" value))
               Right other ->
                 assertFailure ("expected JSON object from self-update runtime, got " <> show other)
     , testCase "worker runtime health-gates activation and attaches rollback triggers" $
@@ -3117,6 +3195,10 @@ compileTests =
                 assertEqual "manual rollback at" (Just (Number 1005)) (KeyMap.lookup "manualRollbackTriggerAt" value)
                 assertEqual "manual rollback count" (Just (Number 5)) (KeyMap.lookup "manualRollbackCount" value)
                 assertEqual "manual rollback supervisor" (Just (String "RollbackSupervisor")) (KeyMap.lookup "manualRollbackSupervisor" value)
+                assertEqual "auto rollback audit type" (Just (String "rollback")) (KeyMap.lookup "autoRollbackAuditType" value)
+                assertEqual "auto rollback audit trigger kind" (Just (String "health_check_failed")) (KeyMap.lookup "autoRollbackAuditTriggerKind" value)
+                assertEqual "manual rollback audit type" (Just (String "rollback")) (KeyMap.lookup "manualRollbackAuditType" value)
+                assertEqual "manual rollback audit trigger kind" (Just (String "error_budget")) (KeyMap.lookup "manualRollbackAuditTriggerKind" value)
               Right other ->
                 assertFailure ("expected JSON object from health-gated runtime, got " <> show other)
     , testCase "server runtime resolves target-aware native interop build plans" $
@@ -3429,6 +3511,10 @@ runNodeModule compiledPath = do
       , "const html = await route.encodeResponse(await route.handler({}));"
       , "console.log(html);"
       ]
+
+jsonArrayValues :: Maybe Value -> Maybe [Value]
+jsonArrayValues (Just (Array items)) = Just (toList items)
+jsonArrayValues _ = Nothing
 
 runNodeScript :: Text -> IO Text
 runNodeScript script = do
@@ -5691,6 +5777,12 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  now: 1000,"
     , "  retry: { maxAttempts: 4, initialBackoffMs: 150, backoffMultiplier: 2, maxBackoffMs: 200 }"
     , "});"
+    , "const failedRetried = workflow.deliver(run, { id: 'm8', payload: 1 }, (state, payload, message, meta) => {"
+    , "  throw new Error(`fatal-${meta.attempt}`);"
+    , "}, {"
+    , "  now: 1000,"
+    , "  retry: { maxAttempts: 2, initialBackoffMs: 25, backoffMultiplier: 2, maxBackoffMs: 25 }"
+    , "});"
     , "const cancelled = workflow.cancel(run, 'manual-stop');"
     , "const cancelledDelivery = workflow.deliver(cancelled, { id: 'm4', payload: 1 }, (state, payload) => ({"
     , "  count: state.count + payload"
@@ -5726,6 +5818,7 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  { id: 'm1', payload: 99 },"
     , "  { id: 'm2', payload: 3 }"
     , "], (state, payload) => ({ count: state.count + payload }));"
+    , "const replaySeed = workflow.handoff(workflow.cancel(run, 'pre-replay-stop'), 'queue-ops', 'pre-replay-review');"
     , "const migrated = workflow.migrate(checkpoint, workflow, {"
     , "  migrateState: (state, meta) => ({"
     , "    count: state.count + (meta.toModuleVersionId === meta.fromModuleVersionId ? 5 : 10)"
@@ -5777,9 +5870,19 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  retriedAttempts: retried.attempts,"
     , "  retriedDelays: retried.retryDelaysMs,"
     , "  retriedResult: retried.result,"
+    , "  retriedAuditKinds: retried.audit.map((entry) => entry.eventType),"
+    , "  retriedAuditLogTail: retried.run.auditLog.slice(-3).map((entry) => entry.eventType),"
     , "  deadlineStatus: deadlineExceeded.status,"
     , "  deadlineAttempts: deadlineExceeded.attempts,"
     , "  deadlineFailure: deadlineExceeded.failure?.message ?? null,"
+    , "  deadlineAuditKinds: deadlineExceeded.audit.map((entry) => entry.eventType),"
+    , "  deadlineAuditOutcome: deadlineExceeded.audit[deadlineExceeded.audit.length - 1]?.outcome ?? null,"
+    , "  failedStatus: failedRetried.status,"
+    , "  failedAttempts: failedRetried.attempts,"
+    , "  failedFailure: failedRetried.failure?.message ?? null,"
+    , "  failedAuditKinds: failedRetried.audit.map((entry) => entry.eventType),"
+    , "  failedAuditOutcome: failedRetried.audit[failedRetried.audit.length - 1]?.outcome ?? null,"
+    , "  failedAuditExhausted: failedRetried.audit[failedRetried.audit.length - 1]?.exhausted ?? null,"
     , "  cancelledStatus: cancelledDelivery.status,"
     , "  cancelReason: cancelled.cancelReason,"
     , "  degradedStatus: degradedDelivery.status,"
@@ -5795,15 +5898,22 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  replayedCount: replayed.state.count,"
     , "  replayedDeliveries: replayed.deliveries.length,"
     , "  replayedIds: replayed.processedIds,"
+    , "  replayedAuditCount: replayed.auditLog.length,"
+    , "  replayedAuditFirst: replayed.auditLog[0]?.transition ?? null,"
+    , "  replayedHasCancelledAudit: replayed.auditLog.some((entry) => entry.transition === 'cancelled'),"
+    , "  replaySeedAuditCount: replaySeed.auditLog.length,"
     , "  migratedStatus: migrated.status,"
     , "  migratedCount: migrated.state.count,"
     , "  migratedHook: migrated.handlers.migrateState,"
+    , "  migratedAuditType: migrated.audit.eventType,"
     , "  upgradedStatus: upgraded.status,"
     , "  upgradedCount: upgraded.run.state.count,"
     , "  upgradedDeadlineAt: upgraded.run.deadlineAt,"
     , "  upgradedSupervisor: upgraded.run.supervision.supervisor,"
     , "  upgradedPrepareHook: upgraded.handlers.prepare,"
-    , "  upgradedActivateHook: upgraded.handlers.activate"
+    , "  upgradedActivateHook: upgraded.handlers.activate,"
+    , "  upgradedAuditType: upgraded.audit.eventType,"
+    , "  upgradedAuditLogTail: upgraded.run.auditLog.slice(-1).map((entry) => entry.eventType)"
     , "}));"
     ]
 
@@ -5979,7 +6089,10 @@ workflowSelfUpdateRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  rollbackTargetTagged: rolledBack.targetVersionId.startsWith('module:Main:'),"
     , "  rollbackSupervision: rolledBack.run.supervision.status,"
     , "  rollbackMigrationHook: rolledBack.handlers.migrateState,"
-    , "  rollbackActivationHook: rolledBack.handlers.activate"
+    , "  rollbackActivationHook: rolledBack.handlers.activate,"
+    , "  rollbackAuditType: rolledBack.audit.eventType,"
+    , "  rollbackAuditTriggerKind: rolledBack.audit.trigger?.kind ?? null,"
+    , "  rollbackAuditLogTail: rolledBack.run.auditLog.slice(-2).map((entry) => entry.eventType)"
     , "}));"
     ]
 
@@ -6112,7 +6225,11 @@ workflowHealthGatedRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  manualRollbackTriggerReason: manualRolledBack.trigger.reason,"
     , "  manualRollbackTriggerAt: manualRolledBack.trigger.at,"
     , "  manualRollbackCount: manualRolledBack.run.state.count,"
-    , "  manualRollbackSupervisor: manualRolledBack.run.supervision.supervisor"
+    , "  manualRollbackSupervisor: manualRolledBack.run.supervision.supervisor,"
+    , "  autoRollbackAuditType: autoRolledBack.audit.eventType,"
+    , "  autoRollbackAuditTriggerKind: autoRolledBack.audit.trigger?.kind ?? null,"
+    , "  manualRollbackAuditType: manualRolledBack.audit.eventType,"
+    , "  manualRollbackAuditTriggerKind: manualRolledBack.audit.trigger?.kind ?? null"
     , "}));"
     ]
 
