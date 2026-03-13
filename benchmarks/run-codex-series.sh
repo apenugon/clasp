@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "usage: $0 <task-id|lead-segment> <count> <note-prefix> [model]" >&2
+  echo "usage: $0 <task-id|lead-priority|lead-segment> <count> <note-prefix> [model]" >&2
   exit 1
 fi
 
@@ -13,6 +13,12 @@ model="${4:-gpt-5.4}"
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "$task_id" in
+  lead-priority)
+    task_ids=(
+      "clasp-lead-priority"
+      "ts-lead-priority"
+    )
+    ;;
   lead-segment)
     task_ids=(
       "clasp-lead-segment"

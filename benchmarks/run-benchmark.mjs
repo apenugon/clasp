@@ -9,6 +9,20 @@ import { pathToFileURL } from "node:url";
 const benchmarkRoot = path.resolve("benchmarks");
 const tasksRoot = path.join(benchmarkRoot, "tasks");
 const resultsRoot = path.join(benchmarkRoot, "results");
+const mirroredTaskFamilies = [
+  {
+    familyId: "lead-priority",
+    comparisonLabel: "lead-priority-comparison",
+    claspTaskId: "clasp-lead-priority",
+    typescriptTaskId: "ts-lead-priority"
+  },
+  {
+    familyId: "lead-segment",
+    comparisonLabel: "lead-segment-comparison",
+    claspTaskId: "clasp-lead-segment",
+    typescriptTaskId: "ts-lead-segment"
+  }
+];
 
 async function main() {
   const [command, maybeTaskId, ...rest] = process.argv.slice(2);
@@ -399,11 +413,11 @@ async function summarizeCommand(args) {
     console.log(`  medianUncachedTokens: ${summary.medianUncachedTokens}`);
   }
 
-  const comparisons = buildLeadSegmentComparisons(filtered);
-  if (comparisons.length > 0) {
-    console.log("lead-segment-comparison");
+  const comparisonSections = buildMirroredTaskFamilyComparisons(filtered);
+  for (const section of comparisonSections) {
+    console.log(section.comparisonLabel);
 
-    for (const comparison of comparisons) {
+    for (const comparison of section.comparisons) {
       console.log(
         `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
       );
@@ -449,9 +463,18 @@ function summarizeGroup(groupResults) {
   };
 }
 
-function buildLeadSegmentComparisons(results) {
-  const leadSegmentTaskIds = new Set(["clasp-lead-segment", "ts-lead-segment"]);
-  const relevant = results.filter((result) => leadSegmentTaskIds.has(result.taskId));
+function buildMirroredTaskFamilyComparisons(results) {
+  return mirroredTaskFamilies
+    .map((family) => ({
+      comparisonLabel: family.comparisonLabel,
+      comparisons: buildMirroredTaskComparisons(results, family)
+    }))
+    .filter((section) => section.comparisons.length > 0);
+}
+
+function buildMirroredTaskComparisons(results, family) {
+  const relevantTaskIds = new Set([family.claspTaskId, family.typescriptTaskId]);
+  const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
     return [result.harness, result.model, series].join("\t");
@@ -461,8 +484,8 @@ function buildLeadSegmentComparisons(results) {
   for (const [groupKey, groupResults] of grouped.entries()) {
     const [harness, model, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
-    const claspResults = byTask.get("clasp-lead-segment");
-    const typescriptResults = byTask.get("ts-lead-segment");
+    const claspResults = byTask.get(family.claspTaskId);
+    const typescriptResults = byTask.get(family.typescriptTaskId);
 
     if (!claspResults || !typescriptResults) {
       continue;

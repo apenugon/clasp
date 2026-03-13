@@ -123,6 +123,13 @@ Run a repeated Codex sample set with a consistent harness wrapper:
 bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
 ```
 
+Run the mirrored schema-propagation pair for both languages:
+
+```sh
+bash benchmarks/run-codex-series.sh lead-priority 5 remediation-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
+```
+
 Run the mirrored repeated `lead-segment` series for both languages:
 
 ```sh

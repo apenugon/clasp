@@ -71,6 +71,10 @@ write_result "2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json" "clasp-l
 write_result "2026-03-01T10-02-00.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "remediation-a-2" "2026-03-01T10:02:00.000Z" 200 130 120 true 0
 write_result "2026-03-01T10-03-00.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "remediation-a-1" "2026-03-01T10:03:00.000Z" 150 140 130 true 0
 write_result "2026-03-01T10-04-00.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "remediation-a-2" "2026-03-01T10:04:00.000Z" 180 160 150 true 0
+write_result "2026-03-01T10-05-00.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "priority-a-1" "2026-03-01T10:05:00.000Z" 220 180 150 true 0
+write_result "2026-03-01T10-06-00.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "priority-a-2" "2026-03-01T10:06:00.000Z" 160 150 120 true 0
+write_result "2026-03-01T10-07-00.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "priority-a-1" "2026-03-01T10:07:00.000Z" 200 170 140 false 1
+write_result "2026-03-01T10-08-00.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "priority-a-2" "2026-03-01T10:08:00.000Z" 210 165 135 true 0
 
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
 printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
@@ -87,6 +91,18 @@ printf '%s\n' "$summary_output" | grep -Fq '    timeToGreenDeltaMs: 150'
 printf '%s\n' "$summary_output" | grep -Fq '    tokenDelta: -25'
 printf '%s\n' "$summary_output" | grep -Fq '    uncachedTokenDelta: -25'
 
+priority_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes priority-a)"
+printf '%s\n' "$priority_summary_output" | grep -Fq $'clasp-lead-priority\tcodex\tgpt-5.4'
+printf '%s\n' "$priority_summary_output" | grep -Fq $'ts-lead-priority\tcodex\tgpt-5.4'
+printf '%s\n' "$priority_summary_output" | grep -Fq 'lead-priority-comparison'
+printf '%s\n' "$priority_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpriority-a'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    timeToGreenDeltaMs: -190'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    tokenDelta: -3'
+printf '%s\n' "$priority_summary_output" | grep -Fq '    uncachedTokenDelta: -3'
+
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"$tmp_bin/nix.log"
@@ -99,3 +115,11 @@ printf '%s\n' "$command_log" | grep -Fq 'run clasp-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq 'run ts-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-1'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4
+priority_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$priority_command_log" | grep -Fq 'run clasp-lead-priority'
+printf '%s\n' "$priority_command_log" | grep -Fq 'run ts-lead-priority'
+printf '%s\n' "$priority_command_log" | grep -Fq -- '--notes priority-a-1'
+printf '%s\n' "$priority_command_log" | grep -Fq -- '--notes priority-a-2'
