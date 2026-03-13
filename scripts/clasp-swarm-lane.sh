@@ -37,6 +37,7 @@ current_task_file="$runtime_root/current-task.txt"
 pid_file="$runtime_root/pid"
 lock_file="$runtime_root/lane.lock"
 merge_lock_file="$project_root/.clasp-swarm/merge.lock"
+worktree_lock_file="$project_root/.clasp-swarm/worktree.lock"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
 main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
@@ -90,6 +91,12 @@ acquire_merge_lock() {
   local merge_lock_fd="$1"
 
   bash -c 'exec 9>&-; flock "$1"' _ "$merge_lock_fd"
+}
+
+acquire_worktree_lock() {
+  local worktree_lock_fd="$1"
+
+  bash -c 'exec 9>&-; flock "$1"' _ "$worktree_lock_fd"
 }
 
 task_id_of() {
@@ -335,12 +342,17 @@ clear_blocked() {
 
 remove_worktree_if_present() {
   local worktree_path="$1"
+  local worktree_lock_fd
+
+  exec {worktree_lock_fd}>"$worktree_lock_file"
+  acquire_worktree_lock "$worktree_lock_fd"
 
   if git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $worktree_path"; then
     git -C "$project_root" worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
   fi
 
   rm -rf "$worktree_path"
+  exec {worktree_lock_fd}>&-
 }
 
 clear_git_worktree_locks() {
@@ -352,14 +364,21 @@ prepare_git_worktree() {
   local add_args=("$@")
   local attempt=1
   local max_attempts=3
+  local worktree_lock_fd
 
   while (( attempt <= max_attempts )); do
+    exec {worktree_lock_fd}>"$worktree_lock_file"
+    acquire_worktree_lock "$worktree_lock_fd"
+
     git -C "$project_root" worktree prune >/dev/null 2>&1 || true
     clear_git_worktree_locks
 
     if git -C "$project_root" worktree add "${add_args[@]}" >/dev/null; then
+      exec {worktree_lock_fd}>&-
       return 0
     fi
+
+    exec {worktree_lock_fd}>&-
 
     if (( attempt == max_attempts )); then
       return 1
