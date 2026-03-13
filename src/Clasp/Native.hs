@@ -1,21 +1,31 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Clasp.Native
-  ( NativeCompareOp (..)
+  ( NativeAbi (..)
+  , NativeBuiltinLayout (..)
+  , NativeCompareOp (..)
+  , NativeConstructorLayout (..)
   , NativeDecl (..)
+  , NativeFieldLayout (..)
   , NativeExpr (..)
   , NativeField (..)
   , NativeFunction (..)
   , NativeGlobal (..)
   , NativeIntrinsic (..)
+  , NativeLayoutStorage (..)
   , NativeLiteral (..)
   , NativeMatchBranch (..)
   , NativeModule (..)
   , NativeMutability (..)
+  , NativeRecordLayout (..)
+  , NativeSlotLayout (..)
+  , NativeVariantLayout (..)
   , buildNativeModule
   ) where
 
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import Clasp.Lower
   ( LowerDecl (..)
   , LowerExpr (..)
@@ -24,12 +34,84 @@ import Clasp.Lower
   , LowerRecordField (..)
   , LowerRouteContract
   )
-import Clasp.Syntax (ModuleName)
+import Clasp.Syntax
+  ( ConstructorDecl (..)
+  , ModuleName
+  , RecordDecl (..)
+  , RecordFieldDecl (..)
+  , Type (..)
+  , TypeDecl (..)
+  )
 
 data NativeModule = NativeModule
   { nativeModuleName :: ModuleName
   , nativeModuleExports :: [Text]
+  , nativeModuleAbi :: NativeAbi
   , nativeModuleDecls :: [NativeDecl]
+  }
+  deriving (Eq, Show)
+
+data NativeAbi = NativeAbi
+  { nativeAbiVersion :: Text
+  , nativeAbiWordBytes :: Int
+  , nativeAbiBuiltinLayouts :: [NativeBuiltinLayout]
+  , nativeAbiRecordLayouts :: [NativeRecordLayout]
+  , nativeAbiVariantLayouts :: [NativeVariantLayout]
+  }
+  deriving (Eq, Show)
+
+data NativeLayoutStorage
+  = NativeImmediateStorage
+  | NativeHandleStorage
+  deriving (Eq, Show)
+
+data NativeBuiltinLayout = NativeBuiltinLayout
+  { nativeBuiltinLayoutName :: Text
+  , nativeBuiltinLayoutStorage :: NativeLayoutStorage
+  , nativeBuiltinLayoutWordCount :: Int
+  }
+  deriving (Eq, Show)
+
+data NativeSlotLayout = NativeSlotLayout
+  { nativeSlotLayoutName :: Text
+  , nativeSlotLayoutType :: Type
+  , nativeSlotLayoutStorage :: NativeLayoutStorage
+  , nativeSlotLayoutWordOffset :: Int
+  , nativeSlotLayoutWordCount :: Int
+  }
+  deriving (Eq, Show)
+
+data NativeFieldLayout = NativeFieldLayout
+  { nativeFieldLayoutName :: Text
+  , nativeFieldLayoutType :: Type
+  , nativeFieldLayoutStorage :: NativeLayoutStorage
+  , nativeFieldLayoutWordOffset :: Int
+  , nativeFieldLayoutWordCount :: Int
+  }
+  deriving (Eq, Show)
+
+data NativeRecordLayout = NativeRecordLayout
+  { nativeRecordLayoutName :: Text
+  , nativeRecordLayoutWordCount :: Int
+  , nativeRecordLayoutFields :: [NativeFieldLayout]
+  }
+  deriving (Eq, Show)
+
+data NativeConstructorLayout = NativeConstructorLayout
+  { nativeConstructorLayoutName :: Text
+  , nativeConstructorLayoutTagWord :: Int
+  , nativeConstructorLayoutPayloadWords :: Int
+  , nativeConstructorLayoutWordCount :: Int
+  , nativeConstructorLayoutPayloads :: [NativeSlotLayout]
+  }
+  deriving (Eq, Show)
+
+data NativeVariantLayout = NativeVariantLayout
+  { nativeVariantLayoutName :: Text
+  , nativeVariantLayoutTagWord :: Int
+  , nativeVariantLayoutMaxPayloadWords :: Int
+  , nativeVariantLayoutWordCount :: Int
+  , nativeVariantLayoutConstructors :: [NativeConstructorLayout]
   }
   deriving (Eq, Show)
 
@@ -123,8 +205,125 @@ buildNativeModule modl =
   NativeModule
     { nativeModuleName = lowerModuleName modl
     , nativeModuleExports = fmap lowerDeclName (lowerModuleDecls modl)
+    , nativeModuleAbi = buildNativeAbi modl
     , nativeModuleDecls = fmap lowerDeclToNative (lowerModuleDecls modl)
     }
+
+buildNativeAbi :: LowerModule -> NativeAbi
+buildNativeAbi modl =
+  NativeAbi
+    { nativeAbiVersion = "clasp-native-v1"
+    , nativeAbiWordBytes = 8
+    , nativeAbiBuiltinLayouts = builtinLayouts
+    , nativeAbiRecordLayouts = fmap (buildRecordLayout recordEnv typeEnv) recordDecls
+    , nativeAbiVariantLayouts = fmap (buildVariantLayout recordEnv typeEnv) typeDecls
+    }
+  where
+    typeDecls = lowerModuleTypeDecls modl
+    recordDecls = lowerModuleRecordDecls modl
+    typeEnv = Map.fromList [(typeDeclName typeDecl, typeDecl) | typeDecl <- typeDecls]
+    recordEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+    builtinLayouts =
+      [ NativeBuiltinLayout "Int" NativeImmediateStorage 1
+      , NativeBuiltinLayout "Bool" NativeImmediateStorage 1
+      , NativeBuiltinLayout "Str" NativeHandleStorage 1
+      , NativeBuiltinLayout "List" NativeHandleStorage 1
+      , NativeBuiltinLayout "Page" NativeHandleStorage 1
+      , NativeBuiltinLayout "Redirect" NativeHandleStorage 1
+      , NativeBuiltinLayout "View" NativeHandleStorage 1
+      , NativeBuiltinLayout "Prompt" NativeHandleStorage 1
+      ]
+
+buildRecordLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> RecordDecl -> NativeRecordLayout
+buildRecordLayout recordEnv typeEnv recordDecl =
+  NativeRecordLayout
+    { nativeRecordLayoutName = recordDeclName recordDecl
+    , nativeRecordLayoutWordCount = length fieldLayouts
+    , nativeRecordLayoutFields = fieldLayouts
+    }
+  where
+    fieldLayouts =
+      zipWith (buildFieldLayout recordEnv typeEnv) [0 ..] (recordDeclFields recordDecl)
+
+buildFieldLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> Int -> RecordFieldDecl -> NativeFieldLayout
+buildFieldLayout recordEnv typeEnv wordOffset fieldDecl =
+  NativeFieldLayout
+    { nativeFieldLayoutName = recordFieldDeclName fieldDecl
+    , nativeFieldLayoutType = fieldType
+    , nativeFieldLayoutStorage = layoutStorageForType recordEnv typeEnv fieldType
+    , nativeFieldLayoutWordOffset = wordOffset
+    , nativeFieldLayoutWordCount = 1
+    }
+  where
+    fieldType = recordFieldDeclType fieldDecl
+
+buildVariantLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> TypeDecl -> NativeVariantLayout
+buildVariantLayout recordEnv typeEnv typeDecl =
+  NativeVariantLayout
+    { nativeVariantLayoutName = typeDeclName typeDecl
+    , nativeVariantLayoutTagWord = 0
+    , nativeVariantLayoutMaxPayloadWords = maximum (0 : fmap nativeConstructorLayoutPayloadWords constructorLayouts)
+    , nativeVariantLayoutWordCount = maximum (1 : fmap nativeConstructorLayoutWordCount constructorLayouts)
+    , nativeVariantLayoutConstructors = constructorLayouts
+    }
+  where
+    constructorLayouts =
+      fmap (buildConstructorLayout recordEnv typeEnv) (typeDeclConstructors typeDecl)
+
+buildConstructorLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> ConstructorDecl -> NativeConstructorLayout
+buildConstructorLayout recordEnv typeEnv constructorDecl =
+  NativeConstructorLayout
+    { nativeConstructorLayoutName = constructorDeclName constructorDecl
+    , nativeConstructorLayoutTagWord = 0
+    , nativeConstructorLayoutPayloadWords = length payloadLayouts
+    , nativeConstructorLayoutWordCount = 1 + length payloadLayouts
+    , nativeConstructorLayoutPayloads = payloadLayouts
+    }
+  where
+    payloadLayouts =
+      zipWith (buildPayloadLayout recordEnv typeEnv) [1 ..] (constructorDeclFields constructorDecl)
+
+buildPayloadLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> Int -> Type -> NativeSlotLayout
+buildPayloadLayout recordEnv typeEnv wordOffset slotType =
+  NativeSlotLayout
+    { nativeSlotLayoutName = "$" <> nativeIndexName (wordOffset - 1)
+    , nativeSlotLayoutType = slotType
+    , nativeSlotLayoutStorage = layoutStorageForType recordEnv typeEnv slotType
+    , nativeSlotLayoutWordOffset = wordOffset
+    , nativeSlotLayoutWordCount = 1
+    }
+
+nativeIndexName :: Int -> Text
+nativeIndexName index =
+  T.pack (show index)
+
+layoutStorageForType :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> Type -> NativeLayoutStorage
+layoutStorageForType recordEnv typeEnv typ =
+  case typ of
+    TInt ->
+      NativeImmediateStorage
+    TBool ->
+      NativeImmediateStorage
+    TStr ->
+      NativeHandleStorage
+    TList _ ->
+      NativeHandleStorage
+    TNamed name
+      | name `elem` ["Page", "Redirect", "View", "Prompt"] ->
+          NativeHandleStorage
+      | Map.member name recordEnv ->
+          NativeHandleStorage
+      | otherwise ->
+          case Map.lookup name typeEnv of
+            Just typeDecl
+              | all (null . constructorDeclFields) (typeDeclConstructors typeDecl) ->
+                  NativeImmediateStorage
+            Just _ ->
+              NativeHandleStorage
+            Nothing ->
+              NativeHandleStorage
+    TFunction _ _ ->
+      NativeHandleStorage
 
 lowerDeclName :: LowerDecl -> Text
 lowerDeclName decl =

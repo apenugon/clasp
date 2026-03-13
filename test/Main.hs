@@ -100,16 +100,24 @@ import Clasp.Lower
   , lowerModule
   )
 import Clasp.Native
-  ( NativeCompareOp (..)
+  ( NativeAbi (..)
+  , NativeBuiltinLayout (..)
+  , NativeCompareOp (..)
+  , NativeConstructorLayout (..)
   , NativeDecl (..)
   , NativeExpr (..)
+  , NativeFieldLayout (..)
   , NativeFunction (..)
   , NativeGlobal (..)
   , NativeIntrinsic (..)
+  , NativeLayoutStorage (..)
   , NativeLiteral (..)
   , NativeMatchBranch (..)
   , NativeModule (..)
   , NativeMutability (..)
+  , NativeRecordLayout (..)
+  , NativeSlotLayout (..)
+  , NativeVariantLayout (..)
   )
 import Clasp.Syntax
   ( AgentDecl (..)
@@ -2511,6 +2519,87 @@ nativeTests =
                       assertEqual "form route contract" "route:createLeadRoute" (lowerRouteContractIdentity routeForm)
                 other ->
                   assertFailure ("unexpected native home declaration: " <> show other)
+    , testCase "native ABI uses handle slots for handle-like record fields and variant payloads" $
+        case nativeSource "native-abi" nativeAbiSource of
+          Left err ->
+            assertFailure ("expected native ABI lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let abi = nativeModuleAbi nativeMod
+            case findBuiltinLayout "Str" (nativeAbiBuiltinLayouts abi) of
+              Just layout -> do
+                assertEqual "string builtin storage" NativeHandleStorage (nativeBuiltinLayoutStorage layout)
+                assertEqual "string builtin words" 1 (nativeBuiltinLayoutWordCount layout)
+              Nothing ->
+                assertFailure "expected Str builtin layout"
+            case findBuiltinLayout "List" (nativeAbiBuiltinLayouts abi) of
+              Just layout ->
+                assertEqual "list builtin storage" NativeHandleStorage (nativeBuiltinLayoutStorage layout)
+              Nothing ->
+                assertFailure "expected List builtin layout"
+            case findRecordLayout "LeadEnvelope" (nativeAbiRecordLayouts abi) of
+              Just layout -> do
+                assertEqual "record word count" 3 (nativeRecordLayoutWordCount layout)
+                assertEqual
+                  "record field layouts"
+                  [ NativeFieldLayout "title" TStr NativeHandleStorage 0 1
+                  , NativeFieldLayout "tags" (TList TStr) NativeHandleStorage 1 1
+                  , NativeFieldLayout "owner" (TNamed "Principal") NativeHandleStorage 2 1
+                  ]
+                  (nativeRecordLayoutFields layout)
+              Nothing ->
+                assertFailure "expected LeadEnvelope layout"
+            case findVariantLayout "RenderResult" (nativeAbiVariantLayouts abi) of
+              Just layout -> do
+                assertEqual "variant tag word" 0 (nativeVariantLayoutTagWord layout)
+                assertEqual "variant payload width" 1 (nativeVariantLayoutMaxPayloadWords layout)
+                assertEqual "variant total word count" 2 (nativeVariantLayoutWordCount layout)
+                assertEqual
+                  "variant constructor layouts"
+                  [ NativeConstructorLayout "RenderedPage" 0 1 2 [NativeSlotLayout "$0" (TNamed "Page") NativeHandleStorage 1 1]
+                  , NativeConstructorLayout "RenderedPrompt" 0 1 2 [NativeSlotLayout "$0" (TNamed "Prompt") NativeHandleStorage 1 1]
+                  , NativeConstructorLayout "RenderedList" 0 1 2 [NativeSlotLayout "$0" (TList TStr) NativeHandleStorage 1 1]
+                  , NativeConstructorLayout "RenderedOwner" 0 1 2 [NativeSlotLayout "$0" (TNamed "Principal") NativeHandleStorage 1 1]
+                  , NativeConstructorLayout "RenderedFlag" 0 1 2 [NativeSlotLayout "$0" TBool NativeImmediateStorage 1 1]
+                  , NativeConstructorLayout "RenderIdle" 0 0 1 []
+                  ]
+                  (nativeVariantLayoutConstructors layout)
+              Nothing ->
+                assertFailure "expected RenderResult layout"
+    , testCase "native entry exposes ABI metadata for a routed module end to end" $
+        withProjectFiles "native-abi-entry" [("Main.clasp", nativeAbiScenarioSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          nativeResult <- nativeEntry inputPath
+          case nativeResult of
+            Left err ->
+              assertFailure ("expected native entry ABI lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right nativeMod -> do
+              let abi = nativeModuleAbi nativeMod
+              assertEqual "abi version" "clasp-native-v1" (nativeAbiVersion abi)
+              assertEqual "abi word bytes" 8 (nativeAbiWordBytes abi)
+              case findVariantLayout "UiSurface" (nativeAbiVariantLayouts abi) of
+                Just layout -> do
+                  assertEqual "ui surface max payload words" 1 (nativeVariantLayoutMaxPayloadWords layout)
+                  assertEqual
+                    "ui surface payload storage"
+                    [ NativeHandleStorage
+                    , NativeHandleStorage
+                    , NativeHandleStorage
+                    , NativeHandleStorage
+                    ]
+                    [ nativeSlotLayoutStorage payload
+                    | constructorLayout <- nativeVariantLayoutConstructors layout
+                    , payload <- nativeConstructorLayoutPayloads constructorLayout
+                    ]
+                Nothing ->
+                  assertFailure "expected UiSurface layout"
+              case findRecordLayout "InboxModel" (nativeAbiRecordLayouts abi) of
+                Just layout ->
+                  assertEqual
+                    "inbox model field storage"
+                    [NativeHandleStorage, NativeHandleStorage, NativeImmediateStorage]
+                    (fmap nativeFieldLayoutStorage (nativeRecordLayoutFields layout))
+                Nothing ->
+                  assertFailure "expected InboxModel layout"
     ]
 
 docsTests :: TestTree
@@ -4735,6 +4824,18 @@ findNativeDecl target =
         NativeFunctionDecl functionDecl ->
           nativeFunctionName functionDecl == target
 
+findBuiltinLayout :: Text -> [NativeBuiltinLayout] -> Maybe NativeBuiltinLayout
+findBuiltinLayout target =
+  find ((== target) . nativeBuiltinLayoutName)
+
+findRecordLayout :: Text -> [NativeRecordLayout] -> Maybe NativeRecordLayout
+findRecordLayout target =
+  find ((== target) . nativeRecordLayoutName)
+
+findVariantLayout :: Text -> [NativeVariantLayout] -> Maybe NativeVariantLayout
+findVariantLayout target =
+  find ((== target) . nativeVariantLayoutName)
+
 lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do
   checked <- checkSource path source
@@ -6148,6 +6249,49 @@ interactivePageSource =
     , "route homeRoute = GET \"/\" Empty -> Page home"
     , "route leadRoute = GET \"/lead/primary\" Empty -> Page leadPage"
     , "route createLeadRoute = POST \"/leads\" LeadCreate -> Redirect createLead"
+    ]
+
+nativeAbiSource :: Text
+nativeAbiSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadEnvelope = {"
+    , "  title : Str,"
+    , "  tags : [Str],"
+    , "  owner : Principal"
+    , "}"
+    , ""
+    , "type RenderResult = RenderedPage Page | RenderedPrompt Prompt | RenderedList [Str] | RenderedOwner Principal | RenderedFlag Bool | RenderIdle"
+    , ""
+    , "main = \"ok\""
+    ]
+
+nativeAbiScenarioSource :: Text
+nativeAbiScenarioSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Empty = {}"
+    , "record InboxModel = {"
+    , "  title : Str,"
+    , "  messages : [Str],"
+    , "  unread : Bool"
+    , "}"
+    , ""
+    , "type UiSurface = Landing Page | Detail View | Draft Prompt | Next Redirect"
+    , ""
+    , "defaultModel : InboxModel"
+    , "defaultModel = InboxModel {"
+    , "  title = \"Inbox\","
+    , "  messages = [\"Ada\", \"Grace\"],"
+    , "  unread = true"
+    , "}"
+    , ""
+    , "home : Empty -> Page"
+    , "home req = page defaultModel.title (text \"Mailbox\")"
+    , ""
+    , "route homeRoute = GET \"/\" Empty -> Page home"
     ]
 
 redirectSource :: Text
