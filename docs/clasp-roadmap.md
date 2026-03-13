@@ -104,6 +104,8 @@ Exit criteria:
 - Treat primitives as representation-only beneath the source language rather than as a normal source-level escape hatch for project-facing declarations
 - Add compiler guidance that promotes repeated local semantic aliases into canonical shared `Domain/` modules and flags competing file-local wrappers for the same concept
 - Keep local bindings on the semantic type path as well, so agents do not regain a primitive escape route simply by packing more logic into larger functions
+- Add protocol or trait declarations for shared behavior contracts without inheritance
+- Add attached methods or receiver syntax as sugar over ordinary functions and protocol implementations, without turning classes or mutable object identity into the default programming model
 
 Exit criteria:
 
@@ -130,6 +132,7 @@ Exit criteria:
 - Treat untyped or weakly typed foreign values as explicit boundary-only `Dynamic` or `Unknown` values rather than ambient `Any`
 - Require explicit unsafe refinement when the compiler cannot prove a foreign declaration matches the claimed `Clasp` type
 - Preserve blame-carrying boundary diagnostics so runtime type failures identify the exact foreign import, declaration, expected type, observed path, and unsafe assertion site
+- Prefer protocol- and function-oriented polymorphism over class hierarchies when the language needs reusable behavior organization
 
 Exit criteria:
 

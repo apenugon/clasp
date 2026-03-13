@@ -365,6 +365,8 @@ Critical path:
 - `TY-022` Add semantic proof and result caching keyed by graph identity, compiler version, and relevant world or environment state so already-discharged reasoning does not repeat unnecessarily.
 - `TY-023` Add cross-repo semantic graph federation and compatibility reasoning for multi-package changes.
 - `TY-024` Add semantic primitive aliases and primitive discipline so source-level code uses project-meaningful types instead of bare `Str`, `Int`, or `Bool`.
+- `TY-025` Add protocol or trait declarations for shared behavior without inheritance, override chains, or class-heavy mutable object models.
+- `TY-026` Add attached methods, `impl`-style blocks, and receiver syntax as sugar over ordinary functions and protocol implementations.
 
 ### Track 3: Schemas and Trust Boundaries
 
@@ -541,6 +543,7 @@ Critical path:
 - `BM-036` Add learning-loop and behavioral-verification benchmarks for budget-aware remediation and bounded workflow, policy, and rollout checks.
 - `BM-037` Add semantic-type-discipline benchmarks.
 - `BM-038` Add parallel-runtime benchmarks proving mailbox safety, supervision correctness, hot-upgrade safety, and multicore scalability for isolated workflow or process execution.
+- `BM-039` Add protocol-and-method ergonomics benchmarks that compare receiver-style and protocol-oriented Clasp code against equivalent function-only and baseline-language implementations on realistic product logic changes.
 
 ### Track 10: SaaS Dogfooding
 

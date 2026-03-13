@@ -755,6 +755,34 @@ The stronger long-term shape is:
 
 That gives agents something stable to query and transform, and avoids treating string literals as the main representation of important runtime contracts.
 
+### Protocols and methods without class-heavy OOP
+
+`Clasp` should not copy the parts of traditional OOP that make whole-system reasoning harder:
+
+- class-first design
+- inheritance hierarchies
+- override chains
+- ambient mutable object state
+- hidden dynamic dispatch as the default behavior model
+
+Those patterns usually make agent reasoning and provability worse, not better.
+
+What *is* worth preserving are the ergonomic pieces:
+
+- protocol or trait declarations for shared behavior
+- attached methods or `impl`-style blocks as sugar over ordinary functions
+- receiver-style call syntax when it improves readability
+- clear module or type-local organization of related behavior
+
+So the right long-term shape is:
+
+- records, ADTs, schemas, and workflows remain the semantic foundation
+- protocols or traits describe shared behavior contracts without inheritance
+- methods are surface sugar over compiler-known functions and implementations
+- mutable object identity does not become the default application model
+
+That gives agents a familiar way to read and organize behavior without reintroducing the semantic ambiguity and hidden coupling that class-heavy OOP tends to create.
+
 ### UI graphs and action traces as first-class artifacts
 
 If `Clasp` owns pages, actions, forms, navigation, and later client placement, then it should emit machine-readable UI artifacts too.
