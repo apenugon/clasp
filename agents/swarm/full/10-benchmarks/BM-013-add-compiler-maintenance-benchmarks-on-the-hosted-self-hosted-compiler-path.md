@@ -25,7 +25,7 @@ The project needs a benchmark story that is reproducible, public, and grounded i
 
 ## Dependencies
 
-- `SH-012`
+- `SH-014`
 
 ## Acceptance
 

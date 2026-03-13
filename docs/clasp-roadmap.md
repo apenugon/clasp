@@ -280,12 +280,14 @@ Exit criteria:
 - Add stage1 and stage2 bootstrap checks so the compiler can compile itself reproducibly
 - Promote the hosted compiler from the proof-harness example tree into a real compiler implementation tree
 - Switch ordinary compiler commands to the Clasp compiler by default while retaining an explicit Haskell bootstrap fallback
+- Quarantine the Haskell bootstrap compiler behind an explicit recovery-only mode so ordinary workflows cannot silently escape back to the easier path
+- Remove the Haskell bootstrap compiler from default development, CI, release, and benchmark paths once the self-hosted compiler proves stable enough
 
 Exit criteria:
 
 - The primary compiler implementation is written in `Clasp`
 - The ordinary `check`, `compile`, and `explain` entrypoints default to the Clasp compiler rather than a self-hosting-only special case
-- The Haskell compiler remains available as a bootstrap fallback
+- The Haskell compiler is no longer part of ordinary development or benchmark paths and remains only as an explicit recovery/bootstrap oracle
 - Bootstrap reproducibility checks pass for the self-hosted path
 
 ## Phase 13: Native Backend and Bytecode Emission

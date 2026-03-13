@@ -19,11 +19,11 @@ Lanes in this wave:
 - `09-external-objectives`: External-Objective Adaptation (8 tasks)
 - `10-benchmarks`: Benchmark Program (40 tasks)
 - `11-saas-dogfood`: SaaS Dogfooding (10 tasks)
-- `12-self-hosting`: Self-Hosting (12 tasks)
+- `12-self-hosting`: Self-Hosting (14 tasks)
 - `13-native-backend`: Native Backend And Bytecode (11 tasks)
 - `14-sqlite`: SQLite Storage (10 tasks)
 
-Total tasks: 256
+Total tasks: 258
 
 Regenerate with:
 

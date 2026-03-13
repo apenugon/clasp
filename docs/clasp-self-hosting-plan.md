@@ -154,7 +154,7 @@ Run that compiler on `Bun`, then add bootstrap checks:
 - stage1 Clasp compiler builds stage2 Clasp compiler
 - stage1 and stage2 are identical or semantically equivalent
 
-Once those checks are reliable, the hosted `Clasp` implementation should move out of the proof-harness example tree into a real compiler implementation directory, then become the primary compiler while Haskell remains the bootstrap fallback.
+Once those checks are reliable, the hosted `Clasp` implementation should move out of the proof-harness example tree into a real compiler implementation directory, then become the primary compiler. After that, the Haskell bootstrap should be quarantined behind an explicit recovery-only path rather than remaining an easy ordinary fallback.
 
 ### Stage 6: Native Self-Hosting
 
@@ -176,7 +176,7 @@ Hosted self-hosting is complete when:
 - ordinary `check`, `compile`, `explain`, manifest, and package-tool flows default to the Clasp compiler path
 - `Clasp` can compile itself through the JS/Bun path
 - bootstrap reproducibility checks pass
-- the Haskell compiler is needed only as a bootstrap path or fallback
+- the Haskell compiler is needed only as an explicit bootstrap/recovery path and not as an ordinary workflow fallback
 
 Native self-hosting is complete when:
 

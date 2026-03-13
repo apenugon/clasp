@@ -576,6 +576,8 @@ Critical path:
 - `SH-010` Switch the primary compiler implementation to Clasp while retaining the Haskell bootstrap fallback.
 - `SH-011` Promote the hosted Clasp compiler from `examples/compiler-selfhost` into a real compiler implementation tree that can serve ordinary compiler entrypoints instead of only the special self-hosting proof harness.
 - `SH-012` Switch ordinary `check`, `compile`, `explain`, manifest, and package-tool flows to the Clasp compiler by default while retaining the Haskell bootstrap fallback and explicit compatibility checks.
+- `SH-013` Quarantine the Haskell bootstrap compiler behind an explicit recovery-only mode so ordinary agent and developer workflows cannot silently fall back to the easier bootstrap path.
+- `SH-014` Remove the Haskell bootstrap compiler from default development, CI, release, and benchmark paths while keeping only a narrow emergency recovery path and reproducibility oracle role.
 
 ### Track 12: Native Backend And Bytecode
 
@@ -687,7 +689,7 @@ Reason:
 
 Dispatch after Wave 6:
 
-- `SH-001` through `SH-012`
+- `SH-001` through `SH-014`
 - `BM-013`
 
 Reason:

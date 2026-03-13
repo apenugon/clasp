@@ -26,7 +26,7 @@ Clasp needs a path beyond JavaScript for backend and compiler workloads once the
 
 ## Dependencies
 
-- `SH-012`
+- `SH-014`
 
 ## Acceptance
 
