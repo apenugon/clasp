@@ -168,6 +168,53 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
     }
   );
 
+  let invalidLearningLoop = null;
+  try {
+    contract.traceability?.linkLearningLoop(
+      {
+        name: "growth-outreach-loop-over-budget",
+        objective: {
+          name: "reply-rate",
+          summary: "Raise growth lead reply rate.",
+          metric: "growth_reply_rate"
+        },
+        incident: feedbackSignal,
+        evals: [{ name: "lead-app.ai-demo", file: "examples/lead-app/ai-demo.mjs" }],
+        benchmarks: [{ name: "clasp-external-adaptation", harness: "codex", baseline: "objective-a" }],
+        budget: { maxRemediationSteps: 1, evalRuns: 1, benchmarkRuns: 1 },
+        remediation: changePlan
+      },
+      {
+        collector: signalCollector,
+        traceId: `${lead.leadId}:growth-outreach-loop-over-budget`,
+        context: { actor: { id: "lead-ai-demo" }, objective: "reply-rate" }
+      }
+    );
+  } catch (error) {
+    invalidLearningLoop = error instanceof Error ? error.message : String(error);
+  }
+
+  const learningLoop = contract.traceability?.linkLearningLoop(
+    {
+      name: "growth-outreach-loop",
+      objective: {
+        name: "reply-rate",
+        summary: "Raise growth lead reply rate.",
+        metric: "growth_reply_rate"
+      },
+      incident: feedbackSignal,
+      evals: [{ name: "lead-app.ai-demo", file: "examples/lead-app/ai-demo.mjs" }],
+      benchmarks: [{ name: "clasp-external-adaptation", harness: "codex", baseline: "objective-a" }],
+      budget: { maxRemediationSteps: 2, evalRuns: 1, benchmarkRuns: 1 },
+      remediation: changePlan
+    },
+    {
+      collector: signalCollector,
+      traceId: `${lead.leadId}:growth-outreach-loop`,
+      context: { actor: { id: "lead-ai-demo" }, objective: "reply-rate" }
+    }
+  );
+
   let invalidTool = null;
   try {
     lookupLeadPlaybook.parse({
@@ -231,8 +278,18 @@ export async function runLeadAiDemo(compiledModule, options = {}) {
     changePlanAirRootKind:
       changePlan?.air?.nodes?.find((node) => node.id === "plan:growth-outreach-tune")?.kind ??
       null,
+    learningLoopKind: learningLoop?.kind ?? null,
+    learningLoopName: learningLoop?.loop?.name ?? null,
+    learningLoopObjective: learningLoop?.objective?.name ?? null,
+    learningLoopEvalIds: learningLoop?.evals?.map((entry) => entry.id) ?? [],
+    learningLoopBenchmarkIds: learningLoop?.benchmarks?.map((entry) => entry.id) ?? [],
+    learningLoopBudgetStepCap: learningLoop?.budget?.maxRemediationSteps ?? null,
+    learningLoopAirRootKind:
+      learningLoop?.air?.nodes?.find((node) => node.id === "learning-loop:growth-outreach-loop")
+        ?.kind ?? null,
     collectedSignalCount: signalCollector?.entries?.().length ?? 0,
     invalidChange,
+    invalidLearningLoop,
     invalidTool,
     invalidModel
   };
