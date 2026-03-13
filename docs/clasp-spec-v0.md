@@ -136,10 +136,12 @@ module Main
 
 record CustomerRecord = { customerId : Str, tier : Str }
 record CustomerChurnEvent = { customerId : Str, reason : Str }
+record CustomerEscalationFeedback = { customerId : Str, severity : Str }
 record CustomerMetric = { customerId : Str, churnRate : Int }
 
 domain object Customer = CustomerRecord
 domain event CustomerChurned = CustomerChurnEvent for Customer
+feedback operational CustomerEscalation = CustomerEscalationFeedback for Customer
 metric CustomerChurnRate = CustomerMetric for Customer
 goal RetainCustomers = CustomerChurnRate
 experiment RetentionPromptTrial = RetainCustomers

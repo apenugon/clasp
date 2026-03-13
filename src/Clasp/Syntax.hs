@@ -11,6 +11,8 @@ module Clasp.Syntax
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
   , Expr (..)
+  , FeedbackDecl (..)
+  , FeedbackKind (..)
   , ForeignDecl (..)
   , ForeignPackageImport (..)
   , ForeignPackageImportKind (..)
@@ -60,6 +62,7 @@ module Clasp.Syntax
   , renderType
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderFeedbackKind
   , renderSupervisorRestartStrategy
   , splitModuleName
   ) where
@@ -122,6 +125,7 @@ data Module = Module
   , moduleRecordDecls :: [RecordDecl]
   , moduleDomainObjectDecls :: [DomainObjectDecl]
   , moduleDomainEventDecls :: [DomainEventDecl]
+  , moduleFeedbackDecls :: [FeedbackDecl]
   , moduleMetricDecls :: [MetricDecl]
   , moduleGoalDecls :: [GoalDecl]
   , moduleExperimentDecls :: [ExperimentDecl]
@@ -183,6 +187,30 @@ data MetricDecl = MetricDecl
   , metricDeclSchemaSpan :: SourceSpan
   , metricDeclObjectName :: Text
   , metricDeclObjectSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data FeedbackKind
+  = FeedbackOperational
+  | FeedbackBusiness
+  deriving (Eq, Show)
+
+renderFeedbackKind :: FeedbackKind -> Text
+renderFeedbackKind feedbackKind =
+  case feedbackKind of
+    FeedbackOperational -> "operational"
+    FeedbackBusiness -> "business"
+
+data FeedbackDecl = FeedbackDecl
+  { feedbackDeclName :: Text
+  , feedbackDeclSpan :: SourceSpan
+  , feedbackDeclNameSpan :: SourceSpan
+  , feedbackDeclIdentity :: Text
+  , feedbackDeclKind :: FeedbackKind
+  , feedbackDeclSchemaName :: Text
+  , feedbackDeclSchemaSpan :: SourceSpan
+  , feedbackDeclObjectName :: Text
+  , feedbackDeclObjectSpan :: SourceSpan
   }
   deriving (Eq, Show)
 
@@ -724,6 +752,7 @@ renderModule modl =
         , fmap renderRecordDecl (moduleRecordDecls modl)
         , fmap renderDomainObjectDecl (moduleDomainObjectDecls modl)
         , fmap renderDomainEventDecl (moduleDomainEventDecls modl)
+        , fmap renderFeedbackDecl (moduleFeedbackDecls modl)
         , fmap renderMetricDecl (moduleMetricDecls modl)
         , fmap renderGoalDecl (moduleGoalDecls modl)
         , fmap renderExperimentDecl (moduleExperimentDecls modl)
@@ -802,6 +831,17 @@ renderMetricDecl metricDecl =
     <> metricDeclSchemaName metricDecl
     <> " for "
     <> metricDeclObjectName metricDecl
+
+renderFeedbackDecl :: FeedbackDecl -> Text
+renderFeedbackDecl feedbackDecl =
+  "feedback "
+    <> renderFeedbackKind (feedbackDeclKind feedbackDecl)
+    <> " "
+    <> feedbackDeclName feedbackDecl
+    <> " = "
+    <> feedbackDeclSchemaName feedbackDecl
+    <> " for "
+    <> feedbackDeclObjectName feedbackDecl
 
 renderGoalDecl :: GoalDecl -> Text
 renderGoalDecl goalDecl =

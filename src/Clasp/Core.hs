@@ -8,6 +8,7 @@ module Clasp.Core
   , CoreDomainObjectDecl (..)
   , CoreExperimentDecl (..)
   , CoreExpr (..)
+  , CoreFeedbackDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -43,6 +44,7 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
+  , FeedbackDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -70,6 +72,7 @@ import Clasp.Syntax
   , SourceSpan (..)
   , SupervisorChildDecl (..)
   , SupervisorDecl (..)
+  , renderFeedbackKind
   , renderSupervisorRestartStrategy
   , ToolDecl (..)
   , ToolServerDecl (..)
@@ -91,6 +94,7 @@ data CoreModule = CoreModule
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleDomainObjectDecls :: [CoreDomainObjectDecl]
   , coreModuleDomainEventDecls :: [CoreDomainEventDecl]
+  , coreModuleFeedbackDecls :: [CoreFeedbackDecl]
   , coreModuleMetricDecls :: [CoreMetricDecl]
   , coreModuleGoalDecls :: [CoreGoalDecl]
   , coreModuleExperimentDecls :: [CoreExperimentDecl]
@@ -130,6 +134,11 @@ data CoreDomainEventDecl = CoreDomainEventDecl
 
 data CoreMetricDecl = CoreMetricDecl
   { coreMetricSourceDecl :: MetricDecl
+  }
+  deriving (Eq, Show)
+
+data CoreFeedbackDecl = CoreFeedbackDecl
+  { coreFeedbackSourceDecl :: FeedbackDecl
   }
   deriving (Eq, Show)
 
@@ -310,6 +319,7 @@ renderCoreModule modl =
       , fmap renderRecordDecl (coreModuleRecordDecls modl)
       , fmap renderDomainObjectDecl (coreModuleDomainObjectDecls modl)
       , fmap renderDomainEventDecl (coreModuleDomainEventDecls modl)
+      , fmap renderFeedbackDecl (coreModuleFeedbackDecls modl)
       , fmap renderMetricDecl (coreModuleMetricDecls modl)
       , fmap renderGoalDecl (coreModuleGoalDecls modl)
       , fmap renderExperimentDecl (coreModuleExperimentDecls modl)
@@ -380,6 +390,17 @@ renderMetricDecl (CoreMetricDecl metricDecl) =
     <> metricDeclSchemaName metricDecl
     <> " for "
     <> metricDeclObjectName metricDecl
+
+renderFeedbackDecl :: CoreFeedbackDecl -> Text
+renderFeedbackDecl (CoreFeedbackDecl feedbackDecl) =
+  "feedback "
+    <> renderFeedbackKind (feedbackDeclKind feedbackDecl)
+    <> " "
+    <> feedbackDeclName feedbackDecl
+    <> " = "
+    <> feedbackDeclSchemaName feedbackDecl
+    <> " for "
+    <> feedbackDeclObjectName feedbackDecl
 
 renderGoalDecl :: CoreGoalDecl -> Text
 renderGoalDecl (CoreGoalDecl goalDecl) =

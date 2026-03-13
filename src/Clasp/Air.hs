@@ -28,6 +28,7 @@ import Clasp.Core
   , CoreDomainObjectDecl (..)
   , CoreExperimentDecl (..)
   , CoreExpr (..)
+  , CoreFeedbackDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -54,6 +55,7 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
+  , FeedbackDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -86,6 +88,7 @@ import Clasp.Syntax
   , VerifierDecl (..)
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderFeedbackKind
   , renderType
   )
 
@@ -133,6 +136,7 @@ buildAirModule modl =
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
     domainObjectNodes = fmap buildDomainObjectDeclNode (coreModuleDomainObjectDecls modl)
     domainEventNodes = fmap buildDomainEventDeclNode (coreModuleDomainEventDecls modl)
+    feedbackNodes = fmap buildFeedbackDeclNode (coreModuleFeedbackDecls modl)
     metricNodes = fmap buildMetricDeclNode (coreModuleMetricDecls modl)
     goalNodes = fmap buildGoalDeclNode (coreModuleGoalDecls modl)
     experimentNodes = fmap buildExperimentDeclNode (coreModuleExperimentDecls modl)
@@ -155,6 +159,7 @@ buildAirModule modl =
         <> recordNodes
         <> domainObjectNodes
         <> domainEventNodes
+        <> feedbackNodes
         <> metricNodes
         <> goalNodes
         <> experimentNodes
@@ -262,6 +267,22 @@ buildDomainEventDeclNode (CoreDomainEventDecl domainEventDecl) =
         , ("identity", AirAttrText (domainEventDeclIdentity domainEventDecl))
         , ("schema", AirAttrObject [("name", AirAttrText (domainEventDeclSchemaName domainEventDecl)), ("ref", AirAttrNode (recordDeclId (domainEventDeclSchemaName domainEventDecl)))])
         , ("domainObject", AirAttrObject [("name", AirAttrText (domainEventDeclObjectName domainEventDecl)), ("ref", AirAttrNode (domainObjectDeclId (domainEventDeclObjectName domainEventDecl)))])
+        ]
+    }
+
+buildFeedbackDeclNode :: CoreFeedbackDecl -> AirNode
+buildFeedbackDeclNode (CoreFeedbackDecl feedbackDecl) =
+  AirNode
+    { airNodeId = feedbackDeclId (feedbackDeclName feedbackDecl)
+    , airNodeKind = "feedbackDecl"
+    , airNodeSpan = Just (feedbackDeclSpan feedbackDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (feedbackDeclName feedbackDecl))
+        , ("identity", AirAttrText (feedbackDeclIdentity feedbackDecl))
+        , ("kind", AirAttrText (renderFeedbackKind (feedbackDeclKind feedbackDecl)))
+        , ("schema", AirAttrObject [("name", AirAttrText (feedbackDeclSchemaName feedbackDecl)), ("ref", AirAttrNode (recordDeclId (feedbackDeclSchemaName feedbackDecl)))])
+        , ("domainObject", AirAttrObject [("name", AirAttrText (feedbackDeclObjectName feedbackDecl)), ("ref", AirAttrNode (domainObjectDeclId (feedbackDeclObjectName feedbackDecl)))])
         ]
     }
 
@@ -1008,6 +1029,9 @@ domainObjectDeclId name = AirNodeId ("domain-object:" <> name)
 
 domainEventDeclId :: Text -> AirNodeId
 domainEventDeclId name = AirNodeId ("domain-event:" <> name)
+
+feedbackDeclId :: Text -> AirNodeId
+feedbackDeclId name = AirNodeId ("feedback:" <> name)
 
 metricDeclId :: Text -> AirNodeId
 metricDeclId name = AirNodeId ("metric:" <> name)

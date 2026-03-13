@@ -61,6 +61,7 @@ import Clasp.Core
   , CoreDomainObjectDecl (..)
   , CoreExperimentDecl (..)
   , CoreExpr (..)
+  , CoreFeedbackDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
@@ -107,6 +108,8 @@ import Clasp.Syntax
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
   , Expr (..)
+  , FeedbackDecl (..)
+  , FeedbackKind (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , ForeignPackageImport (..)
@@ -332,7 +335,7 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
-    , testCase "parses domain object, domain event, metric, goal, experiment, and rollout declarations" $
+    , testCase "parses domain object, domain event, feedback, metric, goal, experiment, and rollout declarations" $
         case parseSource "inline" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -352,6 +355,16 @@ parserTests =
                 assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
               other ->
                 assertFailure ("expected one domain event declaration, got " <> show (length other))
+            case moduleFeedbackDecls modl of
+              [operationalFeedbackDecl, businessFeedbackDecl] -> do
+                assertEqual "operational feedback name" "CustomerEscalation" (feedbackDeclName operationalFeedbackDecl)
+                assertEqual "operational feedback identity" "feedback:CustomerEscalation" (feedbackDeclIdentity operationalFeedbackDecl)
+                assertEqual "operational feedback kind" FeedbackOperational (feedbackDeclKind operationalFeedbackDecl)
+                assertEqual "business feedback kind" FeedbackBusiness (feedbackDeclKind businessFeedbackDecl)
+                assertEqual "business feedback schema" "CustomerRetentionFeedback" (feedbackDeclSchemaName businessFeedbackDecl)
+                assertEqual "business feedback object" "Customer" (feedbackDeclObjectName businessFeedbackDecl)
+              other ->
+                assertFailure ("expected two feedback declarations, got " <> show (length other))
             case moduleMetricDecls modl of
               [metricDecl] -> do
                 assertEqual "metric name" "CustomerChurnRate" (metricDeclName metricDecl)
@@ -955,7 +968,7 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
-    , testCase "accepts domain objects, domain events, metrics, goals, experiments, and rollouts bound to typed declarations" $
+    , testCase "accepts domain objects, domain events, feedback, metrics, goals, experiments, and rollouts bound to typed declarations" $
         case checkSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected domain model source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -970,6 +983,13 @@ checkerTests =
                 assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
               other ->
                 assertFailure ("expected one checked domain event declaration, got " <> show (length other))
+            case coreModuleFeedbackDecls checked of
+              [CoreFeedbackDecl operationalFeedbackDecl, CoreFeedbackDecl businessFeedbackDecl] -> do
+                assertEqual "operational feedback kind" FeedbackOperational (feedbackDeclKind operationalFeedbackDecl)
+                assertEqual "operational feedback object" "Customer" (feedbackDeclObjectName operationalFeedbackDecl)
+                assertEqual "business feedback kind" FeedbackBusiness (feedbackDeclKind businessFeedbackDecl)
+              other ->
+                assertFailure ("expected two checked feedback declarations, got " <> show (length other))
             case coreModuleMetricDecls checked of
               [CoreMetricDecl metricDecl] -> do
                 assertEqual "metric schema" "CustomerMetric" (metricDeclSchemaName metricDecl)
@@ -1342,6 +1362,8 @@ checkerTests =
         assertHasCode "E_GUIDE_CYCLE" (checkSource "bad" cyclicGuideSource)
     , testCase "rejects goals that reference unknown metrics" $
         assertHasCode "E_UNKNOWN_GOAL_METRIC" (checkSource "bad" unknownGoalMetricSource)
+    , testCase "rejects feedback declarations that reference unknown domain objects" $
+        assertHasCode "E_UNKNOWN_FEEDBACK_OBJECT" (checkSource "bad" unknownFeedbackObjectSource)
     , testCase "rejects experiments that reference unknown goals" $
         assertHasCode "E_UNKNOWN_EXPERIMENT_GOAL" (checkSource "bad" unknownExperimentGoalSource)
     , testCase "rejects rollouts that reference unknown experiments" $
@@ -1685,13 +1707,14 @@ airTests =
                 assertBool "expected lifecycle event" (("event", AirAttrText "worker.start") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected hook trigger AIR node"
-    , testCase "air retains domain object, domain event, metric, goal, experiment, and rollout graph identity" $
+    , testCase "air retains domain object, domain event, feedback, metric, goal, experiment, and rollout graph identity" $
         case airSource "domain" domainModelSource of
           Left err ->
             assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right airModule -> do
             assertBool "expected domain object root" (AirNodeId "domain-object:Customer" `elem` airModuleRootIds airModule)
             assertBool "expected domain event root" (AirNodeId "domain-event:CustomerChurned" `elem` airModuleRootIds airModule)
+            assertBool "expected feedback root" (AirNodeId "feedback:CustomerEscalation" `elem` airModuleRootIds airModule)
             assertBool "expected metric root" (AirNodeId "metric:CustomerChurnRate" `elem` airModuleRootIds airModule)
             assertBool "expected goal root" (AirNodeId "goal:RetainCustomers" `elem` airModuleRootIds airModule)
             assertBool "expected experiment root" (AirNodeId "experiment:RetentionPromptTrial" `elem` airModuleRootIds airModule)
@@ -1710,6 +1733,16 @@ airTests =
                   (("domainObject", AirAttrObject [("name", AirAttrText "Customer"), ("ref", AirAttrNode (AirNodeId "domain-object:Customer"))]) `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected domain event AIR node"
+            case findAirNode (AirNodeId "feedback:CustomerEscalation") (airModuleNodes airModule) of
+              Just node -> do
+                assertBool
+                  "expected feedback kind"
+                  (("kind", AirAttrText "operational") `elem` airNodeAttrs node)
+                assertBool
+                  "expected feedback object ref"
+                  (("domainObject", AirAttrObject [("name", AirAttrText "Customer"), ("ref", AirAttrNode (AirNodeId "domain-object:Customer"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected feedback AIR node"
             case findAirNode (AirNodeId "metric:CustomerChurnRate") (airModuleNodes airModule) of
               Just node ->
                 assertBool
@@ -1878,7 +1911,7 @@ contextTests =
             assertBool "expected hook trigger node" ("\"hook-trigger:workerStart\"" `T.isInfixOf` jsonText)
             assertBool "expected hook trigger edge" ("\"hook-trigger\"" `T.isInfixOf` jsonText)
             assertBool "expected hook request edge" ("\"hook-request-schema\"" `T.isInfixOf` jsonText)
-    , testCase "context graph includes domain object, domain event, metric, goal, experiment, and rollout objective edges" $
+    , testCase "context graph includes domain object, domain event, feedback, metric, goal, experiment, and rollout objective edges" $
         case renderContextSourceJson "domain" domainModelSource of
           Left err ->
             assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -1886,12 +1919,14 @@ contextTests =
             let jsonText = LT.toStrict rendered
             assertBool "expected domain object node" ("\"domain-object:Customer\"" `T.isInfixOf` jsonText)
             assertBool "expected domain event node" ("\"domain-event:CustomerChurned\"" `T.isInfixOf` jsonText)
+            assertBool "expected feedback node" ("\"feedback:CustomerEscalation\"" `T.isInfixOf` jsonText)
             assertBool "expected metric node" ("\"metric:CustomerChurnRate\"" `T.isInfixOf` jsonText)
             assertBool "expected goal node" ("\"goal:RetainCustomers\"" `T.isInfixOf` jsonText)
             assertBool "expected experiment node" ("\"experiment:RetentionPromptTrial\"" `T.isInfixOf` jsonText)
             assertBool "expected rollout node" ("\"rollout:RetentionPromptCanary\"" `T.isInfixOf` jsonText)
             assertBool "expected domain object schema edge" ("\"domain-object-schema\"" `T.isInfixOf` jsonText)
             assertBool "expected domain event object edge" ("\"domain-event-object\"" `T.isInfixOf` jsonText)
+            assertBool "expected feedback object edge" ("\"feedback-object\"" `T.isInfixOf` jsonText)
             assertBool "expected metric object edge" ("\"metric-object\"" `T.isInfixOf` jsonText)
             assertBool "expected goal metric edge" ("\"goal-metric\"" `T.isInfixOf` jsonText)
             assertBool "expected experiment goal edge" ("\"experiment-goal\"" `T.isInfixOf` jsonText)
@@ -4885,10 +4920,14 @@ domainModelSource =
     , ""
     , "record CustomerRecord = { customerId : Str, tier : Str }"
     , "record CustomerChurnEvent = { customerId : Str, reason : Str }"
+    , "record CustomerEscalationFeedback = { customerId : Str, severity : Str }"
+    , "record CustomerRetentionFeedback = { customerId : Str, summary : Str }"
     , "record CustomerMetric = { customerId : Str, churnRate : Int }"
     , ""
     , "domain object Customer = CustomerRecord"
     , "domain event CustomerChurned = CustomerChurnEvent for Customer"
+    , "feedback operational CustomerEscalation = CustomerEscalationFeedback for Customer"
+    , "feedback business CustomerRetentionSignal = CustomerRetentionFeedback for Customer"
     , "metric CustomerChurnRate = CustomerMetric for Customer"
     , "goal RetainCustomers = CustomerChurnRate"
     , "experiment RetentionPromptTrial = RetainCustomers"
@@ -5097,9 +5136,11 @@ formatterRoundTripSource =
     , "record Worker={name:Str classified pii, aliases:[Str]}"
     , "record LeadRequest={company:Str, budget:Int}"
     , "record LeadSummary={summary:Str}"
+    , "record LeadFeedback={company:Str, summary:Str}"
     , "record LeadMetric={workerId:Str, conversionRate:Int}"
     , "domain object WorkerProfile=Worker"
     , "domain event LeadRequested=LeadRequest for WorkerProfile"
+    , "feedback business LeadQualitySignal=LeadFeedback for WorkerProfile"
     , "metric LeadConversionRate=LeadMetric for WorkerProfile"
     , "goal ImproveLeadConversion=LeadConversionRate"
     , "type Status=Idle|Busy Str"
@@ -5139,6 +5180,18 @@ unknownGoalMetricSource =
     , ""
     , "domain object Customer = CustomerRecord"
     , "goal RetainCustomers = MissingMetric"
+    , ""
+    , "main = \"ok\""
+    ]
+
+unknownFeedbackObjectSource :: Text
+unknownFeedbackObjectSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record CustomerFeedback = { customerId : Str }"
+    , ""
+    , "feedback operational CustomerEscalation = CustomerFeedback for MissingCustomer"
     , ""
     , "main = \"ok\""
     ]

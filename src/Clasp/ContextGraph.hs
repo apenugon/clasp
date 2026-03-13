@@ -29,6 +29,7 @@ import Clasp.Core
   , CoreDomainEventDecl (..)
   , CoreDomainObjectDecl (..)
   , CoreExperimentDecl (..)
+  , CoreFeedbackDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -56,6 +57,7 @@ import Clasp.Syntax
   , DomainEventDecl (..)
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
+  , FeedbackDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -83,6 +85,7 @@ import Clasp.Syntax
   , VerifierDecl (..)
   , renderAgentRoleApprovalPolicy
   , renderAgentRoleSandboxPolicy
+  , renderFeedbackKind
   )
 
 newtype ContextNodeId = ContextNodeId
@@ -137,6 +140,7 @@ buildContextGraph modl =
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
     domainObjectNodes = fmap buildDomainObjectNode (coreModuleDomainObjectDecls modl)
     domainEventNodes = fmap buildDomainEventNode (coreModuleDomainEventDecls modl)
+    feedbackNodes = fmap buildFeedbackNode (coreModuleFeedbackDecls modl)
     metricNodes = fmap buildMetricNode (coreModuleMetricDecls modl)
     goalNodes = fmap buildGoalNode (coreModuleGoalDecls modl)
     experimentNodes = fmap buildExperimentNode (coreModuleExperimentDecls modl)
@@ -156,12 +160,13 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> metricNodes <> goalNodes <> experimentNodes <> rolloutNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> feedbackNodes <> metricNodes <> goalNodes <> experimentNodes <> rolloutNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildDomainObjectEdges (coreModuleDomainObjectDecls modl)
         <> concatMap buildDomainEventEdges (coreModuleDomainEventDecls modl)
+        <> concatMap buildFeedbackEdges (coreModuleFeedbackDecls modl)
         <> concatMap buildMetricEdges (coreModuleMetricDecls modl)
         <> concatMap buildGoalEdges (coreModuleGoalDecls modl)
         <> concatMap buildExperimentEdges (coreModuleExperimentDecls modl)
@@ -237,6 +242,21 @@ buildDomainEventNode (CoreDomainEventDecl domainEventDecl) =
         , ("identity", ContextAttrText (domainEventDeclIdentity domainEventDecl))
         , ("schemaName", ContextAttrText (domainEventDeclSchemaName domainEventDecl))
         , ("domainObjectName", ContextAttrText (domainEventDeclObjectName domainEventDecl))
+        ]
+    }
+
+buildFeedbackNode :: CoreFeedbackDecl -> ContextNode
+buildFeedbackNode (CoreFeedbackDecl feedbackDecl) =
+  ContextNode
+    { contextNodeId = feedbackNodeId (feedbackDeclName feedbackDecl)
+    , contextNodeKind = "feedback"
+    , contextNodeSpan = Just (feedbackDeclSpan feedbackDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (feedbackDeclName feedbackDecl))
+        , ("identity", ContextAttrText (feedbackDeclIdentity feedbackDecl))
+        , ("kind", ContextAttrText (renderFeedbackKind (feedbackDeclKind feedbackDecl)))
+        , ("schemaName", ContextAttrText (feedbackDeclSchemaName feedbackDecl))
+        , ("domainObjectName", ContextAttrText (feedbackDeclObjectName feedbackDecl))
         ]
     }
 
@@ -666,6 +686,22 @@ buildDomainEventEdges (CoreDomainEventDecl domainEventDecl) =
       }
   ]
 
+buildFeedbackEdges :: CoreFeedbackDecl -> [ContextEdge]
+buildFeedbackEdges (CoreFeedbackDecl feedbackDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "feedback-schema"
+      , contextEdgeFrom = feedbackNodeId (feedbackDeclName feedbackDecl)
+      , contextEdgeTo = schemaNodeId (feedbackDeclSchemaName feedbackDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "feedback-object"
+      , contextEdgeFrom = feedbackNodeId (feedbackDeclName feedbackDecl)
+      , contextEdgeTo = domainObjectNodeId (feedbackDeclObjectName feedbackDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
 buildMetricEdges :: CoreMetricDecl -> [ContextEdge]
 buildMetricEdges (CoreMetricDecl metricDecl) =
   [ ContextEdge
@@ -1018,6 +1054,9 @@ domainObjectNodeId name = ContextNodeId ("domain-object:" <> name)
 
 domainEventNodeId :: Text -> ContextNodeId
 domainEventNodeId name = ContextNodeId ("domain-event:" <> name)
+
+feedbackNodeId :: Text -> ContextNodeId
+feedbackNodeId name = ContextNodeId ("feedback:" <> name)
 
 metricNodeId :: Text -> ContextNodeId
 metricNodeId name = ContextNodeId ("metric:" <> name)

@@ -191,6 +191,7 @@ combineModules entryModule state =
         , moduleRecordDecls = concatMap moduleRecordDecls (importedModules <> [entryModule])
         , moduleDomainObjectDecls = concatMap moduleDomainObjectDecls (importedModules <> [entryModule])
         , moduleDomainEventDecls = concatMap moduleDomainEventDecls (importedModules <> [entryModule])
+        , moduleFeedbackDecls = concatMap moduleFeedbackDecls (importedModules <> [entryModule])
         , moduleMetricDecls = concatMap moduleMetricDecls (importedModules <> [entryModule])
         , moduleGoalDecls = concatMap moduleGoalDecls (importedModules <> [entryModule])
         , moduleExperimentDecls = concatMap moduleExperimentDecls (importedModules <> [entryModule])

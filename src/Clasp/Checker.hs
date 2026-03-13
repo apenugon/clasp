@@ -29,6 +29,7 @@ import Clasp.Core
   , CoreDomainObjectDecl (..)
   , CoreExperimentDecl (..)
   , CoreExpr (..)
+  , CoreFeedbackDecl (..)
   , CoreGoalDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -67,6 +68,7 @@ import Clasp.Syntax
   , DomainObjectDecl (..)
   , ExperimentDecl (..)
   , Expr (..)
+  , FeedbackDecl (..)
   , ForeignDecl (..)
   , GoalDecl (..)
   , GuideDecl (..)
@@ -734,6 +736,7 @@ checkModule modl = do
       schemaRecordDecls = moduleRecordDecls modl
       domainObjectDecls = moduleDomainObjectDecls modl
       domainEventDecls = moduleDomainEventDecls modl
+      feedbackDecls = moduleFeedbackDecls modl
       metricDecls = moduleMetricDecls modl
       goalDecls = moduleGoalDecls modl
       experimentDecls = moduleExperimentDecls modl
@@ -763,6 +766,7 @@ checkModule modl = do
   ensureUniqueGuideDecls guideDecls
   ensureUniqueDomainObjectDecls domainObjectDecls
   ensureUniqueDomainEventDecls domainEventDecls
+  ensureUniqueFeedbackDecls feedbackDecls
   ensureUniqueMetricDecls metricDecls
   ensureUniqueGoalDecls goalDecls
   ensureUniqueExperimentDecls experimentDecls
@@ -780,6 +784,7 @@ checkModule modl = do
   ensureGuideHierarchy guideDecls
   ensureKnownDomainObjectSchemaReferences schemaRecordDecls domainObjectDecls
   ensureKnownDomainEventReferences schemaRecordDecls domainObjectDecls domainEventDecls
+  ensureKnownFeedbackReferences schemaRecordDecls domainObjectDecls feedbackDecls
   ensureKnownMetricReferences schemaRecordDecls domainObjectDecls metricDecls
   ensureKnownGoalMetricReferences metricDecls goalDecls
   ensureKnownExperimentGoalReferences goalDecls experimentDecls
@@ -831,6 +836,7 @@ checkModule modl = do
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleDomainObjectDecls = fmap CoreDomainObjectDecl domainObjectDecls
       , coreModuleDomainEventDecls = fmap CoreDomainEventDecl domainEventDecls
+      , coreModuleFeedbackDecls = fmap CoreFeedbackDecl feedbackDecls
       , coreModuleMetricDecls = fmap CoreMetricDecl metricDecls
       , coreModuleGoalDecls = fmap CoreGoalDecl goalDecls
       , coreModuleExperimentDecls = fmap CoreExperimentDecl experimentDecls
@@ -916,6 +922,24 @@ ensureUniqueDomainEventDecls = go Map.empty
         Nothing ->
           go (Map.insert (domainEventDeclName domainEventDecl) domainEventDecl seen) rest
 
+ensureUniqueFeedbackDecls :: [FeedbackDecl] -> Either DiagnosticBundle ()
+ensureUniqueFeedbackDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (feedbackDecl : rest) =
+      case Map.lookup (feedbackDeclName feedbackDecl) seen of
+        Just previousFeedbackDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_FEEDBACK"
+                ("Duplicate feedback declaration for `" <> feedbackDeclName feedbackDecl <> "`.")
+                (Just (feedbackDeclNameSpan feedbackDecl))
+                ["Each feedback name may only be declared once."]
+                [diagnosticRelated "previous feedback declaration" (feedbackDeclNameSpan previousFeedbackDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (feedbackDeclName feedbackDecl) feedbackDecl seen) rest
+
 ensureKnownDomainObjectSchemaReferences :: [RecordDecl] -> [DomainObjectDecl] -> Either DiagnosticBundle ()
 ensureKnownDomainObjectSchemaReferences recordDecls domainObjectDecls =
   traverse_ checkDomainObject domainObjectDecls
@@ -955,6 +979,32 @@ ensureKnownDomainEventReferences recordDecls domainObjectDecls domainEventDecls 
               ("Domain event `" <> domainEventDeclName domainEventDecl <> "` references unknown domain object `" <> domainEventDeclObjectName domainEventDecl <> "`.")
               (Just (domainEventDeclObjectSpan domainEventDecl))
               ["Declare the referenced domain object before using it in a domain event."]
+              []
+          ]
+
+ensureKnownFeedbackReferences :: [RecordDecl] -> [DomainObjectDecl] -> [FeedbackDecl] -> Either DiagnosticBundle ()
+ensureKnownFeedbackReferences recordDecls domainObjectDecls feedbackDecls =
+  traverse_ checkFeedback feedbackDecls
+  where
+    recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+    domainObjectDeclEnv = Map.fromList [(domainObjectDeclName domainObjectDecl, domainObjectDecl) | domainObjectDecl <- domainObjectDecls]
+    checkFeedback feedbackDecl = do
+      unless (Map.member (feedbackDeclSchemaName feedbackDecl) recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_FEEDBACK_SCHEMA"
+              ("Feedback `" <> feedbackDeclName feedbackDecl <> "` references unknown schema `" <> feedbackDeclSchemaName feedbackDecl <> "`.")
+              (Just (feedbackDeclSchemaSpan feedbackDecl))
+              ["Declare the referenced record before using it in a feedback declaration."]
+              []
+          ]
+      unless (Map.member (feedbackDeclObjectName feedbackDecl) domainObjectDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_FEEDBACK_OBJECT"
+              ("Feedback `" <> feedbackDeclName feedbackDecl <> "` references unknown domain object `" <> feedbackDeclObjectName feedbackDecl <> "`.")
+              (Just (feedbackDeclObjectSpan feedbackDecl))
+              ["Declare the referenced domain object before using it in a feedback declaration."]
               []
           ]
 
