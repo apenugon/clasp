@@ -5,6 +5,9 @@ record TicketDraft = {
   summary : Str
 }
 
+record PromptToolRequest = { query : Str }
+record PromptToolResponse = { summary : Str }
+
 sampleDraft : TicketDraft
 sampleDraft = TicketDraft {
   customerId = "cust-42",
@@ -19,6 +22,23 @@ replyPromptValue = replyPrompt sampleDraft
 
 replyPromptText : Str
 replyPromptText = promptText replyPromptValue
+
+guide PromptDemo = {
+  scope: "Keep secret values out of prompt payloads, traces, and tool calls."
+}
+
+policy PromptSecrets = public permits {
+  process "node",
+  secret "OPENAI_API_KEY"
+}
+
+role PromptWorkerRole = guide: PromptDemo, policy: PromptSecrets, approval: on_request, sandbox: workspace_write
+
+agent promptWorker = PromptWorkerRole
+
+toolserver PromptTools = "mcp" "stdio://prompt-tools" with PromptSecrets
+
+tool summarizeDraft = PromptTools "summarize_draft" PromptToolRequest -> PromptToolResponse
 
 main : Str
 main = replyPromptText

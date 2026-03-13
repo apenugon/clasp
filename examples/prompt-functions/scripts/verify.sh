@@ -19,7 +19,7 @@ run_verify() {
 }
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
-  run_verify | tail -n 1 | grep -F '{"messageCount":3,"roles":["system","assistant","user"],"content":["You are a support agent.","Draft a concise reply.","Renewal is blocked on legal review."],"text":"system: You are a support agent.\n\nassistant: Draft a concise reply.\n\nuser: Renewal is blocked on legal review."}'
+  run_verify | tail -n 1 | grep -F '{"messageCount":3,"roles":["system","assistant","user"],"content":["You are a support agent.","Draft a concise reply.","Renewal is blocked on legal review."],"text":"system: You are a support agent.\n\nassistant: Draft a concise reply.\n\nuser: Renewal is blocked on legal review.","promptHasSecretValue":false,"promptMessageKeys":["content,role","content,role","content,role"],"promptPolicySurface":"PromptSecrets","promptGuideScope":"Keep secret values out of prompt payloads, traces, and tool calls.","traceSecret":"OPENAI_API_KEY","tracePolicy":"PromptSecrets","traceBoundary":"PromptTools","traceActor":"prompt-worker","traceHasSecretValue":false,"resolvedSecretName":"OPENAI_API_KEY","toolMethod":"summarize_draft","toolQuery":"system: You are a support agent.\n\nassistant: Draft a concise reply.\n\nuser: Renewal is blocked on legal review.","toolCallHasSecretValue":false,"toolKnowsDeclaredSecret":true}'
 else
   nix develop "$project_root" --command bash -lc "
     set -euo pipefail
