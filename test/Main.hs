@@ -1256,6 +1256,13 @@ checkerTests =
                 assertEqual "main type" TStr (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
+    , testCase "typechecks the compiler renderers example file" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected compiler renderers example source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2413,6 +2420,55 @@ compileTests =
               "expected compiler stdlib runtime output"
               "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
+    , testCase "compile evaluates the compiler renderers example end-to-end" $ do
+        let compiledPath = "dist/compiler-renderers.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-renderers.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler renderers compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({"
+                , "  formattedDecl: compiledModule.formattedDecl,"
+                , "  renderedDiagnostic: compiledModule.renderedDiagnostic,"
+                , "  diagnosticJson: JSON.parse(compiledModule.diagnosticJson),"
+                , "  main: compiledModule.main"
+                , "}));"
+                ]
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected formatted decl"
+              (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]"))
+              (lookupObjectKey "formattedDecl" runtimeValue)
+            assertEqual
+              "expected rendered diagnostic"
+              (Just (String "E_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"))
+              (lookupObjectKey "renderedDiagnostic" runtimeValue)
+            case lookupObjectKey "diagnosticJson" runtimeValue of
+              Just diagnosticValue -> do
+                assertEqual "expected diagnostic json code" (Just (String "E_DUPLICATE_DECL")) (lookupObjectKey "code" diagnosticValue)
+                assertEqual
+                  "expected diagnostic json primary span"
+                  (Just (String "Compiler/Formatter.clasp:3:1-3:18"))
+                  (lookupObjectKey "primarySpan" diagnosticValue)
+                assertEqual
+                  "expected diagnostic json related line"
+                  (Just (String "- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"))
+                  (lookupObjectKey "related" diagnosticValue)
+              Nothing ->
+                assertFailure "expected diagnosticJson field"
+            assertEqual
+              "expected main render"
+              (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]\n\nE_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\n\n{\"code\":\"E_DUPLICATE_DECL\",\"summary\":\"Declaration `renderPosition` is already defined.\",\"primarySpan\":\"Compiler/Formatter.clasp:3:1-3:18\",\"detail\":\"Formatter helper names must be unique within a module.\",\"fixHint\":\"Rename the helper or merge the duplicate definitions.\",\"related\":\"- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\"}"))
+              (lookupObjectKey "main" runtimeValue)
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->

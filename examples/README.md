@@ -13,6 +13,7 @@ This directory has two kinds of examples:
 - [lists.clasp](/home/akul/DevProjects/synthspeak/examples/lists.clasp): list types, literals, nested list fields, and JSON list boundaries
 - [let.clasp](/home/akul/DevProjects/synthspeak/examples/let.clasp): local `let` bindings at the top level and inside `match` branches
 - [blocks.clasp](/home/akul/DevProjects/synthspeak/examples/blocks.clasp): multiline block expressions with local declarations, mutable locals, `for` loops, and early `return`
+- [compiler-renderers.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-renderers.clasp): self-hosting formatter and diagnostic rendering helpers expressed in Clasp
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples
