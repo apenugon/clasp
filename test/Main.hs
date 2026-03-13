@@ -3670,8 +3670,34 @@ compileTests =
             runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected landing, create, inbox, detail, review, and invalid form behavior"
-              "{\"contractKind\":\"clasp-generated-bindings\",\"contractVersion\":1,\"contractRouteCount\":6,\"contractAssetBasePath\":\"/assets\",\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
+              "{\"contractKind\":\"clasp-generated-bindings\",\"contractVersion\":1,\"contractRouteCount\":11,\"contractAssetBasePath\":\"/assets\",\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
               runtimeOutput
+    , testCase "lead app generated clients round-trip the shared api routes" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-client.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "client-demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected generated clients to drive the lead app api surface"
+                  "{\"routeClientCount\":11,\"routeClientNames\":[\"landingRoute\",\"inboxRoute\",\"primaryLeadRoute\",\"secondaryLeadRoute\",\"createLeadRoute\",\"reviewLeadRoute\",\"inboxSnapshotRoute\",\"primaryLeadRecordRoute\",\"secondaryLeadRecordRoute\",\"createLeadRecordRoute\",\"reviewLeadRecordRoute\"],\"inboxHeadline\":\"Priority inbox\",\"createdLeadId\":\"lead-3\",\"createdPriority\":\"Medium\",\"createdSegment\":\"Growth\",\"primaryCompany\":\"SynthSpeak API\",\"reviewedStatus\":\"Reviewed\",\"reviewedNote\":\"Schedule technical discovery\",\"invalid\":\"value.segment expected a LeadSegment value\"}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("lead-app client demo script failed:\n" <> stderrText)
     , testCase "lead app browser shell keeps POST results on stable GET history entries" $ do
         absoluteShellPath <- makeAbsolute ("examples" </> "lead-app" </> "app-shell.mjs")
         shellOutput <- runNodeScript (leadAppBrowserShellScript absoluteShellPath)
@@ -3751,7 +3777,7 @@ compileTests =
                 ]
             assertEqual
               "expected seeded fixtures to expose stable request and response seeds"
-              "{\"fixtureCount\":6,\"landingResponseType\":\"Page\",\"landingResponseSchema\":null,\"landingResponseSeed\":{\"$kind\":\"page\",\"title\":\"Seeded Page\",\"body\":{\"$kind\":\"text\",\"text\":\"seed\"}},\"createLeadRequestSeed\":{\"company\":\"seed\",\"contact\":\"seed\",\"budget\":0,\"segment\":\"Startup\"}}"
+              "{\"fixtureCount\":11,\"landingResponseType\":\"Page\",\"landingResponseSchema\":null,\"landingResponseSeed\":{\"$kind\":\"page\",\"title\":\"Seeded Page\",\"body\":{\"$kind\":\"text\",\"text\":\"seed\"}},\"createLeadRequestSeed\":{\"company\":\"seed\",\"contact\":\"seed\",\"budget\":0,\"segment\":\"Startup\"}}"
               fixtureOutput
     ]
 
