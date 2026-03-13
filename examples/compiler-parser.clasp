@@ -1,0 +1,114 @@
+module Main
+
+record ParserState = {
+  moduleName : Str,
+  imports : Str,
+  signatures : Str,
+  declarations : Str
+}
+
+type LineKind = ModuleLine Str | ImportLine Str | SignatureLine Str | DeclarationLine Str | IgnoredLine
+type SplitTailState = WaitingForHead | CapturingTail Str
+
+appendEntry : Str -> Str -> Str
+appendEntry current entry = textConcat [current, "|", entry]
+
+firstSegment : Str -> Str
+firstSegment value = {
+  for segment in textSplit value "\n" {
+    return segment
+  };
+  ""
+}
+
+remainingSegments : Str -> Str
+remainingSegments value = {
+  let mut state = WaitingForHead;
+  for segment in textSplit value "\n" {
+    state = match state {
+      WaitingForHead ->
+        CapturingTail "",
+      CapturingTail current ->
+        CapturingTail (textConcat [current, segment])
+    };
+    state
+  };
+  match state {
+    WaitingForHead ->
+      "",
+    CapturingTail current ->
+      current
+  }
+}
+
+classifyLine : Str -> LineKind
+classifyLine line = match textPrefix line "module " {
+  Ok moduleName ->
+    ModuleLine moduleName,
+  Err moduleMiss ->
+    match textPrefix line "import " {
+      Ok importName ->
+        ImportLine importName,
+      Err importMiss ->
+        match textSplitFirst line " : " {
+          Ok signatureMatch ->
+            SignatureLine line,
+          Err signatureMiss ->
+            match textSplitFirst line " = " {
+              Ok payload ->
+                DeclarationLine (firstSegment payload),
+              Err declarationMiss ->
+                IgnoredLine
+            }
+        }
+    }
+}
+
+stepParser : ParserState -> Str -> ParserState
+stepParser state line = match classifyLine line {
+  ModuleLine moduleName ->
+    ParserState { moduleName = moduleName, imports = state.imports, signatures = state.signatures, declarations = state.declarations },
+  ImportLine importName ->
+    ParserState { moduleName = state.moduleName, imports = appendEntry state.imports importName, signatures = state.signatures, declarations = state.declarations },
+  SignatureLine signature ->
+    ParserState { moduleName = state.moduleName, imports = state.imports, signatures = appendEntry state.signatures signature, declarations = state.declarations },
+  DeclarationLine declHead ->
+    ParserState { moduleName = state.moduleName, imports = state.imports, signatures = state.signatures, declarations = appendEntry state.declarations declHead },
+  IgnoredLine ->
+    state
+}
+
+parseModuleSummary : Str -> ParserState
+parseModuleSummary source = {
+  let mut state = ParserState { moduleName = "Main", imports = "", signatures = "", declarations = "" };
+  for line in textSplit source "\n" {
+    state = stepParser state line;
+    state
+  };
+  state
+}
+
+sampleSource : Str
+sampleSource = textJoin "\n" ["module Compiler.Parser", "", "import Compiler.Loader", "import Compiler.Renderers", "", "parseModule : Str -> Str", "parseModule source = source", "", "main : Str", "main = encode (parseModuleSummary sampleSource)"]
+
+snapshot : ParserState
+snapshot = parseModuleSummary sampleSource
+
+moduleBody : Str
+moduleBody = match textPrefix sampleSource "module Compiler.Parser\n" {
+  Ok body ->
+    body,
+  Err missingPrefix ->
+    sampleSource
+}
+
+firstDeclarationPayload : Str
+firstDeclarationPayload = match textSplitFirst "parseModule source = source" " = " {
+  Ok payload ->
+    payload,
+  Err message ->
+    message
+}
+
+main : Str
+main = encode snapshot

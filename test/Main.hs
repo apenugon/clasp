@@ -1216,6 +1216,8 @@ checkerTests =
           Right checked -> do
             let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
             assertBool "expected textJoin builtin" ("textJoin" `elem` foreignNames)
+            assertBool "expected textPrefix builtin" ("textPrefix" `elem` foreignNames)
+            assertBool "expected textSplitFirst builtin" ("textSplitFirst" `elem` foreignNames)
             assertBool "expected pathJoin builtin" ("pathJoin" `elem` foreignNames)
             assertBool "expected readFile builtin" ("readFile" `elem` foreignNames)
             case find ((== "loadSummary") . coreDeclName) (coreModuleDecls checked) of
@@ -1270,6 +1272,13 @@ checkerTests =
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler loader example source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "typechecks the compiler parser example file" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-parser.clasp"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected compiler parser example source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2417,6 +2426,10 @@ compileTests =
                 , "console.log(JSON.stringify({"
                 , "  main: compiledModule.main,"
                 , "  split: compiledModule.splitSummary('alpha:beta'),"
+                , "  prefixOk: compiledModule.prefixSummary('src/Clasp/Parser.hs'),"
+                , "  prefixMiss: compiledModule.prefixSummary('examples/hello.clasp'),"
+                , "  splitOnce: compiledModule.splitOnceSummary('left::right'),"
+                , "  splitOnceMiss: compiledModule.splitOnceSummary('plain-text'),"
                 , "  existsOk: compiledModule.filePresent('fixtures/ok.txt'),"
                 , "  existsMissing: compiledModule.filePresent('fixtures/missing.txt'),"
                 , "  readOk: compiledModule.loadSummary('fixtures/ok.txt'),"
@@ -2425,7 +2438,7 @@ compileTests =
                 ]
             assertEqual
               "expected compiler stdlib runtime output"
-              "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
+              "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
     , testCase "compile evaluates the compiler renderers example end-to-end" $ do
         let compiledPath = "dist/compiler-renderers.mjs"
@@ -2519,6 +2532,63 @@ compileTests =
               "expected missing module summary"
               (Just (String "missing:Compiler.Emit"))
               (lookupObjectKey "missingModule" runtimeValue)
+    , testCase "compile evaluates the compiler parser example end-to-end" $ do
+        let compiledPath = "dist/compiler-parser.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-parser.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler parser compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
+                , "console.log(JSON.stringify({"
+                , "  snapshot: JSON.parse(compiledModule.main),"
+                , "  moduleBody: compiledModule.moduleBody,"
+                , "  firstDeclarationName: compiledModule.firstSegment(compiledModule.firstDeclarationPayload),"
+                , "  firstDeclarationBody: compiledModule.remainingSegments(compiledModule.firstDeclarationPayload)"
+                , "}));"
+                ]
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected compiler parser runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            snapshotValue <- case lookupObjectKey "snapshot" runtimeValue of
+              Just (Object objectValue) ->
+                pure (Object objectValue)
+              other ->
+                assertFailure ("expected parser snapshot object, got " <> show other)
+            assertEqual
+              "expected parsed module name"
+              (Just (String "Compiler.Parser"))
+              (lookupObjectKey "moduleName" snapshotValue)
+            assertEqual
+              "expected parsed imports"
+              (Just (String "|Compiler.Loader|Compiler.Renderers"))
+              (lookupObjectKey "imports" snapshotValue)
+            assertEqual
+              "expected parsed signatures"
+              (Just (String "|parseModule : Str -> Str|main : Str"))
+              (lookupObjectKey "signatures" snapshotValue)
+            assertEqual
+              "expected parsed declarations"
+              (Just (String "|parseModule source|main"))
+              (lookupObjectKey "declarations" snapshotValue)
+            assertEqual
+              "expected module body after prefix split"
+              (Just (String "\nimport Compiler.Loader\nimport Compiler.Renderers\n\nparseModule : Str -> Str\nparseModule source = source\n\nmain : Str\nmain = encode (parseModuleSummary sampleSource)"))
+              (lookupObjectKey "moduleBody" runtimeValue)
+            assertEqual
+              "expected first declaration name"
+              (Just (String "parseModule source"))
+              (lookupObjectKey "firstDeclarationName" runtimeValue)
+            assertEqual
+              "expected first declaration body"
+              (Just (String "source"))
+              (lookupObjectKey "firstDeclarationBody" runtimeValue)
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->
@@ -4720,6 +4790,18 @@ compilerStdlibSource =
     , ""
     , "splitSummary : Str -> [Str]"
     , "splitSummary value = textSplit value \":\""
+    , ""
+    , "prefixSummary : Str -> Str"
+    , "prefixSummary value = match textPrefix value \"src/\" {"
+    , "  Ok rest -> rest,"
+    , "  Err original -> original"
+    , "}"
+    , ""
+    , "splitOnceSummary : Str -> Str"
+    , "splitOnceSummary value = match textSplitFirst value \"::\" {"
+    , "  Ok payload -> payload,"
+    , "  Err original -> original"
+    , "}"
     , ""
     , "filePresent : Str -> Bool"
     , "filePresent path = fileExists path"
