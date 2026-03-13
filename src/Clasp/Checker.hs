@@ -25,6 +25,8 @@ import Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
   , CoreDecl (..)
+  , CoreDomainEventDecl (..)
+  , CoreDomainObjectDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -57,6 +59,8 @@ import Clasp.Syntax
   , AgentRoleDecl (..)
   , ConstructorDecl (..)
   , Decl (..)
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , GuideDecl (..)
@@ -613,6 +617,8 @@ checkModule :: Module -> Either DiagnosticBundle CoreModule
 checkModule modl = do
   let typeDecls = moduleTypeDecls modl
       schemaRecordDecls = moduleRecordDecls modl
+      domainObjectDecls = moduleDomainObjectDecls modl
+      domainEventDecls = moduleDomainEventDecls modl
       workflowDecls = moduleWorkflowDecls modl
       supervisorDecls = moduleSupervisorDecls modl
       guideDecls = moduleGuideDecls modl
@@ -633,6 +639,8 @@ checkModule modl = do
 
   ensureUniqueTypeDecls typeDecls
   ensureUniqueGuideDecls guideDecls
+  ensureUniqueDomainObjectDecls domainObjectDecls
+  ensureUniqueDomainEventDecls domainEventDecls
   ensureUniqueWorkflowDecls workflowDecls
   ensureUniqueSupervisorDecls supervisorDecls
   ensureUniqueHooks hookDecls
@@ -644,6 +652,8 @@ checkModule modl = do
   ensureUniqueVerifierDecls verifierDecls
   ensureUniqueMergeGateDecls mergeGateDecls
   ensureGuideHierarchy guideDecls
+  ensureKnownDomainObjectSchemaReferences schemaRecordDecls domainObjectDecls
+  ensureKnownDomainEventReferences schemaRecordDecls domainObjectDecls domainEventDecls
   ensureSupervisorHierarchy workflowDecls supervisorDecls
   ensureKnownAgentRoleReferences guideDecls policyDecls agentRoleDecls
   ensureKnownAgentReferences agentRoleDecls agentDecls
@@ -689,6 +699,8 @@ checkModule modl = do
       { coreModuleName = moduleName modl
       , coreModuleTypeDecls = allTypeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
+      , coreModuleDomainObjectDecls = fmap CoreDomainObjectDecl domainObjectDecls
+      , coreModuleDomainEventDecls = fmap CoreDomainEventDecl domainEventDecls
       , coreModuleWorkflowDecls = fmap CoreWorkflowDecl workflowDecls
       , coreModuleSupervisorDecls = fmap CoreSupervisorDecl supervisorDecls
       , coreModuleGuideDecls = guideDecls
@@ -733,6 +745,84 @@ ensureUniqueGuideDecls = go Map.empty
         Nothing -> do
           ensureUniqueGuideEntries guideDecl
           go (Map.insert (guideDeclName guideDecl) guideDecl seen) rest
+
+ensureUniqueDomainObjectDecls :: [DomainObjectDecl] -> Either DiagnosticBundle ()
+ensureUniqueDomainObjectDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (domainObjectDecl : rest) =
+      case Map.lookup (domainObjectDeclName domainObjectDecl) seen of
+        Just previousDomainObjectDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_DOMAIN_OBJECT"
+                ("Duplicate domain object declaration for `" <> domainObjectDeclName domainObjectDecl <> "`.")
+                (Just (domainObjectDeclNameSpan domainObjectDecl))
+                ["Each domain object name may only be declared once."]
+                [diagnosticRelated "previous domain object declaration" (domainObjectDeclNameSpan previousDomainObjectDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (domainObjectDeclName domainObjectDecl) domainObjectDecl seen) rest
+
+ensureUniqueDomainEventDecls :: [DomainEventDecl] -> Either DiagnosticBundle ()
+ensureUniqueDomainEventDecls = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (domainEventDecl : rest) =
+      case Map.lookup (domainEventDeclName domainEventDecl) seen of
+        Just previousDomainEventDecl ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_DOMAIN_EVENT"
+                ("Duplicate domain event declaration for `" <> domainEventDeclName domainEventDecl <> "`.")
+                (Just (domainEventDeclNameSpan domainEventDecl))
+                ["Each domain event name may only be declared once."]
+                [diagnosticRelated "previous domain event declaration" (domainEventDeclNameSpan previousDomainEventDecl)]
+            ]
+        Nothing ->
+          go (Map.insert (domainEventDeclName domainEventDecl) domainEventDecl seen) rest
+
+ensureKnownDomainObjectSchemaReferences :: [RecordDecl] -> [DomainObjectDecl] -> Either DiagnosticBundle ()
+ensureKnownDomainObjectSchemaReferences recordDecls domainObjectDecls =
+  traverse_ checkDomainObject domainObjectDecls
+  where
+    recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+    checkDomainObject domainObjectDecl =
+      unless (Map.member (domainObjectDeclSchemaName domainObjectDecl) recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_DOMAIN_OBJECT_SCHEMA"
+              ("Domain object `" <> domainObjectDeclName domainObjectDecl <> "` references unknown schema `" <> domainObjectDeclSchemaName domainObjectDecl <> "`.")
+              (Just (domainObjectDeclSchemaSpan domainObjectDecl))
+              ["Declare the referenced record before using it in a domain object."]
+              []
+          ]
+
+ensureKnownDomainEventReferences :: [RecordDecl] -> [DomainObjectDecl] -> [DomainEventDecl] -> Either DiagnosticBundle ()
+ensureKnownDomainEventReferences recordDecls domainObjectDecls domainEventDecls =
+  traverse_ checkDomainEvent domainEventDecls
+  where
+    recordDeclEnv = Map.fromList [(recordDeclName recordDecl, recordDecl) | recordDecl <- recordDecls]
+    domainObjectDeclEnv = Map.fromList [(domainObjectDeclName domainObjectDecl, domainObjectDecl) | domainObjectDecl <- domainObjectDecls]
+    checkDomainEvent domainEventDecl = do
+      unless (Map.member (domainEventDeclSchemaName domainEventDecl) recordDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_DOMAIN_EVENT_SCHEMA"
+              ("Domain event `" <> domainEventDeclName domainEventDecl <> "` references unknown schema `" <> domainEventDeclSchemaName domainEventDecl <> "`.")
+              (Just (domainEventDeclSchemaSpan domainEventDecl))
+              ["Declare the referenced record before using it in a domain event."]
+              []
+          ]
+      unless (Map.member (domainEventDeclObjectName domainEventDecl) domainObjectDeclEnv) $
+        Left . diagnosticBundle $
+          [ diagnostic
+              "E_UNKNOWN_DOMAIN_EVENT_OBJECT"
+              ("Domain event `" <> domainEventDeclName domainEventDecl <> "` references unknown domain object `" <> domainEventDeclObjectName domainEventDecl <> "`.")
+              (Just (domainEventDeclObjectSpan domainEventDecl))
+              ["Declare the referenced domain object before using it in a domain event."]
+              []
+          ]
 
 ensureUniqueWorkflowDecls :: [WorkflowDecl] -> Either DiagnosticBundle ()
 ensureUniqueWorkflowDecls = go Map.empty

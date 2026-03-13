@@ -4,6 +4,8 @@ module Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
   , CoreDecl (..)
+  , CoreDomainEventDecl (..)
+  , CoreDomainObjectDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -34,6 +36,8 @@ import Clasp.Syntax
   ( AgentDecl (..)
   , AgentRoleDecl (..)
   , ConstructorDecl (..)
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
@@ -77,6 +81,8 @@ data CoreModule = CoreModule
   { coreModuleName :: ModuleName
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
+  , coreModuleDomainObjectDecls :: [CoreDomainObjectDecl]
+  , coreModuleDomainEventDecls :: [CoreDomainEventDecl]
   , coreModuleWorkflowDecls :: [CoreWorkflowDecl]
   , coreModuleSupervisorDecls :: [CoreSupervisorDecl]
   , coreModuleGuideDecls :: [GuideDecl]
@@ -97,6 +103,16 @@ data CoreModule = CoreModule
 
 data CorePolicyDecl = CorePolicyDecl
   { corePolicySourceDecl :: PolicyDecl
+  }
+  deriving (Eq, Show)
+
+data CoreDomainObjectDecl = CoreDomainObjectDecl
+  { coreDomainObjectSourceDecl :: DomainObjectDecl
+  }
+  deriving (Eq, Show)
+
+data CoreDomainEventDecl = CoreDomainEventDecl
+  { coreDomainEventSourceDecl :: DomainEventDecl
   }
   deriving (Eq, Show)
 
@@ -260,6 +276,8 @@ renderCoreModule modl =
     topLevelSections =
       [ fmap renderTypeDecl (coreModuleTypeDecls modl)
       , fmap renderRecordDecl (coreModuleRecordDecls modl)
+      , fmap renderDomainObjectDecl (coreModuleDomainObjectDecls modl)
+      , fmap renderDomainEventDecl (coreModuleDomainEventDecls modl)
       , fmap renderWorkflowDecl (coreModuleWorkflowDecls modl)
       , fmap renderSupervisorDecl (coreModuleSupervisorDecls modl)
       , fmap renderGuideDecl (coreModuleGuideDecls modl)
@@ -301,6 +319,22 @@ renderRecordDecl recordDecl =
     <> recordDeclName recordDecl
     <> " = "
     <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderDomainObjectDecl :: CoreDomainObjectDecl -> Text
+renderDomainObjectDecl (CoreDomainObjectDecl domainObjectDecl) =
+  "domain object "
+    <> domainObjectDeclName domainObjectDecl
+    <> " = "
+    <> domainObjectDeclSchemaName domainObjectDecl
+
+renderDomainEventDecl :: CoreDomainEventDecl -> Text
+renderDomainEventDecl (CoreDomainEventDecl domainEventDecl) =
+  "domain event "
+    <> domainEventDeclName domainEventDecl
+    <> " = "
+    <> domainEventDeclSchemaName domainEventDecl
+    <> " for "
+    <> domainEventDeclObjectName domainEventDecl
 
 renderWorkflowDecl :: CoreWorkflowDecl -> Text
 renderWorkflowDecl workflowDecl =

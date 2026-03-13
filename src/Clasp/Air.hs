@@ -24,6 +24,8 @@ import Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
   , CoreDecl (..)
+  , CoreDomainEventDecl (..)
+  , CoreDomainObjectDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
@@ -45,6 +47,8 @@ import Clasp.Syntax
   ( AgentDecl (..)
   , AgentRoleDecl (..)
   , ConstructorDecl (..)
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
@@ -119,6 +123,8 @@ buildAirModule modl =
   where
     typeNodes = concatMap buildTypeDeclNodes (coreModuleTypeDecls modl)
     recordNodes = concatMap buildRecordDeclNodes (coreModuleRecordDecls modl)
+    domainObjectNodes = fmap buildDomainObjectDeclNode (coreModuleDomainObjectDecls modl)
+    domainEventNodes = fmap buildDomainEventDeclNode (coreModuleDomainEventDecls modl)
     guideNodes = concatMap buildGuideDeclNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookDeclNodes (coreModuleHookDecls modl)
     agentRoleNodes = fmap buildAgentRoleDeclNode (coreModuleAgentRoleDecls modl)
@@ -135,6 +141,8 @@ buildAirModule modl =
     topLevelNodes =
       typeNodes
         <> recordNodes
+        <> domainObjectNodes
+        <> domainEventNodes
         <> guideNodes
         <> hookNodes
         <> agentRoleNodes
@@ -209,6 +217,35 @@ buildRecordFieldDeclNode recordName fieldDecl =
         [ ("name", AirAttrText (recordFieldDeclName fieldDecl))
         , ("recordName", AirAttrText recordName)
         , ("classification", AirAttrText (recordFieldDeclClassification fieldDecl))
+        ]
+    }
+
+buildDomainObjectDeclNode :: CoreDomainObjectDecl -> AirNode
+buildDomainObjectDeclNode (CoreDomainObjectDecl domainObjectDecl) =
+  AirNode
+    { airNodeId = domainObjectDeclId (domainObjectDeclName domainObjectDecl)
+    , airNodeKind = "domainObjectDecl"
+    , airNodeSpan = Just (domainObjectDeclSpan domainObjectDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (domainObjectDeclName domainObjectDecl))
+        , ("identity", AirAttrText (domainObjectDeclIdentity domainObjectDecl))
+        , ("schema", AirAttrObject [("name", AirAttrText (domainObjectDeclSchemaName domainObjectDecl)), ("ref", AirAttrNode (recordDeclId (domainObjectDeclSchemaName domainObjectDecl)))])
+        ]
+    }
+
+buildDomainEventDeclNode :: CoreDomainEventDecl -> AirNode
+buildDomainEventDeclNode (CoreDomainEventDecl domainEventDecl) =
+  AirNode
+    { airNodeId = domainEventDeclId (domainEventDeclName domainEventDecl)
+    , airNodeKind = "domainEventDecl"
+    , airNodeSpan = Just (domainEventDeclSpan domainEventDecl)
+    , airNodeType = Nothing
+    , airNodeAttrs =
+        [ ("name", AirAttrText (domainEventDeclName domainEventDecl))
+        , ("identity", AirAttrText (domainEventDeclIdentity domainEventDecl))
+        , ("schema", AirAttrObject [("name", AirAttrText (domainEventDeclSchemaName domainEventDecl)), ("ref", AirAttrNode (recordDeclId (domainEventDeclSchemaName domainEventDecl)))])
+        , ("domainObject", AirAttrObject [("name", AirAttrText (domainEventDeclObjectName domainEventDecl)), ("ref", AirAttrNode (domainObjectDeclId (domainEventDeclObjectName domainEventDecl)))])
         ]
     }
 
@@ -892,6 +929,12 @@ recordDeclId name = AirNodeId ("record:" <> name)
 recordFieldDeclId :: Text -> Text -> AirNodeId
 recordFieldDeclId recordName fieldName =
   AirNodeId ("record-field:" <> recordName <> ":" <> fieldName)
+
+domainObjectDeclId :: Text -> AirNodeId
+domainObjectDeclId name = AirNodeId ("domain-object:" <> name)
+
+domainEventDeclId :: Text -> AirNodeId
+domainEventDeclId name = AirNodeId ("domain-event:" <> name)
 
 foreignDeclId :: Text -> AirNodeId
 foreignDeclId name = AirNodeId ("foreign:" <> name)

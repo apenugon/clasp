@@ -7,6 +7,8 @@ module Clasp.Syntax
   , AgentRoleSandboxPolicy (..)
   , ConstructorDecl (..)
   , Decl (..)
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , ForeignPackageImport (..)
@@ -114,6 +116,8 @@ data Module = Module
   , moduleImports :: [ImportDecl]
   , moduleTypeDecls :: [TypeDecl]
   , moduleRecordDecls :: [RecordDecl]
+  , moduleDomainObjectDecls :: [DomainObjectDecl]
+  , moduleDomainEventDecls :: [DomainEventDecl]
   , moduleWorkflowDecls :: [WorkflowDecl]
   , moduleSupervisorDecls :: [SupervisorDecl]
   , moduleGuideDecls :: [GuideDecl]
@@ -137,6 +141,28 @@ data GuideEntryDecl = GuideEntryDecl
   , guideEntryDeclSpan :: SourceSpan
   , guideEntryDeclValue :: Text
   , guideEntryDeclValueSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data DomainObjectDecl = DomainObjectDecl
+  { domainObjectDeclName :: Text
+  , domainObjectDeclSpan :: SourceSpan
+  , domainObjectDeclNameSpan :: SourceSpan
+  , domainObjectDeclIdentity :: Text
+  , domainObjectDeclSchemaName :: Text
+  , domainObjectDeclSchemaSpan :: SourceSpan
+  }
+  deriving (Eq, Show)
+
+data DomainEventDecl = DomainEventDecl
+  { domainEventDeclName :: Text
+  , domainEventDeclSpan :: SourceSpan
+  , domainEventDeclNameSpan :: SourceSpan
+  , domainEventDeclIdentity :: Text
+  , domainEventDeclSchemaName :: Text
+  , domainEventDeclSchemaSpan :: SourceSpan
+  , domainEventDeclObjectName :: Text
+  , domainEventDeclObjectSpan :: SourceSpan
   }
   deriving (Eq, Show)
 
@@ -646,6 +672,8 @@ renderModule modl =
       fmap renderSection . filter (not . null) $
         [ fmap renderTypeDecl (moduleTypeDecls modl)
         , fmap renderRecordDecl (moduleRecordDecls modl)
+        , fmap renderDomainObjectDecl (moduleDomainObjectDecls modl)
+        , fmap renderDomainEventDecl (moduleDomainEventDecls modl)
         , fmap renderWorkflowDecl (moduleWorkflowDecls modl)
         , fmap renderSupervisorDecl (moduleSupervisorDecls modl)
         , fmap renderGuideDecl (moduleGuideDecls modl)
@@ -695,6 +723,22 @@ renderRecordFieldDecl fieldDecl =
     <> ": "
     <> renderType (recordFieldDeclType fieldDecl)
     <> renderClassificationSuffix (recordFieldDeclClassification fieldDecl)
+
+renderDomainObjectDecl :: DomainObjectDecl -> Text
+renderDomainObjectDecl domainObjectDecl =
+  "domain object "
+    <> domainObjectDeclName domainObjectDecl
+    <> " = "
+    <> domainObjectDeclSchemaName domainObjectDecl
+
+renderDomainEventDecl :: DomainEventDecl -> Text
+renderDomainEventDecl domainEventDecl =
+  "domain event "
+    <> domainEventDeclName domainEventDecl
+    <> " = "
+    <> domainEventDeclSchemaName domainEventDecl
+    <> " for "
+    <> domainEventDeclObjectName domainEventDecl
 
 renderClassificationSuffix :: Text -> Text
 renderClassificationSuffix classification

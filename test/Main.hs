@@ -57,6 +57,8 @@ import Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
   , CoreDecl (..)
+  , CoreDomainEventDecl (..)
+  , CoreDomainObjectDecl (..)
   , CoreExpr (..)
   , CoreHookDecl (..)
   , CoreMatchBranch (..)
@@ -97,6 +99,8 @@ import Clasp.Syntax
   , AgentRoleSandboxPolicy (..)
   , ConstructorDecl (..)
   , Decl (..)
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , Expr (..)
   , ForeignDecl (..)
   , ForeignPackageImport (..)
@@ -319,6 +323,26 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
+    , testCase "parses domain object and domain event declarations" $
+        case parseSource "inline" domainModelSource of
+          Left err ->
+            assertFailure ("expected domain model source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleDomainObjectDecls modl of
+              [domainObjectDecl] -> do
+                assertEqual "domain object name" "Customer" (domainObjectDeclName domainObjectDecl)
+                assertEqual "domain object identity" "domain-object:Customer" (domainObjectDeclIdentity domainObjectDecl)
+                assertEqual "domain object schema" "CustomerRecord" (domainObjectDeclSchemaName domainObjectDecl)
+              other ->
+                assertFailure ("expected one domain object declaration, got " <> show (length other))
+            case moduleDomainEventDecls modl of
+              [domainEventDecl] -> do
+                assertEqual "domain event name" "CustomerChurned" (domainEventDeclName domainEventDecl)
+                assertEqual "domain event identity" "domain-event:CustomerChurned" (domainEventDeclIdentity domainEventDecl)
+                assertEqual "domain event schema" "CustomerChurnEvent" (domainEventDeclSchemaName domainEventDecl)
+                assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
+              other ->
+                assertFailure ("expected one domain event declaration, got " <> show (length other))
     , testCase "parses supervisor declarations with restart strategies and nested children" $
         case parseSource "inline" supervisorSource of
           Left err ->
@@ -893,6 +917,21 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
+    , testCase "accepts domain objects and domain events bound to record schemas" $
+        case checkSource "domain" domainModelSource of
+          Left err ->
+            assertFailure ("expected domain model source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case coreModuleDomainObjectDecls checked of
+              [CoreDomainObjectDecl domainObjectDecl] ->
+                assertEqual "domain object schema" "CustomerRecord" (domainObjectDeclSchemaName domainObjectDecl)
+              other ->
+                assertFailure ("expected one checked domain object declaration, got " <> show (length other))
+            case coreModuleDomainEventDecls checked of
+              [CoreDomainEventDecl domainEventDecl] ->
+                assertEqual "domain event object" "Customer" (domainEventDeclObjectName domainEventDecl)
+              other ->
+                assertFailure ("expected one checked domain event declaration, got " <> show (length other))
     , testCase "accepts supervisor hierarchies with BEAM-style restart strategies" $
         case checkSource "supervisor" supervisorSource of
           Left err ->
@@ -1556,6 +1595,27 @@ airTests =
                 assertBool "expected lifecycle event" (("event", AirAttrText "worker.start") `elem` airNodeAttrs node)
               Nothing ->
                 assertFailure "expected hook trigger AIR node"
+    , testCase "air retains domain object and domain event graph identity" $
+        case airSource "domain" domainModelSource of
+          Left err ->
+            assertFailure ("expected AIR generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right airModule -> do
+            assertBool "expected domain object root" (AirNodeId "domain-object:Customer" `elem` airModuleRootIds airModule)
+            assertBool "expected domain event root" (AirNodeId "domain-event:CustomerChurned" `elem` airModuleRootIds airModule)
+            case findAirNode (AirNodeId "domain-object:Customer") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected domain object schema ref"
+                  (("schema", AirAttrObject [("name", AirAttrText "CustomerRecord"), ("ref", AirAttrNode (AirNodeId "record:CustomerRecord"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected domain object AIR node"
+            case findAirNode (AirNodeId "domain-event:CustomerChurned") (airModuleNodes airModule) of
+              Just node ->
+                assertBool
+                  "expected domain event object ref"
+                  (("domainObject", AirAttrObject [("name", AirAttrText "Customer"), ("ref", AirAttrNode (AirNodeId "domain-object:Customer"))]) `elem` airNodeAttrs node)
+              Nothing ->
+                assertFailure "expected domain event AIR node"
     , testCase "air retains agent roles and agent-to-role bindings" $
         case airSource "agent" agentSource of
           Left err ->
@@ -1696,6 +1756,16 @@ contextTests =
             assertBool "expected hook trigger node" ("\"hook-trigger:workerStart\"" `T.isInfixOf` jsonText)
             assertBool "expected hook trigger edge" ("\"hook-trigger\"" `T.isInfixOf` jsonText)
             assertBool "expected hook request edge" ("\"hook-request-schema\"" `T.isInfixOf` jsonText)
+    , testCase "context graph includes domain object and domain event objective edges" $
+        case renderContextSourceJson "domain" domainModelSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected domain object node" ("\"domain-object:Customer\"" `T.isInfixOf` jsonText)
+            assertBool "expected domain event node" ("\"domain-event:CustomerChurned\"" `T.isInfixOf` jsonText)
+            assertBool "expected domain object schema edge" ("\"domain-object-schema\"" `T.isInfixOf` jsonText)
+            assertBool "expected domain event object edge" ("\"domain-event-object\"" `T.isInfixOf` jsonText)
     , testCase "context graph includes agent roles, policies, and agent bindings" $
         case renderContextSourceJson "agent" agentSource of
           Left err ->
@@ -4333,6 +4403,20 @@ workflowSource =
     , "main = \"ok\""
     ]
 
+domainModelSource :: Text
+domainModelSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record CustomerRecord = { customerId : Str, tier : Str }"
+    , "record CustomerChurnEvent = { customerId : Str, reason : Str }"
+    , ""
+    , "domain object Customer = CustomerRecord"
+    , "domain event CustomerChurned = CustomerChurnEvent for Customer"
+    , ""
+    , "main = \"ok\""
+    ]
+
 simulationSource :: Text
 simulationSource =
   T.unlines
@@ -4533,6 +4617,8 @@ formatterRoundTripSource =
     , "record Worker={name:Str classified pii, aliases:[Str]}"
     , "record LeadRequest={company:Str, budget:Int}"
     , "record LeadSummary={summary:Str}"
+    , "domain object WorkerProfile=Worker"
+    , "domain event LeadRequested=LeadRequest for WorkerProfile"
     , "type Status=Idle|Busy Str"
     , "guide Repo extends Base={verification:\"Run bash scripts/verify-all.sh\"}"
     , "hook workerStart=\"worker.start\" WorkerBoot -> HookAck bootstrapWorker"

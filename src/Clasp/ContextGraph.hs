@@ -26,6 +26,8 @@ import qualified Data.Text.Lazy as LT
 import Clasp.Core
   ( CoreAgentDecl (..)
   , CoreAgentRoleDecl (..)
+  , CoreDomainEventDecl (..)
+  , CoreDomainObjectDecl (..)
   , CoreHookDecl (..)
   , CoreMergeGateDecl (..)
   , CoreModule (..)
@@ -47,6 +49,8 @@ import Clasp.Syntax
   , AgentRoleApprovalPolicy
   , AgentRoleDecl (..)
   , AgentRoleSandboxPolicy
+  , DomainEventDecl (..)
+  , DomainObjectDecl (..)
   , ForeignDecl (..)
   , GuideDecl (..)
   , GuideEntryDecl (..)
@@ -123,6 +127,8 @@ buildContextGraph modl =
     routeBoundaryNames = collectRouteBoundaryNames (coreModuleRouteDecls modl)
     builtinSchemaNodes = mapMaybe builtinSchemaNode (Set.toList routeBoundaryNames)
     schemaNodes = concatMap buildSchemaNodes (coreModuleRecordDecls modl) <> builtinSchemaNodes
+    domainObjectNodes = fmap buildDomainObjectNode (coreModuleDomainObjectDecls modl)
+    domainEventNodes = fmap buildDomainEventNode (coreModuleDomainEventDecls modl)
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
@@ -138,10 +144,12 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> domainObjectNodes <> domainEventNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
+        <> concatMap buildDomainObjectEdges (coreModuleDomainObjectDecls modl)
+        <> concatMap buildDomainEventEdges (coreModuleDomainEventDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
@@ -186,6 +194,33 @@ buildSchemaFieldNode schemaName fieldDecl =
         , ("schemaName", ContextAttrText schemaName)
         , ("classification", ContextAttrText (recordFieldDeclClassification fieldDecl))
         , ("type", ContextAttrText (renderContextType (recordFieldDeclType fieldDecl)))
+        ]
+    }
+
+buildDomainObjectNode :: CoreDomainObjectDecl -> ContextNode
+buildDomainObjectNode (CoreDomainObjectDecl domainObjectDecl) =
+  ContextNode
+    { contextNodeId = domainObjectNodeId (domainObjectDeclName domainObjectDecl)
+    , contextNodeKind = "domainObject"
+    , contextNodeSpan = Just (domainObjectDeclSpan domainObjectDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (domainObjectDeclName domainObjectDecl))
+        , ("identity", ContextAttrText (domainObjectDeclIdentity domainObjectDecl))
+        , ("schemaName", ContextAttrText (domainObjectDeclSchemaName domainObjectDecl))
+        ]
+    }
+
+buildDomainEventNode :: CoreDomainEventDecl -> ContextNode
+buildDomainEventNode (CoreDomainEventDecl domainEventDecl) =
+  ContextNode
+    { contextNodeId = domainEventNodeId (domainEventDeclName domainEventDecl)
+    , contextNodeKind = "domainEvent"
+    , contextNodeSpan = Just (domainEventDeclSpan domainEventDecl)
+    , contextNodeAttrs =
+        [ ("name", ContextAttrText (domainEventDeclName domainEventDecl))
+        , ("identity", ContextAttrText (domainEventDeclIdentity domainEventDecl))
+        , ("schemaName", ContextAttrText (domainEventDeclSchemaName domainEventDecl))
+        , ("domainObjectName", ContextAttrText (domainEventDeclObjectName domainEventDecl))
         ]
     }
 
@@ -536,6 +571,32 @@ schemaFieldTypeEdge schemaName fieldDecl =
     _ ->
       Nothing
 
+buildDomainObjectEdges :: CoreDomainObjectDecl -> [ContextEdge]
+buildDomainObjectEdges (CoreDomainObjectDecl domainObjectDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "domain-object-schema"
+      , contextEdgeFrom = domainObjectNodeId (domainObjectDeclName domainObjectDecl)
+      , contextEdgeTo = schemaNodeId (domainObjectDeclSchemaName domainObjectDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
+buildDomainEventEdges :: CoreDomainEventDecl -> [ContextEdge]
+buildDomainEventEdges (CoreDomainEventDecl domainEventDecl) =
+  [ ContextEdge
+      { contextEdgeKind = "domain-event-schema"
+      , contextEdgeFrom = domainEventNodeId (domainEventDeclName domainEventDecl)
+      , contextEdgeTo = schemaNodeId (domainEventDeclSchemaName domainEventDecl)
+      , contextEdgeAttrs = []
+      }
+  , ContextEdge
+      { contextEdgeKind = "domain-event-object"
+      , contextEdgeFrom = domainEventNodeId (domainEventDeclName domainEventDecl)
+      , contextEdgeTo = domainObjectNodeId (domainEventDeclObjectName domainEventDecl)
+      , contextEdgeAttrs = []
+      }
+  ]
+
 buildGuideEdges :: GuideDecl -> [ContextEdge]
 buildGuideEdges guideDecl =
   entryEdges <> parentEdges
@@ -836,6 +897,12 @@ schemaNodeId name = ContextNodeId ("schema:" <> name)
 
 schemaFieldNodeId :: Text -> Text -> ContextNodeId
 schemaFieldNodeId schemaName fieldName = ContextNodeId ("schema-field:" <> schemaName <> ":" <> fieldName)
+
+domainObjectNodeId :: Text -> ContextNodeId
+domainObjectNodeId name = ContextNodeId ("domain-object:" <> name)
+
+domainEventNodeId :: Text -> ContextNodeId
+domainEventNodeId name = ContextNodeId ("domain-event:" <> name)
 
 guideNodeId :: Text -> ContextNodeId
 guideNodeId name = ContextNodeId ("guide:" <> name)
