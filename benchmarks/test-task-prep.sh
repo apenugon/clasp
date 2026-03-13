@@ -15,6 +15,8 @@ printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-external-adaptation[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-external-adaptation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
 
@@ -178,6 +180,8 @@ check_incomplete_task ts-control-plane
 check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
 check_incomplete_task clasp-durable-workflow
+check_incomplete_task clasp-external-adaptation
+check_incomplete_task ts-external-adaptation
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
 check_nested_clasp_benchmark_prep

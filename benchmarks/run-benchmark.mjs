@@ -39,6 +39,13 @@ const comparisonTaskFamilies = [
     rightLabel: "ts"
   },
   {
+    comparisonLabel: "external-adaptation-comparison",
+    leftTaskId: "clasp-external-adaptation",
+    rightTaskId: "ts-external-adaptation",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
     comparisonLabel: "syntax-form-comparison",
     leftTaskId: "clasp-syntax-compact",
     rightTaskId: "clasp-syntax-verbose",

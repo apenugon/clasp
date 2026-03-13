@@ -87,6 +87,10 @@ write_result "2026-03-01T10-10-56.000Z--clasp-control-plane--codex.json" "clasp-
 write_result "2026-03-01T10-10-57.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:57.000Z" 90 120 95 true 0
 write_result "2026-03-01T10-10-58.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-1" "2026-03-01T10:10:58.000Z" 150 165 145 false 1
 write_result "2026-03-01T10-10-59.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "containment-a-2" "2026-03-01T10:10:59.000Z" 170 170 150 false 1
+write_result "2026-03-01T10-11-10.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "objective-a-1" "2026-03-01T10:11:10.000Z" 90 150 130 false 1
+write_result "2026-03-01T10-11-11.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "objective-a-2" "2026-03-01T10:11:11.000Z" 110 140 120 true 0
+write_result "2026-03-01T10-11-12.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "objective-a-1" "2026-03-01T10:11:12.000Z" 100 155 135 true 0
+write_result "2026-03-01T10-11-13.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "objective-a-2" "2026-03-01T10:11:13.000Z" 120 165 145 true 0
 write_result "2026-03-01T10-11-01.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:01.000Z" 180 160 150 true 0
 write_result "2026-03-01T10-11-02.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:02.000Z" 220 190 170 true 0
 write_result "2026-03-01T10-11-03.000Z--clasp-lead-rejection--codex.json" "clasp-lead-rejection" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:03.000Z" 140 120 100 true 0
@@ -180,6 +184,18 @@ printf '%s\n' "$containment_summary_output" | grep -Fq '    timeToGreenDeltaMs: 
 printf '%s\n' "$containment_summary_output" | grep -Fq '    tokenDelta: -35'
 printf '%s\n' "$containment_summary_output" | grep -Fq '    uncachedTokenDelta: -40'
 
+objective_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes objective-a)"
+printf '%s\n' "$objective_summary_output" | grep -Fq $'clasp-external-adaptation\tcodex\tgpt-5.4'
+printf '%s\n' "$objective_summary_output" | grep -Fq $'ts-external-adaptation\tcodex\tgpt-5.4'
+printf '%s\n' "$objective_summary_output" | grep -Fq 'external-adaptation-comparison'
+printf '%s\n' "$objective_summary_output" | grep -Fq $'  codex\tgpt-5.4\tobjective-a'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    tsPassRate: 100%'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    passRateDeltaPct: -50'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    timeToGreenDeltaMs: 100'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    tokenDelta: -15'
+printf '%s\n' "$objective_summary_output" | grep -Fq '    uncachedTokenDelta: -15'
+
 python_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes py-escalation)"
 printf '%s\n' "$python_summary_output" | grep -Fq $'py-agent-escalation\tcodex\tgpt-5.4'
 printf '%s\n' "$python_summary_output" | grep -Fq '  series: py-escalation'
@@ -258,6 +274,14 @@ printf '%s\n' "$control_command_log" | grep -Fq 'run clasp-control-plane'
 printf '%s\n' "$control_command_log" | grep -Fq 'run ts-control-plane'
 printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-1'
 printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" external-adaptation 2 objective-a gpt-5.4
+objective_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$objective_command_log" | grep -Fq 'run clasp-external-adaptation'
+printf '%s\n' "$objective_command_log" | grep -Fq 'run ts-external-adaptation'
+printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-1'
+printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-2'
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4

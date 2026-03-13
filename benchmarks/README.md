@@ -47,6 +47,8 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/py-agent-escalation`: mirrored `Python` agent-boundary baseline
 - `benchmarks/tasks/clasp-lead-rejection`: `Clasp` trust-boundary rejection task
 - `benchmarks/tasks/ts-lead-rejection`: mirrored `TypeScript` trust-boundary rejection task
+- `benchmarks/tasks/clasp-external-adaptation`: `Clasp` external-objective adaptation task grounded in the lead outreach reply-rate signal
+- `benchmarks/tasks/ts-external-adaptation`: mirrored `TypeScript` external-objective adaptation baseline for the same bounded reply-rate remediation
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 
 ## Benchmark Modes
@@ -189,6 +191,13 @@ bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
 ```
 
+Run the mirrored repeated external-objective adaptation series for both languages:
+
+```sh
+bash benchmarks/run-codex-series.sh external-adaptation 5 objective-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes objective-1
+```
+
 Run the mirrored repeated series for Claude Code:
 
 ```sh
@@ -223,6 +232,8 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
+- `clasp-external-adaptation`: reply-rate-driven bounded adaptation over the Clasp lead outreach demo
+- `ts-external-adaptation`: mirrored TypeScript reply-rate adaptation benchmark with the same bounded remediation contract
 - `clasp-syntax-compact`: compact-source authoring microbenchmark for a single-file Clasp change
 - `clasp-syntax-verbose`: the same authoring microbenchmark with an added compiler-generated explain surface
 
