@@ -38,6 +38,15 @@ export function createLeadDemoBindings(seedLeads = SEEDED_LEADS) {
         followUpRequired: intake.budget >= 20000
       });
     },
+    mockLeadOutreachModel(request) {
+      return JSON.stringify({
+        leadId: request.leadId,
+        channel: request.channel,
+        subject: `${request.company} ${request.channel} follow-up`,
+        message: `${request.summary} Reach out to ${request.contact} with: ${request.guidance}`,
+        callToAction: request.callToAction
+      });
+    },
     storeLead(intake, summary) {
       const lead = {
         leadId: `lead-${leads.length + 1}`,

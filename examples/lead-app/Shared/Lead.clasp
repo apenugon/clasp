@@ -55,6 +55,38 @@ record InboxSnapshot = {
   secondaryLeadLabel : Str
 }
 
+record LeadPlaybookLookup = {
+  segment : LeadSegment,
+  priority : LeadPriority
+}
+
+record LeadPlaybook = {
+  channel : Str,
+  guidance : Str,
+  callToAction : Str
+}
+
+record LeadOutreachRequest = {
+  leadId : Str,
+  company : Str,
+  contact : Str,
+  summary : Str,
+  priorityLabel : Str,
+  segmentLabel : Str,
+  channel : Str,
+  guidance : Str,
+  callToAction : Str,
+  promptText : Str
+}
+
+record LeadOutreachDraft = {
+  leadId : Str,
+  channel : Str,
+  subject : Str,
+  message : Str,
+  callToAction : Str
+}
+
 renderLandingPage : InboxSnapshot -> Page
 renderLandingPage inbox = page "Lead inbox" (styled "lead_shell" (element "main" (append (element "h1" (text "Lead inbox")) (append (element "p" (text "Capture a lead, score it once, and review it on the server.")) (append intakeSection (append (element "h2" (text inbox.headline)) (append (inboxLinks inbox) (element "p" (link "/inbox" (text "Open the inbox page"))))))))))
 

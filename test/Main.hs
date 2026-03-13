@@ -3815,6 +3815,32 @@ compileTests =
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("lead-app workflow demo script failed:\n" <> stderrText)
+    , testCase "lead app ai demo composes typed tool and model boundaries around a seeded lead" $ do
+        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
+        case result of
+          Left err ->
+            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/lead-app/compiled-ai.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "ai-demo.mjs")
+            (exitCode, stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "node"
+                [ absoluteDemoPath
+                , absoluteCompiledPath
+                ]
+                ""
+            case exitCode of
+              ExitSuccess ->
+                assertEqual
+                  "expected ai demo to load a lead, resolve the typed playbook tool, and reject invalid tool/model payloads"
+                  "{\"routeName\":\"primaryLeadRecordRoute\",\"toolName\":\"lookupLeadPlaybook\",\"toolMethod\":\"lookup_lead_playbook\",\"leadId\":\"lead-2\",\"leadPriority\":\"Medium\",\"leadSegment\":\"Growth\",\"playbookChannel\":\"email\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the lead outreach assistant.\\n\\nassistant: Northwind Studio\\n\\nassistant: Northwind Studio is ready for a design-system migration this quarter.\\n\\nassistant: medium\\n\\nassistant: growth\\n\\nassistant: Keep the note concise, mention the current pilot, and ask for a next step.\\n\\nuser: Ask for the best time to send a tailored rollout plan.\",\"draftChannel\":\"email\",\"draftSubject\":\"Northwind Studio email follow-up\",\"draftCallToAction\":\"Ask for the best time to send a tailored rollout plan.\",\"invalidTool\":\"guidance must be a string\",\"invalidModel\":\"subject must be a string\"}"
+                  (T.strip (T.pack stdoutText))
+              ExitFailure _ ->
+                assertFailure ("lead-app ai demo script failed:\n" <> stderrText)
     , testCase "lead inbox app emits machine-readable ui, navigation, and action graphs" $ do
         result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
         case result of

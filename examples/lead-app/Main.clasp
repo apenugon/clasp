@@ -3,11 +3,20 @@ module Main
 import Shared.Lead
 
 foreign mockLeadSummaryModel : LeadIntake -> Str = "mockLeadSummaryModel"
+foreign mockLeadOutreachModel : LeadOutreachRequest -> Str = "mockLeadOutreachModel"
 foreign storeLead : LeadIntake -> LeadSummary -> Str = "storeLead"
 foreign loadInbox : Empty -> Str = "loadInbox"
 foreign loadPrimaryLead : Empty -> Str = "loadPrimaryLead"
 foreign loadSecondaryLead : Empty -> Str = "loadSecondaryLead"
 foreign reviewLead : LeadReview -> Str = "reviewLead"
+
+policy LeadAssistOps = public permits {
+  process "node"
+}
+
+toolserver LeadAssistTools = "mcp" "stdio://lead-assist-tools" with LeadAssistOps
+
+tool lookupLeadPlaybook = LeadAssistTools "lookup_lead_playbook" LeadPlaybookLookup -> LeadPlaybook
 
 summarizeLead : LeadIntake -> LeadSummary
 summarizeLead intake = decode LeadSummary (mockLeadSummaryModel intake)
@@ -26,6 +35,49 @@ secondaryLead req = decode LeadRecord (loadSecondaryLead req)
 
 reviewedLead : LeadReview -> LeadRecord
 reviewedLead review = decode LeadRecord (reviewLead review)
+
+leadPlaybookRequest : LeadRecord -> LeadPlaybookLookup
+leadPlaybookRequest lead = LeadPlaybookLookup {
+  segment = lead.segment,
+  priority = lead.priority
+}
+
+leadPriorityLabel : LeadPriority -> Str
+leadPriorityLabel priority = match priority {
+  Low -> "low",
+  Medium -> "medium",
+  High -> "high"
+}
+
+leadSegmentLabel : LeadSegment -> Str
+leadSegmentLabel segment = match segment {
+  Startup -> "startup",
+  Growth -> "growth",
+  Enterprise -> "enterprise"
+}
+
+outreachPrompt : LeadRecord -> LeadPlaybook -> Prompt
+outreachPrompt lead playbook = appendPrompt (appendPrompt (appendPrompt (appendPrompt (appendPrompt (appendPrompt (systemPrompt "You are the lead outreach assistant.") (assistantPrompt lead.company)) (assistantPrompt lead.summary)) (assistantPrompt (leadPriorityLabel lead.priority))) (assistantPrompt (leadSegmentLabel lead.segment))) (assistantPrompt playbook.guidance)) (userPrompt playbook.callToAction)
+
+outreachPromptText : LeadRecord -> LeadPlaybook -> Str
+outreachPromptText lead playbook = promptText (outreachPrompt lead playbook)
+
+leadOutreachRequest : LeadRecord -> LeadPlaybook -> LeadOutreachRequest
+leadOutreachRequest lead playbook = LeadOutreachRequest {
+  leadId = lead.leadId,
+  company = lead.company,
+  contact = lead.contact,
+  summary = lead.summary,
+  priorityLabel = leadPriorityLabel lead.priority,
+  segmentLabel = leadSegmentLabel lead.segment,
+  channel = playbook.channel,
+  guidance = playbook.guidance,
+  callToAction = playbook.callToAction,
+  promptText = outreachPromptText lead playbook
+}
+
+draftLeadOutreach : LeadRecord -> LeadPlaybook -> LeadOutreachDraft
+draftLeadOutreach lead playbook = decode LeadOutreachDraft (mockLeadOutreachModel (leadOutreachRequest lead playbook))
 
 workflow LeadFollowUpFlow = { state : LeadFollowUpState }
 
