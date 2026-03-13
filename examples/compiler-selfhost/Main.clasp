@@ -1,5 +1,6 @@
 module Main
 
+import Compiler.Checker
 import Compiler.Emit.JavaScript
 import Compiler.Lower
 
@@ -7,6 +8,10 @@ record SelfHostSnapshot = {
   loweredValue : Str,
   loweredFunction : Str,
   loweredModule : Str,
+  checkedValueType : Str,
+  checkedFunctionType : Str,
+  checkedModule : Str,
+  mismatchDiagnostic : Str,
   emittedModule : Str
 }
 
@@ -15,6 +20,10 @@ snapshot = SelfHostSnapshot {
   loweredValue = renderLowerDecl loweredValueDecl,
   loweredFunction = renderLowerDecl loweredFunctionDecl,
   loweredModule = loweredSummary,
+  checkedValueType = renderType checkedValueType,
+  checkedFunctionType = renderType checkedFunctionType,
+  checkedModule = checkedModuleSummary,
+  mismatchDiagnostic = mismatchDiagnostic,
   emittedModule = emittedModule
 }
 

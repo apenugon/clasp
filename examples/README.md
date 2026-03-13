@@ -16,7 +16,7 @@ This directory has two kinds of examples:
 - [compiler-renderers.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-renderers.clasp): self-hosting formatter and diagnostic rendering helpers expressed in Clasp
 - [compiler-loader.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-loader.clasp): self-hosting module loading and package search-order helpers expressed in Clasp
 - [compiler-parser.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-parser.clasp): self-hosting parser helpers for module headers, imports, signatures, and declaration heads expressed in Clasp
-- [compiler-selfhost/Main.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-selfhost/Main.clasp): self-hosting lowered-IR helpers plus a small JavaScript emitter slice expressed across Clasp modules
+- [compiler-selfhost/Main.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-selfhost/Main.clasp): self-hosting checker/type-inference helpers, lowered-IR helpers, and a small JavaScript emitter slice expressed across Clasp modules
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples
