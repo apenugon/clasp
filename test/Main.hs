@@ -1718,6 +1718,17 @@ contextTests =
             let jsonText = LT.toStrict rendered
             assertBool "expected file permissions attr" ("\"filePermissions\"" `T.isInfixOf` jsonText && "\"/workspace\"" `T.isInfixOf` jsonText)
             assertBool "expected secret permissions attr" ("\"secretPermissions\"" `T.isInfixOf` jsonText && "\"OPENAI_API_KEY\"" `T.isInfixOf` jsonText)
+    , testCase "context graph ties secret inputs back to policies and consuming boundaries" $
+        case renderContextSourceJson "control-plane" controlPlaneSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            let jsonText = LT.toStrict rendered
+            assertBool "expected secret input node" ("\"secret-input:OPENAI_API_KEY\"" `T.isInfixOf` jsonText)
+            assertBool "expected secret input policy names" ("\"policyNames\"" `T.isInfixOf` jsonText && "\"SupportDisclosure\"" `T.isInfixOf` jsonText)
+            assertBool "expected policy secret edge" ("\"policy-permits-secret\"" `T.isInfixOf` jsonText)
+            assertBool "expected agent role secret edge" ("\"agent-role-secret-input\"" `T.isInfixOf` jsonText)
+            assertBool "expected toolserver secret edge" ("\"toolserver-secret-input\"" `T.isInfixOf` jsonText)
     , testCase "context graph includes tool servers, policy edges, and tool schema edges" $
         case renderContextSourceJson "tool" toolSource of
           Left err ->
@@ -2441,6 +2452,10 @@ compileTests =
             assertBool "expected policy decision helper" ("decideFile(target, context = null) { return this.decide(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected policy trace helper" ("traceFile(target, context = null) { return this.trace(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected policy audit helper" ("auditFile(target, context = null) { return this.audit(\"file\", target, context); }" `T.isInfixOf` emitted)
+            assertBool "expected secret inputs export" ("export const __claspSecretInputs = [" `T.isInfixOf` emitted)
+            assertBool "expected secret boundaries export" ("export const __claspSecretBoundaries = [" `T.isInfixOf` emitted)
+            assertBool "expected secret trace helper" ("traceAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).trace; }" `T.isInfixOf` emitted)
+            assertBool "expected missing secret diagnostic helper" ("Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}" `T.isInfixOf` emitted)
             assertBool "expected hook invoke helper" ("invoke(value) { return this.encodeResponse(this.handler(this.decodeRequest(value))); }" `T.isInfixOf` emitted)
             assertBool "expected tool request preparation" ("prepareCall(value, id = null) {" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
@@ -2461,18 +2476,31 @@ compileTests =
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
                 , "const policy = agent.policy;"
+                , "const secretInput = compiledModule.__claspControlPlane.secretInputs[0];"
+                , "const agentSecretBoundary = compiledModule.__claspControlPlane.secretBoundaries.find((boundary) => boundary.kind === 'agentRole');"
+                , "const toolSecretBoundary = compiledModule.__claspControlPlane.secretBoundaries.find((boundary) => boundary.kind === 'toolServer');"
                 , "const context = { actor: { id: 'worker-7', tags: ['initial'] }, requestId: 'req-1' };"
                 , "const decision = policy.decideFile('/workspace/src/Main.clasp', context);"
                 , "const trace = policy.traceFile('/workspace/src/Main.clasp', context);"
                 , "const audit = policy.auditFile('/workspace/src/Main.clasp', context);"
+                , "const secretDecision = secretInput.decideAccess(agentSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
+                , "const secretTrace = secretInput.traceAccess(agentSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
+                , "const secretAudit = secretInput.auditAccess(toolSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
+                , "const secretValue = secretInput.resolve(agentSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
                 , "context.actor.id = 'mutated';"
                 , "context.actor.tags.push('later');"
                 , "context.requestId = 'req-2';"
                 , "let deniedFile = null;"
+                , "let missingSecret = null;"
                 , "try {"
                 , "  policy.assertFile('/tmp');"
                 , "} catch (error) {"
                 , "  deniedFile = error.message;"
+                , "}"
+                , "try {"
+                , "  secretInput.resolve(toolSecretBoundary, {}, context);"
+                , "} catch (error) {"
+                , "  missingSecret = error.message;"
                 , "}"
                 , "console.log(JSON.stringify({"
                 , "  guideExtends: guide.extends,"
@@ -2491,9 +2519,20 @@ compileTests =
                 , "  traceTags: trace.context.actor.tags.join(','),"
                 , "  auditActor: audit.context.actor.id,"
                 , "  auditRequestId: audit.context.requestId,"
+                , "  secretPolicy: secretDecision.policy,"
+                , "  secretBoundaryKind: secretDecision.boundary.kind,"
+                , "  secretBoundaryName: secretDecision.boundary.name,"
+                , "  secretMissing: secretDecision.missing,"
+                , "  secretTraceActor: secretTrace.context.actor.id,"
+                , "  secretAuditBoundary: secretAudit.boundary.name,"
+                , "  secretResolvedName: secretValue.name,"
+                , "  secretResolvedValue: secretValue.value,"
+                , "  secretConsumerBoundary: secretInput.consumerBoundaries.join(','),"
                 , "  traceFrozen: Object.isFrozen(trace.context) && Object.isFrozen(trace.context.actor) && Object.isFrozen(trace.context.actor.tags),"
                 , "  auditFrozen: Object.isFrozen(audit.context) && Object.isFrozen(audit.context.actor) && Object.isFrozen(audit.context.actor.tags),"
+                , "  secretTraceFrozen: Object.isFrozen(secretTrace.context) && Object.isFrozen(secretTrace.boundary),"
                 , "  deniedFile,"
+                , "  missingSecret,"
                 , "  hookEvent: hook.event,"
                 , "  hookAccepted: hook.invoke({ workerId: 'worker-7' }).accepted,"
                 , "  toolMethod: tool.prepareCall({ query: 'search' }, 7).method,"
@@ -2504,6 +2543,8 @@ compileTests =
                 , "  docsFormat: docs.format,"
                 , "  docsHasGuides: docs.markdown.includes('## Guides'),"
                 , "  docsHasPermissions: docs.markdown.includes('File permissions: /workspace'),"
+                , "  docsHasSecretInputs: docs.markdown.includes('## Secret Inputs'),"
+                , "  docsHasSecretBoundary: docs.markdown.includes('toolServer:RepoTools'),"
                 , "  docsHasApproval: docs.markdown.includes('Approval: on_request'),"
                 , "  docsHasSandbox: docs.markdown.includes('Sandbox: workspace_write'),"
                 , "  docsHasHookEvent: docs.markdown.includes('worker.start'),"
@@ -2516,7 +2557,7 @@ compileTests =
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"traceFrozen\":true,\"auditFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1}"
               runtimeOutput
     , testCase "control-plane example drives one repo-level agent loop" $ do
         result <- compileEntry ("examples" </> "control-plane" </> "Main.clasp")

@@ -18,6 +18,7 @@ import Data.Aeson
   )
 import qualified Data.Aeson.Key as Key
 import Data.Aeson.Text (encodeToLazyText)
+import Data.List (nub)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text, pack)
@@ -125,6 +126,7 @@ buildContextGraph modl =
     guideNodes = concatMap buildGuideNodes (coreModuleGuideDecls modl)
     hookNodes = concatMap buildHookNodes (coreModuleHookDecls modl)
     policyNodes = concatMap buildPolicyNodes (coreModulePolicyDecls modl)
+    secretInputNodes = buildSecretInputNodes (coreModulePolicyDecls modl) (coreModuleAgentRoleDecls modl) (coreModuleToolServerDecls modl)
     toolServerNodes = fmap buildToolServerNode (coreModuleToolServerDecls modl)
     toolNodes = fmap buildToolNode (coreModuleToolDecls modl)
     verifierNodes = fmap buildVerifierNode (coreModuleVerifierDecls modl)
@@ -136,13 +138,14 @@ buildContextGraph modl =
     actionNodes = concatMap buildActionNodes pageFlows
     foreignNodes = fmap buildForeignNode (coreModuleForeignDecls modl)
     runtimeNodes = buildRuntimeNodes (coreModuleForeignDecls modl)
-    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
+    allNodes = schemaNodes <> guideNodes <> hookNodes <> policyNodes <> secretInputNodes <> toolServerNodes <> toolNodes <> verifierNodes <> mergeGateNodes <> agentRoleNodes <> agentNodes <> routeNodes <> pageNodes <> actionNodes <> foreignNodes <> runtimeNodes
     allNodeIds = Set.fromList (fmap contextNodeId allNodes)
     allEdges =
       concatMap buildSchemaEdges (coreModuleRecordDecls modl)
         <> concatMap buildGuideEdges (coreModuleGuideDecls modl)
         <> concatMap buildHookEdges (coreModuleHookDecls modl)
         <> concatMap buildPolicyEdges (coreModulePolicyDecls modl)
+        <> buildSecretInputEdges (coreModulePolicyDecls modl) (coreModuleAgentRoleDecls modl) (coreModuleToolServerDecls modl)
         <> concatMap buildToolServerEdges (coreModuleToolServerDecls modl)
         <> concatMap buildToolEdges (coreModuleToolDecls modl)
         <> concatMap buildVerifierEdges (coreModuleVerifierDecls modl)
@@ -277,6 +280,22 @@ buildPolicyClassificationNode policyName classificationDecl =
         , ("policyName", ContextAttrText policyName)
         ]
     }
+
+buildSecretInputNodes :: [CorePolicyDecl] -> [CoreAgentRoleDecl] -> [CoreToolServerDecl] -> [ContextNode]
+buildSecretInputNodes policyDecls agentRoleDecls toolServerDecls =
+  fmap buildSecretInputNode (declaredSecretInputs policyDecls)
+  where
+    buildSecretInputNode secretName =
+      ContextNode
+        { contextNodeId = secretInputNodeId secretName
+        , contextNodeKind = "secretInput"
+        , contextNodeSpan = Nothing
+        , contextNodeAttrs =
+            [ ("name", ContextAttrText secretName)
+            , ("policyNames", ContextAttrTexts (secretInputPolicyNames secretName policyDecls))
+            , ("consumerBoundaries", ContextAttrTexts (secretInputConsumerBoundaries secretName policyDecls agentRoleDecls toolServerDecls))
+            ]
+        }
 
 buildToolServerNode :: CoreToolServerDecl -> ContextNode
 buildToolServerNode coreToolServerDecl =
@@ -582,6 +601,47 @@ buildPolicyEdges corePolicyDecl =
         , contextEdgeAttrs = []
         }
 
+buildSecretInputEdges :: [CorePolicyDecl] -> [CoreAgentRoleDecl] -> [CoreToolServerDecl] -> [ContextEdge]
+buildSecretInputEdges policyDecls agentRoleDecls toolServerDecls =
+  policyEdges <> agentRoleEdges <> toolServerEdges
+  where
+    secretNames = declaredSecretInputs policyDecls
+    policyEdges =
+      [ ContextEdge
+          { contextEdgeKind = "policy-permits-secret"
+          , contextEdgeFrom = policyNodeId (policyDeclName policyDecl)
+          , contextEdgeTo = secretInputNodeId secretName
+          , contextEdgeAttrs = []
+          }
+      | corePolicyDecl <- policyDecls
+      , let policyDecl = corePolicySourceDecl corePolicyDecl
+      , secretName <- policyPermissionValues PolicyPermissionSecret policyDecl
+      ]
+    agentRoleEdges =
+      [ ContextEdge
+          { contextEdgeKind = "agent-role-secret-input"
+          , contextEdgeFrom = agentRoleNodeId (agentRoleDeclName agentRoleDecl)
+          , contextEdgeTo = secretInputNodeId secretName
+          , contextEdgeAttrs = []
+          }
+      | coreAgentRoleDecl <- agentRoleDecls
+      , let agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+      , secretName <- secretNames
+      , secretName `elem` secretInputPermissions (agentRoleDeclPolicyName agentRoleDecl) policyDecls
+      ]
+    toolServerEdges =
+      [ ContextEdge
+          { contextEdgeKind = "toolserver-secret-input"
+          , contextEdgeFrom = toolServerNodeId (toolServerDeclName toolServerDecl)
+          , contextEdgeTo = secretInputNodeId secretName
+          , contextEdgeAttrs = []
+          }
+      | coreToolServerDecl <- toolServerDecls
+      , let toolServerDecl = coreToolServerSourceDecl coreToolServerDecl
+      , secretName <- secretNames
+      , secretName `elem` secretInputPermissions (toolServerDeclPolicyName toolServerDecl) policyDecls
+      ]
+
 buildToolServerEdges :: CoreToolServerDecl -> [ContextEdge]
 buildToolServerEdges coreToolServerDecl =
   [ ContextEdge
@@ -789,12 +849,59 @@ policyNodeId name = ContextNodeId ("policy:" <> name)
 policyClassificationNodeId :: Text -> Text -> ContextNodeId
 policyClassificationNodeId policyName classificationName = ContextNodeId ("policy-classification:" <> policyName <> ":" <> classificationName)
 
+secretInputNodeId :: Text -> ContextNodeId
+secretInputNodeId name = ContextNodeId ("secret-input:" <> name)
+
 policyPermissionValues :: PolicyPermissionKind -> PolicyDecl -> [Text]
 policyPermissionValues permissionKind policyDecl =
   [ policyPermissionDeclValue permissionDecl
   | permissionDecl <- policyDeclPermissions policyDecl
   , policyPermissionDeclKind permissionDecl == permissionKind
   ]
+
+declaredSecretInputs :: [CorePolicyDecl] -> [Text]
+declaredSecretInputs policyDecls =
+  nub
+    [ secretName
+    | corePolicyDecl <- policyDecls
+    , let policyDecl = corePolicySourceDecl corePolicyDecl
+    , secretName <- policyPermissionValues PolicyPermissionSecret policyDecl
+    ]
+
+secretInputPermissions :: Text -> [CorePolicyDecl] -> [Text]
+secretInputPermissions policyName policyDecls =
+  concat
+    [ policyPermissionValues PolicyPermissionSecret policyDecl
+    | corePolicyDecl <- policyDecls
+    , let policyDecl = corePolicySourceDecl corePolicyDecl
+    , policyDeclName policyDecl == policyName
+    ]
+
+secretInputPolicyNames :: Text -> [CorePolicyDecl] -> [Text]
+secretInputPolicyNames secretName policyDecls =
+  [ policyDeclName policyDecl
+  | corePolicyDecl <- policyDecls
+  , let policyDecl = corePolicySourceDecl corePolicyDecl
+  , secretName `elem` policyPermissionValues PolicyPermissionSecret policyDecl
+  ]
+
+secretInputConsumerBoundaries :: Text -> [CorePolicyDecl] -> [CoreAgentRoleDecl] -> [CoreToolServerDecl] -> [Text]
+secretInputConsumerBoundaries secretName policyDecls agentRoleDecls toolServerDecls =
+  fmap ("agent-role:" <>) agentRoleNames <> fmap ("toolserver:" <>) toolServerNames
+  where
+    allowedBy policyName = secretName `elem` secretInputPermissions policyName policyDecls
+    agentRoleNames =
+      [ agentRoleDeclName agentRoleDecl
+      | coreAgentRoleDecl <- agentRoleDecls
+      , let agentRoleDecl = coreAgentRoleSourceDecl coreAgentRoleDecl
+      , allowedBy (agentRoleDeclPolicyName agentRoleDecl)
+      ]
+    toolServerNames =
+      [ toolServerDeclName toolServerDecl
+      | coreToolServerDecl <- toolServerDecls
+      , let toolServerDecl = coreToolServerSourceDecl coreToolServerDecl
+      , allowedBy (toolServerDeclPolicyName toolServerDecl)
+      ]
 
 hookNodeId :: Text -> ContextNodeId
 hookNodeId name = ContextNodeId ("hook:" <> name)

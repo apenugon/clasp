@@ -837,6 +837,89 @@ emitRuntimePrelude =
   , "  });"
   , "}"
   , ""
+  , "function $claspSecretProviderValue(provider, secretName) {"
+  , "  if (typeof provider === \"function\") {"
+  , "    return provider(secretName);"
+  , "  }"
+  , "  if (provider && typeof provider === \"object\") {"
+  , "    return provider[secretName];"
+  , "  }"
+  , "  return undefined;"
+  , "}"
+  , ""
+  , "function $claspSecretBoundary(boundary) {"
+  , "  if (!boundary || typeof boundary !== \"object\") {"
+  , "    throw new Error(\"Missing Clasp secret consuming boundary.\");"
+  , "  }"
+  , "  return Object.freeze({"
+  , "    kind: boundary.kind ?? \"unknown\","
+  , "    name: boundary.name ?? \"unknown\","
+  , "    id: boundary.id ?? null,"
+  , "    policyName: boundary.policyName ?? boundary.policy?.name ?? null"
+  , "  });"
+  , "}"
+  , ""
+  , "function $claspSecretAccessDecision(secretInput, boundary, provider, context = null) {"
+  , "  const boundaryRef = $claspSecretBoundary(boundary);"
+  , "  const policy = boundary.policy ?? (boundaryRef.policyName ? $claspPolicyMap[boundaryRef.policyName] ?? null : null);"
+  , "  if (!policy) {"
+  , "    throw new Error(`Missing Clasp secret policy for ${boundaryRef.kind} ${boundaryRef.name}`);"
+  , "  }"
+  , "  const allowed = policy.allowsSecret(secretInput.name);"
+  , "  const missing = $claspSecretProviderValue(provider, secretInput.name) == null;"
+  , "  const contextSnapshot = $claspSnapshotValue(context);"
+  , "  const boundarySnapshot = $claspSnapshotValue(boundaryRef);"
+  , "  const trace = Object.freeze({"
+  , "    secret: secretInput.name,"
+  , "    secretInputId: secretInput.id,"
+  , "    policy: policy.name,"
+  , "    policyId: policy.id,"
+  , "    boundary: boundarySnapshot,"
+  , "    allowed,"
+  , "    missing,"
+  , "    context: contextSnapshot"
+  , "  });"
+  , "  const audit = Object.freeze({"
+  , "    secret: secretInput.name,"
+  , "    secretInputId: secretInput.id,"
+  , "    policy: policy.name,"
+  , "    policyId: policy.id,"
+  , "    boundary: boundarySnapshot,"
+  , "    allowed,"
+  , "    missing,"
+  , "    context: contextSnapshot"
+  , "  });"
+  , "  return Object.freeze({"
+  , "    secret: secretInput.name,"
+  , "    secretInputId: secretInput.id,"
+  , "    policy: policy.name,"
+  , "    policyId: policy.id,"
+  , "    boundary: boundarySnapshot,"
+  , "    allowed,"
+  , "    missing,"
+  , "    context: contextSnapshot,"
+  , "    trace,"
+  , "    audit"
+  , "  });"
+  , "}"
+  , ""
+  , "function $claspResolveSecretInput(secretInput, boundary, provider, context = null) {"
+  , "  const decision = $claspSecretAccessDecision(secretInput, boundary, provider, context);"
+  , "  if (!decision.allowed) {"
+  , "    throw new Error(`Policy ${decision.policy} denies secret access to ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name}`);"
+  , "  }"
+  , "  const value = $claspSecretProviderValue(provider, secretInput.name);"
+  , "  if (value == null) {"
+  , "    throw new Error(`Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}`);"
+  , "  }"
+  , "  return Object.freeze({"
+  , "    name: secretInput.name,"
+  , "    value,"
+  , "    trace: decision.trace,"
+  , "    audit: decision.audit"
+  , "  });"
+  , "}"
+  , ""
   , "function $claspExpectInt(value, path) {"
   , "  if (!Number.isInteger(value)) {"
   , "    throw new Error(`${$claspBoundaryLabel(path)} must be an integer`);"
@@ -2171,10 +2254,12 @@ emitControlPlaneExports modl =
     <> emitModuleManifest
     <> emitGuides
     <> emitPolicies
+    <> emitSecretInputs
     <> emitAgentRoles
     <> emitAgents
     <> emitHooks
     <> emitToolServers
+    <> emitSecretBoundaries
     <> emitTools
     <> emitVerifiers
     <> emitMergeGates
@@ -2403,6 +2488,65 @@ emitControlPlaneExports modl =
       , "  },"
       ]
 
+    secretInputNames =
+      nub
+        [ secretName
+        | policyDecl <- policies
+        , secretName <- policyPermissionValues PolicyPermissionSecret policyDecl
+        ]
+
+    secretInputPolicyNames secretName =
+      [ policyDeclName policyDecl
+      | policyDecl <- policies
+      , secretName `elem` policyPermissionValues PolicyPermissionSecret policyDecl
+      ]
+
+    policySecretPermissions policyName =
+      concat
+        [ policyPermissionValues PolicyPermissionSecret policyDecl
+        | policyDecl <- policies
+        , policyDeclName policyDecl == policyName
+        ]
+
+    secretInputBoundaryNames secretName =
+      fmap (\agentRoleDecl -> "agentRole:" <> agentRoleDeclName agentRoleDecl)
+        [ agentRoleDecl
+        | agentRoleDecl <- agentRoles
+        , secretName `elem` policySecretPermissions (agentRoleDeclPolicyName agentRoleDecl)
+        ]
+        <> fmap (\toolServerDecl -> "toolServer:" <> toolServerDeclName toolServerDecl)
+          [ toolServerDecl
+          | toolServerDecl <- toolServers
+          , secretName `elem` policySecretPermissions (toolServerDeclPolicyName toolServerDecl)
+          ]
+
+    emitSecretInputs =
+      [ "export const __claspSecretInputs = ["
+      ]
+        <> concatMap emitSecretInput secretInputNames
+        <> [ "];"
+           , "const $claspSecretInputMap = Object.fromEntries(__claspSecretInputs.map((secretInput) => [secretInput.name, secretInput]));"
+           , "for (const secretInput of __claspSecretInputs) {"
+           , "  Object.freeze(secretInput.policyNames);"
+           , "  Object.freeze(secretInput.consumerBoundaries);"
+           , "  Object.freeze(secretInput);"
+           , "}"
+           , ""
+           ]
+
+    emitSecretInput secretName =
+      [ "  {"
+      , "    name: " <> emitStringLiteral secretName <> ","
+      , "    id: " <> emitStringLiteral ("secret-input:" <> secretName) <> ","
+      , "    policyNames: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (secretInputPolicyNames secretName)) <> "]),"
+      , "    consumerBoundaries: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (secretInputBoundaryNames secretName)) <> "]),"
+      , "    decideAccess(boundary, provider, context = null) { return $claspSecretAccessDecision(this, boundary, provider, context); },"
+      , "    traceAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).trace; },"
+      , "    auditAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).audit; },"
+      , "    resolve(boundary, provider, context = null) { return $claspResolveSecretInput(this, boundary, provider, context); }"
+      , "  },"
+      ]
+
     emitAgentRoles =
       [ "export const __claspAgentRoles = ["
       ]
@@ -2503,6 +2647,40 @@ emitControlPlaneExports modl =
       , "    protocol: " <> emitStringLiteral (toolServerDeclProtocol toolServerDecl) <> ","
       , "    location: " <> emitStringLiteral (toolServerDeclLocation toolServerDecl) <> ","
       , "    policyName: " <> emitStringLiteral (toolServerDeclPolicyName toolServerDecl)
+      , "  },"
+      ]
+
+    emitSecretBoundaries =
+      [ "export const __claspSecretBoundaries = ["
+      ]
+        <> concatMap emitSecretAgentRoleBoundary agentRoles
+        <> concatMap emitSecretToolServerBoundary toolServers
+        <> [ "];"
+           , "for (const boundary of __claspSecretBoundaries) {"
+           , "  boundary.policy = boundary.policyName ? $claspPolicyMap[boundary.policyName] ?? null : null;"
+           , "  Object.freeze(boundary.secretNames);"
+           , "  Object.freeze(boundary);"
+           , "}"
+           , ""
+           ]
+
+    emitSecretAgentRoleBoundary agentRoleDecl =
+      [ "  {"
+      , "    kind: \"agentRole\","
+      , "    name: " <> emitStringLiteral (agentRoleDeclName agentRoleDecl) <> ","
+      , "    id: " <> emitStringLiteral (agentRoleDeclIdentity agentRoleDecl) <> ","
+      , "    policyName: " <> emitStringLiteral (agentRoleDeclPolicyName agentRoleDecl) <> ","
+      , "    secretNames: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policySecretPermissions (agentRoleDeclPolicyName agentRoleDecl))) <> "])"
+      , "  },"
+      ]
+
+    emitSecretToolServerBoundary toolServerDecl =
+      [ "  {"
+      , "    kind: \"toolServer\","
+      , "    name: " <> emitStringLiteral (toolServerDeclName toolServerDecl) <> ","
+      , "    id: " <> emitStringLiteral (toolServerDeclIdentity toolServerDecl) <> ","
+      , "    policyName: " <> emitStringLiteral (toolServerDeclPolicyName toolServerDecl) <> ","
+      , "    secretNames: Object.freeze([" <> T.intercalate ", " (fmap emitStringLiteral (policySecretPermissions (toolServerDeclPolicyName toolServerDecl))) <> "])"
       , "  },"
       ]
 
@@ -2614,7 +2792,9 @@ emitControlPlaneExports modl =
       , "  agentRoles: __claspAgentRoles,"
       , "  agents: __claspAgents,"
       , "  policies: __claspPolicies,"
+      , "  secretInputs: __claspSecretInputs,"
       , "  toolServers: __claspToolServers,"
+      , "  secretBoundaries: __claspSecretBoundaries,"
       , "  tools: __claspTools,"
       , "  verifiers: __claspVerifiers,"
       , "  mergeGates: __claspMergeGates,"
@@ -2640,6 +2820,7 @@ renderControlPlaneDocsMarkdown modl =
       <> renderDocsSection "Supervisors" (fmap renderSupervisorDoc (lowerModuleSupervisorDecls modl))
       <> renderDocsSection "Guides" (fmap renderGuideDoc (lowerModuleGuideDecls modl))
       <> renderDocsSection "Policies" (fmap renderPolicyDoc (lowerModulePolicyDecls modl))
+      <> renderDocsSection "Secret Inputs" (renderSecretInputDocs (lowerModulePolicyDecls modl) (lowerModuleAgentRoleDecls modl) (lowerModuleToolServerDecls modl))
       <> renderDocsSection "Agent Roles" (fmap renderAgentRoleDoc (lowerModuleAgentRoleDecls modl))
       <> renderDocsSection "Agents" (fmap renderAgentDoc (lowerModuleAgentDecls modl))
       <> renderDocsSection "Hooks" (fmap renderHookDoc (lowerModuleHookDecls modl))
@@ -2742,6 +2923,50 @@ renderPolicyPermissionSummary permissionKind policyDecl =
   case policyPermissionValues permissionKind policyDecl of
     [] -> "none"
     values -> T.intercalate ", " values
+
+renderSecretInputDocs :: [PolicyDecl] -> [AgentRoleDecl] -> [ToolServerDecl] -> [Text]
+renderSecretInputDocs policyDecls agentRoleDecls toolServerDecls =
+  fmap renderSecretInputDoc secretNames
+  where
+    secretNames =
+      nub
+        [ secretName
+        | policyDecl <- policyDecls
+        , secretName <- policyPermissionValues PolicyPermissionSecret policyDecl
+        ]
+    policyNamesFor secretName =
+      [ policyDeclName policyDecl
+      | policyDecl <- policyDecls
+      , secretName `elem` policyPermissionValues PolicyPermissionSecret policyDecl
+      ]
+    secretPermissionsFor policyName =
+      concat
+        [ policyPermissionValues PolicyPermissionSecret policyDecl
+        | policyDecl <- policyDecls
+        , policyDeclName policyDecl == policyName
+        ]
+    consumerNamesFor secretName =
+      fmap (\agentRoleDecl -> "agentRole:" <> agentRoleDeclName agentRoleDecl)
+        [ agentRoleDecl
+        | agentRoleDecl <- agentRoleDecls
+        , secretName `elem` secretPermissionsFor (agentRoleDeclPolicyName agentRoleDecl)
+        ]
+        <> fmap (\toolServerDecl -> "toolServer:" <> toolServerDeclName toolServerDecl)
+          [ toolServerDecl
+          | toolServerDecl <- toolServerDecls
+          , secretName `elem` secretPermissionsFor (toolServerDeclPolicyName toolServerDecl)
+          ]
+    renderSecretInputDoc secretName =
+      T.unlines
+        [ "### " <> secretName
+        , "- Policies: " <> renderDocList (policyNamesFor secretName)
+        , "- Consuming boundaries: " <> renderDocList (consumerNamesFor secretName)
+        , "- Runtime helpers: `secretInput.decideAccess(boundary, provider, context?)`, `traceAccess`, `auditAccess`, `resolve`"
+        ]
+
+renderDocList :: [Text] -> Text
+renderDocList [] = "none"
+renderDocList values = T.intercalate ", " values
 
 policyPermissionValues :: PolicyPermissionKind -> PolicyDecl -> [Text]
 policyPermissionValues permissionKind policyDecl =
