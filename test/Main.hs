@@ -3670,6 +3670,44 @@ compileTests =
                 assertEqual "manual rollback audit trigger kind" (Just (String "error_budget")) (KeyMap.lookup "manualRollbackAuditTriggerKind" value)
               Right other ->
                 assertFailure ("expected JSON object from health-gated runtime, got " <> show other)
+    , testCase "worker runtime kill switch latches rollback and disables further swaps" $
+        case (compileSource "workflow-kill-switch-old" workflowSource, compileSource "workflow-kill-switch-new" workflowHotSwapTargetSource) of
+          (Left err, _) ->
+            assertFailure ("expected old workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (_, Left err) ->
+            assertFailure ("expected new workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          (Right oldEmitted, Right newEmitted) -> do
+            let oldCompiledPath = "dist/test-projects/workflow-kill-switch-runtime/old-compiled.mjs"
+            let newCompiledPath = "dist/test-projects/workflow-kill-switch-runtime/new-compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory oldCompiledPath)
+            TIO.writeFile oldCompiledPath oldEmitted
+            TIO.writeFile newCompiledPath newEmitted
+            absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
+            absoluteNewCompiledPath <- makeAbsolute newCompiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowKillSwitchRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
+            case eitherDecodeStrictText runtimeOutput of
+              Left err ->
+                assertFailure ("expected kill-switch runtime output to be valid JSON:\n" <> err)
+              Right (Object value) -> do
+                assertEqual "kill status" (Just (String "killed")) (KeyMap.lookup "killStatus" value)
+                assertEqual "kill rollback status" (Just (String "rolled_back")) (KeyMap.lookup "killRollbackStatus" value)
+                assertEqual "kill active" (Just (Bool True)) (KeyMap.lookup "killActive" value)
+                assertEqual "kill trigger kind" (Just (String "policy_breach")) (KeyMap.lookup "killTriggerKind" value)
+                assertEqual "kill trigger reason" (Just (String "policy-breach")) (KeyMap.lookup "killTriggerReason" value)
+                assertEqual "kill trigger at" (Just (Number 1006)) (KeyMap.lookup "killTriggerAt" value)
+                assertEqual "kill count" (Just (Number 5)) (KeyMap.lookup "killCount" value)
+                assertEqual "kill supervisor" (Just (String "RollbackSupervisor")) (KeyMap.lookup "killSupervisor" value)
+                assertEqual "kill operator" (Just (String "safety-bot")) (KeyMap.lookup "killOperator" value)
+                assertEqual "kill reason" (Just (String "policy-breach")) (KeyMap.lookup "killReason" value)
+                assertEqual "kill state rollback applied" (Just (Bool True)) (KeyMap.lookup "killStateRollbackApplied" value)
+                assertEqual "kill state trigger kind" (Just (String "policy_breach")) (KeyMap.lookup "killStateTriggerKind" value)
+                assertEqual "kill audit type" (Just (String "kill_switch")) (KeyMap.lookup "killAuditType" value)
+                assertEqual "kill audit rollback status" (Just (String "rolled_back")) (KeyMap.lookup "killAuditRollbackStatus" value)
+                assertEqual "kill audit log tail" (Just [String "rollback", String "kill_switch"]) (jsonArrayValues (KeyMap.lookup "killAuditLogTail" value))
+                assertEqual "blocked operation mentions kill switch" (Just (Bool True)) (KeyMap.lookup "blockedOperationMentionsKillSwitch" value)
+              Right other ->
+                assertFailure ("expected JSON object from kill-switch runtime, got " <> show other)
     , testCase "server runtime resolves target-aware native interop build plans" $
         case compileSource "service-native-interop-runtime" serviceSource of
           Left err ->
@@ -7440,6 +7478,105 @@ workflowHealthGatedRuntimeScript oldCompiledPath newCompiledPath runtimePath =
     , "  autoRollbackAuditTriggerKind: autoRolledBack.audit.trigger?.kind ?? null,"
     , "  manualRollbackAuditType: manualRolledBack.audit.eventType,"
     , "  manualRollbackAuditTriggerKind: manualRolledBack.audit.trigger?.kind ?? null"
+    , "}));"
+    ]
+
+workflowKillSwitchRuntimeScript :: FilePath -> FilePath -> FilePath -> Text
+workflowKillSwitchRuntimeScript oldCompiledPath newCompiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as oldCompiledModule from " <> show ("file://" <> oldCompiledPath) <> ";"
+    , "import * as newCompiledModule from " <> show ("file://" <> newCompiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(oldCompiledModule);"
+    , "const sourceVersionId = oldCompiledModule.__claspModule.versionId;"
+    , "const patchedTargetModule = Object.freeze({"
+    , "  ...newCompiledModule.__claspModule,"
+    , "  upgradeWindow: Object.freeze({"
+    , "    ...newCompiledModule.__claspModule.upgradeWindow,"
+    , "    fromVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(newCompiledModule.__claspModule.upgradeWindow.fromVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "});"
+    , "const patchedTargetWorkflows = Object.freeze((newCompiledModule.__claspWorkflows ?? []).map((workflow) => Object.freeze({"
+    , "  ...workflow,"
+    , "  compatibility: Object.freeze({"
+    , "    ...workflow.compatibility,"
+    , "    compatibleModuleVersionIds: Object.freeze(["
+    , "      ...new Set(["
+    , "        ...(workflow.compatibility?.compatibleModuleVersionIds ?? []),"
+    , "        sourceVersionId"
+    , "      ])"
+    , "    ])"
+    , "  })"
+    , "})));"
+    , "const patchedTargetBindings = Object.freeze({"
+    , "  ...(newCompiledModule.__claspBindings ?? {}),"
+    , "  module: patchedTargetModule"
+    , "});"
+    , "const patchedTargetCompiledModule = Object.freeze({"
+    , "  ...newCompiledModule,"
+    , "  __claspModule: patchedTargetModule,"
+    , "  __claspWorkflows: patchedTargetWorkflows,"
+    , "  __claspBindings: patchedTargetBindings"
+    , "});"
+    , "const protocol = runtime.hotSwap(patchedTargetCompiledModule, { supervisor: 'UpgradeSupervisor' });"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const baseRun = workflow.start(workflow.checkpoint({ count: 5 }), { deadlineAt: 100 });"
+    , "const handoff = protocol.handoff('CounterFlow', baseRun, 'release-bot', 'self-update', { updatedAt: 1001 });"
+    , "const activated = protocol.activate('CounterFlow', handoff.run, {"
+    , "  migrateState: (state) => ({ count: state.count + 3 }),"
+    , "  activate: (nextRun) => ({"
+    , "    ...nextRun,"
+    , "    supervision: {"
+    , "      ...nextRun.supervision,"
+    , "      supervisor: 'UpgradeSupervisor'"
+    , "    }"
+    , "  })"
+    , "});"
+    , "const killed = protocol.killSwitch('CounterFlow', activated.run, {"
+    , "  trigger: { kind: 'policy_breach', reason: 'policy-breach', at: 1006 },"
+    , "  operator: 'safety-bot',"
+    , "  rollbackOptions: {"
+    , "    migrateState: (state) => ({ count: state.count - 3 }),"
+    , "    activate: (nextRun) => ({"
+    , "      ...nextRun,"
+    , "      supervision: {"
+    , "        ...nextRun.supervision,"
+    , "        supervisor: 'RollbackSupervisor'"
+    , "      }"
+    , "    })"
+    , "  }"
+    , "});"
+    , "let blockedMessage = '';"
+    , "try {"
+    , "  protocol.activate('CounterFlow', killed.run, {"
+    , "    migrateState: (state) => state"
+    , "  });"
+    , "} catch (error) {"
+    , "  blockedMessage = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "const killState = protocol.killSwitchState();"
+    , "console.log(JSON.stringify({"
+    , "  killStatus: killed.status,"
+    , "  killRollbackStatus: killed.rollback?.status ?? null,"
+    , "  killActive: killed.killSwitchActive,"
+    , "  killTriggerKind: killed.trigger.kind,"
+    , "  killTriggerReason: killed.trigger.reason,"
+    , "  killTriggerAt: killed.trigger.at,"
+    , "  killCount: killed.run.state.count,"
+    , "  killSupervisor: killed.run.supervision.supervisor,"
+    , "  killOperator: killed.run.supervision.operator,"
+    , "  killReason: killed.run.supervision.reason,"
+    , "  killStateRollbackApplied: killState?.rollbackApplied ?? false,"
+    , "  killStateTriggerKind: killState?.trigger?.kind ?? null,"
+    , "  killAuditType: killed.audit.eventType,"
+    , "  killAuditRollbackStatus: killed.audit.rollback?.status ?? null,"
+    , "  killAuditLogTail: killed.run.auditLog.slice(-2).map((entry) => entry.eventType),"
+    , "  blockedOperationMentionsKillSwitch: blockedMessage.includes('kill switch')"
     , "}));"
     ]
 

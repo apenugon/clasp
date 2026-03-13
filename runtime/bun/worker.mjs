@@ -289,6 +289,7 @@ export function createModuleHotSwapProtocol(
   );
   const workflowPlansByName = new Map(workflowPlans.map((plan) => [plan.name, plan]));
   const defaultSupervisor = normalizeHotSwapLabel(options.supervisor, "hotSwap.supervisor");
+  let killSwitchState = null;
 
   return Object.freeze({
     kind: "clasp-module-hot-swap",
@@ -315,10 +316,12 @@ export function createModuleHotSwapProtocol(
       return getWorkflowPlan(name);
     },
     migrate(workflowName, snapshot, workflowOptions) {
+      assertHotSwapEnabled("migrate");
       const plan = getWorkflowPlan(workflowName);
       return plan.sourceWorkflow.migrate(snapshot, plan.targetWorkflow, workflowOptions);
     },
     upgrade(workflowName, run, workflowOptions) {
+      assertHotSwapEnabled("upgrade");
       const plan = getWorkflowPlan(workflowName);
       return plan.sourceWorkflow.upgrade(
         run,
@@ -327,6 +330,7 @@ export function createModuleHotSwapProtocol(
       );
     },
     activate(workflowName, run, activationOptions = {}) {
+      assertHotSwapEnabled("activate");
       const plan = getWorkflowPlan(workflowName);
       const normalizedOptions = normalizeHotSwapActivationOptions(
         activationOptions,
@@ -405,6 +409,7 @@ export function createModuleHotSwapProtocol(
       });
     },
     handoff(workflowName, run, operator, reason, handoffOptions = {}) {
+      assertHotSwapEnabled("handoff");
       const plan = getWorkflowPlan(workflowName);
       const supervisor =
         normalizeHotSwapLabel(
@@ -432,6 +437,7 @@ export function createModuleHotSwapProtocol(
       });
     },
     drain(workflowName, run, drainOptions = {}) {
+      assertHotSwapEnabled("drain");
       const plan = getWorkflowPlan(workflowName);
       const supervisor =
         normalizeHotSwapLabel(
@@ -480,14 +486,85 @@ export function createModuleHotSwapProtocol(
       });
     },
     rollback(workflowName, run, workflowOptions = {}) {
+      assertHotSwapEnabled("rollback");
       const plan = getWorkflowPlan(workflowName);
       return performRollback(plan, run, workflowOptions);
     },
     triggerRollback(workflowName, run, trigger, workflowOptions = {}) {
+      assertHotSwapEnabled("triggerRollback");
       const plan = getWorkflowPlan(workflowName);
       return performRollback(plan, run, workflowOptions, trigger);
     },
+    killSwitch(workflowName, run, killSwitchOptions = {}) {
+      if (killSwitchState !== null) {
+        throw new Error(
+          `Clasp hot-swap protocol is already kill-switched for workflow ${killSwitchState.workflowName}.`
+        );
+      }
+
+      const plan = getWorkflowPlan(workflowName);
+      const normalizedOptions = normalizeHotSwapKillSwitchOptions(
+        killSwitchOptions,
+        "hotSwap.killSwitch"
+      );
+      const rolledBack =
+        normalizedOptions.rollback === true
+          ? performRollback(
+              plan,
+              run,
+              normalizedOptions.rollbackOptions,
+              normalizedOptions.trigger
+            )
+          : null;
+      const runWithKillSwitch = createKillSwitchedRun(
+        rolledBack?.run ?? run,
+        normalizedOptions,
+        defaultSupervisor,
+        plan.name
+      );
+      const audit = Object.freeze({
+        eventType: "kill_switch",
+        workflowName: plan.name,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        trigger: normalizedOptions.trigger,
+        rollback: rolledBack
+          ? Object.freeze({
+              status: rolledBack.status,
+              supervisor: rolledBack.supervisor
+            })
+          : null
+      });
+      const runWithAudit = appendWorkflowAudit(runWithKillSwitch, audit);
+
+      killSwitchState = Object.freeze({
+        workflowName: plan.name,
+        trigger: normalizedOptions.trigger,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        rollbackApplied: rolledBack !== null
+      });
+
+      return Object.freeze({
+        status: "killed",
+        workflowName: plan.name,
+        supervisor: runWithAudit.supervision.supervisor,
+        sourceVersionId: sourceModule.versionId,
+        targetVersionId: targetModule.versionId,
+        rollbackVersionId: sourceModule.versionId,
+        rollbackAvailable: false,
+        killSwitchActive: true,
+        run: runWithAudit,
+        rollback: rolledBack,
+        trigger: normalizedOptions.trigger,
+        audit
+      });
+    },
+    killSwitchState() {
+      return killSwitchState;
+    },
     begin(beginOptions = {}) {
+      assertHotSwapEnabled("begin");
       return Object.freeze({
         status: "overlap",
         supervisor: normalizeHotSwapLabel(
@@ -504,6 +581,7 @@ export function createModuleHotSwapProtocol(
       });
     },
     retire(retireOptions = {}) {
+      assertHotSwapEnabled("retire");
       return Object.freeze({
         status: "retired",
         supervisor: normalizeHotSwapLabel(
@@ -526,6 +604,16 @@ export function createModuleHotSwapProtocol(
     }
 
     return plan;
+  }
+
+  function assertHotSwapEnabled(operation) {
+    if (killSwitchState === null) {
+      return;
+    }
+
+    throw new Error(
+      `Clasp hot-swap ${operation} is disabled by kill switch for workflow ${killSwitchState.workflowName}.`
+    );
   }
 
   function performRollback(plan, run, workflowOptions = {}, trigger = null) {
@@ -638,6 +726,31 @@ function appendWorkflowAudit(run, auditEntry) {
   return Object.freeze({
     ...run,
     auditLog: Object.freeze([...auditLog, Object.freeze(auditEntry)])
+  });
+}
+
+function createKillSwitchedRun(run, killSwitchOptions, defaultSupervisor, workflowName) {
+  const supervision = run?.supervision && typeof run.supervision === "object" ? run.supervision : {};
+
+  return Object.freeze({
+    ...run,
+    supervision: Object.freeze({
+      ...supervision,
+      status: "operator_handoff",
+      supervisor:
+        killSwitchOptions.supervisor ?? supervision.supervisor ?? defaultSupervisor ?? null,
+      operator: killSwitchOptions.operator,
+      reason: killSwitchOptions.trigger.reason,
+      updatedAt:
+        killSwitchOptions.updatedAt === null
+          ? (supervision.updatedAt ?? null)
+          : killSwitchOptions.updatedAt
+    }),
+    killSwitch: Object.freeze({
+      active: true,
+      workflowName,
+      trigger: killSwitchOptions.trigger
+    })
   });
 }
 
@@ -1375,6 +1488,39 @@ function normalizeHotSwapActivationOptions(options, path) {
 
   normalized.healthCheck = rawOptions.healthCheck ?? null;
   normalized.rollback = rawOptions.rollback ?? {};
+  return Object.freeze(normalized);
+}
+
+function normalizeHotSwapKillSwitchOptions(options, path) {
+  const rawOptions = options && typeof options === "object" ? options : {};
+  const normalized = {
+    trigger: normalizeHotSwapRollbackTrigger(
+      rawOptions.trigger ?? "kill_switch",
+      `${path}.trigger`
+    ),
+    rollback: rawOptions.rollback === undefined ? true : rawOptions.rollback,
+    rollbackOptions: {},
+    supervisor: normalizeHotSwapLabel(rawOptions.supervisor, `${path}.supervisor`),
+    operator:
+      rawOptions.operator === undefined || rawOptions.operator === null
+        ? "kill-switch"
+        : normalizeHotSwapLabel(rawOptions.operator, `${path}.operator`),
+    updatedAt: normalizeHotSwapTimestamp(rawOptions.updatedAt, `${path}.updatedAt`)
+  };
+
+  if (typeof normalized.rollback !== "boolean") {
+    throw new Error(`${path}.rollback must be a boolean.`);
+  }
+
+  if (
+    rawOptions.rollbackOptions !== undefined &&
+    rawOptions.rollbackOptions !== null &&
+    typeof rawOptions.rollbackOptions !== "object"
+  ) {
+    throw new Error(`${path}.rollbackOptions must be an object.`);
+  }
+
+  normalized.rollbackOptions = rawOptions.rollbackOptions ?? {};
   return Object.freeze(normalized);
 }
 
