@@ -88,6 +88,7 @@ Additional policy:
 
 - runtime, boundary, interop, workflow, control-plane, and app-surface tasks should add scenario-level or end-to-end verification, not only narrow unit regressions
 - benchmark-facing tasks should preserve the product task surface and avoid pushing edits into mutable test/runtime scaffolding unless that is the actual language/runtime bug being fixed
+- once `SH-014` is complete, every newly integrated task should leave a committed feedback artifact under [agents/feedback](/home/akul/DevProjects/synthspeak/agents/feedback) so future agents can reuse concrete task lessons
 
 ## What Must Not Change Casually
 

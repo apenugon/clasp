@@ -22,6 +22,26 @@
     "residual_risks": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "follow_ups"],
+      "properties": {
+        "summary": { "type": "string" },
+        "ergonomics": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "follow_ups": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   }
 }

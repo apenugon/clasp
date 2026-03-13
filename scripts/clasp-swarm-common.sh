@@ -141,6 +141,32 @@ clasp_swarm_completion_commit() {
   clasp_swarm_completion_marker_field "$1" "$2" 2
 }
 
+clasp_swarm_feedback_activation_task() {
+  printf '%s\n' "${CLASP_SWARM_FEEDBACK_AFTER_TASK:-SH-014}"
+}
+
+clasp_swarm_feedback_required() {
+  local project_root="$1"
+  local activation_task="${2:-$(clasp_swarm_feedback_activation_task)}"
+  local completed_root="$project_root/.clasp-swarm/completed"
+
+  clasp_swarm_completion_marker_exists "$completed_root" "$activation_task"
+}
+
+clasp_swarm_feedback_dir() {
+  local project_root="$1"
+  printf '%s/agents/feedback\n' "$project_root"
+}
+
+clasp_swarm_feedback_path() {
+  local project_root="$1"
+  local task_ref="$2"
+  local task_key=""
+
+  task_key="$(clasp_swarm_completion_key "$task_ref")"
+  printf '%s/%s.json\n' "$(clasp_swarm_feedback_dir "$project_root")" "$task_key"
+}
+
 clasp_swarm_latest_task_run_dir() {
   local runs_root="$1"
   local task_ref="$2"

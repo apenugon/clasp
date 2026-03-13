@@ -21,6 +21,7 @@ run_dir="$(dirname "$report_json")"
 isolated_codex_home="$run_dir/codex-home"
 
 source "$project_root/scripts/clasp-codex-home.sh"
+source "$project_root/scripts/clasp-swarm-common.sh"
 
 cleanup() {
   rm -f "$prompt_file"
@@ -29,6 +30,12 @@ cleanup() {
 trap cleanup EXIT
 
 clasp_prepare_isolated_codex_home "$shared_codex_home" "$isolated_codex_home"
+
+feedback_required=0
+feedback_activation_task="$(clasp_swarm_feedback_activation_task)"
+if clasp_swarm_feedback_required "$project_root" "$feedback_activation_task"; then
+  feedback_required=1
+fi
 
 cat <<'EOF' > "$prompt_file"
 You are the verifier subagent for the Clasp language repository.
@@ -47,6 +54,14 @@ Rules:
 - Prioritize reviewing the changed files before reading unrelated source.
 - If verification fails, explain the concrete defects or missing coverage.
 - Treat missing scenario-level or end-to-end verification for runtime, trust-boundary, workflow, interop, or app-surface changes as a real verification defect.
+EOF
+if (( feedback_required )); then
+  cat <<EOF >> "$prompt_file"
+- Because ${feedback_activation_task} is complete, this task must leave a committed feedback artifact for future agents under \`agents/feedback/\`.
+- Treat missing, low-signal, or obviously generic feedback as a verification defect when the task changes source files.
+EOF
+fi
+cat <<'EOF' >> "$prompt_file"
 
 Your final response must satisfy the provided JSON schema.
 

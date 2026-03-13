@@ -21,6 +21,7 @@ run_dir="$(dirname "$report_json")"
 isolated_codex_home="$run_dir/codex-home"
 
 source "$project_root/scripts/clasp-codex-home.sh"
+source "$project_root/scripts/clasp-swarm-common.sh"
 
 cleanup() {
   rm -f "$prompt_file"
@@ -29,6 +30,12 @@ cleanup() {
 trap cleanup EXIT
 
 clasp_prepare_isolated_codex_home "$shared_codex_home" "$isolated_codex_home"
+
+feedback_required=0
+feedback_activation_task="$(clasp_swarm_feedback_activation_task)"
+if clasp_swarm_feedback_required "$project_root" "$feedback_activation_task"; then
+  feedback_required=1
+fi
 
 {
   cat <<'EOF'
@@ -55,6 +62,42 @@ Rules:
 
 Your final response must satisfy the provided JSON schema.
 EOF
+  if (( feedback_required )); then
+    cat <<EOF
+- Because ${feedback_activation_task} is complete, this task must leave a feedback artifact for future agents.
+- In your final JSON include a \`feedback\` object with:
+  - \`summary\`: short practical take for future agents
+  - \`ergonomics\`: what felt good or bad in the language/tooling for this task
+  - \`follow_ups\`: concrete follow-on improvements or missing capabilities
+  - \`warnings\`: traps or misleading surfaces future agents should watch for
+- Keep this feedback concrete and task-specific; do not write generic encouragement.
+EOF
+    while IFS= read -r dep; do
+      [[ -z "$dep" ]] && continue
+      dep_feedback="$(clasp_swarm_feedback_path "$project_root" "$dep")"
+      if [[ -f "$dep_feedback" ]]; then
+        node - <<'EOF' "$dep_feedback"
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const asList = (value) => Array.isArray(value) ? value.slice(0, 3) : [];
+console.log("");
+console.log(`Relevant prior feedback from ${report.task_id}:`);
+if (typeof report.summary === "string" && report.summary.length > 0) {
+  console.log(`Summary: ${report.summary}`);
+}
+for (const item of asList(report.ergonomics)) {
+  console.log(`- ergonomics: ${item}`);
+}
+for (const item of asList(report.follow_ups)) {
+  console.log(`- follow_up: ${item}`);
+}
+for (const item of asList(report.warnings)) {
+  console.log(`- warning: ${item}`);
+}
+EOF
+      fi
+    done < <(clasp_swarm_task_dependencies "$task_file")
+  fi
   if [[ -n "$feedback_file" && -f "$feedback_file" ]]; then
     node - <<'EOF' "$feedback_file"
 const fs = require("fs");

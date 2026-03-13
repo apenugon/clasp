@@ -425,6 +425,53 @@ prepare_baseline_worktree() {
   prepare_git_worktree --detach "$baseline_worktree" "$trunk_branch"
 }
 
+write_task_feedback_artifact() {
+  local task_worktree="$1"
+  local task_id="$2"
+  local builder_report="$3"
+  local activation_task=""
+  local feedback_path=""
+
+  activation_task="$(clasp_swarm_feedback_activation_task)"
+  if ! clasp_swarm_feedback_required "$project_root" "$activation_task"; then
+    return 0
+  fi
+
+  feedback_path="$task_worktree/agents/feedback/$task_id.json"
+  mkdir -p "$(dirname "$feedback_path")"
+
+  node - <<'EOF' "$builder_report" "$feedback_path" "$task_id" "$activation_task"
+const fs = require("fs");
+const [reportPath, feedbackPath, taskId, activationTask] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+if (!report.feedback || typeof report.feedback !== "object") {
+  console.error(`missing builder feedback for ${taskId} after ${activationTask}`);
+  process.exit(10);
+}
+const feedback = report.feedback;
+if (typeof feedback.summary !== "string" || feedback.summary.trim().length === 0) {
+  console.error(`feedback.summary is required for ${taskId}`);
+  process.exit(11);
+}
+if (!Array.isArray(feedback.follow_ups)) {
+  console.error(`feedback.follow_ups must be an array for ${taskId}`);
+  process.exit(12);
+}
+const normalizeList = (value) => Array.isArray(value) ? value.map(String) : [];
+const artifact = {
+  task_id: taskId,
+  summary: feedback.summary.trim(),
+  ergonomics: normalizeList(feedback.ergonomics),
+  follow_ups: normalizeList(feedback.follow_ups),
+  warnings: normalizeList(feedback.warnings),
+  files_touched: normalizeList(report.files_touched),
+  tests_run: normalizeList(report.tests_run),
+  residual_risks: normalizeList(report.residual_risks),
+};
+fs.writeFileSync(feedbackPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+EOF
+}
+
 commit_task_changes() {
   local task_worktree="$1"
   local task_id="$2"
@@ -705,6 +752,24 @@ while true; do
         "$task_id" \
         "builder" \
         "$builder_exit"
+      archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+      feedback_file="$verifier_report"
+      remove_worktree_if_present "$baseline_worktree"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    if write_task_feedback_artifact "$task_worktree" "$task_id" "$builder_report" 2>>"$builder_log"; then
+      :
+    else
+      feedback_exit="$?"
+      write_failure_report \
+        "$verifier_report" \
+        "Builder feedback artifact generation failed before verification could run." \
+        "$builder_log" \
+        "$task_id" \
+        "builder-feedback" \
+        "$feedback_exit"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"

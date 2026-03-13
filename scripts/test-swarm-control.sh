@@ -17,11 +17,13 @@ cleanup() {
 trap cleanup EXIT
 
 bash -n \
+  "$project_root/scripts/clasp-builder.sh" \
   "$project_root/scripts/clasp-swarm-common.sh" \
   "$project_root/scripts/clasp-swarm-lane.sh" \
   "$project_root/scripts/clasp-swarm-start.sh" \
   "$project_root/scripts/clasp-swarm-status.sh" \
-  "$project_root/scripts/clasp-swarm-stop.sh"
+  "$project_root/scripts/clasp-swarm-stop.sh" \
+  "$project_root/scripts/clasp-verifier.sh"
 
 bash -lc "
   set -euo pipefail
@@ -133,6 +135,21 @@ bash -lc "
   clasp_swarm_completion_marker_exists '$markers_root' 'SW-001'
   [[ -f '$markers_root/SW-001' ]]
   [[ ! -f '$markers_root/SW-001-some-slug' ]]
+" >/dev/null
+
+bash -lc "
+  set -euo pipefail
+  source '$project_root/scripts/clasp-swarm-common.sh'
+  project_root='$project_root'
+  feedback_dir=\$(clasp_swarm_feedback_dir \"\$project_root\")
+  feedback_path=\$(clasp_swarm_feedback_path \"\$project_root\" 'TY-003')
+  [[ \"\$feedback_dir\" == '$project_root/agents/feedback' ]]
+  [[ \"\$feedback_path\" == '$project_root/agents/feedback/TY-003.json' ]]
+  ! clasp_swarm_feedback_required \"\$project_root\" 'SH-014'
+  mkdir -p \"\$project_root/.clasp-swarm/completed\"
+  printf '%s\t%s\n' '2026-03-13T00:00:00Z' 'deadbeef' > \"\$project_root/.clasp-swarm/completed/SH-014\"
+  clasp_swarm_feedback_required \"\$project_root\" 'SH-014'
+  rm -f \"\$project_root/.clasp-swarm/completed/SH-014\"
 " >/dev/null
 
 lane_root="$(mktemp -d)"
