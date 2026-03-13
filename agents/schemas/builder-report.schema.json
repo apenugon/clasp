@@ -7,7 +7,8 @@
     "summary",
     "files_touched",
     "tests_run",
-    "residual_risks"
+    "residual_risks",
+    "feedback"
   ],
   "properties": {
     "summary": { "type": "string" },
@@ -26,7 +27,7 @@
     "feedback": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["summary", "follow_ups"],
+      "required": ["summary", "ergonomics", "follow_ups", "warnings"],
       "properties": {
         "summary": { "type": "string" },
         "ergonomics": {

@@ -14,7 +14,8 @@ feedback_file="${5:-}"
 model="${CODEX_MODEL:-gpt-5.4}"
 reasoning_effort="${CODEX_REASONING_EFFORT:-medium}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-schema_file="$project_root/agents/schemas/builder-report.schema.json"
+base_schema_file="$project_root/agents/schemas/builder-report.schema.json"
+schema_file="$(mktemp "${TMPDIR:-/tmp}/clasp-builder-schema.XXXXXX.json")"
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-builder-prompt.XXXXXX")"
 shared_codex_home="${CODEX_HOME:-$HOME/.codex}"
 run_dir="$(dirname "$report_json")"
@@ -25,6 +26,7 @@ source "$project_root/scripts/clasp-swarm-common.sh"
 
 cleanup() {
   rm -f "$prompt_file"
+  rm -f "$schema_file"
 }
 
 trap cleanup EXIT
@@ -36,6 +38,28 @@ feedback_activation_task="$(clasp_swarm_feedback_activation_task)"
 if clasp_swarm_feedback_required "$project_root" "$feedback_activation_task"; then
   feedback_required=1
 fi
+
+node - <<'EOF' "$base_schema_file" "$schema_file" "$feedback_required"
+const fs = require("fs");
+const [basePath, outPath, feedbackFlag] = process.argv.slice(2);
+const schema = JSON.parse(fs.readFileSync(basePath, "utf8"));
+const requireFeedback = feedbackFlag === "1";
+
+if (!schema.properties || !schema.properties.feedback) {
+  throw new Error("builder schema is missing feedback property");
+}
+
+if (requireFeedback) {
+  if (!schema.required.includes("feedback")) {
+    schema.required.push("feedback");
+  }
+} else {
+  delete schema.properties.feedback;
+  schema.required = schema.required.filter((item) => item !== "feedback");
+}
+
+fs.writeFileSync(outPath, `${JSON.stringify(schema, null, 2)}\n`, "utf8");
+EOF
 
 {
   cat <<'EOF'
