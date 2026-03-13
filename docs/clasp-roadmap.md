@@ -311,6 +311,9 @@ The first native runtime slice for compiler and backend workloads should stay ex
 - module globals stay in static storage and act as permanent roots for shared runtime state
 - callees borrow incoming arguments and transfer returned handle ownership back to the caller
 - records, variants, and lists retain the handle-backed fields or payloads they capture so aggregate lifetimes stay explicit
+- every heap object starts with a two-word header containing a layout identifier and retain count before the object payload
+- root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects
+- retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage
 
 ## Phase 14: Native Storage With SQLite First
 

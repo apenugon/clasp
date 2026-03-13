@@ -114,12 +114,16 @@ import Clasp.Native
   , NativeIntrinsic (..)
   , NativeLayoutStorage (..)
   , NativeLiteral (..)
+  , NativeLifetimeInvariant (..)
   , NativeMatchBranch (..)
   , NativeMemoryStrategy (..)
   , NativeModule (..)
   , NativeMutability (..)
+  , NativeObjectKind (..)
+  , NativeObjectLayout (..)
   , NativeOwnershipRule (..)
   , NativeRecordLayout (..)
+  , NativeRootDiscoveryRule (..)
   , NativeSlotLayout (..)
   , NativeVariantLayout (..)
   )
@@ -2547,6 +2551,21 @@ nativeTests =
               , NativeGlobalsAreStaticRoots
               ]
               (nativeAbiOwnershipRules abi)
+            assertEqual
+              "root discovery rules"
+              [ NativeDiscoverStaticRootsFromGlobals
+              , NativeDiscoverStackRootsFromHandleSlots
+              , NativeDiscoverHeapRootsFromObjectLayouts
+              ]
+              (nativeAbiRootDiscoveryRules abi)
+            assertEqual
+              "lifetime invariants"
+              [ NativeHeapObjectsCarryLayoutAndRetainHeaders
+              , NativeOnlyDeclaredRootOffsetsRetainChildren
+              , NativeReleaseTraversesRootOffsetsBeforeFree
+              , NativeBorrowedHandlesDoNotMutateRetainCounts
+              ]
+              (nativeAbiLifetimeInvariants abi)
             case findBuiltinLayout "Str" (nativeAbiBuiltinLayouts abi) of
               Just layout -> do
                 assertEqual "string builtin storage" NativeHandleStorage (nativeBuiltinLayoutStorage layout)
@@ -2587,6 +2606,38 @@ nativeTests =
                   (nativeVariantLayoutConstructors layout)
               Nothing ->
                 assertFailure "expected RenderResult layout"
+            case findObjectLayout "LeadEnvelope" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "lead envelope object layout"
+                  (NativeObjectLayout "LeadEnvelope" NativeRecordObject 2 5 [2, 3, 4])
+                  layout
+              Nothing ->
+                assertFailure "expected LeadEnvelope object layout"
+            case findObjectLayout "RenderResult.RenderedPage" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "rendered page object layout"
+                  (NativeObjectLayout "RenderResult.RenderedPage" NativeVariantObject 2 4 [3])
+                  layout
+              Nothing ->
+                assertFailure "expected RenderResult.RenderedPage object layout"
+            case findObjectLayout "RenderResult.RenderedFlag" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "rendered flag object layout"
+                  (NativeObjectLayout "RenderResult.RenderedFlag" NativeVariantObject 2 4 [])
+                  layout
+              Nothing ->
+                assertFailure "expected RenderResult.RenderedFlag object layout"
+            case findObjectLayout "RenderResult.RenderIdle" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "render idle object layout"
+                  (NativeObjectLayout "RenderResult.RenderIdle" NativeVariantObject 2 3 [])
+                  layout
+              Nothing ->
+                assertFailure "expected RenderResult.RenderIdle object layout"
     , testCase "native entry exposes ABI metadata for a routed module end to end" $
         withProjectFiles "native-abi-entry" [("Main.clasp", nativeAbiScenarioSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2608,6 +2659,21 @@ nativeTests =
                 , NativeGlobalsAreStaticRoots
                 ]
                 (nativeAbiOwnershipRules abi)
+              assertEqual
+                "abi root discovery rules"
+                [ NativeDiscoverStaticRootsFromGlobals
+                , NativeDiscoverStackRootsFromHandleSlots
+                , NativeDiscoverHeapRootsFromObjectLayouts
+                ]
+                (nativeAbiRootDiscoveryRules abi)
+              assertEqual
+                "abi lifetime invariants"
+                [ NativeHeapObjectsCarryLayoutAndRetainHeaders
+                , NativeOnlyDeclaredRootOffsetsRetainChildren
+                , NativeReleaseTraversesRootOffsetsBeforeFree
+                , NativeBorrowedHandlesDoNotMutateRetainCounts
+                ]
+                (nativeAbiLifetimeInvariants abi)
               case findVariantLayout "UiSurface" (nativeAbiVariantLayouts abi) of
                 Just layout -> do
                   assertEqual "ui surface max payload words" 1 (nativeVariantLayoutMaxPayloadWords layout)
@@ -2632,6 +2698,22 @@ nativeTests =
                     (fmap nativeFieldLayoutStorage (nativeRecordLayoutFields layout))
                 Nothing ->
                   assertFailure "expected InboxModel layout"
+              case findObjectLayout "InboxModel" (nativeAbiObjectLayouts abi) of
+                Just layout ->
+                  assertEqual
+                    "inbox model root offsets"
+                    (NativeObjectLayout "InboxModel" NativeRecordObject 2 5 [2, 3])
+                    layout
+                Nothing ->
+                  assertFailure "expected InboxModel object layout"
+              case findObjectLayout "UiSurface.Next" (nativeAbiObjectLayouts abi) of
+                Just layout ->
+                  assertEqual
+                    "redirect constructor roots"
+                    (NativeObjectLayout "UiSurface.Next" NativeVariantObject 2 4 [3])
+                    layout
+                Nothing ->
+                  assertFailure "expected UiSurface.Next object layout"
     ]
 
 docsTests :: TestTree
@@ -2654,6 +2736,9 @@ docsTests =
         assertBool "expected stack and heap allocation split" ("- immediate values and activation records stay in stack storage while handle-backed values allocate in heap storage" `T.isInfixOf` roadmap)
         assertBool "expected ownership rule for calls" ("- callees borrow incoming arguments and transfer returned handle ownership back to the caller" `T.isInfixOf` roadmap)
         assertBool "expected ownership rule for globals" ("- module globals stay in static storage and act as permanent roots for shared runtime state" `T.isInfixOf` roadmap)
+        assertBool "expected object header layout" ("- every heap object starts with a two-word header containing a layout identifier and retain count before the object payload" `T.isInfixOf` roadmap)
+        assertBool "expected root discovery rule" ("- root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects" `T.isInfixOf` roadmap)
+        assertBool "expected release invariant" ("- retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage" `T.isInfixOf` roadmap)
     ]
 
 compileTests :: TestTree
@@ -4915,6 +5000,10 @@ findRecordLayout target =
 findVariantLayout :: Text -> [NativeVariantLayout] -> Maybe NativeVariantLayout
 findVariantLayout target =
   find ((== target) . nativeVariantLayoutName)
+
+findObjectLayout :: Text -> [NativeObjectLayout] -> Maybe NativeObjectLayout
+findObjectLayout target =
+  find ((== target) . nativeObjectLayoutName)
 
 lowerChecked :: FilePath -> Text -> Either DiagnosticBundle LowerModule
 lowerChecked path source = do

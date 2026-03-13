@@ -18,11 +18,15 @@ module Clasp.Native
   , NativeLiteral (..)
   , NativeMatchBranch (..)
   , NativeModule (..)
+  , NativeObjectKind (..)
+  , NativeObjectLayout (..)
   , NativeOwnershipRule (..)
   , NativeMemoryStrategy (..)
   , NativeMutability (..)
   , NativeRecordLayout (..)
+  , NativeRootDiscoveryRule (..)
   , NativeSlotLayout (..)
+  , NativeLifetimeInvariant (..)
   , NativeVariantLayout (..)
   , buildNativeModule
   ) where
@@ -61,9 +65,12 @@ data NativeAbi = NativeAbi
   , nativeAbiMemoryStrategy :: NativeMemoryStrategy
   , nativeAbiAllocationModel :: NativeAllocationModel
   , nativeAbiOwnershipRules :: [NativeOwnershipRule]
+  , nativeAbiRootDiscoveryRules :: [NativeRootDiscoveryRule]
+  , nativeAbiLifetimeInvariants :: [NativeLifetimeInvariant]
   , nativeAbiBuiltinLayouts :: [NativeBuiltinLayout]
   , nativeAbiRecordLayouts :: [NativeRecordLayout]
   , nativeAbiVariantLayouts :: [NativeVariantLayout]
+  , nativeAbiObjectLayouts :: [NativeObjectLayout]
   }
   deriving (Eq, Show)
 
@@ -89,6 +96,19 @@ data NativeOwnershipRule
   | NativeCalleeBorrowsArguments
   | NativeAggregatesRetainHandleFields
   | NativeGlobalsAreStaticRoots
+  deriving (Eq, Show)
+
+data NativeRootDiscoveryRule
+  = NativeDiscoverStaticRootsFromGlobals
+  | NativeDiscoverStackRootsFromHandleSlots
+  | NativeDiscoverHeapRootsFromObjectLayouts
+  deriving (Eq, Show)
+
+data NativeLifetimeInvariant
+  = NativeHeapObjectsCarryLayoutAndRetainHeaders
+  | NativeOnlyDeclaredRootOffsetsRetainChildren
+  | NativeReleaseTraversesRootOffsetsBeforeFree
+  | NativeBorrowedHandlesDoNotMutateRetainCounts
   deriving (Eq, Show)
 
 data NativeLayoutStorage
@@ -125,6 +145,20 @@ data NativeRecordLayout = NativeRecordLayout
   { nativeRecordLayoutName :: Text
   , nativeRecordLayoutWordCount :: Int
   , nativeRecordLayoutFields :: [NativeFieldLayout]
+  }
+  deriving (Eq, Show)
+
+data NativeObjectKind
+  = NativeRecordObject
+  | NativeVariantObject
+  deriving (Eq, Show)
+
+data NativeObjectLayout = NativeObjectLayout
+  { nativeObjectLayoutName :: Text
+  , nativeObjectLayoutKind :: NativeObjectKind
+  , nativeObjectLayoutHeaderWords :: Int
+  , nativeObjectLayoutWordCount :: Int
+  , nativeObjectLayoutRootOffsets :: [Int]
   }
   deriving (Eq, Show)
 
@@ -258,9 +292,23 @@ buildNativeAbi modl =
         , NativeAggregatesRetainHandleFields
         , NativeGlobalsAreStaticRoots
         ]
+    , nativeAbiRootDiscoveryRules =
+        [ NativeDiscoverStaticRootsFromGlobals
+        , NativeDiscoverStackRootsFromHandleSlots
+        , NativeDiscoverHeapRootsFromObjectLayouts
+        ]
+    , nativeAbiLifetimeInvariants =
+        [ NativeHeapObjectsCarryLayoutAndRetainHeaders
+        , NativeOnlyDeclaredRootOffsetsRetainChildren
+        , NativeReleaseTraversesRootOffsetsBeforeFree
+        , NativeBorrowedHandlesDoNotMutateRetainCounts
+        ]
     , nativeAbiBuiltinLayouts = builtinLayouts
     , nativeAbiRecordLayouts = fmap (buildRecordLayout recordEnv typeEnv) recordDecls
     , nativeAbiVariantLayouts = fmap (buildVariantLayout recordEnv typeEnv) typeDecls
+    , nativeAbiObjectLayouts =
+        fmap (buildRecordObjectLayout recordEnv typeEnv) recordDecls
+          <> concatMap (buildVariantObjectLayouts recordEnv typeEnv) typeDecls
     }
   where
     typeDecls = lowerModuleTypeDecls modl
@@ -289,6 +337,22 @@ buildRecordLayout recordEnv typeEnv recordDecl =
     fieldLayouts =
       zipWith (buildFieldLayout recordEnv typeEnv) [0 ..] (recordDeclFields recordDecl)
 
+buildRecordObjectLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> RecordDecl -> NativeObjectLayout
+buildRecordObjectLayout recordEnv typeEnv recordDecl =
+  NativeObjectLayout
+    { nativeObjectLayoutName = recordDeclName recordDecl
+    , nativeObjectLayoutKind = NativeRecordObject
+    , nativeObjectLayoutHeaderWords = nativeObjectHeaderWords
+    , nativeObjectLayoutWordCount = nativeObjectHeaderWords + nativeRecordLayoutWordCount recordLayout
+    , nativeObjectLayoutRootOffsets =
+        [ nativeObjectHeaderWords + nativeFieldLayoutWordOffset fieldLayout
+        | fieldLayout <- nativeRecordLayoutFields recordLayout
+        , nativeFieldLayoutStorage fieldLayout == NativeHandleStorage
+        ]
+    }
+  where
+    recordLayout = buildRecordLayout recordEnv typeEnv recordDecl
+
 buildFieldLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> Int -> RecordFieldDecl -> NativeFieldLayout
 buildFieldLayout recordEnv typeEnv wordOffset fieldDecl =
   NativeFieldLayout
@@ -313,6 +377,24 @@ buildVariantLayout recordEnv typeEnv typeDecl =
   where
     constructorLayouts =
       fmap (buildConstructorLayout recordEnv typeEnv) (typeDeclConstructors typeDecl)
+
+buildVariantObjectLayouts :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> TypeDecl -> [NativeObjectLayout]
+buildVariantObjectLayouts recordEnv typeEnv typeDecl =
+  fmap buildObjectLayout (typeDeclConstructors typeDecl)
+  where
+    buildObjectLayout constructorDecl =
+      let constructorLayout = buildConstructorLayout recordEnv typeEnv constructorDecl
+       in NativeObjectLayout
+            { nativeObjectLayoutName = typeDeclName typeDecl <> "." <> constructorDeclName constructorDecl
+            , nativeObjectLayoutKind = NativeVariantObject
+            , nativeObjectLayoutHeaderWords = nativeObjectHeaderWords
+            , nativeObjectLayoutWordCount = nativeObjectHeaderWords + nativeConstructorLayoutWordCount constructorLayout
+            , nativeObjectLayoutRootOffsets =
+                [ nativeObjectHeaderWords + nativeSlotLayoutWordOffset payloadLayout
+                | payloadLayout <- nativeConstructorLayoutPayloads constructorLayout
+                , nativeSlotLayoutStorage payloadLayout == NativeHandleStorage
+                ]
+            }
 
 buildConstructorLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> ConstructorDecl -> NativeConstructorLayout
 buildConstructorLayout recordEnv typeEnv constructorDecl =
@@ -340,6 +422,9 @@ buildPayloadLayout recordEnv typeEnv wordOffset slotType =
 nativeIndexName :: Int -> Text
 nativeIndexName index =
   T.pack (show index)
+
+nativeObjectHeaderWords :: Int
+nativeObjectHeaderWords = 2
 
 layoutStorageForType :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> Type -> NativeLayoutStorage
 layoutStorageForType recordEnv typeEnv typ =
