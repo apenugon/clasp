@@ -6,7 +6,7 @@ const [, , commandArg, entryPathArg, stage1PathArg, bootstrapOutputPathArg, resu
 
 if (!commandArg || !entryPathArg || !stage1PathArg || !bootstrapOutputPathArg || !resultPathArg) {
   throw new Error(
-    "usage: bun compiler/hosted/run-tool.mjs <check|compile|explain> <entry-path> <stage1-path> <bootstrap-output-path> <result-path>"
+    "usage: bun compiler/hosted/run-tool.mjs <check|compile|explain|native> <entry-path> <stage1-path> <bootstrap-output-path> <result-path>"
   );
 }
 
@@ -41,6 +41,11 @@ const commandPlans = {
     marker: "compileEntrypoint : Str",
     run: () => stage2Compiler.compileEntrypoint(),
     expected: snapshot.emittedModule
+  },
+  native: {
+    marker: "nativeEntrypoint : Str",
+    run: () => stage2Compiler.nativeEntrypoint(),
+    expected: snapshot.emittedNativeModule
   }
 };
 

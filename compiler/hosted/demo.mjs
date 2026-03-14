@@ -20,6 +20,7 @@ const stage2Compiler = await import(pathToFileURL(stage2CompilerPath).href);
 const stage2CheckOutput = stage2Compiler.checkEntrypoint();
 const stage2ExplainOutput = stage2Compiler.explainEntrypoint();
 const stage2EmittedModule = stage2Compiler.compileEntrypoint();
+const stage2NativeOutput = stage2Compiler.nativeEntrypoint();
 
 writeFileSync(emittedPath, stage2EmittedModule);
 
@@ -33,11 +34,13 @@ console.log(
     stage2CheckOutput,
     stage2ExplainOutput,
     stage2EmittedModule,
+    stage2NativeOutput,
     stage2MatchesStage1Snapshot: stage2Compiler.main === stage1Module.main,
     stage2CompilerMatchesStage1Snapshot: JSON.stringify(stage2Compiler.snapshot) === JSON.stringify(snapshot),
     stage2CheckMatchesStage1: stage2CheckOutput === snapshot.checkedModule,
     stage2ExplainMatchesStage1: stage2ExplainOutput === snapshot.explainModule,
     stage2OutputMatchesStage1: stage2EmittedModule === snapshot.emittedModule,
+    stage2NativeMatchesStage1: stage2NativeOutput === snapshot.emittedNativeModule,
     loweredValue: snapshot.loweredValue,
     loweredFunction: snapshot.loweredFunction,
     loweredModule: snapshot.loweredModule,
@@ -47,6 +50,7 @@ console.log(
     explainModule: snapshot.explainModule,
     mismatchDiagnostic: snapshot.mismatchDiagnostic,
     emittedModule: snapshot.emittedModule,
+    emittedNativeModule: snapshot.emittedNativeModule,
     emittedGreeting: emittedModule.greeting,
     emittedRender: emittedModule.renderLead(42)
   })

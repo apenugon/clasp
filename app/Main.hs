@@ -20,7 +20,7 @@ import Clasp.Compiler
   , parseSource
   , renderAirEntryJson
   , renderContextEntryJson
-  , renderNativeEntry
+  , renderNativeEntryWithPreference
   )
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
 
@@ -58,11 +58,11 @@ main = do
     ["compile", "-o", outputPath, inputPath] ->
       runCompile format compilerPreference inputPath (Just outputPath)
     ["native", inputPath] ->
-      runNative format inputPath Nothing
+      runNative format compilerPreference inputPath Nothing
     ["native", inputPath, "-o", outputPath] ->
-      runNative format inputPath (Just outputPath)
+      runNative format compilerPreference inputPath (Just outputPath)
     ["native", "-o", outputPath, inputPath] ->
-      runNative format inputPath (Just outputPath)
+      runNative format compilerPreference inputPath (Just outputPath)
     _ ->
       die usage
 
@@ -220,9 +220,9 @@ runCompile format compilerPreference inputPath outputPath = do
                 , "output" .= resolvedOutput
                 ]
 
-runNative :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
-runNative format inputPath outputPath = do
-  result <- renderNativeEntry inputPath
+runNative :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
+runNative format compilerPreference inputPath outputPath = do
+  (implementation, result) <- renderNativeEntryWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -232,7 +232,7 @@ runNative format inputPath outputPath = do
       TIO.writeFile resolvedOutput nativeIr
       case format of
         Pretty ->
-          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+          hPutStrLn stderr ("Wrote " <> resolvedOutput <> " with " <> renderCompilerImplementation implementation)
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
@@ -240,6 +240,7 @@ runNative format inputPath outputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("native" :: String)
                 , "input" .= inputPath
+                , "implementation" .= renderCompilerImplementation implementation
                 , "output" .= resolvedOutput
                 ]
 
@@ -261,7 +262,7 @@ usage =
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json]"
     , "  claspc compile <input.clasp> [-o output.js] [--json] [--compiler=auto|clasp|bootstrap]"
-    , "  claspc native <input.clasp> [-o output.native.ir] [--json]"
+    , "  claspc native <input.clasp> [-o output.native.ir] [--json] [--compiler=auto|clasp|bootstrap]"
     ]
 
 renderCompilerImplementation :: CompilerImplementation -> String

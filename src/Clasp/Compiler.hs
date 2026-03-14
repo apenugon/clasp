@@ -20,6 +20,7 @@ module Clasp.Compiler
   , formatSource
   , renderNativeSource
   , renderNativeEntry
+  , renderNativeEntryWithPreference
   , nativeSource
   , nativeEntry
   , parseSource
@@ -69,6 +70,7 @@ data HostedToolCommand
   = HostedToolCheck
   | HostedToolCompile
   | HostedToolExplain
+  | HostedToolNative
   deriving (Eq, Show)
 
 parseSource :: FilePath -> Text -> Either DiagnosticBundle Module
@@ -136,10 +138,24 @@ nativeEntry entryPath = do
   checkedModule <- checkEntry entryPath
   pure ((buildNativeModule . lowerModule) <$> checkedModule)
 
+nativeEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle NativeModule)
+nativeEntryBootstrap entryPath = do
+  checkedModule <- checkEntryBootstrap entryPath
+  pure ((buildNativeModule . lowerModule) <$> checkedModule)
+
 renderNativeEntry :: FilePath -> IO (Either DiagnosticBundle Text)
-renderNativeEntry entryPath = do
-  nativeModule <- nativeEntry entryPath
-  pure (renderNativeModule <$> nativeModule)
+renderNativeEntry entryPath = snd <$> renderNativeEntryWithPreference CompilerPreferenceAuto entryPath
+
+renderNativeEntryWithPreference :: CompilerPreference -> FilePath -> IO (CompilerImplementation, Either DiagnosticBundle Text)
+renderNativeEntryWithPreference preference entryPath =
+  case preference of
+    CompilerPreferenceBootstrap -> do
+      result <- renderNativeEntryBootstrap entryPath
+      pure (CompilerImplementationBootstrap, result)
+    CompilerPreferenceClasp ->
+      runPrimaryTextTool HostedToolNative entryPath renderNativeEntryBootstrap
+    CompilerPreferenceAuto ->
+      preferPrimaryTool supportsPrimaryTool entryPath (flip (runPrimaryTextTool HostedToolNative) renderNativeEntryBootstrap) renderNativeEntryBootstrap
 
 compileSource :: FilePath -> Text -> Either DiagnosticBundle Text
 compileSource path source = do
@@ -329,6 +345,8 @@ hostedToolBootstrapOutput command entryPath =
       compileEntryBootstrap entryPath
     HostedToolExplain ->
       explainEntryBootstrap entryPath
+    HostedToolNative ->
+      renderNativeEntryBootstrap entryPath
 
 hostedToolOutputExtension :: HostedToolCommand -> String
 hostedToolOutputExtension command =
@@ -339,6 +357,8 @@ hostedToolOutputExtension command =
       "mjs"
     HostedToolExplain ->
       "txt"
+    HostedToolNative ->
+      "native.ir"
 
 renderHostedToolCommand :: HostedToolCommand -> String
 renderHostedToolCommand command =
@@ -349,6 +369,8 @@ renderHostedToolCommand command =
       "compile"
     HostedToolExplain ->
       "explain"
+    HostedToolNative ->
+      "native"
 
 explainEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
 explainEntryBootstrap entryPath = do
@@ -367,6 +389,11 @@ compileEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntryBootstrap entryPath = do
   checkedModule <- checkEntryBootstrap entryPath
   pure ((\modl -> emitModule (buildAirModule modl) (lowerModule modl)) <$> checkedModule)
+
+renderNativeEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
+renderNativeEntryBootstrap entryPath = do
+  nativeModule <- nativeEntryBootstrap entryPath
+  pure (renderNativeModule <$> nativeModule)
 
 writeFileText :: FilePath -> Text -> IO ()
 writeFileText = TIO.writeFile

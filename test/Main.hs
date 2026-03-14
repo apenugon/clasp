@@ -3265,6 +3265,10 @@ compileTests =
               (Just (Bool True))
               (lookupObjectKey "stage2OutputMatchesStage1" runtimeValue)
             assertEqual
+              "expected stage2 native output to match stage1 output"
+              (Just (Bool True))
+              (lookupObjectKey "stage2NativeMatchesStage1" runtimeValue)
+            assertEqual
               "expected lowered value declaration"
               (Just (String "const greeting = literal:hello"))
               (lookupObjectKey "loweredValue" runtimeValue)
@@ -3312,6 +3316,20 @@ compileTests =
               "expected stage2 explain output"
               (Just (String "greeting : Str\nrenderLead : Int -> Str\n\nconst greeting = literal:hello\nfunction renderLead(lead) = call String(lead)"))
               (lookupObjectKey "stage2ExplainOutput" runtimeValue)
+            case lookupObjectKey "emittedNativeModule" runtimeValue of
+              Just (String nativeText) -> do
+                assertBool "expected emitted native module format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
+                assertBool "expected emitted native module runtime section" ("runtime {" `T.isInfixOf` nativeText)
+                assertBool "expected emitted native global" ("global greeting = string(\"hello\")" `T.isInfixOf` nativeText)
+                assertBool "expected emitted native function" ("function renderLead(lead) = call(local(String), [lead])" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected emittedNativeModule field"
+            case lookupObjectKey "stage2NativeOutput" runtimeValue of
+              Just (String nativeText) -> do
+                assertBool "expected stage2 native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
+                assertBool "expected stage2 native decl block" ("decls {" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected stage2NativeOutput field"
             assertEqual
               "expected emitted greeting export"
               (Just (String "hello"))
@@ -3337,6 +3355,26 @@ compileTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc native prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
+        let outputPath = "dist/compiler-selfhost.native.ir"
+        createDirectoryIfMissing True (takeDirectory outputPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "compiler/hosted/Main.clasp", "-o", outputPath, "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler native emission to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted native json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+        nativeIr <- TIO.readFile outputPath
+        assertBool "expected hosted native bootstrap artifact format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+        assertBool "expected hosted native bootstrap artifact decl section" ("decls {" `T.isInfixOf` nativeIr)
     , testCase "claspc compile falls back to the Haskell bootstrap compiler for ordinary programs" $ do
         let compiledPath = "dist/hello-bootstrap.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
