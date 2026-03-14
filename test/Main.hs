@@ -3814,6 +3814,8 @@ compileTests =
             assertBool "expected route clients registry" ("export const __claspRouteClients = [" `T.isInfixOf` emitted)
             assertBool "expected schema registry export" ("export const __claspSchemas = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected schema registry entry" ("\"LeadRequest\": {" `T.isInfixOf` emitted)
+            assertBool "expected binary schema codec helper" ("schemaContract.binary = $claspCreateSchemaBinaryCodec(schemaContract);" `T.isInfixOf` emitted)
+            assertBool "expected framed binary schema helper" ("schemaContract.encodeFramedBinary = function (value) { return this.binary.frame(value); };" `T.isInfixOf` emitted)
             assertBool "expected platform bridge export" ("export const __claspPlatformBridges = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected react native bridge descriptor" ("reactNative: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createReactNativeBridge\" })" `T.isInfixOf` emitted)
             assertBool "expected expo bridge descriptor" ("expo: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createExpoBridge\" })" `T.isInfixOf` emitted)
@@ -3823,6 +3825,7 @@ compileTests =
             assertBool "expected generated binding contract host bindings" ("hostBindings: __claspHostBindings," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract native interop" ("nativeInterop: __claspNativeInterop," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract schemas" ("schemas: __claspSchemas," `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract boundary transports" ("boundaryTransports: __claspBoundaryTransports," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract platform bridges" ("platformBridges: __claspPlatformBridges," `T.isInfixOf` emitted)
             assertBool "expected request preparation helper" ("prepareRequest(value) {" `T.isInfixOf` emitted)
             assertBool "expected response parsing helper" ("async parseResponse(response) {" `T.isInfixOf` emitted)
@@ -3835,6 +3838,9 @@ compileTests =
             assertBool "expected partial response decoder" ("decodePartialResponse(value, path = \"result\")" `T.isInfixOf` emitted)
             assertBool "expected partial response parser" ("parsePartialResponse(jsonText) { return $decodePartial_SearchResponse(jsonText); }" `T.isInfixOf` emitted)
             assertBool "expected stream result helper" ("streamResult(initial = null) {" `T.isInfixOf` emitted)
+            assertBool "expected boundary transport export" ("export const __claspBoundaryTransports = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected service binary transport helper" ("kind: \"tool\"," `T.isInfixOf` emitted)
+            assertBool "expected agent channel helper" ("channel(typeName, peer = null) {" `T.isInfixOf` emitted)
             assertBool "expected guides export" ("export const __claspGuides = [" `T.isInfixOf` emitted)
             assertBool "expected hooks export" ("export const __claspHooks = [" `T.isInfixOf` emitted)
             assertBool "expected tools export" ("export const __claspTools = [" `T.isInfixOf` emitted)
@@ -4588,6 +4594,34 @@ compileTests =
             assertEqual
               "expected json route client transport contract"
               "{\"method\":\"POST\",\"path\":\"/lead/summary\",\"href\":\"/lead/summary\",\"contentType\":\"application/json\",\"body\":\"{\\\"company\\\":\\\"Acme\\\",\\\"budget\\\":42,\\\"priorityHint\\\":\\\"high\\\"}\",\"parsedSummary\":\"Ready\",\"parsedPriority\":\"High\",\"parsedFollowUpRequired\":true}"
+              runtimeOutput
+    , testCase "generated binary transports round-trip service, worker, tool, and workflow boundaries" $
+        case compileSource "native-boundary-binary-runtime" nativeBoundarySource of
+          Left err ->
+            assertFailure ("expected native boundary source compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/native-boundary-binary-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (boundaryBinaryRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected binary service, worker, tool, and workflow transport contracts"
+              "{\"schemaFingerprint\":\"record:LeadRequest\",\"schemaRoundTripCompany\":\"Acme\",\"serviceMode\":\"request_response\",\"serviceRequestBudget\":42,\"serviceResponseSummary\":\"Queued\",\"workerEvent\":\"worker.start\",\"workerAck\":true,\"toolMode\":\"rpc\",\"toolQuery\":\"rg worker runtime\",\"workflowMode\":\"checkpoint\",\"workflowCount\":9,\"bindingsTransportVersion\":1}"
+              runtimeOutput
+    , testCase "generated binary transports support agent-to-agent channels from shared schemas" $
+        case compileSource "agent-binary-runtime" delegatedSecretHandoffSource of
+          Left err ->
+            assertFailure ("expected delegated secret handoff source compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/agent-binary-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (agentBinaryRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected agent-to-agent binary channel contract"
+              "{\"agentName\":\"builder\",\"agentId\":\"agent:builder\",\"peer\":\"agent:reviewer\",\"messageType\":\"SearchRequest\",\"query\":\"needs review\",\"framing\":\"length_prefixed\"}"
               runtimeOutput
     , testCase "client runtime executes generated json route clients over fetch" $
         case compileSource "service-client-runtime" serviceSource of
@@ -8111,6 +8145,55 @@ routeClientJsonRuntimeScript compiledPath =
     , "  parsedSummary: parsed.summary,"
     , "  parsedPriority: parsed.priority?.$tag ?? parsed.priority,"
     , "  parsedFollowUpRequired: parsed.followUpRequired"
+    , "}));"
+    ]
+
+boundaryBinaryRuntimeScript :: FilePath -> Text
+boundaryBinaryRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const leadSchema = compiledModule.__claspSchemas.LeadRequest;"
+    , "const schemaFrame = leadSchema.encodeFramedBinary({ company: 'Acme', budget: 42 });"
+    , "const schemaRoundTrip = leadSchema.decodeFramedBinary(schemaFrame);"
+    , "const service = compiledModule.__claspBoundaryTransports.services[0];"
+    , "const serviceRequest = service.decodeRequestFrame(service.encodeRequestFrame({ company: 'Acme', budget: 42 }));"
+    , "const serviceResponse = service.decodeResponseFrame(service.encodeResponseFrame({ summary: 'Queued' }));"
+    , "const worker = compiledModule.__claspBoundaryTransports.workers.find((entry) => entry.kind === 'worker');"
+    , "const workerResponse = worker.decodeResponseFrame(worker.encodeResponseFrame({ accepted: true }));"
+    , "const tool = compiledModule.__claspBoundaryTransports.tools[0];"
+    , "const toolRequest = tool.decodeRequestFrame(tool.encodeRequestFrame({ query: 'rg worker runtime' }));"
+    , "const workflow = compiledModule.__claspBoundaryTransports.workers.find((entry) => entry.kind === 'workflow');"
+    , "const workflowState = workflow.decodeCheckpointFrame(workflow.encodeCheckpointFrame({ count: 9 }));"
+    , "console.log(JSON.stringify({"
+    , "  schemaFingerprint: leadSchema.binary.schemaFingerprint,"
+    , "  schemaRoundTripCompany: schemaRoundTrip.company,"
+    , "  serviceMode: service.mode,"
+    , "  serviceRequestBudget: serviceRequest.budget,"
+    , "  serviceResponseSummary: serviceResponse.summary,"
+    , "  workerEvent: worker.event,"
+    , "  workerAck: workerResponse.accepted,"
+    , "  toolMode: tool.mode,"
+    , "  toolQuery: toolRequest.query,"
+    , "  workflowMode: workflow.mode,"
+    , "  workflowCount: workflowState.count,"
+    , "  bindingsTransportVersion: compiledModule.__claspBindings.boundaryTransports.version"
+    , "}));"
+    ]
+
+agentBinaryRuntimeScript :: FilePath -> Text
+agentBinaryRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const agent = compiledModule.__claspBoundaryTransports.agentChannels[0];"
+    , "const channel = agent.channel('SearchRequest', 'agent:reviewer');"
+    , "const message = channel.decodeMessageFrame(channel.encodeMessageFrame({ query: 'needs review' }));"
+    , "console.log(JSON.stringify({"
+    , "  agentName: agent.name,"
+    , "  agentId: agent.id,"
+    , "  peer: channel.peer,"
+    , "  messageType: channel.messageType,"
+    , "  query: message.query,"
+    , "  framing: channel.framing"
     , "}));"
     ]
 
