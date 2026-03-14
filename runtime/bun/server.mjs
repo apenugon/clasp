@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 export function installRuntime(bindings) {
   const previous = globalThis.__claspRuntime ?? {};
   globalThis.__claspRuntime = {
@@ -21,6 +23,7 @@ export function bindingContractFor(compiledModule) {
       hostBindings,
       providers:
         contract.providers ?? defaultProviderContract(compiledModule, hostBindings),
+      sqlite: contract.sqlite ?? defaultSqliteContract(hostBindings),
       nativeInterop:
         contract.nativeInterop ??
         compiledModule?.__claspNativeInterop ??
@@ -42,6 +45,7 @@ export function bindingContractFor(compiledModule) {
     module: compiledModule?.__claspModule ?? null,
     hostBindings,
     providers: defaultProviderContract(compiledModule, hostBindings),
+    sqlite: defaultSqliteContract(hostBindings),
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
       defaultNativeInterop(hostBindings),
@@ -527,6 +531,218 @@ function parseProviderRuntimeName(runtimeName) {
 
 export function providerContractFor(compiledModule) {
   return bindingContractFor(compiledModule).providers;
+}
+
+function defaultSqliteContract(hostBindings) {
+  const bindings = (hostBindings ?? [])
+    .map(defaultSqliteBinding)
+    .filter((binding) => binding !== null);
+
+  return Object.freeze({
+    kind: "clasp-sqlite-contract",
+    version: 1,
+    bindings: Object.freeze(bindings)
+  });
+}
+
+function defaultSqliteBinding(binding) {
+  const descriptor = parseSqliteRuntimeName(binding?.runtimeName);
+
+  if (!descriptor) {
+    return null;
+  }
+
+  return Object.freeze({
+    name: binding?.name ?? descriptor.operation,
+    runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`,
+    operation: descriptor.operation,
+    capability: Object.freeze({
+      id: `capability:sqlite:${descriptor.operation}`,
+      kind: "sqlite-connection-operation",
+      runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`
+    }),
+    params: Object.freeze(binding?.params ?? []),
+    returns: binding?.returns ?? null
+  });
+}
+
+function parseSqliteRuntimeName(runtimeName) {
+  if (typeof runtimeName !== "string") {
+    return null;
+  }
+
+  const parts = runtimeName.split(":");
+
+  if (parts[0] !== "sqlite" || parts.length < 2) {
+    return null;
+  }
+
+  return {
+    namespace: "sqlite",
+    operation: parts.slice(1).join(":")
+  };
+}
+
+export function sqliteContractFor(compiledModule) {
+  return bindingContractFor(compiledModule).sqlite;
+}
+
+export function createSqliteRuntime(compiledModule, options = {}) {
+  if (!compiledModule || typeof compiledModule.__claspAdaptHostBindings !== "function") {
+    throw new Error("createSqliteRuntime requires a generated Clasp module.");
+  }
+
+  const runtimeOptions = normalizeSqliteRuntimeOptions(options);
+  const contract = sqliteContractFor(compiledModule);
+  const bindingMap = new Map(contract.bindings.map((binding) => [binding.name, binding]));
+  const runtimeBindingMap = new Map(
+    contract.bindings.map((binding) => [binding.runtimeName, binding])
+  );
+  const liveConnections = new Map();
+  const implementations = {};
+  let nextConnectionId = 1;
+
+  const runtime = {
+    contract,
+    bindings: contract.bindings,
+    binding(name) {
+      const found = bindingMap.get(name) ?? runtimeBindingMap.get(name) ?? null;
+
+      if (!found) {
+        throw new Error(`Unknown Clasp sqlite binding: ${String(name)}`);
+      }
+
+      return found;
+    },
+    open(path, connectionOptions = {}) {
+      return openSqliteConnection(path, {
+        ...connectionOptions,
+        readOnly: false
+      });
+    },
+    openReadonly(path, connectionOptions = {}) {
+      return openSqliteConnection(path, {
+        ...connectionOptions,
+        readOnly: true
+      });
+    },
+    connection(connectionOrId) {
+      return resolveSqliteConnection(connectionOrId).descriptor;
+    },
+    database(connectionOrId) {
+      return resolveSqliteConnection(connectionOrId).database;
+    },
+    listConnections() {
+      return Object.freeze(
+        Array.from(liveConnections.values(), (entry) => entry.descriptor)
+      );
+    },
+    close(connectionOrId) {
+      const connection = resolveSqliteConnection(connectionOrId);
+      connection.database.close();
+      liveConnections.delete(connection.descriptor.id);
+      return true;
+    },
+    install() {
+      const adaptedBindings =
+        compiledModule.__claspAdaptHostBindings(this.implementations);
+      installRuntime(adaptedBindings);
+      return adaptedBindings;
+    }
+  };
+
+  for (const binding of contract.bindings) {
+    const implementation = (...args) =>
+      invokeSqliteBinding(runtime, binding, args, runtimeOptions);
+    implementations[binding.name] = implementation;
+    implementations[binding.runtimeName] = implementation;
+  }
+
+  runtime.implementations = Object.freeze(implementations);
+
+  return Object.freeze(runtime);
+
+  function openSqliteConnection(path, connectionOptions = {}) {
+    const normalizedPath = normalizeSqliteConnectionPath(path);
+    const readOnly = Boolean(connectionOptions.readOnly);
+    const database = new DatabaseSync(normalizedPath, { open: true, readOnly });
+    const descriptor = Object.freeze({
+      id: `sqlite-connection-${nextConnectionId++}`,
+      databasePath: normalizedPath,
+      readOnly,
+      memory: normalizedPath === ":memory:"
+    });
+    liveConnections.set(descriptor.id, { descriptor, database });
+
+    if (typeof runtimeOptions.onOpen === "function") {
+      runtimeOptions.onOpen({
+        connection: descriptor,
+        database
+      });
+    }
+
+    return descriptor;
+  }
+
+  function resolveSqliteConnection(connectionOrId) {
+    const connectionId =
+      typeof connectionOrId === "string"
+        ? connectionOrId
+        : connectionOrId?.id;
+
+    if (typeof connectionId !== "string" || connectionId === "") {
+      throw new Error("SQLite connection reference must include a non-empty id.");
+    }
+
+    const connection = liveConnections.get(connectionId);
+
+    if (!connection) {
+      throw new Error(`Unknown Clasp sqlite connection: ${connectionId}`);
+    }
+
+    return connection;
+  }
+}
+
+export function installSqliteRuntime(compiledModule, options = {}) {
+  return createSqliteRuntime(compiledModule, options).install();
+}
+
+function normalizeSqliteRuntimeOptions(options) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return {
+      onOpen: null
+    };
+  }
+
+  return {
+    onOpen: typeof options.onOpen === "function" ? options.onOpen : null
+  };
+}
+
+function normalizeSqliteConnectionPath(path) {
+  if (typeof path !== "string") {
+    throw new Error("SQLite connection path must be a string.");
+  }
+
+  const normalizedPath = path.trim();
+
+  if (normalizedPath === "") {
+    throw new Error("SQLite connection path cannot be empty.");
+  }
+
+  return normalizedPath;
+}
+
+function invokeSqliteBinding(runtime, binding, args, runtimeOptions) {
+  switch (binding.operation) {
+    case "open":
+      return runtime.open(args[0], runtimeOptions);
+    case "openReadonly":
+      return runtime.openReadonly(args[0], runtimeOptions);
+    default:
+      throw new Error(`Unsupported Clasp sqlite operation: ${binding.operation}`);
+  }
 }
 
 export function createProviderRuntime(compiledModule, options = {}) {

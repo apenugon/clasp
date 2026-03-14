@@ -97,8 +97,10 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `pathBasename : Str -> Str`
 - `fileExists : Str -> Bool`
 - `readFile : Str -> Result`
+- `sqliteOpen : Str -> SqliteConnection`
+- `sqliteOpenReadonly : Str -> SqliteConnection`
 
-The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime.
+The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime. The SQLite helpers also stay host/runtime-backed and currently expose typed connection descriptors for Bun hosts without committing the language to a query model yet.
 
 ## Design Constraints
 
@@ -495,7 +497,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`.
 - Generated JavaScript page modules also export `__claspStyleIR`, a compiler-owned style contract with stable style refs, default design tokens, baseline variants, per-target lowering for web and native runtimes, and explicit raw host styling escape-hatch metadata.
 - Page-flow machine metadata is emitted through generated sidecar exports such as `__claspUiGraph`, `__claspNavigationGraph`, and `__claspActionGraph`; HTML flow attributes are available only through the opt-in `__claspRenderPage(value, __claspPageRenderModes.htmlWithFlowMetadata)` projection.
-- `AuthSession`, `Principal`, `Tenant`, and `ResourceIdentity` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`.
+- `AuthSession`, `Principal`, `Tenant`, `ResourceIdentity`, and `SqliteConnection` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, and `resourceIdentity`; `SqliteConnection` values currently come from `sqliteOpen` and `sqliteOpenReadonly`.
 - Safe views escape text content, reject raw `script`/`style` tags, keep styling explicit through `styled` references instead of raw host `class` or `style` strings, and record `hostClass` or `hostStyle` only as explicit escape-hatch metadata outside the safe default renderer.
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate hook names, duplicate agent-role names, duplicate agent names, duplicate verifier and merge-gate names, duplicate route names/endpoints, unknown names, unknown types, unknown guide/policy references in roles, unknown role references in agents, unknown tool references in verifiers, unknown verifier references in merge gates, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong hook or route handler signatures, and simple type mismatches before code generation.
 - AIR JSON is emitted as `clasp-air-v1`, with stable node IDs, explicit `ref` edges, root node IDs, and a module-level node count so tools can replay declaration, policy, projection, route, and expression graphs without reconstructing them from raw files.

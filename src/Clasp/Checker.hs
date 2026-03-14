@@ -291,6 +291,9 @@ resourceIdentityTypeName = "ResourceIdentity"
 resultTypeName :: Text
 resultTypeName = "Result"
 
+sqliteConnectionTypeName :: Text
+sqliteConnectionTypeName = "SqliteConnection"
+
 resultOkConstructorName :: Text
 resultOkConstructorName = "Ok"
 
@@ -381,6 +384,10 @@ builtinResultTypeDecl =
 
 builtinForeignDecl :: Text -> Type -> ForeignDecl
 builtinForeignDecl name typ =
+  builtinRuntimeForeignDecl name name typ
+
+builtinRuntimeForeignDecl :: Text -> Text -> Type -> ForeignDecl
+builtinRuntimeForeignDecl name runtimeName typ =
   ForeignDecl
     { foreignDeclName = name
     , foreignDeclSpan = builtinSpan
@@ -388,7 +395,7 @@ builtinForeignDecl name typ =
     , foreignDeclUnsafeInterop = False
     , foreignDeclAnnotationSpan = builtinSpan
     , foreignDeclType = typ
-    , foreignDeclRuntimeName = name
+    , foreignDeclRuntimeName = runtimeName
     , foreignDeclRuntimeSpan = builtinSpan
     , foreignDeclPackageImport = Nothing
     }
@@ -405,6 +412,8 @@ builtinStdlibForeignDecls =
   , builtinForeignDecl "pathBasename" (TFunction [TStr] TStr)
   , builtinForeignDecl "fileExists" (TFunction [TStr] TBool)
   , builtinForeignDecl "readFile" (TFunction [TStr] (TNamed resultTypeName))
+  , builtinRuntimeForeignDecl "sqliteOpen" "sqlite:open" (TFunction [TStr] (TNamed sqliteConnectionTypeName))
+  , builtinRuntimeForeignDecl "sqliteOpenReadonly" "sqlite:openReadonly" (TFunction [TStr] (TNamed sqliteConnectionTypeName))
   ]
 
 builtinStdlibForeignDeclsForModule :: Module -> [ForeignDecl]
@@ -493,6 +502,13 @@ builtinRecordDecls =
   [ builtinRecordDecl principalTypeName [("id", TStr)]
   , builtinRecordDecl tenantTypeName [("id", TStr)]
   , builtinRecordDecl resourceIdentityTypeName [("resourceType", TStr), ("resourceId", TStr)]
+  , builtinRecordDecl
+      sqliteConnectionTypeName
+      [ ("id", TStr)
+      , ("databasePath", TStr)
+      , ("readOnly", TBool)
+      , ("memory", TBool)
+      ]
   , builtinRecordDecl
       authSessionTypeName
       [ ("sessionId", TStr)

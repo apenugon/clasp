@@ -1293,6 +1293,31 @@ checkerTests =
                 assertEqual "loadSummary type" (TFunction [TStr] TStr) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected loadSummary declaration"
+    , testCase "typechecks compiler-known sqlite connection helpers" $
+        case checkSource "sqlite-runtime" sqliteRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite runtime source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignDecls = coreModuleForeignDecls checked
+                foreignNames = fmap foreignDeclName foreignDecls
+            assertBool "expected sqliteOpen builtin" ("sqliteOpen" `elem` foreignNames)
+            assertBool "expected sqliteOpenReadonly builtin" ("sqliteOpenReadonly" `elem` foreignNames)
+            case find ((== "SqliteConnection") . recordDeclName) (coreModuleRecordDecls checked) of
+              Just recordDecl ->
+                assertEqual
+                  "sqlite connection fields"
+                  ["id", "databasePath", "readOnly", "memory"]
+                  (fmap recordFieldDeclName (recordDeclFields recordDecl))
+              Nothing ->
+                assertFailure "expected compiler-known SqliteConnection record declaration"
+            case find ((== "describeConnection") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual
+                  "describeConnection type"
+                  (TFunction [TStr] (TNamed "SqliteConnection"))
+                  (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected describeConnection declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -4388,7 +4413,7 @@ compileTests =
             runtimeOutput <- runNodeScript (authIdentityRuntimeScript absoluteCompiledPath absoluteServerRuntimePath absoluteWorkerRuntimePath)
             assertEqual
               "expected auth identity contract exports across server and worker runtimes"
-              "{\"contractVersion\":1,\"schemaNames\":[\"AuditEnvelope\",\"AuthSession\",\"Bool\",\"Int\",\"Principal\",\"ResourceIdentity\",\"Str\",\"Tenant\"],\"sessionSchemaKind\":\"record\",\"principalFieldType\":\"Principal\",\"tenantSeed\":\"seed\",\"workerSessionId\":\"sess-1\",\"workerPrincipalId\":\"user-1\",\"workerTenantId\":\"tenant-1\",\"workerResource\":\"lead:lead-1\"}"
+              "{\"contractVersion\":1,\"schemaNames\":[\"AuditEnvelope\",\"AuthSession\",\"Bool\",\"Int\",\"Principal\",\"ResourceIdentity\",\"SqliteConnection\",\"Str\",\"Tenant\"],\"sessionSchemaKind\":\"record\",\"principalFieldType\":\"Principal\",\"tenantSeed\":\"seed\",\"workerSessionId\":\"sess-1\",\"workerPrincipalId\":\"user-1\",\"workerTenantId\":\"tenant-1\",\"workerResource\":\"lead:lead-1\"}"
               runtimeOutput
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
@@ -5049,6 +5074,21 @@ compileTests =
             assertEqual
               "expected provider contract and provider-backed page flow"
               "{\"providerKind\":\"clasp-provider-contract\",\"providerVersion\":1,\"providerNames\":[\"provider\"],\"providerOperation\":\"replyPreview\",\"providerBinding\":\"generateReplyPreview\",\"runtimeInstalled\":true,\"runtimeBindingVisible\":true,\"seenProvider\":\"provider\",\"seenOperation\":\"replyPreview\",\"seenCustomerId\":\"cust-42\",\"previewHasReply\":true,\"customerHasExport\":true}"
+              runtimeOutput
+    , testCase "sqlite runtime installs typed connection bindings and keeps live sqlite handles addressable by typed connection ids" $ do
+        case compileSource "sqlite-runtime" sqliteRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected sqlite contract and live connection runtime output"
+              "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"sqliteOpen\",\"sqliteOpenReadonly\"],\"runtimeNames\":[\"sqlite:open\",\"sqlite:openReadonly\"],\"runtimeInstalled\":true,\"memoryPath\":\":memory:\",\"memoryIsMemory\":true,\"readonlyPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"readonlyFlag\":true,\"liveConnectionCount\":4,\"rowCount\":1,\"lookupPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"closed\":true,\"closedLookup\":\"Unknown Clasp sqlite connection: sqlite-connection-2\"}"
               runtimeOutput
     , testCase "provider runtime validates structured JSON-text outputs against declared schemas" $ do
         case compileSource "provider-runtime-invalid" providerRuntimeSource of
@@ -5966,6 +6006,21 @@ compilerStdlibSource =
     , ""
     , "main : Str"
     , "main = textJoin \" :: \" [pathDirname joinedPath, pathBasename joinedPath]"
+    ]
+
+sqliteRuntimeSource :: Text
+sqliteRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "describeConnection : Str -> SqliteConnection"
+    , "describeConnection path = sqliteOpen path"
+    , ""
+    , "describeReadonlyConnection : Str -> SqliteConnection"
+    , "describeReadonlyConnection path = sqliteOpenReadonly path"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
     ]
 
 recordSource :: Text
@@ -9489,6 +9544,53 @@ providerRuntimeScript compiledPath runtimePath =
     , "  seenCustomerId: seen?.customerId ?? null,"
     , "  previewHasReply: previewHtml.includes('Reply for cust-42: Renewal is blocked on legal review.'),"
     , "  customerHasExport: customerHtml.includes('Northwind Studio') && customerHtml.includes('ops@northwind.example')"
+    , "}));"
+    ]
+
+sqliteRuntimeScript :: FilePath -> FilePath -> Text
+sqliteRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime, sqliteContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const sqliteContract = sqliteContractFor(compiledModule);"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule);"
+    , "const databasePath = 'dist/test-projects/sqlite-runtime/runtime.db';"
+    , "const seededConnection = sqliteRuntime.open(databasePath);"
+    , "sqliteRuntime.database(seededConnection).exec('drop table if exists notes;');"
+    , "sqliteRuntime.database(seededConnection).exec('create table notes (value text not null);');"
+    , "sqliteRuntime.database(seededConnection).exec(\"insert into notes(value) values ('ready');\");"
+    , "const installed = sqliteRuntime.install();"
+    , "const appConnection = compiledModule.describeConnection(databasePath);"
+    , "const memoryConnection = compiledModule.describeConnection(':memory:');"
+    , "const readonlyConnection = compiledModule.describeReadonlyConnection(databasePath);"
+    , "const row = sqliteRuntime.database(appConnection).prepare('select count(*) as count from notes;').get();"
+    , "const liveConnectionCount = sqliteRuntime.listConnections().length;"
+    , "const lookupPath = sqliteRuntime.connection(appConnection.id).databasePath;"
+    , "const closed = sqliteRuntime.close(appConnection.id);"
+    , "let closedLookup = null;"
+    , "try {"
+    , "  sqliteRuntime.connection(appConnection.id);"
+    , "} catch (error) {"
+    , "  closedLookup = error instanceof Error ? error.message : String(error);"
+    , "}"
+    , "sqliteRuntime.close(readonlyConnection.id);"
+    , "sqliteRuntime.close(memoryConnection.id);"
+    , "sqliteRuntime.close(seededConnection.id);"
+    , "console.log(JSON.stringify({"
+    , "  sqliteKind: sqliteContract.kind,"
+    , "  sqliteVersion: sqliteContract.version,"
+    , "  bindingNames: sqliteContract.bindings.map((binding) => binding.name),"
+    , "  runtimeNames: sqliteContract.bindings.map((binding) => binding.runtimeName),"
+    , "  runtimeInstalled: typeof installed['sqlite:open'] === 'function',"
+    , "  memoryPath: memoryConnection.databasePath,"
+    , "  memoryIsMemory: memoryConnection.memory,"
+    , "  readonlyPath: readonlyConnection.databasePath,"
+    , "  readonlyFlag: readonlyConnection.readOnly,"
+    , "  liveConnectionCount,"
+    , "  rowCount: row.count,"
+    , "  lookupPath,"
+    , "  closed,"
+    , "  closedLookup"
     , "}));"
     ]
 
