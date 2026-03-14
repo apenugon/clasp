@@ -2491,6 +2491,22 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered let declaration: " <> show other)
+    , testCase "lowering preserves the let example file" $ do
+        source <- readExampleSource "let.clasp"
+        case lowerChecked "examples/let.clasp" source of
+          Left err ->
+            assertFailure ("expected let example lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "describe" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["status"] (LMatch (LVar "status") [LowerMatchBranch "Idle" [] (LLet "label" (LString "idle") (LVar "label")), LowerMatchBranch "Busy" ["note"] (LLet "copy" (LVar "note") (LVar "copy"))])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered let example describe declaration: " <> show other)
+            case findLowerDecl "main" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LLet "current" (LCall (LVar "Busy") [LString "loading"]) (LCall (LVar "describe") [LVar "current"]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered let example main declaration: " <> show other)
     , testCase "lowering block expressions preserves the lowered inner expression" $
         case lowerChecked "block" blockExpressionSource of
           Left err ->
