@@ -22,5 +22,4 @@ verify_solution() {
   )
 }
 
-verify_solution "clasp-external-adaptation"
 verify_solution "ts-external-adaptation"

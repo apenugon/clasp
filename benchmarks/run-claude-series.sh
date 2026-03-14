@@ -13,6 +13,11 @@ model="${4:-sonnet}"
 mode="${5:-${CLASP_BENCHMARK_MODE:-raw-repo}}"
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 bundle_manifest="$project_root/benchmarks/bundles/${note_prefix}--claude-code--${model//\//-}--${mode}.json"
+recovery_args=()
+
+if [[ "${CLASP_ALLOW_BOOTSTRAP_RECOVERY:-}" == "true" ]]; then
+  recovery_args=(--allow-bootstrap-recovery true)
+fi
 
 node "$project_root/benchmarks/run-benchmark.mjs" freeze "$task_id" \
   --count "$count" \
@@ -20,7 +25,8 @@ node "$project_root/benchmarks/run-benchmark.mjs" freeze "$task_id" \
   --model "$model" \
   --mode "$mode" \
   --notes "$note_prefix" \
-  --output "$bundle_manifest" >/dev/null
+  --output "$bundle_manifest" \
+  "${recovery_args[@]}" >/dev/null
 
 for index in $(seq 1 "$count"); do
   note="${note_prefix}-${index}"
@@ -53,6 +59,7 @@ for (const entry of sample.runOrder) {
       --bundle-manifest "$bundle_manifest" \
       --sample-count "$count" \
       --sample-index "$index" \
-      --agent-command "$agent_command"
+      --agent-command "$agent_command" \
+      "${recovery_args[@]}"
   done
 done

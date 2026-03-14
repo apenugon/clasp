@@ -227,6 +227,7 @@ async function listTasks() {
 async function prepareCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
+  assertDefaultBenchmarkPathSupported(task, options);
   const workspace = resolveWorkspace(task.id, options.workspace);
   const promptPath = await resolvePromptPath(task, options.mode);
 
@@ -247,7 +248,9 @@ async function freezeCommand(taskSelection, args) {
   const taskIds = resolveTaskSelection(taskSelection);
   const tasks = [];
   for (const taskId of taskIds) {
-    tasks.push(await loadTask(taskId));
+    const task = await loadTask(taskId);
+    assertDefaultBenchmarkPathSupported(task, options);
+    tasks.push(task);
   }
 
   const sampleCount = parsePositiveNumber(options.count ?? options.sampleCount ?? "1", "sample count");
@@ -288,6 +291,7 @@ async function freezeCommand(taskSelection, args) {
 async function verifyCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
+  assertDefaultBenchmarkPathSupported(task, options);
   const workspace = resolveWorkspace(task.id, options.workspace);
   const env = benchmarkEnv(task, workspace);
 
@@ -310,6 +314,7 @@ async function verifyCommand(taskId, args) {
 async function runCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
+  assertDefaultBenchmarkPathSupported(task, options);
   const workspace = resolveWorkspace(task.id, options.workspace);
   const env = benchmarkEnv(task, workspace);
 
@@ -1169,6 +1174,24 @@ async function loadTask(taskId) {
   };
 }
 
+function assertDefaultBenchmarkPathSupported(task, options) {
+  if (!requiresBootstrapRecovery(task) || allowsBootstrapRecovery(options)) {
+    return;
+  }
+
+  throw new Error(
+    `${task.id} is not available on the default benchmark path because it still depends on the Haskell bootstrap compiler; rerun with --allow-bootstrap-recovery true for the explicit recovery-only path`
+  );
+}
+
+function requiresBootstrapRecovery(task) {
+  return task.language === "clasp";
+}
+
+function allowsBootstrapRecovery(options) {
+  return parseBooleanOption(options.allowBootstrapRecovery) === true;
+}
+
 function benchmarkEnv(task, workspace) {
   return {
     ...process.env,
@@ -1210,6 +1233,27 @@ function parseOptions(args) {
   }
 
   return options;
+}
+
+function parseBooleanOption(value) {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error("boolean option value must be a string");
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "false") {
+    return false;
+  }
+
+  throw new Error(`expected boolean option value but received: ${value}`);
 }
 
 async function buildProtocolMetadata(task, options, startedAt, finishedAt) {

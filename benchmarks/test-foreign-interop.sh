@@ -21,9 +21,6 @@ verify_solution() {
     --model deterministic >/dev/null
 }
 
-verify_solution "clasp-npm-interop"
 verify_solution "ts-npm-interop"
-verify_solution "clasp-python-interop"
 verify_solution "ts-python-interop"
-verify_solution "clasp-rust-interop"
 verify_solution "ts-rust-interop"

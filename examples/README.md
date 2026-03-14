@@ -43,13 +43,15 @@ This directory has two kinds of examples:
 
 ## Useful Commands
 
-Check an example:
+The default repo verification path now stays on the hosted compiler and non-Clasp benchmark surfaces. Commands below that pass `--compiler=bootstrap` are explicit recovery-only workflows.
+
+Check an example in explicit bootstrap recovery mode:
 
 ```sh
 cabal run claspc -- check examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
-Emit AIR:
+Emit AIR in explicit bootstrap recovery mode:
 
 ```sh
 cabal run claspc -- air examples/support-console/Main.clasp --compiler=bootstrap
@@ -91,13 +93,13 @@ Verify the release-gate example:
 bash examples/release-gate/scripts/verify.sh
 ```
 
-Emit the context graph:
+Emit the context graph in explicit bootstrap recovery mode:
 
 ```sh
 cabal run claspc -- context examples/release-gate/Main.clasp --compiler=bootstrap
 ```
 
-Run the control-plane demo after compiling `Main.clasp` into `dist/`:
+Run the control-plane demo after compiling `Main.clasp` into `dist/` with explicit bootstrap recovery mode:
 
 ```sh
 mkdir -p dist/control-plane
@@ -105,7 +107,7 @@ cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-pl
 node examples/control-plane/demo.mjs dist/control-plane/Main.js
 ```
 
-Run the durable workflow restart and supervised hot-swap demo after compiling both module versions:
+Run the durable workflow restart and supervised hot-swap demo after compiling both module versions with explicit bootstrap recovery mode:
 
 ```sh
 mkdir -p dist/durable-workflow

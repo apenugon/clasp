@@ -61,8 +61,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 59726,
-      "sha256": "8e9e888ec2259e4b4fb3469cf6b02007292010c013aded4195f8531d10a4b46b"
+      "size": 60979,
+      "sha256": "d00136bae8c04e9c0bb90d20f033fb39b4f8d57022169079facb1209b8c3da2b"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -71,8 +71,8 @@
     },
     {
       "path": "benchmarks/run-claude-series.sh",
-      "size": 2056,
-      "sha256": "60d79ad09ff247d4af20e35393b48c3bfcb9109abce18e7512351b226ea74b94"
+      "size": 2246,
+      "sha256": "aaa6763905ab17863eebaa0db5ecdcc9a31fa76f94d6cc8d221e0ef73d8a2c6d"
     },
     {
       "path": "benchmarks/run-codex-harness.sh",
@@ -81,8 +81,8 @@
     },
     {
       "path": "benchmarks/run-codex-series.sh",
-      "size": 2065,
-      "sha256": "5dee82479ea6b2084ab8115729f10c8df5ed3e15fc28d1f8c4192737accf7b12"
+      "size": 2255,
+      "sha256": "7e3d8947b1144adf2f74cae7b90e881d60c26989cd33dd59428621528dd682ae"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/prompt.md",

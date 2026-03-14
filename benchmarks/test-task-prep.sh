@@ -35,10 +35,15 @@ printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
 check_incomplete_task() {
   local task_id="$1"
   local workspace="$workspace_root/$task_id"
+  local recovery_args=()
 
-  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+  if [[ "$task_id" == clasp-* ]]; then
+    recovery_args=(--allow-bootstrap-recovery true)
+  fi
 
-  if node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null 2>&1; then
+  run_benchmark_prepare "$task_id" "$workspace" "${recovery_args[@]}" >/dev/null
+
+  if run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local "${recovery_args[@]}" >/dev/null 2>&1; then
     echo "expected $task_id to fail verification before the benchmark change is applied" >&2
     return 1
   fi
@@ -106,6 +111,35 @@ latest_result_for_harness() {
   printf '%s\n' "$latest_result"
 }
 
+run_benchmark_prepare() {
+  local task_id="$1"
+  local workspace="$2"
+  shift 2
+
+  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" "$@"
+}
+
+run_benchmark_verify() {
+  local task_id="$1"
+  local workspace="$2"
+  shift 2
+
+  node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" "$@"
+}
+
+check_default_clasp_benchmark_path_requires_recovery() {
+  local task_id="clasp-lead-segment"
+  local workspace="$workspace_root/$task_id-default-blocked"
+  local output
+
+  if output="$(run_benchmark_prepare "$task_id" "$workspace" 2>&1)"; then
+    echo "expected $task_id default prepare to require explicit bootstrap recovery" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$output" | grep -Fq 'rerun with --allow-bootstrap-recovery true'
+}
+
 check_fixture_seed_override() {
   local task_id="fixture-seed-env-check"
   local task_dir="$project_root/benchmarks/tasks/$task_id"
@@ -139,20 +173,20 @@ override-seed
 EOF
 
   CLASP_APP_FIXTURE_SEED="override-seed" \
-    node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$override_workspace" >/dev/null
+  run_benchmark_prepare "$task_id" "$override_workspace" >/dev/null
   assert_contains "$override_workspace/prepare-seed.txt" "override-seed"
 
   CLASP_APP_FIXTURE_SEED="override-seed" \
-    node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$override_workspace" --harness prep-check --model local >/dev/null
+    run_benchmark_verify "$task_id" "$override_workspace" --harness prep-check --model local >/dev/null
   assert_contains "$override_workspace/verify-seed.txt" "override-seed"
 
   printf '%s\n' "$task_id" >"$task_dir/repo/expected-seed.txt"
   CLASP_APP_FIXTURE_SEED="" \
-    node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$fallback_workspace" >/dev/null
+    run_benchmark_prepare "$task_id" "$fallback_workspace" >/dev/null
   assert_contains "$fallback_workspace/prepare-seed.txt" "$task_id"
 
   CLASP_APP_FIXTURE_SEED="" \
-    node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$fallback_workspace" --harness prep-check --model local >/dev/null
+    run_benchmark_verify "$task_id" "$fallback_workspace" --harness prep-check --model local >/dev/null
   assert_contains "$fallback_workspace/verify-seed.txt" "$task_id"
 
   rm -rf "$task_dir" "$override_workspace" "$fallback_workspace"
@@ -163,11 +197,11 @@ check_product_only_clasp_solution() {
   local workspace="$workspace_root/$task_id-product-only"
   local task_root="$project_root/benchmarks/tasks/$task_id/repo"
 
-  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+  run_benchmark_prepare "$task_id" "$workspace" --allow-bootstrap-recovery true >/dev/null
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$workspace/Shared/Lead.clasp"
 
-  node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null
+  run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local --allow-bootstrap-recovery true >/dev/null
 
   assert_files_match "$workspace/server.mjs" "$task_root/server.mjs"
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
@@ -178,12 +212,12 @@ check_product_only_typescript_solution() {
   local workspace="$workspace_root/$task_id-product-only"
   local task_root="$project_root/benchmarks/tasks/$task_id/repo"
 
-  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+  run_benchmark_prepare "$task_id" "$workspace" >/dev/null
 
   cp "$project_root/examples/lead-app-ts/src/shared/lead.ts" "$workspace/src/shared/lead.ts"
   cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$workspace/src/server/main.ts"
 
-  node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null
+  run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
 
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
@@ -195,16 +229,16 @@ check_oracle_prompt_mode() {
   local ts_prepare_output
   local latest_result
 
-  clasp_prepare_output="$(node "$project_root/benchmarks/run-benchmark.mjs" prepare clasp-lead-segment --mode oracle --workspace "$clasp_workspace")"
+  clasp_prepare_output="$(run_benchmark_prepare clasp-lead-segment "$clasp_workspace" --mode oracle --allow-bootstrap-recovery true)"
   printf '%s\n' "$clasp_prepare_output" | grep -Fq 'Prompt: '
   printf '%s\n' "$clasp_prepare_output" | grep -Fq 'benchmarks/tasks/clasp-lead-segment/prompt.oracle.md'
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$clasp_workspace/Shared/Lead.clasp"
-  node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
-    --workspace "$clasp_workspace" \
+  run_benchmark_verify clasp-lead-segment "$clasp_workspace" \
     --harness oracle-check \
     --model local \
-    --mode oracle >/dev/null
+    --mode oracle \
+    --allow-bootstrap-recovery true >/dev/null
 
   latest_result="$(latest_result_for_harness oracle-check)"
   assert_contains "$latest_result" '"mode": "oracle"'
@@ -220,7 +254,7 @@ check_nested_clasp_benchmark_prep() {
   local task_id="clasp-lead-priority"
   local workspace="$workspace_root/$task_id"
 
-  node "$project_root/benchmarks/run-benchmark.mjs" prepare "$task_id" --workspace "$workspace" >/dev/null
+  run_benchmark_prepare "$task_id" "$workspace" --allow-bootstrap-recovery true >/dev/null
 
   assert_file_exists "$workspace/benchmark-prep/Main.context.json"
   assert_file_exists "$workspace/benchmark-prep/Main.air.json"
@@ -235,6 +269,7 @@ check_nested_clasp_benchmark_prep() {
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`POST /lead/summary` request `LeadRequest` -> response `LeadSummary`'
 }
 
+check_default_clasp_benchmark_path_requires_recovery
 check_incomplete_task ts-lead-segment
 check_incomplete_task clasp-lead-segment
 check_incomplete_task ts-lead-rejection

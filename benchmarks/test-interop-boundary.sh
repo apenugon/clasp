@@ -21,5 +21,4 @@ verify_solution() {
     --model deterministic >/dev/null
 }
 
-verify_solution "clasp-interop-boundary"
 verify_solution "ts-interop-boundary"

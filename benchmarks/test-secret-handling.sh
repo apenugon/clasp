@@ -21,5 +21,4 @@ verify_solution() {
     --model deterministic >/dev/null
 }
 
-verify_solution "clasp-secret-handling"
 verify_solution "ts-secret-handling"
