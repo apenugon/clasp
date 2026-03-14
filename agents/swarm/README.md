@@ -29,6 +29,11 @@ The swarm integration model is:
 5. Final verification runs again
 6. The task commit fast-forwards `agents/swarm-trunk`
 
+Supervisor status is available in both human and machine-readable forms:
+
+- `bash scripts/clasp-swarm-status.sh`: lane-by-lane text summary with current run state
+- `bash scripts/clasp-swarm-status.sh --json`: structured lane status for tooling and dashboards
+
 Wave directories:
 
 - `full/`: full materialized project backlog and the default swarm target

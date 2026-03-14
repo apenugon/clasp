@@ -16,9 +16,21 @@ autopilot_test_root=""
 autopilot_test_root_2=""
 prompt_test_root=""
 prompt_test_root_2=""
+status_wave_name=""
+status_lane_root_1=""
+status_lane_root_2=""
+status_runtime_root_1=""
+status_runtime_root_2=""
+status_text_output=""
+status_json_output=""
+status_live_pid=""
 
 cleanup() {
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}"
+  if [[ -n "${status_live_pid:-}" ]]; then
+    kill "${status_live_pid}" >/dev/null 2>&1 || true
+  fi
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}"
+  rm -f "${status_text_output:-}" "${status_json_output:-}"
 }
 
 trap cleanup EXIT
@@ -393,6 +405,145 @@ for lane_dir in "${default_lanes[@]}"; do
 done
 
 bash "$project_root/scripts/clasp-swarm-status.sh" >/dev/null
+
+status_wave_name="status-test-$$"
+status_lane_root_1="$project_root/agents/swarm/$status_wave_name/01-active"
+status_lane_root_2="$project_root/agents/swarm/$status_wave_name/02-idle"
+status_runtime_root_1="$project_root/.clasp-swarm/$status_wave_name/01-active"
+status_runtime_root_2="$project_root/.clasp-swarm/$status_wave_name/02-idle"
+status_text_output="$(mktemp)"
+status_json_output="$(mktemp)"
+
+mkdir -p \
+  "$status_runtime_root_1" \
+  "$status_runtime_root_2" \
+  "$status_lane_root_1" \
+  "$status_lane_root_2" \
+  "$status_runtime_root_1/completed" \
+  "$status_runtime_root_1/blocked" \
+  "$status_runtime_root_1/runs/20260314T120000Z-AA-100-sample-attempt1" \
+  "$status_runtime_root_1/runs/20260314T121500Z-AA-100-sample-attempt2" \
+  "$status_runtime_root_2/completed" \
+  "$status_runtime_root_2/blocked" \
+  "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1"
+
+printf '%s\n' "AA-100-sample" > "$status_runtime_root_1/current-task.txt"
+printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-001"
+printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-002"
+printf '%s\n' '{}' > "$status_runtime_root_1/blocked/AA-003.json"
+cat > "$status_runtime_root_1/runs/20260314T120000Z-AA-100-sample-attempt1/verifier-report.json" <<'EOF'
+{
+  "verdict": "fail",
+  "summary": "older failed attempt",
+  "findings": [],
+  "tests_run": [],
+  "follow_up": []
+}
+EOF
+cat > "$status_runtime_root_1/runs/20260314T121500Z-AA-100-sample-attempt2/verifier-report.json" <<'EOF'
+{
+  "verdict": "pass",
+  "summary": "latest verifier summary",
+  "findings": [],
+  "tests_run": [],
+  "follow_up": []
+}
+EOF
+cat > "$status_runtime_root_1/lane.log" <<'EOF'
+line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+EOF
+
+printf '%s\n' "done" > "$status_runtime_root_2/completed/BB-001"
+cat > "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1/builder-report.json" <<'EOF'
+{
+  "summary": "builder summary only",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+EOF
+cat > "$status_runtime_root_2/lane.log" <<'EOF'
+idle line 1
+idle line 2
+EOF
+
+sleep 30 >/dev/null 2>&1 &
+status_live_pid="$!"
+printf '%s\n' "$status_live_pid" > "$status_runtime_root_1/pid"
+kill "$status_live_pid" >/dev/null 2>&1 || true
+wait "$status_live_pid" 2>/dev/null || true
+
+sleep 30 >/dev/null 2>&1 &
+status_live_pid="$!"
+printf '%s\n' "$status_live_pid" > "$status_runtime_root_2/pid"
+
+bash "$project_root/scripts/clasp-swarm-status.sh" "$status_wave_name" > "$status_text_output"
+bash "$project_root/scripts/clasp-swarm-status.sh" --json "$status_wave_name" > "$status_json_output"
+
+bash -lc "
+  set -euo pipefail
+  text=\$(cat '$status_text_output')
+  [[ \"\$text\" == *'wave: $status_wave_name'* ]]
+  [[ \"\$text\" == *'summary: lanes=2 running=1 stopped=1 completed=3 blocked=1'* ]]
+  [[ \"\$text\" == *'lane: 01-active'* ]]
+  [[ \"\$text\" == *'stale pid: '* ]]
+  [[ \"\$text\" == *'current task: AA-100-sample'* ]]
+  [[ \"\$text\" == *'latest run: 20260314T121500Z-AA-100-sample-attempt2'* ]]
+  [[ \"\$text\" == *'run status: pass'* ]]
+  [[ \"\$text\" == *'run summary: latest verifier summary'* ]]
+  [[ \"\$text\" == *'lane: 02-idle'* ]]
+  [[ \"\$text\" == *'pid: $status_live_pid'* ]]
+  [[ \"\$text\" == *'run status: builder-complete'* ]]
+  [[ \"\$text\" == *'run summary: builder summary only'* ]]
+  [[ \"\$text\" == *'line 6'* ]]
+  [[ \"\$text\" == *'idle line 2'* ]]
+  node - <<'EOF' '$status_json_output' '$status_wave_name' '$status_live_pid'
+const fs = require('fs');
+const [jsonPath, expectedWave, livePid] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+if (payload.wave !== expectedWave) {
+  throw new Error(\`unexpected wave: \${payload.wave}\`);
+}
+if (payload.summary.laneCount !== 2 || payload.summary.runningCount !== 1 || payload.summary.stoppedCount !== 1) {
+  throw new Error('unexpected lane summary counts');
+}
+if (payload.summary.completedCount !== 3 || payload.summary.blockedCount !== 1) {
+  throw new Error('unexpected completion summary counts');
+}
+const active = payload.lanes.find((lane) => lane.lane === '01-active');
+const idle = payload.lanes.find((lane) => lane.lane === '02-idle');
+if (!active || !idle) {
+  throw new Error('expected both lanes in JSON output');
+}
+if (active.status !== 'stopped' || active.stalePid === null || active.currentTask !== 'AA-100-sample') {
+  throw new Error('unexpected active-lane JSON state');
+}
+if (active.latestRun?.status !== 'pass' || active.latestRun?.summary !== 'latest verifier summary') {
+  throw new Error('unexpected active-lane run summary');
+}
+if (idle.status !== 'running' || String(idle.pid) !== livePid) {
+  throw new Error('unexpected idle-lane pid state');
+}
+if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !== 'builder summary only') {
+  throw new Error('unexpected idle-lane run summary');
+}
+if (!Array.isArray(active.recentLogLines) || active.recentLogLines.at(-1) !== 'line 6') {
+  throw new Error('unexpected active-lane log tail');
+}
+if (!Array.isArray(idle.recentLogLines) || idle.recentLogLines.at(-1) !== 'idle line 2') {
+  throw new Error('unexpected idle-lane log tail');
+}
+EOF
+" >/dev/null
+
+kill "$status_live_pid" >/dev/null 2>&1 || true
+wait "$status_live_pid" 2>/dev/null || true
+status_live_pid=""
 
 markers_root="$(mktemp -d)"
 printf '%s\n' "legacy" > "$markers_root/SW-001-some-slug"
