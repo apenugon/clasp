@@ -1318,6 +1318,20 @@ checkerTests =
                   (coreDeclType decl)
               Nothing ->
                 assertFailure "expected describeConnection declaration"
+    , testCase "typechecks storage bindings that use shared schema types" $
+        case checkSource "provider-runtime" providerRuntimeSource of
+          Left err ->
+            assertFailure ("expected storage binding source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignDecls = coreModuleForeignDecls checked
+            case find ((== "publishCustomer") . foreignDeclName) foreignDecls of
+              Just foreignDecl ->
+                assertEqual
+                  "publishCustomer type"
+                  (TFunction [TNamed "SupportCustomer"] (TNamed "SupportCustomer"))
+                  (foreignDeclType foreignDecl)
+              Nothing ->
+                assertFailure "expected publishCustomer foreign declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -1522,6 +1536,8 @@ checkerTests =
         assertHasCode "E_RECORD_MISSING_FIELDS" (checkSource "bad" missingRecordFieldSource)
     , testCase "rejects route handlers with the wrong response type" $
         assertHasCode "E_ROUTE_HANDLER_TYPE" (checkSource "bad" wrongRouteHandlerSource)
+    , testCase "rejects storage bindings that use bare primitive types" $
+        assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badStoragePrimitiveSource)
     , testCase "rejects projections that disclose disallowed classified fields" $
         assertHasCode "E_DISCLOSURE_POLICY" (checkSource "bad" disallowedProjectionSource)
     , testCase "rejects assignment to immutable block locals" $
@@ -4208,7 +4224,7 @@ compileTests =
               ExitSuccess ->
                 assertEqual
                   "expected support-console demo result"
-                  "{\"routeCount\":4,\"routeNames\":[\"supportDashboardRoute\",\"supportCustomerRoute\",\"supportCustomerPageRoute\",\"previewReplyRoute\"],\"hostBindingNames\":[\"generateReplyPreview\",\"publishCustomer\"],\"hostBindingRuntimeNames\":[\"provider:replyPreview\",\"storage:publishCustomer\"],\"dashboardHasPreviewForm\":true,\"dashboardHasCustomerLink\":true,\"customerCompany\":\"Northwind Studio\",\"customerEmail\":\"ops@northwind.example\",\"customerPageHasExport\":true,\"previewReply\":\"Thanks for the update. Renewal is blocked on legal review. We will send the next renewal step today.\",\"previewEscalationNeeded\":true,\"previewPageHasReply\":true,\"providerOnlyPreviewKeys\":[\"customerId\",\"escalationNeeded\",\"suggestedReply\"],\"providerOnlyDeniedStorage\":\"Unknown Clasp provider binding: publishCustomer\",\"providerOnlyBindings\":[\"generateReplyPreview\"],\"providerObservedDraft\":{\"source\":\"app-runtime\",\"keys\":[\"customerId\",\"summary\"],\"contactEmail\":false},\"storageObservedCustomer\":{\"keys\":[\"company\",\"contactEmail\",\"id\",\"plan\",\"renewalRisk\"],\"contactEmail\":\"ops@northwind.example\",\"plan\":\"enterprise\"},\"invalid\":\"summary must be a string\"}"
+                  "{\"routeCount\":4,\"routeNames\":[\"supportDashboardRoute\",\"supportCustomerRoute\",\"supportCustomerPageRoute\",\"previewReplyRoute\"],\"hostBindingNames\":[\"generateReplyPreview\",\"publishCustomer\"],\"hostBindingRuntimeNames\":[\"provider:replyPreview\",\"storage:publishCustomer\"],\"storageBindingNames\":[\"publishCustomer\"],\"storageTableNames\":[\"support_customer\"],\"storageParamSemanticType\":\"SupportCustomer\",\"storagePrimaryKeyKinds\":[\"not_null\",\"primary_key\"],\"dashboardHasPreviewForm\":true,\"dashboardHasCustomerLink\":true,\"customerCompany\":\"Northwind Studio\",\"customerEmail\":\"ops@northwind.example\",\"customerPageHasExport\":true,\"previewReply\":\"Thanks for the update. Renewal is blocked on legal review. We will send the next renewal step today.\",\"previewEscalationNeeded\":true,\"previewPageHasReply\":true,\"providerOnlyPreviewKeys\":[\"customerId\",\"escalationNeeded\",\"suggestedReply\"],\"providerOnlyDeniedStorage\":\"Unknown Clasp provider binding: publishCustomer\",\"providerOnlyBindings\":[\"generateReplyPreview\"],\"providerObservedDraft\":{\"source\":\"app-runtime\",\"keys\":[\"customerId\",\"summary\"],\"contactEmail\":false},\"storageObservedCustomer\":{\"keys\":[\"company\",\"contactEmail\",\"id\",\"plan\",\"renewalRisk\"],\"contactEmail\":\"ops@northwind.example\",\"plan\":\"enterprise\"},\"invalid\":\"summary must be a string\"}"
                   (T.strip (T.pack stdoutText))
               ExitFailure _ ->
                 assertFailure ("support-console demo script failed:\n" <> stderrText)
@@ -5081,6 +5097,21 @@ compileTests =
             assertEqual
               "expected provider contract and provider-backed page flow"
               "{\"providerKind\":\"clasp-provider-contract\",\"providerVersion\":1,\"providerNames\":[\"provider\"],\"providerOperation\":\"replyPreview\",\"providerBinding\":\"generateReplyPreview\",\"runtimeInstalled\":true,\"runtimeBindingVisible\":true,\"seenProvider\":\"provider\",\"seenOperation\":\"replyPreview\",\"seenCustomerId\":\"cust-42\",\"previewHasReply\":true,\"customerHasExport\":true}"
+              runtimeOutput
+    , testCase "storage contract derives schema-backed tables and semantic storage types from storage bindings" $ do
+        case compileSource "storage-runtime" providerRuntimeSource of
+          Left err ->
+            assertFailure ("expected storage runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/storage-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (storageRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected derived storage contract output"
+              "{\"storageKind\":\"clasp-storage-contract\",\"storageVersion\":1,\"bindingNames\":[\"publishCustomer\"],\"runtimeNames\":[\"storage:publishCustomer\"],\"tableNames\":[\"support_customer\"],\"paramSemanticType\":\"SupportCustomer\",\"returnSemanticType\":\"SupportCustomer\",\"tableSchemaType\":\"SupportCustomer\",\"tableColumnNames\":[\"company\",\"contactEmail\"],\"tableColumnTypes\":[\"Str\",\"Str\"],\"columnConstraintKinds\":[[\"not_null\"],[\"not_null\"]],\"tableDeclaration\":\"create table if not exists \\\"support_customer\\\" (\\\"company\\\" TEXT NOT NULL, \\\"contactEmail\\\" TEXT NOT NULL);\"}"
               runtimeOutput
     , testCase "sqlite runtime installs typed connection bindings and keeps live sqlite handles addressable by typed connection ids" $ do
         case compileSource "sqlite-runtime" sqliteRuntimeSource of
@@ -7752,6 +7783,17 @@ wrongRouteHandlerSource =
     , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     ]
 
+badStoragePrimitiveSource :: Text
+badStoragePrimitiveSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "foreign loadCustomer : Str -> Str = \"storage:loadCustomer\""
+    , ""
+    , "main : Str -> Str"
+    , "main value = loadCustomer value"
+    ]
+
 mismatchSource :: Text
 mismatchSource =
   T.unlines
@@ -9618,6 +9660,31 @@ providerRuntimeScript compiledPath runtimePath =
     , "  seenCustomerId: seen?.customerId ?? null,"
     , "  previewHasReply: previewHtml.includes('Reply for cust-42: Renewal is blocked on legal review.'),"
     , "  customerHasExport: customerHtml.includes('Northwind Studio') && customerHtml.includes('ops@northwind.example')"
+    , "}));"
+    ]
+
+storageRuntimeScript :: FilePath -> FilePath -> Text
+storageRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import { pathToFileURL } from 'node:url';"
+    , "import { bindingContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const compiledModule = await import(pathToFileURL(" <> show compiledPath <> ").href);"
+    , "const storageContract = bindingContractFor(compiledModule).storage;"
+    , "const binding = storageContract.bindings[0] ?? null;"
+    , "const table = storageContract.tables[0] ?? null;"
+    , "console.log(JSON.stringify({"
+    , "  storageKind: storageContract.kind,"
+    , "  storageVersion: storageContract.version,"
+    , "  bindingNames: storageContract.bindings.map((entry) => entry.name),"
+    , "  runtimeNames: storageContract.bindings.map((entry) => entry.runtimeName),"
+    , "  tableNames: storageContract.tables.map((entry) => entry.name),"
+    , "  paramSemanticType: binding?.params?.[0]?.storageType?.semanticType ?? null,"
+    , "  returnSemanticType: binding?.returns?.storageType?.semanticType ?? null,"
+    , "  tableSchemaType: table?.schemaType ?? null,"
+    , "  tableColumnNames: table?.columns?.map((column) => column.name) ?? [],"
+    , "  tableColumnTypes: table?.columns?.map((column) => column.semanticType) ?? [],"
+    , "  columnConstraintKinds: table?.columns?.map((column) => column.constraints.map((constraint) => constraint.kind)) ?? [],"
+    , "  tableDeclaration: table?.declaration ?? null"
     , "}));"
     ]
 

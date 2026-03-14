@@ -79,6 +79,12 @@ export async function runSupportConsoleDemo(compiledModule) {
   });
 
   const contract = bindingContractFor(compiledModule);
+  const storageBinding = contract.storage?.bindings?.find(
+    (binding) => binding.name === "publishCustomer"
+  );
+  const storageTable = contract.storage?.tables?.find(
+    (table) => table.schemaType === "SupportCustomer"
+  );
   const dashboardRoute = route(contract, "supportDashboardRoute");
   const customerRoute = route(contract, "supportCustomerRoute");
   const customerPageRoute = route(contract, "supportCustomerPageRoute");
@@ -126,6 +132,14 @@ export async function runSupportConsoleDemo(compiledModule) {
     routeNames: contract.routes.map((candidate) => candidate.name),
     hostBindingNames: contract.hostBindings.map((binding) => binding.name),
     hostBindingRuntimeNames: contract.hostBindings.map((binding) => binding.runtimeName),
+    storageBindingNames: contract.storage?.bindings?.map((binding) => binding.name) ?? [],
+    storageTableNames: contract.storage?.tables?.map((table) => table.name) ?? [],
+    storageParamSemanticType:
+      storageBinding?.params?.[0]?.storageType?.semanticType ?? null,
+    storagePrimaryKeyKinds:
+      storageTable?.columns?.find((column) => column.name === "id")?.constraints?.map(
+        (constraint) => constraint.kind
+      ) ?? [],
     dashboardHasPreviewForm:
       dashboardHtml.includes('action="/support/preview"') &&
       dashboardHtml.includes("Conversation summary") &&

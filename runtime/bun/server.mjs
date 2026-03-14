@@ -23,6 +23,8 @@ export function bindingContractFor(compiledModule) {
       hostBindings,
       providers:
         contract.providers ?? defaultProviderContract(compiledModule, hostBindings),
+      storage:
+        contract.storage ?? defaultStorageContract(compiledModule, hostBindings),
       sqlite: contract.sqlite ?? defaultSqliteContract(hostBindings),
       nativeInterop:
         contract.nativeInterop ??
@@ -45,6 +47,7 @@ export function bindingContractFor(compiledModule) {
     module: compiledModule?.__claspModule ?? null,
     hostBindings,
     providers: defaultProviderContract(compiledModule, hostBindings),
+    storage: defaultStorageContract(compiledModule, hostBindings),
     sqlite: defaultSqliteContract(hostBindings),
     nativeInterop:
       compiledModule?.__claspNativeInterop ??
@@ -533,6 +536,86 @@ export function providerContractFor(compiledModule) {
   return bindingContractFor(compiledModule).providers;
 }
 
+function defaultStorageContract(compiledModule, hostBindings) {
+  const bindings = (hostBindings ?? [])
+    .map((binding) => defaultStorageBinding(compiledModule, binding))
+    .filter((binding) => binding !== null);
+  const tableMap = new Map();
+
+  for (const binding of bindings) {
+    for (const table of binding.tables) {
+      const key = `${table.schemaType}:${table.name}`;
+
+      if (!tableMap.has(key)) {
+        tableMap.set(key, table);
+      }
+    }
+  }
+
+  return Object.freeze({
+    kind: "clasp-storage-contract",
+    version: 1,
+    bindings: Object.freeze(bindings),
+    tables: Object.freeze(Array.from(tableMap.values()))
+  });
+}
+
+function defaultStorageBinding(compiledModule, binding) {
+  const descriptor = parseStorageRuntimeName(binding?.runtimeName);
+
+  if (!descriptor) {
+    return null;
+  }
+
+  const params = Object.freeze(
+    (binding?.params ?? []).map((param) =>
+      Object.freeze({
+        ...param,
+        storageType: describeStorageType(param?.type, param?.schema)
+      })
+    )
+  );
+  const returns =
+    binding?.returns == null
+      ? null
+      : Object.freeze({
+          ...binding.returns,
+          storageType: describeStorageType(binding.returns?.type, binding.returns?.schema)
+        });
+  const tables = collectStorageTables([...params, ...(returns ? [returns] : [])]);
+
+  return Object.freeze({
+    name: binding?.name ?? descriptor.operation,
+    runtimeName: binding?.runtimeName ?? `storage:${descriptor.operation}`,
+    operation: descriptor.operation,
+    capability: Object.freeze({
+      id: `capability:storage:${descriptor.operation}`,
+      kind: "storage-operation",
+      runtimeName: binding?.runtimeName ?? `storage:${descriptor.operation}`
+    }),
+    params,
+    returns,
+    tables: Object.freeze(tables)
+  });
+}
+
+function parseStorageRuntimeName(runtimeName) {
+  if (typeof runtimeName !== "string") {
+    return null;
+  }
+
+  const parts = runtimeName.split(":");
+
+  if (parts[0] !== "storage" || parts.length < 2) {
+    return null;
+  }
+
+  return {
+    namespace: "storage",
+    operation: parts.slice(1).join(":")
+  };
+}
+
 function defaultSqliteContract(hostBindings) {
   const bindings = (hostBindings ?? [])
     .map(defaultSqliteBinding)
@@ -585,6 +668,10 @@ function parseSqliteRuntimeName(runtimeName) {
 
 export function sqliteContractFor(compiledModule) {
   return bindingContractFor(compiledModule).sqlite;
+}
+
+export function storageContractFor(compiledModule) {
+  return bindingContractFor(compiledModule).storage;
 }
 
 export function createSqliteRuntime(compiledModule, options = {}) {
@@ -902,6 +989,219 @@ function invokeSqliteBinding(runtime, binding, args, runtimeOptions) {
   }
 
   return result;
+}
+
+function describeStorageType(typeName, schema) {
+  if (typeof typeName === "string" && typeName.startsWith("[") && typeName.endsWith("]")) {
+    const itemType = typeName.slice(1, -1);
+    const itemSchema = schema?.kind === "list" ? schema.item : null;
+    return Object.freeze({
+      kind: "list",
+      semanticType: typeName,
+      item: describeStorageType(itemType, itemSchema)
+    });
+  }
+
+  const semanticType = typeof typeName === "string" && typeName !== ""
+    ? typeName
+    : storageSchemaTypeName(schema);
+
+  switch (schema?.kind) {
+    case "record":
+      return Object.freeze({
+        kind: "record",
+        semanticType,
+        schemaType: semanticType,
+        tableName: storageTableName(semanticType)
+      });
+    case "enum":
+      return Object.freeze({
+        kind: "enum",
+        semanticType,
+        schemaType: semanticType,
+        affinity: "TEXT"
+      });
+    case "int":
+      return Object.freeze({
+        kind: "primitive",
+        semanticType: semanticType ?? "Int",
+        affinity: "INTEGER"
+      });
+    case "str":
+      return Object.freeze({
+        kind: "primitive",
+        semanticType: semanticType ?? "Str",
+        affinity: "TEXT"
+      });
+    case "bool":
+      return Object.freeze({
+        kind: "primitive",
+        semanticType: semanticType ?? "Bool",
+        affinity: "INTEGER"
+      });
+    default:
+      return semanticType === null
+        ? null
+        : Object.freeze({
+            kind: "semantic",
+            semanticType
+          });
+  }
+}
+
+function collectStorageTables(boundaries) {
+  const tableMap = new Map();
+
+  for (const boundary of boundaries) {
+    collectStorageTablesFromType(boundary?.type, boundary?.schema, tableMap);
+  }
+
+  return Array.from(tableMap.values());
+}
+
+function collectStorageTablesFromType(typeName, schema, tableMap) {
+  if (typeof typeName === "string" && typeName.startsWith("[") && typeName.endsWith("]")) {
+    collectStorageTablesFromType(typeName.slice(1, -1), schema?.kind === "list" ? schema.item : null, tableMap);
+    return;
+  }
+
+  if (schema?.kind !== "record") {
+    return;
+  }
+
+  const schemaType = typeof typeName === "string" && typeName !== "" ? typeName : storageSchemaTypeName(schema);
+
+  if (typeof schemaType !== "string" || schemaType === "") {
+    return;
+  }
+
+  const key = `${schemaType}:${storageTableName(schemaType)}`;
+
+  if (!tableMap.has(key)) {
+    tableMap.set(key, createStorageTable(schemaType, schema));
+  }
+}
+
+function createStorageTable(schemaType, schema) {
+  const tableName = storageTableName(schemaType);
+  const columns = Object.freeze(
+    Object.entries(schema?.fields ?? {}).map(([name, field], index) =>
+      createStorageColumn(name, field?.schema ?? null, field?.classification ?? "public", index)
+    )
+  );
+  const declaration = `create table if not exists "${tableName}" (${columns.map((column) => column.declaration).join(", ")});`;
+
+  return Object.freeze({
+    name: tableName,
+    schemaType,
+    schema,
+    columns,
+    declaration
+  });
+}
+
+function createStorageColumn(name, schema, classification, index) {
+  const semanticType = storageSchemaTypeName(schema);
+  const affinity = storageColumnAffinity(schema);
+  const constraints = storageColumnConstraints(name, schema, index);
+  const declaration = [
+    `"${name}"`,
+    affinity,
+    ...constraints.map((constraint) => constraint.sql)
+  ].join(" ");
+
+  return Object.freeze({
+    name,
+    ordinal: index,
+    semanticType,
+    classification,
+    affinity,
+    constraints: Object.freeze(constraints),
+    declaration
+  });
+}
+
+function storageColumnAffinity(schema) {
+  switch (schema?.kind) {
+    case "int":
+    case "bool":
+      return "INTEGER";
+    case "record":
+    case "list":
+      return "TEXT";
+    case "enum":
+    case "str":
+    default:
+      return "TEXT";
+  }
+}
+
+function storageColumnConstraints(name, schema, index) {
+  const constraints = [
+    Object.freeze({
+      kind: "not_null",
+      sql: "NOT NULL"
+    })
+  ];
+
+  if (index === 0 && name === "id") {
+    constraints.push(
+      Object.freeze({
+        kind: "primary_key",
+        sql: "PRIMARY KEY"
+      })
+    );
+  }
+
+  if (schema?.kind === "bool") {
+    constraints.push(
+      Object.freeze({
+        kind: "boolean_domain",
+        sql: `CHECK("${name}" IN (0, 1))`
+      })
+    );
+  }
+
+  if (schema?.kind === "record" || schema?.kind === "list") {
+    constraints.push(
+      Object.freeze({
+        kind: "json_valid",
+        sql: `CHECK(json_valid("${name}"))`
+      })
+    );
+  }
+
+  return constraints;
+}
+
+function storageSchemaTypeName(schema) {
+  switch (schema?.kind) {
+    case "record":
+    case "enum":
+    case "partial-record":
+      return typeof schema.name === "string" && schema.name !== "" ? schema.name : null;
+    case "list": {
+      const itemType = storageSchemaTypeName(schema.item);
+      return itemType === null ? null : `[${itemType}]`;
+    }
+    case "int":
+      return "Int";
+    case "str":
+      return "Str";
+    case "bool":
+      return "Bool";
+    default:
+      return null;
+  }
+}
+
+function storageTableName(typeName) {
+  return String(typeName)
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\[\]\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
 }
 
 const sqliteQueryResultUnmapped = Symbol("clasp.sqlite.queryResultUnmapped");

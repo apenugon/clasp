@@ -2029,8 +2029,8 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
           (foreignDeclType foreignDecl)
         case foreignDeclType foreignDecl of
-          TFunction _ _ ->
-            pure ()
+          TFunction _ _ -> do
+            ensureStorageForeignDecl foreignDecl
           _ ->
             Left . diagnosticBundle $
               [ diagnostic
@@ -2040,6 +2040,48 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
                   ["Use an explicit function type for foreign runtime bindings."]
                   [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
               ]
+
+    ensureStorageForeignDecl foreignDecl
+      | "storage:" `T.isPrefixOf` foreignDeclRuntimeName foreignDecl = do
+          let (paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
+          zipWithM_
+            (\index paramType -> ensureStorageBoundaryType foreignDecl ("parameter " <> T.pack (show index)) paramType)
+            [(1 :: Int) ..]
+            paramTypes
+          ensureStorageBoundaryType foreignDecl "return value" returnType
+      | otherwise =
+          pure ()
+
+    ensureStorageBoundaryType foreignDecl role typ =
+      case typ of
+        TInt ->
+          storageBoundaryTypeError foreignDecl role typ
+        TStr ->
+          storageBoundaryTypeError foreignDecl role typ
+        TBool ->
+          storageBoundaryTypeError foreignDecl role typ
+        TList itemType ->
+          ensureStorageBoundaryType foreignDecl (role <> " item") itemType
+        TNamed name
+          | Map.member name recordDeclEnv ->
+              pure ()
+          | maybe False isJsonEnumTypeDecl (Map.lookup name typeDeclEnv) ->
+              pure ()
+          | otherwise ->
+              storageBoundaryTypeError foreignDecl role typ
+        TFunction _ _ ->
+          storageBoundaryTypeError foreignDecl role typ
+
+    storageBoundaryTypeError foreignDecl role typ =
+      Left . diagnosticBundle $
+        [ diagnostic
+            "E_STORAGE_BOUNDARY_TYPE"
+            ("Storage binding `" <> foreignDeclName foreignDecl <> "` must use shared semantic schema types for its " <> role <> ", not bare `" <> renderType typ <> "`.")
+            (Just (foreignDeclAnnotationSpan foreignDecl))
+            [ "Wrap storage-facing values in named record or enum schema types before exposing them through `storage:*` bindings."
+            ]
+            [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+        ]
 
     checkHookDeclTypes hookDecl = do
       ensureHookRecordType hookDecl (hookDeclRequestType hookDecl) (hookDeclRequestTypeSpan hookDecl) "request"
@@ -2173,6 +2215,14 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
               ["Declare `" <> typeName <> "` as a record or return `Page` or `Redirect` from the route."]
               []
           ]
+
+splitFunctionType :: Type -> ([Type], Type)
+splitFunctionType typ =
+  case typ of
+    TFunction args result ->
+      (args, result)
+    _ ->
+      ([], typ)
 
 ensureUniqueRecordFields :: RecordDecl -> Either DiagnosticBundle ()
 ensureUniqueRecordFields recordDecl = go Map.empty (recordDeclFields recordDecl)
