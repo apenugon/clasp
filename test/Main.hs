@@ -83,6 +83,7 @@ import Clasp.Core
 import Clasp.Diagnostic
   ( Diagnostic (..)
   , DiagnosticBundle (..)
+  , diagnostic
   , renderDiagnosticBundle
   , renderDiagnosticBundleJson
   )
@@ -1896,6 +1897,16 @@ diagnosticTests =
                 assertFailure "expected details array in diagnostic json"
           Right _ ->
             assertFailure "expected parse failure"
+    , testCase "current structured diagnostic codes avoid the generic fallback hint" $ do
+        codes <- currentStructuredDiagnosticCodes
+        let uncoveredCodes =
+              filter
+                (\code ->
+                    diagnosticFixHints (diagnostic code "summary" Nothing [] [])
+                      == [genericDiagnosticFixHint]
+                )
+                codes
+        assertEqual "expected dedicated hints for current diagnostic codes" [] uncoveredCodes
     , testCase "pretty rendering includes related locations" $
         case checkSource "bad" duplicateDeclSource of
           Left bundle -> do
@@ -5983,6 +5994,23 @@ assertUnsupportedPrimaryCompilerJson stderrText = do
       assertFailure "expected diagnostics array for unsupported primary compiler request"
   assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
   assertEqual "diagnostic code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
+
+currentStructuredDiagnosticCodes :: IO [Text]
+currentStructuredDiagnosticCodes = do
+  sourceFiles <- mapM TIO.readFile ["src/Clasp/Checker.hs", "src/Clasp/Compiler.hs", "src/Clasp/Core.hs", "src/Clasp/Loader.hs", "src/Clasp/Parser.hs"]
+  let codes =
+        Set.toAscList $
+          Set.fromList
+            [ quoted
+            | quoted <- concatMap (T.splitOn "\"") sourceFiles
+            , T.isPrefixOf "E_" quoted
+            , T.all (\char -> char == '_' || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9')) quoted
+            ]
+  pure codes
+
+genericDiagnosticFixHint :: Text
+genericDiagnosticFixHint =
+  "Review the diagnostic details and the highlighted code, then update the program to satisfy the reported constraint."
 
 findDecl :: Text -> [Decl] -> Maybe Decl
 findDecl target =

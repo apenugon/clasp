@@ -160,12 +160,94 @@ defaultFixHints code =
       ["Define the route handler first, or update the route to call an existing declaration."]
     "E_UNKNOWN_TYPE" ->
       ["Use a declared type name, or add the missing type declaration."]
+    "E_ASSIGNMENT_TARGET" ->
+      ["Assign only to mutable block locals, or change the binding so the updated name is introduced with `let mut` in the current scope."]
+    "E_EMPTY_SUPERVISOR" ->
+      ["Add at least one child workflow or supervisor to the supervisor declaration."]
+    "E_FOR_ITERABLE" ->
+      ["Iterate over a list value, or change the loop source so it produces a list."]
+    "E_HOOK_HANDLER_TYPE" ->
+      ["Make the hook handler accept the declared input schema and return the declared output schema."]
+    "E_HOOK_TYPE" ->
+      ["Declare hook input and output schemas with named record types."]
+    "E_MULTIPLE_SUPERVISOR_PARENTS" ->
+      ["Attach each workflow or child supervisor to exactly one parent supervisor."]
+    "E_PRIMARY_COMPILER_RUNTIME" ->
+      ["Fix the hosted compiler runtime failure, or rerun with `--compiler=bootstrap` while the hosted path is unavailable."]
+    "E_PRIMARY_COMPILER_UNSUPPORTED" ->
+      ["Use `--compiler=bootstrap` for sources the hosted compiler does not support yet, or switch to a supported entrypoint."]
+    "E_RETURN_OUTSIDE_FUNCTION" ->
+      ["Move the `return` into a function body, or rewrite the block as a plain expression."]
+    "E_SQLITE_UNSAFE_DECL" ->
+      ["Mark the foreign declaration as `unsafe sqlite`, or switch to a supported storage primitive."]
+    "E_SQLITE_UNSAFE_ROW_CONTRACT" ->
+      ["Use named record schemas for sqlite row inputs and outputs so the boundary contract stays explicit."]
+    "E_STORAGE_BOUNDARY_TYPE" ->
+      ["Wrap storage-facing inputs and outputs in named record schemas instead of bare primitive types."]
+    "E_SUPERVISOR_CYCLE" ->
+      ["Remove the cyclic supervisor edge so the hierarchy forms a tree."]
+    "E_SUPERVISOR_SELF_REFERENCE" ->
+      ["Remove the self-reference, or introduce a distinct child supervisor instead of reusing the same declaration."]
+    "E_TOOL_SCHEMA_TYPE" ->
+      ["Use named record schemas for tool inputs and outputs."]
+    "E_UNKNOWN_AGENT_ROLE" ->
+      ["Declare the referenced agent role before assigning it to an agent, or correct the role name."]
+    "E_UNKNOWN_AGENT_ROLE_GUIDE" ->
+      ["Declare the referenced guide before attaching it to the agent role, or correct the guide name."]
+    "E_UNKNOWN_AGENT_ROLE_POLICY" ->
+      ["Declare the referenced policy before attaching it to the agent role, or correct the policy name."]
+    "E_UNKNOWN_DOMAIN_EVENT_OBJECT" ->
+      ["Point the domain event at an existing domain object declaration."]
+    "E_UNKNOWN_DOMAIN_EVENT_SCHEMA" ->
+      ["Use a declared record schema for the domain event payload."]
+    "E_UNKNOWN_DOMAIN_OBJECT_SCHEMA" ->
+      ["Use a declared record schema for the domain object state."]
+    "E_UNKNOWN_EXPERIMENT_GOAL" ->
+      ["Reference a declared goal from the experiment, or correct the goal name."]
+    "E_UNKNOWN_FEEDBACK_OBJECT" ->
+      ["Reference an existing domain object from the feedback declaration."]
+    "E_UNKNOWN_FEEDBACK_SCHEMA" ->
+      ["Use a declared record schema for the feedback payload."]
+    "E_UNKNOWN_GOAL_METRIC" ->
+      ["Reference a declared metric from the goal, or correct the metric name."]
+    "E_UNKNOWN_HOOK_HANDLER" ->
+      ["Define the hook handler first, or update the hook to call an existing declaration."]
+    "E_UNKNOWN_MERGE_GATE_VERIFIER" ->
+      ["Reference a declared verifier from the merge gate, or correct the verifier name."]
+    "E_UNKNOWN_METRIC_OBJECT" ->
+      ["Reference an existing domain object from the metric declaration."]
+    "E_UNKNOWN_METRIC_SCHEMA" ->
+      ["Use a declared record schema for the metric input payload."]
+    "E_UNKNOWN_ROLLOUT_EXPERIMENT" ->
+      ["Reference a declared experiment from the rollout, or correct the experiment name."]
+    "E_UNKNOWN_SUPERVISOR_CHILD" ->
+      ["Reference an existing workflow or supervisor as the child entry, or correct the child name."]
+    "E_UNKNOWN_SUPERVISOR_WORKFLOW" ->
+      ["Reference a declared workflow from the supervisor, or correct the workflow name."]
+    "E_UNKNOWN_TOOLSERVER" ->
+      ["Declare the referenced tool server before binding tools to it, or correct the server name."]
+    "E_UNKNOWN_TOOLSERVER_POLICY" ->
+      ["Declare the referenced policy before attaching it to the tool server, or correct the policy name."]
+    "E_UNKNOWN_VERIFIER_TOOL" ->
+      ["Reference a declared tool from the verifier, or correct the tool name."]
+    "E_UNKNOWN_WORKFLOW_CONSTRAINT" ->
+      ["Define the workflow constraint handler first, or update the workflow to use an existing declaration."]
+    "E_WORKFLOW_CONSTRAINT_TYPE" ->
+      ["Make each workflow constraint handler accept the workflow state schema and return `Bool`."]
+    "E_WORKFLOW_STATE_TYPE" ->
+      ["Declare workflow state with a named record schema."]
     "E_IMPORT_NOT_FOUND" ->
       ["Create the imported module, or update the import path to an existing file."]
     "E_IMPORT_NAME" ->
       ["Make the imported module name match the file and import statement."]
     "E_IMPORT_CYCLE" ->
       ["Break the import cycle by extracting shared declarations into a separate module."]
+    "E_FOREIGN_PACKAGE_DECLARATION_NOT_FOUND" ->
+      ["Add the missing exported declaration to the foreign package, or update the import to target an existing declaration."]
+    "E_FOREIGN_PACKAGE_EXPORT_NOT_FOUND" ->
+      ["Export the requested value from the foreign package, or update the import to a valid export name."]
+    "E_FOREIGN_PACKAGE_SIGNATURE_MISMATCH" ->
+      ["Make the Clasp foreign declaration signature match the runtime package export."]
     "E_SEMANTIC_EDIT_TARGET" ->
       ["Choose an existing declaration or schema as the semantic edit target."]
     "E_SEMANTIC_EDIT_CONFLICT" ->
