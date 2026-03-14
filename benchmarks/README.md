@@ -61,6 +61,8 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-interop-boundary`: mirrored handwritten JavaScript refinement baseline for the same unexpected-foreign-value blame surface
 - `benchmarks/tasks/clasp-secret-handling`: compiler-managed secret-redaction, policy-gated access, and blame-quality task for declared secrets
 - `benchmarks/tasks/ts-secret-handling`: mirrored handwritten JavaScript baseline for the same declared-secret handling surface
+- `benchmarks/tasks/clasp-audit-log`: compiler-managed audit-log task covering typed events, redaction, retention, and root-cause traceability across routes, tools, workflows, and secret access
+- `benchmarks/tasks/ts-audit-log`: mirrored handwritten JavaScript baseline for the same audit-log surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
 
@@ -325,6 +327,8 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `ts-interop-boundary`: mirrored handwritten refinement and blame-reporting baseline
 - `clasp-secret-handling`: compiler-managed secret redaction, policy-gated access, and root-cause blame for declared secrets
 - `ts-secret-handling`: mirrored handwritten secret redaction, policy-gated access, and blame-reporting baseline
+- `clasp-audit-log`: compiler-managed typed audit events, redaction policy, retention rules, and cross-surface root-cause traceability
+- `ts-audit-log`: mirrored handwritten audit-log baseline for the same route, tool, workflow, and secret-access surface
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
 - `clasp-external-adaptation`: reply-rate-driven bounded adaptation over the Clasp lead outreach demo
 - `ts-external-adaptation`: mirrored TypeScript reply-rate adaptation benchmark with the same bounded remediation contract

@@ -28,6 +28,8 @@ printf '%s\n' "$list_output" | grep -q '^clasp-interop-boundary[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-interop-boundary[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-secret-handling[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-secret-handling[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-audit-log[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-audit-log[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
@@ -290,6 +292,8 @@ check_incomplete_task clasp-interop-boundary
 check_incomplete_task ts-interop-boundary
 check_incomplete_task clasp-secret-handling
 check_incomplete_task ts-secret-handling
+check_incomplete_task clasp-audit-log
+check_incomplete_task ts-audit-log
 check_incomplete_task clasp-compiler-maintenance
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
@@ -390,6 +394,14 @@ assert_not_contains "$clasp_secret_workspace/Main.clasp" 'secret "SEARCH_API_TOK
 
 ts_secret_workspace="$workspace_root/ts-secret-handling"
 assert_contains "$ts_secret_workspace/src/main.mjs" 'secretNames: Object.freeze([])'
+
+clasp_audit_workspace="$workspace_root/clasp-audit-log"
+assert_contains "$clasp_audit_workspace/Main.clasp" 'retentionDays = 7'
+assert_not_contains "$clasp_audit_workspace/Main.clasp" 'TypedRouteAudit'
+
+ts_audit_workspace="$workspace_root/ts-audit-log"
+assert_contains "$ts_audit_workspace/src/main.mjs" 'retentionDays: 7'
+assert_contains "$ts_audit_workspace/src/main.mjs" 'typedEventKinds: Object.freeze(["route", "tool", "workflow"])'
 
 compiler_maintenance_workspace="$workspace_root/clasp-compiler-maintenance"
 assert_file_exists "$compiler_maintenance_workspace/benchmark-prep/Main.context.json"

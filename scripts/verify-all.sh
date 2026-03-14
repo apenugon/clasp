@@ -18,6 +18,7 @@ nix develop -c bash -lc "
   bash benchmarks/test-foreign-interop.sh
   bash benchmarks/test-interop-boundary.sh
   bash benchmarks/test-secret-handling.sh
+  bash benchmarks/test-audit-log.sh
   bash benchmarks/test-backend-benchmarks.sh
   bash benchmarks/test-series-summary.sh
 "

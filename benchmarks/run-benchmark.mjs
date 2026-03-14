@@ -59,6 +59,10 @@ const taskSetAliases = {
     "clasp-secret-handling",
     "ts-secret-handling"
   ],
+  "audit-log": [
+    "clasp-audit-log",
+    "ts-audit-log"
+  ],
   "npm-interop": [
     "clasp-npm-interop",
     "ts-npm-interop"
@@ -147,6 +151,13 @@ const comparisonTaskFamilies = [
     comparisonLabel: "secret-handling-comparison",
     leftTaskId: "clasp-secret-handling",
     rightTaskId: "ts-secret-handling",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "audit-log-comparison",
+    leftTaskId: "clasp-audit-log",
+    rightTaskId: "ts-audit-log",
     leftLabel: "clasp",
     rightLabel: "ts"
   },

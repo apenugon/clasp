@@ -151,6 +151,10 @@ write_result "2026-03-01T10-12-47.000Z--clasp-secret-handling--codex.json" "clas
 write_result "2026-03-01T10-12-48.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:48.000Z" 90 120 102 true 0
 write_result "2026-03-01T10-12-49.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:49.000Z" 150 170 150 false 1
 write_result "2026-03-01T10-12-50.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:50.000Z" 160 175 155 true 0
+write_result "2026-03-01T10-12-51.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:51.000Z" 100 140 120 true 0
+write_result "2026-03-01T10-12-52.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:52.000Z" 110 150 130 true 0
+write_result "2026-03-01T10-12-53.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:53.000Z" 190 205 180 false 1
+write_result "2026-03-01T10-12-54.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:54.000Z" 210 215 190 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -338,6 +342,18 @@ printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    timeToGreenDelta
 printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    tokenDelta: -58'
 printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    uncachedTokenDelta: -53'
 
+audit_log_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes audit-log-a)"
+printf '%s\n' "$audit_log_summary_output" | grep -Fq $'clasp-audit-log\tcodex\tgpt-5.4'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq $'ts-audit-log\tcodex\tgpt-5.4'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq 'audit-log-comparison'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq $'  codex\tgpt-5.4\taudit-log-a'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    tokenDelta: -65'
+printf '%s\n' "$audit_log_summary_output" | grep -Fq '    uncachedTokenDelta: -60'
+
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
 printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
 printf '%s\n' "$public_app_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpublic-app'
@@ -442,6 +458,12 @@ PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/be
 secret_handling_command_log="$(cat "$tmp_bin/nix.log")"
 printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run clasp-secret-handling'
 printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run ts-secret-handling'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" audit-log 2 audit-log-a gpt-5.4
+audit_log_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$audit_log_command_log" | grep -Fq 'run clasp-audit-log'
+printf '%s\n' "$audit_log_command_log" | grep -Fq 'run ts-audit-log'
 printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-1'
 printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-2'
 
