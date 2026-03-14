@@ -745,13 +745,8 @@ renderModule :: Module -> Text
 renderModule modl =
   T.intercalate
     "\n\n"
-    (["module " <> unModuleName (moduleName modl)] <> importSections <> topLevelSections)
+    (renderModuleHeader modl : topLevelSections)
   where
-    importSections =
-      case moduleImports modl of
-        [] -> []
-        imports ->
-          [T.dropWhileEnd (== '\n') (T.unlines (fmap renderImportDecl imports))]
     topLevelSections =
       fmap renderSection . filter (not . null) $
         [ fmap renderTypeDecl (moduleTypeDecls modl)
@@ -780,13 +775,18 @@ renderModule modl =
         , fmap renderDecl (moduleDecls modl)
         ]
 
+renderModuleHeader :: Module -> Text
+renderModuleHeader modl =
+  "module "
+    <> unModuleName (moduleName modl)
+    <> case moduleImports modl of
+      [] -> ""
+      imports ->
+        " with " <> T.intercalate ", " (fmap (unModuleName . importDeclModule) imports)
+
 renderSection :: [Text] -> Text
 renderSection entries =
   T.dropWhileEnd (== '\n') (T.unlines entries)
-
-renderImportDecl :: ImportDecl -> Text
-renderImportDecl importDecl =
-  "import " <> unModuleName (importDeclModule importDecl)
 
 renderTypeDecl :: TypeDecl -> Text
 renderTypeDecl typeDecl =

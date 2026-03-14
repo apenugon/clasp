@@ -115,11 +115,17 @@ The text and path helpers are emitted with default JavaScript behavior. The file
 Every `Clasp` source file in `v0` has:
 
 1. An optional module declaration
-2. Zero or more file-level imports
+2. Zero or more imports, either attached to the module declaration through `with` or written as separate `import` lines
 3. Zero or more top-level type, record, domain object, domain event, metric, goal, experiment, rollout, workflow, supervisor, guide, hook, role, agent, toolserver, tool, verifier, mergegate, foreign, or route declarations
 4. One or more top-level declarations
 
 When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
+
+When a module declaration is present, it may attach imports directly in the header:
+
+```clasp
+module Main with Shared.User, Shared.Team
+```
 
 Workflows declare a named durable state model with a record-backed `state` field. They can also attach optional `invariant`, `precondition`, and `postcondition` handlers, each typed as `State -> Bool`, so generated runtimes can enforce state-schema checks at checkpoint, resume, start, delivery, replay, and upgrade boundaries:
 
@@ -368,7 +374,7 @@ route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summa
 
 ```text
 module      ::= module-header? import* top-level+
-module-header ::= "module" module-name
+module-header ::= "module" module-name ("with" module-name ("," module-name)*)?
 module-name ::= segment ("." segment)*
 segment     ::= upper-ident
 import      ::= "import" module-name

@@ -159,16 +159,35 @@ parseModule path source =
 moduleParser :: FilePath -> Parser (ModuleName, [ImportDecl], [TopLevelItem])
 moduleParser path = do
   scn
-  explicitName <- optional (try moduleDeclParser)
+  explicitHeader <- optional (try moduleDeclParser)
   scn
   imports <- many importParser
   items <- some topLevelItemParser
-  pure (ModuleName (fromMaybe (inferModuleName path) explicitName), imports, items)
+  let (explicitName, headerImports) = fromMaybe (inferModuleName path, []) explicitHeader
+  pure (ModuleName explicitName, headerImports <> imports, items)
 
-moduleDeclParser :: Parser Text
+moduleDeclParser :: Parser (Text, [ImportDecl])
 moduleDeclParser = do
   keyword "module"
-  moduleNameParser
+  moduleName <- moduleNameParser
+  headerImports <- fromMaybe [] <$> optional (try compactImportListParser)
+  pure (moduleName, headerImports)
+
+compactImportListParser :: Parser [ImportDecl]
+compactImportListParser = do
+  keyword "with"
+  sepBy1 compactImportParser (symbol ",")
+
+compactImportParser :: Parser ImportDecl
+compactImportParser = do
+  start <- getSourcePos
+  importName <- moduleNameParser
+  end <- getSourcePos
+  pure
+    ImportDecl
+      { importDeclModule = ModuleName importName
+      , importDeclSpan = makeSourceSpan start end
+      }
 
 inferModuleName :: FilePath -> Text
 inferModuleName path =

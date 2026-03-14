@@ -162,6 +162,7 @@ import Clasp.Syntax
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , ImportDecl (..)
   , MatchBranch (..)
   , MetricDecl (..)
   , MergeGateDecl (..)
@@ -294,6 +295,25 @@ parserTests =
           Right modl -> do
             assertEqual "inferred module name" (ModuleName "Main") (moduleName modl)
             assertEqual "import count" 1 (length (moduleImports modl))
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EString _ "ready" ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected string literal body, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
+    , testCase "parses compact module headers with imports" $
+        case parseSource "Main.clasp" compactHeaderMainSource of
+          Left err ->
+            assertFailure ("expected compact header source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            assertEqual "module name" (ModuleName "Main") (moduleName modl)
+            assertEqual
+              "header imports"
+              [ModuleName "Shared.User", ModuleName "Shared.Team"]
+              (fmap importDeclModule (moduleImports modl))
             case findDecl "main" (moduleDecls modl) of
               Just decl ->
                 case declBody decl of
@@ -4935,6 +4955,23 @@ compileTests =
               assertFailure ("expected headerless imported project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
             Right checkedModule ->
               assertEqual "merged module name" (ModuleName "Main") (coreModuleName checkedModule)
+    , testCase "compileEntry runs compact header imports end to end" $
+        withProjectFiles "compile-import-compact-header" compactHeaderImportSuccessFiles $ \root -> do
+          result <- compileEntry (root </> "Main.clasp")
+          case result of
+            Left err ->
+              assertFailure ("expected compact-header project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right emitted -> do
+              let compiledPath = root </> "compiled.mjs"
+              TIO.writeFile compiledPath emitted
+              absoluteCompiledPath <- makeAbsolute compiledPath
+              runtimeOutput <-
+                runNodeScript $
+                  T.pack . unlines $
+                    [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                    , "console.log(compiledModule.main);"
+                    ]
+              assertEqual "expected compact-header import project to execute" "Ada" runtimeOutput
     , testCase "checkEntry reports missing imported modules" $
         withProjectFiles "import-missing" missingImportFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
@@ -7259,9 +7296,7 @@ formatterCanonicalizationExpected :: Text
 formatterCanonicalizationExpected =
   T.intercalate
     "\n"
-    [ "module Main"
-    , ""
-    , "import Shared.User"
+    [ "module Main with Shared.User"
     , ""
     , "type Status = Busy Str | Idle"
     , ""
@@ -8537,6 +8572,12 @@ headerlessImportSuccessFiles =
   , ("Shared/User.clasp", headerlessSharedUserSource)
   ]
 
+compactHeaderImportSuccessFiles :: [(FilePath, Text)]
+compactHeaderImportSuccessFiles =
+  [ ("Main.clasp", compactHeaderImportSuccessMainSource)
+  , ("Shared/User.clasp", headerlessSharedUserSource)
+  ]
+
 packageImportFiles :: [(FilePath, Text)]
 packageImportFiles =
   [ ("Main.clasp", packageImportMainSource)
@@ -8608,10 +8649,28 @@ headerlessMainSource =
     , "main = \"ready\""
     ]
 
+compactHeaderMainSource :: Text
+compactHeaderMainSource =
+  T.unlines
+    [ "module Main with Shared.User, Shared.Team"
+    , ""
+    , "main : Str"
+    , "main = \"ready\""
+    ]
+
 headerlessImportSuccessMainSource :: Text
 headerlessImportSuccessMainSource =
   T.unlines
     [ "import Shared.User"
+    , ""
+    , "main : Str"
+    , "main = formatUser defaultUser"
+    ]
+
+compactHeaderImportSuccessMainSource :: Text
+compactHeaderImportSuccessMainSource =
+  T.unlines
+    [ "module Main with Shared.User"
     , ""
     , "main : Str"
     , "main = formatUser defaultUser"
