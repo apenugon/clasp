@@ -31,8 +31,13 @@ clasp_swarm_lane_dirs() {
 
 clasp_swarm_task_files() {
   local lane_dir="$1"
+  local task_file=""
 
-  find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort
+  while IFS= read -r task_file; do
+    [[ -n "$task_file" ]] || continue
+    clasp_swarm_validate_task_manifest "$task_file" >/dev/null
+    printf '%s\n' "$task_file"
+  done < <(find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort)
 }
 
 clasp_swarm_lane_name() {
@@ -248,7 +253,13 @@ PY
 clasp_swarm_task_dependencies() {
   local task_file="$1"
 
-  sed -n '/^## Dependencies$/,/^## /p' "$task_file" | grep -oE '[A-Z]{2,3}-[0-9]{3}' || true
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-field dependencies "$task_file"
+}
+
+clasp_swarm_validate_task_manifest() {
+  local task_file="$1"
+
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" "$task_file"
 }
 
 clasp_swarm_task_dependencies_met() {

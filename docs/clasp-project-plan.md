@@ -81,6 +81,9 @@ Every task file should include:
 - verification command
 - dependencies
 
+The canonical markdown template lives at `agents/swarm/task-template.md`.
+The parsed machine-readable manifest is validated against `agents/swarm/task.schema.json`.
+
 Task sizing guidance:
 
 - `XS`: parser-only, emitter-only, docs-only, or test-only changes

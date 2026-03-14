@@ -2,6 +2,17 @@
 
 This directory contains the worktree-based swarm backlogs.
 
+Canonical task-manifest assets live here too:
+
+- `agents/swarm/task-template.md`: markdown template for new swarm tasks
+- `agents/swarm/task.schema.json`: schema for the parsed machine-readable manifest projected from each task file
+
+The runtime validates every task file against that schema before a lane lists or selects tasks. The canonical identity model is:
+
+- `taskId`: the markdown basename without `.md`
+- `taskKey`: the leading `SW-001` style key derived from the basename and `#` heading
+- `title`: the remainder of the `#` heading after the task key
+
 Each lane is:
 
 - a sequence of small task files
