@@ -61,6 +61,8 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-interop-boundary`: mirrored handwritten JavaScript refinement baseline for the same unexpected-foreign-value blame surface
 - `benchmarks/tasks/clasp-secret-handling`: compiler-managed secret-redaction, policy-gated access, and blame-quality task for declared secrets
 - `benchmarks/tasks/ts-secret-handling`: mirrored handwritten JavaScript baseline for the same declared-secret handling surface
+- `benchmarks/tasks/clasp-authorization-data-access`: compiler-managed authorization and protected-data-access task covering proof-gated reads, writes, and field disclosures
+- `benchmarks/tasks/ts-authorization-data-access`: mirrored handwritten JavaScript baseline for the same protected read/write/disclosure proof surface
 - `benchmarks/tasks/clasp-audit-log`: compiler-managed audit-log task covering typed events, redaction, retention, and root-cause traceability across routes, tools, workflows, and secret access
 - `benchmarks/tasks/ts-audit-log`: mirrored handwritten JavaScript baseline for the same audit-log surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
@@ -191,6 +193,12 @@ Run the mixed-stack semantic-layer suite through the repeated Codex wrapper:
 
 ```sh
 bash benchmarks/run-codex-series.sh mixed-stack-semantic-layer 5 mixed-stack-a gpt-5.4
+```
+
+Run the proof-gated authorization/data-access pair through the repeated Codex wrapper:
+
+```sh
+bash benchmarks/run-codex-series.sh authorization-data-access 5 authorization-data-access-a gpt-5.4
 ```
 
 When result files include `benchmark-phases.json`, the summary also reports median discovery, first-edit, first-verify, and phase-local time-to-green timings. Summaries and mirrored comparisons stay split by benchmark mode so `Raw Repo`, `File-Hinted`, and `Oracle` remain separate scorecards.

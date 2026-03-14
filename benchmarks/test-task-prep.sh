@@ -30,6 +30,8 @@ printf '%s\n' "$list_output" | grep -q '^clasp-interop-boundary[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-interop-boundary[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-secret-handling[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-secret-handling[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-authorization-data-access[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-authorization-data-access[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-audit-log[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-audit-log[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
@@ -370,6 +372,8 @@ check_incomplete_task clasp-interop-boundary
 check_incomplete_task ts-interop-boundary
 check_incomplete_task clasp-secret-handling
 check_incomplete_task ts-secret-handling
+check_incomplete_task clasp-authorization-data-access
+check_incomplete_task ts-authorization-data-access
 check_incomplete_task clasp-audit-log
 check_incomplete_task ts-audit-log
 check_incomplete_task clasp-compiler-maintenance
@@ -492,6 +496,15 @@ assert_not_contains "$clasp_secret_workspace/Main.clasp" 'secret "SEARCH_API_TOK
 
 ts_secret_workspace="$workspace_root/ts-secret-handling"
 assert_contains "$ts_secret_workspace/src/main.mjs" 'secretNames: Object.freeze([])'
+
+clasp_authorization_workspace="$workspace_root/clasp-authorization-data-access"
+assert_not_contains "$clasp_authorization_workspace/Main.clasp" 'policy SupportAccess = public, pii'
+assert_not_contains "$clasp_authorization_workspace/Main.clasp" 'projection SupportCustomer = Customer with SupportAccess { id, company, contactEmail, plan }'
+assert_contains "$clasp_authorization_workspace/Main.clasp" 'writeProofPolicy = "PublicAccess"'
+
+ts_authorization_workspace="$workspace_root/ts-authorization-data-access"
+assert_contains "$ts_authorization_workspace/src/main.mjs" 'writeProofPolicy: "PublicAccess"'
+assert_contains "$ts_authorization_workspace/src/main.mjs" 'disclosedField: "plan"'
 
 clasp_audit_workspace="$workspace_root/clasp-audit-log"
 assert_contains "$clasp_audit_workspace/Main.clasp" 'retentionDays = 7'

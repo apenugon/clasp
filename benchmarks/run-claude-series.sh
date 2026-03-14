@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 5 ]]; then
-  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|mixed-stack-semantic-layer|interop-boundary|secret-handling|audit-log|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model] [mode]" >&2
+  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|mixed-stack-semantic-layer|interop-boundary|secret-handling|authorization-data-access|audit-log|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model] [mode]" >&2
   exit 1
 fi
 

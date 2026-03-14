@@ -76,6 +76,10 @@ const taskSetAliases = {
     "clasp-secret-handling",
     "ts-secret-handling"
   ],
+  "authorization-data-access": [
+    "clasp-authorization-data-access",
+    "ts-authorization-data-access"
+  ],
   "audit-log": [
     "clasp-audit-log",
     "ts-audit-log"
@@ -168,6 +172,13 @@ const comparisonTaskFamilies = [
     comparisonLabel: "secret-handling-comparison",
     leftTaskId: "clasp-secret-handling",
     rightTaskId: "ts-secret-handling",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "authorization-data-access-comparison",
+    leftTaskId: "clasp-authorization-data-access",
+    rightTaskId: "ts-authorization-data-access",
     leftLabel: "clasp",
     rightLabel: "ts"
   },
@@ -1740,7 +1751,7 @@ function usage() {
   console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
   console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
-  console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, correctness, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
+  console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, correctness, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, authorization-data-access, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
 }
 
 async function copyPackageFiles(bundleRoot, results, tasks) {

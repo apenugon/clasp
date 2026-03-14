@@ -167,6 +167,10 @@ write_result "2026-03-01T10-12-47.000Z--clasp-secret-handling--codex.json" "clas
 write_result "2026-03-01T10-12-48.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:48.000Z" 90 120 102 true 0
 write_result "2026-03-01T10-12-49.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:49.000Z" 150 170 150 false 1
 write_result "2026-03-01T10-12-50.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:50.000Z" 160 175 155 true 0
+write_result "2026-03-01T10-12-50.500Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "authorization-data-access-a-1" "2026-03-01T10:12:50.500Z" 95 125 110 true 0
+write_result "2026-03-01T10-12-50.750Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "authorization-data-access-a-2" "2026-03-01T10:12:50.750Z" 105 130 115 true 0
+write_result "2026-03-01T10-12-51.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "authorization-data-access-a-1" "2026-03-01T10:12:51.000Z" 170 190 170 false 1
+write_result "2026-03-01T10-12-51.250Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "authorization-data-access-a-2" "2026-03-01T10:12:51.250Z" 180 200 180 true 0
 write_result "2026-03-01T10-12-51.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:51.000Z" 100 140 120 true 0
 write_result "2026-03-01T10-12-52.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:52.000Z" 110 150 130 true 0
 write_result "2026-03-01T10-12-53.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:53.000Z" 190 205 180 false 1
@@ -257,6 +261,18 @@ printf '%s\n' "$containment_summary_output" | grep -Fq '    passRateDeltaPct: 50
 printf '%s\n' "$containment_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
 printf '%s\n' "$containment_summary_output" | grep -Fq '    tokenDelta: -35'
 printf '%s\n' "$containment_summary_output" | grep -Fq '    uncachedTokenDelta: -40'
+
+authorization_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes authorization-data-access-a)"
+printf '%s\n' "$authorization_summary_output" | grep -Fq $'clasp-authorization-data-access\tcodex\tgpt-5.4'
+printf '%s\n' "$authorization_summary_output" | grep -Fq $'ts-authorization-data-access\tcodex\tgpt-5.4'
+printf '%s\n' "$authorization_summary_output" | grep -Fq 'authorization-data-access-comparison'
+printf '%s\n' "$authorization_summary_output" | grep -Fq $'  codex\tgpt-5.4\tauthorization-data-access-a'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    timeToGreenDeltaMs: -255'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    tokenDelta: -67'
+printf '%s\n' "$authorization_summary_output" | grep -Fq '    uncachedTokenDelta: -62'
 
 objective_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes objective-a)"
 printf '%s\n' "$objective_summary_output" | grep -Fq $'clasp-external-adaptation\tcodex\tgpt-5.4'
