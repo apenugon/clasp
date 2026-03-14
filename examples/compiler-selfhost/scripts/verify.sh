@@ -15,8 +15,8 @@ trap cleanup EXIT
 
 run_verify() {
   cd "$project_root"
-  cabal run claspc -- check examples/compiler-selfhost/Main.clasp
-  cabal run claspc -- compile examples/compiler-selfhost/Main.clasp -o "$stage1_path"
+  cabal run claspc -- check examples/compiler-selfhost/Main.clasp --compiler=bootstrap
+  cabal run claspc -- compile examples/compiler-selfhost/Main.clasp -o "$stage1_path" --compiler=bootstrap
   bun examples/compiler-selfhost/demo.mjs "$stage1_path" "$stage2_compiler_path" "$stage2_output_path"
 }
 

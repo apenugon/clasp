@@ -13,8 +13,8 @@ trap cleanup EXIT
 
 run_verify() {
   cd "$project_root"
-  cabal run claspc -- check examples/prompt-functions/Main.clasp
-  cabal run claspc -- compile examples/prompt-functions/Main.clasp -o examples/prompt-functions/compiled.mjs
+  cabal run claspc -- check examples/prompt-functions/Main.clasp --compiler=bootstrap
+  cabal run claspc -- compile examples/prompt-functions/Main.clasp -o examples/prompt-functions/compiled.mjs --compiler=bootstrap
   node examples/prompt-functions/demo.mjs "$compiled_path"
 }
 

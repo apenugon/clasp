@@ -1324,22 +1324,22 @@ checkerTests =
                 assertEqual "main type" TStr (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
-    , testCase "typechecks the compiler renderers example file" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp"]
+    , testCase "typechecks the compiler renderers example file in explicit bootstrap recovery mode" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler renderers example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler loader example file" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-loader.clasp"]
+    , testCase "typechecks the compiler loader example file in explicit bootstrap recovery mode" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-loader.clasp", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler loader example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler parser example file" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-parser.clasp"]
+    , testCase "typechecks the compiler parser example file in explicit bootstrap recovery mode" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-parser.clasp", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -1367,16 +1367,24 @@ checkerTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check falls back to the Haskell bootstrap compiler for ordinary programs" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json"]
+    , testCase "claspc check rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected default compiler check for an ordinary program to fail"
+          ExitFailure _ ->
+            pure ()
+        assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "claspc check can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
-            assertFailure ("expected bootstrap fallback check to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected bootstrap recovery check to succeed:\n" <> stdoutText <> stderrText)
         jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
           Left decodeErr ->
-            assertFailure ("expected bootstrap fallback json output to decode:\n" <> decodeErr)
+            assertFailure ("expected bootstrap recovery json output to decode:\n" <> decodeErr)
           Right value ->
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
@@ -1402,22 +1410,7 @@ checkerTests =
             assertFailure "expected explicit unsupported primary compiler request to fail"
           ExitFailure _ ->
             pure ()
-        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
-          Left decodeErr ->
-            assertFailure ("expected explicit primary compiler failure json to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
-          Just (Array diagnosticsJson) ->
-            case toList diagnosticsJson of
-              firstDiagnostic : _ ->
-                pure firstDiagnostic
-              [] ->
-                assertFailure "expected at least one diagnostic for unsupported primary compiler request"
-          _ ->
-            assertFailure "expected diagnostics array for unsupported primary compiler request"
-        assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
-        assertEqual "diagnostic code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
+        assertUnsupportedPrimaryCompilerJson stderrText
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -1605,7 +1598,7 @@ explainTests =
     , testCase "claspc explain emits json output when requested" $
         withProjectFiles "explain-cli-json" [("Main.clasp", blockExpressionSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json", "--compiler=bootstrap"]
           case exitCode of
             ExitSuccess ->
               pure ()
@@ -1638,16 +1631,24 @@ explainTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc explain falls back to the Haskell bootstrap compiler for ordinary programs" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json"]
+    , testCase "claspc explain rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected default compiler explain for an ordinary program to fail"
+          ExitFailure _ ->
+            pure ()
+        assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "claspc explain can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
-            assertFailure ("expected bootstrap fallback explain to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected bootstrap recovery explain to succeed:\n" <> stdoutText <> stderrText)
         jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
           Left decodeErr ->
-            assertFailure ("expected bootstrap fallback explain json output to decode:\n" <> decodeErr)
+            assertFailure ("expected bootstrap recovery explain json output to decode:\n" <> decodeErr)
           Right value ->
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
@@ -1659,21 +1660,7 @@ explainTests =
             assertFailure "expected explicit unsupported primary compiler explain request to fail"
           ExitFailure _ ->
             pure ()
-        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
-          Left decodeErr ->
-            assertFailure ("expected explicit primary explain failure json to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
-          Just (Array diagnosticsJson) ->
-            case toList diagnosticsJson of
-              firstDiagnostic : _ ->
-                pure firstDiagnostic
-              [] ->
-                assertFailure "expected at least one diagnostic for unsupported primary explain request"
-          _ ->
-            assertFailure "expected diagnostics array for unsupported primary explain request"
-        assertEqual "code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
+        assertUnsupportedPrimaryCompilerJson stderrText
     ]
 
 diagnosticTests :: TestTree
@@ -2201,16 +2188,56 @@ contextTests =
             assertBool "expected merge gate node" ("\"mergegate:trunk\"" `T.isInfixOf` jsonText)
             assertBool "expected verifier tool edge" ("\"verifier-tool\"" `T.isInfixOf` jsonText)
             assertBool "expected merge gate verifier edge" ("\"merge-gate-verifier\"" `T.isInfixOf` jsonText)
-    , testCase "claspc context writes the default context artifact when -o is omitted" $
-        withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
+    , testCase "claspc air rejects ordinary programs unless bootstrap recovery mode is requested" $
+        withProjectFiles "air-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
-              outputPath = replaceExtension inputPath "context.json"
-          (exitCode, _stdoutText, stderrText) <- runClaspc ["context", inputPath]
+              outputPath = replaceExtension inputPath "air.json"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["air", inputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected default air command for an ordinary program to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
+          exists <- doesFileExist outputPath
+          assertBool "expected default air command not to write an artifact" (not exists)
+    , testCase "claspc air writes the default AIR artifact in bootstrap recovery mode when -o is omitted" $
+        withProjectFiles "air-cli-bootstrap" [("Main.clasp", interactivePageSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = replaceExtension inputPath "air.json"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["air", inputPath, "--compiler=bootstrap"]
           case exitCode of
             ExitSuccess ->
               pure ()
             ExitFailure _ ->
-              assertFailure ("claspc context failed:\n" <> stderrText)
+              assertFailure ("claspc air bootstrap recovery failed:\n" <> stderrText)
+          exists <- doesFileExist outputPath
+          assertBool "expected default AIR artifact to be written" exists
+          outputText <- TIO.readFile outputPath
+          assertBool "expected air format marker" ("\"format\":\"clasp-air-v1\"" `T.isInfixOf` outputText)
+    , testCase "claspc context rejects ordinary programs unless bootstrap recovery mode is requested" $
+        withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = replaceExtension inputPath "context.json"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["context", inputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected default context command for an ordinary program to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
+          exists <- doesFileExist outputPath
+          assertBool "expected default context command not to write an artifact" (not exists)
+    , testCase "claspc context writes the default context artifact in bootstrap recovery mode when -o is omitted" $
+        withProjectFiles "context-cli-bootstrap" [("Main.clasp", interactivePageSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = replaceExtension inputPath "context.json"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["context", inputPath, "--compiler=bootstrap"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("claspc context bootstrap recovery failed:\n" <> stderrText)
           exists <- doesFileExist outputPath
           assertBool "expected default context artifact to be written" exists
           outputText <- TIO.readFile outputPath
@@ -2861,7 +2888,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected same-shape native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -2929,7 +2956,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected native boundary emission to succeed:\n" <> stdoutText <> stderrText)
@@ -2940,10 +2967,10 @@ nativeTests =
               assertBool "expected hook boundary contract" ("hook workerStart{id=hook:workerStart, event=\"worker.start\", request=WorkerBoot, response=HookAck, handler=bootstrapWorker, encode=$encode_HookAck, decode=$decode_WorkerBoot}" `T.isInfixOf` nativeIr)
               assertBool "expected tool boundary contract" ("tool searchRepo{id=tool:searchRepo, server=RepoTools, operation=\"search_repo\", request=SearchRequest, response=SearchResponse, encode=$encode_SearchResponse, decode=$decode_SearchRequest}" `T.isInfixOf` nativeIr)
               assertBool "expected workflow boundary contract" ("workflow CounterFlow{id=workflow:CounterFlow, state=Counter, checkpoint=$encode_Counter, restore=$decode_Counter}" `T.isInfixOf` nativeIr)
-    , testCase "claspc native emits a native IR artifact for compiler workloads end to end" $ do
+    , testCase "claspc native emits a native IR artifact for compiler workloads end to end in bootstrap recovery mode" $ do
         let outputPath = "dist/compiler-parser.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath, "--compiler=bootstrap"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler parser native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -3076,10 +3103,10 @@ compileTests =
               "expected compiler stdlib runtime output"
               "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
-    , testCase "compile evaluates the compiler renderers example end-to-end" $ do
+    , testCase "compile evaluates the compiler renderers example end-to-end in bootstrap recovery mode" $ do
         let compiledPath = "dist/compiler-renderers.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-renderers.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-renderers.clasp", "-o", compiledPath, "--compiler=bootstrap"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler renderers compile to succeed:\n" <> stdoutText <> stderrText)
@@ -3125,10 +3152,10 @@ compileTests =
               "expected main render"
               (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]\n\nE_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\n\n{\"code\":\"E_DUPLICATE_DECL\",\"summary\":\"Declaration `renderPosition` is already defined.\",\"primarySpan\":\"Compiler/Formatter.clasp:3:1-3:18\",\"detail\":\"Formatter helper names must be unique within a module.\",\"fixHint\":\"Rename the helper or merge the duplicate definitions.\",\"related\":\"- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\"}"))
               (lookupObjectKey "main" runtimeValue)
-    , testCase "compile evaluates the compiler loader example end-to-end" $ do
+    , testCase "compile evaluates the compiler loader example end-to-end in bootstrap recovery mode" $ do
         let compiledPath = "dist/compiler-loader.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-loader.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-loader.clasp", "-o", compiledPath, "--compiler=bootstrap"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler loader compile to succeed:\n" <> stdoutText <> stderrText)
@@ -3168,10 +3195,10 @@ compileTests =
               "expected missing module summary"
               (Just (String "missing:Compiler.Emit"))
               (lookupObjectKey "missingModule" runtimeValue)
-    , testCase "compile evaluates the compiler parser example end-to-end" $ do
+    , testCase "compile evaluates the compiler parser example end-to-end in bootstrap recovery mode" $ do
         let compiledPath = "dist/compiler-parser.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-parser.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-parser.clasp", "-o", compiledPath, "--compiler=bootstrap"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler parser compile to succeed:\n" <> stdoutText <> stderrText)
@@ -3375,18 +3402,42 @@ compileTests =
         nativeIr <- TIO.readFile outputPath
         assertBool "expected hosted native bootstrap artifact format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
         assertBool "expected hosted native bootstrap artifact decl section" ("decls {" `T.isInfixOf` nativeIr)
-    , testCase "claspc compile falls back to the Haskell bootstrap compiler for ordinary programs" $ do
+    , testCase "claspc native rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+        let outputPath = "dist/hello-default.native.ir"
+        createDirectoryIfMissing True (takeDirectory outputPath)
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["native", "examples/hello.clasp", "-o", outputPath, "--json"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected default native command for an ordinary program to fail"
+          ExitFailure _ ->
+            pure ()
+        assertUnsupportedPrimaryCompilerJson stderrText
+        outputExists <- doesFileExist outputPath
+        assertBool "expected default native command not to write an artifact" (not outputExists)
+    , testCase "claspc compile rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+        let compiledPath = "dist/hello-default.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected default compiler compile for an ordinary program to fail"
+          ExitFailure _ ->
+            pure ()
+        assertUnsupportedPrimaryCompilerJson stderrText
+        outputExists <- doesFileExist compiledPath
+        assertBool "expected default compile command not to write an artifact" (not outputExists)
+    , testCase "claspc compile can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         let compiledPath = "dist/hello-bootstrap.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
-            assertFailure ("expected bootstrap fallback compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected bootstrap recovery compile to succeed:\n" <> stdoutText <> stderrText)
         jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
           Left decodeErr ->
-            assertFailure ("expected bootstrap fallback compile json output to decode:\n" <> decodeErr)
+            assertFailure ("expected bootstrap recovery compile json output to decode:\n" <> decodeErr)
           Right value ->
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
@@ -3398,21 +3449,7 @@ compileTests =
             assertFailure "expected explicit unsupported primary compiler compile request to fail"
           ExitFailure _ ->
             pure ()
-        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
-          Left decodeErr ->
-            assertFailure ("expected explicit primary compile failure json to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
-          Just (Array diagnosticsJson) ->
-            case toList diagnosticsJson of
-              firstDiagnostic : _ ->
-                pure firstDiagnostic
-              [] ->
-                assertFailure "expected at least one diagnostic for unsupported primary compile request"
-          _ ->
-            assertFailure "expected diagnostics array for unsupported primary compile request"
-        assertEqual "code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
+        assertUnsupportedPrimaryCompilerJson stderrText
     , testCase "hosted tool runner rejects entrypoints that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let stage1Path = root </> "stage1.mjs"
@@ -5388,6 +5425,25 @@ expectFirstDiagnostic (DiagnosticBundle errs) =
       pure firstErr
     [] ->
       assertFailure "expected at least one diagnostic"
+
+assertUnsupportedPrimaryCompilerJson :: String -> Assertion
+assertUnsupportedPrimaryCompilerJson stderrText = do
+  jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
+    Left decodeErr ->
+      assertFailure ("expected unsupported primary compiler failure json to decode:\n" <> decodeErr)
+    Right value ->
+      pure value
+  diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+    Just (Array diagnosticsJson) ->
+      case toList diagnosticsJson of
+        firstDiagnostic : _ ->
+          pure firstDiagnostic
+        [] ->
+          assertFailure "expected at least one diagnostic for unsupported primary compiler request"
+    _ ->
+      assertFailure "expected diagnostics array for unsupported primary compiler request"
+  assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
+  assertEqual "diagnostic code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
 
 findDecl :: Text -> [Decl] -> Maybe Decl
 findDecl target =

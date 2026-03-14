@@ -49,13 +49,13 @@ From the workspace root, these commands emit compiler-owned artifacts for this a
 ```sh
 workspace_root="$(pwd)"
 nix develop "$CLASP_PROJECT_ROOT" --command bash -lc \
-  "cd \"$CLASP_PROJECT_ROOT\" && cabal run claspc -- context \"$workspace_root/Main.clasp\""
+  "cd \"$CLASP_PROJECT_ROOT\" && cabal run claspc -- context \"$workspace_root/Main.clasp\" --compiler=bootstrap"
 ```
 
 ```sh
 workspace_root="$(pwd)"
 nix develop "$CLASP_PROJECT_ROOT" --command bash -lc \
-  "cd \"$CLASP_PROJECT_ROOT\" && cabal run claspc -- air \"$workspace_root/Main.clasp\""
+  "cd \"$CLASP_PROJECT_ROOT\" && cabal run claspc -- air \"$workspace_root/Main.clasp\" --compiler=bootstrap"
 ```
 
 That writes:

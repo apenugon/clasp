@@ -185,14 +185,14 @@ nix develop
 cabal build
 cabal test
 
-cabal run claspc -- check examples/hello.clasp
-cabal run claspc -- check examples/status.clasp
-cabal run claspc -- check examples/records.clasp
-cabal run claspc -- check examples/lead-app/Main.clasp
-cabal run claspc -- check examples/compiler-selfhost/Main.clasp --json
+cabal run claspc -- check examples/hello.clasp --compiler=bootstrap
+cabal run claspc -- check examples/status.clasp --compiler=bootstrap
+cabal run claspc -- check examples/records.clasp --compiler=bootstrap
+cabal run claspc -- check examples/lead-app/Main.clasp --compiler=bootstrap
+cabal run claspc -- check examples/compiler-selfhost/Main.clasp --json --compiler=bootstrap
 
-cabal run claspc -- context examples/lead-app/Main.clasp
-cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js
+cabal run claspc -- context examples/lead-app/Main.clasp --compiler=bootstrap
+cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js --compiler=bootstrap
 bun examples/lead-app/server.mjs
 
 cd examples/lead-app-ts

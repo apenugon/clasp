@@ -413,7 +413,7 @@ async function runClaspCompilerCommand(command, inputPath, outputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `cabal run claspc -- ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null 2>/dev/null`
+    `cabal run claspc -- ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} --compiler=bootstrap >/dev/null 2>/dev/null`
   ].join(" && ");
   const result = await runProcess(
     ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
@@ -452,7 +452,7 @@ async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `cabal run claspc -- ${command} ${shellQuote(inputPath)}`
+    `cabal run claspc -- ${command} ${shellQuote(inputPath)} --compiler=bootstrap`
   ].join(" && ");
   return runProcessCapture(
     ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],

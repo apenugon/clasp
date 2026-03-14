@@ -46,13 +46,13 @@ This directory has two kinds of examples:
 Check an example:
 
 ```sh
-cabal run claspc -- check examples/support-console/Main.clasp
+cabal run claspc -- check examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
 Emit AIR:
 
 ```sh
-cabal run claspc -- air examples/support-console/Main.clasp
+cabal run claspc -- air examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
 Verify the `npm`/`TypeScript` interop example:
@@ -94,14 +94,14 @@ bash examples/release-gate/scripts/verify.sh
 Emit the context graph:
 
 ```sh
-cabal run claspc -- context examples/release-gate/Main.clasp
+cabal run claspc -- context examples/release-gate/Main.clasp --compiler=bootstrap
 ```
 
 Run the control-plane demo after compiling `Main.clasp` into `dist/`:
 
 ```sh
 mkdir -p dist/control-plane
-cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js
+cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js --compiler=bootstrap
 node examples/control-plane/demo.mjs dist/control-plane/Main.js
 ```
 
@@ -109,8 +109,8 @@ Run the durable workflow restart and supervised hot-swap demo after compiling bo
 
 ```sh
 mkdir -p dist/durable-workflow
-cabal run claspc -- compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js
-cabal run claspc -- compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js
+cabal run claspc -- compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js --compiler=bootstrap
+cabal run claspc -- compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js --compiler=bootstrap
 node examples/durable-workflow/demo.mjs dist/durable-workflow/Main.js dist/durable-workflow/Main.next.js
 ```
 

@@ -18,8 +18,8 @@ import Clasp.Compiler
   , compileEntryWithPreference
   , explainEntryWithPreference
   , parseSource
-  , renderAirEntryJson
-  , renderContextEntryJson
+  , renderAirEntryJsonWithPreference
+  , renderContextEntryJsonWithPreference
   , renderNativeEntryWithPreference
   )
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
@@ -40,17 +40,17 @@ main = do
     ["explain", inputPath] ->
       runExplain format compilerPreference inputPath
     ["air", inputPath] ->
-      runAir format inputPath Nothing
+      runAir format compilerPreference inputPath Nothing
     ["air", inputPath, "-o", outputPath] ->
-      runAir format inputPath (Just outputPath)
+      runAir format compilerPreference inputPath (Just outputPath)
     ["air", "-o", outputPath, inputPath] ->
-      runAir format inputPath (Just outputPath)
+      runAir format compilerPreference inputPath (Just outputPath)
     ["context", inputPath] ->
-      runContext format inputPath Nothing
+      runContext format compilerPreference inputPath Nothing
     ["context", inputPath, "-o", outputPath] ->
-      runContext format inputPath (Just outputPath)
+      runContext format compilerPreference inputPath (Just outputPath)
     ["context", "-o", outputPath, inputPath] ->
-      runContext format inputPath (Just outputPath)
+      runContext format compilerPreference inputPath (Just outputPath)
     ["compile", inputPath] ->
       runCompile format compilerPreference inputPath Nothing
     ["compile", inputPath, "-o", outputPath] ->
@@ -68,7 +68,7 @@ main = do
 
 parseCliOptions :: [String] -> (OutputFormat, CompilerPreference, [String])
 parseCliOptions args =
-  foldl parseOption (Pretty, CompilerPreferenceAuto, []) args
+  foldl parseOption (Pretty, CompilerPreferenceClasp, []) args
   where
     parseOption (format, preference, remaining) arg =
       case arg of
@@ -80,8 +80,6 @@ parseCliOptions args =
               (format, CompilerPreferenceClasp, remaining)
             Just "bootstrap" ->
               (format, CompilerPreferenceBootstrap, remaining)
-            Just "auto" ->
-              (format, CompilerPreferenceAuto, remaining)
             Just _ ->
               (format, preference, remaining <> [arg])
             Nothing ->
@@ -150,9 +148,9 @@ runExplain format compilerPreference inputPath = do
                 , "explanation" .= explanation
                 ]
 
-runAir :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
-runAir format inputPath outputPath = do
-  result <- renderAirEntryJson inputPath
+runAir :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
+runAir format compilerPreference inputPath outputPath = do
+  result <- renderAirEntryJsonWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -173,9 +171,9 @@ runAir format inputPath outputPath = do
                 , "output" .= resolvedOutput
                 ]
 
-runContext :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
-runContext format inputPath outputPath = do
-  result <- renderContextEntryJson inputPath
+runContext :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
+runContext format compilerPreference inputPath outputPath = do
+  result <- renderContextEntryJsonWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -257,12 +255,12 @@ usage =
   unlines
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
-    , "  claspc check <input.clasp> [--json] [--compiler=auto|clasp|bootstrap]"
-    , "  claspc explain <input.clasp> [--json] [--compiler=auto|clasp|bootstrap]"
-    , "  claspc air <input.clasp> [-o output.air.json] [--json]"
-    , "  claspc context <input.clasp> [-o output.context.json] [--json]"
-    , "  claspc compile <input.clasp> [-o output.js] [--json] [--compiler=auto|clasp|bootstrap]"
-    , "  claspc native <input.clasp> [-o output.native.ir] [--json] [--compiler=auto|clasp|bootstrap]"
+    , "  claspc check <input.clasp> [--json] [--compiler=clasp|bootstrap]"
+    , "  claspc explain <input.clasp> [--json] [--compiler=clasp|bootstrap]"
+    , "  claspc air <input.clasp> [-o output.air.json] [--json] [--compiler=clasp|bootstrap]"
+    , "  claspc context <input.clasp> [-o output.context.json] [--json] [--compiler=clasp|bootstrap]"
+    , "  claspc compile <input.clasp> [-o output.js] [--json] [--compiler=clasp|bootstrap]"
+    , "  claspc native <input.clasp> [-o output.native.ir] [--json] [--compiler=clasp|bootstrap]"
     ]
 
 renderCompilerImplementation :: CompilerImplementation -> String

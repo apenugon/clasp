@@ -25,8 +25,10 @@ module Clasp.Compiler
   , nativeEntry
   , parseSource
   , renderAirEntryJson
+  , renderAirEntryJsonWithPreference
   , renderAirSourceJson
   , renderContextEntryJson
+  , renderContextEntryJsonWithPreference
   , renderContextSourceJson
   , semanticEditEntry
   , semanticEditSource
@@ -123,6 +125,11 @@ renderAirEntryJson entryPath = do
   airModule <- airEntry entryPath
   pure (renderAirModuleJson <$> airModule)
 
+renderAirEntryJsonWithPreference :: CompilerPreference -> FilePath -> IO (Either DiagnosticBundle LT.Text)
+renderAirEntryJsonWithPreference preference entryPath = do
+  (_implementation, checkedModule) <- checkEntryWithPreference preference entryPath
+  pure (renderAirModuleJson . buildAirModule <$> checkedModule)
+
 contextEntry :: FilePath -> IO (Either DiagnosticBundle ContextGraph)
 contextEntry entryPath = do
   checkedModule <- checkEntry entryPath
@@ -132,6 +139,11 @@ renderContextEntryJson :: FilePath -> IO (Either DiagnosticBundle LT.Text)
 renderContextEntryJson entryPath = do
   contextGraph <- contextEntry entryPath
   pure (renderContextGraphJson <$> contextGraph)
+
+renderContextEntryJsonWithPreference :: CompilerPreference -> FilePath -> IO (Either DiagnosticBundle LT.Text)
+renderContextEntryJsonWithPreference preference entryPath = do
+  (_implementation, checkedModule) <- checkEntryWithPreference preference entryPath
+  pure (renderContextGraphJson . buildContextGraph <$> checkedModule)
 
 nativeEntry :: FilePath -> IO (Either DiagnosticBundle NativeModule)
 nativeEntry entryPath = do
