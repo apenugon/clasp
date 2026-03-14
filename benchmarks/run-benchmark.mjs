@@ -298,6 +298,48 @@ const agentPlanningBenchmark = {
     }
   ]
 };
+const cachingAndTrustBenchmark = {
+  comparisonLabel: "caching-and-trust-scorecard",
+  slices: [
+    {
+      sliceLabel: "semantic-proof-or-result-cache-reuse",
+      type: "task-family",
+      comparisonLabel: "authorization-data-access-comparison",
+      leftTaskId: "clasp-authorization-data-access",
+      rightTaskId: "ts-authorization-data-access",
+      leftLabel: "clasp",
+      rightLabel: "ts",
+      includeCacheMetrics: true
+    },
+    {
+      sliceLabel: "world-snapshot-fidelity",
+      type: "task-family",
+      comparisonLabel: "external-adaptation-comparison",
+      leftTaskId: "clasp-external-adaptation",
+      rightTaskId: "ts-external-adaptation",
+      leftLabel: "clasp",
+      rightLabel: "ts"
+    },
+    {
+      sliceLabel: "interference-analysis-quality",
+      type: "task-family",
+      comparisonLabel: "control-plane-comparison",
+      leftTaskId: "clasp-control-plane",
+      rightTaskId: "ts-control-plane",
+      leftLabel: "clasp",
+      rightLabel: "ts"
+    },
+    {
+      sliceLabel: "trusted-computing-base-reporting-clarity",
+      type: "task-family",
+      comparisonLabel: "interop-boundary-comparison",
+      leftTaskId: "clasp-interop-boundary",
+      rightTaskId: "ts-interop-boundary",
+      leftLabel: "clasp",
+      rightLabel: "ts"
+    }
+  ]
+};
 
 async function main() {
   const [command, maybeTaskId, ...rest] = process.argv.slice(2);
@@ -955,6 +997,7 @@ async function summarizeCommand(args) {
     buildBenchmarkSuiteComparisons(filtered, mixedStackSemanticLayerBenchmark)
   );
   printAgentPlanningScorecard(buildAgentPlanningScorecard(filtered));
+  printCachingAndTrustScorecard(buildCachingAndTrustScorecard(filtered));
 }
 
 async function packageCommand(args) {
@@ -1008,6 +1051,10 @@ function summarizeGroup(groupResults) {
   const uncached = ordered.map(
     (result) => result.harnessUsage?.uncachedTotal ?? result.tokenUsage.total
   );
+  const cachedInput = ordered.map((result) => result.harnessUsage?.cachedInputTokens ?? 0);
+  const cacheReuseRates = ordered
+    .map((result) => computeCacheReuseRate(result))
+    .filter((value) => value !== null);
   const discovery = numericPhaseValues(ordered, "discoveryMs");
   const firstEdit = numericPhaseValues(ordered, "firstEditMs");
   const firstVerify = numericPhaseValues(ordered, "firstVerifyMs");
@@ -1028,6 +1075,8 @@ function summarizeGroup(groupResults) {
     medianDurationMs: median(durations),
     medianTokens: median(totals),
     medianUncachedTokens: median(uncached),
+    medianCachedInputTokens: median(cachedInput),
+    medianCacheReuseRatePct: cacheReuseRates.length > 0 ? median(cacheReuseRates) : "n/a",
     medianDiscoveryMs: discovery.length > 0 ? median(discovery) : "n/a",
     medianFirstEditMs: firstEdit.length > 0 ? median(firstEdit) : "n/a",
     medianFirstVerifyMs: firstVerify.length > 0 ? median(firstVerify) : "n/a",
@@ -1243,6 +1292,13 @@ function buildTaskComparisons(results, family) {
           ? left.timeToGreenMs - right.timeToGreenMs
           : "n/a",
       tokenDelta: left.medianTokens - right.medianTokens,
+      cachedInputTokenDelta:
+        left.medianCachedInputTokens - right.medianCachedInputTokens,
+      cacheReuseRateDeltaPct:
+        typeof left.medianCacheReuseRatePct === "number" &&
+          typeof right.medianCacheReuseRatePct === "number"
+          ? left.medianCacheReuseRatePct - right.medianCacheReuseRatePct
+          : "n/a",
       uncachedTokenDelta:
         left.medianUncachedTokens - right.medianUncachedTokens
     });
@@ -1253,6 +1309,90 @@ function buildTaskComparisons(results, family) {
       [right.harness, right.model, right.mode, right.workflowAssistance, right.series].join("\t")
     )
   );
+}
+
+function buildCachingAndTrustScorecard(results) {
+  const entries = [];
+
+  for (const slice of cachingAndTrustBenchmark.slices) {
+    for (const comparison of buildTaskComparisons(results, slice)) {
+      entries.push({
+        sliceLabel: slice.sliceLabel,
+        sliceType: slice.type,
+        source: slice.comparisonLabel,
+        includeCacheMetrics: slice.includeCacheMetrics === true,
+        ...comparison
+      });
+    }
+  }
+
+  return entries.sort((left, right) =>
+    [
+      left.sliceLabel,
+      left.harness,
+      left.model,
+      left.mode,
+      left.workflowAssistance ?? "",
+      left.series
+    ].join("\t").localeCompare(
+      [
+        right.sliceLabel,
+        right.harness,
+        right.model,
+        right.mode,
+        right.workflowAssistance ?? "",
+        right.series
+      ].join("\t")
+    )
+  );
+}
+
+function printCachingAndTrustScorecard(entries) {
+  if (entries.length === 0) {
+    return;
+  }
+
+  console.log(cachingAndTrustBenchmark.comparisonLabel);
+
+  for (const entry of entries) {
+    console.log(`  ${entry.sliceLabel}\t${entry.harness}\t${entry.model}\t${entry.series}`);
+    console.log(`    mode: ${entry.mode}`);
+    console.log(`    sourceBenchmark: ${entry.source}`);
+    console.log(`    workflowAssistance: ${entry.workflowAssistance}`);
+    console.log(
+      `    ${buildComparisonMetricKey(entry.leftLabel, "PassRate")}: ${entry.left.passRate}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(entry.rightLabel, "PassRate")}: ${entry.right.passRate}`
+    );
+    console.log(`    passRateDeltaPct: ${entry.passRateDeltaPct}`);
+    console.log(
+      `    ${buildComparisonMetricKey(entry.leftLabel, "TimeToGreenMs")}: ${entry.left.timeToGreenMs}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(entry.rightLabel, "TimeToGreenMs")}: ${entry.right.timeToGreenMs}`
+    );
+    console.log(`    timeToGreenDeltaMs: ${entry.timeToGreenDeltaMs}`);
+    console.log(`    tokenDelta: ${entry.tokenDelta}`);
+    console.log(`    uncachedTokenDelta: ${entry.uncachedTokenDelta}`);
+
+    if (entry.includeCacheMetrics) {
+      console.log(
+        `    ${buildComparisonMetricKey(entry.leftLabel, "MedianCachedInputTokens")}: ${entry.left.medianCachedInputTokens}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.rightLabel, "MedianCachedInputTokens")}: ${entry.right.medianCachedInputTokens}`
+      );
+      console.log(`    cachedInputTokenDelta: ${entry.cachedInputTokenDelta}`);
+      console.log(
+        `    ${buildComparisonMetricKey(entry.leftLabel, "MedianCacheReuseRatePct")}: ${entry.left.medianCacheReuseRatePct}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.rightLabel, "MedianCacheReuseRatePct")}: ${entry.right.medianCacheReuseRatePct}`
+      );
+      console.log(`    cacheReuseRateDeltaPct: ${entry.cacheReuseRateDeltaPct}`);
+    }
+  }
 }
 
 function buildWorkflowAssistanceComparisons(results) {
@@ -1462,6 +1602,22 @@ function printAgentPlanningScorecard(entries) {
 
 function buildComparisonMetricKey(label, suffix) {
   return `${label}${suffix}`;
+}
+
+function computeCacheReuseRate(result) {
+  const cached = result.harnessUsage?.cachedInputTokens;
+  const uncachedInput = result.harnessUsage?.uncachedInputTokens;
+
+  if (typeof cached !== "number" || typeof uncachedInput !== "number") {
+    return null;
+  }
+
+  const totalInput = cached + uncachedInput;
+  if (totalInput <= 0) {
+    return 0;
+  }
+
+  return Number((cached / totalInput * 100).toFixed(2));
 }
 
 async function buildResult(task, options, startedAt, finishedAt, verification, usage, phases) {

@@ -29,6 +29,8 @@ write_result() {
   local passed="${11}"
   local exit_code="${12}"
   local workflow_assistance="${13:-unspecified}"
+  local cached_input_tokens="${14:-10}"
+  local uncached_input_tokens="${15:-90}"
   local result_path="$results_root/$filename"
   local sample_index=""
   if [[ "$notes" =~ -([0-9]+)$ ]]; then
@@ -59,10 +61,10 @@ write_result() {
   "harnessUsage": {
     "provider": "$harness",
     "agentLogFile": "/tmp/$harness-run.jsonl",
-    "inputTokens": 100,
-    "cachedInputTokens": 10,
+    "inputTokens": $((cached_input_tokens + uncached_input_tokens)),
+    "cachedInputTokens": $cached_input_tokens,
     "outputTokens": 20,
-    "uncachedInputTokens": 90,
+    "uncachedInputTokens": $uncached_input_tokens,
     "uncachedTotal": $uncached_total
   },
   "protocol": {
@@ -195,6 +197,22 @@ write_result "2026-03-01T10-12-51.000Z--clasp-audit-log--codex.json" "clasp-audi
 write_result "2026-03-01T10-12-52.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:52.000Z" 110 150 130 true 0
 write_result "2026-03-01T10-12-53.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:53.000Z" 190 205 180 false 1
 write_result "2026-03-01T10-12-54.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:54.000Z" 210 215 190 true 0
+write_result "2026-03-01T10-14-01.000Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:01.000Z" 90 150 75 false 1 "unspecified" 45 55
+write_result "2026-03-01T10-14-02.000Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:02.000Z" 70 140 65 true 0 "unspecified" 55 45
+write_result "2026-03-01T10-14-03.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:03.000Z" 140 175 160 false 1 "unspecified" 5 95
+write_result "2026-03-01T10-14-04.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:04.000Z" 130 170 150 true 0 "unspecified" 15 85
+write_result "2026-03-01T10-14-05.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:05.000Z" 80 130 120 true 0
+write_result "2026-03-01T10-14-06.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:06.000Z" 70 120 110 true 0
+write_result "2026-03-01T10-14-07.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:07.000Z" 110 150 135 true 0
+write_result "2026-03-01T10-14-08.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:08.000Z" 120 160 145 true 0
+write_result "2026-03-01T10-14-09.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:09.000Z" 95 120 100 false 1
+write_result "2026-03-01T10-14-10.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:10.000Z" 65 110 90 true 0
+write_result "2026-03-01T10-14-11.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:11.000Z" 140 150 135 false 1
+write_result "2026-03-01T10-14-12.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:12.000Z" 150 160 145 false 1
+write_result "2026-03-01T10-14-13.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:13.000Z" 75 110 100 true 0
+write_result "2026-03-01T10-14-14.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:14.000Z" 85 115 105 true 0
+write_result "2026-03-01T10-14-15.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:15.000Z" 145 155 145 false 1
+write_result "2026-03-01T10-14-16.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:16.000Z" 135 160 150 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -543,6 +561,37 @@ printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    mode: (unspeci
 printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    sourceTask: clasp-durable-workflow'
 printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    passRate: 100%'
 printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    timeToGreenMs: 640'
+
+caching_trust_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes cache-trust-a)"
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq 'caching-and-trust-scorecard'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  semantic-proof-or-result-cache-reuse\tcodex\tgpt-5.4\tcache-trust-a'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: authorization-data-access-comparison'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -110'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tokenDelta: -28'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    uncachedTokenDelta: -85'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspMedianCachedInputTokens: 50'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsMedianCachedInputTokens: 10'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    cachedInputTokenDelta: 40'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspMedianCacheReuseRatePct: 50'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsMedianCacheReuseRatePct: 10'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    cacheReuseRateDeltaPct: 40'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  world-snapshot-fidelity\tcodex\tgpt-5.4\tcache-trust-a'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: external-adaptation-comparison'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 100%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -30'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  interference-analysis-quality\tcodex\tgpt-5.4\tcache-trust-a'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: control-plane-comparison'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 0%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  trusted-computing-base-reporting-clarity\tcodex\tgpt-5.4\tcache-trust-a'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: interop-boundary-comparison'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -205'
 
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash

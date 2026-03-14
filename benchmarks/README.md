@@ -217,6 +217,23 @@ node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --no
 - `clasp-durable-workflow` for transactional-edit rollback behavior
 - `clasp-compiler-maintenance` for cheapest-valid-path planning efficiency on a narrow semantic repair
 
+Run the repeated caching-and-trust slice covering proof/result cache reuse, world-snapshot fidelity, interference analysis, and trusted-computing-base reporting clarity:
+
+```sh
+bash benchmarks/run-codex-series.sh authorization-data-access 5 cache-trust-1 gpt-5.4
+bash benchmarks/run-codex-series.sh external-adaptation 5 cache-trust-1 gpt-5.4
+bash benchmarks/run-codex-series.sh control-plane 5 cache-trust-1 gpt-5.4
+bash benchmarks/run-codex-series.sh interop-boundary 5 cache-trust-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes cache-trust-1
+```
+
+`summarize` emits `caching-and-trust-scorecard`, which rolls up:
+
+- `authorization-data-access` for semantic proof or result cache reuse, including cached-input-token and cache-reuse-rate deltas
+- `external-adaptation` for world-snapshot fidelity under repeated reruns
+- `control-plane` for interference-analysis quality under bounded multi-agent authority
+- `interop-boundary` for trusted-computing-base reporting clarity at unsafe boundaries
+
 When result files include `benchmark-phases.json`, the summary also reports median discovery, first-edit, first-verify, and phase-local time-to-green timings. Summaries and mirrored comparisons stay split by benchmark mode so `Raw Repo`, `File-Hinted`, and `Oracle` remain separate scorecards.
 
 Package a filtered result set into a reproducible benchmark bundle:
