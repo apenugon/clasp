@@ -4373,8 +4373,9 @@ compileTests =
             assertFailure ("expected auth identity compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected auth session decoder" ("function $decode_AuthSession" `T.isInfixOf` emitted)
-            assertBool "expected principal schema" ("const $claspSchema_Principal" `T.isInfixOf` emitted)
-            assertBool "expected auth session constructor object" ("sessionId: \"sess-1\"" `T.isInfixOf` emitted)
+            assertBool "expected audit actor schema" ("const $claspSchema_AuditActor" `T.isInfixOf` emitted)
+            assertBool "expected standard audit envelope decoder" ("function $decode_StandardAuditEnvelope" `T.isInfixOf` emitted)
+            assertBool "expected audit provenance constructor object" ("source: \"worker-runtime\"" `T.isInfixOf` emitted)
             assertBool "expected nested field access" ("((session).tenant).id" `T.isInfixOf` emitted)
     , testCase "compile round-trips auth identity primitives through JSON codecs" $
         case compileSource "auth" authIdentitySource of
@@ -4391,13 +4392,19 @@ compileTests =
                 , "const raw = compiledModule.encodeAudit(compiledModule.defaultAudit);"
                 , "const decoded = compiledModule.decodeAudit(raw);"
                 , "console.log(JSON.stringify({"
-                , "  sessionId: decoded.session.sessionId,"
-                , "  tenantId: compiledModule.sessionTenantId(decoded.session),"
+                , "  actorId: decoded.actor.actorId,"
+                , "  actorType: decoded.actor.actorType,"
+                , "  tenantId: compiledModule.sessionTenantId(compiledModule.defaultSession),"
+                , "  actionType: decoded.action.actionType,"
+                , "  provenanceRequestId: decoded.provenance.requestId,"
                 , "  resource: decoded.resource.resourceType + ':' + decoded.resource.resourceId"
                 , "}));"
                 ]
-            assertBool "expected decoded auth session" ("\"sessionId\":\"sess-1\"" `T.isInfixOf` encoded)
+            assertBool "expected decoded actor id" ("\"actorId\":\"user-1\"" `T.isInfixOf` encoded)
+            assertBool "expected decoded actor type" ("\"actorType\":\"principal\"" `T.isInfixOf` encoded)
             assertBool "expected tenant id" ("\"tenantId\":\"tenant-1\"" `T.isInfixOf` encoded)
+            assertBool "expected action type" ("\"actionType\":\"read\"" `T.isInfixOf` encoded)
+            assertBool "expected provenance request id" ("\"provenanceRequestId\":\"sess-1\"" `T.isInfixOf` encoded)
             assertBool "expected resource identity" ("\"resource\":\"lead:lead-1\"" `T.isInfixOf` encoded)
     , testCase "generated auth identity contracts stay available across app runtimes" $
         case compileSource "auth-runtime" authIdentitySource of
@@ -4413,7 +4420,7 @@ compileTests =
             runtimeOutput <- runNodeScript (authIdentityRuntimeScript absoluteCompiledPath absoluteServerRuntimePath absoluteWorkerRuntimePath)
             assertEqual
               "expected auth identity contract exports across server and worker runtimes"
-              "{\"contractVersion\":1,\"schemaNames\":[\"AuditEnvelope\",\"AuthSession\",\"Bool\",\"Int\",\"Principal\",\"ResourceIdentity\",\"SqliteConnection\",\"Str\",\"Tenant\"],\"sessionSchemaKind\":\"record\",\"principalFieldType\":\"Principal\",\"tenantSeed\":\"seed\",\"workerSessionId\":\"sess-1\",\"workerPrincipalId\":\"user-1\",\"workerTenantId\":\"tenant-1\",\"workerResource\":\"lead:lead-1\"}"
+              "{\"contractVersion\":1,\"schemaNames\":[\"AuditAction\",\"AuditActor\",\"AuditProvenance\",\"AuthSession\",\"Bool\",\"Int\",\"Principal\",\"ResourceIdentity\",\"SqliteConnection\",\"StandardAuditEnvelope\",\"Str\",\"Tenant\"],\"sessionSchemaKind\":\"record\",\"principalFieldType\":\"Principal\",\"tenantSeed\":\"seed\",\"workerActorType\":\"principal\",\"workerActorId\":\"user-1\",\"workerActionType\":\"read\",\"workerTimestamp\":1710000000,\"workerProvenanceSource\":\"worker-runtime\",\"workerResource\":\"lead:lead-1\"}"
               runtimeOutput
     , testCase "checkEntry resolves imported modules" $
         withProjectFiles "import-success" importSuccessFiles $ \root -> do
@@ -7334,25 +7341,20 @@ authIdentitySource =
   T.unlines
     [ "module Main"
     , ""
-    , "record AuditEnvelope = {"
-    , "  session : AuthSession,"
-    , "  resource : ResourceIdentity"
-    , "}"
+    , "defaultSession : AuthSession"
+    , "defaultSession = authSession \"sess-1\" (principal \"user-1\") (tenant \"tenant-1\") (resourceIdentity \"lead\" \"lead-1\")"
     , ""
-    , "defaultAudit : AuditEnvelope"
-    , "defaultAudit = AuditEnvelope {"
-    , "  session = authSession \"sess-1\" (principal \"user-1\") (tenant \"tenant-1\") (resourceIdentity \"lead\" \"lead-1\"),"
-    , "  resource = resourceIdentity \"lead\" \"lead-1\""
-    , "}"
+    , "defaultAudit : StandardAuditEnvelope"
+    , "defaultAudit = auditEnvelope (auditActor \"principal\" \"user-1\") defaultSession.resource (auditAction \"read\" \"Opened lead record\") 1710000000 (auditProvenance \"worker-runtime\" defaultSession.sessionId \"trace-7\")"
     , ""
     , "sessionTenantId : AuthSession -> Str"
     , "sessionTenantId session = session.tenant.id"
     , ""
-    , "encodeAudit : AuditEnvelope -> Str"
+    , "encodeAudit : StandardAuditEnvelope -> Str"
     , "encodeAudit audit = encode audit"
     , ""
-    , "decodeAudit : Str -> AuditEnvelope"
-    , "decodeAudit raw = decode AuditEnvelope raw"
+    , "decodeAudit : Str -> StandardAuditEnvelope"
+    , "decodeAudit raw = decode StandardAuditEnvelope raw"
     ]
 
 listTypeSource :: Text
@@ -10155,16 +10157,18 @@ authIdentityRuntimeScript compiledPath serverRuntimePath workerRuntimePath =
     , "const contract = bindingContractFor(compiledModule);"
     , "const workerRuntime = createWorkerRuntime(compiledModule);"
     , "const authSession = workerRuntime.schema('AuthSession');"
-    , "const decodedAudit = workerRuntime.schema('AuditEnvelope').decodeJson(compiledModule.encodeAudit(compiledModule.defaultAudit));"
+    , "const decodedAudit = workerRuntime.schema('StandardAuditEnvelope').decodeJson(compiledModule.encodeAudit(compiledModule.defaultAudit));"
     , "console.log(JSON.stringify({"
     , "  contractVersion: contract.version,"
     , "  schemaNames: Object.keys(contract.schemas).sort(),"
     , "  sessionSchemaKind: contract.schemas.AuthSession?.schema?.kind ?? null,"
     , "  principalFieldType: contract.schemas.AuthSession?.schema?.fields?.principal?.schema?.name ?? null,"
     , "  tenantSeed: authSession.seed.tenant.id,"
-    , "  workerSessionId: decodedAudit.session.sessionId,"
-    , "  workerPrincipalId: decodedAudit.session.principal.id,"
-    , "  workerTenantId: decodedAudit.session.tenant.id,"
+    , "  workerActorType: decodedAudit.actor.actorType,"
+    , "  workerActorId: decodedAudit.actor.actorId,"
+    , "  workerActionType: decodedAudit.action.actionType,"
+    , "  workerTimestamp: decodedAudit.timestamp,"
+    , "  workerProvenanceSource: decodedAudit.provenance.source,"
     , "  workerResource: decodedAudit.resource.resourceType + ':' + decodedAudit.resource.resourceId"
     , "}));"
     ]

@@ -288,6 +288,18 @@ tenantTypeName = "Tenant"
 resourceIdentityTypeName :: Text
 resourceIdentityTypeName = "ResourceIdentity"
 
+auditActorTypeName :: Text
+auditActorTypeName = "AuditActor"
+
+auditActionTypeName :: Text
+auditActionTypeName = "AuditAction"
+
+auditProvenanceTypeName :: Text
+auditProvenanceTypeName = "AuditProvenance"
+
+standardAuditEnvelopeTypeName :: Text
+standardAuditEnvelopeTypeName = "StandardAuditEnvelope"
+
 resultTypeName :: Text
 resultTypeName = "Result"
 
@@ -311,6 +323,18 @@ tenantBuiltinName = "tenant"
 
 resourceIdentityBuiltinName :: Text
 resourceIdentityBuiltinName = "resourceIdentity"
+
+auditActorBuiltinName :: Text
+auditActorBuiltinName = "auditActor"
+
+auditActionBuiltinName :: Text
+auditActionBuiltinName = "auditAction"
+
+auditProvenanceBuiltinName :: Text
+auditProvenanceBuiltinName = "auditProvenance"
+
+auditEnvelopeBuiltinName :: Text
+auditEnvelopeBuiltinName = "auditEnvelope"
 
 hostClassBuiltinName :: Text
 hostClassBuiltinName = "hostClass"
@@ -502,6 +526,9 @@ builtinRecordDecls =
   [ builtinRecordDecl principalTypeName [("id", TStr)]
   , builtinRecordDecl tenantTypeName [("id", TStr)]
   , builtinRecordDecl resourceIdentityTypeName [("resourceType", TStr), ("resourceId", TStr)]
+  , builtinRecordDecl auditActorTypeName [("actorType", TStr), ("actorId", TStr)]
+  , builtinRecordDecl auditActionTypeName [("actionType", TStr), ("summary", TStr)]
+  , builtinRecordDecl auditProvenanceTypeName [("source", TStr), ("requestId", TStr), ("traceId", TStr)]
   , builtinRecordDecl
       sqliteConnectionTypeName
       [ ("id", TStr)
@@ -515,6 +542,14 @@ builtinRecordDecls =
       , ("principal", TNamed principalTypeName)
       , ("tenant", TNamed tenantTypeName)
       , ("resource", TNamed resourceIdentityTypeName)
+      ]
+  , builtinRecordDecl
+      standardAuditEnvelopeTypeName
+      [ ("actor", TNamed auditActorTypeName)
+      , ("resource", TNamed resourceIdentityTypeName)
+      , ("action", TNamed auditActionTypeName)
+      , ("timestamp", TInt)
+      , ("provenance", TNamed auditProvenanceTypeName)
       ]
   ]
 
@@ -670,7 +705,17 @@ isBuiltinPromptFunctionName name =
 
 isBuiltinAuthFunctionName :: Text -> Bool
 isBuiltinAuthFunctionName name =
-  name `elem` [authSessionBuiltinName, principalBuiltinName, tenantBuiltinName, resourceIdentityBuiltinName]
+  name
+    `elem`
+      [ authSessionBuiltinName
+      , principalBuiltinName
+      , tenantBuiltinName
+      , resourceIdentityBuiltinName
+      , auditActorBuiltinName
+      , auditActionBuiltinName
+      , auditProvenanceBuiltinName
+      , auditEnvelopeBuiltinName
+      ]
 
 isSafeViewTag :: Text -> Bool
 isSafeViewTag tag =
@@ -3368,6 +3413,69 @@ inferBuiltinAuthCall ctx termEnv localEnv callSpan builtinName args =
                 )
             _ ->
               throwBuiltinRecordArity callSpan builtinName 2 (length args)
+      | name == auditActorBuiltinName ->
+          case args of
+            [actorTypeExpr, actorIdExpr] -> do
+              draftActorType <- inferExpr ctx termEnv localEnv actorTypeExpr
+              draftActorId <- inferExpr ctx termEnv localEnv actorIdExpr
+              unifyBuiltinRecordArg "audit actor type" draftActorType IStr
+              unifyBuiltinRecordArg "audit actor id" draftActorId IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed auditActorTypeName)
+                    ( DraftRecord
+                        auditActorTypeName
+                        [ DraftRecordField "actorType" draftActorType
+                        , DraftRecordField "actorId" draftActorId
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 2 (length args)
+      | name == auditActionBuiltinName ->
+          case args of
+            [actionTypeExpr, actionSummaryExpr] -> do
+              draftActionType <- inferExpr ctx termEnv localEnv actionTypeExpr
+              draftActionSummary <- inferExpr ctx termEnv localEnv actionSummaryExpr
+              unifyBuiltinRecordArg "audit action type" draftActionType IStr
+              unifyBuiltinRecordArg "audit action summary" draftActionSummary IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed auditActionTypeName)
+                    ( DraftRecord
+                        auditActionTypeName
+                        [ DraftRecordField "actionType" draftActionType
+                        , DraftRecordField "summary" draftActionSummary
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 2 (length args)
+      | name == auditProvenanceBuiltinName ->
+          case args of
+            [sourceExpr, requestIdExpr, traceIdExpr] -> do
+              draftSource <- inferExpr ctx termEnv localEnv sourceExpr
+              draftRequestId <- inferExpr ctx termEnv localEnv requestIdExpr
+              draftTraceId <- inferExpr ctx termEnv localEnv traceIdExpr
+              unifyBuiltinRecordArg "audit provenance source" draftSource IStr
+              unifyBuiltinRecordArg "audit provenance request id" draftRequestId IStr
+              unifyBuiltinRecordArg "audit provenance trace id" draftTraceId IStr
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed auditProvenanceTypeName)
+                    ( DraftRecord
+                        auditProvenanceTypeName
+                        [ DraftRecordField "source" draftSource
+                        , DraftRecordField "requestId" draftRequestId
+                        , DraftRecordField "traceId" draftTraceId
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 3 (length args)
       | name == authSessionBuiltinName ->
           case args of
             [sessionIdExpr, principalExpr, tenantExpr, resourceExpr] -> do
@@ -3394,6 +3502,35 @@ inferBuiltinAuthCall ctx termEnv localEnv callSpan builtinName args =
                 )
             _ ->
               throwBuiltinRecordArity callSpan builtinName 4 (length args)
+      | name == auditEnvelopeBuiltinName ->
+          case args of
+            [actorExpr, resourceExpr, actionExpr, timestampExpr, provenanceExpr] -> do
+              draftActor <- inferExpr ctx termEnv localEnv actorExpr
+              draftResource <- inferExpr ctx termEnv localEnv resourceExpr
+              draftAction <- inferExpr ctx termEnv localEnv actionExpr
+              draftTimestamp <- inferExpr ctx termEnv localEnv timestampExpr
+              draftProvenance <- inferExpr ctx termEnv localEnv provenanceExpr
+              unifyBuiltinRecordArg "audit envelope actor" draftActor (INamed auditActorTypeName)
+              unifyBuiltinRecordArg "audit envelope resource" draftResource (INamed resourceIdentityTypeName)
+              unifyBuiltinRecordArg "audit envelope action" draftAction (INamed auditActionTypeName)
+              unifyBuiltinRecordArg "audit envelope timestamp" draftTimestamp IInt
+              unifyBuiltinRecordArg "audit envelope provenance" draftProvenance (INamed auditProvenanceTypeName)
+              pure
+                ( DraftExpr
+                    callSpan
+                    (INamed standardAuditEnvelopeTypeName)
+                    ( DraftRecord
+                        standardAuditEnvelopeTypeName
+                        [ DraftRecordField "actor" draftActor
+                        , DraftRecordField "resource" draftResource
+                        , DraftRecordField "action" draftAction
+                        , DraftRecordField "timestamp" draftTimestamp
+                        , DraftRecordField "provenance" draftProvenance
+                        ]
+                    )
+                )
+            _ ->
+              throwBuiltinRecordArity callSpan builtinName 5 (length args)
     _ ->
       inferRegularCall ctx termEnv localEnv callSpan (EVar callSpan builtinName) args
 
