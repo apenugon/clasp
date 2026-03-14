@@ -147,6 +147,22 @@ write_result "2026-03-01T10-12-43.000Z--clasp-interop-boundary--codex.json" "cla
 write_result "2026-03-01T10-12-44.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:44.000Z" 95 110 100 true 0
 write_result "2026-03-01T10-12-45.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-1" "2026-03-01T10:12:45.000Z" 130 155 142 false 1
 write_result "2026-03-01T10-12-46.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:46.000Z" 140 160 148 true 0
+write_result "2026-03-01T10-13-01.000Z--clasp-npm-interop--codex.json" "clasp-npm-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:01.000Z" 70 95 88 true 0
+write_result "2026-03-01T10-13-02.000Z--clasp-npm-interop--codex.json" "clasp-npm-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:02.000Z" 80 100 92 true 0
+write_result "2026-03-01T10-13-03.000Z--ts-npm-interop--codex.json" "ts-npm-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:03.000Z" 100 130 120 false 1
+write_result "2026-03-01T10-13-04.000Z--ts-npm-interop--codex.json" "ts-npm-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:04.000Z" 110 140 126 true 0
+write_result "2026-03-01T10-13-05.000Z--clasp-python-interop--codex.json" "clasp-python-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:05.000Z" 120 150 135 false 1
+write_result "2026-03-01T10-13-06.000Z--clasp-python-interop--codex.json" "clasp-python-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:06.000Z" 90 140 125 true 0
+write_result "2026-03-01T10-13-07.000Z--ts-python-interop--codex.json" "ts-python-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:07.000Z" 160 200 180 false 1
+write_result "2026-03-01T10-13-08.000Z--ts-python-interop--codex.json" "ts-python-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:08.000Z" 180 210 190 true 0
+write_result "2026-03-01T10-13-09.000Z--clasp-rust-interop--codex.json" "clasp-rust-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:09.000Z" 75 115 105 true 0
+write_result "2026-03-01T10-13-10.000Z--clasp-rust-interop--codex.json" "clasp-rust-interop" "clasp" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:10.000Z" 85 120 110 true 0
+write_result "2026-03-01T10-13-11.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:11.000Z" 140 170 155 true 0
+write_result "2026-03-01T10-13-12.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:12.000Z" 150 180 165 true 0
+write_result "2026-03-01T10-13-13.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:13.000Z" 85 105 95 true 0
+write_result "2026-03-01T10-13-14.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:14.000Z" 95 110 100 true 0
+write_result "2026-03-01T10-13-15.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "mixed-stack-a-1" "2026-03-01T10:13:15.000Z" 130 155 142 false 1
+write_result "2026-03-01T10-13-16.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "mixed-stack-a-2" "2026-03-01T10:13:16.000Z" 140 160 148 true 0
 write_result "2026-03-01T10-12-47.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:47.000Z" 80 110 98 true 0
 write_result "2026-03-01T10-12-48.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:48.000Z" 90 120 102 true 0
 write_result "2026-03-01T10-12-49.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:49.000Z" 150 170 150 false 1
@@ -330,6 +346,26 @@ printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    timeToGreenDelt
 printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tokenDelta: -50'
 printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    uncachedTokenDelta: -47'
 
+mixed_stack_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes mixed-stack-a)"
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq 'mixed-stack-semantic-layer-comparison'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq $'  codex\tgpt-5.4\tmixed-stack-a'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    taskPairs: 4'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspCompletedTasks: 4/4'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsCompletedTasks: 4/4'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspRunPassRate: 88%'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsRunPassRate: 63%'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    passRateDeltaPct: 25'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspSuiteTimeToGreenMs: 440'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsSuiteTimeToGreenMs: 960'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    timeToGreenDeltaMs: -520'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspSuiteMedianTokens: 469'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsSuiteMedianTokens: 673'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspFeatureThroughputPerHour: 32727.27'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsFeatureThroughputPerHour: 15000'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    throughputDeltaPct: 118'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tokenDelta: -204'
+printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    uncachedTokenDelta: -187'
+
 secret_handling_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes secret-handling-a)"
 printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'clasp-secret-handling\tcodex\tgpt-5.4'
 printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'ts-secret-handling\tcodex\tgpt-5.4'
@@ -452,6 +488,16 @@ printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run clasp-interop-boun
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run ts-interop-boundary'
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-1'
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" mixed-stack-semantic-layer 2 mixed-stack-a gpt-5.4
+mixed_stack_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run clasp-npm-interop'
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run ts-python-interop'
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run clasp-rust-interop'
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run ts-interop-boundary'
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq -- '--notes mixed-stack-a-1'
+printf '%s\n' "$mixed_stack_command_log" | grep -Fq -- '--notes mixed-stack-a-2'
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" secret-handling 2 secret-handling-a gpt-5.4

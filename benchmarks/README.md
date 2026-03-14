@@ -109,6 +109,15 @@ For public scorecards, the main comparison should roll up the mirrored moderate-
 
 `node benchmarks/run-benchmark.mjs summarize` now emits this roll-up as `main-public-app-comparison`, with completed-task counts plus suite-level time-to-green, product-feature throughput per hour, and token totals for `Clasp` versus `TypeScript`.
 
+For mixed-stack semantic-layer scorecards, the benchmark runner also rolls up the host-runtime interop and unsafe-boundary task families:
+
+- `clasp-npm-interop` vs `ts-npm-interop`
+- `clasp-python-interop` vs `ts-python-interop`
+- `clasp-rust-interop` vs `ts-rust-interop`
+- `clasp-interop-boundary` vs `ts-interop-boundary`
+
+`node benchmarks/run-benchmark.mjs summarize` emits this suite as `mixed-stack-semantic-layer-comparison`, with completed-task counts plus suite-level time-to-green, throughput, and token totals for `Clasp` versus `TypeScript`.
+
 ## Publication-Grade Fairness
 
 The most defensible benchmark publication mode should freeze a full benchmark bundle:
@@ -170,6 +179,12 @@ Summarize recorded runs by task, harness, model, and repeated-run series:
 
 ```sh
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
+```
+
+Run the mixed-stack semantic-layer suite through the repeated Codex wrapper:
+
+```sh
+bash benchmarks/run-codex-series.sh mixed-stack-semantic-layer 5 mixed-stack-a gpt-5.4
 ```
 
 When result files include `benchmark-phases.json`, the summary also reports median discovery, first-edit, first-verify, and phase-local time-to-green timings. Summaries and mirrored comparisons stay split by benchmark mode so `Raw Repo`, `File-Hinted`, and `Oracle` remain separate scorecards.

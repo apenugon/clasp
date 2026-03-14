@@ -54,6 +54,16 @@ const taskSetAliases = {
     "clasp-rust-interop",
     "ts-rust-interop"
   ],
+  "mixed-stack-semantic-layer": [
+    "clasp-npm-interop",
+    "ts-npm-interop",
+    "clasp-python-interop",
+    "ts-python-interop",
+    "clasp-rust-interop",
+    "ts-rust-interop",
+    "clasp-interop-boundary",
+    "ts-interop-boundary"
+  ],
   "interop-boundary": [
     "clasp-interop-boundary",
     "ts-interop-boundary"
@@ -190,6 +200,29 @@ const publicAppBenchmark = {
     {
       leftTaskId: "clasp-external-adaptation",
       rightTaskId: "ts-external-adaptation"
+    }
+  ],
+  leftLabel: "clasp",
+  rightLabel: "ts"
+};
+const mixedStackSemanticLayerBenchmark = {
+  comparisonLabel: "mixed-stack-semantic-layer-comparison",
+  taskPairs: [
+    {
+      leftTaskId: "clasp-npm-interop",
+      rightTaskId: "ts-npm-interop"
+    },
+    {
+      leftTaskId: "clasp-python-interop",
+      rightTaskId: "ts-python-interop"
+    },
+    {
+      leftTaskId: "clasp-rust-interop",
+      rightTaskId: "ts-rust-interop"
+    },
+    {
+      leftTaskId: "clasp-interop-boundary",
+      rightTaskId: "ts-interop-boundary"
     }
   ],
   leftLabel: "clasp",
@@ -798,55 +831,10 @@ async function summarizeCommand(args) {
     }
   }
 
-  const publicAppComparisons = buildPublicAppComparisons(filtered);
-  if (publicAppComparisons.length > 0) {
-    console.log(publicAppBenchmark.comparisonLabel);
-
-    for (const comparison of publicAppComparisons) {
-      console.log(
-        `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
-      );
-      console.log(`    mode: ${comparison.mode}`);
-      console.log(`    taskPairs: ${comparison.taskPairs}`);
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.rightLabel, "CompletedTasks")}: ${comparison.right.completedTasks}/${comparison.taskPairs}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.leftLabel, "RunPassRate")}: ${comparison.left.runPassRate}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.rightLabel, "RunPassRate")}: ${comparison.right.runPassRate}`
-      );
-      console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteTimeToGreenMs")}: ${comparison.left.suiteTimeToGreenMs}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteTimeToGreenMs")}: ${comparison.right.suiteTimeToGreenMs}`
-      );
-      console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteMedianTokens")}: ${comparison.left.suiteMedianTokens}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteMedianTokens")}: ${comparison.right.suiteMedianTokens}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.leftLabel, "FeatureThroughputPerHour")}: ${comparison.left.featureThroughputPerHour}`
-      );
-      console.log(
-        `    ${buildComparisonMetricKey(comparison.rightLabel, "FeatureThroughputPerHour")}: ${comparison.right.featureThroughputPerHour}`
-      );
-      console.log(`    throughputDeltaPct: ${comparison.throughputDeltaPct}`);
-      console.log(`    tokenDelta: ${comparison.tokenDelta}`);
-      console.log(
-        `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
-      );
-    }
-  }
+  printBenchmarkSuiteComparisons(buildBenchmarkSuiteComparisons(filtered, publicAppBenchmark));
+  printBenchmarkSuiteComparisons(
+    buildBenchmarkSuiteComparisons(filtered, mixedStackSemanticLayerBenchmark)
+  );
 }
 
 async function packageCommand(args) {
@@ -936,9 +924,62 @@ function buildTaskFamilyComparisons(results) {
     .filter((section) => section.comparisons.length > 0);
 }
 
-function buildPublicAppComparisons(results) {
+function printBenchmarkSuiteComparisons(comparisons) {
+  if (comparisons.length === 0) {
+    return;
+  }
+
+  console.log(comparisons[0].comparisonLabel);
+
+  for (const comparison of comparisons) {
+    console.log(
+      `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
+    );
+    console.log(`    mode: ${comparison.mode}`);
+    console.log(`    taskPairs: ${comparison.taskPairs}`);
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.rightLabel, "CompletedTasks")}: ${comparison.right.completedTasks}/${comparison.taskPairs}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.leftLabel, "RunPassRate")}: ${comparison.left.runPassRate}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.rightLabel, "RunPassRate")}: ${comparison.right.runPassRate}`
+    );
+    console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteTimeToGreenMs")}: ${comparison.left.suiteTimeToGreenMs}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteTimeToGreenMs")}: ${comparison.right.suiteTimeToGreenMs}`
+    );
+    console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.leftLabel, "SuiteMedianTokens")}: ${comparison.left.suiteMedianTokens}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.rightLabel, "SuiteMedianTokens")}: ${comparison.right.suiteMedianTokens}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.leftLabel, "FeatureThroughputPerHour")}: ${comparison.left.featureThroughputPerHour}`
+    );
+    console.log(
+      `    ${buildComparisonMetricKey(comparison.rightLabel, "FeatureThroughputPerHour")}: ${comparison.right.featureThroughputPerHour}`
+    );
+    console.log(`    throughputDeltaPct: ${comparison.throughputDeltaPct}`);
+    console.log(`    tokenDelta: ${comparison.tokenDelta}`);
+    console.log(
+      `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
+    );
+  }
+}
+
+function buildBenchmarkSuiteComparisons(results, benchmark) {
   const relevantTaskIds = new Set(
-    publicAppBenchmark.taskPairs.flatMap((pair) => [pair.leftTaskId, pair.rightTaskId])
+    benchmark.taskPairs.flatMap((pair) => [pair.leftTaskId, pair.rightTaskId])
   );
   const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
@@ -954,7 +995,7 @@ function buildPublicAppComparisons(results) {
     const leftTaskSummaries = [];
     const rightTaskSummaries = [];
 
-    for (const pair of publicAppBenchmark.taskPairs) {
+    for (const pair of benchmark.taskPairs) {
       const leftResults = byTask.get(pair.leftTaskId);
       const rightResults = byTask.get(pair.rightTaskId);
 
@@ -968,20 +1009,21 @@ function buildPublicAppComparisons(results) {
       rightTaskSummaries.push(summarizeGroup(rightResults));
     }
 
-    if (leftTaskSummaries.length !== publicAppBenchmark.taskPairs.length) {
+    if (leftTaskSummaries.length !== benchmark.taskPairs.length) {
       continue;
     }
 
     const left = summarizeBenchmarkSuite(leftTaskSummaries);
     const right = summarizeBenchmarkSuite(rightTaskSummaries);
     comparisons.push({
+      comparisonLabel: benchmark.comparisonLabel,
       harness,
       model,
       mode: mode || "(unspecified)",
       series: series || "(all-runs)",
-      taskPairs: publicAppBenchmark.taskPairs.length,
-      leftLabel: publicAppBenchmark.leftLabel,
-      rightLabel: publicAppBenchmark.rightLabel,
+      taskPairs: benchmark.taskPairs.length,
+      leftLabel: benchmark.leftLabel,
+      rightLabel: benchmark.rightLabel,
       left,
       right,
       passRateDeltaPct: Math.round(left.runPassRatePct - right.runPassRatePct),
@@ -1694,6 +1736,7 @@ function usage() {
   console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
   console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
+  console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
 }
 
 async function copyPackageFiles(bundleRoot, results, tasks) {

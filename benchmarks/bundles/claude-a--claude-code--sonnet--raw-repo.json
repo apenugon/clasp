@@ -51,8 +51,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 20442,
-      "sha256": "5883ff8c02635400aa98d44181965ab6b3ae964f8b3925e1f92adda97134968b"
+      "size": 21173,
+      "sha256": "74ba503f257c3d25ba8200928aeeda044475751d5933bccde64a728448be40c7"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -61,8 +61,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 61265,
-      "sha256": "70eef4655dd1d6030741124d2ff3b4cf9574725dc5a05f7da8c25ad48825adbc"
+      "size": 62476,
+      "sha256": "f813664fe3fa818b13e0ddf31ca658ffdb24acfb84ae250268a14b1ab2d32e95"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -71,8 +71,8 @@
     },
     {
       "path": "benchmarks/run-claude-series.sh",
-      "size": 2246,
-      "sha256": "aaa6763905ab17863eebaa0db5ecdcc9a31fa76f94d6cc8d221e0ef73d8a2c6d"
+      "size": 2283,
+      "sha256": "95c768c3f29eff5379f68febc5bc56a7f1c322ea6cc904ac8c1a4649b801eca5"
     },
     {
       "path": "benchmarks/run-codex-harness.sh",
@@ -81,8 +81,8 @@
     },
     {
       "path": "benchmarks/run-codex-series.sh",
-      "size": 2255,
-      "sha256": "7e3d8947b1144adf2f74cae7b90e881d60c26989cd33dd59428621528dd682ae"
+      "size": 2292,
+      "sha256": "ab1a947f61dfe21981d52b28781f9993694ffbd28794f5d8f935f395f11cc3ce"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/prompt.md",
