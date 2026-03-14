@@ -108,12 +108,15 @@ import Clasp.Native
   , NativeCompareOp (..)
   , NativeConstructorLayout (..)
   , NativeDecl (..)
+  , NativeBoundaryContract (..)
   , NativeExpr (..)
   , NativeField (..)
   , NativeFieldLayout (..)
   , NativeFunction (..)
   , NativeGlobal (..)
+  , NativeHookBoundary (..)
   , NativeIntrinsic (..)
+  , NativeJsonCodec (..)
   , NativeLayoutStorage (..)
   , NativeLiteral (..)
   , NativeLifetimeInvariant (..)
@@ -125,11 +128,15 @@ import Clasp.Native
   , NativeObjectLayout (..)
   , NativeOwnershipRule (..)
   , NativeRecordLayout (..)
+  , NativeRouteBoundary (..)
   , NativeRuntime (..)
   , NativeRuntimeBinding (..)
   , NativeRootDiscoveryRule (..)
   , NativeSlotLayout (..)
+  , NativeToolBoundary (..)
+  , NativeToolServerBoundary (..)
   , NativeVariantLayout (..)
+  , NativeWorkflowBoundary (..)
   )
 import Clasp.Syntax
   ( AgentDecl (..)
@@ -2305,6 +2312,22 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered decodeUsers declaration: " <> show other)
+    , testCase "lowering tracks codec types for route, hook, tool, and workflow boundaries" $
+        case lowerChecked "native-boundaries" nativeBoundarySource of
+          Left err ->
+            assertFailure ("expected native boundary lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            assertEqual
+              "boundary codec types"
+              [ TNamed "Counter"
+              , TNamed "HookAck"
+              , TNamed "LeadRequest"
+              , TNamed "LeadSummary"
+              , TNamed "SearchRequest"
+              , TNamed "SearchResponse"
+              , TNamed "WorkerBoot"
+              ]
+              (lowerModuleCodecTypes lowered)
     , testCase "lowering preserves local let expressions" $
         case lowerChecked "let" letExpressionSource of
           Left err ->
@@ -2873,6 +2896,50 @@ nativeTests =
                 assertEqual "readFile symbol" "clasp_rt_read_file" (nativeRuntimeBindingSymbol binding)
               Nothing ->
                 assertFailure "expected readFile runtime binding"
+    , testCase "native runtime tracks json codecs and runtime boundaries for app surfaces" $
+        case nativeSource "native-boundaries" nativeBoundarySource of
+          Left err ->
+            assertFailure ("expected native boundary lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let runtime = nativeModuleRuntime nativeMod
+            assertEqual
+              "json codecs"
+              [ NativeJsonCodec (TNamed "Counter") "$encode_Counter" "$decode_Counter"
+              , NativeJsonCodec (TNamed "HookAck") "$encode_HookAck" "$decode_HookAck"
+              , NativeJsonCodec (TNamed "LeadRequest") "$encode_LeadRequest" "$decode_LeadRequest"
+              , NativeJsonCodec (TNamed "LeadSummary") "$encode_LeadSummary" "$decode_LeadSummary"
+              , NativeJsonCodec (TNamed "SearchRequest") "$encode_SearchRequest" "$decode_SearchRequest"
+              , NativeJsonCodec (TNamed "SearchResponse") "$encode_SearchResponse" "$decode_SearchResponse"
+              , NativeJsonCodec (TNamed "WorkerBoot") "$encode_WorkerBoot" "$decode_WorkerBoot"
+              ]
+              (nativeRuntimeJsonCodecs runtime)
+            assertBool "expected json runtime symbol" ("clasp_rt_json_from_string" `elem` nativeRuntimeMemorySymbols runtime)
+            assertBool "expected json boundary symbol" ("clasp_rt_json_to_string" `elem` nativeRuntimeMemorySymbols runtime)
+            assertEqual
+              "boundary contracts"
+              [ NativeRouteContract (NativeRouteBoundary "summarizeLeadRoute" "route:summarizeLeadRoute" "POST" "/lead/summary" "LeadRequest" "LeadSummary" "json" "$encode_LeadSummary" "$decode_LeadRequest")
+              , NativeHookContract (NativeHookBoundary "workerStart" "hook:workerStart" "worker.start" "WorkerBoot" "HookAck" "bootstrapWorker" "$encode_HookAck" "$decode_WorkerBoot")
+              , NativeToolServerContract (NativeToolServerBoundary "RepoTools" "toolserver:RepoTools" "mcp" "stdio://repo-tools" "SupportDisclosure")
+              , NativeToolContract (NativeToolBoundary "searchRepo" "tool:searchRepo" "RepoTools" "search_repo" "SearchRequest" "SearchResponse" "$encode_SearchResponse" "$decode_SearchRequest")
+              , NativeWorkflowContract (NativeWorkflowBoundary "CounterFlow" "workflow:CounterFlow" (TNamed "Counter") "$encode_Counter" "$decode_Counter")
+              ]
+              (nativeRuntimeBoundaryContracts runtime)
+    , testCase "claspc native emits json codec and runtime-boundary metadata end to end" $
+        withProjectFiles "native-boundaries" [("Main.clasp", nativeBoundarySource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "dist" </> "Main.native.ir"
+          createDirectoryIfMissing True (takeDirectory outputPath)
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
+          case exitCode of
+            ExitFailure _ ->
+              assertFailure ("expected native boundary emission to succeed:\n" <> stdoutText <> stderrText)
+            ExitSuccess -> do
+              nativeIr <- TIO.readFile outputPath
+              assertBool "expected json codecs section" ("json_codecs [Counter{encode=$encode_Counter, decode=$decode_Counter}" `T.isInfixOf` nativeIr)
+              assertBool "expected route boundary contract" ("route summarizeLeadRoute{id=route:summarizeLeadRoute, method=POST, path=\"/lead/summary\", request=LeadRequest, response=LeadSummary, response_kind=json, encode=$encode_LeadSummary, decode=$decode_LeadRequest}" `T.isInfixOf` nativeIr)
+              assertBool "expected hook boundary contract" ("hook workerStart{id=hook:workerStart, event=\"worker.start\", request=WorkerBoot, response=HookAck, handler=bootstrapWorker, encode=$encode_HookAck, decode=$decode_WorkerBoot}" `T.isInfixOf` nativeIr)
+              assertBool "expected tool boundary contract" ("tool searchRepo{id=tool:searchRepo, server=RepoTools, operation=\"search_repo\", request=SearchRequest, response=SearchResponse, encode=$encode_SearchResponse, decode=$decode_SearchRequest}" `T.isInfixOf` nativeIr)
+              assertBool "expected workflow boundary contract" ("workflow CounterFlow{id=workflow:CounterFlow, state=Counter, checkpoint=$encode_Counter, restore=$decode_Counter}" `T.isInfixOf` nativeIr)
     , testCase "claspc native emits a native IR artifact for compiler workloads end to end" $ do
         let outputPath = "dist/compiler-parser.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
@@ -2901,8 +2968,10 @@ nativeTests =
         source <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.c")
         assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
+        assertBool "expected runtime json helper export" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value);" `T.isInfixOf` header)
         assertBool "expected runtime stdlib text split export" ("ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);" `T.isInfixOf` header)
         assertBool "expected runtime static root registration" ("void clasp_rt_register_static_root(ClaspRtRuntime *runtime, ClaspRtHeader **slot)" `T.isInfixOf` source)
+        assertBool "expected runtime json helper implementation" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value)" `T.isInfixOf` source)
         assertBool "expected runtime object destroy path" ("static void clasp_rt_destroy_object" `T.isInfixOf` source)
         assertBool "expected runtime file read helper" ("ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path)" `T.isInfixOf` source)
     ]
@@ -6394,6 +6463,36 @@ controlPlaneSource =
     , ""
     , "verifier repoChecks = searchRepo"
     , "mergegate trunk = repoChecks"
+    , ""
+    , "main = \"ok\""
+    ]
+
+nativeBoundarySource :: Text
+nativeBoundarySource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record WorkerBoot = { workerId : Str }"
+    , "record HookAck = { accepted : Bool }"
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , "record Counter = { count : Int }"
+    , "record LeadRequest = { company : Str, budget : Int }"
+    , "record LeadSummary = { summary : Str }"
+    , ""
+    , "bootstrapWorker : WorkerBoot -> HookAck"
+    , "bootstrapWorker req = HookAck { accepted = true }"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead lead = LeadSummary { summary = lead.company }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "hook workerStart = \"worker.start\" WorkerBoot -> HookAck bootstrapWorker"
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , "workflow CounterFlow = { state : Counter }"
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     , ""
     , "main = \"ok\""
     ]

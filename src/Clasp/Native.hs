@@ -9,6 +9,13 @@ module Clasp.Native
   , NativeConstructorLayout (..)
   , NativeDecl (..)
   , NativeFieldLayout (..)
+  , NativeJsonCodec (..)
+  , NativeBoundaryContract (..)
+  , NativeRouteBoundary (..)
+  , NativeHookBoundary (..)
+  , NativeToolServerBoundary (..)
+  , NativeToolBoundary (..)
+  , NativeWorkflowBoundary (..)
   , NativeExpr (..)
   , NativeField (..)
   , NativeFunction (..)
@@ -44,16 +51,22 @@ import Clasp.Lower
   , LowerMatchBranch (..)
   , LowerModule (..)
   , LowerRecordField (..)
+  , LowerRoute (..)
   , LowerRouteContract (..)
   )
 import Clasp.Syntax
   ( ConstructorDecl (..)
   , ForeignDecl (..)
+  , HookDecl (..)
+  , HookTriggerDecl (..)
   , ModuleName
   , RecordDecl (..)
   , RecordFieldDecl (..)
+  , ToolDecl (..)
+  , ToolServerDecl (..)
   , Type (..)
   , TypeDecl (..)
+  , WorkflowDecl (..)
   , renderType
   , splitModuleName
   )
@@ -193,6 +206,78 @@ data NativeRuntime = NativeRuntime
   , nativeRuntimeArtifacts :: [Text]
   , nativeRuntimeMemorySymbols :: [Text]
   , nativeRuntimeBindings :: [NativeRuntimeBinding]
+  , nativeRuntimeJsonCodecs :: [NativeJsonCodec]
+  , nativeRuntimeBoundaryContracts :: [NativeBoundaryContract]
+  }
+  deriving (Eq, Show)
+
+data NativeJsonCodec = NativeJsonCodec
+  { nativeJsonCodecType :: Type
+  , nativeJsonCodecEncodeSymbol :: Text
+  , nativeJsonCodecDecodeSymbol :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeBoundaryContract
+  = NativeRouteContract NativeRouteBoundary
+  | NativeHookContract NativeHookBoundary
+  | NativeToolServerContract NativeToolServerBoundary
+  | NativeToolContract NativeToolBoundary
+  | NativeWorkflowContract NativeWorkflowBoundary
+  deriving (Eq, Show)
+
+data NativeRouteBoundary = NativeRouteBoundary
+  { nativeRouteBoundaryName :: Text
+  , nativeRouteBoundaryIdentity :: Text
+  , nativeRouteBoundaryMethod :: Text
+  , nativeRouteBoundaryPath :: Text
+  , nativeRouteBoundaryRequestType :: Text
+  , nativeRouteBoundaryResponseType :: Text
+  , nativeRouteBoundaryResponseKind :: Text
+  , nativeRouteBoundaryEncodeSymbol :: Text
+  , nativeRouteBoundaryDecodeSymbol :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeHookBoundary = NativeHookBoundary
+  { nativeHookBoundaryName :: Text
+  , nativeHookBoundaryIdentity :: Text
+  , nativeHookBoundaryEvent :: Text
+  , nativeHookBoundaryRequestType :: Text
+  , nativeHookBoundaryResponseType :: Text
+  , nativeHookBoundaryHandler :: Text
+  , nativeHookBoundaryEncodeSymbol :: Text
+  , nativeHookBoundaryDecodeSymbol :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeToolServerBoundary = NativeToolServerBoundary
+  { nativeToolServerBoundaryName :: Text
+  , nativeToolServerBoundaryIdentity :: Text
+  , nativeToolServerBoundaryProtocol :: Text
+  , nativeToolServerBoundaryLocation :: Text
+  , nativeToolServerBoundaryPolicy :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeToolBoundary = NativeToolBoundary
+  { nativeToolBoundaryName :: Text
+  , nativeToolBoundaryIdentity :: Text
+  , nativeToolBoundaryServer :: Text
+  , nativeToolBoundaryOperation :: Text
+  , nativeToolBoundaryRequestType :: Text
+  , nativeToolBoundaryResponseType :: Text
+  , nativeToolBoundaryEncodeSymbol :: Text
+  , nativeToolBoundaryDecodeSymbol :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeWorkflowBoundary = NativeWorkflowBoundary
+  { nativeWorkflowBoundaryName :: Text
+  , nativeWorkflowBoundaryIdentity :: Text
+  , nativeWorkflowBoundaryStateType :: Type
+  , nativeWorkflowBoundaryCheckpointSymbol :: Text
+  , nativeWorkflowBoundaryRestoreSymbol :: Text
   }
   deriving (Eq, Show)
 
@@ -370,6 +455,8 @@ renderNativeRuntime runtime =
   , "artifacts [" <> commaSeparated (fmap renderQuoted (nativeRuntimeArtifacts runtime)) <> "]"
   , "memory_symbols [" <> commaSeparated (nativeRuntimeMemorySymbols runtime) <> "]"
   , "bindings [" <> commaSeparated (fmap renderRuntimeBinding (nativeRuntimeBindings runtime)) <> "]"
+  , "json_codecs [" <> commaSeparated (fmap renderJsonCodec (nativeRuntimeJsonCodecs runtime)) <> "]"
+  , "boundaries [" <> commaSeparated (fmap renderBoundaryContract (nativeRuntimeBoundaryContracts runtime)) <> "]"
   ]
 
 renderRuntimeBinding :: NativeRuntimeBinding -> Text
@@ -382,6 +469,99 @@ renderRuntimeBinding binding =
     <> ", type="
     <> renderType (nativeRuntimeBindingType binding)
     <> "}"
+
+renderJsonCodec :: NativeJsonCodec -> Text
+renderJsonCodec codec =
+  renderType (nativeJsonCodecType codec)
+    <> "{encode="
+    <> nativeJsonCodecEncodeSymbol codec
+    <> ", decode="
+    <> nativeJsonCodecDecodeSymbol codec
+    <> "}"
+
+renderBoundaryContract :: NativeBoundaryContract -> Text
+renderBoundaryContract contract =
+  case contract of
+    NativeRouteContract routeBoundary ->
+      "route "
+        <> nativeRouteBoundaryName routeBoundary
+        <> "{id="
+        <> nativeRouteBoundaryIdentity routeBoundary
+        <> ", method="
+        <> nativeRouteBoundaryMethod routeBoundary
+        <> ", path="
+        <> renderQuoted (nativeRouteBoundaryPath routeBoundary)
+        <> ", request="
+        <> nativeRouteBoundaryRequestType routeBoundary
+        <> ", response="
+        <> nativeRouteBoundaryResponseType routeBoundary
+        <> ", response_kind="
+        <> nativeRouteBoundaryResponseKind routeBoundary
+        <> ", encode="
+        <> nativeRouteBoundaryEncodeSymbol routeBoundary
+        <> ", decode="
+        <> nativeRouteBoundaryDecodeSymbol routeBoundary
+        <> "}"
+    NativeHookContract hookBoundary ->
+      "hook "
+        <> nativeHookBoundaryName hookBoundary
+        <> "{id="
+        <> nativeHookBoundaryIdentity hookBoundary
+        <> ", event="
+        <> renderQuoted (nativeHookBoundaryEvent hookBoundary)
+        <> ", request="
+        <> nativeHookBoundaryRequestType hookBoundary
+        <> ", response="
+        <> nativeHookBoundaryResponseType hookBoundary
+        <> ", handler="
+        <> nativeHookBoundaryHandler hookBoundary
+        <> ", encode="
+        <> nativeHookBoundaryEncodeSymbol hookBoundary
+        <> ", decode="
+        <> nativeHookBoundaryDecodeSymbol hookBoundary
+        <> "}"
+    NativeToolServerContract toolServerBoundary ->
+      "toolserver "
+        <> nativeToolServerBoundaryName toolServerBoundary
+        <> "{id="
+        <> nativeToolServerBoundaryIdentity toolServerBoundary
+        <> ", protocol="
+        <> renderQuoted (nativeToolServerBoundaryProtocol toolServerBoundary)
+        <> ", location="
+        <> renderQuoted (nativeToolServerBoundaryLocation toolServerBoundary)
+        <> ", policy="
+        <> nativeToolServerBoundaryPolicy toolServerBoundary
+        <> "}"
+    NativeToolContract toolBoundary ->
+      "tool "
+        <> nativeToolBoundaryName toolBoundary
+        <> "{id="
+        <> nativeToolBoundaryIdentity toolBoundary
+        <> ", server="
+        <> nativeToolBoundaryServer toolBoundary
+        <> ", operation="
+        <> renderQuoted (nativeToolBoundaryOperation toolBoundary)
+        <> ", request="
+        <> nativeToolBoundaryRequestType toolBoundary
+        <> ", response="
+        <> nativeToolBoundaryResponseType toolBoundary
+        <> ", encode="
+        <> nativeToolBoundaryEncodeSymbol toolBoundary
+        <> ", decode="
+        <> nativeToolBoundaryDecodeSymbol toolBoundary
+        <> "}"
+    NativeWorkflowContract workflowBoundary ->
+      "workflow "
+        <> nativeWorkflowBoundaryName workflowBoundary
+        <> "{id="
+        <> nativeWorkflowBoundaryIdentity workflowBoundary
+        <> ", state="
+        <> renderType (nativeWorkflowBoundaryStateType workflowBoundary)
+        <> ", checkpoint="
+        <> nativeWorkflowBoundaryCheckpointSymbol workflowBoundary
+        <> ", restore="
+        <> nativeWorkflowBoundaryRestoreSymbol workflowBoundary
+        <> "}"
 
 renderFieldLayout :: NativeFieldLayout -> Text
 renderFieldLayout fieldLayout =
@@ -640,8 +820,17 @@ buildNativeRuntime modl =
         , "clasp_rt_string_list_new"
         , "clasp_rt_result_ok_string"
         , "clasp_rt_result_err_string"
+        , "clasp_rt_json_from_string"
+        , "clasp_rt_json_to_string"
         ]
     , nativeRuntimeBindings = fmap lowerForeignDeclToRuntimeBinding (lowerModuleForeignDecls modl)
+    , nativeRuntimeJsonCodecs = fmap nativeJsonCodecForType (lowerModuleCodecTypes modl)
+    , nativeRuntimeBoundaryContracts =
+        fmap (NativeRouteContract . lowerRouteToBoundary) (lowerModuleRoutes modl)
+          <> fmap (NativeHookContract . hookDeclToBoundary) (lowerModuleHookDecls modl)
+          <> fmap (NativeToolServerContract . toolServerDeclToBoundary) (lowerModuleToolServerDecls modl)
+          <> fmap (NativeToolContract . toolDeclToBoundary) (lowerModuleToolDecls modl)
+          <> fmap (NativeWorkflowContract . workflowDeclToBoundary) (lowerModuleWorkflowDecls modl)
     }
 
 lowerForeignDeclToRuntimeBinding :: ForeignDecl -> NativeRuntimeBinding
@@ -656,6 +845,74 @@ lowerForeignDeclToRuntimeBinding foreignDecl =
 nativeRuntimeSymbol :: Text -> Text
 nativeRuntimeSymbol runtimeName =
   "clasp_rt_" <> normalizeRuntimeName runtimeName
+
+nativeJsonCodecForType :: Type -> NativeJsonCodec
+nativeJsonCodecForType typ =
+  NativeJsonCodec
+    { nativeJsonCodecType = typ
+    , nativeJsonCodecEncodeSymbol = "$encode_" <> nativeCodecSuffix typ
+    , nativeJsonCodecDecodeSymbol = "$decode_" <> nativeCodecSuffix typ
+    }
+
+lowerRouteToBoundary :: LowerRoute -> NativeRouteBoundary
+lowerRouteToBoundary route =
+  NativeRouteBoundary
+    { nativeRouteBoundaryName = lowerRouteName route
+    , nativeRouteBoundaryIdentity = lowerRouteIdentity route
+    , nativeRouteBoundaryMethod = renderRouteMethodText (lowerRouteMethod route)
+    , nativeRouteBoundaryPath = lowerRoutePath route
+    , nativeRouteBoundaryRequestType = lowerRouteRequestTypeName route
+    , nativeRouteBoundaryResponseType = lowerRouteResponseTypeName route
+    , nativeRouteBoundaryResponseKind = routeBoundaryKind (lowerRouteResponseTypeName route)
+    , nativeRouteBoundaryEncodeSymbol = "$encode_" <> lowerRouteResponseTypeName route
+    , nativeRouteBoundaryDecodeSymbol = "$decode_" <> lowerRouteRequestTypeName route
+    }
+
+hookDeclToBoundary :: HookDecl -> NativeHookBoundary
+hookDeclToBoundary hookDecl =
+  NativeHookBoundary
+    { nativeHookBoundaryName = hookDeclName hookDecl
+    , nativeHookBoundaryIdentity = hookDeclIdentity hookDecl
+    , nativeHookBoundaryEvent = hookTriggerDeclEvent (hookDeclTrigger hookDecl)
+    , nativeHookBoundaryRequestType = hookDeclRequestType hookDecl
+    , nativeHookBoundaryResponseType = hookDeclResponseType hookDecl
+    , nativeHookBoundaryHandler = hookDeclHandlerName hookDecl
+    , nativeHookBoundaryEncodeSymbol = "$encode_" <> hookDeclResponseType hookDecl
+    , nativeHookBoundaryDecodeSymbol = "$decode_" <> hookDeclRequestType hookDecl
+    }
+
+toolServerDeclToBoundary :: ToolServerDecl -> NativeToolServerBoundary
+toolServerDeclToBoundary toolServerDecl =
+  NativeToolServerBoundary
+    { nativeToolServerBoundaryName = toolServerDeclName toolServerDecl
+    , nativeToolServerBoundaryIdentity = toolServerDeclIdentity toolServerDecl
+    , nativeToolServerBoundaryProtocol = toolServerDeclProtocol toolServerDecl
+    , nativeToolServerBoundaryLocation = toolServerDeclLocation toolServerDecl
+    , nativeToolServerBoundaryPolicy = toolServerDeclPolicyName toolServerDecl
+    }
+
+toolDeclToBoundary :: ToolDecl -> NativeToolBoundary
+toolDeclToBoundary toolDecl =
+  NativeToolBoundary
+    { nativeToolBoundaryName = toolDeclName toolDecl
+    , nativeToolBoundaryIdentity = toolDeclIdentity toolDecl
+    , nativeToolBoundaryServer = toolDeclServerName toolDecl
+    , nativeToolBoundaryOperation = toolDeclOperation toolDecl
+    , nativeToolBoundaryRequestType = toolDeclRequestType toolDecl
+    , nativeToolBoundaryResponseType = toolDeclResponseType toolDecl
+    , nativeToolBoundaryEncodeSymbol = "$encode_" <> toolDeclResponseType toolDecl
+    , nativeToolBoundaryDecodeSymbol = "$decode_" <> toolDeclRequestType toolDecl
+    }
+
+workflowDeclToBoundary :: WorkflowDecl -> NativeWorkflowBoundary
+workflowDeclToBoundary workflowDecl =
+  NativeWorkflowBoundary
+    { nativeWorkflowBoundaryName = workflowDeclName workflowDecl
+    , nativeWorkflowBoundaryIdentity = workflowDeclIdentity workflowDecl
+    , nativeWorkflowBoundaryStateType = workflowDeclStateType workflowDecl
+    , nativeWorkflowBoundaryCheckpointSymbol = "$encode_" <> nativeCodecSuffix (workflowDeclStateType workflowDecl)
+    , nativeWorkflowBoundaryRestoreSymbol = "$decode_" <> nativeCodecSuffix (workflowDeclStateType workflowDecl)
+    }
 
 normalizeRuntimeName :: Text -> Text
 normalizeRuntimeName =
@@ -678,6 +935,35 @@ normalizeRuntimeName =
                   then acc
                   else acc <> "_"
            in (seenAlphaNum, nextAcc)
+
+nativeCodecSuffix :: Type -> Text
+nativeCodecSuffix typ =
+  case typ of
+    TInt ->
+      "Int"
+    TStr ->
+      "Str"
+    TBool ->
+      "Bool"
+    TList itemType ->
+      "List_" <> nativeCodecSuffix itemType
+    TNamed name ->
+      name
+    TFunction _ _ ->
+      error "functions are not JSON codec targets"
+
+routeBoundaryKind :: Text -> Text
+routeBoundaryKind responseType
+  | responseType == "Page" = "page"
+  | responseType == "Redirect" = "redirect"
+  | otherwise = "json"
+
+renderRouteMethodText :: Show a => a -> Text
+renderRouteMethodText method =
+  case T.pack (show method) of
+    "RouteGet" -> "GET"
+    "RoutePost" -> "POST"
+    other -> other
 
 buildRecordLayout :: Map.Map Text RecordDecl -> Map.Map Text TypeDecl -> RecordDecl -> NativeRecordLayout
 buildRecordLayout recordEnv typeEnv recordDecl =

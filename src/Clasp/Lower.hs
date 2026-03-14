@@ -50,7 +50,7 @@ import Clasp.Syntax
   , ConstructorDecl (..)
   , ForeignDecl
   , GuideDecl
-  , HookDecl
+  , HookDecl (..)
   , MergeGateDecl
   , ModuleName
   , PolicyDecl
@@ -59,13 +59,13 @@ import Clasp.Syntax
   , RouteDecl (..)
   , RouteMethod
   , RoutePathDecl
-  , ToolDecl
+  , ToolDecl (..)
   , ToolServerDecl
   , Type (..)
   , TypeDecl (..)
   , VerifierDecl
   , SupervisorDecl
-  , WorkflowDecl
+  , WorkflowDecl (..)
   )
 
 data LowerModule = LowerModule
@@ -251,6 +251,32 @@ collectModuleCodecTypes modl =
   Set.toList $
     Set.fromList $
       concatMap (collectExprCodecTypes . coreDeclBody) (coreModuleDecls modl)
+        <> concatMap collectRouteCodecTypes (coreModuleRouteDecls modl)
+        <> concatMap collectHookCodecTypes (coreModuleHookDecls modl)
+        <> concatMap collectToolCodecTypes (coreModuleToolDecls modl)
+        <> fmap (workflowDeclStateType . coreWorkflowSourceDecl) (coreModuleWorkflowDecls modl)
+
+collectRouteCodecTypes :: RouteDecl -> [Type]
+collectRouteCodecTypes routeDecl =
+  [ TNamed (routeDeclRequestType routeDecl)
+  , TNamed (routeDeclResponseType routeDecl)
+  ]
+
+collectHookCodecTypes :: CoreHookDecl -> [Type]
+collectHookCodecTypes coreHookDecl =
+  [ TNamed (hookDeclRequestType hookDecl)
+  , TNamed (hookDeclResponseType hookDecl)
+  ]
+  where
+    hookDecl = coreHookSourceDecl coreHookDecl
+
+collectToolCodecTypes :: CoreToolDecl -> [Type]
+collectToolCodecTypes coreToolDecl =
+  [ TNamed (toolDeclRequestType toolDecl)
+  , TNamed (toolDeclResponseType toolDecl)
+  ]
+  where
+    toolDecl = coreToolSourceDecl coreToolDecl
 
 collectExprCodecTypes :: CoreExpr -> [Type]
 collectExprCodecTypes expr =

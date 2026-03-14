@@ -9,6 +9,7 @@ typedef struct ClaspRtHeader ClaspRtHeader;
 typedef struct ClaspRtObjectLayout ClaspRtObjectLayout;
 typedef struct ClaspRtRuntime ClaspRtRuntime;
 typedef struct ClaspRtString ClaspRtString;
+typedef ClaspRtString ClaspRtJson;
 typedef struct ClaspRtStringList ClaspRtStringList;
 typedef struct ClaspRtResultString ClaspRtResultString;
 typedef struct ClaspRtObject ClaspRtObject;
@@ -65,6 +66,8 @@ ClaspRtString *clasp_rt_string_from_utf8(const char *value);
 ClaspRtStringList *clasp_rt_string_list_new(size_t length);
 ClaspRtResultString *clasp_rt_result_ok_string(ClaspRtString *value);
 ClaspRtResultString *clasp_rt_result_err_string(ClaspRtString *value);
+ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value);
+ClaspRtString *clasp_rt_json_to_string(ClaspRtJson *value);
 
 ClaspRtString *clasp_rt_text_concat(ClaspRtStringList *parts);
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);

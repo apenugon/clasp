@@ -123,6 +123,16 @@ ClaspRtResultString *clasp_rt_result_err_string(ClaspRtString *value) {
   return result;
 }
 
+ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value) {
+  clasp_rt_retain((ClaspRtHeader *) value);
+  return (ClaspRtJson *) value;
+}
+
+ClaspRtString *clasp_rt_json_to_string(ClaspRtJson *value) {
+  clasp_rt_retain((ClaspRtHeader *) value);
+  return (ClaspRtString *) value;
+}
+
 ClaspRtString *clasp_rt_text_concat(ClaspRtStringList *parts) {
   return clasp_rt_text_join(clasp_rt_string_from_utf8(""), parts);
 }
