@@ -450,8 +450,8 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.
 - `Prompt` host values carry prompt-message content only; authority-bearing policy, permission, and tool-grant metadata must remain on declared control-plane surfaces instead of being embedded into prompt payloads.
 - Projections derive boundary-facing record schemas from a source record plus a policy, and the checker rejects projected fields whose classifications are not allowed by that policy.
-- `decode` validates and decodes JSON text into a primitive or record type.
-- `encode` serializes a primitive or record value into JSON text.
+- `decode` validates and decodes JSON text into a primitive, record, or list type.
+- `encode` serializes a primitive, record, or list value into JSON text.
 - Foreign declarations bind typed runtime capabilities through a host-provided runtime object.
 - Foreign declarations also emit structured host-binding manifests plus generated host-binding adapters so host code can register schema-shaped implementations without hand-written runtime glue.
 - Foreign declarations also emit a versioned `__claspNativeInterop` manifest with generated binding-module references, capability identifiers, default `Rust` crate or native-library naming, and target-aware build descriptors for Bun, workers, and future mobile-native bridges.

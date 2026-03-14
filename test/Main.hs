@@ -3873,6 +3873,29 @@ compileTests =
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
             assertBool "expected nested list schema" ("$claspCreateListSchema($claspCreateListSchema($claspSchema_Int))" `T.isInfixOf` emitted)
+    , testCase "compile evaluates the list example file end to end" $ do
+        source <- readExampleSource "lists.clasp"
+        case compileSource "examples/lists.clasp" source of
+          Left err ->
+            assertFailure ("expected list example compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/lists-example.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({"
+                , "  main: compiledModule.main,"
+                , "  usersJson: compiledModule.usersJson,"
+                , "  directory: compiledModule.directory"
+                , "}));"
+                ]
+            assertEqual
+              "expected list example runtime result"
+              "{\"main\":[{\"name\":\"Ada\",\"active\":true},{\"name\":\"Grace\",\"active\":false}],\"usersJson\":\"[{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true},{\\\"name\\\":\\\"Grace\\\",\\\"active\\\":false}]\",\"directory\":{\"names\":[\"Ada\",\"Grace\"],\"scoreBuckets\":[[10,20],[30]]}}"
+              runtimeOutput
     , testCase "compile evaluates the let example file" $ do
         source <- readExampleSource "let.clasp"
         case compileSource "examples/let.clasp" source of
