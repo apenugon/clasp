@@ -76,6 +76,12 @@ Do not collapse these into one number. They answer different questions:
 
 The current mirrored `lead-segment` task pair should remain compatible with all three modes. Prompt variants may differ only in the presence or absence of those file hints; the acceptance surface should stay identical.
 
+For the current `Oracle` lead-segment pair, the exact analogous edit surfaces are:
+
+- `benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp`
+- `benchmarks/tasks/ts-lead-segment/repo/src/shared/lead.ts`
+- `benchmarks/tasks/ts-lead-segment/repo/src/server/main.ts`
+
 For long-running workflow behavior, the suite also includes `clasp-durable-workflow`, a single-task durable upgrade benchmark that exercises supervised handoff, bounded overlap, health-gated activation, rollback, and version-drain reporting against the worker runtime.
 
 `Raw Repo` is the primary benchmark scorecard. That is the most realistic mode because a real harness has to inspect and understand the environment. `File-Hinted` and `Oracle` are supporting diagnostic modes used to explain *why* one side won, not to replace the main benchmark.

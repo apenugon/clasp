@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_root="$project_root/benchmarks/workspaces/task-prep-check"
+results_root="$project_root/benchmarks/results"
 
 mkdir -p "$workspace_root"
 
@@ -78,6 +79,29 @@ assert_file_exists() {
     echo "expected file to exist: $target" >&2
     return 1
   fi
+}
+
+latest_result_for_harness() {
+  local harness="$1"
+  local latest_result=""
+  local latest_mtime=0
+
+  for candidate in "$results_root"/*--"$harness".json; do
+    [[ -e "$candidate" ]] || continue
+    local candidate_mtime
+    candidate_mtime="$(stat -c '%Y' "$candidate")"
+    if [[ -z "$latest_result" || "$candidate_mtime" -gt "$latest_mtime" ]]; then
+      latest_result="$candidate"
+      latest_mtime="$candidate_mtime"
+    fi
+  done
+
+  if [[ -z "$latest_result" ]]; then
+    echo "expected at least one benchmark result artifact for harness $harness" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$latest_result"
 }
 
 check_fixture_seed_override() {
@@ -160,6 +184,34 @@ check_product_only_typescript_solution() {
   node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" --harness prep-check --model local >/dev/null
 
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+}
+
+check_oracle_prompt_mode() {
+  local clasp_workspace="$workspace_root/clasp-lead-segment-oracle"
+  local ts_workspace="$workspace_root/ts-lead-segment-oracle"
+  local clasp_prepare_output
+  local ts_prepare_output
+  local latest_result
+
+  clasp_prepare_output="$(node "$project_root/benchmarks/run-benchmark.mjs" prepare clasp-lead-segment --mode oracle --workspace "$clasp_workspace")"
+  printf '%s\n' "$clasp_prepare_output" | grep -Fq 'Prompt: '
+  printf '%s\n' "$clasp_prepare_output" | grep -Fq 'benchmarks/tasks/clasp-lead-segment/prompt.oracle.md'
+
+  cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$clasp_workspace/Shared/Lead.clasp"
+  node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
+    --workspace "$clasp_workspace" \
+    --harness oracle-check \
+    --model local \
+    --mode oracle >/dev/null
+
+  latest_result="$(latest_result_for_harness oracle-check)"
+  assert_contains "$latest_result" '"mode": "oracle"'
+  assert_contains "$latest_result" '"promptFile": "benchmarks/tasks/clasp-lead-segment/prompt.oracle.md"'
+  rm -f "$latest_result"
+
+  ts_prepare_output="$(node "$project_root/benchmarks/run-benchmark.mjs" prepare ts-lead-segment --mode oracle --workspace "$ts_workspace")"
+  printf '%s\n' "$ts_prepare_output" | grep -Fq 'Prompt: '
+  printf '%s\n' "$ts_prepare_output" | grep -Fq 'benchmarks/tasks/ts-lead-segment/prompt.oracle.md'
 }
 
 check_nested_clasp_benchmark_prep() {
@@ -321,3 +373,4 @@ assert_contains "$syntax_verbose_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/M
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution
+check_oracle_prompt_mode

@@ -105,8 +105,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 17071,
-      "sha256": "27846c5d331ac8395df802ea6bcb4d36b70375c52abb9cae966d04ccf001b312"
+      "size": 17341,
+      "sha256": "086ba2b73e6626a94d9c7c3e0aa476bd4d48dbe0e566a051a706686f08e6a13c"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -292,6 +292,11 @@
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.md",
       "size": 1884,
       "sha256": "c63b60d611309cab8b4dbdc0a12531028430a43644d6595cfe13f6317adf32a6"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-segment/prompt.oracle.md",
+      "size": 2061,
+      "sha256": "a9ae4ad4c2fe93216489407d2a298ab7827f1233d5acbb102a1c806673711a2e"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.raw.md",
@@ -517,6 +522,11 @@
       "path": "benchmarks/tasks/ts-lead-segment/prompt.md",
       "size": 1885,
       "sha256": "5f4b720a373982d8bb2b759e04f633d6dbf157632b0c027ce8299aea0051d8a5"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-segment/prompt.oracle.md",
+      "size": 2045,
+      "sha256": "821055ace65cc008c5b0d1518956c8c659f6f505e39a4b750907e7ce43c44769"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/prompt.raw.md",
