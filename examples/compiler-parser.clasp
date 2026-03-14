@@ -7,8 +7,14 @@ record ParserState = {
   declarations : Str
 }
 
+record ListLiteralSummary = {
+  items : Str,
+  count : Str
+}
+
 type LineKind = ModuleLine Str | ImportLine Str | SignatureLine Str | DeclarationLine Str | IgnoredLine
 type SplitTailState = WaitingForHead | CapturingTail Str
+type SegmentCount = ZeroSegments | OneSegment | TwoSegments | ThreeSegments | ManySegments
 
 appendEntry : Str -> Str -> Str
 appendEntry current entry = textConcat [current, "|", entry]
@@ -88,11 +94,77 @@ parseModuleSummary source = {
   state
 }
 
+betweenBrackets : Str -> Str
+betweenBrackets value = match textPrefix value "[" {
+  Ok tail ->
+    match textSplitFirst tail "]" {
+      Ok payload ->
+        firstSegment payload,
+      Err missingClose ->
+        ""
+    },
+  Err missingOpen ->
+    ""
+}
+
+advanceCount : SegmentCount -> SegmentCount
+advanceCount count = match count {
+  ZeroSegments ->
+    OneSegment,
+  OneSegment ->
+    TwoSegments,
+  TwoSegments ->
+    ThreeSegments,
+  ThreeSegments ->
+    ManySegments,
+  ManySegments ->
+    ManySegments
+}
+
+renderCount : SegmentCount -> Str
+renderCount count = match count {
+  ZeroSegments ->
+    "0",
+  OneSegment ->
+    "1",
+  TwoSegments ->
+    "2",
+  ThreeSegments ->
+    "3",
+  ManySegments ->
+    "4+"
+}
+
+countSegments : [Str] -> Str
+countSegments values = {
+  let mut total = ZeroSegments;
+  for item in values {
+    total = advanceCount total;
+    total
+  };
+  renderCount total
+}
+
+summarizeListLiteral : Str -> ListLiteralSummary
+summarizeListLiteral literal = {
+  let items = textSplit (betweenBrackets literal) ", ";
+  ListLiteralSummary { items = textJoin "|" items, count = countSegments items }
+}
+
 sampleSource : Str
 sampleSource = textJoin "\n" ["module Compiler.Parser", "", "import Compiler.Loader", "import Compiler.Renderers", "", "parseModule : Str -> Str", "parseModule source = source", "", "main : Str", "main = encode (parseModuleSummary sampleSource)"]
 
+sampleListLiteral : Str
+sampleListLiteral = "[module, import, declaration]"
+
 snapshot : ParserState
 snapshot = parseModuleSummary sampleSource
+
+listSnapshot : ListLiteralSummary
+listSnapshot = summarizeListLiteral sampleListLiteral
+
+listSnapshotJson : Str
+listSnapshotJson = encode listSnapshot
 
 moduleBody : Str
 moduleBody = match textPrefix sampleSource "module Compiler.Parser\n" {

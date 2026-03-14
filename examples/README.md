@@ -15,7 +15,9 @@ This directory has two kinds of examples:
 - [blocks.clasp](/home/akul/DevProjects/synthspeak/examples/blocks.clasp): multiline block expressions with local declarations, mutable locals, `for` loops, and early `return`
 - [compiler-renderers.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-renderers.clasp): self-hosting formatter and diagnostic rendering helpers expressed in Clasp
 - [compiler-loader.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-loader.clasp): self-hosting module loading and package search-order helpers expressed in Clasp
-- [compiler-parser.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-parser.clasp): self-hosting parser helpers for module headers, imports, signatures, and declaration heads expressed in Clasp
+- [compiler-parser.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-parser.clasp): self-hosting parser helpers for module headers plus simple list literal summaries expressed in Clasp
+- [compiler-checker.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-checker.clasp): self-hosting checker-style list inference and homogeneous-list validation helpers expressed in Clasp
+- [compiler-emitter.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-emitter.clasp): self-hosting emitter-style list literal and module rendering helpers expressed in Clasp
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
 
 ## Richer Examples

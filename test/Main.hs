@@ -1432,6 +1432,20 @@ checkerTests =
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler parser example source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "typechecks the compiler checker example file in explicit bootstrap recovery mode" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-checker.clasp", "--compiler=bootstrap"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected compiler checker example source to typecheck:\n" <> stdoutText <> stderrText)
+    , testCase "typechecks the compiler emitter example file in explicit bootstrap recovery mode" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-emitter.clasp", "--compiler=bootstrap"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected compiler emitter example source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "typechecks the hosted compiler entrypoint file" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp"]
         case exitCode of
@@ -3348,6 +3362,7 @@ compileTests =
                 [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
                 , "console.log(JSON.stringify({"
                 , "  snapshot: JSON.parse(compiledModule.main),"
+                , "  listSnapshot: JSON.parse(compiledModule.listSnapshotJson),"
                 , "  moduleBody: compiledModule.moduleBody,"
                 , "  firstDeclarationName: compiledModule.firstSegment(compiledModule.firstDeclarationPayload),"
                 , "  firstDeclarationBody: compiledModule.remainingSegments(compiledModule.firstDeclarationPayload)"
@@ -3379,6 +3394,19 @@ compileTests =
               "expected parsed declarations"
               (Just (String "|parseModule source|main"))
               (lookupObjectKey "declarations" snapshotValue)
+            case lookupObjectKey "listSnapshot" runtimeValue of
+              Just (Object objectValue) -> do
+                let listSnapshotValue = Object objectValue
+                assertEqual
+                  "expected parsed list items"
+                  (Just (String "module|import|declaration"))
+                  (lookupObjectKey "items" listSnapshotValue)
+                assertEqual
+                  "expected parsed list count"
+                  (Just (String "3"))
+                  (lookupObjectKey "count" listSnapshotValue)
+              other ->
+                assertFailure ("expected parser list snapshot object, got " <> show other)
             assertEqual
               "expected module body after prefix split"
               (Just (String "\nimport Compiler.Loader\nimport Compiler.Renderers\n\nparseModule : Str -> Str\nparseModule source = source\n\nmain : Str\nmain = encode (parseModuleSummary sampleSource)"))
@@ -3391,6 +3419,64 @@ compileTests =
               "expected first declaration body"
               (Just (String "source"))
               (lookupObjectKey "firstDeclarationBody" runtimeValue)
+    , testCase "compile evaluates the compiler checker example end-to-end in bootstrap recovery mode" $ do
+        let compiledPath = "dist/compiler-checker.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-checker.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler checker compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
+                , "console.log(compiledModule.snapshotJson);"
+                ]
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected compiler checker runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected homogeneous roster inference"
+              (Just (String "ok:[Str]"))
+              (lookupObjectKey "roster" runtimeValue)
+            assertEqual
+              "expected nested list inference"
+              (Just (String "ok:[[Int]]"))
+              (lookupObjectKey "matrix" runtimeValue)
+            assertEqual
+              "expected mixed list rejection"
+              (Just (String "error:expected Str but found Int"))
+              (lookupObjectKey "mixed" runtimeValue)
+    , testCase "compile evaluates the compiler emitter example end-to-end in bootstrap recovery mode" $ do
+        let compiledPath = "dist/compiler-emitter.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-emitter.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected compiler emitter compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
+                , "console.log(compiledModule.snapshotJson);"
+                ]
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected compiler emitter runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected emitted array literal"
+              (Just (String "[\"Ada\", \"Grace\", \"Linus\"]"))
+              (lookupObjectKey "arrayLiteral" runtimeValue)
+            assertEqual
+              "expected emitted module text"
+              (Just (String "// Generated by compiler-emitter\nexport const names = [\"Ada\", \"Grace\", \"Linus\"];\nexport function renderNames(names) { return JSON.stringify(names); }"))
+              (lookupObjectKey "moduleText" runtimeValue)
     , testCase "compile evaluates the hosted compiler entrypoint end-to-end" $ do
         let compiledPath = "dist/compiler-selfhost.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
