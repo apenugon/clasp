@@ -3938,7 +3938,8 @@ compileTests =
             assertBool "expected audit log runtime helper" ("createRuntime(options = null) { return $claspCreateAuditLogRuntime(this, options); }" `T.isInfixOf` emitted)
             assertBool "expected secret inputs export" ("export const __claspSecretInputs = [" `T.isInfixOf` emitted)
             assertBool "expected secret boundaries export" ("export const __claspSecretBoundaries = [" `T.isInfixOf` emitted)
-            assertBool "expected secret trace helper" ("traceAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).trace; }" `T.isInfixOf` emitted)
+            assertBool "expected secret trace helper" ("traceAccess(boundary, provider, context = null, options = null) { return this.decideAccess(boundary, provider, context, options).trace; }" `T.isInfixOf` emitted)
+            assertBool "expected delegated secret audit provenance" ("consumingBoundary: boundarySnapshot," `T.isInfixOf` emitted && "attenuation: $claspSnapshotValue(rawOptions.delegation.attenuation ?? null)" `T.isInfixOf` emitted)
             assertBool "expected missing secret diagnostic helper" ("Missing secret ${decision.secret} for ${decision.boundary.kind} ${decision.boundary.name} under policy ${decision.policy}" `T.isInfixOf` emitted)
             assertBool "expected eval hooks export" ("export const __claspEvalHooks = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected trace collector export" ("export const __claspTraceCollector = Object.freeze({" `T.isInfixOf` emitted)
@@ -5361,7 +5362,7 @@ compileTests =
             runtimeOutput <- runNodeScript (delegatedSecretHandoffRuntimeScript absoluteCompiledPath)
             assertEqual
               "expected delegated handoff runtime output"
-              "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"repeatDelegationIdsDistinct\":true,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
+              "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"repeatDelegationIdsDistinct\":true,\"toolTraceDelegator\":\"agent:builder\",\"toolTraceConsumer\":\"tool:searchRepo\",\"toolTraceBoundary\":\"toolServer:RepoTools\",\"toolAuditDelegatedAt\":1700,\"toolAuditAttenuationAction\":\"resolve\",\"toolAuditAttenuationTtl\":300,\"toolAuditAttenuationMaxUses\":1,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
               runtimeOutput
     , testCase "prompt and tool input surfaces resolve secrets from declared handles" $ do
         result <- compileEntry ("examples" </> "prompt-functions" </> "Main.clasp")
@@ -10485,9 +10486,11 @@ delegatedSecretHandoffRuntimeScript compiledPath =
     , "const agentSecrets = agent.secretConsumer();"
     , "const toolSecrets = tool.secretConsumer();"
     , "const workflowSecrets = workflow.secretConsumer(agentBoundary);"
-    , "const agentToTool = agentSecrets.handoff(toolSecrets, { reason: 'invoke-tool' });"
+    , "const agentToTool = agentSecrets.handoff(toolSecrets, { reason: 'invoke-tool', delegatedAt: 1700, attenuation: { action: 'resolve', ttlMs: 300, maxUses: 1 } });"
     , "const repeatDelegationA = agentSecrets.delegate(agentSecrets.secretHandles[0], { consumer: toolSecrets, reason: 'repeat-a' });"
     , "const repeatDelegationB = agentSecrets.delegate(agentSecrets.secretHandles[0], { consumer: toolSecrets, reason: 'repeat-b' });"
+    , "const toolTrace = toolSecrets.traceAccess(agentToTool.secretHandles[0], provider, { context: { actor: { id: 'tool-operator' } } });"
+    , "const toolAudit = toolSecrets.auditAccess(agentToTool.secretHandles[0], provider, { context: { actor: { id: 'tool-operator' } } });"
     , "const toolResolved = toolSecrets.resolve(agentToTool.secretHandles[0], provider);"
     , "let workflowRejected = null;"
     , "try {"
@@ -10509,6 +10512,13 @@ delegatedSecretHandoffRuntimeScript compiledPath =
     , "  agentHasRawValue: Object.prototype.hasOwnProperty.call(agentToTool.secretHandles[0], 'value'),"
     , "  agentRawValueLeaked: JSON.stringify(agentToTool).includes('sk-agent-live'),"
     , "  repeatDelegationIdsDistinct: repeatDelegationA.id !== repeatDelegationB.id,"
+    , "  toolTraceDelegator: `${toolTrace.delegation.delegator.kind}:${toolTrace.delegation.delegator.name}`,"
+    , "  toolTraceConsumer: `${toolTrace.consumer.kind}:${toolTrace.consumer.name}`,"
+    , "  toolTraceBoundary: `${toolTrace.delegation.consumingBoundary.kind}:${toolTrace.delegation.consumingBoundary.name}`,"
+    , "  toolAuditDelegatedAt: toolAudit.delegation.delegatedAt,"
+    , "  toolAuditAttenuationAction: toolAudit.delegation.attenuation.action,"
+    , "  toolAuditAttenuationTtl: toolAudit.delegation.attenuation.ttlMs,"
+    , "  toolAuditAttenuationMaxUses: toolAudit.delegation.attenuation.maxUses,"
     , "  toolResolvedName: toolResolved.name,"
     , "  toolResolvedValue: toolResolved.reveal({ reason: 'tool-run' }),"
     , "  workflowRejected,"
