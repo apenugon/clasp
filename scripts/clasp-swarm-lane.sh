@@ -122,6 +122,10 @@ acquire_lock() {
   while ! mkdir "$lock_dir" 2>/dev/null; do
     clear_stale_lock "$lock_path"
 
+    if mkdir "$lock_dir" 2>/dev/null; then
+      break
+    fi
+
     if [[ "$mode" == "try" ]]; then
       return 1
     fi
