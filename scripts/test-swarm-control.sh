@@ -12,12 +12,169 @@ global_completed_root=""
 spawn_root=""
 spawn_path_root=""
 invalid_lane_root=""
+autopilot_test_root=""
+autopilot_test_root_2=""
 
 cleanup() {
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}"
 }
 
 trap cleanup EXIT
+
+write_task_manifest() {
+  local task_file="$1"
+  local title="$2"
+  local dependency="${3:-None}"
+
+  cat > "$task_file" <<EOF
+# $title
+
+## Goal
+
+Exercise autopilot queue behavior for $title.
+
+## Why
+
+Regression coverage for the swarm control plane should stay local and deterministic.
+
+## Scope
+
+- Keep the scenario minimal
+
+## Likely Files
+
+- \`scripts/test-swarm-control.sh\`
+
+## Dependencies
+
+- $dependency
+
+## Acceptance
+
+- done
+
+## Verification
+
+\`\`\`sh
+bash scripts/verify-all.sh
+\`\`\`
+EOF
+}
+
+make_autopilot_test_project() {
+  local target_root="$1"
+  local scenario="$2"
+  local project_dir="$target_root/repo"
+
+  mkdir -p "$project_dir/scripts" "$project_dir/tools" "$project_dir/agents/tasks" "$project_dir/verifier-state"
+  cp "$project_root/scripts/clasp-autopilot.sh" "$project_dir/scripts/clasp-autopilot.sh"
+  printf '%s\n' "$scenario" > "$project_dir/scenario"
+
+  cat > "$project_dir/scripts/clasp-builder.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+task_id="$(basename "$task_file" .md)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+printf 'builder:%s\n' "$task_id" >> "$project_root/test-events.log"
+if [[ "$task_id" == *"--workaround" ]]; then
+  printf 'fixed\n' > "$workspace/.workaround-fixed"
+fi
+
+cat > "$report_json" <<JSON
+{
+  "summary": "builder finished for $task_id",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/clasp-verifier.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+task_id="$(basename "$task_file" .md)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state_dir="$project_root/verifier-state"
+scenario="$(< "$project_root/scenario")"
+attempt_file="$state_dir/$task_id.attempts"
+attempt=0
+
+if [[ -f "$attempt_file" ]]; then
+  attempt="$(< "$attempt_file")"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" > "$attempt_file"
+
+verdict="pass"
+summary="verified"
+findings_json='[]'
+follow_up_json='[]'
+
+case "$task_id" in
+  AA-001-parent)
+    if [[ ! -f "$workspace/.workaround-fixed" ]]; then
+      verdict="fail"
+      summary="parent task still needs a workaround"
+      findings_json='["Missing workaround marker in the builder workspace."]'
+      follow_up_json='["Generate and land the workaround task before retrying the parent."]'
+    fi
+    ;;
+  AA-001-parent--workaround)
+    if [[ "$scenario" == "fail-workaround" ]]; then
+      verdict="fail"
+      summary="workaround task remains blocked"
+      findings_json='["The generated workaround intentionally fails in this scenario."]'
+      follow_up_json='["Leave the workaround blocked and continue later ready tasks."]'
+    fi
+    ;;
+esac
+
+printf 'verifier:%s:%s\n' "$task_id" "$verdict" >> "$project_root/test-events.log"
+
+cat > "$report_json" <<JSON
+{
+  "verdict": "$verdict",
+  "summary": "$summary",
+  "findings": $findings_json,
+  "tests_run": [
+    "stub verifier for $task_id"
+  ],
+  "follow_up": $follow_up_json
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/tools/flock" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+
+  chmod +x \
+    "$project_dir/scripts/clasp-autopilot.sh" \
+    "$project_dir/scripts/clasp-builder.sh" \
+    "$project_dir/scripts/clasp-verifier.sh" \
+    "$project_dir/tools/flock"
+
+  printf '%s\n' "$project_dir"
+}
 
 bash -n \
   "$project_root/scripts/clasp-builder.sh" \
@@ -341,3 +498,36 @@ if [[ "$invalid_output" != *"manifest.title must be a non-empty string"* ]]; the
   printf '%s\n' "$invalid_output" >&2
   exit 1
 fi
+
+autopilot_test_root="$(mktemp -d)"
+autopilot_project_root="$(make_autopilot_test_project "$autopilot_test_root" "pass-workaround")"
+write_task_manifest "$autopilot_project_root/agents/tasks/AA-001-parent.md" "AA-001 Parent" "None"
+
+bash -lc "
+  set -euo pipefail
+  cd '$autopilot_project_root'
+  PATH='$autopilot_project_root/tools':\"\$PATH\" CLASP_AUTOPILOT_RETRY_LIMIT=2 bash scripts/clasp-autopilot.sh >/dev/null 2>&1
+
+  [[ -f .clasp-agents/completed/AA-001-parent ]]
+  [[ ! -f .clasp-agents/blocked/AA-001-parent.json ]]
+  [[ ! -f .clasp-agents/generated-tasks/AA-001-parent--workaround.md ]]
+  [[ \$(< test-events.log) == \$'builder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:pass\nbuilder:AA-001-parent\nverifier:AA-001-parent:pass' ]]
+" >/dev/null
+
+autopilot_test_root_2="$(mktemp -d)"
+autopilot_project_root_2="$(make_autopilot_test_project "$autopilot_test_root_2" "fail-workaround")"
+write_task_manifest "$autopilot_project_root_2/agents/tasks/AA-001-parent.md" "AA-001 Parent" "None"
+write_task_manifest "$autopilot_project_root_2/agents/tasks/AA-002-later.md" "AA-002 Later" "None"
+
+bash -lc "
+  set -euo pipefail
+  cd '$autopilot_project_root_2'
+  PATH='$autopilot_project_root_2/tools':\"\$PATH\" CLASP_AUTOPILOT_RETRY_LIMIT=2 bash scripts/clasp-autopilot.sh >/dev/null 2>&1
+
+  [[ -f .clasp-agents/completed/AA-002-later ]]
+  [[ ! -f .clasp-agents/completed/AA-001-parent ]]
+  [[ -f .clasp-agents/blocked/AA-001-parent.json ]]
+  [[ -f .clasp-agents/blocked/AA-001-parent--workaround.json ]]
+  [[ -f .clasp-agents/generated-tasks/AA-001-parent--workaround.md ]]
+  [[ \$(< test-events.log) == \$'builder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:fail\nbuilder:AA-002-later\nverifier:AA-002-later:pass' ]]
+" >/dev/null
