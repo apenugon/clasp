@@ -214,6 +214,28 @@ clasp_swarm_spawn_detached() {
 
   if command -v setsid >/dev/null 2>&1; then
     setsid "$@" >"$log_file" 2>&1 < /dev/null &
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "$log_file" "$@" <<'PY'
+import os
+import subprocess
+import sys
+
+log_path = sys.argv[1]
+command = sys.argv[2:]
+
+with open(log_path, "ab", buffering=0) as log_handle, open(os.devnull, "rb") as null_stdin:
+    process = subprocess.Popen(
+        command,
+        stdin=null_stdin,
+        stdout=log_handle,
+        stderr=log_handle,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+print(process.pid)
+PY
+    return 0
   elif command -v nohup >/dev/null 2>&1; then
     nohup "$@" >"$log_file" 2>&1 < /dev/null &
   else
