@@ -1403,6 +1403,31 @@ checkerTests =
                     assertFailure ("expected checked Result match expression, got " <> show other)
               Nothing ->
                 assertFailure "expected unwrap declaration"
+    , testCase "typechecks compiler-known Option constructors and matches" $
+        case checkSource "option" builtinOptionSource of
+          Left err ->
+            assertFailure ("expected builtin Option source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "Option") . typeDeclName) (coreModuleTypeDecls checked) of
+              Just typeDecl ->
+                assertEqual
+                  "builtin Option constructors"
+                  [ ConstructorDecl "Some" dummySpan dummySpan [TStr]
+                  , ConstructorDecl "None" dummySpan dummySpan []
+                  ]
+                  (normalizeConstructors (typeDeclConstructors typeDecl))
+              Nothing ->
+                assertFailure "expected compiler-known Option type declaration"
+            case find ((== "unwrap") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "unwrap type" (TFunction [TNamed "Option"] TStr) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CMatch _ TStr (CVar _ (TNamed "Option") "value") [CoreMatchBranch _ (CConstructorPattern _ "Some" [CorePatternBinder "present" _ TStr]) (CVar _ TStr "present"), CoreMatchBranch _ (CConstructorPattern _ "None" []) (CString _ "missing")] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked Option match expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected unwrap declaration"
     , testCase "typechecks compiler-known self-hosting stdlib helpers" $
         case checkSource "compiler-stdlib" compilerStdlibSource of
           Left err ->
@@ -2552,6 +2577,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered Result constructors: " <> show other)
+    , testCase "lowering materializes compiler-known Option constructors" $
+        case lowerChecked "option" builtinOptionSource of
+          Left err ->
+            assertFailure ("expected builtin Option lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case lowerModuleDecls lowered of
+              LFunctionDecl "Some" ["$0"] (LConstruct "Some" [LVar "$0"]) : LValueDecl "None" (LConstruct "None" []) : _ ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered Option constructors: " <> show other)
     , testCase "lowering preserves match branches as tag dispatch" $
         case lowerChecked "adt" adtSource of
           Left err ->
@@ -3384,7 +3419,11 @@ docsTests :: TestTree
 docsTests =
   testGroup
     "docs"
-    [ testCase "self-hosting plan defines the subset and bootstrap boundary" $ do
+    [ testCase "v0 spec documents compiler-known Option and Result bootstrap types" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
+        assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`." `T.isInfixOf` spec)
+    , testCase "self-hosting plan defines the subset and bootstrap boundary" $ do
         plan <- TIO.readFile ("docs" </> "clasp-self-hosting-plan.md")
         assertBool "expected self-hosting subset section" ("## Self-Hosting Subset" `T.isInfixOf` plan)
         assertBool "expected subset to include compiler-oriented language forms" ("- package-aware modules and imports" `T.isInfixOf` plan)
@@ -3442,6 +3481,24 @@ compileTests =
                 , "console.log(compiledModule.unwrap(compiledModule.Err(\"problem\")));"
                 ]
             assertEqual "expected Result runtime output" "done\nproblem" runtimeOutput
+    , testCase "compile emits compiler-known Option constructors and evaluates matches" $
+        case compileSource "option" builtinOptionSource of
+          Left err ->
+            assertFailure ("expected builtin Option compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected Some constructor function" ("export function Some" `T.isInfixOf` emitted)
+            assertBool "expected None constructor value" ("export const None" `T.isInfixOf` emitted)
+            let compiledPath = "dist/option-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.main);"
+                , "console.log(compiledModule.unwrap(compiledModule.None));"
+                ]
+            assertEqual "expected Option runtime output" "present\nmissing" runtimeOutput
     , testCase "compile emits compiler-known self-hosting stdlib helpers and evaluates them end-to-end" $
         case compileSource "compiler-stdlib" compilerStdlibSource of
           Left err ->
@@ -6617,6 +6674,21 @@ builtinResultSource =
     , ""
     , "main : Str"
     , "main = unwrap (Ok \"done\")"
+    ]
+
+builtinOptionSource :: Text
+builtinOptionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "unwrap : Option -> Str"
+    , "unwrap value = match value {"
+    , "  Some present -> present,"
+    , "  None -> \"missing\""
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = unwrap (Some \"present\")"
     ]
 
 compilerStdlibSource :: Text

@@ -301,11 +301,20 @@ auditProvenanceTypeName = "AuditProvenance"
 standardAuditEnvelopeTypeName :: Text
 standardAuditEnvelopeTypeName = "StandardAuditEnvelope"
 
+optionTypeName :: Text
+optionTypeName = "Option"
+
 resultTypeName :: Text
 resultTypeName = "Result"
 
 sqliteConnectionTypeName :: Text
 sqliteConnectionTypeName = "SqliteConnection"
+
+optionSomeConstructorName :: Text
+optionSomeConstructorName = "Some"
+
+optionNoneConstructorName :: Text
+optionNoneConstructorName = "None"
 
 resultOkConstructorName :: Text
 resultOkConstructorName = "Ok"
@@ -404,6 +413,18 @@ builtinResultTypeDecl =
     , typeDeclConstructors =
         [ builtinConstructorDecl resultOkConstructorName [TStr]
         , builtinConstructorDecl resultErrConstructorName [TStr]
+        ]
+    }
+
+builtinOptionTypeDecl :: TypeDecl
+builtinOptionTypeDecl =
+  TypeDecl
+    { typeDeclName = optionTypeName
+    , typeDeclSpan = builtinSpan
+    , typeDeclNameSpan = builtinSpan
+    , typeDeclConstructors =
+        [ builtinConstructorDecl optionSomeConstructorName [TStr]
+        , builtinConstructorDecl optionNoneConstructorName []
         ]
     }
 
@@ -562,14 +583,19 @@ isBuiltinRecordTypeName name = Map.member name builtinRecordDeclEnv
 
 isBuiltinTypeName :: Text -> Bool
 isBuiltinTypeName name =
-  name `elem` [pageTypeName, redirectTypeName, viewTypeName, promptTypeName, resultTypeName] || isBuiltinRecordTypeName name
+  name `elem` [pageTypeName, redirectTypeName, viewTypeName, promptTypeName, optionTypeName, resultTypeName] || isBuiltinRecordTypeName name
 
 builtinTypeDeclsForModule :: Module -> [TypeDecl]
-builtinTypeDeclsForModule modl
-  | moduleUsesBuiltinResult modl =
-      [builtinResultTypeDecl]
-  | otherwise =
-      []
+builtinTypeDeclsForModule modl =
+  [ builtinOptionTypeDecl | moduleUsesBuiltinOption modl ]
+    <> [ builtinResultTypeDecl | moduleUsesBuiltinResult modl ]
+
+moduleUsesBuiltinOption :: Module -> Bool
+moduleUsesBuiltinOption modl =
+  let userConstructorNames =
+        concatMap (fmap constructorDeclName . typeDeclConstructors) (moduleTypeDecls modl)
+   in any typeUsesBuiltinOption (collectModuleTypes modl)
+        || any (`notElem` userConstructorNames) (collectBuiltinOptionConstructorRefs modl)
 
 moduleUsesBuiltinResult :: Module -> Bool
 moduleUsesBuiltinResult modl =
@@ -600,6 +626,99 @@ collectRecordDeclTypes recordDecl =
 collectBuiltinResultConstructorRefs :: Module -> [Text]
 collectBuiltinResultConstructorRefs modl =
   concatMap collectDeclResultConstructors (moduleDecls modl)
+
+collectBuiltinOptionConstructorRefs :: Module -> [Text]
+collectBuiltinOptionConstructorRefs modl =
+  concatMap collectDeclOptionConstructors (moduleDecls modl)
+
+collectDeclOptionConstructors :: Decl -> [Text]
+collectDeclOptionConstructors decl =
+  collectExprOptionConstructors (declBody decl)
+
+collectExprOptionConstructors :: Expr -> [Text]
+collectExprOptionConstructors expr =
+  case expr of
+    EVar _ name
+      | name `elem` [optionSomeConstructorName, optionNoneConstructorName] ->
+          [name]
+      | otherwise ->
+          []
+    EInt _ _ ->
+      []
+    EString _ _ ->
+      []
+    EBool _ _ ->
+      []
+    EList _ values ->
+      concatMap collectExprOptionConstructors values
+    EReturn _ value ->
+      collectExprOptionConstructors value
+    EBlock _ body ->
+      collectExprOptionConstructors body
+    EEqual _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    ENotEqual _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    ELessThan _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    ELessThanOrEqual _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    EGreaterThan _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    EGreaterThanOrEqual _ left right ->
+      collectExprOptionConstructors left <> collectExprOptionConstructors right
+    ECall _ fn args ->
+      collectExprOptionConstructors fn <> concatMap collectExprOptionConstructors args
+    ELet _ _ _ value body ->
+      collectExprOptionConstructors value <> collectExprOptionConstructors body
+    EMutableLet _ _ _ value body ->
+      collectExprOptionConstructors value <> collectExprOptionConstructors body
+    EAssign _ _ _ value body ->
+      collectExprOptionConstructors value <> collectExprOptionConstructors body
+    EFor _ _ _ iterable loopBody body ->
+      collectExprOptionConstructors iterable
+        <> collectExprOptionConstructors loopBody
+        <> collectExprOptionConstructors body
+    EMatch _ subject branches ->
+      collectExprOptionConstructors subject <> concatMap collectMatchBranchOptionConstructors branches
+    ERecord _ _ fields ->
+      concatMap (collectExprOptionConstructors . recordFieldExprValue) fields
+    EFieldAccess _ subject _ ->
+      collectExprOptionConstructors subject
+    EDecode _ _ value ->
+      collectExprOptionConstructors value
+    EEncode _ value ->
+      collectExprOptionConstructors value
+
+collectMatchBranchOptionConstructors :: MatchBranch -> [Text]
+collectMatchBranchOptionConstructors branch =
+  collectPatternOptionConstructors (matchBranchPattern branch)
+    <> collectExprOptionConstructors (matchBranchBody branch)
+
+collectPatternOptionConstructors :: Pattern -> [Text]
+collectPatternOptionConstructors pattern' =
+  case pattern' of
+    PConstructor _ constructorName _
+      | constructorName `elem` [optionSomeConstructorName, optionNoneConstructorName] ->
+          [constructorName]
+      | otherwise ->
+          []
+
+typeUsesBuiltinOption :: Type -> Bool
+typeUsesBuiltinOption typ =
+  case typ of
+    TInt ->
+      False
+    TStr ->
+      False
+    TBool ->
+      False
+    TList itemType ->
+      typeUsesBuiltinOption itemType
+    TNamed name ->
+      name == optionTypeName
+    TFunction args result ->
+      any typeUsesBuiltinOption (args <> [result])
 
 collectDeclResultConstructors :: Decl -> [Text]
 collectDeclResultConstructors decl =

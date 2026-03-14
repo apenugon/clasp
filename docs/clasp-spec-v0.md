@@ -85,6 +85,8 @@ The current `module Main`-style surface should be treated as provisional. Future
 
 The v0 compiler now implements a first slice of those features through nominal sum types and constructor-based match expressions, but the design should still assume a broader static-semantics story later.
 
+`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`. Modules may use `Option`, `Some`, and `None` without declaring the type locally.
+
 `Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`. Modules may use `Result`, `Ok`, and `Err` without declaring the type locally.
 
 The self-hosting slice also reserves a small compiler-known stdlib surface:
