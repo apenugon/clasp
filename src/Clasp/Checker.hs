@@ -6,7 +6,7 @@ module Clasp.Checker
   ) where
 
 import Control.Monad (foldM, unless, when, zipWithM_)
-import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad.Except (ExceptT, MonadError (throwError), catchError, runExceptT)
 import Control.Monad.State.Strict
   ( MonadState
   , State
@@ -4617,7 +4617,10 @@ withReturnType :: InferType -> InferM a -> InferM a
 withReturnType returnType action = do
   previousReturnType <- gets inferReturnType
   modify' (\state -> state {inferReturnType = Just returnType})
-  result <- action
+  result <-
+    action `catchError` \err -> do
+      modify' (\state -> state {inferReturnType = previousReturnType})
+      throwError err
   modify' (\state -> state {inferReturnType = previousReturnType})
   pure result
 

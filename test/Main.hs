@@ -1294,6 +1294,21 @@ checkerTests =
                     assertFailure ("expected checked early return expression, got " <> show other)
               Nothing ->
                 assertFailure "expected choose declaration"
+    , testCase "typechecks early returns from inside for-loops against the enclosing function result" $
+        case checkSource "loop-return" loopEarlyReturnSource of
+          Left err ->
+            assertFailure ("expected loop early return source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "pickUntilStop") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "pickUntilStop type" (TFunction [TList (TNamed "Decision")] TStr) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CMutableLet _ TStr "winner" (CString _ "none") (CFor _ TStr "decision" (CVar _ (TList (TNamed "Decision")) "decisions") (CMatch _ TStr (CVar _ (TNamed "Decision") "decision") [CoreMatchBranch _ (CConstructorPattern _ "Stop" []) (CReturn _ TStr (CString _ "stopped")), CoreMatchBranch _ (CConstructorPattern _ "Keep" [CorePatternBinder "name" _ TStr]) (CAssign _ TStr "winner" (CVar _ TStr "name") (CVar _ TStr "winner"))]) (CVar _ TStr "winner")) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked loop early return expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected pickUntilStop declaration"
     , testCase "typechecks compiler-known Result constructors and matches" $
         case checkSource "result" builtinResultSource of
           Left err ->
@@ -2632,6 +2647,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered early return declaration: " <> show other)
+    , testCase "lowering preserves early returns from inside for-loops" $
+        case lowerChecked "loop-return" loopEarlyReturnSource of
+          Left err ->
+            assertFailure ("expected loop early return lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "pickUntilStop" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["decisions"] (LMutableLet "winner" (LString "none") (LFor "decision" (LVar "decisions") (LMatch (LVar "decision") [LowerMatchBranch "Stop" [] (LReturn (LString "stopped")), LowerMatchBranch "Keep" ["name"] (LAssign "winner" (LVar "name") (LVar "winner"))]) (LVar "winner")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered loop early return declaration: " <> show other)
     , testCase "lowering preserves equality operators" $
         case lowerChecked "equality" equalitySource of
           Left err ->
@@ -3982,6 +4007,24 @@ compileTests =
                 , "console.log(compiledModule.choose(compiledModule.Continue, 'Ada'));"
                 ]
             assertEqual "expected early return results" "Ada\nfallback" runtimeOutput
+    , testCase "compile exits enclosing functions when returns occur inside for-loops" $
+        case compileSource "loop-return" loopEarlyReturnSource of
+          Left err ->
+            assertFailure ("expected loop early return compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected loop emission" ("for (const decision of decisions)" `T.isInfixOf` emitted)
+            assertBool "expected loop early return helper" ("throw $claspEarlyReturn(\"stopped\")" `T.isInfixOf` emitted)
+            let compiledPath = "dist/loop-early-return.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.pickUntilStop([compiledModule.Keep('Ada'), compiledModule.Keep('Grace')]));"
+                , "console.log(compiledModule.pickUntilStop([compiledModule.Keep('Ada'), compiledModule.Stop, compiledModule.Keep('Grace')]));"
+                ]
+            assertEqual "expected loop early return results" "Grace\nstopped" runtimeOutput
     , testCase "compile lowers equality operators to JavaScript and evaluates them" $
         case compileSource "equality" equalitySource of
           Left err ->
@@ -7985,6 +8028,29 @@ earlyReturnSource =
     , "    Exit -> return alias,"
     , "    Continue -> \"fallback\""
     , "  }"
+    , "}"
+    ]
+
+loopEarlyReturnSource :: Text
+loopEarlyReturnSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Decision = Stop | Keep Str"
+    , ""
+    , "pickUntilStop : [Decision] -> Str"
+    , "pickUntilStop decisions = {"
+    , "  let mut winner = \"none\";"
+    , "  for decision in decisions {"
+    , "    match decision {"
+    , "      Stop -> return \"stopped\","
+    , "      Keep name -> {"
+    , "        winner = name;"
+    , "        winner"
+    , "      }"
+    , "    }"
+    , "  };"
+    , "  winner"
     , "}"
     ]
 
