@@ -2753,7 +2753,7 @@ nativeTests =
                 pure ()
               other ->
                 assertFailure ("unexpected native describe declaration: " <> show other)
-    , testCase "native lowering preserves mutable bindings and backend comparison ops" $ do
+    , testCase "native lowering preserves mutable bindings and backend equality/comparison ops" $ do
         case nativeSource "mutable-block" mutableBlockAssignmentSource of
           Left err ->
             assertFailure ("expected mutable native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
@@ -2763,6 +2763,15 @@ nativeTests =
                 pure ()
               other ->
                 assertFailure ("unexpected native greeting declaration: " <> show other)
+        case nativeSource "equality" equalitySource of
+          Left err ->
+            assertFailure ("expected equality native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod ->
+            case findNativeDecl "sameWord" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["left", "right"] (NativeCompare NativeEqual (NativeLocal "left") (NativeLocal "right")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native sameWord declaration: " <> show other)
         case nativeSource "comparison" integerComparisonSource of
           Left err ->
             assertFailure ("expected comparison native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
