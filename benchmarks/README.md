@@ -7,9 +7,11 @@ The goal is to measure whether AI coding harnesses perform better on realistic s
 ## Layout
 
 - `run-benchmark.mjs`: task preparation and verification runner
+- `run-backend-benchmarks.mjs`: JS/Bun versus native backend compile-time and runtime comparison runner
 - `run-codex-harness.sh` / `run-claude-harness.sh`: harness wrappers for repeated runs
 - `run-codex-series.sh` / `run-claude-series.sh`: repeated-run helpers for mirrored task families
 - `result-schema.json`: result record format
+- `backend-result-schema.json`: backend benchmark result format
 - `tasks`: benchmark task manifests, prompts, and baseline repos
 - `results`: machine-readable benchmark outputs
 - `workspaces`: temporary prepared task copies
@@ -249,6 +251,27 @@ Run the mirrored repeated foreign-interop series for compiler-managed `npm`, `Py
 ```sh
 bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-1
+```
+
+Run the backend compile-time and runtime comparison between the current JS/Bun path and the native backend runtime bundle:
+
+```sh
+node benchmarks/run-backend-benchmarks.mjs
+```
+
+The backend benchmark writes a machine-readable JSON report under `benchmarks/results/backend/`. It currently measures:
+
+- compile time for `claspc compile` versus `claspc native` on `examples/compiler-parser.clasp` and `compiler/hosted/Main.clasp`
+- runtime throughput for compiler-text and boundary-transport workloads using `bun` versus the C native runtime bundle in `runtime/native/clasp_runtime.c`
+
+For faster local smoke checks, reduce the sample counts and runtime iterations:
+
+```sh
+node benchmarks/run-backend-benchmarks.mjs \
+  --compile-samples 1 \
+  --runtime-samples 1 \
+  --runtime-iterations 25 \
+  --warmup-runs 0
 ```
 
 Run the mirrored repeated unsafe-refinement and blame-quality pair for unexpected foreign values:
