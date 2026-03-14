@@ -2031,6 +2031,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
         case foreignDeclType foreignDecl of
           TFunction _ _ -> do
             ensureStorageForeignDecl foreignDecl
+            ensureSqliteQueryForeignDecl foreignDecl
             ensureSqliteMutationForeignDecl foreignDecl
             ensureSqliteUnsafeForeignDecl foreignDecl
           _ ->
@@ -2048,6 +2049,17 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           let (paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
           zipWithM_
             (\index paramType -> ensureStorageBoundaryType foreignDecl ("parameter " <> T.pack (show index)) paramType)
+            [(1 :: Int) ..]
+            paramTypes
+          ensureStorageBoundaryType foreignDecl "return value" returnType
+      | otherwise =
+          pure ()
+
+    ensureSqliteQueryForeignDecl foreignDecl
+      | isSqliteQueryRuntimeName (foreignDeclRuntimeName foreignDecl) = do
+          let (paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
+          zipWithM_
+            (\index paramType -> ensureSqliteQueryBoundaryType foreignDecl index paramType)
             [(1 :: Int) ..]
             paramTypes
           ensureStorageBoundaryType foreignDecl "return value" returnType
@@ -2086,6 +2098,16 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           pure ()
       | otherwise =
           ensureStorageBoundaryType foreignDecl ("parameter " <> T.pack (show index)) paramType
+
+    ensureSqliteQueryBoundaryType foreignDecl index paramType
+      | index <= 2 =
+          pure ()
+      | otherwise =
+          ensureStorageBoundaryType foreignDecl ("parameter " <> T.pack (show index)) paramType
+
+    isSqliteQueryRuntimeName runtimeName =
+      runtimeName == "sqlite:queryOne"
+        || runtimeName == "sqlite:queryAll"
 
     isSqliteMutationRuntimeName runtimeName =
       "sqlite:mutateOne" `T.isPrefixOf` runtimeName

@@ -1567,6 +1567,8 @@ checkerTests =
         assertHasCode "E_ROUTE_HANDLER_TYPE" (checkSource "bad" wrongRouteHandlerSource)
     , testCase "rejects storage bindings that use bare primitive types" $
         assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badStoragePrimitiveSource)
+    , testCase "rejects sqlite query bindings that use bare primitive storage-facing types" $
+        assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badSqliteQueryPrimitiveSource)
     , testCase "rejects sqlite mutation bindings that use bare primitive storage-facing types" $
         assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badSqliteMutationPrimitiveSource)
     , testCase "rejects sqlite unsafe bindings that are not declared as explicit unsafe foreign declarations" $
@@ -5208,6 +5210,21 @@ compileTests =
               "expected typed sqlite mutation runtime output"
               "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"insertNote\",\"replaceNotes\"],\"runtimeNames\":[\"sqlite:mutateOne:immediate\",\"sqlite:mutateAll:exclusive\"],\"operations\":[\"mutateOne\",\"mutateAll\"],\"isolations\":[\"immediate\",\"exclusive\"],\"mutationKinds\":[\"one\",\"many\"],\"paramSemanticTypes\":[\"NoteInput\",\"NoteInput\"],\"returnSemanticTypes\":[\"NoteRow\",\"[NoteRow]\"],\"runtimeInstalled\":true,\"insertedNote\":\"beta\",\"replacedNotes\":[{\"note\":\"BETA\"}],\"committedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"immediate\",\"boundary\":\"connection\",\"depth\":1},\"nestedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"exclusive\",\"boundary\":\"savepoint\",\"depth\":2},\"rolledBack\":\"rollback mutation\",\"finalNotes\":[\"BETA\",\"alpha\"]}"
               runtimeOutput
+    , testCase "sqlite query and mutation contracts preserve policy-gated projected row and field metadata" $ do
+        case compileSource "sqlite-protected-runtime" sqliteProtectedRuntimeSource of
+          Left err ->
+            assertFailure ("expected protected sqlite runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-protected-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteProtectedRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected protected sqlite contract output"
+              "{\"queryReturnSemanticType\":\"[SupportCustomer]\",\"queryRowPolicy\":\"SupportDisclosure\",\"queryRowProjectionSource\":\"Customer\",\"queryProtectedFields\":[\"email\"],\"queryEmailClassification\":\"pii\",\"queryEmailFieldIdentity\":\"Customer.email\",\"queryEmailPolicy\":\"SupportDisclosure\",\"queryEmailRequiresProof\":true,\"mutationParamSemanticType\":\"SupportCustomer\",\"mutationParamPolicy\":\"SupportDisclosure\",\"mutationReturnPolicy\":\"SupportDisclosure\",\"savedEmail\":\"ops@northwind.example\",\"loadedEmails\":[\"ops@northwind.example\"]}"
+              runtimeOutput
     , testCase "sqlite runtime exposes explicit unsafe SQL bindings with row-contract metadata and audit entries" $ do
         case compileSource "sqlite-unsafe-runtime" sqliteUnsafeRuntimeSource of
           Left err ->
@@ -6219,6 +6236,34 @@ sqliteMutationRuntimeSource =
     , ""
     , "rewriteNotes : SqliteConnection -> Str -> NoteInput -> [NoteRow]"
     , "rewriteNotes connection sql input = replaceNotes connection sql input"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+sqliteProtectedRuntimeSource :: Text
+sqliteProtectedRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Customer = {"
+    , "  id : Str,"
+    , "  email : Str classified pii,"
+    , "  tier : Str"
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public, pii"
+    , ""
+    , "projection SupportCustomer = Customer with SupportDisclosure { id, email, tier }"
+    , ""
+    , "foreign fetchCustomers : SqliteConnection -> Str -> [SupportCustomer] = \"sqlite:queryAll\""
+    , "foreign saveCustomer : SqliteConnection -> Str -> SupportCustomer -> SupportCustomer = \"sqlite:mutateOne:immediate\""
+    , ""
+    , "loadCustomers : SqliteConnection -> Str -> [SupportCustomer]"
+    , "loadCustomers connection sql = fetchCustomers connection sql"
+    , ""
+    , "persistCustomer : SqliteConnection -> Str -> SupportCustomer -> SupportCustomer"
+    , "persistCustomer connection sql customer = saveCustomer connection sql customer"
     , ""
     , "main : Str"
     , "main = \"ok\""
@@ -7904,6 +7949,17 @@ badStoragePrimitiveSource =
     , ""
     , "main : Str -> Str"
     , "main value = loadCustomer value"
+    ]
+
+badSqliteQueryPrimitiveSource :: Text
+badSqliteQueryPrimitiveSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "foreign fetchCount : SqliteConnection -> Str -> Int = \"sqlite:queryOne\""
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
     ]
 
 badSqliteMutationPrimitiveSource :: Text
@@ -9974,6 +10030,41 @@ sqliteMutationRuntimeScript compiledPath runtimePath =
     , "  nestedTransaction,"
     , "  rolledBack,"
     , "  finalNotes"
+    , "}));"
+    ]
+
+sqliteProtectedRuntimeScript :: FilePath -> FilePath -> Text
+sqliteProtectedRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime, sqliteContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const sqliteContract = sqliteContractFor(compiledModule);"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule);"
+    , "const databasePath = 'dist/test-projects/sqlite-protected-runtime/runtime.db';"
+    , "const connection = sqliteRuntime.open(databasePath);"
+    , "sqliteRuntime.database(connection).exec('drop table if exists customers;');"
+    , "sqliteRuntime.database(connection).exec('create table customers (id text not null, email text not null, tier text not null);');"
+    , "sqliteRuntime.database(connection).exec(\"insert into customers(id, email, tier) values ('cust-1', 'ops@northwind.example', 'enterprise');\");"
+    , "sqliteRuntime.install();"
+    , "const queryBinding = sqliteContract.bindings.find((binding) => binding.name === 'fetchCustomers');"
+    , "const mutationBinding = sqliteContract.bindings.find((binding) => binding.name === 'saveCustomer');"
+    , "const fetched = compiledModule.loadCustomers(connection, 'select id, email, tier from customers order by id asc');"
+    , "const saved = compiledModule.persistCustomer(connection, 'update customers set email = :email, tier = :tier where id = :id returning id, email, tier', { id: 'cust-1', email: 'ops@northwind.example', tier: 'enterprise' });"
+    , "sqliteRuntime.close(connection.id);"
+    , "console.log(JSON.stringify({"
+    , "  queryReturnSemanticType: queryBinding?.returns?.storageType?.semanticType ?? null,"
+    , "  queryRowPolicy: queryBinding?.returns?.storageType?.item?.proof?.policy ?? null,"
+    , "  queryRowProjectionSource: queryBinding?.returns?.storageType?.item?.proof?.projectionSource ?? null,"
+    , "  queryProtectedFields: queryBinding?.returns?.storageType?.item?.proof?.protectedFields ?? [],"
+    , "  queryEmailClassification: queryBinding?.returns?.storageType?.item?.fields?.email?.classification ?? null,"
+    , "  queryEmailFieldIdentity: queryBinding?.returns?.storageType?.item?.fields?.email?.fieldIdentity ?? null,"
+    , "  queryEmailPolicy: queryBinding?.returns?.storageType?.item?.fields?.email?.proof?.policy ?? null,"
+    , "  queryEmailRequiresProof: queryBinding?.returns?.storageType?.item?.fields?.email?.proof?.requiresPolicyProof ?? null,"
+    , "  mutationParamSemanticType: mutationBinding?.params?.[2]?.storageType?.semanticType ?? null,"
+    , "  mutationParamPolicy: mutationBinding?.params?.[2]?.storageType?.proof?.policy ?? null,"
+    , "  mutationReturnPolicy: mutationBinding?.returns?.storageType?.proof?.policy ?? null,"
+    , "  savedEmail: saved.email,"
+    , "  loadedEmails: fetched.map((row) => row.email)"
     , "}));"
     ]
 

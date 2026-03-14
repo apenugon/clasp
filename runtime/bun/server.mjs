@@ -1246,12 +1246,17 @@ function describeStorageType(typeName, schema) {
 
   switch (schema?.kind) {
     case "record":
-      return Object.freeze({
-        kind: "record",
-        semanticType,
-        schemaType: semanticType,
-        tableName: storageTableName(semanticType)
-      });
+      {
+        const projection = describeStorageProjection(schema);
+        return Object.freeze({
+          kind: "record",
+          semanticType,
+          schemaType: semanticType,
+          tableName: storageTableName(semanticType),
+          proof: describeStorageRecordProof(semanticType, schema, projection),
+          fields: describeStorageFields(schema, projection)
+        });
+      }
     case "enum":
       return Object.freeze({
         kind: "enum",
@@ -1285,6 +1290,77 @@ function describeStorageType(typeName, schema) {
             semanticType
           });
   }
+}
+
+function describeStorageProjection(schema, fieldIdentity = null) {
+  if (typeof schema?.projection !== "function") {
+    return null;
+  }
+
+  const projection = schema.projection(fieldIdentity);
+
+  if (!projection || typeof projection !== "object") {
+    return null;
+  }
+
+  return projection;
+}
+
+function describeStorageRecordProof(semanticType, schema, projection) {
+  const protectedFields = Object.freeze(
+    Object.entries(schema?.fields ?? {})
+      .filter(([, field]) => (field?.classification ?? "public") !== "public")
+      .map(([fieldName]) => fieldName)
+  );
+  const policy = projection?.classificationPolicy ?? null;
+  const projectionSource = projection?.projectionSource ?? null;
+  const requiresPolicyProof = policy !== null || protectedFields.length > 0;
+
+  return Object.freeze({
+    kind: "clasp-storage-access-proof",
+    access: "row",
+    semanticType,
+    policy,
+    projectionSource,
+    protectedFields,
+    requiresPolicyProof
+  });
+}
+
+function describeStorageFields(schema, projection) {
+  const entries = Object.entries(schema?.fields ?? {}).map(([fieldName, field]) => [
+    fieldName,
+    describeStorageField(fieldName, field, projection, schema)
+  ]);
+
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function describeStorageField(fieldName, field, rowProjection, schema) {
+  const fieldIdentity = field?.fieldIdentity ?? `${rowProjection?.projectionSource ?? schema?.name ?? "value"}.${fieldName}`;
+  const classification = field?.classification ?? "public";
+  const fieldProjection = describeStorageProjection(field?.schema, fieldIdentity);
+  const storageType = describeStorageType(field?.schema?.name ?? null, field?.schema ?? null);
+  const policy = fieldProjection?.classificationPolicy ?? rowProjection?.classificationPolicy ?? null;
+  const projectionSource = fieldProjection?.projectionSource ?? rowProjection?.projectionSource ?? null;
+
+  return Object.freeze({
+    name: fieldName,
+    fieldIdentity,
+    classification,
+    storageType,
+    proof: Object.freeze({
+      kind: "clasp-storage-access-proof",
+      access: "field",
+      semanticType: storageType?.semanticType ?? field?.schema?.name ?? null,
+      fieldName,
+      fieldIdentity,
+      classification,
+      policy,
+      projectionSource,
+      requiresPolicyProof: policy !== null || classification !== "public"
+    })
+  });
 }
 
 function collectStorageTables(boundaries) {
