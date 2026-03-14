@@ -39,6 +39,9 @@ const taskSetAliases = {
     "clasp-lead-segment",
     "ts-lead-segment"
   ],
+  "lead-persistence": [
+    "ts-lead-persistence"
+  ],
   "external-adaptation": [
     "clasp-external-adaptation",
     "ts-external-adaptation"

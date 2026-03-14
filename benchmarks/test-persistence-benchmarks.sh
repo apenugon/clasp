@@ -22,3 +22,10 @@ node "$project_root/benchmarks/run-benchmark.mjs" verify \
   --workspace "$workspace" \
   --harness scenario \
   --model deterministic >/dev/null
+
+node "$project_root/benchmarks/run-benchmark.mjs" verify \
+  "$task_id" \
+  --workspace "$workspace" \
+  --harness scenario \
+  --model deterministic \
+  --mode oracle >/dev/null

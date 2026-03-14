@@ -272,6 +272,43 @@ check_oracle_prompt_mode() {
   printf '%s\n' "$ts_prepare_output" | grep -Fq 'benchmarks/tasks/ts-lead-segment/prompt.oracle.md'
 }
 
+check_persistence_prompt_modes() {
+  local raw_workspace="$workspace_root/ts-lead-persistence-raw"
+  local hinted_workspace="$workspace_root/ts-lead-persistence-file-hinted"
+  local oracle_workspace="$workspace_root/ts-lead-persistence-oracle"
+  local raw_output
+  local hinted_output
+  local oracle_output
+  local latest_result
+
+  raw_output="$(run_benchmark_prepare ts-lead-persistence "$raw_workspace" --mode raw-repo)"
+  printf '%s\n' "$raw_output" | grep -Fq 'Prompt: '
+  printf '%s\n' "$raw_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.raw.md'
+
+  hinted_output="$(run_benchmark_prepare ts-lead-persistence "$hinted_workspace" --mode file-hinted)"
+  printf '%s\n' "$hinted_output" | grep -Fq 'Prompt: '
+  printf '%s\n' "$hinted_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.file-hinted.md'
+
+  oracle_output="$(run_benchmark_prepare ts-lead-persistence "$oracle_workspace" --mode oracle)"
+  printf '%s\n' "$oracle_output" | grep -Fq 'Prompt: '
+  printf '%s\n' "$oracle_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.oracle.md'
+
+  cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$oracle_workspace/src/server/main.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/store.ts" "$oracle_workspace/src/server/store.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/runtime-modules.d.ts" "$oracle_workspace/src/server/runtime-modules.d.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/dev.ts" "$oracle_workspace/src/server/dev.ts"
+
+  run_benchmark_verify ts-lead-persistence "$oracle_workspace" \
+    --harness oracle-check \
+    --model local \
+    --mode oracle >/dev/null
+
+  latest_result="$(latest_result_for_harness oracle-check)"
+  assert_contains "$latest_result" '"mode": "oracle"'
+  assert_contains "$latest_result" '"promptFile": "benchmarks/tasks/ts-lead-persistence/prompt.oracle.md"'
+  rm -f "$latest_result"
+}
+
 check_nested_clasp_benchmark_prep() {
   local task_id="clasp-lead-priority"
   local workspace="$workspace_root/$task_id"
@@ -461,3 +498,4 @@ check_product_only_clasp_solution
 check_product_only_typescript_solution
 check_product_only_typescript_persistence_solution
 check_oracle_prompt_mode
+check_persistence_prompt_modes

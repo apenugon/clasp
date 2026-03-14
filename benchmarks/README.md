@@ -65,7 +65,7 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-audit-log`: mirrored handwritten JavaScript baseline for the same audit-log surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
-- `benchmarks/tasks/ts-lead-persistence`: SQLite-backed TypeScript lead-app task covering restart durability and incompatible-schema failure handling
+- `benchmarks/tasks/ts-lead-persistence`: SQLite-backed TypeScript lead-app task covering restart durability and incompatible-schema failure handling on the dogfood app
 
 ## Benchmark Modes
 
@@ -88,6 +88,13 @@ For the current `Oracle` lead-segment pair, the exact analogous edit surfaces ar
 - `benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp`
 - `benchmarks/tasks/ts-lead-segment/repo/src/shared/lead.ts`
 - `benchmarks/tasks/ts-lead-segment/repo/src/server/main.ts`
+
+The SQLite-backed dogfood benchmark also supports all three modes. For the current `Oracle` persisted TypeScript task, the exact app-owned edit surfaces are:
+
+- `benchmarks/tasks/ts-lead-persistence/repo/src/server/main.ts`
+- `benchmarks/tasks/ts-lead-persistence/repo/src/server/store.ts`
+- `benchmarks/tasks/ts-lead-persistence/repo/src/server/runtime-modules.d.ts`
+- `benchmarks/tasks/ts-lead-persistence/repo/src/server/dev.ts`
 
 For long-running workflow behavior, the suite also includes `clasp-durable-workflow`, a single-task durable upgrade benchmark that exercises supervised handoff, bounded overlap, health-gated activation, rollback, and version-drain reporting against the worker runtime.
 
@@ -240,6 +247,12 @@ Run the mirrored repeated `lead-segment` series for both languages:
 ```sh
 bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
+```
+
+Run the SQLite-backed dogfood benchmark in `Oracle` mode:
+
+```sh
+node benchmarks/run-benchmark.mjs prepare ts-lead-persistence --mode oracle --workspace benchmarks/workspaces/ts-lead-persistence
 ```
 
 Run the mirrored repeated external-objective adaptation series for both languages:
