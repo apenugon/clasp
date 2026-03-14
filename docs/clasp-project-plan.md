@@ -96,7 +96,7 @@ Worktree rules:
 - one worktree per task
 - no shared mutable state between worktrees
 - verifier runs from a clean copy of the last accepted snapshot
-- merge only after verification passes
+- merge only after verification passes by copying the verified workspace delta into the accepted snapshot
 - failed tasks produce structured reports, not free-form notes
 
 ## Milestones

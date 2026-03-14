@@ -317,7 +317,7 @@ resume_incomplete_run() {
     return 2
   fi
 
-  if integrate_task_branch "$task_worktree" "$run_dir"; then
+  if integrate_task_branch "$task_worktree" "$run_dir" "$task_id"; then
     integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
     mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     clear_blocked "$task_id"
@@ -639,13 +639,110 @@ archive_task_state() {
   printf '%s\n' "$task_branch" > "$run_dir/task-branch.txt"
 }
 
+worktree_repo_paths() {
+  local worktree_path="$1"
+
+  git -C "$worktree_path" ls-files --cached --others --exclude-standard
+}
+
+worktree_path_exists() {
+  local worktree_path="$1"
+  local relative_path="$2"
+
+  [[ -e "$worktree_path/$relative_path" || -L "$worktree_path/$relative_path" ]]
+}
+
+worktree_path_matches() {
+  local left_root="$1"
+  local right_root="$2"
+  local relative_path="$3"
+  local left_path="$left_root/$relative_path"
+  local right_path="$right_root/$relative_path"
+
+  if [[ -L "$left_path" || -L "$right_path" ]]; then
+    [[ -L "$left_path" && -L "$right_path" ]] || return 1
+    [[ "$(readlink "$left_path")" == "$(readlink "$right_path")" ]]
+    return 0
+  fi
+
+  [[ -e "$left_path" && -e "$right_path" ]] || return 1
+  cmp -s "$left_path" "$right_path"
+}
+
+copy_relative_path_between_worktrees() {
+  local src_root="$1"
+  local dst_root="$2"
+  local relative_path="$3"
+
+  rm -rf "$dst_root/$relative_path"
+  mkdir -p "$(dirname "$dst_root/$relative_path")"
+
+  (
+    cd "$src_root"
+    tar -cf - -- "$relative_path"
+  ) | (
+    cd "$dst_root"
+    tar -xf -
+  )
+}
+
+apply_verified_workspace_delta() {
+  local baseline_worktree="$1"
+  local verified_worktree="$2"
+  local accepted_worktree="$3"
+  local path_list=""
+  local relative_path=""
+  local baseline_exists=0
+  local verified_exists=0
+
+  path_list="$(mktemp)"
+  {
+    worktree_repo_paths "$baseline_worktree"
+    worktree_repo_paths "$verified_worktree"
+  } | sort -u > "$path_list"
+
+  while IFS= read -r relative_path; do
+    [[ -n "$relative_path" ]] || continue
+
+    baseline_exists=0
+    verified_exists=0
+
+    if worktree_path_exists "$baseline_worktree" "$relative_path"; then
+      baseline_exists=1
+    fi
+
+    if worktree_path_exists "$verified_worktree" "$relative_path"; then
+      verified_exists=1
+    fi
+
+    if [[ "$verified_exists" == "1" ]]; then
+      if [[ "$baseline_exists" == "1" ]] && worktree_path_matches "$baseline_worktree" "$verified_worktree" "$relative_path"; then
+        continue
+      fi
+
+      copy_relative_path_between_worktrees "$verified_worktree" "$accepted_worktree" "$relative_path"
+      continue
+    fi
+
+    if [[ "$baseline_exists" == "1" ]]; then
+      rm -rf "$accepted_worktree/$relative_path"
+    fi
+  done < "$path_list"
+
+  rm -f "$path_list"
+}
+
 integrate_task_branch() {
   local task_worktree="$1"
   local run_dir="$2"
+  local task_id="$3"
   local integration_log="$run_dir/integration.log"
+  local merge_baseline_worktree="$run_dir/merge-baseline-worktree"
+  local accepted_worktree="$run_dir/accepted-snapshot-worktree"
   local base_head
   local old_trunk
   local task_head
+  local accepted_head
   local status=0
 
   acquire_lock "$merge_lock_file"
@@ -661,6 +758,7 @@ integrate_task_branch() {
     task_head="$(git -C "$task_worktree" rev-parse HEAD)"
 
     if [[ "$task_head" != "$base_head" ]]; then
+      commit_task_changes "$task_worktree" "$task_id"
       git -C "$task_worktree" rebase "$main_branch"
       (
         cd "$task_worktree"
@@ -675,13 +773,33 @@ integrate_task_branch() {
       )
     fi
 
-    git -C "$project_root" merge --ff-only "$task_head"
-    git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$task_head" "$old_trunk"
+    prepare_baseline_worktree "$merge_baseline_worktree"
+    prepare_baseline_worktree "$accepted_worktree"
+    apply_verified_workspace_delta "$merge_baseline_worktree" "$task_worktree" "$accepted_worktree"
+
+    (
+      cd "$accepted_worktree"
+      bash scripts/verify-all.sh
+    )
+
+    git -C "$accepted_worktree" add -A
+    if ! git -C "$accepted_worktree" diff --cached --quiet --ignore-submodules --exit-code; then
+      git -C "$accepted_worktree" \
+        -c user.name="Clasp Swarm" \
+        -c user.email="swarm@local" \
+        commit -m "[$lane_name] $task_id" >/dev/null
+    fi
+
+    accepted_head="$(git -C "$accepted_worktree" rev-parse HEAD)"
+    git -C "$project_root" merge --ff-only "$accepted_head"
+    git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$accepted_head" "$old_trunk"
     printf '%s\n' "$(git -C "$project_root" rev-parse "$main_branch")"
   ) >"$integration_log" 2>&1
   status=$?
   set -e
 
+  remove_worktree_if_present "$merge_baseline_worktree"
+  remove_worktree_if_present "$accepted_worktree"
   release_lock "$merge_lock_file"
   return "$status"
 }
@@ -946,7 +1064,7 @@ while true; do
       continue
     fi
 
-    if integrate_task_branch "$task_worktree" "$run_dir"; then
+    if integrate_task_branch "$task_worktree" "$run_dir" "$task_id"; then
       integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       clear_blocked "$task_id"

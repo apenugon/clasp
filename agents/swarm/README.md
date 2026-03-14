@@ -26,8 +26,8 @@ The swarm integration model is:
 2. The builder subagent edits in that branch's worktree
 3. The verifier checks the task branch against a clean baseline worktree
 4. The merge gate rebases the task branch onto the latest `agents/swarm-trunk`
-5. Final verification runs again
-6. The task commit fast-forwards `agents/swarm-trunk`
+5. Final verification runs again against an accepted-snapshot worktree
+6. Only the verified workspace delta is copied into the accepted snapshot before `main` and `agents/swarm-trunk` advance
 
 Supervisor status is available in both human and machine-readable forms:
 
