@@ -80,6 +80,15 @@ const taskSetAliases = {
     "clasp-authorization-data-access",
     "ts-authorization-data-access"
   ],
+  "agent-planning": [
+    "clasp-authorization-data-access",
+    "ts-authorization-data-access",
+    "clasp-lead-segment",
+    "clasp-control-plane",
+    "ts-control-plane",
+    "clasp-durable-workflow",
+    "clasp-compiler-maintenance"
+  ],
   "audit-log": [
     "clasp-audit-log",
     "ts-audit-log"
@@ -249,6 +258,45 @@ const airPlanningWorkflowComparison = {
   candidateWorkflowAssistance: "compiler-owned-air",
   baselineLabel: "rawText",
   candidateLabel: "compilerOwnedAir"
+};
+const agentPlanningBenchmark = {
+  comparisonLabel: "agent-planning-scorecard",
+  slices: [
+    {
+      sliceLabel: "obligation-discharge-guidance",
+      type: "task-family",
+      comparisonLabel: "authorization-data-access-comparison",
+      leftTaskId: "clasp-authorization-data-access",
+      rightTaskId: "ts-authorization-data-access",
+      leftLabel: "clasp",
+      rightLabel: "ts"
+    },
+    {
+      sliceLabel: "semantic-memory-freshness",
+      type: "workflow-assistance",
+      taskId: "clasp-lead-segment",
+      sourceComparison: airPlanningWorkflowComparison.comparisonLabel
+    },
+    {
+      sliceLabel: "parallel-agent-lease-coordination",
+      type: "task-family",
+      comparisonLabel: "control-plane-comparison",
+      leftTaskId: "clasp-control-plane",
+      rightTaskId: "ts-control-plane",
+      leftLabel: "clasp",
+      rightLabel: "ts"
+    },
+    {
+      sliceLabel: "transactional-edit-rollback",
+      type: "task-summary",
+      taskId: "clasp-durable-workflow"
+    },
+    {
+      sliceLabel: "cheapest-valid-path-planning",
+      type: "task-summary",
+      taskId: "clasp-compiler-maintenance"
+    }
+  ]
 };
 
 async function main() {
@@ -906,6 +954,7 @@ async function summarizeCommand(args) {
   printBenchmarkSuiteComparisons(
     buildBenchmarkSuiteComparisons(filtered, mixedStackSemanticLayerBenchmark)
   );
+  printAgentPlanningScorecard(buildAgentPlanningScorecard(filtered));
 }
 
 async function packageCommand(args) {
@@ -1262,6 +1311,153 @@ function buildWorkflowAssistanceComparisons(results) {
       [right.taskId, right.harness, right.model, right.mode, right.series].join("\t")
     )
   );
+}
+
+function buildAgentPlanningScorecard(results) {
+  const entries = [];
+  const workflowComparisons = buildWorkflowAssistanceComparisons(results);
+
+  for (const slice of agentPlanningBenchmark.slices) {
+    if (slice.type === "task-family") {
+      for (const comparison of buildTaskComparisons(results, slice)) {
+        entries.push({
+          sliceLabel: slice.sliceLabel,
+          sliceType: slice.type,
+          source: slice.comparisonLabel,
+          ...comparison
+        });
+      }
+      continue;
+    }
+
+    if (slice.type === "workflow-assistance") {
+      for (const comparison of workflowComparisons.filter((entry) => entry.taskId === slice.taskId)) {
+        entries.push({
+          sliceLabel: slice.sliceLabel,
+          sliceType: slice.type,
+          source: slice.sourceComparison,
+          ...comparison
+        });
+      }
+      continue;
+    }
+
+    if (slice.type === "task-summary") {
+      const relevant = results.filter((result) => result.taskId === slice.taskId);
+      const grouped = groupBy(relevant, (result) => {
+        const series = parseSeriesRun(result.notes).series ?? "";
+        const mode = result.protocol?.mode ?? "";
+        const workflowAssistance = result.protocol?.workflowAssistance ?? "";
+        return [result.harness, result.model, mode, workflowAssistance, series].join("\t");
+      });
+
+      for (const [groupKey, groupResults] of grouped.entries()) {
+        const [harness, model, mode, workflowAssistance, series] = groupKey.split("\t");
+        entries.push({
+          sliceLabel: slice.sliceLabel,
+          sliceType: slice.type,
+          sourceTaskId: slice.taskId,
+          harness,
+          model,
+          mode: mode || "(unspecified)",
+          workflowAssistance: workflowAssistance || "unspecified",
+          series: series || "(all-runs)",
+          summary: summarizeGroup(groupResults)
+        });
+      }
+    }
+  }
+
+  return entries.sort((left, right) =>
+    [
+      left.sliceLabel,
+      left.harness,
+      left.model,
+      left.mode,
+      left.workflowAssistance ?? "",
+      left.series
+    ].join("\t").localeCompare(
+      [
+        right.sliceLabel,
+        right.harness,
+        right.model,
+        right.mode,
+        right.workflowAssistance ?? "",
+        right.series
+      ].join("\t")
+    )
+  );
+}
+
+function printAgentPlanningScorecard(entries) {
+  if (entries.length === 0) {
+    return;
+  }
+
+  console.log(agentPlanningBenchmark.comparisonLabel);
+
+  for (const entry of entries) {
+    console.log(`  ${entry.sliceLabel}\t${entry.harness}\t${entry.model}\t${entry.series}`);
+    console.log(`    mode: ${entry.mode}`);
+
+    if (entry.sliceType === "task-family") {
+      console.log(`    sourceBenchmark: ${entry.source}`);
+      console.log(`    workflowAssistance: ${entry.workflowAssistance}`);
+      console.log(
+        `    ${buildComparisonMetricKey(entry.leftLabel, "PassRate")}: ${entry.left.passRate}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.rightLabel, "PassRate")}: ${entry.right.passRate}`
+      );
+      console.log(`    passRateDeltaPct: ${entry.passRateDeltaPct}`);
+      console.log(
+        `    ${buildComparisonMetricKey(entry.leftLabel, "TimeToGreenMs")}: ${entry.left.timeToGreenMs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.rightLabel, "TimeToGreenMs")}: ${entry.right.timeToGreenMs}`
+      );
+      console.log(`    timeToGreenDeltaMs: ${entry.timeToGreenDeltaMs}`);
+      console.log(`    tokenDelta: ${entry.tokenDelta}`);
+      console.log(`    uncachedTokenDelta: ${entry.uncachedTokenDelta}`);
+      continue;
+    }
+
+    if (entry.sliceType === "workflow-assistance") {
+      console.log(`    sourceBenchmark: ${entry.source}`);
+      console.log(
+        `    ${buildComparisonMetricKey(entry.baselineLabel, "WorkflowAssistance")}: ${entry.baselineWorkflowAssistance}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.candidateLabel, "WorkflowAssistance")}: ${entry.candidateWorkflowAssistance}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.baselineLabel, "PassRate")}: ${entry.baseline.passRate}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.candidateLabel, "PassRate")}: ${entry.candidate.passRate}`
+      );
+      console.log(`    passRateDeltaPct: ${entry.passRateDeltaPct}`);
+      console.log(
+        `    ${buildComparisonMetricKey(entry.baselineLabel, "TimeToGreenMs")}: ${entry.baseline.timeToGreenMs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(entry.candidateLabel, "TimeToGreenMs")}: ${entry.candidate.timeToGreenMs}`
+      );
+      console.log(`    timeToGreenDeltaMs: ${entry.timeToGreenDeltaMs}`);
+      console.log(`    tokenDelta: ${entry.tokenDelta}`);
+      console.log(`    uncachedTokenDelta: ${entry.uncachedTokenDelta}`);
+      continue;
+    }
+
+    console.log(`    sourceTask: ${entry.sourceTaskId}`);
+    console.log(`    workflowAssistance: ${entry.workflowAssistance}`);
+    console.log(`    runs: ${entry.summary.runs}`);
+    console.log(`    passRate: ${entry.summary.passRate}`);
+    console.log(`    timeToGreenMs: ${entry.summary.timeToGreenMs}`);
+    console.log(`    medianDurationMs: ${entry.summary.medianDurationMs}`);
+    console.log(`    medianTokens: ${entry.summary.medianTokens}`);
+    console.log(`    medianUncachedTokens: ${entry.summary.medianUncachedTokens}`);
+  }
 }
 
 function buildComparisonMetricKey(label, suffix) {

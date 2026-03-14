@@ -201,6 +201,22 @@ Run the proof-gated authorization/data-access pair through the repeated Codex wr
 bash benchmarks/run-codex-series.sh authorization-data-access 5 authorization-data-access-a gpt-5.4
 ```
 
+Run the agent-planning scorecard slice covering obligation discharge, semantic-memory freshness, parallel-agent coordination, rollback, and cheapest-valid-path planning:
+
+```sh
+CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
+  bash benchmarks/run-codex-series.sh agent-planning 5 planning-a gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes planning-a
+```
+
+`summarize` emits `agent-planning-scorecard`, which rolls up:
+
+- `authorization-data-access` for obligation-discharge guidance quality
+- `clasp-lead-segment` workflow-assistance comparisons for semantic-memory freshness
+- `control-plane` for parallel-agent coordination under bounded authority
+- `clasp-durable-workflow` for transactional-edit rollback behavior
+- `clasp-compiler-maintenance` for cheapest-valid-path planning efficiency on a narrow semantic repair
+
 When result files include `benchmark-phases.json`, the summary also reports median discovery, first-edit, first-verify, and phase-local time-to-green timings. Summaries and mirrored comparisons stay split by benchmark mode so `Raw Repo`, `File-Hinted`, and `Oracle` remain separate scorecards.
 
 Package a filtered result set into a reproducible benchmark bundle:

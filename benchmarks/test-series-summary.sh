@@ -177,6 +177,20 @@ write_result "2026-03-01T10-12-50.500Z--clasp-authorization-data-access--codex.j
 write_result "2026-03-01T10-12-50.750Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "authorization-data-access-a-2" "2026-03-01T10:12:50.750Z" 105 130 115 true 0
 write_result "2026-03-01T10-12-51.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "authorization-data-access-a-1" "2026-03-01T10:12:51.000Z" 170 190 170 false 1
 write_result "2026-03-01T10-12-51.250Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "authorization-data-access-a-2" "2026-03-01T10:12:51.250Z" 180 200 180 true 0
+write_result "2026-03-01T10-13-20.000Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:20.000Z" 90 120 110 true 0
+write_result "2026-03-01T10-13-21.000Z--clasp-authorization-data-access--codex.json" "clasp-authorization-data-access" "clasp" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:21.000Z" 100 130 120 true 0
+write_result "2026-03-01T10-13-22.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:22.000Z" 140 170 150 false 1
+write_result "2026-03-01T10-13-23.000Z--ts-authorization-data-access--codex.json" "ts-authorization-data-access" "typescript" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:23.000Z" 150 180 160 true 0
+write_result "2026-03-01T10-13-24.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:24.000Z" 200 150 140 false 1 "raw-text"
+write_result "2026-03-01T10-13-25.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:25.000Z" 180 140 130 true 0 "raw-text"
+write_result "2026-03-01T10-13-26.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:26.000Z" 80 100 95 true 0 "compiler-owned-air"
+write_result "2026-03-01T10-13-27.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:27.000Z" 90 110 100 true 0 "compiler-owned-air"
+write_result "2026-03-01T10-13-28.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:28.000Z" 120 110 100 false 1
+write_result "2026-03-01T10-13-29.000Z--clasp-control-plane--codex.json" "clasp-control-plane" "clasp" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:29.000Z" 70 100 90 true 0
+write_result "2026-03-01T10-13-30.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:30.000Z" 130 150 135 false 1
+write_result "2026-03-01T10-13-31.000Z--ts-control-plane--codex.json" "ts-control-plane" "typescript" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:31.000Z" 160 160 145 false 1
+write_result "2026-03-01T10-13-32.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "planning-a-1" "2026-03-01T10:13:32.000Z" 240 175 145 false 1
+write_result "2026-03-01T10-13-33.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "planning-a-2" "2026-03-01T10:13:33.000Z" 180 165 135 true 0
 write_result "2026-03-01T10-12-51.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:51.000Z" 100 140 120 true 0
 write_result "2026-03-01T10-12-52.000Z--clasp-audit-log--codex.json" "clasp-audit-log" "clasp" "codex" "gpt-5.4" "audit-log-a-2" "2026-03-01T10:12:52.000Z" 110 150 130 true 0
 write_result "2026-03-01T10-12-53.000Z--ts-audit-log--codex.json" "ts-audit-log" "typescript" "codex" "gpt-5.4" "audit-log-a-1" "2026-03-01T10:12:53.000Z" 190 205 180 false 1
@@ -196,6 +210,35 @@ cat >"$durable_result_path" <<EOF
   "durationMs": 784,
   "humanInterventions": 0,
   "notes": "durable-a-1",
+  "tokenUsage": {
+    "prompt": 0,
+    "completion": 0,
+    "retry": 0,
+    "debug": 0,
+    "total": 0
+  },
+  "verification": {
+    "passed": true,
+    "command": ["bash", "scripts/verify.sh"],
+    "exitCode": 0
+  }
+}
+EOF
+
+planning_durable_result_path="$results_root/2026-03-01T10-13-34.000Z--clasp-durable-workflow--scenario.json"
+synthetic_files+=("$planning_durable_result_path")
+cat >"$planning_durable_result_path" <<EOF
+{
+  "taskId": "clasp-durable-workflow",
+  "suite": "durable-workflow",
+  "language": "clasp",
+  "harness": "scenario",
+  "model": "deterministic",
+  "startedAt": "2026-03-01T10:13:00.000Z",
+  "finishedAt": "2026-03-01T10:13:34.000Z",
+  "durationMs": 640,
+  "humanInterventions": 0,
+  "notes": "planning-a-1",
   "tokenUsage": {
     "prompt": 0,
     "completion": 0,
@@ -465,6 +508,42 @@ printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianDurationMs:
 printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianTokens: 0'
 printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianUncachedTokens: 0'
 
+planning_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes planning-a)"
+printf '%s\n' "$planning_summary_output" | grep -Fq 'agent-planning-scorecard'
+printf '%s\n' "$planning_summary_output" | grep -Fq $'  obligation-discharge-guidance\tcodex\tgpt-5.4\tplanning-a'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: authorization-data-access-comparison'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: -200'
+printf '%s\n' "$planning_summary_output" | grep -Fq $'  semantic-memory-freshness\tcodex\tgpt-5.4\tplanning-a'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: air-planning-comparison'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    rawTextPassRate: 50%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    compilerOwnedAirPassRate: 100%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
+printf '%s\n' "$planning_summary_output" | grep -Fq $'  parallel-agent-lease-coordination\tcodex\tgpt-5.4\tplanning-a'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: control-plane-comparison'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    tsPassRate: 0%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
+printf '%s\n' "$planning_summary_output" | grep -Fq $'  cheapest-valid-path-planning\tcodex\tgpt-5.4\tplanning-a'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceTask: clasp-compiler-maintenance'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    passRate: 50%'
+printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenMs: 420'
+
+planning_rollback_summary_output="$(
+  node "$project_root/benchmarks/run-benchmark.mjs" summarize \
+    --task-id clasp-durable-workflow \
+    --harness scenario \
+    --model deterministic \
+    --notes planning-a
+)"
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq 'agent-planning-scorecard'
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq $'  transactional-edit-rollback\tscenario\tdeterministic\tplanning-a'
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    mode: (unspecified)'
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    sourceTask: clasp-durable-workflow'
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    passRate: 100%'
+printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    timeToGreenMs: 640'
+
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"$tmp_bin/nix.log"
@@ -558,6 +637,21 @@ printf '%s\n' "$audit_log_command_log" | grep -Fq 'run clasp-audit-log'
 printf '%s\n' "$audit_log_command_log" | grep -Fq 'run ts-audit-log'
 printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-1'
 printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air bash "$project_root/benchmarks/run-codex-series.sh" agent-planning 2 planning-a gpt-5.4
+agent_planning_command_log="$(cat "$tmp_bin/nix.log")"
+synthetic_files+=("$project_root/benchmarks/bundles/planning-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json")
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-authorization-data-access'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run ts-authorization-data-access'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-lead-segment'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-control-plane'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run ts-control-plane'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-durable-workflow'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-compiler-maintenance'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq -- '--notes planning-a-1'
+printf '%s\n' "$agent_planning_command_log" | grep -Fq -- '--notes planning-a-2'
+test -f "$project_root/benchmarks/bundles/planning-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4
