@@ -1346,6 +1346,21 @@ checkerTests =
                   (foreignDeclType foreignDecl)
               Nothing ->
                 assertFailure "expected insertNote foreign declaration"
+    , testCase "typechecks explicit unsafe sqlite bindings with named row contracts" $
+        case checkSource "sqlite-unsafe-runtime" sqliteUnsafeRuntimeSource of
+          Left err ->
+            assertFailure ("expected unsafe sqlite source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignDecls = coreModuleForeignDecls checked
+            case find ((== "fetchUnsafeFirstNote") . foreignDeclName) foreignDecls of
+              Just foreignDecl -> do
+                assertBool "expected explicit unsafe flag" (foreignDeclUnsafeInterop foreignDecl)
+                assertEqual
+                  "unsafe fetch type"
+                  (TFunction [TNamed "SqliteConnection", TStr] (TNamed "UnsafeNoteRow"))
+                  (foreignDeclType foreignDecl)
+              Nothing ->
+                assertFailure "expected unsafe sqlite foreign declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -1554,6 +1569,10 @@ checkerTests =
         assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badStoragePrimitiveSource)
     , testCase "rejects sqlite mutation bindings that use bare primitive storage-facing types" $
         assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badSqliteMutationPrimitiveSource)
+    , testCase "rejects sqlite unsafe bindings that are not declared as explicit unsafe foreign declarations" $
+        assertHasCode "E_SQLITE_UNSAFE_DECL" (checkSource "bad" badSqliteUnsafeMissingExplicitSource)
+    , testCase "rejects sqlite unsafe bindings without named record row contracts" $
+        assertHasCode "E_SQLITE_UNSAFE_ROW_CONTRACT" (checkSource "bad" badSqliteUnsafeRowContractSource)
     , testCase "rejects projections that disclose disallowed classified fields" $
         assertHasCode "E_DISCLOSURE_POLICY" (checkSource "bad" disallowedProjectionSource)
     , testCase "rejects assignment to immutable block locals" $
@@ -5189,6 +5208,21 @@ compileTests =
               "expected typed sqlite mutation runtime output"
               "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"insertNote\",\"replaceNotes\"],\"runtimeNames\":[\"sqlite:mutateOne:immediate\",\"sqlite:mutateAll:exclusive\"],\"operations\":[\"mutateOne\",\"mutateAll\"],\"isolations\":[\"immediate\",\"exclusive\"],\"mutationKinds\":[\"one\",\"many\"],\"paramSemanticTypes\":[\"NoteInput\",\"NoteInput\"],\"returnSemanticTypes\":[\"NoteRow\",\"[NoteRow]\"],\"runtimeInstalled\":true,\"insertedNote\":\"beta\",\"replacedNotes\":[{\"note\":\"BETA\"}],\"committedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"immediate\",\"boundary\":\"connection\",\"depth\":1},\"nestedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"exclusive\",\"boundary\":\"savepoint\",\"depth\":2},\"rolledBack\":\"rollback mutation\",\"finalNotes\":[\"BETA\",\"alpha\"]}"
               runtimeOutput
+    , testCase "sqlite runtime exposes explicit unsafe SQL bindings with row-contract metadata and audit entries" $ do
+        case compileSource "sqlite-unsafe-runtime" sqliteUnsafeRuntimeSource of
+          Left err ->
+            assertFailure ("expected unsafe sqlite runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-unsafe-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteUnsafeRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected unsafe sqlite runtime output"
+              "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"fetchUnsafeFirstNote\",\"fetchUnsafeNotes\",\"rewriteUnsafeNotes\"],\"runtimeNames\":[\"sqlite:unsafeQueryOne\",\"sqlite:unsafeQueryAll\",\"sqlite:unsafeMutateAll:immediate\"],\"operations\":[\"unsafeQueryOne\",\"unsafeQueryAll\",\"unsafeMutateAll\"],\"unsafeBaseOperations\":[\"queryOne\",\"queryAll\",\"mutateAll\"],\"unsafeRowContracts\":[\"UnsafeNoteRow\",\"[UnsafeNoteRow]\",\"[UnsafeNoteRow]\"],\"unsafeAuditKinds\":[\"clasp-sqlite-unsafe-sql-audit-metadata\",\"clasp-sqlite-unsafe-sql-audit-metadata\",\"clasp-sqlite-unsafe-sql-audit-metadata\"],\"runtimeInstalled\":true,\"firstNote\":\"alpha\",\"allNotes\":[\"alpha\",\"beta\"],\"rewrittenNotes\":[\"BETA\"],\"auditCount\":3,\"auditOperations\":[\"unsafeQueryOne\",\"unsafeQueryAll\",\"unsafeMutateAll\"],\"auditRowContracts\":[\"UnsafeNoteRow\",\"[UnsafeNoteRow]\",\"[UnsafeNoteRow]\"],\"auditParameterCounts\":[0,0,1],\"finalNotes\":[\"BETA\",\"alpha\"],\"clearedAuditCount\":0}"
+              runtimeOutput
     , testCase "provider runtime validates structured JSON-text outputs against declared schemas" $ do
         case compileSource "provider-runtime-invalid" providerRuntimeSource of
           Left err ->
@@ -6185,6 +6219,27 @@ sqliteMutationRuntimeSource =
     , ""
     , "rewriteNotes : SqliteConnection -> Str -> NoteInput -> [NoteRow]"
     , "rewriteNotes connection sql input = replaceNotes connection sql input"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+sqliteUnsafeRuntimeSource :: Text
+sqliteUnsafeRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record UnsafeNoteInput = {"
+    , "  wanted : Str"
+    , "}"
+    , ""
+    , "record UnsafeNoteRow = {"
+    , "  note : Str"
+    , "}"
+    , ""
+    , "foreign unsafe fetchUnsafeFirstNote : SqliteConnection -> Str -> UnsafeNoteRow = \"sqlite:unsafeQueryOne\""
+    , "foreign unsafe fetchUnsafeNotes : SqliteConnection -> Str -> [UnsafeNoteRow] = \"sqlite:unsafeQueryAll\""
+    , "foreign unsafe rewriteUnsafeNotes : SqliteConnection -> Str -> UnsafeNoteInput -> [UnsafeNoteRow] = \"sqlite:unsafeMutateAll:immediate\""
     , ""
     , "main : Str"
     , "main = \"ok\""
@@ -7861,6 +7916,32 @@ badSqliteMutationPrimitiveSource =
     , "}"
     , ""
     , "foreign saveCount : SqliteConnection -> Str -> Int -> NoteRow = \"sqlite:mutateOne\""
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+badSqliteUnsafeMissingExplicitSource :: Text
+badSqliteUnsafeMissingExplicitSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record NoteRow = {"
+    , "  note : Str"
+    , "}"
+    , ""
+    , "foreign fetchUnsafeNote : SqliteConnection -> Str -> NoteRow = \"sqlite:unsafeQueryOne\""
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+badSqliteUnsafeRowContractSource :: Text
+badSqliteUnsafeRowContractSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "foreign unsafe fetchUnsafeCount : SqliteConnection -> Str -> Int = \"sqlite:unsafeQueryOne\""
     , ""
     , "main : Str"
     , "main = \"ok\""
@@ -9893,6 +9974,51 @@ sqliteMutationRuntimeScript compiledPath runtimePath =
     , "  nestedTransaction,"
     , "  rolledBack,"
     , "  finalNotes"
+    , "}));"
+    ]
+
+sqliteUnsafeRuntimeScript :: FilePath -> FilePath -> Text
+sqliteUnsafeRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime, sqliteContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const sqliteContract = sqliteContractFor(compiledModule);"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule);"
+    , "const databasePath = 'dist/test-projects/sqlite-unsafe-runtime/runtime.db';"
+    , "const connection = sqliteRuntime.open(databasePath);"
+    , "sqliteRuntime.database(connection).exec('drop table if exists notes;');"
+    , "sqliteRuntime.database(connection).exec('create table notes (value text not null);');"
+    , "sqliteRuntime.database(connection).exec(\"insert into notes(value) values ('alpha'), ('beta');\");"
+    , "const installed = sqliteRuntime.install();"
+    , "const unsafeConnection = sqliteRuntime.open(databasePath);"
+    , "const firstNote = sqliteRuntime.call('fetchUnsafeFirstNote', unsafeConnection, 'select value as note from notes order by value asc limit 1').note;"
+    , "const allNotes = sqliteRuntime.call('fetchUnsafeNotes', unsafeConnection, 'select value as note from notes order by value asc').map((row) => row.note);"
+    , "const rewrittenNotes = sqliteRuntime.call('rewriteUnsafeNotes', unsafeConnection, \"update notes set value = upper(:wanted) where lower(value) = lower(:wanted) returning value as note\", { wanted: 'beta' }).map((row) => row.note);"
+    , "const auditEntries = sqliteRuntime.auditEntries();"
+    , "const finalNotes = sqliteRuntime.queryAll(unsafeConnection, 'select value as note from notes order by lower(value) desc').map((row) => row.note);"
+    , "sqliteRuntime.clearAuditEntries();"
+    , "const clearedAuditCount = sqliteRuntime.auditEntries().length;"
+    , "sqliteRuntime.close(unsafeConnection.id);"
+    , "sqliteRuntime.close(connection.id);"
+    , "console.log(JSON.stringify({"
+    , "  sqliteKind: sqliteContract.kind,"
+    , "  sqliteVersion: sqliteContract.version,"
+    , "  bindingNames: sqliteContract.bindings.map((binding) => binding.name),"
+    , "  runtimeNames: sqliteContract.bindings.map((binding) => binding.runtimeName),"
+    , "  operations: sqliteContract.bindings.map((binding) => binding.operation),"
+    , "  unsafeBaseOperations: sqliteContract.bindings.map((binding) => binding.unsafe?.baseOperation ?? null),"
+    , "  unsafeRowContracts: sqliteContract.bindings.map((binding) => binding.unsafe?.rowContract?.semanticType ?? null),"
+    , "  unsafeAuditKinds: sqliteContract.bindings.map((binding) => binding.unsafe?.audit?.kind ?? null),"
+    , "  runtimeInstalled: typeof installed['sqlite:unsafeQueryOne'] === 'function' && typeof installed['sqlite:unsafeQueryAll'] === 'function' && typeof installed['sqlite:unsafeMutateAll:immediate'] === 'function',"
+    , "  firstNote,"
+    , "  allNotes,"
+    , "  rewrittenNotes,"
+    , "  auditCount: auditEntries.length,"
+    , "  auditOperations: auditEntries.map((entry) => entry.binding.operation),"
+    , "  auditRowContracts: auditEntries.map((entry) => entry.rowContract?.semanticType ?? null),"
+    , "  auditParameterCounts: auditEntries.map((entry) => entry.parameterCount),"
+    , "  finalNotes,"
+    , "  clearedAuditCount"
     , "}));"
     ]
 

@@ -655,6 +655,24 @@ function defaultSqliteBinding(binding) {
     name: binding?.name ?? descriptor.operation,
     runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`,
     operation: descriptor.operation,
+    unsafe:
+      descriptor.unsafe
+        ? Object.freeze({
+            kind: "clasp-sqlite-unsafe-sql",
+            version: 1,
+            baseOperation: descriptor.baseOperation,
+            sqlParameterIndex: 1,
+            rowContract: returns?.storageType ?? null,
+            audit: Object.freeze({
+              kind: "clasp-sqlite-unsafe-sql-audit-metadata",
+              version: 1,
+              bindingName: binding?.name ?? descriptor.operation,
+              runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`,
+              operation: descriptor.operation,
+              baseOperation: descriptor.baseOperation
+            })
+          })
+        : null,
     transaction:
       descriptor.transaction === null
         ? null
@@ -694,25 +712,54 @@ function parseSqliteRuntimeName(runtimeName) {
   }
 
   const operation = parts[1];
+  const baseOperation = sqliteBaseOperation(operation);
   const isolation = normalizeSqliteIsolationLevel(parts[2]);
+
+  if (baseOperation === null) {
+    return null;
+  }
 
   return {
     namespace: "sqlite",
     operation,
+    baseOperation,
+    unsafe: operation !== baseOperation,
     transaction:
-      operation === "mutateOne" || operation === "mutateAll"
+      baseOperation === "mutateOne" || baseOperation === "mutateAll"
         ? {
             isolation: isolation ?? "deferred",
             boundary: "binding"
           }
         : null,
     mutation:
-      operation === "mutateOne"
+      baseOperation === "mutateOne"
         ? { cardinality: "one" }
-        : operation === "mutateAll"
+        : baseOperation === "mutateAll"
           ? { cardinality: "many" }
           : null
   };
+}
+
+function sqliteBaseOperation(operation) {
+  switch (operation) {
+    case "open":
+    case "openReadonly":
+    case "queryOne":
+    case "queryAll":
+    case "mutateOne":
+    case "mutateAll":
+      return operation;
+    case "unsafeQueryOne":
+      return "queryOne";
+    case "unsafeQueryAll":
+      return "queryAll";
+    case "unsafeMutateOne":
+      return "mutateOne";
+    case "unsafeMutateAll":
+      return "mutateAll";
+    default:
+      return null;
+  }
 }
 
 export function sqliteContractFor(compiledModule) {
@@ -735,8 +782,10 @@ export function createSqliteRuntime(compiledModule, options = {}) {
     contract.bindings.map((binding) => [binding.runtimeName, binding])
   );
   const liveConnections = new Map();
+  const auditLog = [];
   const implementations = {};
   let nextConnectionId = 1;
+  let nextAuditSequence = 1;
 
   const runtime = {
     contract,
@@ -763,10 +812,13 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       });
     },
     queryOne(connectionOrId, sql, ...parameters) {
-      return executeSqliteQuery("queryOne", connectionOrId, sql, parameters);
+      return executeSqliteQuery("queryOne", null, connectionOrId, sql, parameters);
     },
     queryAll(connectionOrId, sql, ...parameters) {
-      return executeSqliteQuery("queryAll", connectionOrId, sql, parameters);
+      return executeSqliteQuery("queryAll", null, connectionOrId, sql, parameters);
+    },
+    executeQuery(operation, binding, connectionOrId, sql, parameters) {
+      return executeSqliteQuery(operation, binding, connectionOrId, sql, parameters);
     },
     mutateOne(connectionOrId, sql, ...parameters) {
       return executeSqliteMutation("mutateOne", null, connectionOrId, sql, parameters);
@@ -799,6 +851,12 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       return Object.freeze(
         Array.from(liveConnections.values(), (entry) => entry.descriptor)
       );
+    },
+    auditEntries() {
+      return Object.freeze([...auditLog]);
+    },
+    clearAuditEntries() {
+      auditLog.length = 0;
     },
     close(connectionOrId) {
       const connection = resolveSqliteConnection(connectionOrId);
@@ -1011,10 +1069,12 @@ export function createSqliteRuntime(compiledModule, options = {}) {
     }
   }
 
-  function executeSqliteQuery(operation, connectionOrId, sql, parameters) {
+  function executeSqliteQuery(operation, binding, connectionOrId, sql, parameters) {
     const connection = resolveSqliteConnection(connectionOrId);
-    const statement = connection.database.prepare(normalizeSqliteQueryText(sql));
+    const normalizedSql = normalizeSqliteQueryText(sql);
+    const statement = connection.database.prepare(normalizedSql);
     const bindingArgs = parameters ?? [];
+    recordUnsafeSqliteAudit(binding, connection, normalizedSql, bindingArgs);
 
     switch (operation) {
       case "queryOne":
@@ -1035,8 +1095,10 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       },
       () => {
         const connection = resolveSqliteConnection(connectionOrId);
-        const statement = connection.database.prepare(normalizeSqliteQueryText(sql));
+        const normalizedSql = normalizeSqliteQueryText(sql);
+        const statement = connection.database.prepare(normalizedSql);
         const bindingArgs = parameters ?? [];
+        recordUnsafeSqliteAudit(binding, connection, normalizedSql, bindingArgs);
 
         switch (operation) {
           case "mutateOne":
@@ -1047,6 +1109,33 @@ export function createSqliteRuntime(compiledModule, options = {}) {
             throw new Error(`Unsupported Clasp sqlite mutation operation: ${operation}`);
         }
       }
+    );
+  }
+
+  function recordUnsafeSqliteAudit(binding, connection, sql, parameters) {
+    if (!binding?.unsafe) {
+      return;
+    }
+
+    auditLog.push(
+      Object.freeze({
+        kind: "clasp-sqlite-unsafe-sql-audit",
+        version: 1,
+        sequence: nextAuditSequence++,
+        binding: Object.freeze({
+          name: binding.name,
+          runtimeName: binding.runtimeName,
+          operation: binding.operation,
+          baseOperation: binding.unsafe.baseOperation
+        }),
+        connection: connection.descriptor,
+        sql,
+        parameterCount: parameters.length,
+        rowContract: binding.unsafe.rowContract,
+        transaction: binding.transaction,
+        mutation: binding.mutation,
+        metadata: binding.unsafe.audit
+      })
     );
   }
 }
@@ -1365,9 +1454,17 @@ function executeSqliteBinding(runtime, binding, args, runtimeOptions) {
       return runtime.queryOne(args[0], args[1], ...args.slice(2));
     case "queryAll":
       return runtime.queryAll(args[0], args[1], ...args.slice(2));
+    case "unsafeQueryOne":
+      return runtime.executeQuery("queryOne", binding, args[0], args[1], args.slice(2));
+    case "unsafeQueryAll":
+      return runtime.executeQuery("queryAll", binding, args[0], args[1], args.slice(2));
     case "mutateOne":
       return runtime.executeMutation("mutateOne", binding, args[0], args[1], args.slice(2));
     case "mutateAll":
+      return runtime.executeMutation("mutateAll", binding, args[0], args[1], args.slice(2));
+    case "unsafeMutateOne":
+      return runtime.executeMutation("mutateOne", binding, args[0], args[1], args.slice(2));
+    case "unsafeMutateAll":
       return runtime.executeMutation("mutateAll", binding, args[0], args[1], args.slice(2));
     default:
       throw new Error(`Unsupported Clasp sqlite operation: ${binding.operation}`);

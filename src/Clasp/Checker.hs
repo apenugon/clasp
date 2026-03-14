@@ -2032,6 +2032,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           TFunction _ _ -> do
             ensureStorageForeignDecl foreignDecl
             ensureSqliteMutationForeignDecl foreignDecl
+            ensureSqliteUnsafeForeignDecl foreignDecl
           _ ->
             Left . diagnosticBundle $
               [ diagnostic
@@ -2064,6 +2065,22 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
       | otherwise =
           pure ()
 
+    ensureSqliteUnsafeForeignDecl foreignDecl
+      | isSqliteUnsafeRuntimeName (foreignDeclRuntimeName foreignDecl) = do
+          let (_paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
+          unless (foreignDeclUnsafeInterop foreignDecl) $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_SQLITE_UNSAFE_DECL"
+                  ("SQLite unsafe binding `" <> foreignDeclName foreignDecl <> "` must be declared with `foreign unsafe`.")
+                  (Just (foreignDeclAnnotationSpan foreignDecl))
+                  ["Mark explicit SQL escape hatches as `foreign unsafe` so the trust boundary stays visible at the declaration site."]
+                  [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+              ]
+          ensureSqliteUnsafeRowContract foreignDecl "return value" returnType
+      | otherwise =
+          pure ()
+
     ensureSqliteMutationBoundaryType foreignDecl index paramType
       | index <= 2 =
           pure ()
@@ -2073,6 +2090,34 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
     isSqliteMutationRuntimeName runtimeName =
       "sqlite:mutateOne" `T.isPrefixOf` runtimeName
         || "sqlite:mutateAll" `T.isPrefixOf` runtimeName
+
+    isSqliteUnsafeRuntimeName runtimeName =
+      "sqlite:unsafeQueryOne" `T.isPrefixOf` runtimeName
+        || "sqlite:unsafeQueryAll" `T.isPrefixOf` runtimeName
+        || "sqlite:unsafeMutateOne" `T.isPrefixOf` runtimeName
+        || "sqlite:unsafeMutateAll" `T.isPrefixOf` runtimeName
+
+    ensureSqliteUnsafeRowContract foreignDecl role typ =
+      case typ of
+        TNamed name
+          | Map.member name recordDeclEnv ->
+              pure ()
+          | otherwise ->
+              sqliteUnsafeRowContractError foreignDecl role typ
+        TList itemType ->
+          ensureSqliteUnsafeRowContract foreignDecl (role <> " item") itemType
+        _ ->
+          sqliteUnsafeRowContractError foreignDecl role typ
+
+    sqliteUnsafeRowContractError foreignDecl role typ =
+      Left . diagnosticBundle $
+        [ diagnostic
+            "E_SQLITE_UNSAFE_ROW_CONTRACT"
+            ("Unsafe SQLite binding `" <> foreignDeclName foreignDecl <> "` must use a named record row contract for its " <> role <> ", not `" <> renderType typ <> "`.")
+            (Just (foreignDeclAnnotationSpan foreignDecl))
+            ["Declare a record schema for the projected SQL row shape and return that named record or a list of that record."]
+            [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
+        ]
 
     ensureStorageBoundaryType foreignDecl role typ =
       case typ of
