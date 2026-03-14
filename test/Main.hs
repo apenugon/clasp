@@ -5160,6 +5160,10 @@ compileTests =
             assertBool "expected prompt input export helper" ("export function __claspCreatePromptInputSurface(config = {}) {" `T.isInfixOf` emitted)
             assertBool "expected secret delegation helper" ("delegate(secretHandleOrName, options = null) {" `T.isInfixOf` emitted)
             assertBool "expected secret handoff helper" ("handoff(consumer, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected secret declaration export" ("export const __claspSecretDeclarations = __claspSecretInputs;" `T.isInfixOf` emitted)
+            assertBool "expected secret injector export" ("export const __claspSecretInjectors = Object.freeze({" `T.isInfixOf` emitted)
+            assertBool "expected secret environment injector helper" ("fromEnvironment(environment = null, options = null) {" `T.isInfixOf` emitted)
+            assertBool "expected secret provider injector helper" ("fromProvider(provider, options = null) {" `T.isInfixOf` emitted)
             assertBool "expected route secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"route\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected workflow secret consumer helper" ("secretConsumer(boundary) { return $claspCreateSecretConsumer({ kind: \"workflow\", name: this.name, id: this.id, boundary }); }" `T.isInfixOf` emitted)
             assertBool "expected tool secret consumer helper" ("secretConsumer(boundary = this.server ?? null) { return $claspCreateSecretConsumer({ kind: \"tool\", name: this.name, id: this.id, boundary, secretNames: this.secretNames }); }" `T.isInfixOf` emitted)
@@ -5185,7 +5189,7 @@ compileTests =
             runtimeOutput <- runNodeScript (secretSurfaceRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected declared secret-handle runtime output"
-              "{\"routeSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"routeSecretValue\":\"sk-live-openai\",\"workflowTracePolicy\":\"SupportSecrets\",\"workflowSecretValue\":\"tok-search-1\",\"toolSecretCount\":2,\"toolHasOpenAI\":true,\"providerSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerResolvedName\":\"SEARCH_API_TOKEN\",\"providerResolvedValue\":\"tok-search-1\",\"providerRequestSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerRequestResolvedValue\":\"tok-search-1\",\"providerPreview\":\"preview: tok-search-1\"}"
+              "{\"declarationKind\":\"clasp-secret-declaration\",\"environmentKey\":\"OPENAI_API_KEY\",\"injectorVersion\":1,\"routeSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"routeSourceKind\":\"environment\",\"routeSecretValue\":\"sk-env-openai\",\"workflowTracePolicy\":\"SupportSecrets\",\"workflowSecretValue\":\"tok-env-1\",\"toolSecretCount\":2,\"toolHasOpenAI\":true,\"providerSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerSourceKind\":\"provider\",\"providerResolvedName\":\"SEARCH_API_TOKEN\",\"providerResolvedValue\":\"tok-provider-1\",\"providerRequestSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"providerRequestResolvedValue\":\"tok-provider-1\",\"providerPreview\":\"preview: tok-provider-1\"}"
               runtimeOutput
     , testCase "delegated secret handoffs pass handles across agent tool and workflow boundaries without raw values" $ do
         case compileSource "delegated-secret-handoff-runtime" delegatedSecretHandoffSource of
@@ -9834,18 +9838,28 @@ secretSurfaceRuntimeScript compiledPath runtimePath =
     , "import { createProviderRuntime, providerContractFor } from " <> show ("file://" <> runtimePath) <> ";"
     , "const boundary = compiledModule.__claspSecretBoundaries.find((candidate) => candidate.kind === 'toolServer');"
     , "if (!boundary) { throw new Error('missing tool-server secret boundary'); }"
-    , "const secretProvider = { OPENAI_API_KEY: 'sk-live-openai', SEARCH_API_TOKEN: 'tok-search-1' };"
+    , "const environmentSecrets = compiledModule.__claspSecretInjectors.environment({ OPENAI_API_KEY: 'sk-env-openai', SEARCH_API_TOKEN: 'tok-env-1' });"
+    , "const hostSecrets = compiledModule.__claspSecretInjectors.provider((secretHandle) => {"
+    , "  if (secretHandle.name === 'OPENAI_API_KEY') { return 'sk-provider-openai'; }"
+    , "  if (secretHandle.name === 'SEARCH_API_TOKEN') { return 'tok-provider-1'; }"
+    , "  return null;"
+    , "});"
     , "const route = compiledModule.__claspRoutes.find((candidate) => candidate.name === 'previewRoute');"
     , "const workflow = compiledModule.__claspWorkflows.find((candidate) => candidate.name === 'SearchFlow');"
     , "const tool = compiledModule.__claspTools.find((candidate) => candidate.name === 'searchRepo');"
     , "if (!route || !workflow || !tool) { throw new Error('missing secret consumer surfaces'); }"
-    , "const routeSecrets = route.secretConsumer(boundary);"
-    , "const workflowSecrets = workflow.secretConsumer(boundary);"
-    , "const toolSecrets = tool.secretConsumer();"
+    , "const declaration = compiledModule.__claspSecretDeclarations[0];"
+    , "const routeSecrets = route.secretConsumer(boundary).fromEnvironment({ OPENAI_API_KEY: 'sk-env-openai', SEARCH_API_TOKEN: 'tok-env-1' });"
+    , "const workflowSecrets = workflow.secretConsumer(boundary).fromEnvironment({ OPENAI_API_KEY: 'sk-env-openai', SEARCH_API_TOKEN: 'tok-env-1' });"
+    , "const toolSecrets = tool.secretConsumer().fromEnvironment({ OPENAI_API_KEY: 'sk-env-openai', SEARCH_API_TOKEN: 'tok-env-1' });"
     , "const providerContract = providerContractFor(compiledModule);"
     , "const providerBinding = providerContract.bindings.find((candidate) => candidate.name === 'generateReplyPreview');"
     , "if (!providerBinding) { throw new Error('missing provider binding'); }"
-    , "const providerSecrets = providerBinding.secretConsumer(boundary);"
+    , "const providerSecrets = providerBinding.secretConsumer(boundary).fromProvider((secretHandle) => {"
+    , "  if (secretHandle.name === 'OPENAI_API_KEY') { return 'sk-provider-openai'; }"
+    , "  if (secretHandle.name === 'SEARCH_API_TOKEN') { return 'tok-provider-1'; }"
+    , "  return null;"
+    , "});"
     , "let seenRequest = null;"
     , "const providerRuntime = createProviderRuntime(compiledModule, {"
     , "  providers: {"
@@ -9859,21 +9873,30 @@ secretSurfaceRuntimeScript compiledPath runtimePath =
     , "      }"
     , "    }"
     , "  },"
-    , "  secrets: secretProvider,"
+    , "  secretProvider(secretHandle) {"
+    , "    if (secretHandle.name === 'OPENAI_API_KEY') { return 'sk-provider-openai'; }"
+    , "    if (secretHandle.name === 'SEARCH_API_TOKEN') { return 'tok-provider-1'; }"
+    , "    return null;"
+    , "  },"
     , "  secretBoundary: boundary"
     , "});"
     , "providerRuntime.install();"
     , "const providerResult = compiledModule.providerPreview({ query: 'renewal' });"
     , "console.log(JSON.stringify({"
+    , "  declarationKind: declaration.declarationKind,"
+    , "  environmentKey: declaration.environmentKey,"
+    , "  injectorVersion: compiledModule.__claspSecretInjectors.version,"
     , "  routeSecretNames: routeSecrets.secretHandles.map((secretHandle) => secretHandle.name),"
-    , "  routeSecretValue: routeSecrets.resolve('OPENAI_API_KEY', secretProvider).value,"
-    , "  workflowTracePolicy: workflowSecrets.traceAccess('SEARCH_API_TOKEN', secretProvider).policy,"
-    , "  workflowSecretValue: workflowSecrets.resolve('SEARCH_API_TOKEN', secretProvider).value,"
+    , "  routeSourceKind: routeSecrets.source.sourceKind,"
+    , "  routeSecretValue: routeSecrets.resolve('OPENAI_API_KEY').value,"
+    , "  workflowTracePolicy: workflowSecrets.traceAccess('SEARCH_API_TOKEN').policy,"
+    , "  workflowSecretValue: workflowSecrets.resolve('SEARCH_API_TOKEN').value,"
     , "  toolSecretCount: toolSecrets.secretHandles.length,"
-    , "  toolHasOpenAI: toolSecrets.hasSecret('OPENAI_API_KEY'),"
+    , "  toolHasOpenAI: toolSecrets.consumer.hasSecret('OPENAI_API_KEY'),"
     , "  providerSecretNames: providerSecrets.secretHandles.map((secretHandle) => secretHandle.name),"
-    , "  providerResolvedName: providerSecrets.handle('SEARCH_API_TOKEN').name,"
-    , "  providerResolvedValue: providerSecrets.resolve('SEARCH_API_TOKEN', secretProvider).value,"
+    , "  providerSourceKind: providerSecrets.source.sourceKind,"
+    , "  providerResolvedName: providerSecrets.consumer.handle('SEARCH_API_TOKEN').name,"
+    , "  providerResolvedValue: providerSecrets.resolve('SEARCH_API_TOKEN').value,"
     , "  providerRequestSecretNames: seenRequest?.secretNames ?? [],"
     , "  providerRequestResolvedValue: seenRequest?.resolvedValue ?? null,"
     , "  providerPreview: providerResult.summary"

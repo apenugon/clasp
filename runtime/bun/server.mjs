@@ -911,6 +911,7 @@ function invokeProviderBinding(compiledModule, binding, args, runtimeOptions) {
   const secretConsumer = binding.secretConsumer(
     resolveProviderSecretBoundary(binding, runtimeOptions)
   );
+  const secretSource = resolveProviderSecretSource(compiledModule, runtimeOptions);
   return provider({
     id: `provider:${binding.provider}:${binding.operation}`,
     binding,
@@ -919,11 +920,12 @@ function invokeProviderBinding(compiledModule, binding, args, runtimeOptions) {
     args: Object.freeze(args.slice()),
     secretConsumer,
     secretHandles: secretConsumer.secretHandles,
+    secretSource,
     resolveSecret(secretHandle, options = null) {
-      return secretConsumer.resolve(secretHandle, runtimeOptions.secrets, options);
+      return secretConsumer.resolve(secretHandle, secretSource, options);
     },
     resolveAllSecrets(options = null) {
-      return secretConsumer.resolveAll(runtimeOptions.secrets, options);
+      return secretConsumer.resolveAll(secretSource, options);
     }
   });
 }
@@ -967,6 +969,9 @@ function normalizeProviderRuntimeOptions(options) {
     return {
       providers: options.providers ?? {},
       secrets: options.secrets ?? null,
+      secretEnvironment: options.secretEnvironment ?? null,
+      secretProvider:
+        options.secretProvider ?? options.hostSecretProvider ?? null,
       secretBoundary: options.secretBoundary ?? null,
       secretBoundaryFor:
         typeof options.secretBoundaryFor === "function"
@@ -978,6 +983,8 @@ function normalizeProviderRuntimeOptions(options) {
   return {
     providers: options,
     secrets: null,
+    secretEnvironment: null,
+    secretProvider: null,
     secretBoundary: null,
     secretBoundaryFor: null
   };
@@ -992,6 +999,36 @@ function resolveProviderSecretBoundary(binding, runtimeOptions) {
   }
 
   return runtimeOptions.secretBoundary ?? null;
+}
+
+function resolveProviderSecretSource(compiledModule, runtimeOptions) {
+  if (runtimeOptions.secrets !== null && runtimeOptions.secrets !== undefined) {
+    return runtimeOptions.secrets;
+  }
+
+  if (
+    runtimeOptions.secretEnvironment !== null &&
+    runtimeOptions.secretEnvironment !== undefined &&
+    compiledModule?.__claspSecretInjectors?.environment
+  ) {
+    return compiledModule.__claspSecretInjectors.environment(
+      runtimeOptions.secretEnvironment,
+      { label: "provider-runtime:environment" }
+    );
+  }
+
+  if (
+    runtimeOptions.secretProvider !== null &&
+    runtimeOptions.secretProvider !== undefined &&
+    compiledModule?.__claspSecretInjectors?.provider
+  ) {
+    return compiledModule.__claspSecretInjectors.provider(
+      runtimeOptions.secretProvider,
+      { label: "provider-runtime:provider" }
+    );
+  }
+
+  return null;
 }
 
 function createProviderSecretConsumerSurface(
