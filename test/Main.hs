@@ -8,7 +8,7 @@ import Data.Aeson (Value (..), eitherDecodeStrictText)
 import Data.Aeson.Key (fromText)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, isInfixOf)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -1616,6 +1616,57 @@ explainTests =
               assertBool "expected typed let in json payload" ("let message : Str =" `T.isInfixOf` explanation)
             _ ->
               assertFailure "expected explanation string in explain json"
+    , testCase "claspc explain prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "compiler/hosted/Main.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler explain to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted explain json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc explain falls back to the Haskell bootstrap compiler for ordinary programs" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected bootstrap fallback explain to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected bootstrap fallback explain json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc explain reports unsupported explicit Clasp-primary requests" $ do
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json", "--compiler=clasp"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected explicit unsupported primary compiler explain request to fail"
+          ExitFailure _ ->
+            pure ()
+        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
+          Left decodeErr ->
+            assertFailure ("expected explicit primary explain failure json to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+          Just (Array diagnosticsJson) ->
+            case toList diagnosticsJson of
+              firstDiagnostic : _ ->
+                pure firstDiagnostic
+              [] ->
+                assertFailure "expected at least one diagnostic for unsupported primary explain request"
+          _ ->
+            assertFailure "expected diagnostics array for unsupported primary explain request"
+        assertEqual "code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
     ]
 
 diagnosticTests :: TestTree
@@ -3200,6 +3251,89 @@ compileTests =
               "expected emitted render export"
               (Just (String "42"))
               (lookupObjectKey "emittedRender" runtimeValue)
+    , testCase "claspc compile prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
+        let compiledPath = "dist/compiler-selfhost-json.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath, "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler compile to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted compile json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc compile falls back to the Haskell bootstrap compiler for ordinary programs" $ do
+        let compiledPath = "dist/hello-bootstrap.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json"]
+        case exitCode of
+          ExitSuccess ->
+            pure ()
+          ExitFailure _ ->
+            assertFailure ("expected bootstrap fallback compile to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected bootstrap fallback compile json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc compile reports unsupported explicit Clasp-primary requests" $ do
+        (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", "dist/hello-clasp.mjs", "--json", "--compiler=clasp"]
+        case exitCode of
+          ExitSuccess ->
+            assertFailure "expected explicit unsupported primary compiler compile request to fail"
+          ExitFailure _ ->
+            pure ()
+        jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
+          Left decodeErr ->
+            assertFailure ("expected explicit primary compile failure json to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+          Just (Array diagnosticsJson) ->
+            case toList diagnosticsJson of
+              firstDiagnostic : _ ->
+                pure firstDiagnostic
+              [] ->
+                assertFailure "expected at least one diagnostic for unsupported primary compile request"
+          _ ->
+            assertFailure "expected diagnostics array for unsupported primary compile request"
+        assertEqual "code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
+    , testCase "hosted tool runner rejects entrypoints that do not expose the requested command" $
+        withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
+          let stage1Path = root </> "stage1.mjs"
+          let bootstrapOutputPath = root </> "bootstrap-output.txt"
+          let resultPath = root </> "result.txt"
+          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", stage1Path, "--compiler=bootstrap"]
+          case compileExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected bootstrap compile for hosted runner setup to succeed:\n" <> compileStdout <> compileStderr)
+          TIO.writeFile bootstrapOutputPath "ignored"
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "bun"
+              [ "compiler/hosted/run-tool.mjs"
+              , "check"
+              , root </> "Fake.clasp"
+              , stage1Path
+              , bootstrapOutputPath
+              , resultPath
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected hosted tool runner to reject an entrypoint without the requested command marker"
+            ExitFailure _ ->
+              assertBool "expected hosted tool runner to report missing hosted command support" ("does not expose hosted check support" `isInfixOf` stderrText)
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->

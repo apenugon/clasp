@@ -15,8 +15,8 @@ import Clasp.Compiler
   ( CompilerImplementation (..)
   , CompilerPreference (..)
   , checkEntryWithPreference
-  , compileEntry
-  , explainEntry
+  , compileEntryWithPreference
+  , explainEntryWithPreference
   , parseSource
   , renderAirEntryJson
   , renderContextEntryJson
@@ -38,7 +38,7 @@ main = do
     ["check", inputPath] ->
       runCheck format compilerPreference inputPath
     ["explain", inputPath] ->
-      runExplain format inputPath
+      runExplain format compilerPreference inputPath
     ["air", inputPath] ->
       runAir format inputPath Nothing
     ["air", inputPath, "-o", outputPath] ->
@@ -52,11 +52,11 @@ main = do
     ["context", "-o", outputPath, inputPath] ->
       runContext format inputPath (Just outputPath)
     ["compile", inputPath] ->
-      runCompile format inputPath Nothing
+      runCompile format compilerPreference inputPath Nothing
     ["compile", inputPath, "-o", outputPath] ->
-      runCompile format inputPath (Just outputPath)
+      runCompile format compilerPreference inputPath (Just outputPath)
     ["compile", "-o", outputPath, inputPath] ->
-      runCompile format inputPath (Just outputPath)
+      runCompile format compilerPreference inputPath (Just outputPath)
     ["native", inputPath] ->
       runNative format inputPath Nothing
     ["native", inputPath, "-o", outputPath] ->
@@ -128,9 +128,9 @@ runCheck format compilerPreference inputPath = do
                 , "implementation" .= renderCompilerImplementation implementation
                 ]
 
-runExplain :: OutputFormat -> FilePath -> IO ()
-runExplain format inputPath = do
-  result <- explainEntry inputPath
+runExplain :: OutputFormat -> CompilerPreference -> FilePath -> IO ()
+runExplain format compilerPreference inputPath = do
+  (implementation, result) <- explainEntryWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -138,7 +138,7 @@ runExplain format inputPath = do
     Right explanation ->
       case format of
         Pretty ->
-          TIO.putStrLn explanation
+          TIO.putStrLn explanation >> hPutStrLn stderr ("Explained " <> inputPath <> " with " <> renderCompilerImplementation implementation)
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
@@ -146,6 +146,7 @@ runExplain format inputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("explain" :: String)
                 , "input" .= inputPath
+                , "implementation" .= renderCompilerImplementation implementation
                 , "explanation" .= explanation
                 ]
 
@@ -195,9 +196,9 @@ runContext format inputPath outputPath = do
                 , "output" .= resolvedOutput
                 ]
 
-runCompile :: OutputFormat -> FilePath -> Maybe FilePath -> IO ()
-runCompile format inputPath outputPath = do
-  result <- compileEntry inputPath
+runCompile :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
+runCompile format compilerPreference inputPath outputPath = do
+  (implementation, result) <- compileEntryWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -207,7 +208,7 @@ runCompile format inputPath outputPath = do
       TIO.writeFile resolvedOutput js
       case format of
         Pretty ->
-          hPutStrLn stderr ("Wrote " <> resolvedOutput)
+          hPutStrLn stderr ("Wrote " <> resolvedOutput <> " with " <> renderCompilerImplementation implementation)
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
@@ -215,6 +216,7 @@ runCompile format inputPath outputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("compile" :: String)
                 , "input" .= inputPath
+                , "implementation" .= renderCompilerImplementation implementation
                 , "output" .= resolvedOutput
                 ]
 
@@ -255,10 +257,10 @@ usage =
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
     , "  claspc check <input.clasp> [--json] [--compiler=auto|clasp|bootstrap]"
-    , "  claspc explain <input.clasp> [--json]"
+    , "  claspc explain <input.clasp> [--json] [--compiler=auto|clasp|bootstrap]"
     , "  claspc air <input.clasp> [-o output.air.json] [--json]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json]"
-    , "  claspc compile <input.clasp> [-o output.js] [--json]"
+    , "  claspc compile <input.clasp> [-o output.js] [--json] [--compiler=auto|clasp|bootstrap]"
     , "  claspc native <input.clasp> [-o output.native.ir] [--json]"
     ]
 

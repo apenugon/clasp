@@ -13,8 +13,10 @@ module Clasp.Compiler
   , checkEntryWithPreference
   , compileSource
   , compileEntry
+  , compileEntryWithPreference
   , explainSource
   , explainEntry
+  , explainEntryWithPreference
   , formatSource
   , renderNativeSource
   , renderNativeEntry
@@ -38,7 +40,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as LT
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, getTemporaryDirectory, removePathForcibly)
 import System.Exit (ExitCode (..))
-import System.FilePath ((</>), normalise)
+import System.FilePath ((<.>), (</>), normalise)
 import System.Process (readProcessWithExitCode)
 import Clasp.Air (AirModule, buildAirModule, renderAirModuleJson)
 import Clasp.Checker (checkModule)
@@ -61,6 +63,12 @@ data CompilerPreference
   = CompilerPreferenceAuto
   | CompilerPreferenceClasp
   | CompilerPreferenceBootstrap
+  deriving (Eq, Show)
+
+data HostedToolCommand
+  = HostedToolCheck
+  | HostedToolCompile
+  | HostedToolExplain
   deriving (Eq, Show)
 
 parseSource :: FilePath -> Text -> Either DiagnosticBundle Module
@@ -143,7 +151,7 @@ explainSource path source =
   renderCoreModule <$> checkSource path source
 
 checkEntry :: FilePath -> IO (Either DiagnosticBundle CoreModule)
-checkEntry = checkEntryBootstrap
+checkEntry entryPath = snd <$> checkEntryWithPreference CompilerPreferenceAuto entryPath
 
 checkEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle CoreModule)
 checkEntryBootstrap entryPath = do
@@ -157,20 +165,9 @@ checkEntryWithPreference preference entryPath =
       result <- checkEntryBootstrap entryPath
       pure (CompilerImplementationBootstrap, result)
     CompilerPreferenceClasp ->
-      runPrimaryCheck entryPath
+      runPrimaryCheckEntry entryPath
     CompilerPreferenceAuto ->
-      if supportsPrimaryCheck entryPath
-        then do
-          (implementation, result) <- runPrimaryCheck entryPath
-          case result of
-            Right _ ->
-              pure (implementation, result)
-            Left _ -> do
-              bootstrapResult <- checkEntryBootstrap entryPath
-              pure (CompilerImplementationBootstrap, bootstrapResult)
-        else do
-          result <- checkEntryBootstrap entryPath
-          pure (CompilerImplementationBootstrap, result)
+      preferPrimaryTool supportsPrimaryTool entryPath runPrimaryCheckEntry checkEntryBootstrap
 
 semanticEditEntry :: SemanticEdit -> FilePath -> IO (Either DiagnosticBundle CoreModule)
 semanticEditEntry edit entryPath = do
@@ -178,18 +175,36 @@ semanticEditEntry edit entryPath = do
   pure (checkedModule >>= applySemanticEdit edit)
 
 compileEntry :: FilePath -> IO (Either DiagnosticBundle Text)
-compileEntry entryPath = do
-  checkedModule <- checkEntryBootstrap entryPath
-  pure ((\modl -> emitModule (buildAirModule modl) (lowerModule modl)) <$> checkedModule)
+compileEntry entryPath = snd <$> compileEntryWithPreference CompilerPreferenceAuto entryPath
+
+compileEntryWithPreference :: CompilerPreference -> FilePath -> IO (CompilerImplementation, Either DiagnosticBundle Text)
+compileEntryWithPreference preference entryPath =
+  case preference of
+    CompilerPreferenceBootstrap -> do
+      result <- compileEntryBootstrap entryPath
+      pure (CompilerImplementationBootstrap, result)
+    CompilerPreferenceClasp ->
+      runPrimaryTextTool HostedToolCompile entryPath compileEntryBootstrap
+    CompilerPreferenceAuto ->
+      preferPrimaryTool supportsPrimaryTool entryPath (flip (runPrimaryTextTool HostedToolCompile) compileEntryBootstrap) compileEntryBootstrap
 
 explainEntry :: FilePath -> IO (Either DiagnosticBundle Text)
-explainEntry entryPath = do
-  checkedModule <- checkEntryBootstrap entryPath
-  pure (renderCoreModule <$> checkedModule)
+explainEntry entryPath = snd <$> explainEntryWithPreference CompilerPreferenceAuto entryPath
 
-runPrimaryCheck :: FilePath -> IO (CompilerImplementation, Either DiagnosticBundle CoreModule)
-runPrimaryCheck entryPath
-  | not (supportsPrimaryCheck entryPath) =
+explainEntryWithPreference :: CompilerPreference -> FilePath -> IO (CompilerImplementation, Either DiagnosticBundle Text)
+explainEntryWithPreference preference entryPath =
+  case preference of
+    CompilerPreferenceBootstrap -> do
+      result <- explainEntryBootstrap entryPath
+      pure (CompilerImplementationBootstrap, result)
+    CompilerPreferenceClasp ->
+      runPrimaryTextTool HostedToolExplain entryPath explainEntryBootstrap
+    CompilerPreferenceAuto ->
+      preferPrimaryTool supportsPrimaryTool entryPath (flip (runPrimaryTextTool HostedToolExplain) explainEntryBootstrap) explainEntryBootstrap
+
+runPrimaryCheckEntry :: FilePath -> IO (CompilerImplementation, Either DiagnosticBundle CoreModule)
+runPrimaryCheckEntry entryPath
+  | not (supportsPrimaryTool entryPath) =
       pure
         ( CompilerImplementationClasp
         , Left $
@@ -204,27 +219,71 @@ runPrimaryCheck entryPath
         Left err ->
           pure (CompilerImplementationClasp, Left err)
         Right checkedModule -> do
-          primaryResult <- verifyHostedPrimaryCheck entryPath
+          primaryResult <- runHostedTool HostedToolCheck entryPath
           pure (CompilerImplementationClasp, checkedModule <$ primaryResult)
 
-supportsPrimaryCheck :: FilePath -> Bool
-supportsPrimaryCheck entryPath =
+runPrimaryTextTool ::
+     HostedToolCommand
+  -> FilePath
+  -> (FilePath -> IO (Either DiagnosticBundle Text))
+  -> IO (CompilerImplementation, Either DiagnosticBundle Text)
+runPrimaryTextTool command entryPath bootstrapAction
+  | not (supportsPrimaryTool entryPath) =
+      pure
+        ( CompilerImplementationClasp
+        , Left $
+            singleDiagnostic
+              "E_PRIMARY_COMPILER_UNSUPPORTED"
+              "The primary Clasp compiler does not support this entrypoint yet."
+              ["Use --compiler=bootstrap for this command, or run the hosted compiler entrypoint at compiler/hosted/Main.clasp."]
+        )
+  | otherwise = do
+      bootstrapResult <- bootstrapAction entryPath
+      case bootstrapResult of
+        Left err ->
+          pure (CompilerImplementationClasp, Left err)
+        Right output -> do
+          primaryResult <- runHostedTool command entryPath
+          pure (CompilerImplementationClasp, output <$ primaryResult)
+
+supportsPrimaryTool :: FilePath -> Bool
+supportsPrimaryTool entryPath =
   let target = hostedCompilerEntryPath
       normalizedPath = normalise entryPath
    in normalizedPath == target || target `isSuffixOf` normalizedPath
 
-verifyHostedPrimaryCheck :: FilePath -> IO (Either DiagnosticBundle ())
-verifyHostedPrimaryCheck entryPath = do
+preferPrimaryTool ::
+     (FilePath -> Bool)
+  -> FilePath
+  -> (FilePath -> IO (CompilerImplementation, Either DiagnosticBundle a))
+  -> (FilePath -> IO (Either DiagnosticBundle a))
+  -> IO (CompilerImplementation, Either DiagnosticBundle a)
+preferPrimaryTool supports entryPath primaryAction bootstrapAction =
+  if supports entryPath
+    then do
+      (implementation, result) <- primaryAction entryPath
+      case result of
+        Right _ ->
+          pure (implementation, result)
+        Left _ -> do
+          bootstrapResult <- bootstrapAction entryPath
+          pure (CompilerImplementationBootstrap, bootstrapResult)
+    else do
+      result <- bootstrapAction entryPath
+      pure (CompilerImplementationBootstrap, result)
+
+runHostedTool :: HostedToolCommand -> FilePath -> IO (Either DiagnosticBundle ())
+runHostedTool command entryPath = do
   tempRoot <- getTemporaryDirectory
-  let tempDir = tempRoot </> "clasp-primary-check"
+  let tempDir = tempRoot </> "clasp-primary-tool"
   tempDirExists <- doesDirectoryExist tempDir
   if tempDirExists
     then removePathForcibly tempDir
     else pure ()
   let cleanup = removePathForcibly tempDir
       stage1Path = tempDir </> "stage1.mjs"
-      stage2CompilerPath = tempDir </> "stage2-compiler.mjs"
-      stage2OutputPath = tempDir </> "stage2-output.mjs"
+      bootstrapOutputPath = tempDir </> ("bootstrap-output" <.> hostedToolOutputExtension command)
+      primaryOutputPath = tempDir </> ("primary-output" <.> hostedToolOutputExtension command)
   flip finally cleanup $ do
     createDirectoryIfMissing True tempDir
     compiledStage1 <- compileEntryBootstrap entryPath
@@ -233,44 +292,76 @@ verifyHostedPrimaryCheck entryPath = do
         pure (Left err)
       Right compiledJs -> do
         writeFileText stage1Path compiledJs
-        (exitCode, stdoutText, stderrText) <-
-          readProcessWithExitCode
-            "bun"
-            [hostedCompilerDemoPath, stage1Path, stage2CompilerPath, stage2OutputPath]
-            ""
-        pure $
-          case exitCode of
-            ExitSuccess ->
-              if all (`T.isInfixOf` T.pack stdoutText) expectedChecks
-                then Right ()
-                else
+        bootstrapOutput <- hostedToolBootstrapOutput command entryPath
+        case bootstrapOutput of
+          Left err ->
+            pure (Left err)
+          Right output -> do
+            writeFileText bootstrapOutputPath output
+            (exitCode, _stdoutText, stderrText) <-
+              readProcessWithExitCode
+                "bun"
+                [ hostedCompilerToolRunnerPath
+                , renderHostedToolCommand command
+                , entryPath
+                , stage1Path
+                , bootstrapOutputPath
+                , primaryOutputPath
+                ]
+                ""
+            pure $
+              case exitCode of
+                ExitSuccess ->
+                  Right ()
+                ExitFailure _ ->
                   Left $
                     singleDiagnostic
                       "E_PRIMARY_COMPILER_RUNTIME"
-                      "The primary Clasp compiler runtime check did not reach a reproducible stage2 result."
-                      [T.pack stdoutText]
-            ExitFailure _ ->
-              Left $
-                singleDiagnostic
-                  "E_PRIMARY_COMPILER_RUNTIME"
-                  "The primary Clasp compiler runtime check failed."
-                  [T.pack stderrText]
-  where
-    expectedChecks =
-      [ "\"stage2MatchesStage1Snapshot\":true"
-      , "\"stage2CompilerMatchesStage1Snapshot\":true"
-      , "\"stage2CheckMatchesStage1\":true"
-      , "\"stage2ExplainMatchesStage1\":true"
-      , "\"stage2OutputMatchesStage1\":true"
-      ]
+                      "The primary Clasp compiler runtime check failed."
+                      [T.pack stderrText]
+
+hostedToolBootstrapOutput :: HostedToolCommand -> FilePath -> IO (Either DiagnosticBundle Text)
+hostedToolBootstrapOutput command entryPath =
+  case command of
+    HostedToolCheck ->
+      fmap renderCoreModule <$> checkEntryBootstrap entryPath
+    HostedToolCompile ->
+      compileEntryBootstrap entryPath
+    HostedToolExplain ->
+      explainEntryBootstrap entryPath
+
+hostedToolOutputExtension :: HostedToolCommand -> String
+hostedToolOutputExtension command =
+  case command of
+    HostedToolCheck ->
+      "check.txt"
+    HostedToolCompile ->
+      "mjs"
+    HostedToolExplain ->
+      "txt"
+
+renderHostedToolCommand :: HostedToolCommand -> String
+renderHostedToolCommand command =
+  case command of
+    HostedToolCheck ->
+      "check"
+    HostedToolCompile ->
+      "compile"
+    HostedToolExplain ->
+      "explain"
+
+explainEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
+explainEntryBootstrap entryPath = do
+  checkedModule <- checkEntryBootstrap entryPath
+  pure (renderCoreModule <$> checkedModule)
+
+hostedCompilerToolRunnerPath :: FilePath
+hostedCompilerToolRunnerPath =
+  "compiler" </> "hosted" </> "run-tool.mjs"
 
 hostedCompilerEntryPath :: FilePath
 hostedCompilerEntryPath =
   normalise ("compiler" </> "hosted" </> "Main.clasp")
-
-hostedCompilerDemoPath :: FilePath
-hostedCompilerDemoPath =
-  "compiler" </> "hosted" </> "demo.mjs"
 
 compileEntryBootstrap :: FilePath -> IO (Either DiagnosticBundle Text)
 compileEntryBootstrap entryPath = do
