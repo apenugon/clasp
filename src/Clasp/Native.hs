@@ -4,6 +4,7 @@ module Clasp.Native
   ( NativeAbi (..)
   , NativeAllocationModel (..)
   , NativeAllocationRegion (..)
+  , NativeBinaryCodec (..)
   , NativeBuiltinLayout (..)
   , NativeCompareOp (..)
   , NativeConstructorLayout (..)
@@ -34,6 +35,7 @@ module Clasp.Native
   , NativeRuntime (..)
   , NativeRuntimeBinding (..)
   , NativeRootDiscoveryRule (..)
+  , NativeServiceTransport (..)
   , NativeSlotLayout (..)
   , NativeLifetimeInvariant (..)
   , NativeVariantLayout (..)
@@ -207,7 +209,9 @@ data NativeRuntime = NativeRuntime
   , nativeRuntimeMemorySymbols :: [Text]
   , nativeRuntimeBindings :: [NativeRuntimeBinding]
   , nativeRuntimeJsonCodecs :: [NativeJsonCodec]
+  , nativeRuntimeBinaryCodecs :: [NativeBinaryCodec]
   , nativeRuntimeBoundaryContracts :: [NativeBoundaryContract]
+  , nativeRuntimeServiceTransports :: [NativeServiceTransport]
   }
   deriving (Eq, Show)
 
@@ -215,6 +219,14 @@ data NativeJsonCodec = NativeJsonCodec
   { nativeJsonCodecType :: Type
   , nativeJsonCodecEncodeSymbol :: Text
   , nativeJsonCodecDecodeSymbol :: Text
+  }
+  deriving (Eq, Show)
+
+data NativeBinaryCodec = NativeBinaryCodec
+  { nativeBinaryCodecType :: Type
+  , nativeBinaryCodecEncodeSymbol :: Text
+  , nativeBinaryCodecDecodeSymbol :: Text
+  , nativeBinaryCodecFraming :: Text
   }
   deriving (Eq, Show)
 
@@ -286,6 +298,21 @@ data NativeRuntimeBinding = NativeRuntimeBinding
   , nativeRuntimeBindingRuntimeName :: Text
   , nativeRuntimeBindingSymbol :: Text
   , nativeRuntimeBindingType :: Type
+  }
+  deriving (Eq, Show)
+
+data NativeServiceTransport = NativeServiceTransport
+  { nativeServiceTransportKind :: Text
+  , nativeServiceTransportName :: Text
+  , nativeServiceTransportIdentity :: Text
+  , nativeServiceTransportMode :: Text
+  , nativeServiceTransportRequestType :: Text
+  , nativeServiceTransportRequestEncodeSymbol :: Text
+  , nativeServiceTransportRequestDecodeSymbol :: Text
+  , nativeServiceTransportResponseType :: Text
+  , nativeServiceTransportResponseEncodeSymbol :: Text
+  , nativeServiceTransportResponseDecodeSymbol :: Text
+  , nativeServiceTransportFraming :: Text
   }
   deriving (Eq, Show)
 
@@ -456,7 +483,9 @@ renderNativeRuntime runtime =
   , "memory_symbols [" <> commaSeparated (nativeRuntimeMemorySymbols runtime) <> "]"
   , "bindings [" <> commaSeparated (fmap renderRuntimeBinding (nativeRuntimeBindings runtime)) <> "]"
   , "json_codecs [" <> commaSeparated (fmap renderJsonCodec (nativeRuntimeJsonCodecs runtime)) <> "]"
+  , "binary_codecs [" <> commaSeparated (fmap renderBinaryCodec (nativeRuntimeBinaryCodecs runtime)) <> "]"
   , "boundaries [" <> commaSeparated (fmap renderBoundaryContract (nativeRuntimeBoundaryContracts runtime)) <> "]"
+  , "service_transports [" <> commaSeparated (fmap renderServiceTransport (nativeRuntimeServiceTransports runtime)) <> "]"
   ]
 
 renderRuntimeBinding :: NativeRuntimeBinding -> Text
@@ -477,6 +506,17 @@ renderJsonCodec codec =
     <> nativeJsonCodecEncodeSymbol codec
     <> ", decode="
     <> nativeJsonCodecDecodeSymbol codec
+    <> "}"
+
+renderBinaryCodec :: NativeBinaryCodec -> Text
+renderBinaryCodec codec =
+  renderType (nativeBinaryCodecType codec)
+    <> "{encode="
+    <> nativeBinaryCodecEncodeSymbol codec
+    <> ", decode="
+    <> nativeBinaryCodecDecodeSymbol codec
+    <> ", framing="
+    <> nativeBinaryCodecFraming codec
     <> "}"
 
 renderBoundaryContract :: NativeBoundaryContract -> Text
@@ -562,6 +602,31 @@ renderBoundaryContract contract =
         <> ", restore="
         <> nativeWorkflowBoundaryRestoreSymbol workflowBoundary
         <> "}"
+
+renderServiceTransport :: NativeServiceTransport -> Text
+renderServiceTransport transport =
+  nativeServiceTransportKind transport
+    <> " "
+    <> nativeServiceTransportName transport
+    <> "{id="
+    <> nativeServiceTransportIdentity transport
+    <> ", mode="
+    <> nativeServiceTransportMode transport
+    <> ", request="
+    <> nativeServiceTransportRequestType transport
+    <> ", request_encode="
+    <> nativeServiceTransportRequestEncodeSymbol transport
+    <> ", request_decode="
+    <> nativeServiceTransportRequestDecodeSymbol transport
+    <> ", response="
+    <> nativeServiceTransportResponseType transport
+    <> ", response_encode="
+    <> nativeServiceTransportResponseEncodeSymbol transport
+    <> ", response_decode="
+    <> nativeServiceTransportResponseDecodeSymbol transport
+    <> ", framing="
+    <> nativeServiceTransportFraming transport
+    <> "}"
 
 renderFieldLayout :: NativeFieldLayout -> Text
 renderFieldLayout fieldLayout =
@@ -817,20 +882,30 @@ buildNativeRuntime modl =
         , "clasp_rt_retain"
         , "clasp_rt_release"
         , "clasp_rt_string_from_utf8"
+        , "clasp_rt_bytes_new"
         , "clasp_rt_string_list_new"
         , "clasp_rt_result_ok_string"
         , "clasp_rt_result_err_string"
         , "clasp_rt_json_from_string"
         , "clasp_rt_json_to_string"
+        , "clasp_rt_binary_from_json"
+        , "clasp_rt_json_from_binary"
+        , "clasp_rt_transport_frame"
+        , "clasp_rt_transport_unframe"
         ]
     , nativeRuntimeBindings = fmap lowerForeignDeclToRuntimeBinding (lowerModuleForeignDecls modl)
     , nativeRuntimeJsonCodecs = fmap nativeJsonCodecForType (lowerModuleCodecTypes modl)
+    , nativeRuntimeBinaryCodecs = fmap nativeBinaryCodecForType (lowerModuleCodecTypes modl)
     , nativeRuntimeBoundaryContracts =
         fmap (NativeRouteContract . lowerRouteToBoundary) (lowerModuleRoutes modl)
           <> fmap (NativeHookContract . hookDeclToBoundary) (lowerModuleHookDecls modl)
           <> fmap (NativeToolServerContract . toolServerDeclToBoundary) (lowerModuleToolServerDecls modl)
           <> fmap (NativeToolContract . toolDeclToBoundary) (lowerModuleToolDecls modl)
           <> fmap (NativeWorkflowContract . workflowDeclToBoundary) (lowerModuleWorkflowDecls modl)
+    , nativeRuntimeServiceTransports =
+        fmap lowerRouteToServiceTransport (filter isBinaryServiceRoute (lowerModuleRoutes modl))
+          <> fmap hookDeclToServiceTransport (lowerModuleHookDecls modl)
+          <> fmap toolDeclToServiceTransport (lowerModuleToolDecls modl)
     }
 
 lowerForeignDeclToRuntimeBinding :: ForeignDecl -> NativeRuntimeBinding
@@ -852,6 +927,15 @@ nativeJsonCodecForType typ =
     { nativeJsonCodecType = typ
     , nativeJsonCodecEncodeSymbol = "$encode_" <> nativeCodecSuffix typ
     , nativeJsonCodecDecodeSymbol = "$decode_" <> nativeCodecSuffix typ
+    }
+
+nativeBinaryCodecForType :: Type -> NativeBinaryCodec
+nativeBinaryCodecForType typ =
+  NativeBinaryCodec
+    { nativeBinaryCodecType = typ
+    , nativeBinaryCodecEncodeSymbol = "$encode_binary_" <> nativeCodecSuffix typ
+    , nativeBinaryCodecDecodeSymbol = "$decode_binary_" <> nativeCodecSuffix typ
+    , nativeBinaryCodecFraming = "length_prefixed"
     }
 
 lowerRouteToBoundary :: LowerRoute -> NativeRouteBoundary
@@ -914,6 +998,54 @@ workflowDeclToBoundary workflowDecl =
     , nativeWorkflowBoundaryRestoreSymbol = "$decode_" <> nativeCodecSuffix (workflowDeclStateType workflowDecl)
     }
 
+lowerRouteToServiceTransport :: LowerRoute -> NativeServiceTransport
+lowerRouteToServiceTransport route =
+  NativeServiceTransport
+    { nativeServiceTransportKind = "route"
+    , nativeServiceTransportName = lowerRouteName route
+    , nativeServiceTransportIdentity = lowerRouteIdentity route
+    , nativeServiceTransportMode = "request_response"
+    , nativeServiceTransportRequestType = lowerRouteRequestTypeName route
+    , nativeServiceTransportRequestEncodeSymbol = "$encode_binary_" <> lowerRouteRequestTypeName route
+    , nativeServiceTransportRequestDecodeSymbol = "$decode_binary_" <> lowerRouteRequestTypeName route
+    , nativeServiceTransportResponseType = lowerRouteResponseTypeName route
+    , nativeServiceTransportResponseEncodeSymbol = "$encode_binary_" <> lowerRouteResponseTypeName route
+    , nativeServiceTransportResponseDecodeSymbol = "$decode_binary_" <> lowerRouteResponseTypeName route
+    , nativeServiceTransportFraming = "length_prefixed"
+    }
+
+hookDeclToServiceTransport :: HookDecl -> NativeServiceTransport
+hookDeclToServiceTransport hookDecl =
+  NativeServiceTransport
+    { nativeServiceTransportKind = "hook"
+    , nativeServiceTransportName = hookDeclName hookDecl
+    , nativeServiceTransportIdentity = hookDeclIdentity hookDecl
+    , nativeServiceTransportMode = "event"
+    , nativeServiceTransportRequestType = hookDeclRequestType hookDecl
+    , nativeServiceTransportRequestEncodeSymbol = "$encode_binary_" <> hookDeclRequestType hookDecl
+    , nativeServiceTransportRequestDecodeSymbol = "$decode_binary_" <> hookDeclRequestType hookDecl
+    , nativeServiceTransportResponseType = hookDeclResponseType hookDecl
+    , nativeServiceTransportResponseEncodeSymbol = "$encode_binary_" <> hookDeclResponseType hookDecl
+    , nativeServiceTransportResponseDecodeSymbol = "$decode_binary_" <> hookDeclResponseType hookDecl
+    , nativeServiceTransportFraming = "length_prefixed"
+    }
+
+toolDeclToServiceTransport :: ToolDecl -> NativeServiceTransport
+toolDeclToServiceTransport toolDecl =
+  NativeServiceTransport
+    { nativeServiceTransportKind = "tool"
+    , nativeServiceTransportName = toolDeclName toolDecl
+    , nativeServiceTransportIdentity = toolDeclIdentity toolDecl
+    , nativeServiceTransportMode = "rpc"
+    , nativeServiceTransportRequestType = toolDeclRequestType toolDecl
+    , nativeServiceTransportRequestEncodeSymbol = "$encode_binary_" <> toolDeclRequestType toolDecl
+    , nativeServiceTransportRequestDecodeSymbol = "$decode_binary_" <> toolDeclRequestType toolDecl
+    , nativeServiceTransportResponseType = toolDeclResponseType toolDecl
+    , nativeServiceTransportResponseEncodeSymbol = "$encode_binary_" <> toolDeclResponseType toolDecl
+    , nativeServiceTransportResponseDecodeSymbol = "$decode_binary_" <> toolDeclResponseType toolDecl
+    , nativeServiceTransportFraming = "length_prefixed"
+    }
+
 normalizeRuntimeName :: Text -> Text
 normalizeRuntimeName =
   T.dropWhileEnd (== '_')
@@ -957,6 +1089,10 @@ routeBoundaryKind responseType
   | responseType == "Page" = "page"
   | responseType == "Redirect" = "redirect"
   | otherwise = "json"
+
+isBinaryServiceRoute :: LowerRoute -> Bool
+isBinaryServiceRoute route =
+  routeBoundaryKind (lowerRouteResponseTypeName route) == "json"
 
 renderRouteMethodText :: Show a => a -> Text
 renderRouteMethodText method =

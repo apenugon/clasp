@@ -104,6 +104,7 @@ import Clasp.Native
   ( NativeAbi (..)
   , NativeAllocationModel (..)
   , NativeAllocationRegion (..)
+  , NativeBinaryCodec (..)
   , NativeBuiltinLayout (..)
   , NativeCompareOp (..)
   , NativeConstructorLayout (..)
@@ -132,6 +133,7 @@ import Clasp.Native
   , NativeRuntime (..)
   , NativeRuntimeBinding (..)
   , NativeRootDiscoveryRule (..)
+  , NativeServiceTransport (..)
   , NativeSlotLayout (..)
   , NativeToolBoundary (..)
   , NativeToolServerBoundary (..)
@@ -2940,8 +2942,21 @@ nativeTests =
               , NativeJsonCodec (TNamed "WorkerBoot") "$encode_WorkerBoot" "$decode_WorkerBoot"
               ]
               (nativeRuntimeJsonCodecs runtime)
+            assertEqual
+              "binary codecs"
+              [ NativeBinaryCodec (TNamed "Counter") "$encode_binary_Counter" "$decode_binary_Counter" "length_prefixed"
+              , NativeBinaryCodec (TNamed "HookAck") "$encode_binary_HookAck" "$decode_binary_HookAck" "length_prefixed"
+              , NativeBinaryCodec (TNamed "LeadRequest") "$encode_binary_LeadRequest" "$decode_binary_LeadRequest" "length_prefixed"
+              , NativeBinaryCodec (TNamed "LeadSummary") "$encode_binary_LeadSummary" "$decode_binary_LeadSummary" "length_prefixed"
+              , NativeBinaryCodec (TNamed "SearchRequest") "$encode_binary_SearchRequest" "$decode_binary_SearchRequest" "length_prefixed"
+              , NativeBinaryCodec (TNamed "SearchResponse") "$encode_binary_SearchResponse" "$decode_binary_SearchResponse" "length_prefixed"
+              , NativeBinaryCodec (TNamed "WorkerBoot") "$encode_binary_WorkerBoot" "$decode_binary_WorkerBoot" "length_prefixed"
+              ]
+              (nativeRuntimeBinaryCodecs runtime)
             assertBool "expected json runtime symbol" ("clasp_rt_json_from_string" `elem` nativeRuntimeMemorySymbols runtime)
             assertBool "expected json boundary symbol" ("clasp_rt_json_to_string" `elem` nativeRuntimeMemorySymbols runtime)
+            assertBool "expected binary codec runtime symbol" ("clasp_rt_binary_from_json" `elem` nativeRuntimeMemorySymbols runtime)
+            assertBool "expected transport framing runtime symbol" ("clasp_rt_transport_frame" `elem` nativeRuntimeMemorySymbols runtime)
             assertEqual
               "boundary contracts"
               [ NativeRouteContract (NativeRouteBoundary "summarizeLeadRoute" "route:summarizeLeadRoute" "POST" "/lead/summary" "LeadRequest" "LeadSummary" "json" "$encode_LeadSummary" "$decode_LeadRequest")
@@ -2951,6 +2966,13 @@ nativeTests =
               , NativeWorkflowContract (NativeWorkflowBoundary "CounterFlow" "workflow:CounterFlow" (TNamed "Counter") "$encode_Counter" "$decode_Counter")
               ]
               (nativeRuntimeBoundaryContracts runtime)
+            assertEqual
+              "service transports"
+              [ NativeServiceTransport "route" "summarizeLeadRoute" "route:summarizeLeadRoute" "request_response" "LeadRequest" "$encode_binary_LeadRequest" "$decode_binary_LeadRequest" "LeadSummary" "$encode_binary_LeadSummary" "$decode_binary_LeadSummary" "length_prefixed"
+              , NativeServiceTransport "hook" "workerStart" "hook:workerStart" "event" "WorkerBoot" "$encode_binary_WorkerBoot" "$decode_binary_WorkerBoot" "HookAck" "$encode_binary_HookAck" "$decode_binary_HookAck" "length_prefixed"
+              , NativeServiceTransport "tool" "searchRepo" "tool:searchRepo" "rpc" "SearchRequest" "$encode_binary_SearchRequest" "$decode_binary_SearchRequest" "SearchResponse" "$encode_binary_SearchResponse" "$decode_binary_SearchResponse" "length_prefixed"
+              ]
+              (nativeRuntimeServiceTransports runtime)
     , testCase "claspc native emits json codec and runtime-boundary metadata end to end" $
         withProjectFiles "native-boundaries" [("Main.clasp", nativeBoundarySource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2963,10 +2985,12 @@ nativeTests =
             ExitSuccess -> do
               nativeIr <- TIO.readFile outputPath
               assertBool "expected json codecs section" ("json_codecs [Counter{encode=$encode_Counter, decode=$decode_Counter}" `T.isInfixOf` nativeIr)
+              assertBool "expected binary codecs section" ("binary_codecs [Counter{encode=$encode_binary_Counter, decode=$decode_binary_Counter, framing=length_prefixed}" `T.isInfixOf` nativeIr)
               assertBool "expected route boundary contract" ("route summarizeLeadRoute{id=route:summarizeLeadRoute, method=POST, path=\"/lead/summary\", request=LeadRequest, response=LeadSummary, response_kind=json, encode=$encode_LeadSummary, decode=$decode_LeadRequest}" `T.isInfixOf` nativeIr)
               assertBool "expected hook boundary contract" ("hook workerStart{id=hook:workerStart, event=\"worker.start\", request=WorkerBoot, response=HookAck, handler=bootstrapWorker, encode=$encode_HookAck, decode=$decode_WorkerBoot}" `T.isInfixOf` nativeIr)
               assertBool "expected tool boundary contract" ("tool searchRepo{id=tool:searchRepo, server=RepoTools, operation=\"search_repo\", request=SearchRequest, response=SearchResponse, encode=$encode_SearchResponse, decode=$decode_SearchRequest}" `T.isInfixOf` nativeIr)
               assertBool "expected workflow boundary contract" ("workflow CounterFlow{id=workflow:CounterFlow, state=Counter, checkpoint=$encode_Counter, restore=$decode_Counter}" `T.isInfixOf` nativeIr)
+              assertBool "expected service transport contract" ("service_transports [route summarizeLeadRoute{id=route:summarizeLeadRoute, mode=request_response, request=LeadRequest, request_encode=$encode_binary_LeadRequest, request_decode=$decode_binary_LeadRequest, response=LeadSummary, response_encode=$encode_binary_LeadSummary, response_decode=$decode_binary_LeadSummary, framing=length_prefixed}" `T.isInfixOf` nativeIr)
     , testCase "claspc native emits a native IR artifact for compiler workloads end to end in bootstrap recovery mode" $ do
         let outputPath = "dist/compiler-parser.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
@@ -2996,9 +3020,14 @@ nativeTests =
         assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
         assertBool "expected runtime json helper export" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value);" `T.isInfixOf` header)
+        assertBool "expected runtime bytes helper export" ("ClaspRtBytes *clasp_rt_bytes_new(size_t length);" `T.isInfixOf` header)
+        assertBool "expected runtime binary codec export" ("ClaspRtBytes *clasp_rt_binary_from_json(ClaspRtJson *value);" `T.isInfixOf` header)
+        assertBool "expected runtime transport export" ("ClaspRtBytes *clasp_rt_transport_frame(ClaspRtBytes *payload);" `T.isInfixOf` header)
         assertBool "expected runtime stdlib text split export" ("ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);" `T.isInfixOf` header)
         assertBool "expected runtime static root registration" ("void clasp_rt_register_static_root(ClaspRtRuntime *runtime, ClaspRtHeader **slot)" `T.isInfixOf` source)
         assertBool "expected runtime json helper implementation" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value)" `T.isInfixOf` source)
+        assertBool "expected runtime binary codec implementation" ("ClaspRtBytes *clasp_rt_binary_from_json(ClaspRtJson *value)" `T.isInfixOf` source)
+        assertBool "expected runtime transport unframe implementation" ("ClaspRtBytes *clasp_rt_transport_unframe(ClaspRtBytes *frame)" `T.isInfixOf` source)
         assertBool "expected runtime object destroy path" ("static void clasp_rt_destroy_object" `T.isInfixOf` source)
         assertBool "expected runtime file read helper" ("ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path)" `T.isInfixOf` source)
     ]

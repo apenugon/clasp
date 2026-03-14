@@ -10,6 +10,7 @@ typedef struct ClaspRtObjectLayout ClaspRtObjectLayout;
 typedef struct ClaspRtRuntime ClaspRtRuntime;
 typedef struct ClaspRtString ClaspRtString;
 typedef ClaspRtString ClaspRtJson;
+typedef struct ClaspRtBytes ClaspRtBytes;
 typedef struct ClaspRtStringList ClaspRtStringList;
 typedef struct ClaspRtResultString ClaspRtResultString;
 typedef struct ClaspRtObject ClaspRtObject;
@@ -38,6 +39,12 @@ struct ClaspRtString {
   char *bytes;
 };
 
+struct ClaspRtBytes {
+  ClaspRtHeader header;
+  size_t byte_length;
+  uint8_t *bytes;
+};
+
 struct ClaspRtStringList {
   ClaspRtHeader header;
   size_t length;
@@ -63,11 +70,16 @@ void clasp_rt_retain(ClaspRtHeader *header);
 void clasp_rt_release(ClaspRtRuntime *runtime, ClaspRtHeader *header);
 
 ClaspRtString *clasp_rt_string_from_utf8(const char *value);
+ClaspRtBytes *clasp_rt_bytes_new(size_t length);
 ClaspRtStringList *clasp_rt_string_list_new(size_t length);
 ClaspRtResultString *clasp_rt_result_ok_string(ClaspRtString *value);
 ClaspRtResultString *clasp_rt_result_err_string(ClaspRtString *value);
 ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value);
 ClaspRtString *clasp_rt_json_to_string(ClaspRtJson *value);
+ClaspRtBytes *clasp_rt_binary_from_json(ClaspRtJson *value);
+ClaspRtJson *clasp_rt_json_from_binary(ClaspRtBytes *value);
+ClaspRtBytes *clasp_rt_transport_frame(ClaspRtBytes *payload);
+ClaspRtBytes *clasp_rt_transport_unframe(ClaspRtBytes *frame);
 
 ClaspRtString *clasp_rt_text_concat(ClaspRtStringList *parts);
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);
