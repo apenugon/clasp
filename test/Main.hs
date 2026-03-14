@@ -5225,7 +5225,7 @@ compileTests =
             runtimeOutput <- runNodeScript (delegatedSecretHandoffRuntimeScript absoluteCompiledPath)
             assertEqual
               "expected delegated handoff runtime output"
-              "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
+              "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"repeatDelegationIdsDistinct\":true,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
               runtimeOutput
     , testCase "prompt and tool input surfaces resolve secrets from declared handles" $ do
         result <- compileEntry ("examples" </> "prompt-functions" </> "Main.clasp")
@@ -10052,6 +10052,8 @@ delegatedSecretHandoffRuntimeScript compiledPath =
     , "const toolSecrets = tool.secretConsumer();"
     , "const workflowSecrets = workflow.secretConsumer(agentBoundary);"
     , "const agentToTool = agentSecrets.handoff(toolSecrets, { reason: 'invoke-tool' });"
+    , "const repeatDelegationA = agentSecrets.delegate(agentSecrets.secretHandles[0], { consumer: toolSecrets, reason: 'repeat-a' });"
+    , "const repeatDelegationB = agentSecrets.delegate(agentSecrets.secretHandles[0], { consumer: toolSecrets, reason: 'repeat-b' });"
     , "const toolResolved = toolSecrets.resolve(agentToTool.secretHandles[0], provider);"
     , "let workflowRejected = null;"
     , "try {"
@@ -10072,6 +10074,7 @@ delegatedSecretHandoffRuntimeScript compiledPath =
     , "  agentDelegated: agentToTool.secretHandles[0].kind === 'clasp-secret-delegation',"
     , "  agentHasRawValue: Object.prototype.hasOwnProperty.call(agentToTool.secretHandles[0], 'value'),"
     , "  agentRawValueLeaked: JSON.stringify(agentToTool).includes('sk-agent-live'),"
+    , "  repeatDelegationIdsDistinct: repeatDelegationA.id !== repeatDelegationB.id,"
     , "  toolResolvedName: toolResolved.name,"
     , "  toolResolvedValue: toolResolved.reveal({ reason: 'tool-run' }),"
     , "  workflowRejected,"
