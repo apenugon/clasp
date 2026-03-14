@@ -1154,8 +1154,25 @@ checkerTests =
         case checkSource "lists" listLiteralSource of
           Left err ->
             assertFailure ("expected list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right _ ->
-            pure ()
+          Right checked -> do
+            case find ((== "roster") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList TStr) [CString _ "Ada", CString _ "Grace"] ->
+                    assertEqual "roster type" (TList TStr) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked roster declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected roster declaration"
+            case find ((== "emptyRoster") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList TStr) [] ->
+                    assertEqual "empty roster type" (TList TStr) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked emptyRoster declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected emptyRoster declaration"
     , testCase "typechecks local let expressions" $
         case checkSource "let" letExpressionSource of
           Left err ->
@@ -1544,6 +1561,16 @@ checkerTests =
             assertEqual "primary line" (Just 3) (positionLine . sourceSpanStart <$> diagnosticPrimarySpan err)
           Right _ ->
             assertFailure "expected ambiguous inference failure"
+    , testCase "reports ambiguous empty list inference with an annotation hint" $
+        case checkSource "bad" ambiguousEmptyListSource of
+          Left bundle -> do
+            err <- expectFirstDiagnostic bundle
+            assertEqual "code" "E_CANNOT_INFER" (diagnosticCode err)
+            assertBool
+              "expected empty list annotation hint"
+              (any ("Empty list literals need a surrounding list type" `T.isInfixOf`) (diagnosticFixHints err))
+          Right _ ->
+            assertFailure "expected ambiguous empty list failure"
     , testCase "reports type mismatches with the argument span" $
         case checkSource "bad" mismatchSource of
           Left bundle -> do
@@ -2398,12 +2425,17 @@ lowerTests =
         case lowerChecked "lists" listLiteralSource of
           Left err ->
             assertFailure ("expected list lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right lowered ->
+          Right lowered -> do
             case findLowerDecl "roster" (lowerModuleDecls lowered) of
               Just (LValueDecl _ (LList [LString "Ada", LString "Grace"])) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered roster declaration: " <> show other)
+            case findLowerDecl "emptyRoster" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LList [])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered emptyRoster declaration: " <> show other)
     , testCase "lowering preserves list json codec boundaries" $
         case lowerChecked "list-json" listJsonBoundarySource of
           Left err ->
@@ -3603,8 +3635,9 @@ compileTests =
         case compileSource "lists" listLiteralSource of
           Left err ->
             assertFailure ("expected list compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted ->
+          Right emitted -> do
             assertBool "expected array literal" ("[\"Ada\", \"Grace\"]" `T.isInfixOf` emitted)
+            assertBool "expected empty array literal" ("const emptyRoster = [];" `T.isInfixOf` emitted)
     , testCase "compile emits list json codecs for explicit encode and decode boundaries" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -6115,6 +6148,14 @@ ambiguousFunctionSource =
     [ "module Main"
     , ""
     , "identity value = value"
+    ]
+
+ambiguousEmptyListSource :: Text
+ambiguousEmptyListSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "empty = []"
     ]
 
 inferredFunctionSource :: Text

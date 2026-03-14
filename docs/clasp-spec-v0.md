@@ -314,7 +314,7 @@ record UserDirectory = {
 type BatchResult = Batch [UserDirectory]
 ```
 
-List literals use the same brackets and must stay homogeneous:
+List literals use the same brackets and must stay homogeneous. Empty lists need surrounding type information from an annotation or another checked context:
 
 ```clasp
 module Main
@@ -444,7 +444,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - A nullary constructor becomes an exported tagged JavaScript object.
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
-- A list literal becomes a JavaScript array, and every element in the literal must have the same type.
+- A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
 - Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.

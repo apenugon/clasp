@@ -52,7 +52,8 @@ import Clasp.Core
   , coreExprType
   )
 import Clasp.Diagnostic
-  ( DiagnosticBundle
+  ( Diagnostic (..)
+  , DiagnosticBundle
   , DiagnosticRelated
   , diagnostic
   , diagnosticBundle
@@ -4513,14 +4514,64 @@ freezeInferTypeForDecl :: Decl -> InferState -> InferType -> Either DiagnosticBu
 freezeInferTypeForDecl decl inferState inferType =
   case inferTypeToType inferState inferType of
     Left unresolvedVars ->
-      Left $
-        singleDiagnosticAt
-          "E_CANNOT_INFER"
-          ("Could not infer the type of `" <> declName decl <> "`.")
-          (declNameSpan decl)
-          ["Remaining unconstrained type variables: " <> T.intercalate ", " (fmap renderTypeVar unresolvedVars) <> "."]
+      let baseDiagnostic =
+            diagnostic
+              "E_CANNOT_INFER"
+              ("Could not infer the type of `" <> declName decl <> "`.")
+              (Just (declNameSpan decl))
+              ["Remaining unconstrained type variables: " <> T.intercalate ", " (fmap renderTypeVar unresolvedVars) <> "."]
+              []
+       in Left $
+            diagnosticBundle
+              [ baseDiagnostic
+                  { diagnosticFixHints = diagnosticFixHints baseDiagnostic <> ambiguousListInferenceHint inferState inferType
+                  }
+              ]
     Right typ ->
       Right typ
+
+ambiguousListInferenceHint :: InferState -> InferType -> [Text]
+ambiguousListInferenceHint inferState inferType
+  | hasUnresolvedListItem (resolveInferType (inferSubstitution inferState) inferType) =
+      ["Empty list literals need a surrounding list type, for example `names : [Str]` with `names = []`."]
+  | otherwise =
+      []
+
+hasUnresolvedListItem :: InferType -> Bool
+hasUnresolvedListItem inferType =
+  case inferType of
+    IInt ->
+      False
+    IStr ->
+      False
+    IBool ->
+      False
+    IList itemType ->
+      containsTypeVar itemType || hasUnresolvedListItem itemType
+    INamed _ ->
+      False
+    IFunction args result ->
+      any hasUnresolvedListItem (result : args)
+    IVar _ ->
+      False
+
+containsTypeVar :: InferType -> Bool
+containsTypeVar inferType =
+  case inferType of
+    IInt ->
+      False
+    IStr ->
+      False
+    IBool ->
+      False
+    IList itemType ->
+      containsTypeVar itemType
+    INamed _ ->
+      False
+    IFunction args result ->
+      any containsTypeVar (result : args)
+    IVar _ ->
+      True
 
 inferTypeToType :: InferState -> InferType -> Either [Int] Type
 inferTypeToType inferState inferType =
