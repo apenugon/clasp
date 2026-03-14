@@ -46,6 +46,7 @@ import Clasp.Compiler
   , checkSource
   , compileEntry
   , compileSource
+  , explainEntry
   , explainSource
   , formatSource
   , nativeEntry
@@ -1869,6 +1870,26 @@ explainTests =
               assertBool "expected typed let in json payload" ("let message : Str =" `T.isInfixOf` explanation)
             _ ->
               assertFailure "expected explanation string in explain json"
+    , testCase "explain preserves entry-module imports in expanded rendering" $
+        withProjectFiles "explain-import-header" compactHeaderImportSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          result <- explainEntry inputPath
+          case result of
+            Left err ->
+              assertFailure ("expected explain rendering with imports to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right explanation ->
+              assertBool "expected expanded header to retain imports" ("module Main with Shared.User" `T.isInfixOf` explanation)
+    , testCase "claspc explain prints imported module headers in pretty mode" $
+        withProjectFiles "explain-cli-import-header" compactHeaderImportSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--compiler=bootstrap"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("claspc explain failed:\n" <> stderrText)
+          assertBool "expected pretty explain output to retain import header" ("module Main with Shared.User" `isInfixOf` stdoutText)
+          assertBool "expected pretty explain output to report success" ("Explained " `isInfixOf` stderrText)
     , testCase "claspc explain prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "compiler/hosted/Main.clasp", "--json"]
         case exitCode of

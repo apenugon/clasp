@@ -897,6 +897,7 @@ checkModule modl = do
   pure
     CoreModule
       { coreModuleName = moduleName modl
+      , coreModuleImports = moduleImports modl
       , coreModuleTypeDecls = allTypeDecls
       , coreModuleRecordDecls = builtinRecordDecls <> recordDecls
       , coreModuleDomainObjectDecls = fmap CoreDomainObjectDecl domainObjectDecls

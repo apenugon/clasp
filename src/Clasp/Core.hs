@@ -51,6 +51,7 @@ import Clasp.Syntax
   , GuideEntryDecl (..)
   , HookDecl (..)
   , HookTriggerDecl (..)
+  , ImportDecl (..)
   , MetricDecl (..)
   , MergeGateDecl (..)
   , MergeGateVerifierRef (..)
@@ -90,6 +91,7 @@ import Clasp.Diagnostic
 
 data CoreModule = CoreModule
   { coreModuleName :: ModuleName
+  , coreModuleImports :: [ImportDecl]
   , coreModuleTypeDecls :: [TypeDecl]
   , coreModuleRecordDecls :: [RecordDecl]
   , coreModuleDomainObjectDecls :: [CoreDomainObjectDecl]
@@ -309,7 +311,7 @@ renderCoreModule :: CoreModule -> Text
 renderCoreModule modl =
   T.intercalate
     "\n\n"
-    ([ "module " <> renderModuleName (coreModuleName modl)
+    ([ renderCoreModuleHeader modl
      ]
        <> fmap renderSection (filter (not . null) topLevelSections)
     )
@@ -340,6 +342,15 @@ renderCoreModule modl =
       , fmap renderRouteDecl (coreModuleRouteDecls modl)
       , fmap renderCoreDecl (coreModuleDecls modl)
       ]
+
+renderCoreModuleHeader :: CoreModule -> Text
+renderCoreModuleHeader modl =
+  "module "
+    <> renderModuleName (coreModuleName modl)
+    <> case coreModuleImports modl of
+      [] -> ""
+      imports ->
+        " with " <> T.intercalate ", " (fmap (renderModuleName . importDeclModule) imports)
 
 renderModuleName :: ModuleName -> Text
 renderModuleName = T.intercalate "." . splitModuleName

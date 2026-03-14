@@ -186,7 +186,7 @@ combineModules entryModule state =
         ]
    in Module
         { moduleName = moduleName entryModule
-        , moduleImports = []
+        , moduleImports = moduleImports entryModule
         , moduleTypeDecls = concatMap moduleTypeDecls (importedModules <> [entryModule])
         , moduleRecordDecls = concatMap moduleRecordDecls (importedModules <> [entryModule])
         , moduleDomainObjectDecls = concatMap moduleDomainObjectDecls (importedModules <> [entryModule])

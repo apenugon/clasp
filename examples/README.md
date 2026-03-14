@@ -60,6 +60,12 @@ Emit AIR in explicit bootstrap recovery mode:
 cabal run claspc -- air examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
+Render the expanded human-readable explain output in explicit bootstrap recovery mode:
+
+```sh
+cabal run claspc -- explain examples/support-console/Main.clasp --compiler=bootstrap
+```
+
 Verify the `npm`/`TypeScript` interop example:
 
 ```sh
