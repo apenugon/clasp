@@ -626,6 +626,16 @@ export function createSqliteRuntime(compiledModule, options = {}) {
         readOnly: true
       });
     },
+    queryOne(connectionOrId, sql, ...parameters) {
+      return executeSqliteQuery("queryOne", connectionOrId, sql, parameters);
+    },
+    queryAll(connectionOrId, sql, ...parameters) {
+      return executeSqliteQuery("queryAll", connectionOrId, sql, parameters);
+    },
+    call(name, ...args) {
+      const binding = this.binding(name);
+      return invokeSqliteBinding(runtime, binding, args, runtimeOptions);
+    },
     connection(connectionOrId) {
       return resolveSqliteConnection(connectionOrId).descriptor;
     },
@@ -644,10 +654,15 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       return true;
     },
     install() {
-      const adaptedBindings =
-        compiledModule.__claspAdaptHostBindings(this.implementations);
-      installRuntime(adaptedBindings);
-      return adaptedBindings;
+      const runtimeBindings = {};
+      for (const binding of contract.bindings) {
+        if (!(binding.runtimeName in runtimeBindings)) {
+          runtimeBindings[binding.runtimeName] = (...args) =>
+            executeSqliteBinding(runtime, binding, args, runtimeOptions);
+        }
+      }
+      installRuntime(runtimeBindings);
+      return Object.freeze(runtimeBindings);
     }
   };
 
@@ -702,6 +717,21 @@ export function createSqliteRuntime(compiledModule, options = {}) {
 
     return connection;
   }
+
+  function executeSqliteQuery(operation, connectionOrId, sql, parameters) {
+    const connection = resolveSqliteConnection(connectionOrId);
+    const statement = connection.database.prepare(normalizeSqliteQueryText(sql));
+    const bindingArgs = parameters ?? [];
+
+    switch (operation) {
+      case "queryOne":
+        return statement.get(...bindingArgs);
+      case "queryAll":
+        return statement.all(...bindingArgs);
+      default:
+        throw new Error(`Unsupported Clasp sqlite query operation: ${operation}`);
+    }
+  }
 }
 
 export function installSqliteRuntime(compiledModule, options = {}) {
@@ -734,15 +764,93 @@ function normalizeSqliteConnectionPath(path) {
   return normalizedPath;
 }
 
+function normalizeSqliteQueryText(sql) {
+  if (typeof sql !== "string") {
+    throw new Error("SQLite query text must be a string.");
+  }
+
+  const normalizedSql = sql.trim();
+
+  if (normalizedSql === "") {
+    throw new Error("SQLite query text cannot be empty.");
+  }
+
+  return normalizedSql;
+}
+
 function invokeSqliteBinding(runtime, binding, args, runtimeOptions) {
+  const result = executeSqliteBinding(runtime, binding, args, runtimeOptions);
+  const mappedResult = mapSqliteQueryResult(binding, result);
+  if (mappedResult !== sqliteQueryResultUnmapped) {
+    return mappedResult;
+  }
+
+  return result;
+}
+
+const sqliteQueryResultUnmapped = Symbol("clasp.sqlite.queryResultUnmapped");
+
+function executeSqliteBinding(runtime, binding, args, runtimeOptions) {
   switch (binding.operation) {
     case "open":
       return runtime.open(args[0], runtimeOptions);
     case "openReadonly":
       return runtime.openReadonly(args[0], runtimeOptions);
+    case "queryOne":
+      return runtime.queryOne(args[0], args[1], ...args.slice(2));
+    case "queryAll":
+      return runtime.queryAll(args[0], args[1], ...args.slice(2));
     default:
       throw new Error(`Unsupported Clasp sqlite operation: ${binding.operation}`);
   }
+}
+
+function mapSqliteQueryResult(binding, result) {
+  const returns = binding?.returns;
+  const fromHost =
+    returns && typeof returns.fromHost === "function" ? returns.fromHost : null;
+
+  if (!fromHost) {
+    return sqliteQueryResultUnmapped;
+  }
+
+  try {
+    return fromHost(result, "result");
+  } catch (_rawError) {
+    const fallback = fallbackSqliteQueryResult(result);
+
+    if (fallback === sqliteQueryResultUnmapped) {
+      return sqliteQueryResultUnmapped;
+    }
+
+    return fromHost(fallback, "result");
+  }
+}
+
+function fallbackSqliteQueryResult(result) {
+  if (Array.isArray(result)) {
+    let changed = false;
+    const mapped = result.map((row) => {
+      const fallback = fallbackSqliteQueryRow(row);
+      if (fallback !== sqliteQueryResultUnmapped) {
+        changed = true;
+        return fallback;
+      }
+      return row;
+    });
+    return changed ? mapped : sqliteQueryResultUnmapped;
+  }
+
+  return fallbackSqliteQueryRow(result);
+}
+
+function fallbackSqliteQueryRow(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return sqliteQueryResultUnmapped;
+  }
+
+  const values = Object.values(row);
+  return values.length === 1 ? values[0] : sqliteQueryResultUnmapped;
 }
 
 export function createProviderRuntime(compiledModule, options = {}) {

@@ -5090,6 +5090,21 @@ compileTests =
               "expected sqlite contract and live connection runtime output"
               "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"sqliteOpen\",\"sqliteOpenReadonly\"],\"runtimeNames\":[\"sqlite:open\",\"sqlite:openReadonly\"],\"runtimeInstalled\":true,\"memoryPath\":\":memory:\",\"memoryIsMemory\":true,\"readonlyPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"readonlyFlag\":true,\"liveConnectionCount\":4,\"rowCount\":1,\"lookupPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"closed\":true,\"closedLookup\":\"Unknown Clasp sqlite connection: sqlite-connection-2\"}"
               runtimeOutput
+    , testCase "sqlite runtime executes typed query bindings and maps query rows through declared result schemas" $ do
+        case compileSource "sqlite-query-runtime" sqliteQueryRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite query runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-query-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteQueryRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected typed sqlite query runtime output"
+              "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"fetchFirstNote\",\"fetchNoteCount\",\"fetchNoteRows\",\"fetchNotesByValue\"],\"runtimeNames\":[\"sqlite:queryOne\",\"sqlite:queryOne\",\"sqlite:queryAll\",\"sqlite:queryAll\"],\"operations\":[\"queryOne\",\"queryOne\",\"queryAll\",\"queryAll\"],\"runtimeInstalled\":true,\"firstNote\":\"alpha\",\"noteCount\":3,\"noteValues\":[\"alpha\",\"beta\",\"gamma\"],\"filteredNotes\":[{\"note\":\"beta\"}]}"
+              runtimeOutput
     , testCase "provider runtime validates structured JSON-text outputs against declared schemas" $ do
         case compileSource "provider-runtime-invalid" providerRuntimeSource of
           Left err ->
@@ -6018,6 +6033,44 @@ sqliteRuntimeSource =
     , ""
     , "describeReadonlyConnection : Str -> SqliteConnection"
     , "describeReadonlyConnection path = sqliteOpenReadonly path"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+sqliteQueryRuntimeSource :: Text
+sqliteQueryRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record NoteRow = {"
+    , "  note : Str"
+    , "}"
+    , ""
+    , "record NoteFilter = {"
+    , "  wanted : Str"
+    , "}"
+    , ""
+    , "record CountRow = {"
+    , "  count : Int"
+    , "}"
+    , ""
+    , "foreign fetchFirstNote : SqliteConnection -> Str -> NoteRow = \"sqlite:queryOne\""
+    , "foreign fetchNoteCount : SqliteConnection -> Str -> CountRow = \"sqlite:queryOne\""
+    , "foreign fetchNoteRows : SqliteConnection -> Str -> [NoteRow] = \"sqlite:queryAll\""
+    , "foreign fetchNotesByValue : SqliteConnection -> Str -> NoteFilter -> [NoteRow] = \"sqlite:queryAll\""
+    , ""
+    , "firstNote : SqliteConnection -> Str -> NoteRow"
+    , "firstNote connection sql = fetchFirstNote connection sql"
+    , ""
+    , "noteCount : SqliteConnection -> Str -> CountRow"
+    , "noteCount connection sql = fetchNoteCount connection sql"
+    , ""
+    , "noteRows : SqliteConnection -> Str -> [NoteRow]"
+    , "noteRows connection sql = fetchNoteRows connection sql"
+    , ""
+    , "notesByValue : SqliteConnection -> Str -> NoteFilter -> [NoteRow]"
+    , "notesByValue connection sql filter = fetchNotesByValue connection sql filter"
     , ""
     , "main : Str"
     , "main = \"ok\""
@@ -9591,6 +9644,40 @@ sqliteRuntimeScript compiledPath runtimePath =
     , "  lookupPath,"
     , "  closed,"
     , "  closedLookup"
+    , "}));"
+    ]
+
+sqliteQueryRuntimeScript :: FilePath -> FilePath -> Text
+sqliteQueryRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime, sqliteContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const sqliteContract = sqliteContractFor(compiledModule);"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule);"
+    , "const databasePath = 'dist/test-projects/sqlite-query-runtime/runtime.db';"
+    , "const seedConnection = sqliteRuntime.open(databasePath);"
+    , "sqliteRuntime.database(seedConnection).exec('drop table if exists notes;');"
+    , "sqliteRuntime.database(seedConnection).exec('create table notes (value text not null);');"
+    , "sqliteRuntime.database(seedConnection).exec(\"insert into notes(value) values ('alpha'), ('beta'), ('gamma');\");"
+    , "const installed = sqliteRuntime.install();"
+    , "const queryConnection = sqliteRuntime.open(databasePath);"
+    , "const firstNote = compiledModule.firstNote(queryConnection, 'select value as note from notes order by value asc limit 1');"
+    , "const noteCount = compiledModule.noteCount(queryConnection, 'select count(*) as count from notes');"
+    , "const noteRows = compiledModule.noteRows(queryConnection, 'select value as note from notes order by value asc');"
+    , "const filteredNotes = compiledModule.notesByValue(queryConnection, 'select value as note from notes where value = :wanted', { wanted: 'beta' });"
+    , "sqliteRuntime.close(queryConnection.id);"
+    , "sqliteRuntime.close(seedConnection.id);"
+    , "console.log(JSON.stringify({"
+    , "  sqliteKind: sqliteContract.kind,"
+    , "  sqliteVersion: sqliteContract.version,"
+    , "  bindingNames: sqliteContract.bindings.map((binding) => binding.name),"
+    , "  runtimeNames: sqliteContract.bindings.map((binding) => binding.runtimeName),"
+    , "  operations: sqliteContract.bindings.map((binding) => binding.operation),"
+    , "  runtimeInstalled: typeof installed['sqlite:queryOne'] === 'function' && typeof installed['sqlite:queryAll'] === 'function',"
+    , "  firstNote: firstNote.note,"
+    , "  noteCount: noteCount.count,"
+    , "  noteValues: noteRows.map((row) => row.note),"
+    , "  filteredNotes"
     , "}));"
     ]
 

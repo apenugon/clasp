@@ -100,7 +100,7 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `sqliteOpen : Str -> SqliteConnection`
 - `sqliteOpenReadonly : Str -> SqliteConnection`
 
-The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime. The SQLite helpers also stay host/runtime-backed and currently expose typed connection descriptors for Bun hosts without committing the language to a query model yet.
+The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, and typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary.
 
 ## Design Constraints
 
