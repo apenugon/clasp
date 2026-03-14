@@ -219,6 +219,8 @@ Later benchmark rounds should compare:
 - text-only and browser-scraping workflows
 - semantic-artifact-assisted workflows
 
+The benchmark harness should record the workflow-assistance variant explicitly in frozen bundles and result protocol metadata so the same repeated Clasp task series can be reported as `raw-text` versus `compiler-owned-air` planning rather than relying on note naming conventions or manifest filenames alone.
+
 That is the honest way to test whether the language is actually reducing agent work rather than just moving complexity around.
 
 ### 9. Freeze the benchmark before using it as the standing scorecard

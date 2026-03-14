@@ -10,6 +10,7 @@
   "harness": "claude-code",
   "model": "sonnet",
   "mode": "raw-repo",
+  "workflowAssistance": "unspecified",
   "sampleCount": 2,
   "seriesLabel": "syntax-a",
   "seed": "syntax-a:claude-code:sonnet:raw-repo:clasp-syntax-compact,clasp-syntax-verbose",
@@ -51,18 +52,18 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 23710,
-      "sha256": "8ebffb4148d78eb1fcce4caa1584d9e7a647c50dfd5683cecd85c77e4fc1e0b8"
+      "size": 24345,
+      "sha256": "53ac97fdc150f654cc9e71410e2c7ce2ddd3aefed86d1bd7a462638ce42d2159"
     },
     {
       "path": "benchmarks/result-schema.json",
-      "size": 4448,
-      "sha256": "3acb5f48abb72a8de394b88a5a9385cd4ce894d3dc7a84822f5302b4dce5b55b"
+      "size": 4518,
+      "sha256": "50c1c47a9cf37e9be989372f65982c5edf511d799c481e8f01ae4ca9211d5a68"
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 62925,
-      "sha256": "8001419bc54d90981d73b0aa05ff6a4cd29cfd9ae68944d824d7188f03992ff9"
+      "size": 69737,
+      "sha256": "43f7c57004a956a1e1b53658fe7a353982a7b1d980e9cd4f8ff0d642aa292051"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",

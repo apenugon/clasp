@@ -224,18 +224,28 @@ node benchmarks/run-benchmark.mjs freeze lead-segment \
   --model gpt-5.4 \
   --mode raw-repo \
   --notes remediation-1 \
-  --output benchmarks/bundles/remediation-1--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-assisted.json
+  --output benchmarks/bundles/remediation-1--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json
 ```
 
-The freeze manifest records the selected task set, benchmark mode, repeated-sample count, deterministic randomized run order for each sample, and file digests for the frozen task bundle. `run-codex-series.sh` and `run-claude-series.sh` generate this manifest automatically and record its digest in each result record. When running semantic-artifact benchmark slices through the series wrappers, set `CLASP_BENCHMARK_WORKFLOW_ASSISTANCE` to values like `compiler-assisted`, `raw-text`, or `browser-only`; the wrappers include that slice in the manifest filename so frozen bundles do not collide across workflow-assistance variants.
+The freeze manifest records the selected task set, benchmark mode, workflow-assistance variant, repeated-sample count, deterministic randomized run order for each sample, and file digests for the frozen task bundle. `run-codex-series.sh` and `run-claude-series.sh` generate this manifest automatically and record its digest plus the normalized workflow-assistance value in each result record. When running semantic-artifact benchmark slices through the series wrappers, set `CLASP_BENCHMARK_WORKFLOW_ASSISTANCE` to values like `compiler-owned-air`, `raw-text`, or `browser-only`; the wrappers include that slice in the manifest filename so frozen bundles do not collide across workflow-assistance variants, and `summarize` can compare `raw-text` against `compiler-owned-air` for the same Clasp task series.
 
 When notes end in `-<run-number>`, the summary report treats the shared prefix as a series label. For the mirrored `lead-segment` pair it also prints a comparative section with pass-rate, time-to-green, and token deltas between `Clasp` and `TypeScript`.
 
 Run a repeated Codex sample set with a consistent harness wrapper:
 
 ```sh
-CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-assisted \
+CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
   bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4 raw-repo
+```
+
+Run the same Clasp task series twice to compare raw-text planning against compiler-owned AIR planning:
+
+```sh
+CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=raw-text \
+  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.4
+CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
+  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes air-a
 ```
 
 Run the mirrored repeated control-plane containment pair:

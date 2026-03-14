@@ -28,6 +28,7 @@ write_result() {
   local uncached_total="${10}"
   local passed="${11}"
   local exit_code="${12}"
+  local workflow_assistance="${13:-unspecified}"
   local result_path="$results_root/$filename"
   local sample_index=""
   if [[ "$notes" =~ -([0-9]+)$ ]]; then
@@ -67,6 +68,7 @@ write_result() {
   "protocol": {
     "schemaVersion": 1,
     "mode": "raw-repo",
+    "workflowAssistance": "$workflow_assistance",
     "promptFile": "benchmarks/tasks/$task_id/prompt.raw.md",
     "repeatedSamples": 2,
     "sampleIndex": ${sample_index:-null},
@@ -95,6 +97,10 @@ EOF
 
 write_result "2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "remediation-a-1" "2026-03-01T10:01:00.000Z" 100 120 110 false 1
 write_result "2026-03-01T10-02-00.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "remediation-a-2" "2026-03-01T10:02:00.000Z" 200 130 120 true 0
+write_result "2026-03-01T10-02-10.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "air-a-1" "2026-03-01T10:02:10.000Z" 210 150 140 false 1 "raw-text"
+write_result "2026-03-01T10-02-20.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "air-a-2" "2026-03-01T10:02:20.000Z" 180 140 130 true 0 "raw-text"
+write_result "2026-03-01T10-02-30.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "air-a-1" "2026-03-01T10:02:30.000Z" 90 100 95 true 0 "compiler-owned-air"
+write_result "2026-03-01T10-02-40.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "air-a-2" "2026-03-01T10:02:40.000Z" 110 110 100 true 0 "compiler-owned-air"
 write_result "2026-03-01T10-03-00.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "codex" "gpt-5.4" "remediation-a-1" "2026-03-01T10:03:00.000Z" 150 140 130 true 0
 write_result "2026-03-01T10-04-00.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "codex" "gpt-5.4" "remediation-a-2" "2026-03-01T10:04:00.000Z" 180 160 150 true 0
 write_result "2026-03-01T10-05-00.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "codex" "gpt-5.4" "priority-a-1" "2026-03-01T10:05:00.000Z" 220 180 150 true 0
@@ -208,6 +214,7 @@ EOF
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
 printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
 printf '%s\n' "$summary_output" | grep -Fq '  mode: raw-repo'
+printf '%s\n' "$summary_output" | grep -Fq '  workflowAssistance: unspecified'
 printf '%s\n' "$summary_output" | grep -Fq '  series: remediation-a'
 printf '%s\n' "$summary_output" | grep -Fq '  passRate: 50%'
 printf '%s\n' "$summary_output" | grep -Fq '  timeToGreenMs: 300'
@@ -225,6 +232,24 @@ printf '%s\n' "$summary_output" | grep -Fq '    passRateDeltaPct: -50'
 printf '%s\n' "$summary_output" | grep -Fq '    timeToGreenDeltaMs: 150'
 printf '%s\n' "$summary_output" | grep -Fq '    tokenDelta: -25'
 printf '%s\n' "$summary_output" | grep -Fq '    uncachedTokenDelta: -25'
+
+air_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes air-a)"
+printf '%s\n' "$air_summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
+printf '%s\n' "$air_summary_output" | grep -Fq '  workflowAssistance: raw-text'
+printf '%s\n' "$air_summary_output" | grep -Fq '  workflowAssistance: compiler-owned-air'
+printf '%s\n' "$air_summary_output" | grep -Fq 'air-planning-comparison'
+printf '%s\n' "$air_summary_output" | grep -Fq $'  clasp-lead-segment\tcodex\tgpt-5.4\tair-a'
+printf '%s\n' "$air_summary_output" | grep -Fq '    mode: raw-repo'
+printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextWorkflowAssistance: raw-text'
+printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirWorkflowAssistance: compiler-owned-air'
+printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextPassRate: 50%'
+printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirPassRate: 100%'
+printf '%s\n' "$air_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextTimeToGreenMs: 390'
+printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirTimeToGreenMs: 90'
+printf '%s\n' "$air_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
+printf '%s\n' "$air_summary_output" | grep -Fq '    tokenDelta: -40'
+printf '%s\n' "$air_summary_output" | grep -Fq '    uncachedTokenDelta: -37'
 
 priority_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes priority-a)"
 printf '%s\n' "$priority_summary_output" | grep -Fq $'clasp-lead-priority\tcodex\tgpt-5.4'
@@ -464,6 +489,9 @@ if (manifest.bundleType !== "clasp-benchmark-fairness-bundle") {
 }
 if (manifest.mode !== "raw-repo" || manifest.sampleCount !== 2) {
   throw new Error("frozen bundle did not record the expected protocol");
+}
+if (manifest.workflowAssistance !== "compiler-assisted") {
+  throw new Error(`unexpected workflow assistance: ${manifest.workflowAssistance}`);
 }
 if (!Array.isArray(manifest.samples) || manifest.samples.length !== 2) {
   throw new Error("frozen bundle is missing repeated sample orders");

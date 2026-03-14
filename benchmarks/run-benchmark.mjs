@@ -243,6 +243,13 @@ const mixedStackSemanticLayerBenchmark = {
   leftLabel: "clasp",
   rightLabel: "ts"
 };
+const airPlanningWorkflowComparison = {
+  comparisonLabel: "air-planning-comparison",
+  baselineWorkflowAssistance: "raw-text",
+  candidateWorkflowAssistance: "compiler-owned-air",
+  baselineLabel: "rawText",
+  candidateLabel: "compilerOwnedAir"
+};
 
 async function main() {
   const [command, maybeTaskId, ...rest] = process.argv.slice(2);
@@ -319,6 +326,9 @@ async function freezeCommand(taskSelection, args) {
   const mode = normalizeBenchmarkMode(options.mode);
   const harness = options.harness ?? "unspecified";
   const model = options.model ?? "unspecified";
+  const workflowAssistance = normalizeWorkflowAssistance(
+    options.workflowAssistance ?? process.env.CLASP_BENCHMARK_WORKFLOW_ASSISTANCE
+  );
   const seriesLabel = options.notes ?? options.notePrefix ?? taskSelection ?? taskIds.join("-");
   const seed = options.seed ?? `${seriesLabel}:${harness}:${model}:${mode}:${taskIds.join(",")}`;
   const samples = taskIds.length === 0
@@ -334,6 +344,7 @@ async function freezeCommand(taskSelection, args) {
     harness,
     model,
     mode,
+    workflowAssistance,
     sampleCount,
     seriesLabel,
     seed,
@@ -776,16 +787,20 @@ async function summarizeCommand(args) {
   const grouped = groupBy(filtered, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
     const mode = result.protocol?.mode ?? "";
-    return [result.taskId, result.harness, result.model, mode, series].join("\t");
+    const workflowAssistance = result.protocol?.workflowAssistance ?? "";
+    return [result.taskId, result.harness, result.model, mode, workflowAssistance, series].join("\t");
   });
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [taskId, harness, model, mode, series] = groupKey.split("\t");
+    const [taskId, harness, model, mode, workflowAssistance, series] = groupKey.split("\t");
     const summary = summarizeGroup(groupResults);
 
     console.log(`${taskId}\t${harness}\t${model}`);
     if (mode) {
       console.log(`  mode: ${mode}`);
+    }
+    if (workflowAssistance) {
+      console.log(`  workflowAssistance: ${workflowAssistance}`);
     }
     if (series) {
       console.log(`  series: ${series}`);
@@ -819,6 +834,7 @@ async function summarizeCommand(args) {
         `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
       );
       console.log(`    mode: ${comparison.mode}`);
+      console.log(`    workflowAssistance: ${comparison.workflowAssistance}`);
       console.log(
         `    ${buildComparisonMetricKey(comparison.leftLabel, "PassRate")}: ${comparison.left.passRate}`
       );
@@ -843,6 +859,46 @@ async function summarizeCommand(args) {
       console.log(
         `    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`
       );
+    }
+  }
+
+  const workflowAssistanceComparisons = buildWorkflowAssistanceComparisons(filtered);
+  if (workflowAssistanceComparisons.length > 0) {
+    console.log(airPlanningWorkflowComparison.comparisonLabel);
+
+    for (const comparison of workflowAssistanceComparisons) {
+      console.log(
+        `  ${comparison.taskId}\t${comparison.harness}\t${comparison.model}\t${comparison.series}`
+      );
+      console.log(`    mode: ${comparison.mode}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.baselineLabel, "WorkflowAssistance")}: ${comparison.baselineWorkflowAssistance}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.candidateLabel, "WorkflowAssistance")}: ${comparison.candidateWorkflowAssistance}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.baselineLabel, "PassRate")}: ${comparison.baseline.passRate}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.candidateLabel, "PassRate")}: ${comparison.candidate.passRate}`
+      );
+      console.log(`    passRateDeltaPct: ${comparison.passRateDeltaPct}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.baselineLabel, "TimeToGreenMs")}: ${comparison.baseline.timeToGreenMs}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.candidateLabel, "TimeToGreenMs")}: ${comparison.candidate.timeToGreenMs}`
+      );
+      console.log(`    timeToGreenDeltaMs: ${comparison.timeToGreenDeltaMs}`);
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.baselineLabel, "MedianTokens")}: ${comparison.baseline.medianTokens}`
+      );
+      console.log(
+        `    ${buildComparisonMetricKey(comparison.candidateLabel, "MedianTokens")}: ${comparison.candidate.medianTokens}`
+      );
+      console.log(`    tokenDelta: ${comparison.tokenDelta}`);
+      console.log(`    uncachedTokenDelta: ${comparison.uncachedTokenDelta}`);
     }
   }
 
@@ -951,6 +1007,7 @@ function printBenchmarkSuiteComparisons(comparisons) {
       `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
     );
     console.log(`    mode: ${comparison.mode}`);
+    console.log(`    workflowAssistance: ${comparison.workflowAssistance}`);
     console.log(`    taskPairs: ${comparison.taskPairs}`);
     console.log(
       `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
@@ -1000,12 +1057,13 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
     const mode = result.protocol?.mode ?? "";
-    return [result.harness, result.model, mode, series].join("\t");
+    const workflowAssistance = result.protocol?.workflowAssistance ?? "";
+    return [result.harness, result.model, mode, workflowAssistance, series].join("\t");
   });
   const comparisons = [];
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [harness, model, mode, series] = groupKey.split("\t");
+    const [harness, model, mode, workflowAssistance, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
     const leftTaskSummaries = [];
     const rightTaskSummaries = [];
@@ -1035,6 +1093,7 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
       harness,
       model,
       mode: mode || "(unspecified)",
+      workflowAssistance: workflowAssistance || "unspecified",
       series: series || "(all-runs)",
       taskPairs: benchmark.taskPairs.length,
       leftLabel: benchmark.leftLabel,
@@ -1063,8 +1122,8 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
   }
 
   return comparisons.sort((left, right) =>
-    [left.harness, left.model, left.mode, left.series].join("\t").localeCompare(
-      [right.harness, right.model, right.mode, right.series].join("\t")
+    [left.harness, left.model, left.mode, left.workflowAssistance, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.mode, right.workflowAssistance, right.series].join("\t")
     )
   );
 }
@@ -1102,12 +1161,13 @@ function buildTaskComparisons(results, family) {
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
     const mode = result.protocol?.mode ?? "";
-    return [result.harness, result.model, mode, series].join("\t");
+    const workflowAssistance = result.protocol?.workflowAssistance ?? "";
+    return [result.harness, result.model, mode, workflowAssistance, series].join("\t");
   });
   const comparisons = [];
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [harness, model, mode, series] = groupKey.split("\t");
+    const [harness, model, mode, workflowAssistance, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
     const leftResults = byTask.get(family.leftTaskId);
     const rightResults = byTask.get(family.rightTaskId);
@@ -1122,6 +1182,7 @@ function buildTaskComparisons(results, family) {
       harness,
       model,
       mode: mode || "(unspecified)",
+      workflowAssistance: workflowAssistance || "unspecified",
       series: series || "(all-runs)",
       leftLabel: family.leftLabel,
       rightLabel: family.rightLabel,
@@ -1139,8 +1200,66 @@ function buildTaskComparisons(results, family) {
   }
 
   return comparisons.sort((left, right) =>
-    [left.harness, left.model, left.mode, left.series].join("\t").localeCompare(
-      [right.harness, right.model, right.mode, right.series].join("\t")
+    [left.harness, left.model, left.mode, left.workflowAssistance, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.mode, right.workflowAssistance, right.series].join("\t")
+    )
+  );
+}
+
+function buildWorkflowAssistanceComparisons(results) {
+  const relevant = results.filter((result) => result.language === "clasp");
+  const grouped = groupBy(relevant, (result) => {
+    const series = parseSeriesRun(result.notes).series ?? "";
+    const mode = result.protocol?.mode ?? "";
+    return [result.taskId, result.harness, result.model, mode, series].join("\t");
+  });
+  const comparisons = [];
+
+  for (const [groupKey, groupResults] of grouped.entries()) {
+    const [taskId, harness, model, mode, series] = groupKey.split("\t");
+    const byWorkflowAssistance = groupBy(
+      groupResults,
+      (result) => result.protocol?.workflowAssistance ?? "unspecified"
+    );
+    const baselineResults = byWorkflowAssistance.get(
+      airPlanningWorkflowComparison.baselineWorkflowAssistance
+    );
+    const candidateResults = byWorkflowAssistance.get(
+      airPlanningWorkflowComparison.candidateWorkflowAssistance
+    );
+
+    if (!baselineResults || !candidateResults) {
+      continue;
+    }
+
+    const baseline = summarizeGroup(baselineResults);
+    const candidate = summarizeGroup(candidateResults);
+    comparisons.push({
+      taskId,
+      harness,
+      model,
+      mode: mode || "(unspecified)",
+      series: series || "(all-runs)",
+      baselineLabel: airPlanningWorkflowComparison.baselineLabel,
+      candidateLabel: airPlanningWorkflowComparison.candidateLabel,
+      baselineWorkflowAssistance: airPlanningWorkflowComparison.baselineWorkflowAssistance,
+      candidateWorkflowAssistance: airPlanningWorkflowComparison.candidateWorkflowAssistance,
+      baseline,
+      candidate,
+      passRateDeltaPct: Math.round(candidate.passRatePct - baseline.passRatePct),
+      timeToGreenDeltaMs:
+        typeof candidate.timeToGreenMs === "number" && typeof baseline.timeToGreenMs === "number"
+          ? candidate.timeToGreenMs - baseline.timeToGreenMs
+          : "n/a",
+      tokenDelta: candidate.medianTokens - baseline.medianTokens,
+      uncachedTokenDelta:
+        candidate.medianUncachedTokens - baseline.medianUncachedTokens
+    });
+  }
+
+  return comparisons.sort((left, right) =>
+    [left.taskId, left.harness, left.model, left.mode, left.series].join("\t").localeCompare(
+      [right.taskId, right.harness, right.model, right.mode, right.series].join("\t")
     )
   );
 }
@@ -1335,6 +1454,11 @@ async function buildProtocolMetadata(task, options, startedAt, finishedAt) {
   const bundleManifest = bundleManifestPath && await fileExists(bundleManifestPath)
     ? JSON.parse(await readFile(bundleManifestPath, "utf8"))
     : null;
+  const workflowAssistance = normalizeWorkflowAssistance(
+    options.workflowAssistance ??
+      bundleManifest?.workflowAssistance ??
+      process.env.CLASP_BENCHMARK_WORKFLOW_ASSISTANCE
+  );
   const seriesRun = parseSeriesRun(options.notes);
   const sampleIndex = parseOptionalPositiveNumber(options.sampleIndex ?? seriesRun.runNumber);
   const sampleCount = parseOptionalPositiveNumber(options.sampleCount ?? bundleManifest?.sampleCount);
@@ -1351,6 +1475,7 @@ async function buildProtocolMetadata(task, options, startedAt, finishedAt) {
   return {
     schemaVersion: 1,
     mode,
+    workflowAssistance,
     promptFile: promptRelativePath,
     repeatedSamples: sampleCount,
     sampleIndex,
@@ -1586,6 +1711,13 @@ function matchesSummaryFilter(result, options) {
     return false;
   }
 
+  if (
+    options.workflowAssistance &&
+    result.protocol?.workflowAssistance !== normalizeWorkflowAssistance(options.workflowAssistance)
+  ) {
+    return false;
+  }
+
   if (options.notes && !String(result.notes ?? "").includes(options.notes)) {
     return false;
   }
@@ -1621,6 +1753,17 @@ function parseSeriesRun(notes) {
     series: match[1],
     runNumber: Number.parseInt(match[2], 10)
   };
+}
+
+function normalizeWorkflowAssistance(value) {
+  const normalized = String(value ?? "unspecified")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-");
+
+  return normalized.length > 0 ? normalized : "unspecified";
 }
 
 function numericPhaseValues(results, key) {
@@ -1746,11 +1889,11 @@ function usage() {
   console.error("usage:");
   console.error("  node benchmarks/run-benchmark.mjs list");
   console.error("  node benchmarks/run-benchmark.mjs prepare <task-id> [--workspace path --mode raw-repo|file-hinted|oracle]");
-  console.error("  node benchmarks/run-benchmark.mjs freeze <task-id|alias> --count n --output path [--harness name --model name --mode raw-repo|file-hinted|oracle --notes text --seed text]");
-  console.error("  node benchmarks/run-benchmark.mjs verify <task-id> --workspace path [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
-  console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
-  console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
-  console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
+  console.error("  node benchmarks/run-benchmark.mjs freeze <task-id|alias> --count n --output path [--harness name --model name --mode raw-repo|file-hinted|oracle --workflow-assistance raw-text|compiler-owned-air|... --notes text --seed text]");
+  console.error("  node benchmarks/run-benchmark.mjs verify <task-id> --workspace path [--harness name --model name --mode raw-repo|file-hinted|oracle --workflow-assistance raw-text|compiler-owned-air|... --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
+  console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --workflow-assistance raw-text|compiler-owned-air|... --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
+  console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --mode raw-repo|file-hinted|oracle --workflow-assistance raw-text|compiler-owned-air|... --notes text]");
+  console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --mode raw-repo|file-hinted|oracle --workflow-assistance raw-text|compiler-owned-air|... --notes text]");
   console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, correctness, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, authorization-data-access, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
 }
 
@@ -1879,6 +2022,11 @@ function buildPublicationProtocolSummary(results) {
       .map((result) => result.protocol?.bundle?.manifestFile)
       .filter((value) => typeof value === "string" && value.length > 0)
   )].sort((left, right) => left.localeCompare(right));
+  const workflowAssistances = [...new Set(
+    results
+      .map((result) => result.protocol?.workflowAssistance)
+      .filter((value) => typeof value === "string" && value.length > 0)
+  )].sort((left, right) => left.localeCompare(right));
   const hasPhases = results.some((result) => result.phases && Object.keys(result.phases).length > 0);
 
   return {
@@ -1886,13 +2034,14 @@ function buildPublicationProtocolSummary(results) {
     randomizedRunOrder: bundleManifests.length > 0,
     repeatedSamples,
     modes,
+    workflowAssistances,
     phaseDecomposition: hasPhases
   };
 }
 
 function packageFilters(options) {
   const filters = {};
-  const keys = ["taskId", "harness", "model", "language", "mode", "notes"];
+  const keys = ["taskId", "harness", "model", "language", "mode", "workflowAssistance", "notes"];
 
   for (const key of keys) {
     if (options[key]) {
