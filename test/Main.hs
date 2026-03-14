@@ -1332,6 +1332,20 @@ checkerTests =
                   (foreignDeclType foreignDecl)
               Nothing ->
                 assertFailure "expected publishCustomer foreign declaration"
+    , testCase "typechecks sqlite mutation bindings that keep semantic schema types at the boundary" $
+        case checkSource "sqlite-mutation-runtime" sqliteMutationRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite mutation source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignDecls = coreModuleForeignDecls checked
+            case find ((== "insertNote") . foreignDeclName) foreignDecls of
+              Just foreignDecl ->
+                assertEqual
+                  "insertNote type"
+                  (TFunction [TNamed "SqliteConnection", TStr, TNamed "NoteInput"] (TNamed "NoteRow"))
+                  (foreignDeclType foreignDecl)
+              Nothing ->
+                assertFailure "expected insertNote foreign declaration"
     , testCase "typechecks the let example file" $ do
         source <- readExampleSource "let.clasp"
         case checkSource "examples/let.clasp" source of
@@ -1538,6 +1552,8 @@ checkerTests =
         assertHasCode "E_ROUTE_HANDLER_TYPE" (checkSource "bad" wrongRouteHandlerSource)
     , testCase "rejects storage bindings that use bare primitive types" $
         assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badStoragePrimitiveSource)
+    , testCase "rejects sqlite mutation bindings that use bare primitive storage-facing types" $
+        assertHasCode "E_STORAGE_BOUNDARY_TYPE" (checkSource "bad" badSqliteMutationPrimitiveSource)
     , testCase "rejects projections that disclose disallowed classified fields" $
         assertHasCode "E_DISCLOSURE_POLICY" (checkSource "bad" disallowedProjectionSource)
     , testCase "rejects assignment to immutable block locals" $
@@ -5158,6 +5174,21 @@ compileTests =
               "expected typed sqlite query runtime output"
               "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"fetchFirstNote\",\"fetchNoteCount\",\"fetchNoteRows\",\"fetchNotesByValue\"],\"runtimeNames\":[\"sqlite:queryOne\",\"sqlite:queryOne\",\"sqlite:queryAll\",\"sqlite:queryAll\"],\"operations\":[\"queryOne\",\"queryOne\",\"queryAll\",\"queryAll\"],\"runtimeInstalled\":true,\"firstNote\":\"alpha\",\"noteCount\":3,\"noteValues\":[\"alpha\",\"beta\",\"gamma\"],\"filteredNotes\":[{\"note\":\"beta\"}]}"
               runtimeOutput
+    , testCase "sqlite runtime executes typed mutation bindings inside typed transaction boundaries with isolation and rollback semantics" $ do
+        case compileSource "sqlite-mutation-runtime" sqliteMutationRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite mutation runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-mutation-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteMutationRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected typed sqlite mutation runtime output"
+              "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"insertNote\",\"replaceNotes\"],\"runtimeNames\":[\"sqlite:mutateOne:immediate\",\"sqlite:mutateAll:exclusive\"],\"operations\":[\"mutateOne\",\"mutateAll\"],\"isolations\":[\"immediate\",\"exclusive\"],\"mutationKinds\":[\"one\",\"many\"],\"paramSemanticTypes\":[\"NoteInput\",\"NoteInput\"],\"returnSemanticTypes\":[\"NoteRow\",\"[NoteRow]\"],\"runtimeInstalled\":true,\"insertedNote\":\"beta\",\"replacedNotes\":[{\"note\":\"BETA\"}],\"committedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"immediate\",\"boundary\":\"connection\",\"depth\":1},\"nestedTransaction\":{\"kind\":\"clasp-sqlite-transaction\",\"isolation\":\"exclusive\",\"boundary\":\"savepoint\",\"depth\":2},\"rolledBack\":\"rollback mutation\",\"finalNotes\":[\"BETA\",\"alpha\"]}"
+              runtimeOutput
     , testCase "provider runtime validates structured JSON-text outputs against declared schemas" $ do
         case compileSource "provider-runtime-invalid" providerRuntimeSource of
           Left err ->
@@ -6128,6 +6159,32 @@ sqliteQueryRuntimeSource =
     , ""
     , "notesByValue : SqliteConnection -> Str -> NoteFilter -> [NoteRow]"
     , "notesByValue connection sql filter = fetchNotesByValue connection sql filter"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
+    ]
+
+sqliteMutationRuntimeSource :: Text
+sqliteMutationRuntimeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record NoteInput = {"
+    , "  wanted : Str"
+    , "}"
+    , ""
+    , "record NoteRow = {"
+    , "  note : Str"
+    , "}"
+    , ""
+    , "foreign insertNote : SqliteConnection -> Str -> NoteInput -> NoteRow = \"sqlite:mutateOne:immediate\""
+    , "foreign replaceNotes : SqliteConnection -> Str -> NoteInput -> [NoteRow] = \"sqlite:mutateAll:exclusive\""
+    , ""
+    , "saveNote : SqliteConnection -> Str -> NoteInput -> NoteRow"
+    , "saveNote connection sql input = insertNote connection sql input"
+    , ""
+    , "rewriteNotes : SqliteConnection -> Str -> NoteInput -> [NoteRow]"
+    , "rewriteNotes connection sql input = replaceNotes connection sql input"
     , ""
     , "main : Str"
     , "main = \"ok\""
@@ -7792,6 +7849,21 @@ badStoragePrimitiveSource =
     , ""
     , "main : Str -> Str"
     , "main value = loadCustomer value"
+    ]
+
+badSqliteMutationPrimitiveSource :: Text
+badSqliteMutationPrimitiveSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record NoteRow = {"
+    , "  note : Str"
+    , "}"
+    , ""
+    , "foreign saveCount : SqliteConnection -> Str -> Int -> NoteRow = \"sqlite:mutateOne\""
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
     ]
 
 mismatchSource :: Text
@@ -9766,6 +9838,61 @@ sqliteQueryRuntimeScript compiledPath runtimePath =
     , "  noteCount: noteCount.count,"
     , "  noteValues: noteRows.map((row) => row.note),"
     , "  filteredNotes"
+    , "}));"
+    ]
+
+sqliteMutationRuntimeScript :: FilePath -> FilePath -> Text
+sqliteMutationRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime, sqliteContractFor } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const sqliteContract = sqliteContractFor(compiledModule);"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule);"
+    , "const databasePath = 'dist/test-projects/sqlite-mutation-runtime/runtime.db';"
+    , "const connection = sqliteRuntime.open(databasePath);"
+    , "sqliteRuntime.database(connection).exec('drop table if exists notes;');"
+    , "sqliteRuntime.database(connection).exec('create table notes (value text not null);');"
+    , "sqliteRuntime.database(connection).exec(\"insert into notes(value) values ('alpha');\");"
+    , "const installed = sqliteRuntime.install();"
+    , "let committedTransaction = null;"
+    , "let nestedTransaction = null;"
+    , "const committed = sqliteRuntime.transaction(connection, { isolation: 'immediate' }, (tx) => {"
+    , "  committedTransaction = { kind: tx.kind, isolation: tx.isolation, boundary: tx.boundary, depth: tx.depth };"
+    , "  const inserted = compiledModule.saveNote(connection, 'insert into notes(value) values (:wanted) returning value as note', { wanted: 'beta' });"
+    , "  const nested = sqliteRuntime.transaction(connection, { isolation: 'exclusive' }, (nestedTx) => {"
+    , "    nestedTransaction = { kind: nestedTx.kind, isolation: nestedTx.isolation, boundary: nestedTx.boundary, depth: nestedTx.depth };"
+    , "    return compiledModule.rewriteNotes(connection, 'update notes set value = upper(value) where value = :wanted returning value as note', { wanted: 'beta' });"
+    , "  });"
+    , "  return { inserted, nested };"
+    , "});"
+    , "let rolledBack = null;"
+    , "try {"
+    , "  sqliteRuntime.transaction(connection, { isolation: 'immediate' }, () => {"
+    , "    compiledModule.saveNote(connection, 'insert into notes(value) values (:wanted) returning value as note', { wanted: 'gamma' });"
+    , "    throw new Error('rollback mutation');"
+    , "  });"
+    , "} catch (error) {"
+    , "  rolledBack = error.message;"
+    , "}"
+    , "const finalNotes = sqliteRuntime.queryAll(connection, 'select value as note from notes order by lower(value) desc').map((row) => row.note);"
+    , "sqliteRuntime.close(connection.id);"
+    , "console.log(JSON.stringify({"
+    , "  sqliteKind: sqliteContract.kind,"
+    , "  sqliteVersion: sqliteContract.version,"
+    , "  bindingNames: sqliteContract.bindings.map((binding) => binding.name),"
+    , "  runtimeNames: sqliteContract.bindings.map((binding) => binding.runtimeName),"
+    , "  operations: sqliteContract.bindings.map((binding) => binding.operation),"
+    , "  isolations: sqliteContract.bindings.map((binding) => binding.transaction?.isolation ?? null),"
+    , "  mutationKinds: sqliteContract.bindings.map((binding) => binding.mutation?.cardinality ?? null),"
+    , "  paramSemanticTypes: sqliteContract.bindings.map((binding) => binding.params[2].storageType.semanticType),"
+    , "  returnSemanticTypes: sqliteContract.bindings.map((binding) => binding.returns.storageType.semanticType),"
+    , "  runtimeInstalled: typeof installed['sqlite:mutateOne:immediate'] === 'function' && typeof installed['sqlite:mutateAll:exclusive'] === 'function',"
+    , "  insertedNote: committed.inserted.note,"
+    , "  replacedNotes: committed.nested,"
+    , "  committedTransaction,"
+    , "  nestedTransaction,"
+    , "  rolledBack,"
+    , "  finalNotes"
     , "}));"
     ]
 

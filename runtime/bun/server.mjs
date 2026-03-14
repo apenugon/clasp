@@ -635,17 +635,50 @@ function defaultSqliteBinding(binding) {
     return null;
   }
 
+  const params = Object.freeze(
+    (binding?.params ?? []).map((param) =>
+      Object.freeze({
+        ...param,
+        storageType: describeStorageType(param?.type, param?.schema)
+      })
+    )
+  );
+  const returns =
+    binding?.returns == null
+      ? null
+      : Object.freeze({
+          ...binding.returns,
+          storageType: describeStorageType(binding.returns?.type, binding.returns?.schema)
+        });
+
   return Object.freeze({
     name: binding?.name ?? descriptor.operation,
     runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`,
     operation: descriptor.operation,
+    transaction:
+      descriptor.transaction === null
+        ? null
+        : Object.freeze({
+            kind: "clasp-sqlite-transaction-boundary",
+            version: 1,
+            isolation: descriptor.transaction.isolation,
+            boundary: descriptor.transaction.boundary
+          }),
+    mutation:
+      descriptor.mutation === null
+        ? null
+        : Object.freeze({
+            kind: "clasp-sqlite-mutation",
+            version: 1,
+            cardinality: descriptor.mutation.cardinality
+          }),
     capability: Object.freeze({
       id: `capability:sqlite:${descriptor.operation}`,
       kind: "sqlite-connection-operation",
       runtimeName: binding?.runtimeName ?? `sqlite:${descriptor.operation}`
     }),
-    params: Object.freeze(binding?.params ?? []),
-    returns: binding?.returns ?? null
+    params,
+    returns
   });
 }
 
@@ -660,9 +693,25 @@ function parseSqliteRuntimeName(runtimeName) {
     return null;
   }
 
+  const operation = parts[1];
+  const isolation = normalizeSqliteIsolationLevel(parts[2]);
+
   return {
     namespace: "sqlite",
-    operation: parts.slice(1).join(":")
+    operation,
+    transaction:
+      operation === "mutateOne" || operation === "mutateAll"
+        ? {
+            isolation: isolation ?? "deferred",
+            boundary: "binding"
+          }
+        : null,
+    mutation:
+      operation === "mutateOne"
+        ? { cardinality: "one" }
+        : operation === "mutateAll"
+          ? { cardinality: "many" }
+          : null
   };
 }
 
@@ -719,6 +768,23 @@ export function createSqliteRuntime(compiledModule, options = {}) {
     queryAll(connectionOrId, sql, ...parameters) {
       return executeSqliteQuery("queryAll", connectionOrId, sql, parameters);
     },
+    mutateOne(connectionOrId, sql, ...parameters) {
+      return executeSqliteMutation("mutateOne", null, connectionOrId, sql, parameters);
+    },
+    mutateAll(connectionOrId, sql, ...parameters) {
+      return executeSqliteMutation("mutateAll", null, connectionOrId, sql, parameters);
+    },
+    executeMutation(operation, binding, connectionOrId, sql, parameters) {
+      return executeSqliteMutation(operation, binding, connectionOrId, sql, parameters);
+    },
+    transaction(connectionOrId, options, action) {
+      const transactionOptions = normalizeSqliteTransactionInvocation(options, action);
+      return withSqliteTransaction(
+        connectionOrId,
+        transactionOptions.options,
+        transactionOptions.action
+      );
+    },
     call(name, ...args) {
       const binding = this.binding(name);
       return invokeSqliteBinding(runtime, binding, args, runtimeOptions);
@@ -774,7 +840,12 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       readOnly,
       memory: normalizedPath === ":memory:"
     });
-    liveConnections.set(descriptor.id, { descriptor, database });
+    liveConnections.set(descriptor.id, {
+      descriptor,
+      database,
+      transactionDepth: 0,
+      nextSavepointId: 1
+    });
 
     try {
       applySqliteSchemaHooks(descriptor, database, runtimeOptions.schema);
@@ -886,6 +957,60 @@ export function createSqliteRuntime(compiledModule, options = {}) {
     return connection;
   }
 
+  function withSqliteTransaction(connectionOrId, options, action) {
+    if (typeof action !== "function") {
+      throw new Error("SQLite transactions require an action function.");
+    }
+
+    const connection = resolveSqliteConnection(connectionOrId);
+    const transactionOptions = normalizeSqliteTransactionOptions(options);
+    const depth = connection.transactionDepth;
+    const transactionId = `${connection.descriptor.id}:txn-${depth + 1}`;
+    const savepointName =
+      depth === 0 ? null : `clasp_txn_${connection.nextSavepointId++}`;
+
+    if (depth === 0) {
+      connection.database.exec(beginSqliteTransactionSql(transactionOptions.isolation));
+    } else {
+      connection.database.exec(`savepoint "${savepointName}";`);
+    }
+
+    connection.transactionDepth += 1;
+
+    try {
+      const descriptor = Object.freeze({
+        kind: "clasp-sqlite-transaction",
+        version: 1,
+        id: transactionId,
+        connection: connection.descriptor,
+        isolation: transactionOptions.isolation,
+        boundary: depth === 0 ? "connection" : "savepoint",
+        depth: depth + 1,
+        readOnly: connection.descriptor.readOnly
+      });
+      const result = action(descriptor);
+
+      if (depth === 0) {
+        connection.database.exec("commit;");
+      } else {
+        connection.database.exec(`release savepoint "${savepointName}";`);
+      }
+
+      return result;
+    } catch (error) {
+      if (depth === 0) {
+        connection.database.exec("rollback;");
+      } else {
+        connection.database.exec(`rollback to savepoint "${savepointName}";`);
+        connection.database.exec(`release savepoint "${savepointName}";`);
+      }
+
+      throw error;
+    } finally {
+      connection.transactionDepth = Math.max(connection.transactionDepth - 1, 0);
+    }
+  }
+
   function executeSqliteQuery(operation, connectionOrId, sql, parameters) {
     const connection = resolveSqliteConnection(connectionOrId);
     const statement = connection.database.prepare(normalizeSqliteQueryText(sql));
@@ -899,6 +1024,30 @@ export function createSqliteRuntime(compiledModule, options = {}) {
       default:
         throw new Error(`Unsupported Clasp sqlite query operation: ${operation}`);
     }
+  }
+
+  function executeSqliteMutation(operation, binding, connectionOrId, sql, parameters) {
+    const transaction = binding?.transaction ?? null;
+    return withSqliteTransaction(
+      connectionOrId,
+      {
+        isolation: transaction?.isolation ?? "deferred"
+      },
+      () => {
+        const connection = resolveSqliteConnection(connectionOrId);
+        const statement = connection.database.prepare(normalizeSqliteQueryText(sql));
+        const bindingArgs = parameters ?? [];
+
+        switch (operation) {
+          case "mutateOne":
+            return statement.get(...bindingArgs);
+          case "mutateAll":
+            return statement.all(...bindingArgs);
+          default:
+            throw new Error(`Unsupported Clasp sqlite mutation operation: ${operation}`);
+        }
+      }
+    );
   }
 }
 
@@ -1216,8 +1365,63 @@ function executeSqliteBinding(runtime, binding, args, runtimeOptions) {
       return runtime.queryOne(args[0], args[1], ...args.slice(2));
     case "queryAll":
       return runtime.queryAll(args[0], args[1], ...args.slice(2));
+    case "mutateOne":
+      return runtime.executeMutation("mutateOne", binding, args[0], args[1], args.slice(2));
+    case "mutateAll":
+      return runtime.executeMutation("mutateAll", binding, args[0], args[1], args.slice(2));
     default:
       throw new Error(`Unsupported Clasp sqlite operation: ${binding.operation}`);
+  }
+}
+
+function normalizeSqliteIsolationLevel(value) {
+  if (value === undefined) {
+    return null;
+  }
+
+  switch (value) {
+    case "deferred":
+    case "immediate":
+    case "exclusive":
+      return value;
+    default:
+      throw new Error(`Unsupported SQLite transaction isolation: ${String(value)}`);
+  }
+}
+
+function normalizeSqliteTransactionInvocation(options, action) {
+  if (typeof options === "function" && action === undefined) {
+    return {
+      options: {},
+      action: options
+    };
+  }
+
+  return {
+    options: options ?? {},
+    action
+  };
+}
+
+function normalizeSqliteTransactionOptions(options) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return Object.freeze({ isolation: "deferred" });
+  }
+
+  return Object.freeze({
+    isolation: normalizeSqliteIsolationLevel(options.isolation) ?? "deferred"
+  });
+}
+
+function beginSqliteTransactionSql(isolation) {
+  switch (isolation) {
+    case "immediate":
+      return "begin immediate transaction;";
+    case "exclusive":
+      return "begin exclusive transaction;";
+    case "deferred":
+    default:
+      return "begin deferred transaction;";
   }
 }
 

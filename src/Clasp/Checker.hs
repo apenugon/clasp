@@ -2031,6 +2031,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
         case foreignDeclType foreignDecl of
           TFunction _ _ -> do
             ensureStorageForeignDecl foreignDecl
+            ensureSqliteMutationForeignDecl foreignDecl
           _ ->
             Left . diagnosticBundle $
               [ diagnostic
@@ -2051,6 +2052,27 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           ensureStorageBoundaryType foreignDecl "return value" returnType
       | otherwise =
           pure ()
+
+    ensureSqliteMutationForeignDecl foreignDecl
+      | isSqliteMutationRuntimeName (foreignDeclRuntimeName foreignDecl) = do
+          let (paramTypes, returnType) = splitFunctionType (foreignDeclType foreignDecl)
+          zipWithM_
+            (\index paramType -> ensureSqliteMutationBoundaryType foreignDecl index paramType)
+            [(1 :: Int) ..]
+            paramTypes
+          ensureStorageBoundaryType foreignDecl "return value" returnType
+      | otherwise =
+          pure ()
+
+    ensureSqliteMutationBoundaryType foreignDecl index paramType
+      | index <= 2 =
+          pure ()
+      | otherwise =
+          ensureStorageBoundaryType foreignDecl ("parameter " <> T.pack (show index)) paramType
+
+    isSqliteMutationRuntimeName runtimeName =
+      "sqlite:mutateOne" `T.isPrefixOf` runtimeName
+        || "sqlite:mutateAll" `T.isPrefixOf` runtimeName
 
     ensureStorageBoundaryType foreignDecl role typ =
       case typ of
@@ -2073,13 +2095,17 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
           storageBoundaryTypeError foreignDecl role typ
 
     storageBoundaryTypeError foreignDecl role typ =
-      Left . diagnosticBundle $
+      let boundaryHint
+            | "storage:" `T.isPrefixOf` foreignDeclRuntimeName foreignDecl =
+                "Wrap storage-facing values in named record or enum schema types before exposing them through `storage:*` bindings."
+            | otherwise =
+                "Wrap SQLite mutation values in named record or enum schema types before exposing them through `sqlite:mutate*` bindings."
+       in Left . diagnosticBundle $
         [ diagnostic
             "E_STORAGE_BOUNDARY_TYPE"
-            ("Storage binding `" <> foreignDeclName foreignDecl <> "` must use shared semantic schema types for its " <> role <> ", not bare `" <> renderType typ <> "`.")
+            ("Storage-facing binding `" <> foreignDeclName foreignDecl <> "` must use shared semantic schema types for its " <> role <> ", not bare `" <> renderType typ <> "`.")
             (Just (foreignDeclAnnotationSpan foreignDecl))
-            [ "Wrap storage-facing values in named record or enum schema types before exposing them through `storage:*` bindings."
-            ]
+            [boundaryHint]
             [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
         ]
 
