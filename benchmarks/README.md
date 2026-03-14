@@ -49,6 +49,12 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-lead-rejection`: mirrored `TypeScript` trust-boundary rejection task
 - `benchmarks/tasks/clasp-external-adaptation`: `Clasp` external-objective adaptation task grounded in the lead outreach reply-rate signal
 - `benchmarks/tasks/ts-external-adaptation`: mirrored `TypeScript` external-objective adaptation baseline for the same bounded reply-rate remediation
+- `benchmarks/tasks/clasp-npm-interop`: compiler-managed `npm` and TypeScript package interop task
+- `benchmarks/tasks/ts-npm-interop`: mirrored handwritten JavaScript package-glue baseline
+- `benchmarks/tasks/clasp-python-interop`: compiler-managed Python worker and service interop task
+- `benchmarks/tasks/ts-python-interop`: mirrored handwritten JavaScript Python-glue baseline
+- `benchmarks/tasks/clasp-rust-interop`: compiler-managed Rust native interop metadata task
+- `benchmarks/tasks/ts-rust-interop`: mirrored handwritten JavaScript native-glue baseline
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
 
@@ -210,6 +216,13 @@ Run the mirrored repeated external-objective adaptation series for both language
 ```sh
 bash benchmarks/run-codex-series.sh external-adaptation 5 objective-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes objective-1
+```
+
+Run the mirrored repeated foreign-interop series for compiler-managed `npm`, `Python`, and `Rust` versus handwritten host glue:
+
+```sh
+bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-1
 ```
 
 Run the mirrored repeated series for Claude Code:

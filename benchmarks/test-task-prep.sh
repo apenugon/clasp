@@ -17,6 +17,12 @@ printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-external-adaptation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-external-adaptation[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-npm-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-npm-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-python-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-python-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-rust-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-rust-interop[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
@@ -183,6 +189,12 @@ check_incomplete_task py-agent-escalation
 check_incomplete_task clasp-durable-workflow
 check_incomplete_task clasp-external-adaptation
 check_incomplete_task ts-external-adaptation
+check_incomplete_task clasp-npm-interop
+check_incomplete_task ts-npm-interop
+check_incomplete_task clasp-python-interop
+check_incomplete_task ts-python-interop
+check_incomplete_task clasp-rust-interop
+check_incomplete_task ts-rust-interop
 check_incomplete_task clasp-compiler-maintenance
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
@@ -237,6 +249,36 @@ assert_contains "$durable_workspace/test/durable-workflow.test.mjs" 'import { ru
 assert_contains "$durable_workspace/demo.mjs" "overlapStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "autoRollbackStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "manualRollbackStatus: null"
+
+clasp_npm_workspace="$workspace_root/clasp-npm-interop"
+assert_file_exists "$clasp_npm_workspace/benchmark-prep/Main.context.json"
+assert_contains "$clasp_npm_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_contains "$clasp_npm_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.context.json`'
+assert_not_contains "$clasp_npm_workspace/Main.clasp" 'from npm "local-upper"'
+assert_not_contains "$clasp_npm_workspace/Main.clasp" 'from typescript "./support/formatLead.mjs"'
+
+ts_npm_workspace="$workspace_root/ts-npm-interop"
+assert_not_contains "$ts_npm_workspace/src/main.mjs" 'local-upper'
+assert_not_contains "$ts_npm_workspace/src/main.mjs" 'formatLead'
+
+clasp_python_workspace="$workspace_root/clasp-python-interop"
+assert_file_exists "$clasp_python_workspace/benchmark-prep/Main.context.json"
+assert_contains "$clasp_python_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_not_contains "$clasp_python_workspace/Main.clasp" 'hook workerStart'
+assert_not_contains "$clasp_python_workspace/Main.clasp" 'route summarizeRoute'
+
+ts_python_workspace="$workspace_root/ts-python-interop"
+assert_contains "$ts_python_workspace/test/python-interop.test.mjs" 'runPythonInteropDemo'
+assert_not_contains "$ts_python_workspace/src/main.mjs" 'spawn('
+
+clasp_rust_workspace="$workspace_root/clasp-rust-interop"
+assert_file_exists "$clasp_rust_workspace/benchmark-prep/Main.context.json"
+assert_contains "$clasp_rust_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_not_contains "$clasp_rust_workspace/Main.clasp" 'foreign mockLeadSummaryModel'
+
+ts_rust_workspace="$workspace_root/ts-rust-interop"
+assert_contains "$ts_rust_workspace/test/rust-interop.test.mjs" 'resolveLeadSummaryNativePlan'
+assert_not_contains "$ts_rust_workspace/src/nativeInterop.mjs" 'lead_summary_bridge'
 
 compiler_maintenance_workspace="$workspace_root/clasp-compiler-maintenance"
 assert_file_exists "$compiler_maintenance_workspace/benchmark-prep/Main.context.json"

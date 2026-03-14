@@ -1,0 +1,11 @@
+{
+  "id": "clasp-rust-interop",
+  "title": "Restore compiler-managed Rust native interop metadata in Clasp",
+  "suite": "foreign-package-interop",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

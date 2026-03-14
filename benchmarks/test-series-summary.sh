@@ -107,6 +107,18 @@ write_result "2026-03-01T10-12-15.000Z--clasp-syntax-verbose--codex.json" "clasp
 write_result "2026-03-01T10-12-20.000Z--clasp-syntax-verbose--codex.json" "clasp-syntax-verbose" "clasp" "codex" "gpt-5.4" "syntax-a-2" "2026-03-01T10:12:20.000Z" 110 130 118 true 0
 write_result "2026-03-01T10-12-25.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "compiler-a-1" "2026-03-01T10:12:25.000Z" 260 180 150 false 1
 write_result "2026-03-01T10-12-26.000Z--clasp-compiler-maintenance--codex.json" "clasp-compiler-maintenance" "clasp" "codex" "gpt-5.4" "compiler-a-2" "2026-03-01T10:12:26.000Z" 220 170 140 true 0
+write_result "2026-03-01T10-12-31.000Z--clasp-npm-interop--codex.json" "clasp-npm-interop" "clasp" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:31.000Z" 70 95 88 true 0
+write_result "2026-03-01T10-12-32.000Z--clasp-npm-interop--codex.json" "clasp-npm-interop" "clasp" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:32.000Z" 80 100 92 true 0
+write_result "2026-03-01T10-12-33.000Z--ts-npm-interop--codex.json" "ts-npm-interop" "typescript" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:33.000Z" 100 130 120 false 1
+write_result "2026-03-01T10-12-34.000Z--ts-npm-interop--codex.json" "ts-npm-interop" "typescript" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:34.000Z" 110 140 126 true 0
+write_result "2026-03-01T10-12-35.000Z--clasp-python-interop--codex.json" "clasp-python-interop" "clasp" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:35.000Z" 120 150 135 false 1
+write_result "2026-03-01T10-12-36.000Z--clasp-python-interop--codex.json" "clasp-python-interop" "clasp" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:36.000Z" 90 140 125 true 0
+write_result "2026-03-01T10-12-37.000Z--ts-python-interop--codex.json" "ts-python-interop" "typescript" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:37.000Z" 160 200 180 false 1
+write_result "2026-03-01T10-12-38.000Z--ts-python-interop--codex.json" "ts-python-interop" "typescript" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:38.000Z" 180 210 190 true 0
+write_result "2026-03-01T10-12-39.000Z--clasp-rust-interop--codex.json" "clasp-rust-interop" "clasp" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:39.000Z" 75 115 105 true 0
+write_result "2026-03-01T10-12-40.000Z--clasp-rust-interop--codex.json" "clasp-rust-interop" "clasp" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:40.000Z" 85 120 110 true 0
+write_result "2026-03-01T10-12-41.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:41.000Z" 140 170 155 true 0
+write_result "2026-03-01T10-12-42.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:42.000Z" 150 180 165 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -236,6 +248,33 @@ printf '%s\n' "$compiler_summary_output" | grep -Fq '  timeToGreenMs: 480'
 printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianDurationMs: 240'
 printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianTokens: 175'
 printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianUncachedTokens: 145'
+
+interop_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes interop-a)"
+printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-npm-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-npm-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-python-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-python-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-rust-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-rust-interop\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_summary_output" | grep -Fq 'npm-interop-comparison'
+printf '%s\n' "$interop_summary_output" | grep -Fq 'python-interop-comparison'
+printf '%s\n' "$interop_summary_output" | grep -Fq 'rust-interop-comparison'
+printf '%s\n' "$interop_summary_output" | grep -Fq $'  codex\tgpt-5.4\tinterop-a'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -140'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -37'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -33'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 50%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -130'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -60'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -55'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 100%'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -65'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -57'
+printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -52'
 
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
 printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'

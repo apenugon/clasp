@@ -48,6 +48,27 @@ const comparisonTaskFamilies = [
     rightLabel: "ts"
   },
   {
+    comparisonLabel: "npm-interop-comparison",
+    leftTaskId: "clasp-npm-interop",
+    rightTaskId: "ts-npm-interop",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "python-interop-comparison",
+    leftTaskId: "clasp-python-interop",
+    rightTaskId: "ts-python-interop",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "rust-interop-comparison",
+    leftTaskId: "clasp-rust-interop",
+    rightTaskId: "ts-rust-interop",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
     comparisonLabel: "syntax-form-comparison",
     leftTaskId: "clasp-syntax-compact",
     rightTaskId: "clasp-syntax-verbose",
