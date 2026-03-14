@@ -90,6 +90,68 @@
       },
       "additionalProperties": false
     },
+    "protocol": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1 },
+        "mode": {
+          "type": "string",
+          "enum": ["raw-repo", "file-hinted", "oracle"]
+        },
+        "promptFile": { "type": "string" },
+        "repeatedSamples": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "sampleIndex": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "runOrderPosition": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "randomizedOrderSeed": {
+          "type": ["string", "null"]
+        },
+        "bundle": {
+          "type": ["object", "null"],
+          "properties": {
+            "id": { "type": "string" },
+            "manifestFile": { "type": "string" },
+            "sha256": { "type": "string" }
+          },
+          "required": ["id", "manifestFile", "sha256"],
+          "additionalProperties": false
+        },
+        "timingWindow": {
+          "type": "object",
+          "properties": {
+            "startedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "finishedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": ["startedAt", "finishedAt"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "phases": {
+      "type": ["object", "null"],
+      "properties": {
+        "discoveryMs": { "type": "integer", "minimum": 0 },
+        "firstEditMs": { "type": "integer", "minimum": 0 },
+        "firstVerifyMs": { "type": "integer", "minimum": 0 },
+        "timeToGreenMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "verification": {
       "type": "object",
       "required": [

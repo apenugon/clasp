@@ -152,6 +152,8 @@ Summarize recorded runs by task, harness, model, and repeated-run series:
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
 ```
 
+When result files include `benchmark-phases.json`, the summary also reports median discovery, first-edit, first-verify, and phase-local time-to-green timings. Summaries and mirrored comparisons stay split by benchmark mode so `Raw Repo`, `File-Hinted`, and `Oracle` remain separate scorecards.
+
 Package a filtered result set into a reproducible benchmark bundle:
 
 ```sh
@@ -164,12 +166,26 @@ node benchmarks/run-benchmark.mjs package \
 
 The package command writes a stable `tar.gz` archive with the selected result JSON files, the referenced task snapshots, the benchmark runner and harness wrappers, `AGENTS.md`, and a `benchmarks/package-manifest.json` manifest that records the included file digests plus the exact result filters used to build the bundle.
 
+Freeze a publication-grade fairness bundle before running repeated samples:
+
+```sh
+node benchmarks/run-benchmark.mjs freeze lead-segment \
+  --count 5 \
+  --harness codex \
+  --model gpt-5.4 \
+  --mode raw-repo \
+  --notes remediation-1 \
+  --output benchmarks/bundles/remediation-1--codex--gpt-5.4--raw-repo.json
+```
+
+The freeze manifest records the selected task set, benchmark mode, repeated-sample count, deterministic randomized run order for each sample, and file digests for the frozen task bundle. `run-codex-series.sh` and `run-claude-series.sh` generate this manifest automatically and record its digest in each result record.
+
 When notes end in `-<run-number>`, the summary report treats the shared prefix as a series label. For the mirrored `lead-segment` pair it also prints a comparative section with pass-rate, time-to-green, and token deltas between `Clasp` and `TypeScript`.
 
 Run a repeated Codex sample set with a consistent harness wrapper:
 
 ```sh
-bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4
+bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4 raw-repo
 ```
 
 Run the mirrored repeated control-plane containment pair:

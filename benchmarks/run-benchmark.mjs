@@ -11,6 +11,70 @@ import { pathToFileURL } from "node:url";
 const benchmarkRoot = path.resolve("benchmarks");
 const tasksRoot = path.join(benchmarkRoot, "tasks");
 const resultsRoot = path.join(benchmarkRoot, "results");
+const benchmarkModes = new Set(["raw-repo", "file-hinted", "oracle"]);
+const taskSetAliases = {
+  app: [
+    "clasp-lead-priority",
+    "ts-lead-priority",
+    "clasp-lead-rejection",
+    "ts-lead-rejection",
+    "clasp-lead-segment",
+    "ts-lead-segment",
+    "clasp-external-adaptation",
+    "ts-external-adaptation"
+  ],
+  "control-plane": [
+    "clasp-control-plane",
+    "ts-control-plane"
+  ],
+  "lead-priority": [
+    "clasp-lead-priority",
+    "ts-lead-priority"
+  ],
+  "lead-rejection": [
+    "clasp-lead-rejection",
+    "ts-lead-rejection"
+  ],
+  "lead-segment": [
+    "clasp-lead-segment",
+    "ts-lead-segment"
+  ],
+  "external-adaptation": [
+    "clasp-external-adaptation",
+    "ts-external-adaptation"
+  ],
+  "foreign-interop": [
+    "clasp-npm-interop",
+    "ts-npm-interop",
+    "clasp-python-interop",
+    "ts-python-interop",
+    "clasp-rust-interop",
+    "ts-rust-interop"
+  ],
+  "interop-boundary": [
+    "clasp-interop-boundary",
+    "ts-interop-boundary"
+  ],
+  "npm-interop": [
+    "clasp-npm-interop",
+    "ts-npm-interop"
+  ],
+  "python-interop": [
+    "clasp-python-interop",
+    "ts-python-interop"
+  ],
+  "rust-interop": [
+    "clasp-rust-interop",
+    "ts-rust-interop"
+  ],
+  "compiler-maintenance": [
+    "clasp-compiler-maintenance"
+  ],
+  "syntax-form": [
+    "clasp-syntax-compact",
+    "clasp-syntax-verbose"
+  ]
+};
 const comparisonTaskFamilies = [
   {
     comparisonLabel: "control-plane-comparison",
@@ -117,6 +181,9 @@ async function main() {
     case "prepare":
       await prepareCommand(maybeTaskId, rest);
       break;
+    case "freeze":
+      await freezeCommand(maybeTaskId, rest);
+      break;
     case "verify":
       await verifyCommand(maybeTaskId, rest);
       break;
@@ -150,12 +217,61 @@ async function prepareCommand(taskId, args) {
   const task = await loadTask(taskId);
   const options = parseOptions(args);
   const workspace = resolveWorkspace(task.id, options.workspace);
+  const promptPath = await resolvePromptPath(task, options.mode);
 
   await prepareWorkspace(task, workspace, benchmarkEnv(task, workspace));
 
   console.log(`Prepared ${task.id}`);
   console.log(`Workspace: ${workspace}`);
-  console.log(`Prompt: ${path.join(task.dir, task.prompt)}`);
+  console.log(`Prompt: ${promptPath}`);
+  console.log(`Mode: ${normalizeBenchmarkMode(options.mode)}`);
+}
+
+async function freezeCommand(taskSelection, args) {
+  const options = parseOptions(args);
+  if (!options.output) {
+    throw new Error("freeze requires --output");
+  }
+
+  const taskIds = resolveTaskSelection(taskSelection);
+  const tasks = [];
+  for (const taskId of taskIds) {
+    tasks.push(await loadTask(taskId));
+  }
+
+  const sampleCount = parsePositiveNumber(options.count ?? options.sampleCount ?? "1", "sample count");
+  const mode = normalizeBenchmarkMode(options.mode);
+  const harness = options.harness ?? "unspecified";
+  const model = options.model ?? "unspecified";
+  const seriesLabel = options.notes ?? options.notePrefix ?? taskSelection ?? taskIds.join("-");
+  const seed = options.seed ?? `${seriesLabel}:${harness}:${model}:${mode}:${taskIds.join(",")}`;
+  const samples = taskIds.length === 0
+    ? []
+    : Array.from({ length: sampleCount }, (_, index) => buildFrozenSample(taskIds, index + 1, seed));
+  const files = await collectFrozenBundleFiles(tasks, mode);
+  const manifest = {
+    schemaVersion: 1,
+    bundleType: "clasp-benchmark-fairness-bundle",
+    bundleId: createStableId(`${seriesLabel}:${harness}:${model}:${mode}`),
+    taskSelection: taskSelection ?? taskIds[0] ?? "",
+    taskIds,
+    harness,
+    model,
+    mode,
+    sampleCount,
+    seriesLabel,
+    seed,
+    samples,
+    files
+  };
+  const outputPath = path.resolve(options.output);
+
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+
+  console.log(`Frozen ${taskIds.length} tasks`);
+  console.log(`Samples: ${sampleCount}`);
+  console.log(`Bundle: ${outputPath}`);
 }
 
 async function verifyCommand(taskId, args) {
@@ -168,7 +284,8 @@ async function verifyCommand(taskId, args) {
   const verification = await runProcess(task.verify, workspace, env);
   const finishedAt = new Date();
   const usage = await resolveTokenUsage(options, workspace);
-  const result = buildResult(task, options, startedAt, finishedAt, verification, usage);
+  const phases = await resolvePhaseSummary(options, workspace, startedAt, finishedAt, verification);
+  const result = await buildResult(task, options, startedAt, finishedAt, verification, usage, phases);
   const resultPath = await writeResult(result);
 
   console.log(`Verification ${verification.exitCode === 0 ? "passed" : "failed"} for ${task.id}`);
@@ -191,7 +308,7 @@ async function runCommand(taskId, args) {
     throw new Error("run requires --agent-command");
   }
 
-  const promptPath = path.join(task.dir, task.prompt);
+  const promptPath = await resolvePromptPath(task, options.mode);
   const startedAt = new Date();
   await runShellCommand(options.agentCommand, workspace, {
     ...env,
@@ -200,7 +317,8 @@ async function runCommand(taskId, args) {
   const verification = await runProcess(task.verify, workspace, env);
   const finishedAt = new Date();
   const usage = await resolveTokenUsage(options, workspace);
-  const result = buildResult(task, options, startedAt, finishedAt, verification, usage);
+  const phases = await resolvePhaseSummary(options, workspace, startedAt, finishedAt, verification);
+  const result = await buildResult(task, options, startedAt, finishedAt, verification, usage, phases);
   const resultPath = await writeResult(result);
 
   console.log(`Completed run for ${task.id}`);
@@ -519,6 +637,55 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
+function resolveTaskSelection(taskSelection) {
+  if (!taskSelection) {
+    throw new Error("task id or task-set alias is required");
+  }
+
+  return taskSetAliases[taskSelection] ?? [taskSelection];
+}
+
+function normalizeBenchmarkMode(mode) {
+  if (!mode) {
+    return "raw-repo";
+  }
+
+  if (!benchmarkModes.has(mode)) {
+    throw new Error(`unsupported benchmark mode: ${mode}`);
+  }
+
+  return mode;
+}
+
+async function resolvePromptPath(task, requestedMode) {
+  const mode = normalizeBenchmarkMode(requestedMode);
+  const taskPromptPath = path.join(task.dir, task.prompt);
+  const promptDir = path.dirname(taskPromptPath);
+  const promptBase = path.basename(taskPromptPath, path.extname(taskPromptPath));
+  const promptExt = path.extname(taskPromptPath);
+  const candidates = [];
+
+  if (mode === "raw-repo") {
+    candidates.push(path.join(promptDir, `${promptBase}.raw${promptExt}`));
+  }
+  if (mode === "file-hinted") {
+    candidates.push(path.join(promptDir, `${promptBase}.file-hinted${promptExt}`));
+  }
+  if (mode === "oracle") {
+    candidates.push(path.join(promptDir, `${promptBase}.oracle${promptExt}`));
+  }
+
+  candidates.push(taskPromptPath);
+
+  for (const candidate of candidates) {
+    if (candidate === taskPromptPath || await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  return taskPromptPath;
+}
+
 async function summarizeCommand(args) {
   const options = parseOptions(args);
   const results = await loadResults();
@@ -530,14 +697,18 @@ async function summarizeCommand(args) {
 
   const grouped = groupBy(filtered, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
-    return [result.taskId, result.harness, result.model, series].join("\t");
+    const mode = result.protocol?.mode ?? "";
+    return [result.taskId, result.harness, result.model, mode, series].join("\t");
   });
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [taskId, harness, model, series] = groupKey.split("\t");
+    const [taskId, harness, model, mode, series] = groupKey.split("\t");
     const summary = summarizeGroup(groupResults);
 
     console.log(`${taskId}\t${harness}\t${model}`);
+    if (mode) {
+      console.log(`  mode: ${mode}`);
+    }
     if (series) {
       console.log(`  series: ${series}`);
     }
@@ -547,6 +718,18 @@ async function summarizeCommand(args) {
     console.log(`  medianDurationMs: ${summary.medianDurationMs}`);
     console.log(`  medianTokens: ${summary.medianTokens}`);
     console.log(`  medianUncachedTokens: ${summary.medianUncachedTokens}`);
+    if (summary.medianDiscoveryMs !== "n/a") {
+      console.log(`  medianDiscoveryMs: ${summary.medianDiscoveryMs}`);
+    }
+    if (summary.medianFirstEditMs !== "n/a") {
+      console.log(`  medianFirstEditMs: ${summary.medianFirstEditMs}`);
+    }
+    if (summary.medianFirstVerifyMs !== "n/a") {
+      console.log(`  medianFirstVerifyMs: ${summary.medianFirstVerifyMs}`);
+    }
+    if (summary.medianPhaseTimeToGreenMs !== "n/a") {
+      console.log(`  medianPhaseTimeToGreenMs: ${summary.medianPhaseTimeToGreenMs}`);
+    }
   }
 
   const comparisonSections = buildTaskFamilyComparisons(filtered);
@@ -557,6 +740,7 @@ async function summarizeCommand(args) {
       console.log(
         `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
       );
+      console.log(`    mode: ${comparison.mode}`);
       console.log(
         `    ${buildComparisonMetricKey(comparison.leftLabel, "PassRate")}: ${comparison.left.passRate}`
       );
@@ -592,6 +776,7 @@ async function summarizeCommand(args) {
       console.log(
         `  ${comparison.harness}\t${comparison.model}\t${comparison.series}`
       );
+      console.log(`    mode: ${comparison.mode}`);
       console.log(`    taskPairs: ${comparison.taskPairs}`);
       console.log(
         `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
@@ -685,6 +870,10 @@ function summarizeGroup(groupResults) {
   const uncached = ordered.map(
     (result) => result.harnessUsage?.uncachedTotal ?? result.tokenUsage.total
   );
+  const discovery = numericPhaseValues(ordered, "discoveryMs");
+  const firstEdit = numericPhaseValues(ordered, "firstEditMs");
+  const firstVerify = numericPhaseValues(ordered, "firstVerifyMs");
+  const phaseTimeToGreen = numericPhaseValues(ordered, "timeToGreenMs");
   const firstGreenIndex = ordered.findIndex((result) => result.verification.passed);
   const timeToGreenMs = firstGreenIndex === -1
     ? "n/a"
@@ -700,7 +889,11 @@ function summarizeGroup(groupResults) {
     timeToGreenMs,
     medianDurationMs: median(durations),
     medianTokens: median(totals),
-    medianUncachedTokens: median(uncached)
+    medianUncachedTokens: median(uncached),
+    medianDiscoveryMs: discovery.length > 0 ? median(discovery) : "n/a",
+    medianFirstEditMs: firstEdit.length > 0 ? median(firstEdit) : "n/a",
+    medianFirstVerifyMs: firstVerify.length > 0 ? median(firstVerify) : "n/a",
+    medianPhaseTimeToGreenMs: phaseTimeToGreen.length > 0 ? median(phaseTimeToGreen) : "n/a"
   };
 }
 
@@ -720,12 +913,13 @@ function buildPublicAppComparisons(results) {
   const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
-    return [result.harness, result.model, series].join("\t");
+    const mode = result.protocol?.mode ?? "";
+    return [result.harness, result.model, mode, series].join("\t");
   });
   const comparisons = [];
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [harness, model, series] = groupKey.split("\t");
+    const [harness, model, mode, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
     const leftTaskSummaries = [];
     const rightTaskSummaries = [];
@@ -753,6 +947,7 @@ function buildPublicAppComparisons(results) {
     comparisons.push({
       harness,
       model,
+      mode: mode || "(unspecified)",
       series: series || "(all-runs)",
       taskPairs: publicAppBenchmark.taskPairs.length,
       leftLabel: publicAppBenchmark.leftLabel,
@@ -781,8 +976,8 @@ function buildPublicAppComparisons(results) {
   }
 
   return comparisons.sort((left, right) =>
-    [left.harness, left.model, left.series].join("\t").localeCompare(
-      [right.harness, right.model, right.series].join("\t")
+    [left.harness, left.model, left.mode, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.mode, right.series].join("\t")
     )
   );
 }
@@ -819,12 +1014,13 @@ function buildTaskComparisons(results, family) {
   const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
     const series = parseSeriesRun(result.notes).series ?? "";
-    return [result.harness, result.model, series].join("\t");
+    const mode = result.protocol?.mode ?? "";
+    return [result.harness, result.model, mode, series].join("\t");
   });
   const comparisons = [];
 
   for (const [groupKey, groupResults] of grouped.entries()) {
-    const [harness, model, series] = groupKey.split("\t");
+    const [harness, model, mode, series] = groupKey.split("\t");
     const byTask = groupBy(groupResults, (result) => result.taskId);
     const leftResults = byTask.get(family.leftTaskId);
     const rightResults = byTask.get(family.rightTaskId);
@@ -838,6 +1034,7 @@ function buildTaskComparisons(results, family) {
     comparisons.push({
       harness,
       model,
+      mode: mode || "(unspecified)",
       series: series || "(all-runs)",
       leftLabel: family.leftLabel,
       rightLabel: family.rightLabel,
@@ -855,8 +1052,8 @@ function buildTaskComparisons(results, family) {
   }
 
   return comparisons.sort((left, right) =>
-    [left.harness, left.model, left.series].join("\t").localeCompare(
-      [right.harness, right.model, right.series].join("\t")
+    [left.harness, left.model, left.mode, left.series].join("\t").localeCompare(
+      [right.harness, right.model, right.mode, right.series].join("\t")
     )
   );
 }
@@ -865,7 +1062,7 @@ function buildComparisonMetricKey(label, suffix) {
   return `${label}${suffix}`;
 }
 
-function buildResult(task, options, startedAt, finishedAt, verification, usage) {
+async function buildResult(task, options, startedAt, finishedAt, verification, usage, phases) {
   const prompt = usage?.prompt ?? parseNumber(options.promptTokens);
   const completion = usage?.completion ?? parseNumber(options.completionTokens);
   const retry = usage?.retry ?? parseNumber(options.retryTokens);
@@ -877,6 +1074,7 @@ function buildResult(task, options, startedAt, finishedAt, verification, usage) 
     debug,
     total: prompt + completion + retry + debug
   };
+  const protocol = await buildProtocolMetadata(task, options, startedAt, finishedAt);
 
   return {
     taskId: task.id,
@@ -891,6 +1089,8 @@ function buildResult(task, options, startedAt, finishedAt, verification, usage) 
     notes: options.notes ?? "",
     tokenUsage,
     harnessUsage: usage?.harnessUsage,
+    protocol,
+    phases,
     verification: {
       passed: verification.exitCode === 0,
       command: task.verify,
@@ -1001,6 +1201,49 @@ function parseOptions(args) {
   return options;
 }
 
+async function buildProtocolMetadata(task, options, startedAt, finishedAt) {
+  const mode = normalizeBenchmarkMode(options.mode);
+  const promptPath = await resolvePromptPath(task, mode);
+  const promptRelativePath = path.relative(path.resolve("."), promptPath);
+  const bundleManifestPath = options.bundleManifest ? path.resolve(options.bundleManifest) : null;
+  const bundleManifest = bundleManifestPath && await fileExists(bundleManifestPath)
+    ? JSON.parse(await readFile(bundleManifestPath, "utf8"))
+    : null;
+  const seriesRun = parseSeriesRun(options.notes);
+  const sampleIndex = parseOptionalPositiveNumber(options.sampleIndex ?? seriesRun.runNumber);
+  const sampleCount = parseOptionalPositiveNumber(options.sampleCount ?? bundleManifest?.sampleCount);
+  const sample = bundleManifest && sampleIndex !== null
+    ? bundleManifest.samples?.find((entry) => entry.sampleIndex === sampleIndex) ?? null
+    : null;
+  const orderIndex = sample
+    ? sample.runOrder.findIndex((entry) => entry.taskId === task.id)
+    : -1;
+  const bundleDigest = bundleManifestPath && await fileExists(bundleManifestPath)
+    ? await sha256File(bundleManifestPath)
+    : null;
+
+  return {
+    schemaVersion: 1,
+    mode,
+    promptFile: promptRelativePath,
+    repeatedSamples: sampleCount,
+    sampleIndex,
+    runOrderPosition: orderIndex >= 0 ? orderIndex + 1 : null,
+    randomizedOrderSeed: sample?.seed ?? bundleManifest?.seed ?? null,
+    bundle: bundleManifest
+      ? {
+        id: bundleManifest.bundleId,
+        manifestFile: path.relative(path.resolve("."), bundleManifestPath),
+        sha256: bundleDigest
+      }
+      : null,
+    timingWindow: {
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString()
+    }
+  };
+}
+
 async function resolveTokenUsage(options, workspace) {
   if (hasAnyTokenOption(options)) {
     return {
@@ -1051,6 +1294,24 @@ function parseNumber(value) {
   return parsed;
 }
 
+function parsePositiveNumber(value, label) {
+  const parsed = parseNumber(value);
+  if (parsed <= 0) {
+    throw new Error(`${label} must be greater than zero`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalPositiveNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = parseNumber(String(value));
+  return parsed > 0 ? parsed : null;
+}
+
 function hasAnyTokenOption(options) {
   return (
     options.promptTokens ||
@@ -1058,6 +1319,35 @@ function hasAnyTokenOption(options) {
     options.retryTokens ||
     options.debugTokens
   );
+}
+
+async function resolvePhaseSummary(options, workspace, startedAt, finishedAt, verification) {
+  const phaseFile = options.phaseFile
+    ? path.resolve(options.phaseFile)
+    : path.join(workspace, "benchmark-phases.json");
+
+  if (!(await fileExists(phaseFile))) {
+    return verification.exitCode === 0
+      ? { timeToGreenMs: finishedAt.getTime() - startedAt.getTime() }
+      : null;
+  }
+
+  const raw = JSON.parse(await readFile(phaseFile, "utf8"));
+  const phases = raw.phases ?? raw;
+  const summary = {};
+
+  for (const key of ["discoveryMs", "firstEditMs", "firstVerifyMs", "timeToGreenMs"]) {
+    const value = phases[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      summary[key] = Math.round(value);
+    }
+  }
+
+  if (summary.timeToGreenMs === undefined && verification.exitCode === 0) {
+    summary.timeToGreenMs = finishedAt.getTime() - startedAt.getTime();
+  }
+
+  return Object.keys(summary).length > 0 ? summary : null;
 }
 
 async function readCodexUsage(agentLogFile) {
@@ -1166,6 +1456,10 @@ function matchesSummaryFilter(result, options) {
     return false;
   }
 
+  if (options.mode && result.protocol?.mode !== options.mode) {
+    return false;
+  }
+
   if (options.notes && !String(result.notes ?? "").includes(options.notes)) {
     return false;
   }
@@ -1203,6 +1497,12 @@ function parseSeriesRun(notes) {
   };
 }
 
+function numericPhaseValues(results, key) {
+  return results
+    .map((result) => result.phases?.[key])
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+}
+
 function compareRunOrder(left, right) {
   const leftSeries = parseSeriesRun(left.notes);
   const rightSeries = parseSeriesRun(right.notes);
@@ -1212,6 +1512,37 @@ function compareRunOrder(left, right) {
   }
 
   return left.finishedAt.localeCompare(right.finishedAt);
+}
+
+function createStableId(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 16);
+}
+
+function seededOrder(taskIds, seed) {
+  const tagged = taskIds.map((taskId) => ({
+    taskId,
+    orderKey: createStableId(`${seed}:${taskId}`)
+  }));
+
+  tagged.sort((left, right) =>
+    left.orderKey.localeCompare(right.orderKey) || left.taskId.localeCompare(right.taskId)
+  );
+
+  return tagged.map((entry) => entry.taskId);
+}
+
+function buildFrozenSample(taskIds, sampleIndex, seriesSeed) {
+  const seed = `${seriesSeed}:sample:${sampleIndex}`;
+  const orderedTaskIds = seededOrder(taskIds, seed);
+
+  return {
+    sampleIndex,
+    seed,
+    runOrder: orderedTaskIds.map((taskId, index) => ({
+      position: index + 1,
+      taskId
+    }))
+  };
 }
 
 function median(values) {
@@ -1288,18 +1619,21 @@ async function runShellCommand(command, cwd, env) {
 function usage() {
   console.error("usage:");
   console.error("  node benchmarks/run-benchmark.mjs list");
-  console.error("  node benchmarks/run-benchmark.mjs prepare <task-id> [--workspace path]");
-  console.error("  node benchmarks/run-benchmark.mjs verify <task-id> --workspace path [--harness name --model name --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text]");
-  console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text]");
+  console.error("  node benchmarks/run-benchmark.mjs prepare <task-id> [--workspace path --mode raw-repo|file-hinted|oracle]");
+  console.error("  node benchmarks/run-benchmark.mjs freeze <task-id|alias> --count n --output path [--harness name --model name --mode raw-repo|file-hinted|oracle --notes text --seed text]");
+  console.error("  node benchmarks/run-benchmark.mjs verify <task-id> --workspace path [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
+  console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
   console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
 }
 
 async function copyPackageFiles(bundleRoot, results, tasks) {
   const benchmarkDir = path.join(bundleRoot, "benchmarks");
+  const bundlesDir = path.join(benchmarkDir, "bundles");
   const resultsDir = path.join(benchmarkDir, "results");
   const tasksDir = path.join(benchmarkDir, "tasks");
 
+  await mkdir(bundlesDir, { recursive: true });
   await mkdir(resultsDir, { recursive: true });
   await mkdir(tasksDir, { recursive: true });
 
@@ -1346,6 +1680,20 @@ async function copyPackageFiles(bundleRoot, results, tasks) {
     );
   }
 
+  const bundleManifests = [...new Set(
+    results
+      .map((result) => result.protocol?.bundle?.manifestFile)
+      .filter((value) => typeof value === "string" && value.length > 0)
+  )];
+
+  for (const relativeBundlePath of bundleManifests) {
+    const sourcePath = path.resolve(relativeBundlePath);
+    if (!(await fileExists(sourcePath))) {
+      continue;
+    }
+    await cp(sourcePath, path.join(bundleRoot, relativeBundlePath));
+  }
+
   for (const task of tasks) {
     await cp(task.dir, path.join(tasksDir, task.id), {
       recursive: true,
@@ -1356,6 +1704,7 @@ async function copyPackageFiles(bundleRoot, results, tasks) {
 
 async function buildPackageManifest(bundleRoot, results, tasks, options) {
   const files = await collectPackageFileRecords(bundleRoot);
+  const publicationProtocol = buildPublicationProtocolSummary(results);
 
   return {
     schemaVersion: 1,
@@ -1388,13 +1737,35 @@ async function buildPackageManifest(bundleRoot, results, tasks, options) {
       tarOptions: ["--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0"],
       gzipOptions: ["-n"]
     },
+    publicationProtocol,
     files
+  };
+}
+
+function buildPublicationProtocolSummary(results) {
+  const modes = [...new Set(results.map((result) => result.protocol?.mode).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+  const repeatedSamples = results.reduce((max, result) =>
+    Math.max(max, result.protocol?.repeatedSamples ?? 0), 0);
+  const bundleManifests = [...new Set(
+    results
+      .map((result) => result.protocol?.bundle?.manifestFile)
+      .filter((value) => typeof value === "string" && value.length > 0)
+  )].sort((left, right) => left.localeCompare(right));
+  const hasPhases = results.some((result) => result.phases && Object.keys(result.phases).length > 0);
+
+  return {
+    frozenBundles: bundleManifests,
+    randomizedRunOrder: bundleManifests.length > 0,
+    repeatedSamples,
+    modes,
+    phaseDecomposition: hasPhases
   };
 }
 
 function packageFilters(options) {
   const filters = {};
-  const keys = ["taskId", "harness", "model", "language", "notes"];
+  const keys = ["taskId", "harness", "model", "language", "mode", "notes"];
 
   for (const key of keys) {
     if (options[key]) {
@@ -1422,6 +1793,44 @@ async function collectPackageFileRecords(rootDir) {
   return records;
 }
 
+async function collectFrozenBundleFiles(tasks, mode) {
+  const rootDir = path.resolve(".");
+  const records = [];
+  const staticFiles = [
+    path.resolve("AGENTS.md"),
+    path.join(benchmarkRoot, "README.md"),
+    path.join(benchmarkRoot, "result-schema.json"),
+    path.join(benchmarkRoot, "run-benchmark.mjs"),
+    path.join(benchmarkRoot, "run-codex-harness.sh"),
+    path.join(benchmarkRoot, "run-claude-harness.sh"),
+    path.join(benchmarkRoot, "run-codex-series.sh"),
+    path.join(benchmarkRoot, "run-claude-series.sh")
+  ];
+
+  for (const filePath of staticFiles) {
+    if (await fileExists(filePath)) {
+      records.push(await buildFileRecord(rootDir, filePath));
+    }
+  }
+
+  for (const task of tasks) {
+    const taskFiles = await collectFiles(task.dir);
+    for (const relativePath of taskFiles) {
+      const absolutePath = path.join(task.dir, relativePath);
+      records.push(await buildFileRecord(rootDir, absolutePath));
+    }
+
+    const promptPath = await resolvePromptPath(task, mode);
+    const promptRecordPath = path.relative(rootDir, promptPath);
+    if (!records.some((record) => record.path === posixJoin(...promptRecordPath.split(path.sep)))) {
+      records.push(await buildFileRecord(rootDir, promptPath));
+    }
+  }
+
+  records.sort((left, right) => left.path.localeCompare(right.path));
+  return records;
+}
+
 async function collectFiles(rootDir, relativeDir = "") {
   const directory = path.join(rootDir, relativeDir);
   const entries = await readdir(directory, { withFileTypes: true });
@@ -1440,6 +1849,20 @@ async function collectFiles(rootDir, relativeDir = "") {
   }
 
   return files;
+}
+
+async function buildFileRecord(rootDir, absolutePath) {
+  const content = await readFile(absolutePath);
+  return {
+    path: posixJoin(...path.relative(rootDir, absolutePath).split(path.sep)),
+    size: content.length,
+    sha256: createHash("sha256").update(content).digest("hex")
+  };
+}
+
+async function sha256File(filePath) {
+  const content = await readFile(filePath);
+  return createHash("sha256").update(content).digest("hex");
 }
 
 async function createDeterministicTarball(sourceDir, outputPath) {

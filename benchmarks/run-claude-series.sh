@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|interop-boundary|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model]" >&2
+if [[ $# -lt 3 || $# -gt 5 ]]; then
+  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|interop-boundary|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model] [mode]" >&2
   exit 1
 fi
 
@@ -10,103 +10,34 @@ task_id="$1"
 count="$2"
 note_prefix="$3"
 model="${4:-sonnet}"
+mode="${5:-${CLASP_BENCHMARK_MODE:-raw-repo}}"
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
+bundle_manifest="$project_root/benchmarks/bundles/${note_prefix}--claude-code--${model//\//-}--${mode}.json"
 
-case "$task_id" in
-  app)
-    task_ids=(
-      "clasp-lead-priority"
-      "ts-lead-priority"
-      "clasp-lead-rejection"
-      "ts-lead-rejection"
-      "clasp-lead-segment"
-      "ts-lead-segment"
-      "clasp-external-adaptation"
-      "ts-external-adaptation"
-    )
-    ;;
-  control-plane)
-    task_ids=(
-      "clasp-control-plane"
-      "ts-control-plane"
-    )
-    ;;
-  lead-priority)
-    task_ids=(
-      "clasp-lead-priority"
-      "ts-lead-priority"
-    )
-    ;;
-  lead-rejection)
-    task_ids=(
-      "clasp-lead-rejection"
-      "ts-lead-rejection"
-    )
-    ;;
-  lead-segment)
-    task_ids=(
-      "clasp-lead-segment"
-      "ts-lead-segment"
-    )
-    ;;
-  external-adaptation)
-    task_ids=(
-      "clasp-external-adaptation"
-      "ts-external-adaptation"
-    )
-    ;;
-  foreign-interop)
-    task_ids=(
-      "clasp-npm-interop"
-      "ts-npm-interop"
-      "clasp-python-interop"
-      "ts-python-interop"
-      "clasp-rust-interop"
-      "ts-rust-interop"
-    )
-    ;;
-  interop-boundary)
-    task_ids=(
-      "clasp-interop-boundary"
-      "ts-interop-boundary"
-    )
-    ;;
-  npm-interop)
-    task_ids=(
-      "clasp-npm-interop"
-      "ts-npm-interop"
-    )
-    ;;
-  python-interop)
-    task_ids=(
-      "clasp-python-interop"
-      "ts-python-interop"
-    )
-    ;;
-  rust-interop)
-    task_ids=(
-      "clasp-rust-interop"
-      "ts-rust-interop"
-    )
-    ;;
-  compiler-maintenance)
-    task_ids=(
-      "clasp-compiler-maintenance"
-    )
-    ;;
-  syntax-form)
-    task_ids=(
-      "clasp-syntax-compact"
-      "clasp-syntax-verbose"
-    )
-    ;;
-  *)
-    task_ids=("$task_id")
-    ;;
-esac
+node "$project_root/benchmarks/run-benchmark.mjs" freeze "$task_id" \
+  --count "$count" \
+  --harness claude-code \
+  --model "$model" \
+  --mode "$mode" \
+  --notes "$note_prefix" \
+  --output "$bundle_manifest" >/dev/null
 
 for index in $(seq 1 "$count"); do
   note="${note_prefix}-${index}"
+  mapfile -t task_ids < <(
+    node -e '
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const sampleIndex = Number.parseInt(process.argv[2], 10);
+const sample = manifest.samples.find((entry) => entry.sampleIndex === sampleIndex);
+if (!sample) {
+  process.exit(1);
+}
+for (const entry of sample.runOrder) {
+  console.log(entry.taskId);
+}
+' "$bundle_manifest" "$index"
+  )
 
   for current_task_id in "${task_ids[@]}"; do
     workspace="$project_root/benchmarks/workspaces/${current_task_id}-${note}"
@@ -117,7 +48,11 @@ for index in $(seq 1 "$count"); do
       --workspace "$workspace" \
       --harness claude-code \
       --model "$model" \
+      --mode "$mode" \
       --notes "$note" \
+      --bundle-manifest "$bundle_manifest" \
+      --sample-count "$count" \
+      --sample-index "$index" \
       --agent-command "$agent_command"
   done
 done

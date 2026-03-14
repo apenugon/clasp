@@ -29,6 +29,10 @@ write_result() {
   local passed="${11}"
   local exit_code="${12}"
   local result_path="$results_root/$filename"
+  local sample_index=""
+  if [[ "$notes" =~ -([0-9]+)$ ]]; then
+    sample_index="${BASH_REMATCH[1]}"
+  fi
 
   synthetic_files+=("$result_path")
 
@@ -59,6 +63,26 @@ write_result() {
     "outputTokens": 20,
     "uncachedInputTokens": 90,
     "uncachedTotal": $uncached_total
+  },
+  "protocol": {
+    "schemaVersion": 1,
+    "mode": "raw-repo",
+    "promptFile": "benchmarks/tasks/$task_id/prompt.raw.md",
+    "repeatedSamples": 2,
+    "sampleIndex": ${sample_index:-null},
+    "runOrderPosition": ${sample_index:-null},
+    "randomizedOrderSeed": "${notes%-$sample_index}:seed",
+    "bundle": null,
+    "timingWindow": {
+      "startedAt": "2026-03-01T10:00:00.000Z",
+      "finishedAt": "$finished_at"
+    }
+  },
+  "phases": {
+    "discoveryMs": $((duration_ms / 5)),
+    "firstEditMs": $((duration_ms / 2)),
+    "firstVerifyMs": $(((duration_ms * 4) / 5)),
+    "timeToGreenMs": $duration_ms
   },
   "verification": {
     "passed": $passed,
@@ -155,14 +179,20 @@ EOF
 
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
 printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
+printf '%s\n' "$summary_output" | grep -Fq '  mode: raw-repo'
 printf '%s\n' "$summary_output" | grep -Fq '  series: remediation-a'
 printf '%s\n' "$summary_output" | grep -Fq '  passRate: 50%'
 printf '%s\n' "$summary_output" | grep -Fq '  timeToGreenMs: 300'
+printf '%s\n' "$summary_output" | grep -Fq '  medianDiscoveryMs: 30'
+printf '%s\n' "$summary_output" | grep -Fq '  medianFirstEditMs: 75'
+printf '%s\n' "$summary_output" | grep -Fq '  medianFirstVerifyMs: 120'
+printf '%s\n' "$summary_output" | grep -Fq '  medianPhaseTimeToGreenMs: 150'
 printf '%s\n' "$summary_output" | grep -Fq $'ts-lead-segment\tcodex\tgpt-5.4'
 printf '%s\n' "$summary_output" | grep -Fq '  passRate: 100%'
 printf '%s\n' "$summary_output" | grep -Fq '  timeToGreenMs: 150'
 printf '%s\n' "$summary_output" | grep -Fq 'lead-segment-comparison'
 printf '%s\n' "$summary_output" | grep -Fq $'  codex\tgpt-5.4\tremediation-a'
+printf '%s\n' "$summary_output" | grep -Fq '    mode: raw-repo'
 printf '%s\n' "$summary_output" | grep -Fq '    passRateDeltaPct: -50'
 printf '%s\n' "$summary_output" | grep -Fq '    timeToGreenDeltaMs: 150'
 printf '%s\n' "$summary_output" | grep -Fq '    tokenDelta: -25'
@@ -334,10 +364,38 @@ chmod +x "$tmp_bin/nix"
 
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-segment 2 remediation-a gpt-5.4
 command_log="$(cat "$tmp_bin/nix.log")"
+bundle_manifest="$project_root/benchmarks/bundles/remediation-a--codex--gpt-5.4--raw-repo.json"
+synthetic_files+=("$bundle_manifest")
 printf '%s\n' "$command_log" | grep -Fq 'run clasp-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq 'run ts-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-1'
 printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-2'
+printf '%s\n' "$command_log" | grep -Fq -- '--mode raw-repo'
+printf '%s\n' "$command_log" | grep -Fq -- '--bundle-manifest'
+node -e '
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (manifest.bundleType !== "clasp-benchmark-fairness-bundle") {
+  throw new Error("unexpected frozen bundle type");
+}
+if (manifest.mode !== "raw-repo" || manifest.sampleCount !== 2) {
+  throw new Error("frozen bundle did not record the expected protocol");
+}
+if (!Array.isArray(manifest.samples) || manifest.samples.length !== 2) {
+  throw new Error("frozen bundle is missing repeated sample orders");
+}
+if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
+  throw new Error("frozen bundle is missing file digests");
+}
+const firstOrder = manifest.samples[0].runOrder.map((entry) => entry.taskId).join(",");
+const secondOrder = manifest.samples[1].runOrder.map((entry) => entry.taskId).join(",");
+if (firstOrder !== "clasp-lead-segment,ts-lead-segment" && firstOrder !== "ts-lead-segment,clasp-lead-segment") {
+  throw new Error(`unexpected first randomized order: ${firstOrder}`);
+}
+if (manifest.samples[0].seed === manifest.samples[1].seed) {
+  throw new Error("expected repeated samples to use distinct deterministic shuffle seeds");
+}
+' "$bundle_manifest"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" control-plane 2 containment-a gpt-5.4
@@ -454,16 +512,39 @@ rm -rf "$claude_workspace"
 node "$project_root/benchmarks/run-benchmark.mjs" prepare clasp-lead-segment --workspace "$claude_workspace" >/dev/null
 cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$claude_workspace/Shared/Lead.clasp"
 
+claude_bundle="$project_root/benchmarks/bundles/claude-usage-check.json"
+synthetic_files+=("$claude_bundle")
+node "$project_root/benchmarks/run-benchmark.mjs" freeze lead-segment \
+  --count 2 \
+  --harness claude-code \
+  --model sonnet \
+  --mode file-hinted \
+  --notes claude-usage-check \
+  --output "$claude_bundle" >/dev/null
+
 cat >"$claude_workspace/claude-run.jsonl" <<EOF
 {"type":"assistant","message":{"usage":{"input_tokens":40,"cache_creation_input_tokens":5,"cache_read_input_tokens":10,"output_tokens":12}}}
 {"type":"assistant","message":{"usage":{"input_tokens":30,"cache_creation_input_tokens":0,"cache_read_input_tokens":20,"output_tokens":8}}}
 {"type":"result","subtype":"success","duration_ms":250}
 EOF
 
+cat >"$claude_workspace/benchmark-phases.json" <<EOF
+{
+  "discoveryMs": 21,
+  "firstEditMs": 144,
+  "firstVerifyMs": 211,
+  "timeToGreenMs": 250
+}
+EOF
+
 node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
   --workspace "$claude_workspace" \
   --harness claude-code \
   --model sonnet \
+  --mode file-hinted \
+  --bundle-manifest "$claude_bundle" \
+  --sample-count 2 \
+  --sample-index 1 \
   --notes claude-usage-check >/dev/null
 
 latest_result=""
@@ -485,12 +566,18 @@ fi
 synthetic_files+=("$latest_result")
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"harness": "claude-code"'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"model": "sonnet"'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"mode": "file-hinted"'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"prompt": 105'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"completion": 20'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"total": 125'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"cachedInputTokens": 30'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedInputTokens": 75'
 printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedTotal": 95'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"sampleIndex": 1'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"manifestFile": "benchmarks/bundles/claude-usage-check.json"'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"discoveryMs": 21'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"firstEditMs": 144'
+printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"firstVerifyMs": 211'
 
 package_a="$tmp_bin/remediation-a.tar.gz"
 package_b="$tmp_bin/remediation-b.tar.gz"
@@ -538,5 +625,14 @@ if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
 }
 if (!manifest.reproducibility || manifest.reproducibility.archiveFormat !== "tar.gz") {
   throw new Error("package manifest is missing reproducibility metadata");
+}
+if (!manifest.publicationProtocol || manifest.publicationProtocol.repeatedSamples !== 2) {
+  throw new Error("package manifest is missing repeated-sample protocol metadata");
+}
+if (!Array.isArray(manifest.publicationProtocol.modes) || manifest.publicationProtocol.modes.join(",") !== "raw-repo") {
+  throw new Error("package manifest is missing benchmark mode metadata");
+}
+if (manifest.publicationProtocol.phaseDecomposition !== true) {
+  throw new Error("package manifest did not record phase-decomposed reporting");
 }
 ' "$manifest_path"

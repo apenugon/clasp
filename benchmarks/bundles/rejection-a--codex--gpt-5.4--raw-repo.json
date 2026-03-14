@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "bundleType": "clasp-benchmark-fairness-bundle",
+  "bundleId": "37daafa91684ae10",
+  "taskSelection": "lead-rejection",
+  "taskIds": [
+    "clasp-lead-rejection",
+    "ts-lead-rejection"
+  ],
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "mode": "raw-repo",
+  "sampleCount": 2,
+  "seriesLabel": "rejection-a",
+  "seed": "rejection-a:codex:gpt-5.4:raw-repo:clasp-lead-rejection,ts-lead-rejection",
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "seed": "rejection-a:codex:gpt-5.4:raw-repo:clasp-lead-rejection,ts-lead-rejection:sample:1",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-lead-rejection"
+        },
+        {
+          "position": 2,
+          "taskId": "ts-lead-rejection"
+        }
+      ]
+    },
+    {
+      "sampleIndex": 2,
+      "seed": "rejection-a:codex:gpt-5.4:raw-repo:clasp-lead-rejection,ts-lead-rejection:sample:2",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-lead-rejection"
+        },
+        {
+          "position": 2,
+          "taskId": "ts-lead-rejection"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "size": 1349,
+      "sha256": "a7759d7dbe23310f44f13426d2b5ee6f527947116e169d0abae6cb32afabbe20"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "size": 17071,
+      "sha256": "27846c5d331ac8395df802ea6bcb4d36b70375c52abb9cae966d04ccf001b312"
+    },
+    {
+      "path": "benchmarks/result-schema.json",
+      "size": 4448,
+      "sha256": "3acb5f48abb72a8de394b88a5a9385cd4ce894d3dc7a84822f5302b4dce5b55b"
+    },
+    {
+      "path": "benchmarks/run-benchmark.mjs",
+      "size": 59417,
+      "sha256": "e6149520fa2182768544963c61e95e5a9df73db9988e9a608d43f76baf3fb92d"
+    },
+    {
+      "path": "benchmarks/run-claude-harness.sh",
+      "size": 859,
+      "sha256": "e7b53379ac072655eb30c8ae57854c6a3102e3667e4135f412ad8951dde83757"
+    },
+    {
+      "path": "benchmarks/run-claude-series.sh",
+      "size": 2040,
+      "sha256": "d6383200f916a116a95730d157b42686ff3c0cb153428c839923eb89b51aef15"
+    },
+    {
+      "path": "benchmarks/run-codex-harness.sh",
+      "size": 951,
+      "sha256": "33ed94155c28ada2162ec6332be2c230ea08176b6cb6de56dd8efc08d1657b26"
+    },
+    {
+      "path": "benchmarks/run-codex-series.sh",
+      "size": 2049,
+      "sha256": "ccebbaad6a6f929c92b0ec49b06936661b6ad4e120776d07473b15cc71e79329"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/prompt.md",
+      "size": 1807,
+      "sha256": "c226c77b63ace7de9fce0ea30badfba779eb3d85e4ed7a36da64621340f06b66"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/.ignore",
+      "size": 23,
+      "sha256": "d86592729660a89f210ab4ff6b61f1088c528804313aaef252587ef004e8a021"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/AGENTS.md",
+      "size": 1150,
+      "sha256": "db15dba3939b7b44ae3b85de3b1c840c71416c8bf26edeea43ab1d69c398d3b9"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/app/Main.clasp",
+      "size": 310,
+      "sha256": "688c834fb6dc61a23ae2490b4b0c96cfc13b893f64372809af7cd919da8d8a31"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/app/Shared/Lead.clasp",
+      "size": 163,
+      "sha256": "f43883e752b39f646d2053bbe975e30d80ae94540af3d03def2adab842886419"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/runtime/server.mjs",
+      "size": 1983,
+      "sha256": "8e813a0c1a5f77b837b313d0be55d84f5600090c175db5eaac1cd349f9f31d8f"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/scripts/verify.sh",
+      "size": 379,
+      "sha256": "5b014a9a442d7d437f049322a5c3fef272de594e438d121299a4e7dce41cf6b3"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/priority.test.mjs",
+      "size": 3051,
+      "sha256": "e994b9804cdb292ff1ebe95aa7dd443b6eb318a0feb17b8b1ca3d15dde574fff"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/rejection.test.mjs",
+      "size": 3051,
+      "sha256": "e994b9804cdb292ff1ebe95aa7dd443b6eb318a0feb17b8b1ca3d15dde574fff"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/task.json",
+      "size": 290,
+      "sha256": "e0db80cf7e3116cb02fdec89e42bac33d19f1d8ce54569eec26bd6868311e66a"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/prompt.md",
+      "size": 1622,
+      "sha256": "078b7ee7970172b339fcca69f60d011832eee3a53434040bf57f660b42ff5ae9"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/.ignore",
+      "size": 54,
+      "sha256": "1121deee016ee56e0bf8283b7686ef5ec6c7831f341f3fb91d636a9c86307c70"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/AGENTS.md",
+      "size": 782,
+      "sha256": "e9ee7e9cd0498f428b7a2b9ae3d24f0ec612f49ff4d17f4f88f32c4a91cf3159"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/package.json",
+      "size": 298,
+      "sha256": "98217994a07175a12d5360d723a143a4a081a6e22b86458f208cabf506edf6cc"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/scripts/verify.sh",
+      "size": 187,
+      "sha256": "a1d11504e43be18432402849cdb75065016a848066157f5bbbe43190837014ab"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/src/server/main.ts",
+      "size": 915,
+      "sha256": "e7c5e88fd554bb1882130b0725e105371fb1c8d34cdc1a334d64a518a1a8e722"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/src/server/runtime.ts",
+      "size": 2230,
+      "sha256": "56e0f47e8bd3afdb10ebaed927690ca870fd267aeb3907383b9fe213d2ec5cb5"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/src/shared/lead.ts",
+      "size": 2176,
+      "sha256": "0b7f36691588c527b0047c9e89d0320bcd17f289426f3b0057e043ba71179e31"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/test/priority.test.mjs",
+      "size": 2728,
+      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/test/rejection.test.mjs",
+      "size": 2728,
+      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/repo/tsconfig.json",
+      "size": 295,
+      "sha256": "e69daed326ba93cabf8ad2305441af9dc50663ab26c404ce442bccd4c162ae70"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-rejection/task.json",
+      "size": 286,
+      "sha256": "2e325cadf074e8681414e87165ac156553b7a1999fa86b2ce5f2ccce5108a8af"
+    }
+  ]
+}
