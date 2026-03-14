@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import {
   bindingContractFor,
+  createProviderRuntime,
   installCompiledModule,
   requestPayloadJson
 } from "../../runtime/bun/server.mjs";
@@ -16,8 +17,51 @@ function route(contract, name) {
 }
 
 export async function runSupportConsoleDemo(compiledModule) {
+  const providerCalls = [];
+  const storageCalls = [];
+  const providerOnlyRuntime = createProviderRuntime(compiledModule, {
+    providers: {
+      provider: {
+        replyPreview(draft) {
+          providerCalls.push({
+            source: "provider-runtime",
+            keys: Object.keys(draft).sort(),
+            contactEmail: Object.prototype.hasOwnProperty.call(draft, "contactEmail")
+          });
+          return {
+            customerId: draft.customerId,
+            suggestedReply: `Thanks for the update. ${draft.summary} We will send the next renewal step today.`,
+            escalationNeeded: draft.summary.toLowerCase().includes("blocked")
+          };
+        }
+      }
+    }
+  });
+  const providerOnlyPreview = await providerOnlyRuntime.call("generateReplyPreview", {
+    customerId: "cust-42",
+    summary: "Renewal is blocked on legal review."
+  });
+  let providerDeniedStorage = null;
+
+  try {
+    await providerOnlyRuntime.call("publishCustomer", {
+      id: "cust-42",
+      company: "Northwind Studio",
+      contactEmail: "ops@northwind.example",
+      plan: "enterprise",
+      renewalRisk: "high"
+    });
+  } catch (error) {
+    providerDeniedStorage = error instanceof Error ? error.message : String(error);
+  }
+
   installCompiledModule(compiledModule, {
     generateReplyPreview(draft) {
+      providerCalls.push({
+        source: "app-runtime",
+        keys: Object.keys(draft).sort(),
+        contactEmail: Object.prototype.hasOwnProperty.call(draft, "contactEmail")
+      });
       return {
         customerId: draft.customerId,
         suggestedReply: `Thanks for the update. ${draft.summary} We will send the next renewal step today.`,
@@ -25,6 +69,11 @@ export async function runSupportConsoleDemo(compiledModule) {
       };
     },
     publishCustomer(customer) {
+      storageCalls.push({
+        keys: Object.keys(customer).sort(),
+        contactEmail: customer.contactEmail,
+        plan: customer.plan
+      });
       return customer;
     }
   });
@@ -76,6 +125,7 @@ export async function runSupportConsoleDemo(compiledModule) {
     routeCount: contract.routes.length,
     routeNames: contract.routes.map((candidate) => candidate.name),
     hostBindingNames: contract.hostBindings.map((binding) => binding.name),
+    hostBindingRuntimeNames: contract.hostBindings.map((binding) => binding.runtimeName),
     dashboardHasPreviewForm:
       dashboardHtml.includes('action="/support/preview"') &&
       dashboardHtml.includes("Conversation summary") &&
@@ -92,6 +142,11 @@ export async function runSupportConsoleDemo(compiledModule) {
     previewPageHasReply:
       previewHtml.includes("Thanks for the update.") &&
       previewHtml.includes("Back to dashboard"),
+    providerOnlyPreviewKeys: Object.keys(providerOnlyPreview).sort(),
+    providerOnlyDeniedStorage: providerDeniedStorage,
+    providerOnlyBindings: providerOnlyRuntime.bindings.map((binding) => binding.name),
+    providerObservedDraft: providerCalls[providerCalls.length - 1] ?? null,
+    storageObservedCustomer: storageCalls[0] ?? null,
     invalid
   };
 }
