@@ -427,9 +427,14 @@ renderWorkflowDecl :: CoreWorkflowDecl -> Text
 renderWorkflowDecl workflowDecl =
   "workflow "
     <> workflowDeclName sourceDecl
-    <> " = { state: "
-    <> renderType (workflowDeclStateType sourceDecl)
-    <> " }"
+    <> " = "
+    <> renderBracedInline
+      ( [ "state: " <> renderType (workflowDeclStateType sourceDecl)
+        ]
+          <> maybe [] (\name -> ["invariant: " <> name]) (workflowDeclInvariantName sourceDecl)
+          <> maybe [] (\name -> ["precondition: " <> name]) (workflowDeclPreconditionName sourceDecl)
+          <> maybe [] (\name -> ["postcondition: " <> name]) (workflowDeclPostconditionName sourceDecl)
+      )
   where
     sourceDecl = coreWorkflowSourceDecl workflowDecl
 

@@ -251,6 +251,12 @@ data WorkflowDecl = WorkflowDecl
   , workflowDeclIdentity :: Text
   , workflowDeclStateType :: Type
   , workflowDeclStateTypeSpan :: SourceSpan
+  , workflowDeclInvariantName :: Maybe Text
+  , workflowDeclInvariantSpan :: Maybe SourceSpan
+  , workflowDeclPreconditionName :: Maybe Text
+  , workflowDeclPreconditionSpan :: Maybe SourceSpan
+  , workflowDeclPostconditionName :: Maybe Text
+  , workflowDeclPostconditionSpan :: Maybe SourceSpan
   }
   deriving (Eq, Show)
 
@@ -889,9 +895,14 @@ renderWorkflowDecl :: WorkflowDecl -> Text
 renderWorkflowDecl workflowDecl =
   "workflow "
     <> workflowDeclName workflowDecl
-    <> " = { state: "
-    <> renderType (workflowDeclStateType workflowDecl)
-    <> " }"
+    <> " = "
+    <> renderBracedInline
+      ( [ "state: " <> renderType (workflowDeclStateType workflowDecl)
+        ]
+          <> maybe [] (\name -> ["invariant: " <> name]) (workflowDeclInvariantName workflowDecl)
+          <> maybe [] (\name -> ["precondition: " <> name]) (workflowDeclPreconditionName workflowDecl)
+          <> maybe [] (\name -> ["postcondition: " <> name]) (workflowDeclPostconditionName workflowDecl)
+      )
 
 renderSupervisorDecl :: SupervisorDecl -> Text
 renderSupervisorDecl supervisorDecl =

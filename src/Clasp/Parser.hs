@@ -844,6 +844,9 @@ rolloutDeclParser = do
 
 data WorkflowAttr
   = WorkflowStateAttr SourceSpan Type
+  | WorkflowInvariantAttr SourceSpan Text
+  | WorkflowPreconditionAttr SourceSpan Text
+  | WorkflowPostconditionAttr SourceSpan Text
 
 workflowDeclParser :: Parser TopLevelItem
 workflowDeclParser = do
@@ -855,13 +858,13 @@ workflowDeclParser = do
   end <- getSourcePos
   _ <- optional eol
   scn
-  (stateTypeSpan, stateType) <-
-    case foldM applyWorkflowAttr Nothing attrs of
+  (stateTypeSpan, stateType, invariantDecl, preconditionDecl, postconditionDecl) <-
+    case foldM applyWorkflowAttr (Nothing, Nothing, Nothing, Nothing) attrs of
       Left message ->
         fail message
-      Right (Just stateDecl) ->
-        pure stateDecl
-      Right Nothing ->
+      Right (Just stateDecl, invariantDecl, preconditionDecl, postconditionDecl) ->
+        pure (fst stateDecl, snd stateDecl, invariantDecl, preconditionDecl, postconditionDecl)
+      Right (Nothing, _, _, _) ->
         fail "workflow declaration requires a `state` attribute"
   pure . TopWorkflowDecl $
     WorkflowDecl
@@ -871,10 +874,23 @@ workflowDeclParser = do
       , workflowDeclIdentity = "workflow:" <> name
       , workflowDeclStateType = stateType
       , workflowDeclStateTypeSpan = stateTypeSpan
+      , workflowDeclInvariantName = snd <$> invariantDecl
+      , workflowDeclInvariantSpan = fst <$> invariantDecl
+      , workflowDeclPreconditionName = snd <$> preconditionDecl
+      , workflowDeclPreconditionSpan = fst <$> preconditionDecl
+      , workflowDeclPostconditionName = snd <$> postconditionDecl
+      , workflowDeclPostconditionSpan = fst <$> postconditionDecl
       }
 
 workflowAttrParser :: Parser WorkflowAttr
-workflowAttrParser = do
+workflowAttrParser =
+  try workflowStateAttrParser
+    <|> try workflowInvariantAttrParser
+    <|> try workflowPreconditionAttrParser
+    <|> workflowPostconditionAttrParser
+
+workflowStateAttrParser :: Parser WorkflowAttr
+workflowStateAttrParser = do
   keywordN "state"
   start <- getSourcePos
   _ <- symbolN ":"
@@ -882,15 +898,73 @@ workflowAttrParser = do
   end <- getSourcePos
   pure (WorkflowStateAttr (makeSourceSpan start end) stateType)
 
-applyWorkflowAttr :: Maybe (SourceSpan, Type) -> WorkflowAttr -> Either String (Maybe (SourceSpan, Type))
-applyWorkflowAttr existing attr =
+workflowInvariantAttrParser :: Parser WorkflowAttr
+workflowInvariantAttrParser = do
+  keywordN "invariant"
+  start <- getSourcePos
+  _ <- symbolN ":"
+  (_, name) <- locatedLowerIdentifierN
+  end <- getSourcePos
+  pure (WorkflowInvariantAttr (makeSourceSpan start end) name)
+
+workflowPreconditionAttrParser :: Parser WorkflowAttr
+workflowPreconditionAttrParser = do
+  keywordN "precondition"
+  start <- getSourcePos
+  _ <- symbolN ":"
+  (_, name) <- locatedLowerIdentifierN
+  end <- getSourcePos
+  pure (WorkflowPreconditionAttr (makeSourceSpan start end) name)
+
+workflowPostconditionAttrParser :: Parser WorkflowAttr
+workflowPostconditionAttrParser = do
+  keywordN "postcondition"
+  start <- getSourcePos
+  _ <- symbolN ":"
+  (_, name) <- locatedLowerIdentifierN
+  end <- getSourcePos
+  pure (WorkflowPostconditionAttr (makeSourceSpan start end) name)
+
+applyWorkflowAttr ::
+  ( Maybe (SourceSpan, Type)
+  , Maybe (SourceSpan, Text)
+  , Maybe (SourceSpan, Text)
+  , Maybe (SourceSpan, Text)
+  ) ->
+  WorkflowAttr ->
+  Either
+    String
+    ( Maybe (SourceSpan, Type)
+    , Maybe (SourceSpan, Text)
+    , Maybe (SourceSpan, Text)
+    , Maybe (SourceSpan, Text)
+    )
+applyWorkflowAttr (existingState, existingInvariant, existingPrecondition, existingPostcondition) attr =
   case attr of
     WorkflowStateAttr stateTypeSpan stateType ->
-      case existing of
+      case existingState of
         Just _ ->
           Left "workflow declaration may only declare `state` once"
         Nothing ->
-          Right (Just (stateTypeSpan, stateType))
+          Right (Just (stateTypeSpan, stateType), existingInvariant, existingPrecondition, existingPostcondition)
+    WorkflowInvariantAttr invariantSpan invariantName ->
+      case existingInvariant of
+        Just _ ->
+          Left "workflow declaration may only declare `invariant` once"
+        Nothing ->
+          Right (existingState, Just (invariantSpan, invariantName), existingPrecondition, existingPostcondition)
+    WorkflowPreconditionAttr preconditionSpan preconditionName ->
+      case existingPrecondition of
+        Just _ ->
+          Left "workflow declaration may only declare `precondition` once"
+        Nothing ->
+          Right (existingState, existingInvariant, Just (preconditionSpan, preconditionName), existingPostcondition)
+    WorkflowPostconditionAttr postconditionSpan postconditionName ->
+      case existingPostcondition of
+        Just _ ->
+          Left "workflow declaration may only declare `postcondition` once"
+        Nothing ->
+          Right (existingState, existingInvariant, existingPrecondition, Just (postconditionSpan, postconditionName))
 
 supervisorDeclParser :: Parser TopLevelItem
 supervisorDeclParser = do

@@ -119,14 +119,20 @@ Every `Clasp` source file in `v0` has:
 
 When the module declaration is omitted, the compiler infers the module name from the project-relative file path. For example, `Main.clasp` infers `Main`, and `Shared/User.clasp` infers `Shared.User`.
 
-Workflows declare a named durable state model with a record-backed `state` field:
+Workflows declare a named durable state model with a record-backed `state` field. They can also attach optional `invariant`, `precondition`, and `postcondition` handlers, each typed as `State -> Bool`, so generated runtimes can enforce state-schema checks at checkpoint, resume, start, delivery, replay, and upgrade boundaries:
 
 ```clasp
 module Main
 
 record Counter = { value : Int }
 
-workflow CounterFlow = { state : Counter }
+nonNegative : Counter -> Bool
+nonNegative counter = counter.value >= 0
+
+workflow CounterFlow = {
+  state : Counter,
+  invariant : nonNegative
+}
 ```
 
 Domain declarations can bind business-facing objects and signals to typed record schemas:

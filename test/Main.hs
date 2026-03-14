@@ -369,6 +369,18 @@ parserTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one workflow declaration, got " <> show (length other))
+    , testCase "parses workflow declarations with invariant, precondition, and postcondition handlers" $
+        case parseSource "inline" workflowConstraintSource of
+          Left err ->
+            assertFailure ("expected constrained workflow source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case moduleWorkflowDecls modl of
+              [workflowDecl] -> do
+                assertEqual "workflow invariant" (Just "nonNegative") (workflowDeclInvariantName workflowDecl)
+                assertEqual "workflow precondition" (Just "belowLimit") (workflowDeclPreconditionName workflowDecl)
+                assertEqual "workflow postcondition" (Just "withinLimit") (workflowDeclPostconditionName workflowDecl)
+              other ->
+                assertFailure ("expected one workflow declaration, got " <> show (length other))
     , testCase "parses domain object, domain event, feedback, metric, goal, experiment, and rollout declarations" $
         case parseSource "inline" domainModelSource of
           Left err ->
@@ -1002,6 +1014,18 @@ checkerTests =
                 assertEqual "workflow state type" (TNamed "Counter") (workflowDeclStateType workflowDecl)
               other ->
                 assertFailure ("expected one checked workflow declaration, got " <> show (length other))
+    , testCase "accepts workflows with typed invariant, precondition, and postcondition handlers" $
+        case checkSource "workflow-constraints" workflowConstraintSource of
+          Left err ->
+            assertFailure ("expected constrained workflow source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case coreModuleWorkflowDecls checked of
+              [CoreWorkflowDecl workflowDecl] -> do
+                assertEqual "workflow invariant" (Just "nonNegative") (workflowDeclInvariantName workflowDecl)
+                assertEqual "workflow precondition" (Just "belowLimit") (workflowDeclPreconditionName workflowDecl)
+                assertEqual "workflow postcondition" (Just "withinLimit") (workflowDeclPostconditionName workflowDecl)
+              other ->
+                assertFailure ("expected one checked workflow declaration, got " <> show (length other))
     , testCase "accepts domain objects, domain events, feedback, metrics, goals, experiments, and rollouts bound to typed declarations" $
         case checkSource "domain" domainModelSource of
           Left err ->
@@ -1502,6 +1526,8 @@ checkerTests =
         assertHasCode "E_HOOK_HANDLER_TYPE" (checkSource "bad" badHookHandlerSource)
     , testCase "rejects workflows whose state is not a record schema" $
         assertHasCode "E_WORKFLOW_STATE_TYPE" (checkSource "bad" badWorkflowStateSource)
+    , testCase "rejects workflows whose declared constraint handlers do not match the state schema" $
+        assertHasCode "E_WORKFLOW_CONSTRAINT_TYPE" (checkSource "bad" badWorkflowConstraintSource)
     , testCase "rejects supervisor hierarchies that attach a workflow to multiple parents" $
         assertHasCode "E_MULTIPLE_SUPERVISOR_PARENTS" (checkSource "bad" duplicateSupervisorParentSource)
     , testCase "rejects agents that reference unknown roles" $
@@ -3165,8 +3191,10 @@ compileTests =
           Left err ->
             assertFailure ("expected workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
-            assertBool "expected workflow checkpoint helper" ("checkpoint(value) { return $encode_Counter(value); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow resume helper" ("resume(snapshot) { return $decode_Counter(snapshot); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow constraints metadata" ("constraints: Object.freeze({ invariant: null, precondition: null, postcondition: null })," `T.isInfixOf` emitted)
+            assertBool "expected workflow checkpoint helper" ("checkpoint(value) {" `T.isInfixOf` emitted)
+            assertBool "expected workflow checkpoint constraint assertion" ("$claspWorkflowAssertConstraints(\"CounterFlow\", this.constraints, null, state, \"checkpoint\");" `T.isInfixOf` emitted)
+            assertBool "expected workflow resume helper" ("resume(snapshot) {" `T.isInfixOf` emitted)
             assertBool "expected module metadata export" ("export const __claspModule = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected workflow module version metadata" ("moduleVersionId: $claspModuleVersionId," `T.isInfixOf` emitted)
             assertBool "expected workflow upgrade window metadata" ("upgradeWindow: $claspModuleUpgradeWindow," `T.isInfixOf` emitted)
@@ -3174,20 +3202,29 @@ compileTests =
             assertBool "expected workflow temporal clock helper" ("clock(seedNow) { return $claspTemporalClock(seedNow); }" `T.isInfixOf` emitted)
             assertBool "expected workflow temporal ttl helper" ("ttl(ttl, options) { return $claspTemporalTtl(ttl, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow temporal cache helper" ("cache(cacheEntry, options) { return $claspTemporalCache(cacheEntry, options); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow start helper" ("start(snapshot, options) { return $claspWorkflowStart(\"CounterFlow\", snapshot, $decode_Counter, this.constraints, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deadline helper" ("withDeadline(run, deadlineAt) { return $claspWorkflowWithDeadline(\"CounterFlow\", run, deadlineAt); }" `T.isInfixOf` emitted)
             assertBool "expected workflow cancel helper" ("cancel(run, reason) { return $claspWorkflowCancel(\"CounterFlow\", run, reason); }" `T.isInfixOf` emitted)
             assertBool "expected workflow degrade helper" ("degrade(run, reason, options) { return $claspWorkflowDegrade(\"CounterFlow\", run, reason, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow handoff helper" ("handoff(run, operator, reason, options) { return $claspWorkflowHandoff(\"CounterFlow\", run, operator, reason, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow enqueue helper" ("enqueue(run, message) { return $claspWorkflowEnqueue(\"CounterFlow\", run, message); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow process-next helper" ("processNext(run, handler, options) { return $claspWorkflowProcessNext(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow drain-mailbox helper" ("drainMailbox(run, handler, options) { return $claspWorkflowDrainMailbox(\"CounterFlow\", run, handler, $encode_Counter, options); }" `T.isInfixOf` emitted)
-            assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, false, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow process-next helper" ("processNext(run, handler, options) { return $claspWorkflowProcessNext(\"CounterFlow\", run, handler, $encode_Counter, this.constraints, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow drain-mailbox helper" ("drainMailbox(run, handler, options) { return $claspWorkflowDrainMailbox(\"CounterFlow\", run, handler, $encode_Counter, this.constraints, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow deliver helper" ("deliver(run, message, handler, options) { return $claspWorkflowDeliver(\"CounterFlow\", run, message, handler, $encode_Counter, this.constraints, false, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow deliver clock support" ("now: $claspTemporalResolveNow(rawOptions, `${workflowName}.delivery`)," `T.isInfixOf` emitted)
-            assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, options); }" `T.isInfixOf` emitted)
+            assertBool "expected workflow replay helper" ("replay(snapshot, messages, handler, options) { return $claspWorkflowReplay(\"CounterFlow\", snapshot, messages, handler, $decode_Counter, $encode_Counter, this.constraints, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow hot-swap compatibility metadata" ("explicitUpgradeHandlers: true," `T.isInfixOf` emitted)
             assertBool "expected workflow migration helper" ("migrate(snapshot, targetWorkflow, options) { return $claspWorkflowMigrateSnapshot(this, targetWorkflow ?? this, snapshot, options); }" `T.isInfixOf` emitted)
             assertBool "expected workflow upgrade helper" ("upgrade(run, targetWorkflow, options) { return $claspWorkflowUpgrade(this, targetWorkflow ?? this, run, options); }" `T.isInfixOf` emitted)
+    , testCase "compile emits workflow state constraint handlers" $
+        case compileSource "workflow-constraints" workflowConstraintSource of
+          Left err ->
+            assertFailure ("expected constrained workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected workflow invariant metadata" ("invariant: Object.freeze({ name: \"nonNegative\", check: nonNegative })" `T.isInfixOf` emitted)
+            assertBool "expected workflow precondition metadata" ("precondition: Object.freeze({ name: \"belowLimit\", check: belowLimit })" `T.isInfixOf` emitted)
+            assertBool "expected workflow postcondition metadata" ("postcondition: Object.freeze({ name: \"withinLimit\", check: withinLimit })" `T.isInfixOf` emitted)
+            assertBool "expected workflow constraint runtime helper" ("function $claspWorkflowAssertConstraints(workflowName, constraints, currentState, nextState, stage) {" `T.isInfixOf` emitted)
     , testCase "compile emits supervisor hierarchy metadata and restart strategies" $
         case compileSource "supervisor" supervisorSource of
           Left err ->
@@ -4360,6 +4397,21 @@ compileTests =
                 assertEqual "upgraded audit log tail" (Just [String "upgrade"]) (jsonArrayValues (KeyMap.lookup "upgradedAuditLogTail" value))
               Right other ->
                 assertFailure ("expected JSON object from workflow runtime, got " <> show other)
+    , testCase "worker runtime enforces declared workflow invariants, preconditions, and postconditions" $
+        case compileSource "workflow-constraint-runtime" workflowConstraintSource of
+          Left err ->
+            assertFailure ("expected constrained workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/workflow-constraint-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            runtimeOutput <- runNodeScript (workflowConstraintRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected workflow constraint runtime output"
+              "{\"constraintNames\":[\"belowLimit\",\"nonNegative\",\"withinLimit\"],\"deliveredStatus\":\"delivered\",\"deliveredResult\":4,\"resumedCount\":2,\"invariantError\":\"Workflow CounterFlow invariant nonNegative failed during start.\",\"preconditionStatus\":\"failed\",\"preconditionError\":\"Workflow CounterFlow precondition belowLimit failed during deliver.\",\"postconditionStatus\":\"failed\",\"postconditionError\":\"Workflow CounterFlow postcondition withinLimit failed during deliver.\"}"
+              runtimeOutput
     , testCase "worker runtime schedules isolated workflow units in parallel while preserving mailbox and upgrade ordering" $
         case (compileSource "workflow-parallel-old" workflowSource, compileSource "workflow-parallel-new" workflowHotSwapTargetSource) of
           (Left err, _) ->
@@ -5798,6 +5850,32 @@ workflowSource =
     , "main = \"ok\""
     ]
 
+workflowConstraintSource :: Text
+workflowConstraintSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , ""
+    , "nonNegative : Counter -> Bool"
+    , "nonNegative counter = counter.count >= 0"
+    , ""
+    , "belowLimit : Counter -> Bool"
+    , "belowLimit counter = counter.count < 5"
+    , ""
+    , "withinLimit : Counter -> Bool"
+    , "withinLimit counter = counter.count <= 5"
+    , ""
+    , "workflow CounterFlow = {"
+    , "  state : Counter,"
+    , "  invariant : nonNegative,"
+    , "  precondition : belowLimit,"
+    , "  postcondition : withinLimit"
+    , "}"
+    , ""
+    , "main = \"ok\""
+    ]
+
 domainModelSource :: Text
 domainModelSource =
   T.unlines
@@ -6274,6 +6352,21 @@ badWorkflowStateSource =
     , "type Counter = CounterValue"
     , ""
     , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "main = \"ok\""
+    ]
+
+badWorkflowConstraintSource :: Text
+badWorkflowConstraintSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Counter = { count : Int }"
+    , ""
+    , "badInvariant : Counter -> Int"
+    , "badInvariant counter = counter.count"
+    , ""
+    , "workflow CounterFlow = { state : Counter, invariant : badInvariant }"
     , ""
     , "main = \"ok\""
     ]
@@ -8143,6 +8236,46 @@ workflowRuntimeScript compiledPath runtimePath =
     , "  upgradedActivateHook: upgraded.handlers.activate,"
     , "  upgradedAuditType: upgraded.audit.eventType,"
     , "  upgradedAuditLogTail: upgraded.run.auditLog.slice(-1).map((entry) => entry.eventType)"
+    , "}));"
+    ]
+
+workflowConstraintRuntimeScript :: FilePath -> FilePath -> Text
+workflowConstraintRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createWorkerRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const runtime = createWorkerRuntime(compiledModule);"
+    , "const workflow = runtime.workflow('CounterFlow');"
+    , "const started = workflow.start('{\"count\":2}');"
+    , "const resumed = workflow.resume('{\"count\":2}');"
+    , "const delivered = workflow.deliver(started, { id: 'ok', payload: 2 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: state.count + payload"
+    , "}));"
+    , "let invariantError = null;"
+    , "try {"
+    , "  workflow.start('{\"count\":-1}');"
+    , "} catch (error) {"
+    , "  invariantError = error.message;"
+    , "}"
+    , "const preconditionFailure = workflow.deliver(workflow.start('{\"count\":5}'), { id: 'pre', payload: 1 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: state.count + payload"
+    , "}));"
+    , "const postconditionFailure = workflow.deliver(workflow.start('{\"count\":4}'), { id: 'post', payload: 2 }, (state, payload) => ({"
+    , "  state: { count: state.count + payload },"
+    , "  result: state.count + payload"
+    , "}));"
+    , "console.log(JSON.stringify({"
+    , "  constraintNames: Object.values(workflow.constraints).filter(Boolean).map((entry) => entry.name).sort(),"
+    , "  deliveredStatus: delivered.status,"
+    , "  deliveredResult: delivered.result,"
+    , "  resumedCount: resumed.count,"
+    , "  invariantError,"
+    , "  preconditionStatus: preconditionFailure.status,"
+    , "  preconditionError: preconditionFailure.failure?.message ?? null,"
+    , "  postconditionStatus: postconditionFailure.status,"
+    , "  postconditionError: postconditionFailure.failure?.message ?? null"
     , "}));"
     ]
 

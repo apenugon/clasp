@@ -830,6 +830,7 @@ checkModule modl = do
 
   traverse_ (checkHookDecl ctx termEnv) hookDecls
   traverse_ (checkRouteDecl ctx termEnv) routeDecls
+  traverse_ (checkWorkflowDecl ctx termEnv) workflowDecls
   coreDecls <- traverse (checkDecl ctx termEnv) decls
   pure
     CoreModule
@@ -1917,7 +1918,7 @@ ensureKnownTypes :: TypeDeclEnv -> RecordDeclEnv -> [TypeDecl] -> [RecordDecl] -
 ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls foreignDecls decls hookDecls toolDecls routeDecls = do
   mapM_ checkTypeDecl typeDecls
   mapM_ checkRecordDecl recordDecls
-  mapM_ checkWorkflowDecl workflowDecls
+  mapM_ checkWorkflowStateDecl workflowDecls
   mapM_ checkForeignDecl foreignDecls
   mapM_ checkDeclAnnotation decls
   mapM_ checkHookDeclTypes hookDecls
@@ -1947,7 +1948,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
         )
         (recordDeclFields recordDecl)
 
-    checkWorkflowDecl workflowDecl =
+    checkWorkflowStateDecl workflowDecl =
       ensureWorkflowStateType workflowDecl
 
     checkDeclAnnotation decl =
@@ -2478,6 +2479,50 @@ checkHookDecl ctx termEnv hookDecl =
                 ]
                 (relatedForHandler (hookDeclHandlerName hookDecl) (contextDeclMap ctx) (contextForeignDeclEnv ctx))
             ]
+
+checkWorkflowDecl :: ModuleContext -> DeclTypeEnv -> WorkflowDecl -> Either DiagnosticBundle ()
+checkWorkflowDecl ctx termEnv workflowDecl = do
+  checkWorkflowConstraintDecl ctx termEnv workflowDecl "invariant" (workflowDeclInvariantName workflowDecl) (workflowDeclInvariantSpan workflowDecl)
+  checkWorkflowConstraintDecl ctx termEnv workflowDecl "precondition" (workflowDeclPreconditionName workflowDecl) (workflowDeclPreconditionSpan workflowDecl)
+  checkWorkflowConstraintDecl ctx termEnv workflowDecl "postcondition" (workflowDeclPostconditionName workflowDecl) (workflowDeclPostconditionSpan workflowDecl)
+
+checkWorkflowConstraintDecl ::
+  ModuleContext ->
+  DeclTypeEnv ->
+  WorkflowDecl ->
+  Text ->
+  Maybe Text ->
+  Maybe SourceSpan ->
+  Either DiagnosticBundle ()
+checkWorkflowConstraintDecl ctx termEnv workflowDecl role maybeName maybeSpan =
+  case (maybeName, maybeSpan) of
+    (Just constraintName, Just constraintSpan) ->
+      case Map.lookup constraintName termEnv of
+        Nothing ->
+          Left $
+            singleDiagnosticAt
+              "E_UNKNOWN_WORKFLOW_CONSTRAINT"
+              ("Workflow `" <> workflowDeclName workflowDecl <> "` references unknown " <> role <> " `" <> constraintName <> "`.")
+              constraintSpan
+              ["Declare `" <> constraintName <> "` before using it as a workflow " <> role <> "."]
+        Just constraintType ->
+          let expectedType = TFunction [workflowDeclStateType workflowDecl] TBool
+           in unless (constraintType == expectedType) $
+                Left . diagnosticBundle $
+                  [ diagnostic
+                      "E_WORKFLOW_CONSTRAINT_TYPE"
+                      ("Workflow `" <> workflowDeclName workflowDecl <> "` " <> role <> " `" <> constraintName <> "` does not match the workflow state schema.")
+                      (Just constraintSpan)
+                      [ "Expected "
+                          <> renderType expectedType
+                          <> " but got "
+                          <> renderType constraintType
+                          <> "."
+                      ]
+                      (relatedForHandler constraintName (contextDeclMap ctx) (contextForeignDeclEnv ctx))
+                  ]
+    _ ->
+      pure ()
 
 inferDeclDraft :: ModuleContext -> DeclTypeEnv -> Decl -> Maybe Type -> InferM DraftDecl
 inferDeclDraft ctx termEnv decl maybeExpectedType = do
