@@ -11,8 +11,13 @@ count="$2"
 note_prefix="$3"
 model="${4:-gpt-5.4}"
 mode="${5:-${CLASP_BENCHMARK_MODE:-raw-repo}}"
+workflow_assistance="${CLASP_BENCHMARK_WORKFLOW_ASSISTANCE:-unspecified}"
+workflow_assistance_slug="$(printf '%s' "$workflow_assistance" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+if [[ -z "$workflow_assistance_slug" ]]; then
+  workflow_assistance_slug="unspecified"
+fi
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
-bundle_manifest="$project_root/benchmarks/bundles/${note_prefix}--codex--${model//\//-}--${mode}.json"
+bundle_manifest="$project_root/benchmarks/bundles/${note_prefix}--codex--${model//\//-}--${mode}--workflow-assistance-${workflow_assistance_slug}.json"
 recovery_args=()
 
 if [[ "${CLASP_ALLOW_BOOTSTRAP_RECOVERY:-}" == "true" ]]; then

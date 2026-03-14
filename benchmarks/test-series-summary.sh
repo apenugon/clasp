@@ -430,9 +430,9 @@ printf '%s\n' "\$*" >>"$tmp_bin/nix.log"
 EOF
 chmod +x "$tmp_bin/nix"
 
-PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" lead-segment 2 remediation-a gpt-5.4
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-assisted bash "$project_root/benchmarks/run-codex-series.sh" lead-segment 2 remediation-a gpt-5.4
 command_log="$(cat "$tmp_bin/nix.log")"
-bundle_manifest="$project_root/benchmarks/bundles/remediation-a--codex--gpt-5.4--raw-repo.json"
+bundle_manifest="$project_root/benchmarks/bundles/remediation-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-assisted.json"
 synthetic_files+=("$bundle_manifest")
 printf '%s\n' "$command_log" | grep -Fq 'run clasp-lead-segment'
 printf '%s\n' "$command_log" | grep -Fq 'run ts-lead-segment'
@@ -466,12 +466,14 @@ if (manifest.samples[0].seed === manifest.samples[1].seed) {
 ' "$bundle_manifest"
 
 : >"$tmp_bin/nix.log"
-PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" control-plane 2 containment-a gpt-5.4
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=browser-only bash "$project_root/benchmarks/run-codex-series.sh" control-plane 2 containment-a gpt-5.4
 control_command_log="$(cat "$tmp_bin/nix.log")"
+synthetic_files+=("$project_root/benchmarks/bundles/containment-a--codex--gpt-5.4--raw-repo--workflow-assistance-browser-only.json")
 printf '%s\n' "$control_command_log" | grep -Fq 'run clasp-control-plane'
 printf '%s\n' "$control_command_log" | grep -Fq 'run ts-control-plane'
 printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-1'
 printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-2'
+test -f "$project_root/benchmarks/bundles/containment-a--codex--gpt-5.4--raw-repo--workflow-assistance-browser-only.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" external-adaptation 2 objective-a gpt-5.4
@@ -564,14 +566,16 @@ printf '%s\n' "$claude_summary_output" | grep -Fq '    tokenDelta: -35'
 printf '%s\n' "$claude_summary_output" | grep -Fq '    uncachedTokenDelta: -50'
 
 : >"$tmp_bin/nix.log"
-PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-claude-series.sh" lead-priority 2 claude-a sonnet
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=raw-text bash "$project_root/benchmarks/run-claude-series.sh" lead-priority 2 claude-a sonnet
 claude_command_log="$(cat "$tmp_bin/nix.log")"
+synthetic_files+=("$project_root/benchmarks/bundles/claude-a--claude-code--sonnet--raw-repo--workflow-assistance-raw-text.json")
 printf '%s\n' "$claude_command_log" | grep -Fq 'run clasp-lead-priority'
 printf '%s\n' "$claude_command_log" | grep -Fq 'run ts-lead-priority'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--harness claude-code'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--model sonnet'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-1'
 printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-2'
+test -f "$project_root/benchmarks/bundles/claude-a--claude-code--sonnet--raw-repo--workflow-assistance-raw-text.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-claude-series.sh" syntax-form 2 syntax-a sonnet

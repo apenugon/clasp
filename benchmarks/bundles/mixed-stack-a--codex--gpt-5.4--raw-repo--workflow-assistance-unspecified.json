@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "bundleType": "clasp-benchmark-fairness-bundle",
+  "bundleId": "5c0afa300b9b563e",
+  "taskSelection": "mixed-stack-semantic-layer",
+  "taskIds": [
+    "clasp-npm-interop",
+    "ts-npm-interop",
+    "clasp-python-interop",
+    "ts-python-interop",
+    "clasp-rust-interop",
+    "ts-rust-interop",
+    "clasp-interop-boundary",
+    "ts-interop-boundary"
+  ],
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "mode": "raw-repo",
+  "sampleCount": 2,
+  "seriesLabel": "mixed-stack-a",
+  "seed": "mixed-stack-a:codex:gpt-5.4:raw-repo:clasp-npm-interop,ts-npm-interop,clasp-python-interop,ts-python-interop,clasp-rust-interop,ts-rust-interop,clasp-interop-boundary,ts-interop-boundary",
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "seed": "mixed-stack-a:codex:gpt-5.4:raw-repo:clasp-npm-interop,ts-npm-interop,clasp-python-interop,ts-python-interop,clasp-rust-interop,ts-rust-interop,clasp-interop-boundary,ts-interop-boundary:sample:1",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-npm-interop"
+        },
+        {
+          "position": 2,
+          "taskId": "clasp-interop-boundary"
+        },
+        {
+          "position": 3,
+          "taskId": "ts-rust-interop"
+        },
+        {
+          "position": 4,
+          "taskId": "clasp-python-interop"
+        },
+        {
+          "position": 5,
+          "taskId": "ts-python-interop"
+        },
+        {
+          "position": 6,
+          "taskId": "clasp-rust-interop"
+        },
+        {
+          "position": 7,
+          "taskId": "ts-interop-boundary"
+        },
+        {
+          "position": 8,
+          "taskId": "ts-npm-interop"
+        }
+      ]
+    },
+    {
+      "sampleIndex": 2,
+      "seed": "mixed-stack-a:codex:gpt-5.4:raw-repo:clasp-npm-interop,ts-npm-interop,clasp-python-interop,ts-python-interop,clasp-rust-interop,ts-rust-interop,clasp-interop-boundary,ts-interop-boundary:sample:2",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "ts-npm-interop"
+        },
+        {
+          "position": 2,
+          "taskId": "ts-python-interop"
+        },
+        {
+          "position": 3,
+          "taskId": "clasp-rust-interop"
+        },
+        {
+          "position": 4,
+          "taskId": "clasp-npm-interop"
+        },
+        {
+          "position": 5,
+          "taskId": "ts-interop-boundary"
+        },
+        {
+          "position": 6,
+          "taskId": "clasp-python-interop"
+        },
+        {
+          "position": 7,
+          "taskId": "clasp-interop-boundary"
+        },
+        {
+          "position": 8,
+          "taskId": "ts-rust-interop"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "size": 1349,
+      "sha256": "a7759d7dbe23310f44f13426d2b5ee6f527947116e169d0abae6cb32afabbe20"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "size": 23186,
+      "sha256": "ffd859592f048ec36f27eb5ae30eec5cb0c459eed047687a4f9520822489890e"
+    },
+    {
+      "path": "benchmarks/result-schema.json",
+      "size": 4448,
+      "sha256": "3acb5f48abb72a8de394b88a5a9385cd4ce894d3dc7a84822f5302b4dce5b55b"
+    },
+    {
+      "path": "benchmarks/run-benchmark.mjs",
+      "size": 62571,
+      "sha256": "08bb8fc08b2680593ae0979dede861330a6469f9fce72c4cb0af8854cbab5ff9"
+    },
+    {
+      "path": "benchmarks/run-claude-harness.sh",
+      "size": 859,
+      "sha256": "e7b53379ac072655eb30c8ae57854c6a3102e3667e4135f412ad8951dde83757"
+    },
+    {
+      "path": "benchmarks/run-claude-series.sh",
+      "size": 2649,
+      "sha256": "7619cb333107ac0ab170a0a6e632d98f815a05d9ed2a4afec6a784874eb84498"
+    },
+    {
+      "path": "benchmarks/run-codex-harness.sh",
+      "size": 951,
+      "sha256": "33ed94155c28ada2162ec6332be2c230ea08176b6cb6de56dd8efc08d1657b26"
+    },
+    {
+      "path": "benchmarks/run-codex-series.sh",
+      "size": 2658,
+      "sha256": "065c574c515c8480dbae8c06a317c88ecf0f9db720111c1f8b247adaf41f2a00"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/prompt.md",
+      "size": 1085,
+      "sha256": "7b499c4cab2740649d15ba595b7bbd66be67c8e053334e4c8fe973672c6a1d4b"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/AGENTS.md",
+      "size": 747,
+      "sha256": "badaa5e6f0a634cea05fda0b34cbe8ad8e19fedaeb37eb635a35d0d7c51218db"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/demo.mjs",
+      "size": 1364,
+      "sha256": "630719ad53a56f37f98563176132ce2e925efb8f986ef01c4577e253a67f3392"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/Main.clasp",
+      "size": 376,
+      "sha256": "377413167f0fae17ac67d886ffb4beb929930ebe9a90496b06ffd246e82b5308"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/scripts/verify.sh",
+      "size": 1222,
+      "sha256": "4d787905a0582a0ef068f5d37357bdd8293755c4f11418c9e34fc7077af800a0"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/support/inspectLead.d.ts",
+      "size": 88,
+      "sha256": "91b5badf93476c8bd4b8ba47f082c5de37c9cb332393676a41aff195fee0daab"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/support/inspectLead.mjs",
+      "size": 359,
+      "sha256": "cf8f5b5047d5c55503d6e5028730e2946828bab60b0ac683f91fbccb2275b613"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/solution/Main.clasp",
+      "size": 468,
+      "sha256": "803bb2f3f17f571b1752a82856e03033822011ee3461f220480d59e303e712cb"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/task.json",
+      "size": 339,
+      "sha256": "6713b2fb22a83f513156641f2b8e85d311ebf02555b30424bbaf8cb89c6b2348"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/prompt.md",
+      "size": 981,
+      "sha256": "bc7cc6953a45f5227b4121792f299be8d1f6c284187554ead1c9b23ee9eb14f6"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/AGENTS.md",
+      "size": 724,
+      "sha256": "872f5e915c02f99e163299f5a3fdb65ea16580d3db05af610b98c9e54a447c38"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/demo.mjs",
+      "size": 908,
+      "sha256": "3ec4ef23aa0d61ad0b43d5df7fd453da647dd68e1bf43fe8729ecaaeacc3e477"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/Main.clasp",
+      "size": 317,
+      "sha256": "fbad466eb756e15d3904e08088e2c75aadc8eeccda96149f18ff513c3b695e24"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/node_modules/local-upper/index.d.ts",
+      "size": 58,
+      "sha256": "48380bc1922922fe6259aba08828716a495d193512099c54ff46d53e57ae3353"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/node_modules/local-upper/index.mjs",
+      "size": 67,
+      "sha256": "21f9203b68887060f18993d5b838f0640dfd19af171f0d9e42b9800cd91b208b"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/node_modules/local-upper/package.json",
+      "size": 76,
+      "sha256": "e5caf9e0172c6745da6fe780cd931f42e17eb8634da8c0063c801232f0488a00"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/scripts/verify.sh",
+      "size": 708,
+      "sha256": "6b0efae98e9f80ea0864ac2766b1fd1146bf5869c17d1d51d2271aba00c490b5"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/support/formatLead.d.ts",
+      "size": 90,
+      "sha256": "36187f14b3c6b79aaba8296bf9c4d1b07c816831251ae48f01a28045cb9c9701"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/repo/support/formatLead.mjs",
+      "size": 89,
+      "sha256": "bc96d35fa5ad4bc96a09983e1c96286a057aaaceec3bdec96f2c8e9edd79bb0c"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/solution/Main.clasp",
+      "size": 475,
+      "sha256": "cb93f9f034c4e794a1322f9ab3a92126230d8f68c12a827399e6d9f1a4ecc72c"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-npm-interop/task.json",
+      "size": 304,
+      "sha256": "79f816b8f466c0419dc92cb77d30e259102a2c096d580e6738cbd6695276bff5"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/prompt.md",
+      "size": 1090,
+      "sha256": "b484dd72f48f4308d5f93508526b2ae3d60a53094f45410a9718ff5e94cc1dae"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/AGENTS.md",
+      "size": 773,
+      "sha256": "603230d8636cc5213b9a29d73b959487b4e64c313b951ee35035ddc5e1fba101"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/clasp_service_pkg/__main__.py",
+      "size": 330,
+      "sha256": "6accd22c0cb6f2796734a9dee88d29dc87e7d3480edce99eb5a7900821aac3f3"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/clasp_worker_bridge.py",
+      "size": 296,
+      "sha256": "c50a688596b7a9c601709293ee775835c9b99ee31aff936d1b67edf505817e59"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/demo.mjs",
+      "size": 1823,
+      "sha256": "45d8097ca170a42b45c89e26c9b13fa39f77fbe7e9a32282943155dc44cf08e8"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/Main.clasp",
+      "size": 491,
+      "sha256": "fbc25f2bff663c259859668a3ac44e84524f0cae6f726eeb8c084f12a97b84ea"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/repo/scripts/verify.sh",
+      "size": 887,
+      "sha256": "0703dd5051012f65c284efd2c6e6800526e2df2f999ed82f0e7e094ca9efd160"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/solution/Main.clasp",
+      "size": 649,
+      "sha256": "f65799f7fde0f2da958e886d852e1ff3aec54107880a6d077549b1ba3e60b905"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-python-interop/task.json",
+      "size": 306,
+      "sha256": "b9d6c44ee0011c4fa77dd934c5820d90b0e06ff81c5bc79fc0d32640e3b11ecf"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/prompt.md",
+      "size": 903,
+      "sha256": "55deef2f11f1983ea99c1ae031757059a0c5cd34f2a00c5f5058c70b081fb23d"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/repo/AGENTS.md",
+      "size": 678,
+      "sha256": "804cb4891d03cd9bc373d565ab89c5f98405be88d1681e8ea62902d004776202"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/repo/demo.mjs",
+      "size": 1619,
+      "sha256": "bd06d9680dd931d37cb9a1070480d4be796ac2282317393c3a4c35d005d5b070"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/repo/Main.clasp",
+      "size": 155,
+      "sha256": "d12fe45fd5213c88990bfc1d6a412d3a95df108a0fb298b5cdfa3d94e19a9447"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/repo/scripts/verify.sh",
+      "size": 1198,
+      "sha256": "d3cf7fe6fb884970308ef25c49ad355fa02de3a8637f5f38c4052803d6216ef2"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/solution/Main.clasp",
+      "size": 231,
+      "sha256": "f9d3901d38fb7c88a09ab05dbcf34dda85ec48f3bfd908c8376ad22ee7920a61"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-rust-interop/task.json",
+      "size": 299,
+      "sha256": "25cbab0eb482e6faeeef5970c59a594112e121e57b31491d1cb6fe787ea42edc"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/prompt.md",
+      "size": 982,
+      "sha256": "71af1bde627d85e1b33c0cfd344b1fbda4bec8a5291de3d1243216b0ee7280ed"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/AGENTS.md",
+      "size": 738,
+      "sha256": "7e555ba926e76739d7411e12802814a0f0e14d71119194f449d35503409873d6"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/src/main.mjs",
+      "size": 131,
+      "sha256": "1d44a66b7abb5c6d63e0192214393b40513185e50bd2718ade86a00dc4798f91"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/support/inspectLead.d.ts",
+      "size": 88,
+      "sha256": "91b5badf93476c8bd4b8ba47f082c5de37c9cb332393676a41aff195fee0daab"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/support/inspectLead.mjs",
+      "size": 359,
+      "sha256": "cf8f5b5047d5c55503d6e5028730e2946828bab60b0ac683f91fbccb2275b613"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/test/interop-boundary.test.mjs",
+      "size": 370,
+      "sha256": "7dc41447d2b4bdd47bf5460a945020c1817e905aaf07906a76ba7d3afbbcff04"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/solution/src/main.mjs",
+      "size": 1767,
+      "sha256": "b83288b2cd9cb6797c752567a1e8088057fd50a2900edebcf0c7dcf0708ae328"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/task.json",
+      "size": 316,
+      "sha256": "260017f01090bf2764d0328b3334524e23243b901645753ef5d28f3b8cd64ba5"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/prompt.md",
+      "size": 833,
+      "sha256": "596663a0c3bd11b49f9f79e4c145899afd342e28d69a8c4d9da47549c2cbf18e"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/AGENTS.md",
+      "size": 645,
+      "sha256": "865631094e8e86bbcb3edd5a3ddc994c7db4ba68abde7a54ddee919e6e2397b6"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/node_modules/local-upper/index.mjs",
+      "size": 67,
+      "sha256": "21f9203b68887060f18993d5b838f0640dfd19af171f0d9e42b9800cd91b208b"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/node_modules/local-upper/package.json",
+      "size": 76,
+      "sha256": "e5caf9e0172c6745da6fe780cd931f42e17eb8634da8c0063c801232f0488a00"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/src/main.mjs",
+      "size": 121,
+      "sha256": "424c907d903aec55f03fbc76e0614f92509b0c935ed1f0b8a56ac964844ad728"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/support/formatLead.mjs",
+      "size": 89,
+      "sha256": "bc96d35fa5ad4bc96a09983e1c96286a057aaaceec3bdec96f2c8e9edd79bb0c"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/repo/test/npm-interop.test.mjs",
+      "size": 257,
+      "sha256": "84fffeaaad8119fe5eeddf65d673cb5f937a170ce31398bda990f317ba83b0a6"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/solution/src/main.mjs",
+      "size": 322,
+      "sha256": "d57c1614e4e3b2f2732674783da9ec864c67ac93c16ab0beaf9b4c902a506ddc"
+    },
+    {
+      "path": "benchmarks/tasks/ts-npm-interop/task.json",
+      "size": 291,
+      "sha256": "ef1a8ca352c9f17adffef225ecf5206b200955deb115824980f26857e6bf5e02"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/prompt.md",
+      "size": 831,
+      "sha256": "eae2466ada855bd07902c9087d0cd6473630a296e0b70e7c5b87e19f5645ee89"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/repo/AGENTS.md",
+      "size": 789,
+      "sha256": "b3b3ff0bf9a48d6a6c3dfa130b41aa4268ef2065275d9b077e8389ad0f921edc"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/repo/clasp_service_pkg/__main__.py",
+      "size": 330,
+      "sha256": "6accd22c0cb6f2796734a9dee88d29dc87e7d3480edce99eb5a7900821aac3f3"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/repo/clasp_worker_bridge.py",
+      "size": 296,
+      "sha256": "c50a688596b7a9c601709293ee775835c9b99ee31aff936d1b67edf505817e59"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/repo/src/main.mjs",
+      "size": 120,
+      "sha256": "dae281f7ea033f062bf65cc748651dd5c41fb9fe158d3994f83f3267b4f223c2"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/repo/test/python-interop.test.mjs",
+      "size": 428,
+      "sha256": "1107bacc2a1a55f68f2035d91558faf725647e230129e06da00939e0b4739294"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/solution/src/main.mjs",
+      "size": 2466,
+      "sha256": "d66f7cf887efbd65adcf7f6d9c72757ffaab68f44dd982733a84275d86e46fb4"
+    },
+    {
+      "path": "benchmarks/tasks/ts-python-interop/task.json",
+      "size": 304,
+      "sha256": "43d424fbc10b94596fba99deab3a3d10def176189cbabcc7bbb01201e6b5e868"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/prompt.md",
+      "size": 713,
+      "sha256": "02d93314b72246e8d3ade2177c13ac7531c8793574913175923d3a8893bf5bde"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/repo/AGENTS.md",
+      "size": 679,
+      "sha256": "168a991d429cc8d88f402632c39b8ba5b890e181465a587a9065061b0ccdd791"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/repo/src/nativeInterop.mjs",
+      "size": 130,
+      "sha256": "730114c5b5d075024d1e7873a939d83e93765e5f5d70d43788c84e06c4d9bbff"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/repo/test/rust-interop.test.mjs",
+      "size": 818,
+      "sha256": "798cc753573b2c0e762433ab2bcb9178493044c7844f3be2e57effede38e3c94"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/solution/src/nativeInterop.mjs",
+      "size": 753,
+      "sha256": "370f8f10503d51092a3b63d8a86907d671e8c10dee8e379ff041860f392da110"
+    },
+    {
+      "path": "benchmarks/tasks/ts-rust-interop/task.json",
+      "size": 295,
+      "sha256": "034a11a274c5c97f6e711ae8524864a755a2cc4420cb0fc1814a9eb1ecb6eda3"
+    }
+  ]
+}
