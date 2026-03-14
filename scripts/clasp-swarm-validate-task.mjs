@@ -155,7 +155,11 @@ function parseTaskManifest(taskPath) {
     why: normalizeText(sections.get("Why")),
     scope: parseBullets("Scope", sections.get("Scope")),
     likelyFiles: parseBullets("Likely Files", sections.get("Likely Files")),
+    batchLabel: sections.has("Batch") ? normalizeText(sections.get("Batch")) : "",
     dependencies: parseBullets("Dependencies", sections.get("Dependencies"), { allowNone: true }),
+    dependencyLabels: sections.has("Dependency Labels")
+      ? parseBullets("Dependency Labels", sections.get("Dependency Labels"), { allowNone: true })
+      : [],
     acceptance: parseBullets("Acceptance", sections.get("Acceptance")),
     verification: parseVerification(sections.get("Verification")),
   };

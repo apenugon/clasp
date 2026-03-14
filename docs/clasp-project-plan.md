@@ -77,9 +77,11 @@ Every task file should include:
 - why it matters
 - scope
 - likely files
+- optional batch label for parallel launch groups
 - acceptance
 - verification command
 - dependencies
+- optional dependency labels that wait for a full prior batch to finish
 
 The canonical markdown template lives at `agents/swarm/task-template.md`.
 The parsed machine-readable manifest is validated against `agents/swarm/task.schema.json`.
@@ -98,6 +100,7 @@ Worktree rules:
 - verifier runs from a clean copy of the last accepted snapshot
 - merge only after verification passes by copying the verified workspace delta into the accepted snapshot
 - failed tasks produce structured reports, not free-form notes
+- parallel launch batches should use explicit lowercase labels so later tasks can wait on the whole batch instead of one task
 
 ## Milestones
 

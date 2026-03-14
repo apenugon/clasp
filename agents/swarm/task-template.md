@@ -19,7 +19,15 @@ Explain why this slice matters now and which track or milestone it supports.
 
 - `path/to/file`
 
+## Batch
+
+foundation-batch
+
 ## Dependencies
+
+- None
+
+## Dependency Labels
 
 - None
 
@@ -41,5 +49,7 @@ Machine-readable manifest notes:
 - taskId is the markdown basename without .md
 - taskKey is the leading SW-000 style identifier from the basename and H1
 - title is the H1 text after the taskKey
+- batchLabel comes from the optional Batch section and should be a lowercase slug when present
 - The parsed manifest is validated against agents/swarm/task.schema.json
+- dependencyLabels come from the optional Dependency Labels section
 -->

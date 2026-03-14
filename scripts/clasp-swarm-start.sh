@@ -9,11 +9,37 @@ trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
 main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
+batch_filter="${CLASP_SWARM_BATCH:-}"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
   clasp_swarm_lane_dirs "$wave_name" "$project_root"
   exit 0
+fi
+
+if [[ "${1:-}" == "--list-batches" ]]; then
+  wave_name="${2:-$(clasp_swarm_default_wave)}"
+  batch_labels=()
+  while IFS= read -r lane_dir; do
+    while IFS= read -r task_file; do
+      batch_label="$(clasp_swarm_task_batch_label "$task_file")"
+      [[ -n "$batch_label" ]] || continue
+      batch_labels+=("$batch_label")
+    done < <(clasp_swarm_task_files "$lane_dir")
+  done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
+  if [[ "${#batch_labels[@]}" -gt 0 ]]; then
+    printf '%s\n' "${batch_labels[@]}" | sort -u
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "--batch" ]]; then
+  if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "usage: $0 [--batch <batch-label> [wave-name]] [wave-name]" >&2
+    exit 1
+  fi
+  batch_filter="$2"
+  wave_name="${3:-$(clasp_swarm_default_wave)}"
 fi
 
 if [[ "$allow_dirty" != "1" ]] && \
@@ -37,6 +63,20 @@ fi
 clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch" >/dev/null
 
 while IFS= read -r lane_dir; do
+  if [[ -n "$batch_filter" ]]; then
+    lane_has_batch=0
+    while IFS= read -r task_file; do
+      if [[ "$(clasp_swarm_task_batch_label "$task_file")" == "$batch_filter" ]]; then
+        lane_has_batch=1
+        break
+      fi
+    done < <(clasp_swarm_task_files "$lane_dir")
+
+    if [[ "$lane_has_batch" != "1" ]]; then
+      continue
+    fi
+  fi
+
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
   runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
   log_file="$runtime_root/lane.log"
@@ -56,8 +96,13 @@ while IFS= read -r lane_dir; do
   pid="$(
     clasp_swarm_spawn_detached \
       "$log_file" \
+      env CLASP_SWARM_BATCH="$batch_filter" \
       bash -lc "exec bash \"$project_root/scripts/clasp-swarm-lane.sh\" \"$lane_dir\""
   )"
   printf '%s\n' "$pid" > "$pid_file"
-  echo "started lane=$lane_name pid=$pid log=$log_file"
+  if [[ -n "$batch_filter" ]]; then
+    echo "started lane=$lane_name batch=$batch_filter pid=$pid log=$log_file"
+  else
+    echo "started lane=$lane_name pid=$pid log=$log_file"
+  fi
 done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")

@@ -48,6 +48,7 @@ verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-600}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
 dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
 infra_retry_delay_seconds="${CLASP_SWARM_INFRA_RETRY_DELAY_SECONDS:-5}"
+batch_filter="${CLASP_SWARM_BATCH:-}"
 owns_runtime_state=0
 
 mkdir -p \
@@ -358,20 +359,32 @@ dependency_is_complete() {
   clasp_swarm_completion_marker_exists "$global_completed_root" "$dependency_id"
 }
 
+dependency_label_is_complete() {
+  local dependency_label="$1"
+  clasp_swarm_batch_is_complete "$dependency_label" "$lane_dir" "$global_completed_root"
+}
+
 wait_for_dependencies() {
   local task_file="$1"
   local task_id="$2"
   local waiting_log="$logs_root/$task_id.waiting.log"
   local deps=()
+  local dependency_labels=()
   local unmet=()
   local dependency_id=""
+  local dependency_label=""
 
   while IFS= read -r dependency_id; do
     [[ -n "$dependency_id" ]] || continue
     deps+=("$dependency_id")
   done < <(clasp_swarm_task_dependencies "$task_file")
 
-  if [[ "${#deps[@]}" -eq 0 ]]; then
+  while IFS= read -r dependency_label; do
+    [[ -n "$dependency_label" ]] || continue
+    dependency_labels+=("$dependency_label")
+  done < <(clasp_swarm_task_dependency_labels "$task_file")
+
+  if [[ "${#deps[@]}" -eq 0 && "${#dependency_labels[@]}" -eq 0 ]]; then
     return 0
   fi
 
@@ -381,6 +394,12 @@ wait_for_dependencies() {
     for dependency_id in "${deps[@]}"; do
       if ! dependency_is_complete "$dependency_id"; then
         unmet+=("$dependency_id")
+      fi
+    done
+
+    for dependency_label in "${dependency_labels[@]}"; do
+      if ! dependency_label_is_complete "$dependency_label"; then
+        unmet+=("label:$dependency_label")
       fi
     done
 
@@ -910,7 +929,7 @@ garbage_collect_stale_runs
 while true; do
   sync_completed_markers_from_global
 
-  selected_task="$(clasp_swarm_select_next_ready_task "$lane_dir" "$completed_root" "$global_completed_root" "$blocked_root" || true)"
+  selected_task="$(clasp_swarm_select_next_ready_task "$lane_dir" "$completed_root" "$global_completed_root" "$blocked_root" "$batch_filter" || true)"
 
   if [[ -z "$selected_task" ]]; then
     break

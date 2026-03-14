@@ -286,16 +286,72 @@ clasp_swarm_task_dependencies() {
   node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-field dependencies "$task_file"
 }
 
+clasp_swarm_task_batch_label() {
+  local task_file="$1"
+
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-field batchLabel "$task_file"
+}
+
+clasp_swarm_task_dependency_labels() {
+  local task_file="$1"
+
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-field dependencyLabels "$task_file"
+}
+
 clasp_swarm_validate_task_manifest() {
   local task_file="$1"
 
   node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" "$task_file"
 }
 
+clasp_swarm_batch_is_complete() {
+  local batch_label="$1"
+  local lane_dir="$2"
+  local completed_root="$3"
+  local wave_dir=""
+  local scan_lane=""
+  local task_file=""
+  local task_batch=""
+  local found=0
+  local project_root=""
+  local scan_lanes=()
+
+  [[ -n "$batch_label" ]] || return 1
+
+  project_root="$(clasp_swarm_project_root)"
+  if [[ "$lane_dir" == "$project_root"/agents/swarm/*/* ]]; then
+    wave_dir="$(dirname "$lane_dir")"
+    while IFS= read -r scan_lane; do
+      [[ -n "$scan_lane" ]] || continue
+      scan_lanes+=("$scan_lane")
+    done < <(find "$wave_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+  else
+    scan_lanes=("$lane_dir")
+  fi
+
+  for scan_lane in "${scan_lanes[@]}"; do
+    while IFS= read -r task_file; do
+      task_batch="$(clasp_swarm_task_batch_label "$task_file")"
+      if [[ "$task_batch" != "$batch_label" ]]; then
+        continue
+      fi
+
+      found=1
+      if ! clasp_swarm_completion_marker_exists "$completed_root" "$task_file"; then
+        return 1
+      fi
+    done < <(clasp_swarm_task_files "$scan_lane")
+  done
+
+  [[ "$found" == "1" ]]
+}
+
 clasp_swarm_task_dependencies_met() {
   local task_file="$1"
-  local completed_root="$2"
+  local lane_dir="$2"
+  local completed_root="$3"
   local dep=""
+  local dependency_label=""
 
   while IFS= read -r dep; do
     [[ -z "$dep" ]] && continue
@@ -303,6 +359,13 @@ clasp_swarm_task_dependencies_met() {
       return 1
     fi
   done < <(clasp_swarm_task_dependencies "$task_file")
+
+  while IFS= read -r dependency_label; do
+    [[ -z "$dependency_label" ]] && continue
+    if ! clasp_swarm_batch_is_complete "$dependency_label" "$lane_dir" "$completed_root"; then
+      return 1
+    fi
+  done < <(clasp_swarm_task_dependency_labels "$task_file")
 
   return 0
 }
@@ -312,11 +375,20 @@ clasp_swarm_select_next_ready_task() {
   local completed_root="$2"
   local global_completed_root="$3"
   local blocked_root="$4"
+  local batch_filter="${5:-}"
   local task_file=""
   local task_id=""
   local first_pending=""
+  local task_batch=""
 
   while IFS= read -r task_file; do
+    if [[ -n "$batch_filter" ]]; then
+      task_batch="$(clasp_swarm_task_batch_label "$task_file")"
+      if [[ "$task_batch" != "$batch_filter" ]]; then
+        continue
+      fi
+    fi
+
     task_id="$(clasp_swarm_completion_key "$task_file")"
 
     if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
@@ -332,7 +404,7 @@ clasp_swarm_select_next_ready_task() {
       return 0
     fi
 
-    if clasp_swarm_task_dependencies_met "$task_file" "$global_completed_root"; then
+    if clasp_swarm_task_dependencies_met "$task_file" "$lane_dir" "$global_completed_root"; then
       printf '%s\n' "$task_file"
       return 0
     fi

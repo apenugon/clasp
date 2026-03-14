@@ -16,6 +16,7 @@ autopilot_test_root=""
 autopilot_test_root_2=""
 lane_merge_test_root=""
 lane_cleanup_test_root=""
+batch_start_test_root=""
 prompt_test_root=""
 prompt_test_root_2=""
 status_wave_name=""
@@ -31,7 +32,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}"
 }
 
@@ -535,6 +536,225 @@ EOF
   printf '%s\n' "$project_dir"
 }
 
+make_batch_start_test_project() {
+  local target_root="$1"
+  local project_dir="$target_root/repo"
+
+  mkdir -p \
+    "$project_dir/scripts" \
+    "$project_dir/agents/swarm/test-wave/01-foundation-a" \
+    "$project_dir/agents/swarm/test-wave/02-foundation-b" \
+    "$project_dir/agents/swarm/test-wave/03-follow-up"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-lane.sh" \
+    "$project_root/scripts/clasp-swarm-start.sh" \
+    "$project_root/scripts/clasp-swarm-stop.sh" \
+    "$project_root/scripts/clasp-swarm-status.sh" \
+    "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/"
+  cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
+
+  cat > "$project_dir/scripts/clasp-builder.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+task_id="$(basename "$task_file" .md)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+printf '%s\n' "$task_id" >> "$project_root/builder-events.log"
+printf '%s\n' "$task_id" > "$workspace/$task_id.txt"
+
+cat > "$report_json" <<JSON
+{
+  "summary": "builder finished for $task_id",
+  "files_touched": [
+    "$task_id.txt"
+  ],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/clasp-verifier.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+task_id="$(basename "$task_file" .md)"
+
+[[ -f "$workspace/$task_id.txt" ]]
+
+cat > "$report_json" <<JSON
+{
+  "verdict": "pass",
+  "summary": "verified $task_id",
+  "findings": [],
+  "tests_run": [
+    "batch start scenario"
+  ],
+  "follow_up": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/verify-all.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+
+  chmod +x \
+    "$project_dir/scripts/clasp-builder.sh" \
+    "$project_dir/scripts/clasp-swarm-common.sh" \
+    "$project_dir/scripts/clasp-swarm-lane.sh" \
+    "$project_dir/scripts/clasp-swarm-start.sh" \
+    "$project_dir/scripts/clasp-swarm-status.sh" \
+    "$project_dir/scripts/clasp-swarm-stop.sh" \
+    "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/clasp-verifier.sh" \
+    "$project_dir/scripts/verify-all.sh"
+
+  cat > "$project_dir/agents/swarm/test-wave/01-foundation-a/BA-001-foundation-a.md" <<'EOF'
+# BA-001 Foundation a
+
+## Goal
+
+Run the first foundation task.
+
+## Why
+
+Exercise batch-filtered swarm startup.
+
+## Scope
+
+- Complete in the foundation batch
+
+## Likely Files
+
+- `scripts/clasp-swarm-start.sh`
+
+## Batch
+
+foundation
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+  cat > "$project_dir/agents/swarm/test-wave/02-foundation-b/BA-002-foundation-b.md" <<'EOF'
+# BA-002 Foundation b
+
+## Goal
+
+Run the second foundation task.
+
+## Why
+
+Exercise batch-filtered swarm startup across lanes.
+
+## Scope
+
+- Complete in the foundation batch
+
+## Likely Files
+
+- `scripts/clasp-swarm-start.sh`
+
+## Batch
+
+foundation
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+  cat > "$project_dir/agents/swarm/test-wave/03-follow-up/BA-003-follow-up.md" <<'EOF'
+# BA-003 Follow up
+
+## Goal
+
+Run only after the full foundation batch completes.
+
+## Why
+
+Exercise dependency labels for batch completion.
+
+## Scope
+
+- Wait for the foundation batch label
+
+## Likely Files
+
+- `scripts/clasp-swarm-lane.sh`
+
+## Dependencies
+
+- None
+
+## Dependency Labels
+
+- foundation
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+  (
+    cd "$project_dir"
+    git init -b main >/dev/null
+    git config user.name 'Swarm Test'
+    git config user.email 'swarm-test@example.com'
+    git add .
+    git commit -m 'base snapshot' >/dev/null
+  )
+
+  printf '%s\n' "$project_dir"
+}
+
 bash -n \
   "$project_root/scripts/clasp-builder.sh" \
   "$project_root/scripts/clasp-swarm-common.sh" \
@@ -552,6 +772,7 @@ bash -lc "
   node '$project_root/scripts/clasp-swarm-validate-task.mjs' '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md' >/dev/null
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskId '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskKey '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == '' ]]
   clasp_swarm_retry_limit_is_bounded '2'
   ! clasp_swarm_retry_limit_is_bounded '0'
   ! clasp_swarm_retry_limit_is_bounded '-1'
@@ -956,6 +1177,120 @@ bash scripts/verify-all.sh
 ```
 EOF
 
+cat > "$lane_root/ZZ-004-batched-follow-up.md" <<'EOF'
+# ZZ-004 Batched follow up
+
+## Goal
+
+Wait for the full foundation batch to finish.
+
+## Why
+
+This task proves dependency labels wait for every task in the batch.
+
+## Scope
+
+- Wait for the foundation label
+
+## Likely Files
+
+- `src/batched-follow-up`
+
+## Dependencies
+
+- None
+
+## Dependency Labels
+
+- foundation
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+cat > "$lane_root/ZZ-005-foundation-a.md" <<'EOF'
+# ZZ-005 Foundation a
+
+## Goal
+
+Contribute to the shared foundation batch.
+
+## Why
+
+This task proves batch completion waits for every batched task.
+
+## Scope
+
+- Complete the foundation batch
+
+## Likely Files
+
+- `src/foundation-a`
+
+## Batch
+
+foundation
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+cat > "$lane_root/ZZ-006-foundation-b.md" <<'EOF'
+# ZZ-006 Foundation b
+
+## Goal
+
+Finish the second task in the shared foundation batch.
+
+## Why
+
+This task proves batch labels only clear after every member completes.
+
+## Scope
+
+- Complete the foundation batch
+
+## Likely Files
+
+- `src/foundation-b`
+
+## Batch
+
+foundation
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
 bash -lc "
   set -euo pipefail
   source '$project_root/scripts/clasp-swarm-common.sh'
@@ -969,6 +1304,20 @@ bash -lc "
   printf '%s\t%s\n' '2026-03-13T00:00:01Z' 'feedface' > '$global_completed_root/ZZ-003'
   next=\$(clasp_swarm_select_next_ready_task '$lane_root' '$completed_root' '$global_completed_root' '$blocked_root')
   [[ \$(basename \"\$next\") == 'ZZ-001-late-consumer.md' ]]
+
+  batch_only=\$(clasp_swarm_select_next_ready_task '$lane_root' '$completed_root' '$global_completed_root' '$blocked_root' foundation)
+  [[ \$(basename \"\$batch_only\") == 'ZZ-005-foundation-a.md' ]]
+
+  ! clasp_swarm_batch_is_complete foundation '$lane_root' '$global_completed_root'
+  ! clasp_swarm_task_dependencies_met '$lane_root/ZZ-004-batched-follow-up.md' '$lane_root' '$global_completed_root'
+
+  printf '%s\t%s\n' '2026-03-13T00:00:02Z' 'c0ffee' > '$global_completed_root/ZZ-005'
+  ! clasp_swarm_batch_is_complete foundation '$lane_root' '$global_completed_root'
+  ! clasp_swarm_task_dependencies_met '$lane_root/ZZ-004-batched-follow-up.md' '$lane_root' '$global_completed_root'
+
+  printf '%s\t%s\n' '2026-03-13T00:00:03Z' 'faded' > '$global_completed_root/ZZ-006'
+  clasp_swarm_batch_is_complete foundation '$lane_root' '$global_completed_root'
+  clasp_swarm_task_dependencies_met '$lane_root/ZZ-004-batched-follow-up.md' '$lane_root' '$global_completed_root'
 " >/dev/null
 
 invalid_lane_root="$(mktemp -d)"
@@ -996,6 +1345,49 @@ if [[ "$invalid_output" != *"manifest.title must be a non-empty string"* ]]; the
   printf '%s\n' "$invalid_output" >&2
   exit 1
 fi
+
+batch_start_test_root="$(mktemp -d)"
+batch_start_project_root="$(make_batch_start_test_project "$batch_start_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$batch_start_project_root'
+
+  batches=\$(bash scripts/clasp-swarm-start.sh --list-batches test-wave)
+  [[ \"\$batches\" == *'foundation'* ]]
+
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  [[ \"\$output\" == *'batch=foundation'* ]]
+  [[ \"\$output\" == *'lane=01-foundation-a'* ]]
+  [[ \"\$output\" == *'lane=02-foundation-b'* ]]
+  [[ \"\$output\" != *'lane=03-follow-up'* ]]
+
+  deadline=\$((SECONDS + 20))
+  while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid || -f .clasp-swarm/test-wave/02-foundation-b/pid ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for foundation batch lanes to finish' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  [[ -f BA-001-foundation-a.txt ]]
+  [[ -f BA-002-foundation-b.txt ]]
+  [[ ! -f BA-003-follow-up.txt ]]
+  [[ \$(sort builder-events.log | tr '\n' ' ') == 'BA-001-foundation-a BA-002-foundation-b ' ]]
+
+  CLASP_SWARM_ALLOW_DIRTY=1 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
+  deadline=\$((SECONDS + 20))
+  while [[ -f .clasp-swarm/test-wave/03-follow-up/pid ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for follow-up lane to finish' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  [[ -f BA-003-follow-up.txt ]]
+" >/dev/null
 
 prompt_test_root="$(mktemp -d)"
 prompt_project_root="$(make_prompt_test_project "$prompt_test_root")"
