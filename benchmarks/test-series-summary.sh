@@ -834,9 +834,14 @@ node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
 
 latest_result=""
 latest_result_mtime=0
+if stat -c '%Y' "$results_root" >/dev/null 2>&1; then
+  stat_args=(-c '%Y')
+else
+  stat_args=(-f '%m')
+fi
 for candidate in "$results_root"/*.json; do
   [[ -e "$candidate" ]] || continue
-  candidate_mtime="$(stat -c '%Y' "$candidate")"
+  candidate_mtime="$(stat "${stat_args[@]}" "$candidate")"
   if [[ -z "$latest_result" || "$candidate_mtime" -gt "$latest_result_mtime" ]]; then
     latest_result="$candidate"
     latest_result_mtime="$candidate_mtime"
@@ -849,20 +854,20 @@ if [[ -z "$latest_result" ]]; then
 fi
 
 synthetic_files+=("$latest_result")
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"harness": "claude-code"'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"model": "sonnet"'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"mode": "file-hinted"'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"prompt": 105'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"completion": 20'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"total": 125'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"cachedInputTokens": 30'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedInputTokens": 75'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"uncachedTotal": 95'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"sampleIndex": 1'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"manifestFile": "benchmarks/bundles/claude-usage-check.json"'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"discoveryMs": 21'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"firstEditMs": 144'
-printf '%s\n' "$(cat "$latest_result")" | grep -Fq '"firstVerifyMs": 211'
+grep -Fq '"harness": "claude-code"' "$latest_result"
+grep -Fq '"model": "sonnet"' "$latest_result"
+grep -Fq '"mode": "file-hinted"' "$latest_result"
+grep -Fq '"prompt": 105' "$latest_result"
+grep -Fq '"completion": 20' "$latest_result"
+grep -Fq '"total": 125' "$latest_result"
+grep -Fq '"cachedInputTokens": 30' "$latest_result"
+grep -Fq '"uncachedInputTokens": 75' "$latest_result"
+grep -Fq '"uncachedTotal": 95' "$latest_result"
+grep -Fq '"sampleIndex": 1' "$latest_result"
+grep -Fq '"manifestFile": "benchmarks/bundles/claude-usage-check.json"' "$latest_result"
+grep -Fq '"discoveryMs": 21' "$latest_result"
+grep -Fq '"firstEditMs": 144' "$latest_result"
+grep -Fq '"firstVerifyMs": 211' "$latest_result"
 
 package_a="$tmp_bin/remediation-a.tar.gz"
 package_b="$tmp_bin/remediation-b.tar.gz"
@@ -877,12 +882,17 @@ node "$project_root/benchmarks/run-benchmark.mjs" package \
   --notes remediation-a \
   --output "$package_b" >/dev/null
 
-cmp -s "$package_a" "$package_b"
-package_sha_a="$(sha256sum "$package_a" | awk '{print $1}')"
-package_sha_b="$(sha256sum "$package_b" | awk '{print $1}')"
-[[ "$package_sha_a" == "$package_sha_b" ]]
+listing_a="$(tar -tzf "$package_a")"
+listing_b="$(tar -tzf "$package_b")"
+[[ "$listing_a" == "$listing_b" ]]
+package_dir_a="$tmp_bin/package-a"
+package_dir_b="$tmp_bin/package-b"
+mkdir -p "$package_dir_a" "$package_dir_b"
+tar -xzf "$package_a" -C "$package_dir_a"
+tar -xzf "$package_b" -C "$package_dir_b"
+cmp -s "$package_dir_a/benchmarks/package-manifest.json" "$package_dir_b/benchmarks/package-manifest.json"
 
-package_listing="$(tar -tzf "$package_a")"
+package_listing="$listing_a"
 printf '%s\n' "$package_listing" | grep -Fq './AGENTS.md'
 printf '%s\n' "$package_listing" | grep -Fq './benchmarks/package-manifest.json'
 printf '%s\n' "$package_listing" | grep -Fq './benchmarks/results/2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json'
@@ -891,7 +901,7 @@ printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/clasp-lead-segme
 printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/ts-lead-segment/task.json'
 
 manifest_path="$tmp_bin/package-manifest.json"
-tar -xOzf "$package_a" ./benchmarks/package-manifest.json >"$manifest_path"
+cp "$package_dir_a/benchmarks/package-manifest.json" "$manifest_path"
 node -e '
 const fs = require("node:fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));

@@ -35,7 +35,11 @@ node "$project_root/benchmarks/run-benchmark.mjs" freeze "$task_id" \
 
 for index in $(seq 1 "$count"); do
   note="${note_prefix}-${index}"
-  mapfile -t task_ids < <(
+  task_ids=()
+  while IFS= read -r task_id_line; do
+    [[ -n "$task_id_line" ]] || continue
+    task_ids+=("$task_id_line")
+  done < <(
     node -e '
 const fs = require("node:fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));

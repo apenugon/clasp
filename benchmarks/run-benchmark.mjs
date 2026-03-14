@@ -2495,7 +2495,7 @@ async function sha256File(filePath) {
 
 async function createDeterministicTarball(sourceDir, outputPath) {
   await mkdir(path.dirname(outputPath), { recursive: true });
-  const command = [
+  const gnuTarCommand = [
     "tar",
     "--sort=name",
     "--owner=0",
@@ -2504,13 +2504,21 @@ async function createDeterministicTarball(sourceDir, outputPath) {
     "--mtime=@0",
     "-cf",
     "-",
-    ".",
-    "|",
-    "gzip",
-    "-n",
-    ">",
-    shellQuote(outputPath)
+    "."
   ].join(" ");
+  const portableTarCommand = [
+    "LC_ALL=C",
+    `find . -print | sort | tar --uid 0 --gid 0 --uname root --gname root --format pax --options gzip:!timestamp -czf ${shellQuote(outputPath)} -T -`
+  ].join(" ");
+  const command = [
+    "set -euo pipefail",
+    "find . -exec touch -h -t 197001010000 {} +",
+    `if ${gnuTarCommand} >/dev/null 2>&1; then`,
+    `  ${gnuTarCommand} | gzip -n > ${shellQuote(outputPath)}`,
+    "else",
+    `  ${portableTarCommand}`,
+    "fi"
+  ].join("\n");
   const result = await runProcess(["bash", "-lc", command], sourceDir);
 
   if (result.exitCode !== 0) {

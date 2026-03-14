@@ -214,6 +214,8 @@ clasp_swarm_spawn_detached() {
 
   if command -v setsid >/dev/null 2>&1; then
     setsid "$@" >"$log_file" 2>&1 < /dev/null &
+  elif command -v nohup >/dev/null 2>&1; then
+    nohup "$@" >"$log_file" 2>&1 < /dev/null &
   elif command -v python3 >/dev/null 2>&1; then
     python3 - "$log_file" "$@" <<'PY'
 import os
@@ -236,8 +238,6 @@ with open(log_path, "ab", buffering=0) as log_handle, open(os.devnull, "rb") as 
 print(process.pid)
 PY
     return 0
-  elif command -v nohup >/dev/null 2>&1; then
-    nohup "$@" >"$log_file" 2>&1 < /dev/null &
   else
     "$@" >"$log_file" 2>&1 < /dev/null &
   fi

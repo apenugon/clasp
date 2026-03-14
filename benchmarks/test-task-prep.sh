@@ -107,11 +107,18 @@ latest_result_for_harness() {
   local harness="$1"
   local latest_result=""
   local latest_mtime=0
+  local stat_format=()
+
+  if stat -c '%Y' "$results_root" >/dev/null 2>&1; then
+    stat_format=(-c '%Y')
+  else
+    stat_format=(-f '%m')
+  fi
 
   for candidate in "$results_root"/*--"$harness".json; do
     [[ -e "$candidate" ]] || continue
     local candidate_mtime
-    candidate_mtime="$(stat -c '%Y' "$candidate")"
+    candidate_mtime="$(stat "${stat_format[@]}" "$candidate")"
     if [[ -z "$latest_result" || "$candidate_mtime" -gt "$latest_mtime" ]]; then
       latest_result="$candidate"
       latest_mtime="$candidate_mtime"
