@@ -63,6 +63,7 @@ mkdir -p \
 cleanup() {
   if [[ "$owns_runtime_state" == "1" ]]; then
     rm -f "$current_task_file" "$pid_file"
+    release_lock "$lock_file"
   fi
 }
 
@@ -88,16 +89,56 @@ run_lane_subprocess() {
   run_with_timeout "$timeout_seconds" "$@"
 }
 
-acquire_merge_lock() {
-  local merge_lock_fd="$1"
-
-  bash -c 'exec 9>&-; flock "$1"' _ "$merge_lock_fd"
+lock_dir_for() {
+  printf '%s.d\n' "$1"
 }
 
-acquire_worktree_lock() {
-  local worktree_lock_fd="$1"
+clear_stale_lock() {
+  local lock_path="$1"
+  local lock_dir=""
+  local owner_pid=""
 
-  bash -c 'exec 9>&-; flock "$1"' _ "$worktree_lock_fd"
+  lock_dir="$(lock_dir_for "$lock_path")"
+
+  if [[ ! -d "$lock_dir" || ! -f "$lock_dir/pid" ]]; then
+    return 0
+  fi
+
+  owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+
+  if [[ -n "$owner_pid" ]] && ! kill -0 "$owner_pid" >/dev/null 2>&1; then
+    rm -f "$lock_dir/pid"
+    rmdir "$lock_dir" >/dev/null 2>&1 || true
+  fi
+}
+
+acquire_lock() {
+  local lock_path="$1"
+  local mode="${2:-wait}"
+  local lock_dir=""
+
+  lock_dir="$(lock_dir_for "$lock_path")"
+
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    clear_stale_lock "$lock_path"
+
+    if [[ "$mode" == "try" ]]; then
+      return 1
+    fi
+
+    sleep 0.1
+  done
+
+  printf '%s\n' "$$" > "$lock_dir/pid"
+}
+
+release_lock() {
+  local lock_path="$1"
+  local lock_dir=""
+
+  lock_dir="$(lock_dir_for "$lock_path")"
+  rm -f "$lock_dir/pid"
+  rmdir "$lock_dir" >/dev/null 2>&1 || true
 }
 
 task_id_of() {
@@ -361,17 +402,15 @@ clear_blocked() {
 
 remove_worktree_if_present() {
   local worktree_path="$1"
-  local worktree_lock_fd
 
-  exec {worktree_lock_fd}>"$worktree_lock_file"
-  acquire_worktree_lock "$worktree_lock_fd"
+  acquire_lock "$worktree_lock_file"
 
   if git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $worktree_path"; then
     git -C "$project_root" worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
   fi
 
   rm -rf "$worktree_path"
-  exec {worktree_lock_fd}>&-
+  release_lock "$worktree_lock_file"
 }
 
 clear_git_worktree_locks() {
@@ -383,21 +422,19 @@ prepare_git_worktree() {
   local add_args=("$@")
   local attempt=1
   local max_attempts=3
-  local worktree_lock_fd
 
   while (( attempt <= max_attempts )); do
-    exec {worktree_lock_fd}>"$worktree_lock_file"
-    acquire_worktree_lock "$worktree_lock_fd"
+    acquire_lock "$worktree_lock_file"
 
     git -C "$project_root" worktree prune >/dev/null 2>&1 || true
     clear_git_worktree_locks
 
     if git -C "$project_root" worktree add "${add_args[@]}" >/dev/null; then
-      exec {worktree_lock_fd}>&-
+      release_lock "$worktree_lock_file"
       return 0
     fi
 
-    exec {worktree_lock_fd}>&-
+    release_lock "$worktree_lock_file"
 
     if (( attempt == max_attempts )); then
       return 1
@@ -605,11 +642,9 @@ integrate_task_branch() {
   local base_head
   local old_trunk
   local task_head
-  local merge_lock_fd
   local status=0
 
-  exec {merge_lock_fd}>"$merge_lock_file"
-  acquire_merge_lock "$merge_lock_fd"
+  acquire_lock "$merge_lock_file"
 
   set +e
   (
@@ -643,7 +678,7 @@ integrate_task_branch() {
   status=$?
   set -e
 
-  exec {merge_lock_fd}>&-
+  release_lock "$merge_lock_file"
   return "$status"
 }
 
@@ -655,11 +690,9 @@ ensure_trunk_branch() {
 
 sync_trunk_with_main() {
   local sync_log="${1:-/dev/null}"
-  local merge_lock_fd
   local status=0
 
-  exec {merge_lock_fd}>"$merge_lock_file"
-  acquire_merge_lock "$merge_lock_fd"
+  acquire_lock "$merge_lock_file"
 
   set +e
   (
@@ -671,12 +704,11 @@ sync_trunk_with_main() {
   status=$?
   set -e
 
-  exec {merge_lock_fd}>&-
+  release_lock "$merge_lock_file"
   return "$status"
 }
 
-exec 9>"$lock_file"
-if ! flock -n 9; then
+if ! acquire_lock "$lock_file" try; then
   echo "lane lock is already held for $lane_name" >&2
   exit 1
 fi
