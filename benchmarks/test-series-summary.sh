@@ -147,6 +147,10 @@ write_result "2026-03-01T10-12-43.000Z--clasp-interop-boundary--codex.json" "cla
 write_result "2026-03-01T10-12-44.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:44.000Z" 95 110 100 true 0
 write_result "2026-03-01T10-12-45.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-1" "2026-03-01T10:12:45.000Z" 130 155 142 false 1
 write_result "2026-03-01T10-12-46.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:46.000Z" 140 160 148 true 0
+write_result "2026-03-01T10-12-47.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:47.000Z" 80 110 98 true 0
+write_result "2026-03-01T10-12-48.000Z--clasp-secret-handling--codex.json" "clasp-secret-handling" "clasp" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:48.000Z" 90 120 102 true 0
+write_result "2026-03-01T10-12-49.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-1" "2026-03-01T10:12:49.000Z" 150 170 150 false 1
+write_result "2026-03-01T10-12-50.000Z--ts-secret-handling--codex.json" "ts-secret-handling" "typescript" "codex" "gpt-5.4" "secret-handling-a-2" "2026-03-01T10:12:50.000Z" 160 175 155 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -322,6 +326,18 @@ printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    timeToGreenDelt
 printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tokenDelta: -50'
 printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    uncachedTokenDelta: -47'
 
+secret_handling_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes secret-handling-a)"
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'clasp-secret-handling\tcodex\tgpt-5.4'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'ts-secret-handling\tcodex\tgpt-5.4'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq 'secret-handling-comparison'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'  codex\tgpt-5.4\tsecret-handling-a'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    timeToGreenDeltaMs: -230'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    tokenDelta: -58'
+printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    uncachedTokenDelta: -53'
+
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
 printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
 printf '%s\n' "$public_app_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpublic-app'
@@ -420,6 +436,14 @@ printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run clasp-interop-boun
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run ts-interop-boundary'
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-1'
 printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" secret-handling 2 secret-handling-a gpt-5.4
+secret_handling_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run clasp-secret-handling'
+printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run ts-secret-handling'
+printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-1'
+printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-2'
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4

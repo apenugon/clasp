@@ -1,0 +1,49 @@
+module Main
+
+record TicketDraft = {
+  customerId : Str,
+  summary : Str
+}
+
+record SearchRequest = { query : Str }
+record SearchResponse = { summary : Str }
+
+sampleDraft : TicketDraft
+sampleDraft = TicketDraft {
+  customerId = "cust-42",
+  summary = "Renewal is blocked on legal review."
+}
+
+replyPrompt : TicketDraft -> Prompt
+replyPrompt draft = appendPrompt (appendPrompt (systemPrompt "You are a support agent.") (assistantPrompt "Draft a concise reply.")) (userPrompt draft.summary)
+
+replyPromptValue : Prompt
+replyPromptValue = replyPrompt sampleDraft
+
+replyPromptText : Str
+replyPromptText = promptText replyPromptValue
+
+guide SecretGuide = {
+  scope: "Keep secret values out of prompt payloads, traces, and tool calls while requiring policy-gated secret access."
+}
+
+policy ReplyPolicy = public permits {
+  process "node",
+  secret "OPENAI_API_KEY"
+}
+
+policy SearchPolicy = public permits {
+  process "node",
+  secret "SEARCH_API_TOKEN"
+}
+
+role ReplyWorkerRole = guide: SecretGuide, policy: ReplyPolicy, approval: on_request, sandbox: workspace_write
+
+agent replyWorker = ReplyWorkerRole
+
+toolserver SearchTools = "mcp" "stdio://search-tools" with SearchPolicy
+
+tool summarizeDraft = SearchTools "summarize_draft" SearchRequest -> SearchResponse
+
+main : Str
+main = replyPromptText

@@ -55,6 +55,10 @@ const taskSetAliases = {
     "clasp-interop-boundary",
     "ts-interop-boundary"
   ],
+  "secret-handling": [
+    "clasp-secret-handling",
+    "ts-secret-handling"
+  ],
   "npm-interop": [
     "clasp-npm-interop",
     "ts-npm-interop"
@@ -136,6 +140,13 @@ const comparisonTaskFamilies = [
     comparisonLabel: "interop-boundary-comparison",
     leftTaskId: "clasp-interop-boundary",
     rightTaskId: "ts-interop-boundary",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
+    comparisonLabel: "secret-handling-comparison",
+    leftTaskId: "clasp-secret-handling",
+    rightTaskId: "ts-secret-handling",
     leftLabel: "clasp",
     rightLabel: "ts"
   },
