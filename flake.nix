@@ -10,6 +10,8 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
       ];
 
       forAllSystems = f:
@@ -28,8 +30,10 @@
           packages = with pkgs; [
             bun
             cabal-install
+            git
             haskellPackages.ghc
             nodejs_22
+            python3
           ];
         };
       });

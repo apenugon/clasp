@@ -208,6 +208,21 @@ clasp_swarm_retry_limit_is_bounded() {
   [[ "$retry_limit" =~ ^[0-9]+$ ]] && (( retry_limit > 0 ))
 }
 
+clasp_swarm_spawn_detached() {
+  local log_file="$1"
+  shift
+
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$log_file" 2>&1 < /dev/null &
+  elif command -v nohup >/dev/null 2>&1; then
+    nohup "$@" >"$log_file" 2>&1 < /dev/null &
+  else
+    "$@" >"$log_file" 2>&1 < /dev/null &
+  fi
+
+  printf '%s\n' "$!"
+}
+
 clasp_swarm_task_dependencies() {
   local task_file="$1"
 

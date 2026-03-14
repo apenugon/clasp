@@ -9,9 +9,11 @@ lane_root=""
 completed_root=""
 blocked_root=""
 global_completed_root=""
+spawn_root=""
+spawn_path_root=""
 
 cleanup() {
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}"
 }
 
 trap cleanup EXIT
@@ -34,6 +36,33 @@ bash -lc "
   ! clasp_swarm_retry_limit_is_bounded '0'
   ! clasp_swarm_retry_limit_is_bounded '-1'
   ! clasp_swarm_retry_limit_is_bounded 'forever'
+" >/dev/null
+
+spawn_root="$(mktemp -d)"
+spawn_path_root="$(mktemp -d)"
+ln -s "$(command -v bash)" "$spawn_path_root/bash"
+ln -s "$(command -v nohup)" "$spawn_path_root/nohup"
+ln -s "$(command -v sleep)" "$spawn_path_root/sleep"
+
+bash -lc "
+  set -euo pipefail
+  source '$project_root/scripts/clasp-swarm-common.sh'
+  export PATH='$spawn_path_root'
+  export CLASP_SWARM_SPAWN_OUTPUT='$spawn_root/output.txt'
+  pid=\$(clasp_swarm_spawn_detached '$spawn_root/spawn.log' bash -lc 'printf detached > \"\$CLASP_SWARM_SPAWN_OUTPUT\"; sleep 1')
+  [[ -n \"\$pid\" ]]
+
+  deadline=\$((SECONDS + 5))
+  while [[ ! -f '$spawn_root/output.txt' ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for detached command output' >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+
+  [[ \$(< '$spawn_root/output.txt') == 'detached' ]]
+  kill \"\$pid\" >/dev/null 2>&1 || true
 " >/dev/null
 
 bash -lc "
@@ -98,7 +127,11 @@ bash -lc "
   [[ \$(clasp_swarm_task_run_attempt \"\$latest_run\") == '2' ]]
 " >/dev/null
 
-mapfile -t lanes < <(bash "$project_root/scripts/clasp-swarm-start.sh" --list-lanes wave1)
+lanes=()
+while IFS= read -r lane; do
+  [[ -n "$lane" ]] || continue
+  lanes+=("$lane")
+done < <(bash "$project_root/scripts/clasp-swarm-start.sh" --list-lanes wave1)
 
 if [[ "${#lanes[@]}" -lt 1 ]]; then
   echo "expected at least one wave1 lane" >&2
@@ -111,7 +144,11 @@ done
 
 bash "$project_root/scripts/clasp-swarm-status.sh" wave1 >/dev/null
 
-mapfile -t default_lanes < <(bash "$project_root/scripts/clasp-swarm-start.sh" --list-lanes)
+default_lanes=()
+while IFS= read -r lane; do
+  [[ -n "$lane" ]] || continue
+  default_lanes+=("$lane")
+done < <(bash "$project_root/scripts/clasp-swarm-start.sh" --list-lanes)
 
 if [[ "${#default_lanes[@]}" -lt 1 ]]; then
   echo "expected at least one default-wave lane" >&2

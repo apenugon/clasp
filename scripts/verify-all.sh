@@ -2,6 +2,13 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+nix_config_features='experimental-features = nix-command flakes'
+
+if [[ -n "${NIX_CONFIG:-}" ]]; then
+  export NIX_CONFIG="${NIX_CONFIG}"$'\n'"${nix_config_features}"
+else
+  export NIX_CONFIG="${nix_config_features}"
+fi
 
 nix develop -c bash -lc "
   set -euo pipefail

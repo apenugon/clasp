@@ -53,9 +53,11 @@ while IFS= read -r lane_dir; do
     rm -f "$pid_file"
   fi
 
-  setsid bash -lc "exec bash \"$project_root/scripts/clasp-swarm-lane.sh\" \"$lane_dir\"" \
-    >"$log_file" 2>&1 < /dev/null &
-  pid=$!
+  pid="$(
+    clasp_swarm_spawn_detached \
+      "$log_file" \
+      bash -lc "exec bash \"$project_root/scripts/clasp-swarm-lane.sh\" \"$lane_dir\""
+  )"
   printf '%s\n' "$pid" > "$pid_file"
   echo "started lane=$lane_name pid=$pid log=$log_file"
 done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")

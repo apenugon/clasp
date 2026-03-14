@@ -47,9 +47,18 @@ check_incomplete_task() {
     recovery_args=(--allow-bootstrap-recovery true)
   fi
 
-  run_benchmark_prepare "$task_id" "$workspace" "${recovery_args[@]}" >/dev/null
+  if [[ "${#recovery_args[@]}" -gt 0 ]]; then
+    run_benchmark_prepare "$task_id" "$workspace" "${recovery_args[@]}" >/dev/null
+  else
+    run_benchmark_prepare "$task_id" "$workspace" >/dev/null
+  fi
 
-  if run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local "${recovery_args[@]}" >/dev/null 2>&1; then
+  if [[ "${#recovery_args[@]}" -gt 0 ]]; then
+    if run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local "${recovery_args[@]}" >/dev/null 2>&1; then
+      echo "expected $task_id to fail verification before the benchmark change is applied" >&2
+      return 1
+    fi
+  elif run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null 2>&1; then
     echo "expected $task_id to fail verification before the benchmark change is applied" >&2
     return 1
   fi

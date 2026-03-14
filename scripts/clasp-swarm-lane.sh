@@ -305,8 +305,12 @@ wait_for_dependencies() {
   local waiting_log="$logs_root/$task_id.waiting.log"
   local deps=()
   local unmet=()
+  local dependency_id=""
 
-  mapfile -t deps < <(clasp_swarm_task_dependencies "$task_file")
+  while IFS= read -r dependency_id; do
+    [[ -n "$dependency_id" ]] || continue
+    deps+=("$dependency_id")
+  done < <(clasp_swarm_task_dependencies "$task_file")
 
   if [[ "${#deps[@]}" -eq 0 ]]; then
     return 0
