@@ -3348,9 +3348,9 @@ collectStyledRefsExpr expr =
       collectStyledRefsExpr iterable <> collectStyledRefsExpr loopBody <> collectStyledRefsExpr body
     LMatch subject branches ->
       collectStyledRefsExpr subject <> concatMap (collectStyledRefsExpr . lowerMatchBranchBody) branches
-    LRecord fields ->
+    LRecord _ fields ->
       concatMap (collectStyledRefsExpr . lowerRecordFieldValue) fields
-    LFieldAccess subject _ ->
+    LFieldAccess _ subject _ ->
       collectStyledRefsExpr subject
     _ ->
       []
@@ -3424,9 +3424,9 @@ lowerExprContainsReturn expr =
       any lowerExprContainsReturn fields
     LMatch subject branches ->
       lowerExprContainsReturn subject || any (lowerExprContainsReturn . lowerMatchBranchBody) branches
-    LRecord fields ->
+    LRecord _ fields ->
       any (lowerExprContainsReturn . lowerRecordFieldValue) fields
-    LFieldAccess subject _ ->
+    LFieldAccess _ subject _ ->
       lowerExprContainsReturn subject
 
 emitListCodecHelpers :: [Type] -> [Text]
@@ -6051,10 +6051,10 @@ emitExpr counter expr =
                   | (index, fieldText) <- zip [(0 :: Int) ..] fieldTexts
                   ]
        in (nextCounter, "{ " <> objectFields <> " }")
-    LRecord fields ->
+    LRecord _ fields ->
       let (nextCounter, fieldTexts) = emitRecordFields counter fields
        in (nextCounter, "{ " <> T.intercalate ", " fieldTexts <> " }")
-    LFieldAccess subject fieldName ->
+    LFieldAccess _ subject fieldName ->
       let (nextCounter, subjectText) = emitExpr counter subject
        in (nextCounter, "(" <> subjectText <> ")." <> emitPropertyName fieldName)
     LMatch subject branches ->

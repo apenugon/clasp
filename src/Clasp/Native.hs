@@ -255,8 +255,8 @@ data NativeExpr
   | NativeCall NativeExpr [NativeExpr]
   | NativeConstruct Text [NativeExpr]
   | NativeMatch NativeExpr [NativeMatchBranch]
-  | NativeRecord [NativeField]
-  | NativeFieldAccess NativeExpr Text
+  | NativeRecord Text [NativeField]
+  | NativeFieldAccess Text NativeExpr Text
   deriving (Eq, Show)
 
 data NativeIntrinsic
@@ -422,10 +422,10 @@ renderNativeExpr expr =
       "construct " <> name <> "(" <> commaSeparated (fmap renderNativeExpr args) <> ")"
     NativeMatch scrutinee branches ->
       "match " <> renderNativeExpr scrutinee <> " [" <> commaSeparated (fmap renderMatchBranch branches) <> "]"
-    NativeRecord fields ->
-      "record {" <> commaSeparated (fmap renderField fields) <> "}"
-    NativeFieldAccess target fieldName ->
-      "field(" <> renderNativeExpr target <> ", " <> fieldName <> ")"
+    NativeRecord recordName fields ->
+      "record " <> recordName <> " {" <> commaSeparated (fmap renderField fields) <> "}"
+    NativeFieldAccess recordName target fieldName ->
+      "field(" <> recordName <> ", " <> renderNativeExpr target <> ", " <> fieldName <> ")"
 
 renderLiteral :: NativeLiteral -> Text
 renderLiteral literal =
@@ -901,10 +901,10 @@ lowerExprToNative expr =
       NativeConstruct tag (fmap lowerExprToNative args)
     LMatch subject branches ->
       NativeMatch (lowerExprToNative subject) (fmap lowerBranchToNative branches)
-    LRecord fields ->
-      NativeRecord (fmap lowerFieldToNative fields)
-    LFieldAccess subject fieldName ->
-      NativeFieldAccess (lowerExprToNative subject) fieldName
+    LRecord recordName fields ->
+      NativeRecord recordName (fmap lowerFieldToNative fields)
+    LFieldAccess subjectType subject fieldName ->
+      NativeFieldAccess (recordTypeName subjectType) (lowerExprToNative subject) fieldName
 
 lowerBranchToNative :: LowerMatchBranch -> NativeMatchBranch
 lowerBranchToNative branch =
@@ -920,3 +920,9 @@ lowerFieldToNative field =
     { nativeFieldName = lowerRecordFieldName field
     , nativeFieldValue = lowerExprToNative (lowerRecordFieldValue field)
     }
+
+recordTypeName :: Type -> Text
+recordTypeName typ =
+  case typ of
+    TNamed name -> name
+    _ -> renderType typ

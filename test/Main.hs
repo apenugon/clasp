@@ -109,6 +109,7 @@ import Clasp.Native
   , NativeConstructorLayout (..)
   , NativeDecl (..)
   , NativeExpr (..)
+  , NativeField (..)
   , NativeFieldLayout (..)
   , NativeFunction (..)
   , NativeGlobal (..)
@@ -2198,12 +2199,12 @@ lowerTests =
             assertFailure ("expected lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right lowered -> do
             case findLowerDecl "showName" (lowerModuleDecls lowered) of
-              Just (LFunctionDecl _ ["user"] (LFieldAccess (LVar "user") "name")) ->
+              Just (LFunctionDecl _ ["user"] (LFieldAccess (TNamed "User") (LVar "user") "name")) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered showName declaration: " <> show other)
             case findLowerDecl "defaultUser" (lowerModuleDecls lowered) of
-              Just (LValueDecl _ (LRecord [LowerRecordField "name" (LString "Ada"), LowerRecordField "active" (LBool True)])) ->
+              Just (LValueDecl _ (LRecord "User" [LowerRecordField "name" (LString "Ada"), LowerRecordField "active" (LBool True)])) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered defaultUser declaration: " <> show other)
@@ -2478,7 +2479,7 @@ lowerTests =
             assertFailure ("expected auth identity lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right lowered ->
             case findLowerDecl "sessionTenantId" (lowerModuleDecls lowered) of
-              Just (LFunctionDecl _ ["session"] (LFieldAccess (LFieldAccess (LVar "session") "tenant") "id")) ->
+              Just (LFunctionDecl _ ["session"] (LFieldAccess (TNamed "Tenant") (LFieldAccess (TNamed "AuthSession") (LVar "session") "tenant") "id")) ->
                 pure ()
               other ->
                 assertFailure ("unexpected lowered auth identity declaration: " <> show other)
@@ -2556,6 +2557,31 @@ nativeTests =
                       assertEqual "form route contract" "route:createLeadRoute" (lowerRouteContractIdentity routeForm)
                 other ->
                   assertFailure ("unexpected native home declaration: " <> show other)
+    , testCase "native lowering keeps static record types for same-shape records" $
+        case nativeSource "same-shape-records" nativeSameShapeRecordSource of
+          Left err ->
+            assertFailure ("expected native lowering for same-shape records to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            case findNativeDecl "defaultUser" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl (NativeGlobal _ (NativeRecord "User" [NativeField "name" (NativeLiteralExpr (NativeString "Ada")), NativeField "active" (NativeLiteralExpr (NativeBool True))]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native defaultUser declaration: " <> show other)
+            case findNativeDecl "defaultTeam" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl (NativeGlobal _ (NativeRecord "Team" [NativeField "name" (NativeLiteralExpr (NativeString "Compiler")), NativeField "active" (NativeLiteralExpr (NativeBool False))]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native defaultTeam declaration: " <> show other)
+            case findNativeDecl "userName" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["user"] (NativeFieldAccess "User" (NativeLocal "user") "name"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native userName declaration: " <> show other)
+            case findNativeDecl "teamName" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["team"] (NativeFieldAccess "Team" (NativeLocal "team") "name"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native teamName declaration: " <> show other)
     , testCase "native ABI uses handle slots for handle-like record fields and variant payloads" $
         case nativeSource "native-abi" nativeAbiSource of
           Left err ->
@@ -2756,6 +2782,21 @@ nativeTests =
             assertBool "expected native IR record layout" ("record_layout LeadEnvelope { words = 3, fields = [title:Str@word0/handle, tags:[Str]@word1/handle, owner:Principal@word2/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR object layout" ("object_layout RenderResult.RenderedFlag { kind = variant, header_words = 2, words = 4, roots = [] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR decl emission" ("global main = string(\"ok\")" `T.isInfixOf` nativeIr)
+    , testCase "claspc native preserves static record types for same-shape record access end to end" $
+        withProjectFiles "native-same-shape-records" [("Main.clasp", nativeSameShapeRecordSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "dist" </> "Main.native.ir"
+          createDirectoryIfMissing True (takeDirectory outputPath)
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
+          case exitCode of
+            ExitFailure _ ->
+              assertFailure ("expected same-shape native emission to succeed:\n" <> stdoutText <> stderrText)
+            ExitSuccess -> do
+              nativeIr <- TIO.readFile outputPath
+              assertBool "expected typed user record literal" ("global defaultUser = record User {name = string(\"Ada\"), active = bool(true)}" `T.isInfixOf` nativeIr)
+              assertBool "expected typed team record literal" ("global defaultTeam = record Team {name = string(\"Compiler\"), active = bool(false)}" `T.isInfixOf` nativeIr)
+              assertBool "expected typed user field access" ("function userName(user) = field(User, local(user), name)" `T.isInfixOf` nativeIr)
+              assertBool "expected typed team field access" ("function teamName(team) = field(Team, local(team), name)" `T.isInfixOf` nativeIr)
     , testCase "native runtime exposes compiler stdlib bindings and bundled runtime artifacts" $
         case nativeSource "compiler-stdlib" compilerStdlibSource of
           Left err ->
@@ -6652,6 +6693,42 @@ nativeAbiScenarioSource =
     , "home req = page defaultModel.title (text \"Mailbox\")"
     , ""
     , "route homeRoute = GET \"/\" Empty -> Page home"
+    ]
+
+nativeSameShapeRecordSource :: Text
+nativeSameShapeRecordSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "record Team = {"
+    , "  name : Str,"
+    , "  active : Bool"
+    , "}"
+    , ""
+    , "defaultUser : User"
+    , "defaultUser = User {"
+    , "  name = \"Ada\","
+    , "  active = true"
+    , "}"
+    , ""
+    , "defaultTeam : Team"
+    , "defaultTeam = Team {"
+    , "  name = \"Compiler\","
+    , "  active = false"
+    , "}"
+    , ""
+    , "userName : User -> Str"
+    , "userName user = user.name"
+    , ""
+    , "teamName : Team -> Str"
+    , "teamName team = team.name"
+    , ""
+    , "main = userName defaultUser"
     ]
 
 redirectSource :: Text

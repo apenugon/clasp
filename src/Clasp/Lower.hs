@@ -135,8 +135,8 @@ data LowerExpr
   | LCall LowerExpr [LowerExpr]
   | LConstruct Text [LowerExpr]
   | LMatch LowerExpr [LowerMatchBranch]
-  | LRecord [LowerRecordField]
-  | LFieldAccess LowerExpr Text
+  | LRecord Text [LowerRecordField]
+  | LFieldAccess Type LowerExpr Text
   deriving (Eq, Show)
 
 data LowerMatchBranch = LowerMatchBranch
@@ -456,10 +456,10 @@ lowerCoreExpr expr =
       LCall (lowerCoreExpr fn) (fmap lowerCoreExpr args)
     CMatch _ _ subject branches ->
       LMatch (lowerCoreExpr subject) (fmap lowerMatchBranch branches)
-    CRecord _ _ _ fields ->
-      LRecord (fmap lowerRecordField fields)
+    CRecord _ _ recordName fields ->
+      LRecord recordName (fmap lowerRecordField fields)
     CFieldAccess _ _ subject fieldName ->
-      LFieldAccess (lowerCoreExpr subject) fieldName
+      LFieldAccess (coreExprType subject) (lowerCoreExpr subject) fieldName
     CDecodeJson _ typ rawJson ->
       LCall (LVar (codecDecodeName typ)) [lowerCoreExpr rawJson]
     CEncodeJson _ value ->
@@ -628,19 +628,19 @@ expandExpr declEnv subst visited expr =
                   LMatch subject' (fmap (expandBranch declEnv subst visited) branches)
             _ ->
               LMatch subject' (fmap (expandBranch declEnv subst visited) branches)
-    LRecord fields ->
-      LRecord (fmap (expandRecordField declEnv subst visited) fields)
-    LFieldAccess subject fieldName ->
+    LRecord recordName fields ->
+      LRecord recordName (fmap (expandRecordField declEnv subst visited) fields)
+    LFieldAccess subjectType subject fieldName ->
       let subject' = expandExpr declEnv subst visited subject
        in case subject' of
-            LRecord fields ->
+            LRecord _ fields ->
               case find ((== fieldName) . lowerRecordFieldName) fields of
                 Just field ->
                   expandExpr declEnv subst visited (lowerRecordFieldValue field)
                 Nothing ->
-                  LFieldAccess subject' fieldName
+                  LFieldAccess subjectType subject' fieldName
             _ ->
-              LFieldAccess subject' fieldName
+              LFieldAccess subjectType subject' fieldName
 
 expandBranch :: DeclEnv -> SubstEnv -> Set.Set Text -> LowerMatchBranch -> LowerMatchBranch
 expandBranch declEnv subst visited branch =
@@ -827,7 +827,7 @@ summarizeValue expr =
       tag
     LCall fn _ ->
       summarizeValue fn <> "(...)"
-    LFieldAccess subject fieldName ->
+    LFieldAccess _ subject fieldName ->
       summarizeValue subject <> "." <> fieldName
     _ ->
       "<dynamic>"
