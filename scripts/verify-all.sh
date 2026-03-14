@@ -15,6 +15,7 @@ nix develop -c bash -lc "
   node benchmarks/run-benchmark.mjs list >/dev/null
   bash benchmarks/test-task-prep.sh
   bash benchmarks/test-persistence-benchmarks.sh
+  bash benchmarks/test-correctness-benchmarks.sh
   bash benchmarks/test-external-adaptation.sh
   bash benchmarks/test-foreign-interop.sh
   bash benchmarks/test-interop-boundary.sh

@@ -17,6 +17,7 @@ printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-workflow-correctness[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-external-adaptation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-external-adaptation[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-npm-interop[[:space:]]'
@@ -244,6 +245,24 @@ check_product_only_typescript_persistence_solution() {
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
 
+check_product_only_clasp_workflow_correctness_solution() {
+  local task_id="clasp-workflow-correctness"
+  local workspace="$workspace_root/$task_id-product-only"
+  local task_root="$project_root/benchmarks/tasks/$task_id/repo"
+  local solution_root="$project_root/benchmarks/tasks/$task_id/solution"
+
+  run_benchmark_prepare "$task_id" "$workspace" --allow-bootstrap-recovery true >/dev/null
+
+  cp "$solution_root/Main.clasp" "$workspace/Main.clasp"
+
+  run_benchmark_verify "$task_id" "$workspace" \
+    --harness prep-check \
+    --model local \
+    --allow-bootstrap-recovery true >/dev/null
+
+  assert_files_match "$workspace/test/workflow-correctness.test.mjs" "$task_root/test/workflow-correctness.test.mjs"
+}
+
 check_oracle_prompt_mode() {
   local clasp_workspace="$workspace_root/clasp-lead-segment-oracle"
   local ts_workspace="$workspace_root/ts-lead-segment-oracle"
@@ -338,6 +357,7 @@ check_incomplete_task ts-control-plane
 check_incomplete_task clasp-control-plane
 check_incomplete_task py-agent-escalation
 check_incomplete_task clasp-durable-workflow
+check_incomplete_task clasp-workflow-correctness
 check_incomplete_task clasp-external-adaptation
 check_incomplete_task ts-external-adaptation
 check_incomplete_task clasp-npm-interop
@@ -414,6 +434,18 @@ assert_contains "$durable_workspace/test/durable-workflow.test.mjs" 'import { ru
 assert_contains "$durable_workspace/demo.mjs" "overlapStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "autoRollbackStatus: null"
 assert_contains "$durable_workspace/demo.mjs" "manualRollbackStatus: null"
+
+workflow_correctness_workspace="$workspace_root/clasp-workflow-correctness"
+assert_file_exists "$workflow_correctness_workspace/benchmark-prep/Main.context.json"
+assert_file_exists "$workflow_correctness_workspace/benchmark-prep/Main.air.json"
+assert_file_exists "$workflow_correctness_workspace/LANGUAGE_GUIDE.md"
+assert_contains "$workflow_correctness_workspace/benchmark-prep/Main.context.json" '"schema:Counter"'
+assert_contains "$workflow_correctness_workspace/benchmark-prep/Main.air.json" '"decl:nonNegative"'
+assert_contains "$workflow_correctness_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_contains "$workflow_correctness_workspace/test/workflow-correctness.test.mjs" 'runWorkflowCorrectnessDemo'
+assert_not_contains "$workflow_correctness_workspace/Main.clasp" 'invariant : nonNegative'
+assert_not_contains "$workflow_correctness_workspace/Main.clasp" 'precondition : belowLimit'
+assert_not_contains "$workflow_correctness_workspace/Main.clasp" 'postcondition : withinLimit'
 
 clasp_npm_workspace="$workspace_root/clasp-npm-interop"
 assert_file_exists "$clasp_npm_workspace/benchmark-prep/Main.context.json"
@@ -497,5 +529,6 @@ assert_contains "$syntax_verbose_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/M
 check_product_only_clasp_solution
 check_product_only_typescript_solution
 check_product_only_typescript_persistence_solution
+check_product_only_clasp_workflow_correctness_solution
 check_oracle_prompt_mode
 check_persistence_prompt_modes

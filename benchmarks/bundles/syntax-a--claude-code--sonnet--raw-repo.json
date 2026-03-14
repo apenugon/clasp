@@ -51,8 +51,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 21173,
-      "sha256": "74ba503f257c3d25ba8200928aeeda044475751d5933bccde64a728448be40c7"
+      "size": 22021,
+      "sha256": "eed01ff843bb2bdc76adcf2be8fb1f237de7ba77bc1f19336221466d0291c333"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -61,8 +61,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 62476,
-      "sha256": "f813664fe3fa818b13e0ddf31ca658ffdb24acfb84ae250268a14b1ab2d32e95"
+      "size": 62571,
+      "sha256": "08bb8fc08b2680593ae0979dede861330a6469f9fce72c4cb0af8854cbab5ff9"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",

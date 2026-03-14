@@ -42,6 +42,10 @@ const taskSetAliases = {
   "lead-persistence": [
     "ts-lead-persistence"
   ],
+  correctness: [
+    "clasp-workflow-correctness",
+    "ts-lead-persistence"
+  ],
   "external-adaptation": [
     "clasp-external-adaptation",
     "ts-external-adaptation"
@@ -1736,7 +1740,7 @@ function usage() {
   console.error("  node benchmarks/run-benchmark.mjs run <task-id> --workspace path --agent-command command [--harness name --model name --mode raw-repo|file-hinted|oracle --interventions n --prompt-tokens n --completion-tokens n --retry-tokens n --debug-tokens n --notes text --bundle-manifest path --sample-count n --sample-index n --phase-file path]");
   console.error("  node benchmarks/run-benchmark.mjs package --output path [--task-id id --harness name --model name --language name --notes text]");
   console.error("  node benchmarks/run-benchmark.mjs summarize [--task-id id --harness name --model name --language name --notes text]");
-  console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
+  console.error("  task-set aliases: app, control-plane, lead-priority, lead-rejection, lead-segment, lead-persistence, correctness, external-adaptation, foreign-interop, mixed-stack-semantic-layer, interop-boundary, secret-handling, audit-log, npm-interop, python-interop, rust-interop, compiler-maintenance, syntax-form");
 }
 
 async function copyPackageFiles(bundleRoot, results, tasks) {

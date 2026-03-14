@@ -64,8 +64,14 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/clasp-audit-log`: compiler-managed audit-log task covering typed events, redaction, retention, and root-cause traceability across routes, tools, workflows, and secret access
 - `benchmarks/tasks/ts-audit-log`: mirrored handwritten JavaScript baseline for the same audit-log surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
+- `benchmarks/tasks/clasp-workflow-correctness`: workflow-correctness task covering declared invariants, preconditions, and postconditions across legal and illegal state transitions
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
 - `benchmarks/tasks/ts-lead-persistence`: SQLite-backed TypeScript lead-app task covering restart durability and incompatible-schema failure handling on the dogfood app
+
+For correctness-focused end-to-end runs that combine workflow guards with storage-backed app changes, the `correctness` task-set alias currently expands to:
+
+- `benchmarks/tasks/clasp-workflow-correctness`
+- `benchmarks/tasks/ts-lead-persistence`
 
 ## Benchmark Modes
 
@@ -270,6 +276,13 @@ Run the SQLite-backed dogfood benchmark in `Oracle` mode:
 node benchmarks/run-benchmark.mjs prepare ts-lead-persistence --mode oracle --workspace benchmarks/workspaces/ts-lead-persistence
 ```
 
+Run the end-to-end correctness suite for workflow constraints plus the storage-backed dogfood change:
+
+```sh
+bash benchmarks/run-codex-series.sh correctness 5 correctness-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes correctness-1
+```
+
 Run the mirrored repeated external-objective adaptation series for both languages:
 
 ```sh
@@ -358,6 +371,7 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `ts-secret-handling`: mirrored handwritten secret redaction, policy-gated access, and blame-reporting baseline
 - `clasp-audit-log`: compiler-managed typed audit events, redaction policy, retention rules, and cross-surface root-cause traceability
 - `ts-audit-log`: mirrored handwritten audit-log baseline for the same route, tool, workflow, and secret-access surface
+- `clasp-workflow-correctness`: workflow invariant, precondition, and postcondition repair benchmark on a small durable state machine
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
 - `clasp-external-adaptation`: reply-rate-driven bounded adaptation over the Clasp lead outreach demo
 - `ts-external-adaptation`: mirrored TypeScript reply-rate adaptation benchmark with the same bounded remediation contract
