@@ -17,6 +17,7 @@ import Clasp.Compiler
   , checkEntryWithPreference
   , compileEntryWithPreference
   , explainEntryWithPreference
+  , formatSource
   , parseSource
   , renderAirEntryJsonWithPreference
   , renderContextEntryJsonWithPreference
@@ -35,6 +36,8 @@ main = do
   case args of
     ["parse", inputPath] ->
       runParse format inputPath
+    ["format", inputPath] ->
+      runFormat format inputPath
     ["check", inputPath] ->
       runCheck format compilerPreference inputPath
     ["explain", inputPath] ->
@@ -103,6 +106,27 @@ runParse format inputPath = do
                 [ "status" .= ("ok" :: String)
                 , "command" .= ("parse" :: String)
                 , "input" .= inputPath
+                ]
+
+runFormat :: OutputFormat -> FilePath -> IO ()
+runFormat format inputPath = do
+  source <- TIO.readFile inputPath
+  case formatSource inputPath source of
+    Left err -> do
+      writeFailure format err
+      exitFailure
+    Right formattedSource ->
+      case format of
+        Pretty ->
+          TIO.putStrLn formattedSource
+        Json ->
+          LTIO.putStrLn $
+            encodeToLazyText $
+              object
+                [ "status" .= ("ok" :: String)
+                , "command" .= ("format" :: String)
+                , "input" .= inputPath
+                , "source" .= formattedSource
                 ]
 
 runCheck :: OutputFormat -> CompilerPreference -> FilePath -> IO ()
@@ -255,6 +279,7 @@ usage =
   unlines
     [ "claspc usage:"
     , "  claspc parse <input.clasp> [--json]"
+    , "  claspc format <input.clasp> [--json]"
     , "  claspc check <input.clasp> [--json] [--compiler=clasp|bootstrap]"
     , "  claspc explain <input.clasp> [--json] [--compiler=clasp|bootstrap]"
     , "  claspc air <input.clasp> [-o output.air.json] [--json] [--compiler=clasp|bootstrap]"

@@ -942,6 +942,8 @@ renderAgentRoleDecl roleDecl =
     <> agentRoleDeclGuideName roleDecl
     <> ", policy: "
     <> agentRoleDeclPolicyName roleDecl
+    <> maybe "" (\approvalPolicy -> ", approval: " <> renderAgentRoleApprovalPolicy approvalPolicy) (agentRoleDeclApprovalPolicy roleDecl)
+    <> maybe "" (\sandboxPolicy -> ", sandbox: " <> renderAgentRoleSandboxPolicy sandboxPolicy) (agentRoleDeclSandboxPolicy roleDecl)
 
 renderAgentDecl :: AgentDecl -> Text
 renderAgentDecl agentDecl =
@@ -1038,6 +1040,24 @@ renderForeignDecl foreignDecl =
     <> renderType (foreignDeclType foreignDecl)
     <> " = "
     <> renderStringLiteral (foreignDeclRuntimeName foreignDecl)
+    <> maybe "" renderForeignPackageImport (foreignDeclPackageImport foreignDecl)
+
+renderForeignPackageImport :: ForeignPackageImport -> Text
+renderForeignPackageImport packageImport =
+  " from "
+    <> renderForeignPackageImportKind (foreignPackageImportKind packageImport)
+    <> " "
+    <> renderStringLiteral (foreignPackageImportSpecifier packageImport)
+    <> " declaration "
+    <> renderStringLiteral (foreignPackageImportDeclarationPath packageImport)
+
+renderForeignPackageImportKind :: ForeignPackageImportKind -> Text
+renderForeignPackageImportKind importKind =
+  case importKind of
+    ForeignPackageImportNpm ->
+      "npm"
+    ForeignPackageImportTypeScript ->
+      "typescript"
 
 renderRouteDecl :: RouteDecl -> Text
 renderRouteDecl routeDecl =

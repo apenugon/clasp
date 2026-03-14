@@ -1016,6 +1016,21 @@ formatterTests =
                 assertFailure ("expected formatted output to parse:\n" <> T.unpack (renderDiagnosticBundle err))
               Right reformatted ->
                 assertEqual "formatter should be idempotent" formatted reformatted
+    , testCase "renders current source forms including role policies and package imports" $
+        case formatSource "Main.clasp" formatterCurrentSurfaceSource of
+          Left err ->
+            assertFailure ("expected formatter success:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right formatted ->
+            assertEqual "current surface should round-trip canonically" formatterCurrentSurfaceExpected formatted
+    , testCase "format CLI rewrites a project file canonically" $
+        withProjectFiles "format-cli" [("Main.clasp", formatterCliSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["format", inputPath]
+          case exitCode of
+            ExitFailure code ->
+              assertFailure ("expected format CLI success, got exit code " <> show code <> ":\n" <> stderrText)
+            ExitSuccess ->
+              assertEqual "formatted CLI output" formatterCliExpected (T.stripEnd (T.pack stdoutText))
     ]
 
 checkerTests :: TestTree
@@ -7347,6 +7362,46 @@ formatterRoundTripSource =
     , " }"
     , "}"
     ]
+
+formatterCurrentSurfaceSource :: Text
+formatterCurrentSurfaceSource =
+  T.unlines
+    [ "foreign unsafe formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , "role WorkerRole = guide: Repo, policy: SupportDisclosure, sandbox: workspace_write, approval: on_request"
+    , "agent builder = WorkerRole"
+    , "main = formatLead defaultLead"
+    ]
+
+formatterCurrentSurfaceExpected :: Text
+formatterCurrentSurfaceExpected =
+  T.intercalate
+    "\n"
+    [ "module Main"
+    , ""
+    , "role WorkerRole = guide: Repo, policy: SupportDisclosure, approval: on_request, sandbox: workspace_write"
+    , ""
+    , "agent builder = WorkerRole"
+    , ""
+    , "foreign unsafe formatLead : LeadRequest -> Str = \"formatLead\" from typescript \"./support/formatLead.mjs\" declaration \"./support/formatLead.d.ts\""
+    , ""
+    , "main = formatLead defaultLead"
+    ]
+
+formatterCliSource :: Text
+formatterCliSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.User"
+    , ""
+    , "main=let message = \"Ada\" in message"
+    , ""
+    , "record User={name:Str, aliases:[Str]}"
+    , "type Status=Busy Str|Idle"
+    ]
+
+formatterCliExpected :: Text
+formatterCliExpected = formatterCanonicalizationExpected
 
 unknownGoalMetricSource :: Text
 unknownGoalMetricSource =
