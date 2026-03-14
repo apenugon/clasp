@@ -318,6 +318,18 @@ node benchmarks/run-backend-benchmarks.mjs \
   --warmup-runs 0
 ```
 
+Run the schema-owned boundary transport benchmark that compares JSON framing against generated binary framing on the exact same compiled schema model:
+
+```sh
+node benchmarks/run-boundary-transport-benchmarks.mjs
+```
+
+That benchmark compiles `benchmarks/backend/boundary-transport-schema.clasp`, loads the generated `__claspSchemas.BoundaryTransportSample` contract, and reports:
+
+- framed JSON projection throughput and wire size after validation through the generated schema adapters
+- generated binary projection throughput and wire size from the same schema contract and seed value
+- payload-size ratio and speedup so the public benchmark story can compare transports without redefining the app schema
+
 Run the mirrored repeated unsafe-refinement and blame-quality pair for unexpected foreign values:
 
 ```sh
