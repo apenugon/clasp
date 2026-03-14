@@ -218,6 +218,8 @@ check_product_only_typescript_solution() {
 
   cp "$project_root/examples/lead-app-ts/src/shared/lead.ts" "$workspace/src/shared/lead.ts"
   cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$workspace/src/server/main.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/store.ts" "$workspace/src/server/store.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/runtime-modules.d.ts" "$workspace/src/server/runtime-modules.d.ts"
 
   run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
 

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer } from "../dist/server/main.js";
 
 function toWireSegment(value) {
@@ -21,19 +24,33 @@ async function request(port, path, init = {}) {
   return fetch(`http://127.0.0.1:${port}${path}`, init);
 }
 
-async function withServer(binding, callback) {
+async function withServer(binding, callback, options = {}) {
   const port = 4300 + Math.floor(Math.random() * 300);
   const server = createServer(
     {
       mockLeadSummaryModel: binding
     },
-    { port }
+    {
+      databasePath: options.databasePath ?? ":memory:",
+      port
+    }
   );
 
   try {
     await callback(port);
   } finally {
     server.stop(true);
+  }
+}
+
+async function withPersistentDatabase(callback) {
+  const directory = await mkdtemp(join(tmpdir(), "lead-app-ts-"));
+  const databasePath = join(directory, "lead-app.sqlite");
+
+  try {
+    await callback(databasePath);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
   }
 }
 
@@ -243,4 +260,58 @@ async (port) => {
 
   assert.equal(response.status, 502);
   assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withPersistentDatabase(async (databasePath) => {
+  const binding = (lead) =>
+    JSON.stringify({
+      summary: `${lead.company} led by ${lead.contact} fits the persisted pipeline.`,
+      priority: "high",
+      segment: toWireSegment(lead.segment),
+      followUpRequired: true
+    });
+
+  await withServer(binding, async (port) => {
+    const created = await request(port, "/leads", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: formBody({
+        company: "Persisted Co",
+        contact: "Riley",
+        budget: "90000",
+        segment: "enterprise"
+      })
+    });
+
+    assert.equal(created.status, 200);
+
+    const reviewed = await request(port, "/review", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: formBody({
+        leadId: "lead-3",
+        note: "Stored in sqlite."
+      })
+    });
+
+    assert.equal(reviewed.status, 200);
+  }, { databasePath });
+
+  await withServer(binding, async (port) => {
+    const inbox = await request(port, "/inbox");
+    const inboxHtml = await inbox.text();
+    assert.equal(inbox.status, 200);
+    assert.match(inboxHtml, /Persisted Co \(high, enterprise\)/);
+
+    const primaryLead = await request(port, "/lead/primary");
+    const primaryLeadHtml = await primaryLead.text();
+    assert.equal(primaryLead.status, 200);
+    assert.match(primaryLeadHtml, /Persisted Co/);
+    assert.match(primaryLeadHtml, /Stored in sqlite\./);
+    assert.match(primaryLeadHtml, /Review status: reviewed/);
+  }, { databasePath });
 });

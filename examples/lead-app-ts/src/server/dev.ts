@@ -27,6 +27,7 @@ function defaultBindings(): LeadBindings {
 }
 
 const server = createServer(defaultBindings(), {
+  databasePath: process?.env.LEAD_APP_DB_PATH ?? "./lead-app.sqlite",
   port: Number(process?.env.PORT ?? "3002")
 });
 
