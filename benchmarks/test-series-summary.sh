@@ -119,6 +119,10 @@ write_result "2026-03-01T10-12-39.000Z--clasp-rust-interop--codex.json" "clasp-r
 write_result "2026-03-01T10-12-40.000Z--clasp-rust-interop--codex.json" "clasp-rust-interop" "clasp" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:40.000Z" 85 120 110 true 0
 write_result "2026-03-01T10-12-41.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "interop-a-1" "2026-03-01T10:12:41.000Z" 140 170 155 true 0
 write_result "2026-03-01T10-12-42.000Z--ts-rust-interop--codex.json" "ts-rust-interop" "typescript" "codex" "gpt-5.4" "interop-a-2" "2026-03-01T10:12:42.000Z" 150 180 165 true 0
+write_result "2026-03-01T10-12-43.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "interop-boundary-a-1" "2026-03-01T10:12:43.000Z" 85 105 95 true 0
+write_result "2026-03-01T10-12-44.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:44.000Z" 95 110 100 true 0
+write_result "2026-03-01T10-12-45.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-1" "2026-03-01T10:12:45.000Z" 130 155 142 false 1
+write_result "2026-03-01T10-12-46.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "interop-boundary-a-2" "2026-03-01T10:12:46.000Z" 140 160 148 true 0
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -276,6 +280,18 @@ printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -65'
 printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -57'
 printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -52'
 
+interop_boundary_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes interop-boundary-a)"
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'clasp-interop-boundary\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'ts-interop-boundary\tcodex\tgpt-5.4'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq 'interop-boundary-comparison'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'  codex\tgpt-5.4\tinterop-boundary-a'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    claspPassRate: 100%'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tsPassRate: 50%'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    passRateDeltaPct: 50'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    timeToGreenDeltaMs: -185'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tokenDelta: -50'
+printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    uncachedTokenDelta: -47'
+
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
 printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
 printf '%s\n' "$public_app_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpublic-app'
@@ -338,6 +354,14 @@ printf '%s\n' "$objective_command_log" | grep -Fq 'run clasp-external-adaptation
 printf '%s\n' "$objective_command_log" | grep -Fq 'run ts-external-adaptation'
 printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-1'
 printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-2'
+
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" interop-boundary 2 interop-boundary-a gpt-5.4
+interop_boundary_command_log="$(cat "$tmp_bin/nix.log")"
+printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run clasp-interop-boundary'
+printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run ts-interop-boundary'
+printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-1'
+printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-2'
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4

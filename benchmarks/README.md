@@ -55,6 +55,8 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-python-interop`: mirrored handwritten JavaScript Python-glue baseline
 - `benchmarks/tasks/clasp-rust-interop`: compiler-managed Rust native interop metadata task
 - `benchmarks/tasks/ts-rust-interop`: mirrored handwritten JavaScript native-glue baseline
+- `benchmarks/tasks/clasp-interop-boundary`: compiler-managed unsafe package refinement and blame-reporting task for unexpected foreign values
+- `benchmarks/tasks/ts-interop-boundary`: mirrored handwritten JavaScript refinement baseline for the same unexpected-foreign-value blame surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
 
@@ -225,6 +227,13 @@ bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-1
 ```
 
+Run the mirrored repeated unsafe-refinement and blame-quality pair for unexpected foreign values:
+
+```sh
+bash benchmarks/run-codex-series.sh interop-boundary 5 interop-boundary-1 gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-boundary-1
+```
+
 Run the mirrored repeated series for Claude Code:
 
 ```sh
@@ -258,6 +267,8 @@ When a `codex` run writes `codex-run.jsonl` in the workspace, the runner extract
 - `clasp-lead-priority`: shared-schema change across a typed route, generated validation, and an LLM-shaped foreign boundary
 - `ts-lead-segment`: clickable lead-inbox change across form input, stored records, HTML rendering, and a validated model echo
 - `clasp-lead-segment`: clickable lead-inbox change across form input, shared records, HTML rendering, and a validated foreign-boundary echo
+- `clasp-interop-boundary`: compiler-managed unsafe package refinement with blameable unexpected foreign values
+- `ts-interop-boundary`: mirrored handwritten refinement and blame-reporting baseline
 - `clasp-durable-workflow`: durable workflow hot-swap and self-update scenario with supervised upgrades, rollback, and version-drain reporting
 - `clasp-external-adaptation`: reply-rate-driven bounded adaptation over the Clasp lead outreach demo
 - `ts-external-adaptation`: mirrored TypeScript reply-rate adaptation benchmark with the same bounded remediation contract

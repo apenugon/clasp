@@ -23,6 +23,8 @@ printf '%s\n' "$list_output" | grep -q '^clasp-python-interop[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-python-interop[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-rust-interop[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-rust-interop[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^clasp-interop-boundary[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-interop-boundary[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
@@ -195,6 +197,8 @@ check_incomplete_task clasp-python-interop
 check_incomplete_task ts-python-interop
 check_incomplete_task clasp-rust-interop
 check_incomplete_task ts-rust-interop
+check_incomplete_task clasp-interop-boundary
+check_incomplete_task ts-interop-boundary
 check_incomplete_task clasp-compiler-maintenance
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
@@ -279,6 +283,16 @@ assert_not_contains "$clasp_rust_workspace/Main.clasp" 'foreign mockLeadSummaryM
 ts_rust_workspace="$workspace_root/ts-rust-interop"
 assert_contains "$ts_rust_workspace/test/rust-interop.test.mjs" 'resolveLeadSummaryNativePlan'
 assert_not_contains "$ts_rust_workspace/src/nativeInterop.mjs" 'lead_summary_bridge'
+
+clasp_boundary_workspace="$workspace_root/clasp-interop-boundary"
+assert_file_exists "$clasp_boundary_workspace/benchmark-prep/Main.context.json"
+assert_contains "$clasp_boundary_workspace/LANGUAGE_GUIDE.md" '`Main.clasp`'
+assert_not_contains "$clasp_boundary_workspace/Main.clasp" 'foreign unsafe inspectLead'
+assert_not_contains "$clasp_boundary_workspace/Main.clasp" 'from typescript "./support/inspectLead.mjs"'
+
+ts_boundary_workspace="$workspace_root/ts-interop-boundary"
+assert_contains "$ts_boundary_workspace/test/interop-boundary.test.mjs" 'runInteropBoundaryDemo'
+assert_not_contains "$ts_boundary_workspace/src/main.mjs" 'inspectLead('
 
 compiler_maintenance_workspace="$workspace_root/clasp-compiler-maintenance"
 assert_file_exists "$compiler_maintenance_workspace/benchmark-prep/Main.context.json"

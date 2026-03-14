@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model]" >&2
+  echo "usage: $0 <task-id|app|control-plane|lead-priority|lead-rejection|lead-segment|external-adaptation|foreign-interop|interop-boundary|npm-interop|python-interop|rust-interop|compiler-maintenance|syntax-form> <count> <note-prefix> [model]" >&2
   exit 1
 fi
 
@@ -63,6 +63,12 @@ case "$task_id" in
       "ts-python-interop"
       "clasp-rust-interop"
       "ts-rust-interop"
+    )
+    ;;
+  interop-boundary)
+    task_ids=(
+      "clasp-interop-boundary"
+      "ts-interop-boundary"
     )
     ;;
   npm-interop)

@@ -69,6 +69,13 @@ const comparisonTaskFamilies = [
     rightLabel: "ts"
   },
   {
+    comparisonLabel: "interop-boundary-comparison",
+    leftTaskId: "clasp-interop-boundary",
+    rightTaskId: "ts-interop-boundary",
+    leftLabel: "clasp",
+    rightLabel: "ts"
+  },
+  {
     comparisonLabel: "syntax-form-comparison",
     leftTaskId: "clasp-syntax-compact",
     rightTaskId: "clasp-syntax-verbose",
