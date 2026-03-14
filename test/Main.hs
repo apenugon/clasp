@@ -3068,6 +3068,57 @@ nativeTests =
                 pure ()
               other ->
                 assertFailure ("unexpected native teamName declaration: " <> show other)
+    , testCase "native lowering keeps compiler-known Result as a first-class variant model" $
+        case nativeSource "result" builtinResultSource of
+          Left err ->
+            assertFailure ("expected builtin Result native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let abi = nativeModuleAbi nativeMod
+                runtime = nativeModuleRuntime nativeMod
+            case findVariantLayout "Result" (nativeAbiVariantLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "result variant layout"
+                  ( NativeVariantLayout
+                      "Result"
+                      0
+                      1
+                      2
+                      [ NativeConstructorLayout "Ok" 0 1 2 [NativeSlotLayout "$0" TStr NativeHandleStorage 1 1]
+                      , NativeConstructorLayout "Err" 0 1 2 [NativeSlotLayout "$0" TStr NativeHandleStorage 1 1]
+                      ]
+                  )
+                  layout
+              Nothing ->
+                assertFailure "expected Result variant layout"
+            case findObjectLayout "Result.Ok" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "result ok object layout"
+                  (NativeObjectLayout "Result.Ok" NativeVariantObject 2 4 [3])
+                  layout
+              Nothing ->
+                assertFailure "expected Result.Ok object layout"
+            case findObjectLayout "Result.Err" (nativeAbiObjectLayouts abi) of
+              Just layout ->
+                assertEqual
+                  "result err object layout"
+                  (NativeObjectLayout "Result.Err" NativeVariantObject 2 4 [3])
+                  layout
+              Nothing ->
+                assertFailure "expected Result.Err object layout"
+            assertBool "expected native Result ok helper" ("clasp_rt_result_ok_string" `elem` nativeRuntimeMemorySymbols runtime)
+            assertBool "expected native Result err helper" ("clasp_rt_result_err_string" `elem` nativeRuntimeMemorySymbols runtime)
+            case findNativeDecl "Ok" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["$0"] (NativeConstruct "Ok" [NativeLocal "$0"]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native Ok declaration: " <> show other)
+            case findNativeDecl "Err" (nativeModuleDecls nativeMod) of
+              Just (NativeFunctionDecl (NativeFunction _ ["$0"] (NativeConstruct "Err" [NativeLocal "$0"]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected native Err declaration: " <> show other)
     , testCase "native ABI uses handle slots for handle-like record fields and variant payloads" $
         case nativeSource "native-abi" nativeAbiSource of
           Left err ->
@@ -3283,6 +3334,21 @@ nativeTests =
               assertBool "expected typed team record literal" ("global defaultTeam = record Team {name = string(\"Compiler\"), active = bool(false)}" `T.isInfixOf` nativeIr)
               assertBool "expected typed user field access" ("function userName(user) = field(User, local(user), name)" `T.isInfixOf` nativeIr)
               assertBool "expected typed team field access" ("function teamName(team) = field(Team, local(team), name)" `T.isInfixOf` nativeIr)
+    , testCase "claspc native emits compiler-known Result layouts and constructors end to end" $
+        withProjectFiles "native-result" [("Main.clasp", builtinResultSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "dist" </> "Main.native.ir"
+          createDirectoryIfMissing True (takeDirectory outputPath)
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          case exitCode of
+            ExitFailure _ ->
+              assertFailure ("expected Result native emission to succeed:\n" <> stdoutText <> stderrText)
+            ExitSuccess -> do
+              nativeIr <- TIO.readFile outputPath
+              assertBool "expected result variant layout" ("variant_layout Result { tag_word = 0, max_payload_words = 1, words = 2, constructors = [Ok{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}, Err{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}] }" `T.isInfixOf` nativeIr)
+              assertBool "expected result ok object layout" ("object_layout Result.Ok { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
+              assertBool "expected result constructors" ("function Ok($0) = construct Ok(local($0))" `T.isInfixOf` nativeIr)
+              assertBool "expected result unwrap match" ("function unwrap(result) = match local(result) [Ok(value) -> local(value), Err(message) -> local(message)]" `T.isInfixOf` nativeIr)
     , testCase "native runtime exposes compiler stdlib bindings and bundled runtime artifacts" $
         case nativeSource "compiler-stdlib" compilerStdlibSource of
           Left err ->
