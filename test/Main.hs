@@ -3934,6 +3934,8 @@ compileTests =
             assertBool "expected policy decision helper" ("decideFile(target, context = null) { return this.decide(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected policy trace helper" ("traceFile(target, context = null) { return this.trace(\"file\", target, context); }" `T.isInfixOf` emitted)
             assertBool "expected policy audit helper" ("auditFile(target, context = null) { return this.audit(\"file\", target, context); }" `T.isInfixOf` emitted)
+            assertBool "expected audit log declarations export" ("export const __claspAuditLogs = [" `T.isInfixOf` emitted)
+            assertBool "expected audit log runtime helper" ("createRuntime(options = null) { return $claspCreateAuditLogRuntime(this, options); }" `T.isInfixOf` emitted)
             assertBool "expected secret inputs export" ("export const __claspSecretInputs = [" `T.isInfixOf` emitted)
             assertBool "expected secret boundaries export" ("export const __claspSecretBoundaries = [" `T.isInfixOf` emitted)
             assertBool "expected secret trace helper" ("traceAccess(boundary, provider, context = null) { return this.decideAccess(boundary, provider, context).trace; }" `T.isInfixOf` emitted)
@@ -3957,6 +3959,7 @@ compileTests =
             assertBool "expected tool result envelope parser" ("parseResultEnvelope(jsonText) { return this.decodeResultEnvelope(JSON.parse(jsonText)); }" `T.isInfixOf` emitted)
             assertBool "expected merge gate planning helper" ("plan(value, idSeed = this.name) {" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane entry" ("controlPlane: __claspControlPlane" `T.isInfixOf` emitted)
+            assertBool "expected generated binding contract audit logs entry" ("auditLogs: __claspAuditLogs," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract control plane docs entry" ("controlPlaneDocs: __claspControlPlaneDocs" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract AIR entry" ("air: __claspAir," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract AIR projector entry" ("airProjectors: __claspAirProjectors," `T.isInfixOf` emitted)
@@ -3980,6 +3983,8 @@ compileTests =
                 , "const verifier = compiledModule.__claspVerifiers[0];"
                 , "const mergeGate = compiledModule.__claspMergeGates[0];"
                 , "const docs = compiledModule.__claspControlPlaneDocs;"
+                , "const auditLog = compiledModule.__claspControlPlane.auditLogs[0];"
+                , "const auditRuntime = auditLog.createRuntime({ retention: { traceability: { maxEntries: 2 } } });"
                 , "const sourceAir = compiledModule.__claspAirProjectors.projectSource();"
                 , "const promptAir = compiledModule.__claspAirProjectors.projectPrompt({ $kind: 'prompt', messages: [{ role: 'system', content: 'Inspect the repo.' }, { role: 'user', content: 'Run verification.' }] }, { name: 'builder-loop' });"
                 , "const planAir = compiledModule.__claspAirProjectors.projectPromptOrPlan(['inspect repo', 'run bash scripts/verify-all.sh'], { name: 'release' });"
@@ -4002,6 +4007,8 @@ compileTests =
                 , "const secretTrace = secretInput.traceAccess(agentSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
                 , "const secretAudit = secretInput.auditAccess(toolSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
                 , "const secretValue = secretInput.resolve(agentSecretBoundary, { OPENAI_API_KEY: 'sk-live' }, context);"
+                , "const routedPolicyAudit = auditRuntime.record(audit);"
+                , "const routedSecretAudit = auditRuntime.record({ ...secretAudit, resolvedValue: 'sk-live', authorization: 'Bearer sk-live' });"
                 , "context.actor.id = 'mutated';"
                 , "context.actor.tags.push('later');"
                 , "context.requestId = 'req-2';"
@@ -4020,6 +4027,7 @@ compileTests =
                 , "const hookEval = hook.evaluate({ workerId: 'worker-7' }, { traceId: 'hook-1', collector, hooks: evalHooks, context: { actor: { id: 'runner-1' } } });"
                 , "const toolEval = tool.evaluateCall({ query: 'search' }, 7, { traceId: 'tool-1', collector, hooks: evalHooks, context: { actor: { id: 'runner-2' } } });"
                 , "const toolResultEval = tool.evaluateResult({ summary: 'done' }, { traceId: 'tool-2', collector, hooks: evalHooks, context: { actor: { id: 'runner-3' } } });"
+                , "const routedHookAudit = auditRuntime.record(hookEval.trace);"
                 , "const objectiveSignal = compiledModule.__claspTraceability.recordSignal({ name: 'repo_checks_flaky', summary: 'Repo checks are intermittently failing in CI.', severity: 'warn', source: 'test/control-plane-runtime' }, { policies: ['SupportDisclosure'], tests: [{ name: 'control-plane.demo', file: 'examples/control-plane/demo.mjs' }] }, { traceId: 'signal-1', collector, context: { actor: { id: 'runner-4' } } });"
                 , "let invalidChange = null;"
                 , "try {"
@@ -4066,6 +4074,10 @@ compileTests =
                 , "  budget: { maxRemediationSteps: 2, evalRuns: 1, benchmarkRuns: 1 },"
                 , "  remediation: changePlan"
                 , "}, { traceId: 'loop-1', collector, context: { actor: { id: 'runner-8' } } });"
+                , "auditRuntime.record(objectiveSignal);"
+                , "auditRuntime.record(changePlan);"
+                , "auditRuntime.record(learningLoop);"
+                , "const auditEntries = auditRuntime.entries();"
                 , "const collected = collector.entries();"
                 , "console.log(JSON.stringify({"
                 , "  guideExtends: guide.extends,"
@@ -4093,6 +4105,14 @@ compileTests =
                 , "  secretResolvedName: secretValue.name,"
                 , "  secretResolvedValue: secretValue.reveal({ reason: 'control-plane-demo' }),"
                 , "  secretConsumerBoundary: secretInput.consumerBoundaries.join(','),"
+                , "  auditLogName: auditLog.name,"
+                , "  auditPolicySink: routedPolicyAudit.sink.name,"
+                , "  auditSecretSink: routedSecretAudit.sink.name,"
+                , "  auditHookSink: routedHookAudit.sink.name,"
+                , "  auditSecretRedactedValue: routedSecretAudit.entry.resolvedValue,"
+                , "  auditSecretRedactedAuth: routedSecretAudit.entry.authorization,"
+                , "  auditTraceabilityRetained: auditEntries.traceability.length,"
+                , "  auditTraceabilityTailKinds: auditEntries.traceability.map((entry) => entry.kind ?? entry.eventType),"
                 , "  traceFrozen: Object.isFrozen(trace.context) && Object.isFrozen(trace.context.actor) && Object.isFrozen(trace.context.actor.tags),"
                 , "  auditFrozen: Object.isFrozen(audit.context) && Object.isFrozen(audit.context.actor) && Object.isFrozen(audit.context.actor.tags),"
                 , "  secretTraceFrozen: Object.isFrozen(secretTrace.context) && Object.isFrozen(secretTrace.boundary),"
@@ -4125,6 +4145,7 @@ compileTests =
                 , "  planAirStepCount: planAir.nodes.filter((node) => node.kind === 'planStepProjection').length,"
                 , "  docsFormat: docs.format,"
                 , "  docsHasGuides: docs.markdown.includes('## Guides'),"
+                , "  docsHasAuditLogs: docs.markdown.includes('## Audit Logs'),"
                 , "  docsHasPermissions: docs.markdown.includes('File permissions: /workspace'),"
                 , "  docsHasSecretInputs: docs.markdown.includes('## Secret Inputs'),"
                 , "  docsHasSecretBoundary: docs.markdown.includes('toolServer:RepoTools'),"
@@ -4136,7 +4157,9 @@ compileTests =
                 , "  bindingModuleVersionTagged: compiledModule.__claspBindings.module.versionId.startsWith('module:Main:'),"
                 , "  bindingControlPlaneVersion: compiledModule.__claspBindings.controlPlane.version,"
                 , "  bindingControlPlaneDocsVersion: compiledModule.__claspBindings.controlPlaneDocs.version,"
+                , "  bindingAuditLogCount: compiledModule.__claspBindings.auditLogs.length,"
                 , "  bindingToolCallContracts: compiledModule.__claspBindings.toolCallContracts.length,"
+                , "  controlPlaneAuditLogCount: compiledModule.__claspControlPlane.auditLogs.length,"
                 , "  controlPlaneToolCallContracts: compiledModule.__claspControlPlane.toolCallContracts.length,"
                 , "  bindingEvalHooksVersion: compiledModule.__claspBindings.evalHooks.version,"
                 , "  bindingTraceVersion: compiledModule.__claspBindings.traces.version,"
@@ -4168,7 +4191,7 @@ compileTests =
                 ]
             assertEqual
               "expected executable control-plane runtime result"
-              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"hookEvalRequest\":\"worker-7\",\"hookEvalTraceStatus\":\"ok\",\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"toolEvalTraceAction\":\"prepare_call\",\"toolEvalMethod\":\"search_repo\",\"toolResultTraceStatus\":\"ok\",\"toolResultSummary\":\"done\",\"toolCallVersion\":1,\"toolCallProtocol\":\"mcp\",\"toolCallType\":\"SearchRequest\",\"parsedCallQuery\":\"search\",\"parsedEnvelopeSummary\":\"framed\",\"formattedEnvelope\":\"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"req-10\\\",\\\"result\\\":{\\\"summary\\\":\\\"wrapped\\\"}}\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"sourceAirFormat\":\"clasp-air-v1\",\"sourceAirHasMergeGate\":true,\"promptAirRootKind\":\"promptProjection\",\"promptAirMessageRole\":\"user\",\"planAirRootKind\":\"planProjection\",\"planAirStepCount\":2,\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1,\"bindingToolCallContracts\":1,\"controlPlaneToolCallContracts\":1,\"bindingEvalHooksVersion\":1,\"bindingTraceVersion\":1,\"controlPlaneEvalHooksVersion\":1,\"controlPlaneTraceVersion\":1,\"boundedSignalName\":\"repo_checks_flaky\",\"boundedChangeKind\":\"bounded_change_plan\",\"boundedChangeName\":\"tighten-repo-check-loop\",\"boundedChangeTargetIds\":[\"policy:SupportDisclosure\",\"test:control-plane.demo\"],\"boundedChangeStepCount\":2,\"boundedChangeAirRootKind\":\"planProjection\",\"invalidChange\":\"Change target test:other-test is outside the observed signal scope\",\"learningLoopKind\":\"learning_loop\",\"learningLoopName\":\"repo-check-loop\",\"learningLoopObjective\":\"repo-stability\",\"learningLoopIncidentSignal\":\"repo_checks_flaky\",\"learningLoopEvalIds\":[\"eval:control-plane.demo\"],\"learningLoopBenchmarkIds\":[\"benchmark:clasp-external-adaptation\"],\"learningLoopBudgetStepCap\":2,\"learningLoopRemediationName\":\"tighten-repo-check-loop\",\"learningLoopAirRootKind\":\"learningLoopProjection\",\"invalidLearningLoop\":\"Learning loop budget allows at most 1 remediation steps\",\"collectedTraceCount\":6,\"collectedKinds\":[\"hook:invoke:ok\",\"tool:prepare_call:ok\",\"tool:parse_result:ok\",\"runtime_signal:observe:ok\",\"bounded_change_plan:propose:ok\",\"learning_loop:link:ok\"],\"collectedActors\":[\"runner-1\",\"runner-2\",\"runner-3\",\"runner-4\",\"runner-6\",\"runner-8\"],\"collectedFrozen\":true,\"evalLifecycle\":[\"hook:invoke:before\",\"trace:hook:invoke:ok\",\"hook:invoke:after:ok\",\"tool:prepare_call:before\",\"trace:tool:prepare_call:ok\",\"tool:prepare_call:after:ok\",\"tool:parse_result:before\",\"trace:tool:parse_result:ok\",\"tool:parse_result:after:ok\"]}"
+              "{\"guideExtends\":\"Repo\",\"guideScope\":\"Stay inside the current checkout.\",\"agentPolicy\":\"SupportDisclosure\",\"agentApproval\":\"on_request\",\"agentSandbox\":\"workspace_write\",\"fileAllowed\":true,\"fileDenied\":false,\"networkAllowed\":true,\"processAllowed\":true,\"secretAllowed\":true,\"decisionAllowed\":true,\"decisionActor\":\"worker-7\",\"traceActor\":\"worker-7\",\"traceTags\":\"initial\",\"auditActor\":\"worker-7\",\"auditRequestId\":\"req-1\",\"secretPolicy\":\"SupportDisclosure\",\"secretBoundaryKind\":\"agentRole\",\"secretBoundaryName\":\"WorkerRole\",\"secretMissing\":false,\"secretTraceActor\":\"worker-7\",\"secretAuditBoundary\":\"RepoTools\",\"secretResolvedName\":\"OPENAI_API_KEY\",\"secretResolvedValue\":\"sk-live\",\"secretConsumerBoundary\":\"agentRole:WorkerRole,toolServer:RepoTools\",\"auditLogName\":\"CompilerOwnedAudit\",\"auditPolicySink\":\"policy_decisions\",\"auditSecretSink\":\"secret_access\",\"auditHookSink\":\"compiler_execution\",\"auditSecretRedactedValue\":\"[redacted by compiler audit policy]\",\"auditSecretRedactedAuth\":\"[redacted by compiler audit policy]\",\"auditTraceabilityRetained\":2,\"auditTraceabilityTailKinds\":[\"bounded_change_plan\",\"learning_loop\"],\"traceFrozen\":true,\"auditFrozen\":true,\"secretTraceFrozen\":true,\"deniedFile\":\"Policy SupportDisclosure denies file access to /tmp\",\"missingSecret\":\"Missing secret OPENAI_API_KEY for toolServer RepoTools under policy SupportDisclosure\",\"hookEvent\":\"worker.start\",\"hookAccepted\":true,\"hookEvalRequest\":\"worker-7\",\"hookEvalTraceStatus\":\"ok\",\"toolMethod\":\"search_repo\",\"toolParam\":\"search\",\"parsedSummary\":\"done\",\"toolEvalTraceAction\":\"prepare_call\",\"toolEvalMethod\":\"search_repo\",\"toolResultTraceStatus\":\"ok\",\"toolResultSummary\":\"done\",\"toolCallVersion\":1,\"toolCallProtocol\":\"mcp\",\"toolCallType\":\"SearchRequest\",\"parsedCallQuery\":\"search\",\"parsedEnvelopeSummary\":\"framed\",\"formattedEnvelope\":\"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"req-10\\\",\\\"result\\\":{\\\"summary\\\":\\\"wrapped\\\"}}\",\"verifierMethod\":\"search_repo\",\"mergeGatePlan\":\"trunk:0\",\"sourceAirFormat\":\"clasp-air-v1\",\"sourceAirHasMergeGate\":true,\"promptAirRootKind\":\"promptProjection\",\"promptAirMessageRole\":\"user\",\"planAirRootKind\":\"planProjection\",\"planAirStepCount\":2,\"docsFormat\":\"markdown\",\"docsHasGuides\":true,\"docsHasAuditLogs\":true,\"docsHasPermissions\":true,\"docsHasSecretInputs\":true,\"docsHasSecretBoundary\":true,\"docsHasApproval\":true,\"docsHasSandbox\":true,\"docsHasHookEvent\":true,\"docsHasModuleVersion\":true,\"controlPlaneModuleVersionTagged\":true,\"bindingModuleVersionTagged\":true,\"bindingControlPlaneVersion\":1,\"bindingControlPlaneDocsVersion\":1,\"bindingAuditLogCount\":1,\"bindingToolCallContracts\":1,\"controlPlaneAuditLogCount\":1,\"controlPlaneToolCallContracts\":1,\"bindingEvalHooksVersion\":1,\"bindingTraceVersion\":1,\"controlPlaneEvalHooksVersion\":1,\"controlPlaneTraceVersion\":1,\"boundedSignalName\":\"repo_checks_flaky\",\"boundedChangeKind\":\"bounded_change_plan\",\"boundedChangeName\":\"tighten-repo-check-loop\",\"boundedChangeTargetIds\":[\"policy:SupportDisclosure\",\"test:control-plane.demo\"],\"boundedChangeStepCount\":2,\"boundedChangeAirRootKind\":\"planProjection\",\"invalidChange\":\"Change target test:other-test is outside the observed signal scope\",\"learningLoopKind\":\"learning_loop\",\"learningLoopName\":\"repo-check-loop\",\"learningLoopObjective\":\"repo-stability\",\"learningLoopIncidentSignal\":\"repo_checks_flaky\",\"learningLoopEvalIds\":[\"eval:control-plane.demo\"],\"learningLoopBenchmarkIds\":[\"benchmark:clasp-external-adaptation\"],\"learningLoopBudgetStepCap\":2,\"learningLoopRemediationName\":\"tighten-repo-check-loop\",\"learningLoopAirRootKind\":\"learningLoopProjection\",\"invalidLearningLoop\":\"Learning loop budget allows at most 1 remediation steps\",\"collectedTraceCount\":6,\"collectedKinds\":[\"hook:invoke:ok\",\"tool:prepare_call:ok\",\"tool:parse_result:ok\",\"runtime_signal:observe:ok\",\"bounded_change_plan:propose:ok\",\"learning_loop:link:ok\"],\"collectedActors\":[\"runner-1\",\"runner-2\",\"runner-3\",\"runner-4\",\"runner-6\",\"runner-8\"],\"collectedFrozen\":true,\"evalLifecycle\":[\"hook:invoke:before\",\"trace:hook:invoke:ok\",\"hook:invoke:after:ok\",\"tool:prepare_call:before\",\"trace:tool:prepare_call:ok\",\"tool:prepare_call:after:ok\",\"tool:parse_result:before\",\"trace:tool:parse_result:ok\",\"tool:parse_result:after:ok\"]}"
               runtimeOutput
     , testCase "typed schema streams merge nested partial results and require completion" $
         case compileSource "streaming-partials" streamingToolSource of
