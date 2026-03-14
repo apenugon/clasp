@@ -213,6 +213,36 @@ clasp_swarm_retry_limit_is_bounded() {
   [[ "$retry_limit" =~ ^[0-9]+$ ]] && (( retry_limit > 0 ))
 }
 
+clasp_swarm_prompt_max_bytes() {
+  printf '%s\n' "${CLASP_SWARM_PROMPT_MAX_BYTES:-262144}"
+}
+
+clasp_swarm_prompt_size_bytes() {
+  local prompt_file="$1"
+  wc -c < "$prompt_file" | tr -d '[:space:]'
+}
+
+clasp_swarm_assert_prompt_size() {
+  local prompt_file="$1"
+  local label="$2"
+  local size_bytes=""
+  local limit_bytes=""
+
+  size_bytes="$(clasp_swarm_prompt_size_bytes "$prompt_file")"
+  limit_bytes="$(clasp_swarm_prompt_max_bytes)"
+
+  if [[ ! "$limit_bytes" =~ ^[0-9]+$ ]] || (( limit_bytes <= 0 )); then
+    echo "CLASP_SWARM_PROMPT_MAX_BYTES must be a positive integer" >&2
+    return 1
+  fi
+
+  if (( size_bytes > limit_bytes )); then
+    printf '%s\n' \
+      "$label prompt is ${size_bytes} bytes, which exceeds CLASP_SWARM_PROMPT_MAX_BYTES=${limit_bytes}" >&2
+    return 1
+  fi
+}
+
 clasp_swarm_spawn_detached() {
   local log_file="$1"
   shift

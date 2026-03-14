@@ -162,6 +162,8 @@ EOF
   cat "$task_file"
 } > "$prompt_file"
 
+clasp_swarm_assert_prompt_size "$prompt_file" "builder"
+
 CODEX_HOME="$isolated_codex_home" codex exec - \
   --json \
   -m "$model" \

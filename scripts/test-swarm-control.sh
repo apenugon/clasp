@@ -14,9 +14,11 @@ spawn_path_root=""
 invalid_lane_root=""
 autopilot_test_root=""
 autopilot_test_root_2=""
+prompt_test_root=""
+prompt_test_root_2=""
 
 cleanup() {
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}"
 }
 
 trap cleanup EXIT
@@ -59,6 +61,75 @@ Regression coverage for the swarm control plane should stay local and determinis
 bash scripts/verify-all.sh
 \`\`\`
 EOF
+}
+
+make_prompt_test_project() {
+  local target_root="$1"
+  local project_dir="$target_root/repo"
+
+  mkdir -p "$project_dir/scripts" "$project_dir/agents/schemas" "$project_dir/tools"
+  cp \
+    "$project_root/scripts/clasp-builder.sh" \
+    "$project_root/scripts/clasp-codex-home.sh" \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-verifier.sh" \
+    "$project_dir/scripts/"
+  cp \
+    "$project_root/agents/schemas/builder-report.schema.json" \
+    "$project_root/agents/schemas/verifier-report.schema.json" \
+    "$project_dir/agents/schemas/"
+
+  cat > "$project_dir/tools/codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+cat > "${CLASP_TEST_PROMPT_CAPTURE:?}"
+
+case "${CLASP_TEST_CODEX_MODE:-builder}" in
+  builder)
+    cat > "$output_file" <<'JSON'
+{
+  "summary": "stub builder report",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+    ;;
+  verifier)
+    cat > "$output_file" <<'JSON'
+{
+  "verdict": "pass",
+  "summary": "stub verifier report",
+  "findings": [],
+  "tests_run": [],
+  "follow_up": []
+}
+JSON
+    ;;
+  *)
+    echo "unknown CLASP_TEST_CODEX_MODE" >&2
+    exit 1
+    ;;
+esac
+EOF
+
+  chmod +x "$project_dir/tools/codex"
+  printf '%s\n' "$project_dir"
 }
 
 make_autopilot_test_project() {
@@ -498,6 +569,172 @@ if [[ "$invalid_output" != *"manifest.title must be a non-empty string"* ]]; the
   printf '%s\n' "$invalid_output" >&2
   exit 1
 fi
+
+prompt_test_root="$(mktemp -d)"
+prompt_project_root="$(make_prompt_test_project "$prompt_test_root")"
+
+cat > "$prompt_project_root/task-literal.md" <<'EOF'
+# PX-001 Prompt literal
+
+## Goal
+
+Keep shell markers literal: $(printf prompt-substitution) `${HOME}` `touch /tmp/prompt`.
+
+## Why
+
+Regression coverage should catch prompt interpolation bugs.
+
+## Scope
+
+- Preserve $(printf scope-substitution) and ${USER} literally
+
+## Likely Files
+
+- `scripts/clasp-builder.sh`
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- Preserve `$(printf acceptance-substitution)` and `${PATH}` in the prompt
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+cat > "$prompt_project_root/feedback.json" <<'EOF'
+{
+  "summary": "Previous verifier said $(printf verifier-summary) should stay literal.",
+  "findings": [
+    "Do not execute ${HOME} while rendering feedback."
+  ],
+  "follow_up": [
+    "Keep `touch /tmp/feedback` as plain text."
+  ]
+}
+EOF
+
+mkdir -p "$prompt_project_root/workspace" "$prompt_project_root/baseline" "$prompt_project_root/run"
+
+bash -lc "
+  set -euo pipefail
+  cd '$prompt_project_root'
+  PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
+    CLASP_TEST_CODEX_MODE=builder \
+    CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/builder.prompt' \
+    bash scripts/clasp-builder.sh \
+      '$prompt_project_root/task-literal.md' \
+      '$prompt_project_root/workspace' \
+      '$prompt_project_root/run/builder-report.json' \
+      '$prompt_project_root/run/builder-log.jsonl' \
+      '$prompt_project_root/feedback.json'
+
+  grep -F '\$(printf prompt-substitution)' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F '\${HOME}' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Previous verifier said \$(printf verifier-summary) should stay literal.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'touch /tmp/feedback' '$prompt_project_root/builder.prompt' >/dev/null
+
+  PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
+    CLASP_TEST_CODEX_MODE=verifier \
+    CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/verifier.prompt' \
+    bash scripts/clasp-verifier.sh \
+      '$prompt_project_root/task-literal.md' \
+      '$prompt_project_root/workspace' \
+      '$prompt_project_root/baseline' \
+      '$prompt_project_root/run/verifier-report.json' \
+      '$prompt_project_root/run/verifier-log.jsonl'
+
+  grep -F 'Baseline workspace: $prompt_project_root/baseline' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F '\$(printf prompt-substitution)' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
+" >/dev/null
+
+prompt_test_root_2="$(mktemp -d)"
+prompt_project_root_2="$(make_prompt_test_project "$prompt_test_root_2")"
+
+{
+  cat <<'EOF'
+# PX-002 Oversized prompt
+
+## Goal
+
+Force the prompt-size guard to fire before codex runs.
+
+## Why
+
+Large manifests should fail with a direct error instead of a late model-side failure.
+
+## Scope
+
+- Keep this file large
+
+## Likely Files
+
+- `scripts/clasp-builder.sh`
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- fail early
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+
+EOF
+  printf '%4096s\n' '' | tr ' ' 'x'
+} > "$prompt_project_root_2/task-oversized.md"
+
+mkdir -p "$prompt_project_root_2/workspace" "$prompt_project_root_2/baseline" "$prompt_project_root_2/run"
+
+bash -lc "
+  set -euo pipefail
+  cd '$prompt_project_root_2'
+
+  set +e
+  builder_output=\$(PATH='$prompt_project_root_2/tools':\"\$PATH\" HOME='$prompt_project_root_2/home' \
+    CLASP_SWARM_PROMPT_MAX_BYTES=512 \
+    CLASP_TEST_CODEX_MODE=builder \
+    CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root_2/builder.prompt' \
+    bash scripts/clasp-builder.sh \
+      '$prompt_project_root_2/task-oversized.md' \
+      '$prompt_project_root_2/workspace' \
+      '$prompt_project_root_2/run/builder-report.json' \
+      '$prompt_project_root_2/run/builder-log.jsonl' 2>&1)
+  builder_status=\$?
+
+  verifier_output=\$(PATH='$prompt_project_root_2/tools':\"\$PATH\" HOME='$prompt_project_root_2/home' \
+    CLASP_SWARM_PROMPT_MAX_BYTES=512 \
+    CLASP_TEST_CODEX_MODE=verifier \
+    CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root_2/verifier.prompt' \
+    bash scripts/clasp-verifier.sh \
+      '$prompt_project_root_2/task-oversized.md' \
+      '$prompt_project_root_2/workspace' \
+      '$prompt_project_root_2/baseline' \
+      '$prompt_project_root_2/run/verifier-report.json' \
+      '$prompt_project_root_2/run/verifier-log.jsonl' 2>&1)
+  verifier_status=\$?
+  set -e
+
+  [[ \$builder_status -ne 0 ]]
+  [[ \$verifier_status -ne 0 ]]
+  [[ \"\$builder_output\" == *'builder prompt is '* ]]
+  [[ \"\$builder_output\" == *'CLASP_SWARM_PROMPT_MAX_BYTES=512'* ]]
+  [[ \"\$verifier_output\" == *'verifier prompt is '* ]]
+  [[ \"\$verifier_output\" == *'CLASP_SWARM_PROMPT_MAX_BYTES=512'* ]]
+  [[ ! -f '$prompt_project_root_2/builder.prompt' ]]
+  [[ ! -f '$prompt_project_root_2/verifier.prompt' ]]
+" >/dev/null
 
 autopilot_test_root="$(mktemp -d)"
 autopilot_project_root="$(make_autopilot_test_project "$autopilot_test_root" "pass-workaround")"
