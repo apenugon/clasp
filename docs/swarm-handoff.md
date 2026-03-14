@@ -59,6 +59,7 @@ Useful commands:
 
 ```sh
 bash scripts/clasp-swarm-status.sh full
+bash scripts/clasp-swarm-summary.sh full
 bash scripts/clasp-swarm-stop.sh full
 bash scripts/clasp-swarm-start.sh full
 ```

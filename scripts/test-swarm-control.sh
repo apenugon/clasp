@@ -27,13 +27,20 @@ status_runtime_root_2=""
 status_text_output=""
 status_json_output=""
 status_live_pid=""
+summary_wave_name=""
+summary_lane_root_1=""
+summary_lane_root_2=""
+summary_runtime_root_1=""
+summary_runtime_root_2=""
+summary_text_output=""
+summary_json_output=""
 
 cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}"
-  rm -f "${status_text_output:-}" "${status_json_output:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}"
 }
 
 trap cleanup EXIT
@@ -1041,6 +1048,121 @@ EOF
 kill "$status_live_pid" >/dev/null 2>&1 || true
 wait "$status_live_pid" 2>/dev/null || true
 status_live_pid=""
+
+summary_wave_name="summary-test-$$"
+summary_lane_root_1="$project_root/agents/swarm/$summary_wave_name/01-core"
+summary_lane_root_2="$project_root/agents/swarm/$summary_wave_name/02-language"
+summary_runtime_root_1="$project_root/.clasp-swarm/$summary_wave_name/01-core"
+summary_runtime_root_2="$project_root/.clasp-swarm/$summary_wave_name/02-language"
+summary_text_output="$(mktemp)"
+summary_json_output="$(mktemp)"
+
+mkdir -p \
+  "$summary_lane_root_1" \
+  "$summary_lane_root_2" \
+  "$summary_runtime_root_1/runs/20260314T120000Z-SW-001-first-attempt1" \
+  "$summary_runtime_root_1/runs/20260314T130000Z-SW-002-second-attempt1" \
+  "$summary_runtime_root_2/runs/20260314T140000Z-LG-001-third-attempt1" \
+  "$summary_runtime_root_2/runs/20260314T150000Z-LG-002-fourth-attempt1"
+
+cat > "$summary_runtime_root_1/runs/20260314T120000Z-SW-001-first-attempt1/verifier-report.json" <<'EOF'
+{
+  "verdict": "pass",
+  "summary": "swarm task passed",
+  "findings": [],
+  "tests_run": [],
+  "follow_up": []
+}
+EOF
+TZ=UTC touch -t 202603141210 "$summary_runtime_root_1/runs/20260314T120000Z-SW-001-first-attempt1/verifier-report.json"
+
+cat > "$summary_runtime_root_1/runs/20260314T130000Z-SW-002-second-attempt1/verifier-report.json" <<'EOF'
+{
+  "verdict": "fail",
+  "summary": "builder timed out",
+  "findings": [
+    "builder exited with code 124 while processing SW-002-second."
+  ],
+  "tests_run": [],
+  "follow_up": []
+}
+EOF
+TZ=UTC touch -t 202603141320 "$summary_runtime_root_1/runs/20260314T130000Z-SW-002-second-attempt1/verifier-report.json"
+
+cat > "$summary_runtime_root_2/runs/20260314T140000Z-LG-001-third-attempt1/verifier-report.json" <<'EOF'
+{
+  "verdict": "fail",
+  "summary": "semantic check failed",
+  "findings": [
+    "type mismatch remains"
+  ],
+  "tests_run": [],
+  "follow_up": []
+}
+EOF
+TZ=UTC touch -t 202603141405 "$summary_runtime_root_2/runs/20260314T140000Z-LG-001-third-attempt1/verifier-report.json"
+
+cat > "$summary_runtime_root_2/runs/20260314T150000Z-LG-002-fourth-attempt1/builder-report.json" <<'EOF'
+{
+  "summary": "builder finished",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+EOF
+TZ=UTC touch -t 202603141502 "$summary_runtime_root_2/runs/20260314T150000Z-LG-002-fourth-attempt1/builder-report.json"
+
+bash "$project_root/scripts/clasp-swarm-summary.sh" "$summary_wave_name" > "$summary_text_output"
+bash "$project_root/scripts/clasp-swarm-summary.sh" --json "$summary_wave_name" > "$summary_json_output"
+
+bash -lc "
+  set -euo pipefail
+  text=\$(cat '$summary_text_output')
+  [[ \"\$text\" == *'wave: $summary_wave_name'* ]]
+  [[ \"\$text\" == *'summary: runs=4 completed=3 incomplete=1 pass-rate=33.3% timeout-rate=33.3% mean-time=700.0s'* ]]
+  [[ \"\$text\" == *'family: LG runs=2 completed=1 incomplete=1 pass-rate=0.0% timeout-rate=0.0% mean-time=300.0s'* ]]
+  [[ \"\$text\" == *'family: SW runs=2 completed=2 incomplete=0 pass-rate=50.0% timeout-rate=50.0% mean-time=900.0s'* ]]
+  node - <<'EOF' '$summary_json_output' '$summary_wave_name'
+const fs = require('fs');
+const [jsonPath, expectedWave] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+if (payload.wave !== expectedWave) {
+  throw new Error(\`unexpected wave: \${payload.wave}\`);
+}
+if (payload.summary.totalRuns !== 4 || payload.summary.completedRuns !== 3 || payload.summary.incompleteRuns !== 1) {
+  throw new Error('unexpected overall run counts');
+}
+if (Math.abs(payload.summary.passRate - (1 / 3)) > 1e-9) {
+  throw new Error('unexpected overall pass rate');
+}
+if (Math.abs(payload.summary.timeoutRate - (1 / 3)) > 1e-9) {
+  throw new Error('unexpected overall timeout rate');
+}
+if (Math.abs(payload.summary.meanTimeSeconds - 700) > 1e-9) {
+  throw new Error('unexpected overall mean time');
+}
+const lg = payload.families.find((family) => family.taskFamily === 'LG');
+const sw = payload.families.find((family) => family.taskFamily === 'SW');
+if (!lg || !sw) {
+  throw new Error('expected LG and SW families');
+}
+if (lg.totalRuns !== 2 || lg.completedRuns !== 1 || lg.incompleteRuns !== 1) {
+  throw new Error('unexpected LG counts');
+}
+if (Math.abs(lg.meanTimeSeconds - 300) > 1e-9 || lg.timeoutRate !== 0 || lg.passRate !== 0) {
+  throw new Error('unexpected LG metrics');
+}
+if (sw.totalRuns !== 2 || sw.completedRuns !== 2 || sw.incompleteRuns !== 0) {
+  throw new Error('unexpected SW counts');
+}
+if (Math.abs(sw.passRate - 0.5) > 1e-9 || Math.abs(sw.timeoutRate - 0.5) > 1e-9) {
+  throw new Error('unexpected SW rates');
+}
+if (Math.abs(sw.meanTimeSeconds - 900) > 1e-9) {
+  throw new Error('unexpected SW mean time');
+}
+EOF
+" >/dev/null
 
 markers_root="$(mktemp -d)"
 printf '%s\n' "legacy" > "$markers_root/SW-001-some-slug"
