@@ -12,6 +12,7 @@ This directory has two kinds of examples:
 - [records.clasp](/home/akul/DevProjects/synthspeak/examples/records.clasp): records and field access
 - [lists.clasp](/home/akul/DevProjects/synthspeak/examples/lists.clasp): list types, literals, nested list fields, and JSON list boundaries
 - [let.clasp](/home/akul/DevProjects/synthspeak/examples/let.clasp): local `let` bindings at the top level and inside `match` branches
+- [comparisons.clasp](/home/akul/DevProjects/synthspeak/examples/comparisons.clasp): integer comparison operators and their precedence relative to equality
 - [blocks.clasp](/home/akul/DevProjects/synthspeak/examples/blocks.clasp): multiline block expressions with local declarations, mutable locals, `for` loops, and early `return`
 - [compiler-renderers.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-renderers.clasp): self-hosting formatter and diagnostic rendering helpers expressed in Clasp
 - [compiler-loader.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-loader.clasp): self-hosting module loading and package search-order helpers expressed in Clasp

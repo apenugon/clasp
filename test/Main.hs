@@ -934,6 +934,30 @@ parserTests =
                     assertFailure ("expected list decode boundary, got " <> show other)
               Nothing ->
                 assertFailure "expected usersFromJson declaration"
+    , testCase "parses the comparisons example file" $ do
+        source <- readExampleSource "comparisons.clasp"
+        case parseSource "examples/comparisons.clasp" source of
+          Left err ->
+            assertFailure ("expected comparisons example source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case findDecl "isEarlier" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  ELessThan _ (EVar _ "left") (EVar _ "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected less-than expression in comparisons example, got " <> show other)
+              Nothing ->
+                assertFailure "expected isEarlier declaration in comparisons example"
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EEqual _ (ECall _ (EVar _ "isEarlier") [EInt _ 3, EInt _ 5]) (ECall _ (EVar _ "isLatest") [EInt _ 7, EInt _ 7]) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected equality over comparison calls in comparisons example, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration in comparisons example"
     ]
 
 formatterTests :: TestTree
@@ -1400,6 +1424,30 @@ checkerTests =
                 assertEqual "main type" (TList (TNamed "User")) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
+    , testCase "typechecks the comparisons example file" $ do
+        source <- readExampleSource "comparisons.clasp"
+        case checkSource "examples/comparisons.clasp" source of
+          Left err ->
+            assertFailure ("expected comparisons example source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "isAtMost") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CLessThanOrEqual _ (CVar _ TInt "left") (CVar _ TInt "right") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked less-than-or-equal expression in comparisons example, got " <> show other)
+              Nothing ->
+                assertFailure "expected isAtMost declaration in comparisons example"
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CEqual _ (CCall _ TBool (CVar _ (TFunction [TInt, TInt] TBool) "isEarlier") [CInt _ 3, CInt _ 5]) (CCall _ TBool (CVar _ (TFunction [TInt, TInt] TBool) "isLatest") [CInt _ 7, CInt _ 7]) ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected checked equality over comparison calls in comparisons example, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration in comparisons example"
     , testCase "typechecks the compiler stdlib example file" $ do
         source <- readExampleSource "compiler-stdlib.clasp"
         case checkSource "examples/compiler-stdlib.clasp" source of
@@ -2507,6 +2555,22 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered let example main declaration: " <> show other)
+    , testCase "lowering preserves the comparisons example file" $ do
+        source <- readExampleSource "comparisons.clasp"
+        case lowerChecked "examples/comparisons.clasp" source of
+          Left err ->
+            assertFailure ("expected comparisons example lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered -> do
+            case findLowerDecl "isLater" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["left", "right"] (LGreaterThan (LVar "left") (LVar "right"))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered isLater declaration in comparisons example: " <> show other)
+            case findLowerDecl "main" (lowerModuleDecls lowered) of
+              Just (LValueDecl _ (LEqual (LCall (LVar "isEarlier") [LInt 3, LInt 5]) (LCall (LVar "isLatest") [LInt 7, LInt 7]))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered comparisons example main declaration: " <> show other)
     , testCase "lowering block expressions preserves the lowered inner expression" $
         case lowerChecked "block" blockExpressionSource of
           Left err ->
@@ -4025,6 +4089,33 @@ compileTests =
                 , "console.log(compiledModule.main);"
                 ]
             assertEqual "expected let example result" "loading" runtimeOutput
+    , testCase "compile evaluates the comparisons example file" $ do
+        source <- readExampleSource "comparisons.clasp"
+        case compileSource "examples/comparisons.clasp" source of
+          Left err ->
+            assertFailure ("expected comparisons example compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected less-than emission in comparisons example" ("(left < right)" `T.isInfixOf` emitted)
+            assertBool "expected equality emission in comparisons example" ("(isEarlier(3, 5) === isLatest(7, 7))" `T.isInfixOf` emitted)
+            let compiledPath = "dist/comparisons-example.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({"
+                , "  earlier: compiledModule.isEarlier(3, 5),"
+                , "  boundary: compiledModule.isAtMost(5, 5),"
+                , "  later: compiledModule.isLater(7, 5),"
+                , "  latest: compiledModule.isLatest(7, 7),"
+                , "  main: compiledModule.main"
+                , "}));"
+                ]
+            assertEqual
+              "expected comparisons example runtime result"
+              "{\"earlier\":true,\"boundary\":true,\"later\":true,\"latest\":true,\"main\":true}"
+              runtimeOutput
     , testCase "compile emits runtime bindings, codecs, and route metadata" $
         case compileSource "service" serviceSource of
           Left err ->
