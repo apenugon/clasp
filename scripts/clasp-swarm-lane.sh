@@ -173,6 +173,20 @@ task_worktree_registered() {
   git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $task_worktree"
 }
 
+task_id_from_run_dir() {
+  local run_dir="$1"
+  local base=""
+
+  base="$(basename "$run_dir")"
+
+  if [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z-(.+)-attempt[0-9]+$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  return 1
+}
+
 next_attempt_number_for_task() {
   local task_id="$1"
   local latest_run=""
@@ -415,6 +429,56 @@ remove_worktree_if_present() {
 
   rm -rf "$worktree_path"
   release_lock "$worktree_lock_file"
+}
+
+remove_task_branch_if_present() {
+  local task_branch="$1"
+
+  git -C "$project_root" branch -D "$task_branch" >/dev/null 2>&1 || true
+}
+
+cleanup_run_worktrees() {
+  local run_dir="$1"
+  local path=""
+
+  for path in \
+    "$run_dir/baseline-worktree" \
+    "$run_dir/merge-baseline-worktree" \
+    "$run_dir/accepted-snapshot-worktree"; do
+    [[ -e "$path" ]] || continue
+    remove_worktree_if_present "$path"
+  done
+}
+
+garbage_collect_stale_runs() {
+  local run_dir=""
+  local task_id=""
+  local task_branch=""
+  local task_worktree=""
+
+  if [[ ! -d "$runs_root" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r run_dir; do
+    [[ -n "$run_dir" ]] || continue
+
+    cleanup_run_worktrees "$run_dir"
+
+    if [[ -f "$run_dir/builder-report.json" || -f "$run_dir/verifier-report.json" ]]; then
+      continue
+    fi
+
+    task_id="$(task_id_from_run_dir "$run_dir" 2>/dev/null || true)"
+    if [[ -n "$task_id" ]]; then
+      task_worktree="$(task_worktree_of "$task_id")"
+      task_branch="$(task_branch_of "$task_id")"
+      remove_worktree_if_present "$task_worktree"
+      remove_task_branch_if_present "$task_branch"
+    fi
+
+    rm -rf "$run_dir"
+  done < <(find "$runs_root" -mindepth 1 -maxdepth 1 -type d | sort)
 }
 
 clear_git_worktree_locks() {
@@ -841,6 +905,7 @@ printf '%s\n' "$$" > "$pid_file"
 ensure_trunk_branch
 clasp_swarm_normalize_completion_dir "$completed_root"
 clasp_swarm_normalize_completion_dir "$global_completed_root"
+garbage_collect_stale_runs
 
 while true; do
   sync_completed_markers_from_global
@@ -1069,7 +1134,7 @@ while true; do
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       clear_blocked "$task_id"
       remove_worktree_if_present "$task_worktree"
-      git -C "$project_root" branch -D "$task_branch" >/dev/null 2>&1 || true
+      remove_task_branch_if_present "$task_branch"
       break
     else
       merge_exit="$?"
