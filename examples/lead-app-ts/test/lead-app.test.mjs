@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../dist/server/main.js";
+
+const require = createRequire(import.meta.url);
 
 function toWireSegment(value) {
   if (typeof value === "string") {
@@ -51,6 +54,34 @@ async function withPersistentDatabase(callback) {
     await callback(databasePath);
   } finally {
     await rm(directory, { force: true, recursive: true });
+  }
+}
+
+function openDatabase(databasePath) {
+  if (typeof Bun !== "undefined") {
+    const { Database } = require("bun:sqlite");
+    return new Database(databasePath);
+  }
+
+  const { DatabaseSync } = require("node:sqlite");
+  return new DatabaseSync(databasePath);
+}
+
+function seedIncompatibleDatabase(databasePath) {
+  const database = openDatabase(databasePath);
+
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      INSERT OR REPLACE INTO app_meta (key, value)
+      VALUES ('schema_version', '999');
+    `);
+  } finally {
+    database.close();
   }
 }
 
@@ -314,4 +345,29 @@ await withPersistentDatabase(async (databasePath) => {
     assert.match(primaryLeadHtml, /Stored in sqlite\./);
     assert.match(primaryLeadHtml, /Review status: reviewed/);
   }, { databasePath });
+});
+
+await withPersistentDatabase(async (databasePath) => {
+  seedIncompatibleDatabase(databasePath);
+
+  assert.throws(
+    () =>
+      createServer(
+        {
+          mockLeadSummaryModel() {
+            return JSON.stringify({
+              summary: "ignored",
+              priority: "medium",
+              segment: "growth",
+              followUpRequired: false
+            });
+          }
+        },
+        {
+          databasePath,
+          port: 4600 + Math.floor(Math.random() * 300)
+        }
+      ),
+    /lead app schema version 999 is incompatible with expected version 1/
+  );
 });

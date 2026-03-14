@@ -9,6 +9,7 @@ mkdir -p "$workspace_root"
 
 list_output="$(node "$project_root/benchmarks/run-benchmark.mjs" list)"
 printf '%s\n' "$list_output" | grep -q '^ts-lead-segment[[:space:]]'
+printf '%s\n' "$list_output" | grep -q '^ts-lead-persistence[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-segment[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^ts-lead-rejection[[:space:]]'
 printf '%s\n' "$list_output" | grep -q '^clasp-lead-rejection[[:space:]]'
@@ -226,6 +227,23 @@ check_product_only_typescript_solution() {
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
 
+check_product_only_typescript_persistence_solution() {
+  local task_id="ts-lead-persistence"
+  local workspace="$workspace_root/$task_id-product-only"
+  local task_root="$project_root/benchmarks/tasks/$task_id/repo"
+
+  run_benchmark_prepare "$task_id" "$workspace" >/dev/null
+
+  cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$workspace/src/server/main.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/store.ts" "$workspace/src/server/store.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/runtime-modules.d.ts" "$workspace/src/server/runtime-modules.d.ts"
+  cp "$project_root/examples/lead-app-ts/src/server/dev.ts" "$workspace/src/server/dev.ts"
+
+  run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
+
+  assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+}
+
 check_oracle_prompt_mode() {
   local clasp_workspace="$workspace_root/clasp-lead-segment-oracle"
   local ts_workspace="$workspace_root/ts-lead-segment-oracle"
@@ -275,6 +293,7 @@ check_nested_clasp_benchmark_prep() {
 
 check_default_clasp_benchmark_path_requires_recovery
 check_incomplete_task ts-lead-segment
+check_incomplete_task ts-lead-persistence
 check_incomplete_task clasp-lead-segment
 check_incomplete_task ts-lead-rejection
 check_incomplete_task clasp-lead-rejection
@@ -313,6 +332,14 @@ ts_workspace="$workspace_root/ts-lead-segment"
 assert_contains "$ts_workspace/test/lead-app.test.mjs" 'import { createServer } from "../dist/server/main.js";'
 assert_not_contains "$ts_workspace/src/shared/lead.ts" "LeadSegment"
 assert_not_contains "$ts_workspace/src/server/main.ts" "segment:"
+
+ts_persistence_workspace="$workspace_root/ts-lead-persistence"
+assert_contains "$ts_persistence_workspace/test/lead-app.test.mjs" 'lead app schema version 999 is incompatible with expected version 1'
+assert_not_contains "$ts_persistence_workspace/src/server/main.ts" 'createLeadStore'
+if [[ -f "$ts_persistence_workspace/src/server/store.ts" ]]; then
+  echo "expected ts-lead-persistence workspace to omit src/server/store.ts" >&2
+  exit 1
+fi
 
 clasp_rejection_workspace="$workspace_root/clasp-lead-rejection"
 assert_contains "$clasp_rejection_workspace/test/rejection.test.mjs" 'import { installRuntime, serveCompiledModule } from "../runtime/server.mjs";'
@@ -432,4 +459,5 @@ assert_contains "$syntax_verbose_workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/M
 
 check_product_only_clasp_solution
 check_product_only_typescript_solution
+check_product_only_typescript_persistence_solution
 check_oracle_prompt_mode

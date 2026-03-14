@@ -65,6 +65,7 @@ For agent-boundary and orchestration-heavy work, the benchmark suite also includ
 - `benchmarks/tasks/ts-audit-log`: mirrored handwritten JavaScript baseline for the same audit-log surface
 - `benchmarks/tasks/clasp-durable-workflow`: durable workflow self-update task covering supervised upgrades, rollback, and version-drain reporting
 - `benchmarks/tasks/clasp-compiler-maintenance`: hosted self-hosted compiler maintenance task covering checker, lowering, emitter, and stage-2 bootstrap alignment
+- `benchmarks/tasks/ts-lead-persistence`: SQLite-backed TypeScript lead-app task covering restart durability and incompatible-schema failure handling
 
 ## Benchmark Modes
 

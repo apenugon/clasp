@@ -105,8 +105,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 19640,
-      "sha256": "8ac448d2fdbdcd74ea13a79dcfe17c9561db6a6c8829647cd6d172f3a3f5c8bd"
+      "size": 19790,
+      "sha256": "60e52f13b8045b259495ff5298b6cd88e01964e72c24b05679325bcfd2064f2f"
     },
     {
       "path": "benchmarks/result-schema.json",
