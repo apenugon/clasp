@@ -689,14 +689,95 @@ export function createSqliteRuntime(compiledModule, options = {}) {
     });
     liveConnections.set(descriptor.id, { descriptor, database });
 
-    if (typeof runtimeOptions.onOpen === "function") {
-      runtimeOptions.onOpen({
-        connection: descriptor,
-        database
-      });
+    try {
+      applySqliteSchemaHooks(descriptor, database, runtimeOptions.schema);
+
+      if (typeof runtimeOptions.onOpen === "function") {
+        runtimeOptions.onOpen({
+          connection: descriptor,
+          database
+        });
+      }
+    } catch (error) {
+      database.close();
+      liveConnections.delete(descriptor.id);
+      throw error;
     }
 
     return descriptor;
+  }
+
+  function applySqliteSchemaHooks(connection, database, schemaOptions) {
+    if (!schemaOptions) {
+      return;
+    }
+
+    let currentVersion = readSqliteUserVersion(database);
+    const targetVersion = schemaOptions.version;
+    const schemaContext = {
+      connection,
+      database,
+      readOnly: connection.readOnly,
+      targetVersion,
+      readVersion() {
+        return readSqliteUserVersion(database);
+      },
+      writeVersion(version) {
+        if (connection.readOnly) {
+          throw new Error("Cannot update SQLite schema version on a read-only connection.");
+        }
+
+        writeSqliteUserVersion(database, version);
+        return readSqliteUserVersion(database);
+      }
+    };
+
+    if (
+      targetVersion !== null &&
+      currentVersion !== targetVersion &&
+      !connection.readOnly &&
+      schemaOptions.migrate
+    ) {
+      schemaOptions.migrate({
+        ...schemaContext,
+        currentVersion,
+        fromVersion: currentVersion,
+        toVersion: targetVersion
+      });
+      currentVersion = readSqliteUserVersion(database);
+    }
+
+    if (schemaOptions.compatibility) {
+      const compatibility = schemaOptions.compatibility({
+        ...schemaContext,
+        currentVersion,
+        schemaVersion: currentVersion,
+        expectedVersion: targetVersion
+      });
+
+      if (compatibility !== true && compatibility !== undefined) {
+        const detail =
+          typeof compatibility === "string"
+            ? compatibility
+            : `schema version ${currentVersion} is incompatible with expected version ${targetVersion}`;
+        throw new Error(`Incompatible SQLite schema for ${connection.databasePath}: ${detail}`);
+      }
+    } else if (targetVersion !== null && currentVersion !== targetVersion) {
+      throw new Error(
+        `Incompatible SQLite schema for ${connection.databasePath}: expected version ${targetVersion} but found ${currentVersion}`
+      );
+    }
+  }
+
+  function readSqliteUserVersion(database) {
+    const row = database.prepare("pragma user_version;").get();
+    const version = row?.user_version;
+    return Number.isInteger(version) && version >= 0 ? version : 0;
+  }
+
+  function writeSqliteUserVersion(database, version) {
+    const normalizedVersion = normalizeSqliteSchemaVersion(version);
+    database.exec(`pragma user_version = ${normalizedVersion};`);
   }
 
   function resolveSqliteConnection(connectionOrId) {
@@ -741,13 +822,48 @@ export function installSqliteRuntime(compiledModule, options = {}) {
 function normalizeSqliteRuntimeOptions(options) {
   if (!options || typeof options !== "object" || Array.isArray(options)) {
     return {
-      onOpen: null
+      onOpen: null,
+      schema: null
     };
   }
 
   return {
-    onOpen: typeof options.onOpen === "function" ? options.onOpen : null
+    onOpen: typeof options.onOpen === "function" ? options.onOpen : null,
+    schema: normalizeSqliteSchemaOptions(options.schema)
   };
+}
+
+function normalizeSqliteSchemaOptions(schema) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return null;
+  }
+
+  const version = normalizeSqliteSchemaVersion(schema.version);
+  const migrate = typeof schema.migrate === "function" ? schema.migrate : null;
+  const compatibility =
+    typeof schema.compatibility === "function" ? schema.compatibility : null;
+
+  if (version === null && !migrate && !compatibility) {
+    return null;
+  }
+
+  return Object.freeze({
+    version,
+    migrate,
+    compatibility
+  });
+}
+
+function normalizeSqliteSchemaVersion(version) {
+  if (version === undefined || version === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(version) || version < 0) {
+    throw new Error("SQLite schema version must be a non-negative integer.");
+  }
+
+  return version;
 }
 
 function normalizeSqliteConnectionPath(path) {

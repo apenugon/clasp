@@ -5090,6 +5090,21 @@ compileTests =
               "expected sqlite contract and live connection runtime output"
               "{\"sqliteKind\":\"clasp-sqlite-contract\",\"sqliteVersion\":1,\"bindingNames\":[\"sqliteOpen\",\"sqliteOpenReadonly\"],\"runtimeNames\":[\"sqlite:open\",\"sqlite:openReadonly\"],\"runtimeInstalled\":true,\"memoryPath\":\":memory:\",\"memoryIsMemory\":true,\"readonlyPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"readonlyFlag\":true,\"liveConnectionCount\":4,\"rowCount\":1,\"lookupPath\":\"dist/test-projects/sqlite-runtime/runtime.db\",\"closed\":true,\"closedLookup\":\"Unknown Clasp sqlite connection: sqlite-connection-2\"}"
               runtimeOutput
+    , testCase "sqlite runtime exposes schema migration and compatibility hooks when typed connections open app databases" $ do
+        case compileSource "sqlite-schema-runtime" sqliteRuntimeSource of
+          Left err ->
+            assertFailure ("expected sqlite schema runtime source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/sqlite-schema-runtime/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            runtimeOutput <- runNodeScript (sqliteSchemaRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+            assertEqual
+              "expected sqlite schema hooks runtime output"
+              "{\"runtimeInstalled\":true,\"migratedVersion\":2,\"migratedColumns\":[\"archived\",\"value\"],\"archivedValue\":0,\"readonlyVersion\":2,\"incompatibleError\":\"Incompatible SQLite schema for dist/test-projects/sqlite-schema-runtime/incompatible.db: expected notes.archived at schema 2\",\"events\":[\"migrate:sqlite-connection-1:1->2\",\"migrated:2\",\"compatible:sqlite-connection-1:2:true\",\"open:sqlite-connection-1:2\",\"compatible:sqlite-connection-2:2:true\",\"open:sqlite-connection-2:2\",\"compatible:sqlite-connection-3:1:false\"]}"
+              runtimeOutput
     , testCase "sqlite runtime executes typed query bindings and maps query rows through declared result schemas" $ do
         case compileSource "sqlite-query-runtime" sqliteQueryRuntimeSource of
           Left err ->
@@ -9682,6 +9697,76 @@ sqliteQueryRuntimeScript compiledPath runtimePath =
     , "  noteCount: noteCount.count,"
     , "  noteValues: noteRows.map((row) => row.note),"
     , "  filteredNotes"
+    , "}));"
+    ]
+
+sqliteSchemaRuntimeScript :: FilePath -> FilePath -> Text
+sqliteSchemaRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import { DatabaseSync } from 'node:sqlite';"
+    , "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { createSqliteRuntime } from " <> show ("file://" <> runtimePath) <> ";"
+    , "const legacyPath = 'dist/test-projects/sqlite-schema-runtime/legacy.db';"
+    , "const incompatiblePath = 'dist/test-projects/sqlite-schema-runtime/incompatible.db';"
+    , "function seedLegacyDatabase(path, includeArchived = false) {"
+    , "  const database = new DatabaseSync(path);"
+    , "  database.exec('drop table if exists notes;');"
+    , "  database.exec(includeArchived ? 'create table notes (value text not null, archived integer not null default 0);' : 'create table notes (value text not null);');"
+    , "  database.exec(\"insert into notes(value) values ('alpha');\");"
+    , "  database.exec(`pragma user_version = 1;`);"
+    , "  database.close();"
+    , "}"
+    , "seedLegacyDatabase(legacyPath);"
+    , "seedLegacyDatabase(incompatiblePath);"
+    , "const events = [];"
+    , "const sqliteRuntime = createSqliteRuntime(compiledModule, {"
+    , "  schema: {"
+    , "    version: 2,"
+    , "    migrate(context) {"
+    , "      events.push(`migrate:${context.connection.id}:${context.fromVersion}->${context.toVersion}`);"
+    , "      const columns = context.database.prepare(\"pragma table_info('notes');\").all().map((row) => row.name);"
+    , "      if (!columns.includes('archived')) {"
+    , "        context.database.exec('alter table notes add column archived integer not null default 0;');"
+    , "      }"
+    , "      context.writeVersion(context.toVersion);"
+    , "      events.push(`migrated:${context.readVersion()}`);"
+    , "    },"
+    , "    compatibility(context) {"
+    , "      const columns = context.database.prepare(\"pragma table_info('notes');\").all().map((row) => row.name);"
+    , "      const compatible = context.currentVersion === context.expectedVersion && columns.includes('archived');"
+    , "      events.push(`compatible:${context.connection.id}:${context.currentVersion}:${compatible}`);"
+    , "      return compatible || `expected notes.archived at schema ${context.expectedVersion}`;"
+    , "    }"
+    , "  },"
+    , "  onOpen({ connection, database }) {"
+    , "    const row = database.prepare('pragma user_version;').get();"
+    , "    events.push(`open:${connection.id}:${row.user_version}`);"
+    , "  }"
+    , "});"
+    , "const installed = sqliteRuntime.install();"
+    , "const migratedConnection = compiledModule.describeConnection(legacyPath);"
+    , "const migratedDatabase = sqliteRuntime.database(migratedConnection);"
+    , "const migratedVersion = migratedDatabase.prepare('pragma user_version;').get().user_version;"
+    , "const migratedColumns = migratedDatabase.prepare(\"pragma table_info('notes');\").all().map((row) => row.name).sort();"
+    , "const archivedValue = migratedDatabase.prepare('select archived from notes limit 1;').get().archived;"
+    , "sqliteRuntime.close(migratedConnection.id);"
+    , "const readonlyConnection = compiledModule.describeReadonlyConnection(legacyPath);"
+    , "const readonlyVersion = sqliteRuntime.database(readonlyConnection).prepare('pragma user_version;').get().user_version;"
+    , "sqliteRuntime.close(readonlyConnection.id);"
+    , "let incompatibleError = null;"
+    , "try {"
+    , "  compiledModule.describeReadonlyConnection(incompatiblePath);"
+    , "} catch (error) {"
+    , "  incompatibleError = error.message;"
+    , "}"
+    , "console.log(JSON.stringify({"
+    , "  runtimeInstalled: typeof installed['sqlite:open'] === 'function' && typeof installed['sqlite:openReadonly'] === 'function',"
+    , "  migratedVersion,"
+    , "  migratedColumns,"
+    , "  archivedValue,"
+    , "  readonlyVersion,"
+    , "  incompatibleError,"
+    , "  events"
     , "}));"
     ]
 
