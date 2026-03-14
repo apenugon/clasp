@@ -289,6 +289,37 @@ parserTests =
                     assertFailure ("expected field access, got " <> show other)
               Nothing ->
                 assertFailure "expected showName declaration"
+    , testCase "parses type parameters on records, ADTs, and function signatures" $
+        case parseSource "inline" genericTypeSource of
+          Left err ->
+            assertFailure ("expected generic type source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case find ((== "Choice") . typeDeclName) (moduleTypeDecls modl) of
+              Just typeDecl -> do
+                assertEqual "type params" ["a"] (typeDeclParams typeDecl)
+                assertEqual
+                  "constructors"
+                  [ ConstructorDecl "Some" dummySpan dummySpan [TVar "a"]
+                  , ConstructorDecl "None" dummySpan dummySpan []
+                  ]
+                  (normalizeConstructors (typeDeclConstructors typeDecl))
+              Nothing ->
+                assertFailure "expected generic Choice declaration"
+            case find ((== "Box") . recordDeclName) (moduleRecordDecls modl) of
+              Just recordDecl -> do
+                assertEqual "record params" ["a"] (recordDeclParams recordDecl)
+                case recordDeclFields recordDecl of
+                  [RecordFieldDecl {recordFieldDeclType = TVar "a"}] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected generic Box field, got " <> show other)
+              Nothing ->
+                assertFailure "expected generic Box declaration"
+            case findDecl "identity" (moduleDecls modl) of
+              Just decl ->
+                assertEqual "identity annotation" (Just (TFunction [TVar "a"] (TVar "a"))) (declAnnotation decl)
+              Nothing ->
+                assertFailure "expected identity declaration"
     , testCase "infers the module name when the file header is omitted" $
         case parseSource "Main.clasp" headerlessMainSource of
           Left err ->
@@ -1444,6 +1475,46 @@ checkerTests =
                 assertEqual "loadSummary type" (TFunction [TStr] TStr) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected loadSummary declaration"
+    , testCase "typechecks generic records, ADTs, and annotated functions" $
+        case checkSource "generic" genericTypeSource of
+          Left err ->
+            assertFailure ("expected generic type source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "Choice") . typeDeclName) (coreModuleTypeDecls checked) of
+              Just typeDecl ->
+                assertEqual "generic adt params" ["a"] (typeDeclParams typeDecl)
+              Nothing ->
+                assertFailure "expected generic Choice declaration"
+            case find ((== "Box") . recordDeclName) (coreModuleRecordDecls checked) of
+              Just recordDecl ->
+                assertEqual "generic record params" ["a"] (recordDeclParams recordDecl)
+              Nothing ->
+                assertFailure "expected generic Box declaration"
+            case find ((== "wrap") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "wrap type" (TFunction [TVar "a"] (TApply "Box" [TVar "a"])) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected wrap declaration"
+            case find ((== "readBox") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "readBox type" (TFunction [TApply "Box" [TVar "a"]] (TVar "a")) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CFieldAccess _ (TVar "a") (CVar _ (TApply "Box" [TVar "a"]) "box") "value" ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected generic field access, got " <> show other)
+              Nothing ->
+                assertFailure "expected readBox declaration"
+            case find ((== "unwrapOr") . coreDeclName) (coreModuleDecls checked) of
+              Just decl -> do
+                assertEqual "unwrapOr type" (TFunction [TApply "Choice" [TVar "a"], TVar "a"] (TVar "a")) (coreDeclType decl)
+                case coreDeclBody decl of
+                  CMatch _ (TVar "a") (CVar _ (TApply "Choice" [TVar "a"]) "value") [CoreMatchBranch _ (CConstructorPattern _ "Some" [CorePatternBinder "present" _ (TVar "a")]) (CVar _ (TVar "a") "present"), CoreMatchBranch _ (CConstructorPattern _ "None" []) (CVar _ (TVar "a") "fallback")] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected generic match expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected unwrapOr declaration"
     , testCase "typechecks compiler-known sqlite connection helpers" $
         case checkSource "sqlite-runtime" sqliteRuntimeSource of
           Left err ->
@@ -3489,6 +3560,11 @@ docsTests =
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
         assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`." `T.isInfixOf` spec)
+    , testCase "v0 spec documents type parameters for records, ADTs, and functions" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected generic record example" ("record Box a = { value : a }" `T.isInfixOf` spec)
+        assertBool "expected generic function example" ("unwrapOr : Option a -> a -> a" `T.isInfixOf` spec)
+        assertBool "expected generic grammar" ("type-decl   ::= \"type\" upper-ident lower-ident*" `T.isInfixOf` spec)
     , testCase "self-hosting plan defines the subset and bootstrap boundary" $ do
         plan <- TIO.readFile ("docs" </> "clasp-self-hosting-plan.md")
         assertBool "expected self-hosting subset section" ("## Self-Hosting Subset" `T.isInfixOf` plan)
@@ -6675,6 +6751,36 @@ adtSource =
     , ""
     , "main : Str"
     , "main = describe (Busy \"loading\")"
+    ]
+
+genericTypeSource :: Text
+genericTypeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Choice a = Some a | None"
+    , ""
+    , "record Box a = {"
+    , "  value : a"
+    , "}"
+    , ""
+    , "identity : a -> a"
+    , "identity value = value"
+    , ""
+    , "wrap : a -> Box a"
+    , "wrap value = Box { value = value }"
+    , ""
+    , "readBox : Box a -> a"
+    , "readBox box = box.value"
+    , ""
+    , "unwrapOr : Choice a -> a -> a"
+    , "unwrapOr value fallback = match value {"
+    , "  Some present -> present,"
+    , "  None -> fallback"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = readBox (wrap \"ok\")"
     ]
 
 unboundNameSource :: Text

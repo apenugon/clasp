@@ -210,6 +210,22 @@ main : Str
 main = describe (makeBusy "loading")
 ```
 
+Type declarations, record schemas, and annotated functions may also introduce type parameters:
+
+```clasp
+module Main
+
+type Option a = Some a | None
+
+record Box a = { value : a }
+
+unwrapOr : Option a -> a -> a
+unwrapOr value fallback = match value {
+  Some present -> present,
+  None -> fallback
+}
+```
+
 Local bindings are also available inside expressions:
 
 ```clasp
@@ -382,9 +398,10 @@ segment     ::= upper-ident
 import      ::= "import" module-name
 
 top-level   ::= type-decl | record-decl | guide-decl | hook-decl | role-decl | agent-decl | policy-decl | toolserver-decl | tool-decl | verifier-decl | mergegate-decl | projection-decl | foreign-decl | route-decl | signature | decl
-type-decl   ::= "type" upper-ident "=" constructor ("|" constructor)*
-constructor ::= upper-ident type-atom*
-record-decl ::= "record" upper-ident "=" "{" record-field-decl ("," record-field-decl)* "}"
+type-decl   ::= "type" upper-ident lower-ident* "=" constructor ("|" constructor)*
+constructor ::= upper-ident constructor-field*
+constructor-field ::= type-base | "(" type ")"
+record-decl ::= "record" upper-ident lower-ident* "=" "{" record-field-decl ("," record-field-decl)* "}"
 record-field-decl ::= lower-ident ":" type ("classified" lower-ident)?
 guide-decl ::= "guide" upper-ident ("extends" upper-ident)? "=" "{" guide-entry-decl ("," guide-entry-decl)* "}"
 guide-entry-decl ::= lower-ident ":" string
@@ -443,7 +460,8 @@ match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
 pattern     ::= upper-ident lower-ident*
 type        ::= type-atom ("->" type-atom)*
-type-atom   ::= "Int" | "Str" | "Bool" | upper-ident | "[" type "]" | "(" type ")"
+type-atom   ::= type-base type-base*
+type-base   ::= "Int" | "Str" | "Bool" | upper-ident | lower-ident | "[" type "]" | "(" type ")"
 ```
 
 Notes:
@@ -558,7 +576,6 @@ Once `v0` is stable, the next additions should be:
 - More complete inference, especially around higher-order code and future generic types
 - Dedicated schema syntax once records no longer need to carry the entire boundary story alone
 - Multi-file namespace control beyond the current flattened import model
-- Type parameters
 - Richer pattern forms, including nested destructuring and wildcards
 - Stronger Bun/runtime interop and eventually non-JS server runtimes
 - Typed workflows, hot-swap checkpoints, and self-update compatibility rules

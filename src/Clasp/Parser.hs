@@ -666,6 +666,7 @@ recordDeclParser = do
   start <- getSourcePos
   keyword "record"
   (nameSpan, name) <- locatedUpperIdentifier
+  params <- many lowerIdentifier
   _ <- symbol "="
   fields <- braces (recordFieldDeclParser `sepBy` symbolN ",")
   end <- getSourcePos
@@ -676,6 +677,7 @@ recordDeclParser = do
       { recordDeclName = name
       , recordDeclSpan = makeSourceSpan start end
       , recordDeclNameSpan = nameSpan
+      , recordDeclParams = params
       , recordDeclProjectionSource = Nothing
       , recordDeclProjectionPolicy = Nothing
       , recordDeclFields = fields
@@ -1119,6 +1121,7 @@ typeDeclParser = do
   start <- getSourcePos
   keyword "type"
   (nameSpan, name) <- locatedUpperIdentifier
+  params <- many lowerIdentifier
   _ <- symbol "="
   constructors <- constructorDeclParser `sepBy1` symbol "|"
   end <- getSourcePos
@@ -1129,6 +1132,7 @@ typeDeclParser = do
       { typeDeclName = name
       , typeDeclSpan = makeSourceSpan start end
       , typeDeclNameSpan = nameSpan
+      , typeDeclParams = params
       , typeDeclConstructors = constructors
       }
 
@@ -1136,7 +1140,7 @@ constructorDeclParser :: Parser ConstructorDecl
 constructorDeclParser = do
   start <- getSourcePos
   (nameSpan, name) <- locatedUpperIdentifier
-  fields <- many typeAtomParser
+  fields <- many constructorFieldTypeParser
   end <- getSourcePos
   pure
     ConstructorDecl
@@ -1145,6 +1149,10 @@ constructorDeclParser = do
       , constructorDeclNameSpan = nameSpan
       , constructorDeclFields = fields
       }
+
+constructorFieldTypeParser :: Parser Type
+constructorFieldTypeParser =
+  parens typeParser <|> typeBaseParser
 
 typeSignatureParser :: Parser TopLevelItem
 typeSignatureParser = do
@@ -1389,7 +1397,7 @@ decodeParser :: Parser Expr
 decodeParser = do
   start <- getSourcePos
   keyword "decode"
-  targetType <- typeAtomParser
+  targetType <- typeBaseParser
   rawJson <- exprParser
   end <- getSourcePos
   pure (EDecode (makeSourceSpan start end) targetType rawJson)
@@ -1486,13 +1494,29 @@ typeParser = do
   pure (buildFunctionType parts)
 
 typeAtomParser :: Parser Type
-typeAtomParser =
+typeAtomParser = do
+  baseType <- typeBaseParser
+  case baseType of
+    TNamed name -> do
+      argTypes <- many (try typeBaseParser)
+      pure $
+        case argTypes of
+          [] ->
+            TNamed name
+          _ ->
+            TApply name argTypes
+    _ ->
+      pure baseType
+
+typeBaseParser :: Parser Type
+typeBaseParser =
   parens typeParser
     <|> (TList <$> brackets typeParser)
     <|> (keyword "Int" *> pure TInt)
     <|> (keyword "Str" *> pure TStr)
     <|> (keyword "Bool" *> pure TBool)
     <|> (TNamed <$> upperIdentifier)
+    <|> (TVar <$> lowerIdentifier)
 
 moduleNameParser :: Parser Text
 moduleNameParser =

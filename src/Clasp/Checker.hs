@@ -18,7 +18,8 @@ import Data.Bifunctor (first)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isNothing, listToMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Clasp.Core
@@ -127,6 +128,7 @@ data ModuleContext = ModuleContext
 
 data ConstructorInfo = ConstructorInfo
   { constructorInfoTypeName :: Text
+  , constructorInfoTypeParams :: [Text]
   , constructorInfoDecl :: ConstructorDecl
   }
 
@@ -138,6 +140,8 @@ data InferType
   | IBool
   | IList InferType
   | INamed Text
+  | IParam Text
+  | IApply Text [InferType]
   | IFunction [InferType] InferType
   | IVar Int
   deriving (Eq, Ord, Show)
@@ -253,6 +257,7 @@ data DraftRecordField = DraftRecordField
 
 data MatchResultAccumulator = MatchResultAccumulator
   { accumulatorExpectedTypeName :: Maybe Text
+  , accumulatorExpectedSubjectType :: Maybe InferType
   , accumulatorSeenBranches :: Map.Map Text MatchBranch
   , accumulatorFirstBranchType :: Maybe (InferType, MatchBranch)
   , accumulatorDraftBranches :: [DraftMatchBranch]
@@ -390,6 +395,7 @@ builtinRecordDecl name fields =
     { recordDeclName = name
     , recordDeclSpan = builtinSpan
     , recordDeclNameSpan = builtinSpan
+    , recordDeclParams = []
     , recordDeclProjectionSource = Nothing
     , recordDeclProjectionPolicy = Nothing
     , recordDeclFields = fmap (uncurry builtinRecordFieldDecl) fields
@@ -410,6 +416,7 @@ builtinResultTypeDecl =
     { typeDeclName = resultTypeName
     , typeDeclSpan = builtinSpan
     , typeDeclNameSpan = builtinSpan
+    , typeDeclParams = []
     , typeDeclConstructors =
         [ builtinConstructorDecl resultOkConstructorName [TStr]
         , builtinConstructorDecl resultErrConstructorName [TStr]
@@ -422,6 +429,7 @@ builtinOptionTypeDecl =
     { typeDeclName = optionTypeName
     , typeDeclSpan = builtinSpan
     , typeDeclNameSpan = builtinSpan
+    , typeDeclParams = []
     , typeDeclConstructors =
         [ builtinConstructorDecl optionSomeConstructorName [TStr]
         , builtinConstructorDecl optionNoneConstructorName []
@@ -717,6 +725,10 @@ typeUsesBuiltinOption typ =
       typeUsesBuiltinOption itemType
     TNamed name ->
       name == optionTypeName
+    TVar _ ->
+      False
+    TApply name args ->
+      name == optionTypeName || any typeUsesBuiltinOption args
     TFunction args result ->
       any typeUsesBuiltinOption (args <> [result])
 
@@ -806,6 +818,10 @@ typeUsesBuiltinResult typ =
       typeUsesBuiltinResult itemType
     TNamed name ->
       name == resultTypeName
+    TVar _ ->
+      False
+    TApply name args ->
+      name == resultTypeName || any typeUsesBuiltinResult args
     TFunction args result ->
       any typeUsesBuiltinResult (args <> [result])
 
@@ -1961,6 +1977,7 @@ synthesizeProjectionRecordDecl schemaRecordEnv policyDeclEnv projectionDecl = do
       { recordDeclName = projectionDeclName projectionDecl
       , recordDeclSpan = projectionDeclSpan projectionDecl
       , recordDeclNameSpan = projectionDeclNameSpan projectionDecl
+      , recordDeclParams = []
       , recordDeclProjectionSource = Just (projectionDeclSourceRecordName projectionDecl)
       , recordDeclProjectionPolicy = Just (projectionDeclPolicyName projectionDecl)
       , recordDeclFields = projectedFields
@@ -2107,20 +2124,23 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
   mapM_ checkToolDeclTypes toolDecls
   mapM_ checkRouteDeclTypes routeDecls
   where
-    checkTypeDecl typeDecl =
+    checkTypeDecl typeDecl = do
+      ensureUniqueScopedTypeParams "type" (typeDeclName typeDecl) (typeDeclNameSpan typeDecl) (typeDeclParams typeDecl)
       mapM_ (checkConstructorFields typeDecl) (typeDeclConstructors typeDecl)
 
     checkConstructorFields typeDecl constructorDecl =
       mapM_
-        (ensureKnownType (constructorDeclSpan constructorDecl) [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)])
+        (ensureKnownType (Set.fromList (typeDeclParams typeDecl)) (constructorDeclSpan constructorDecl) [diagnosticRelated "type declaration" (typeDeclNameSpan typeDecl)])
         (constructorDeclFields constructorDecl)
 
     checkRecordDecl recordDecl = do
+      ensureUniqueScopedTypeParams "record" (recordDeclName recordDecl) (recordDeclNameSpan recordDecl) (recordDeclParams recordDecl)
       ensureUniqueRecordFields recordDecl
       mapM_
         ( \fieldDecl ->
             do
               ensureKnownType
+                (Set.fromList (recordDeclParams recordDecl))
                 (recordFieldDeclSpan fieldDecl)
                 [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
                 (recordFieldDeclType fieldDecl)
@@ -2137,6 +2157,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
       case declAnnotation decl of
         Just annotation ->
           ensureKnownType
+            (freeTypeVars annotation)
             (fromMaybe (declNameSpan decl) (declAnnotationSpan decl))
             [diagnosticRelated "declaration" (declNameSpan decl)]
             annotation
@@ -2146,6 +2167,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
     checkForeignDecl foreignDecl =
       do
         ensureKnownType
+          Set.empty
           (foreignDeclAnnotationSpan foreignDecl)
           [diagnosticRelated "foreign declaration" (foreignDeclNameSpan foreignDecl)]
           (foreignDeclType foreignDecl)
@@ -2309,7 +2331,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
       ensureRecordType routeDecl (routeDeclRequestType routeDecl) (routeDeclRequestTypeSpan routeDecl) "request"
       ensureResponseType routeDecl (routeDeclResponseType routeDecl) (routeDeclResponseTypeSpan routeDecl)
 
-    ensureKnownType primarySpan related typ =
+    ensureKnownType scopedParams primarySpan related typ =
       case typ of
         TInt ->
           pure ()
@@ -2318,7 +2340,7 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
         TBool ->
           pure ()
         TList itemType ->
-          ensureKnownType primarySpan related itemType
+          ensureKnownType scopedParams primarySpan related itemType
         TNamed name ->
           unless (isBuiltinTypeName name || Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
             Left . diagnosticBundle $
@@ -2329,8 +2351,29 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
                   ["Declare the type before using it in a signature or constructor."]
                   related
               ]
+        TVar name ->
+          unless (Set.member name scopedParams) $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_UNKNOWN_TYPE"
+                  ("Unknown type parameter `" <> name <> "`.")
+                  (Just primarySpan)
+                  ["Introduce the type parameter in the surrounding declaration or use a declared named type."]
+                  related
+              ]
+        TApply name args -> do
+          unless (isBuiltinTypeName name || Map.member name typeDeclEnv || Map.member name recordDeclEnv) $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_UNKNOWN_TYPE"
+                  ("Unknown type `" <> name <> "`.")
+                  (Just primarySpan)
+                  ["Declare the type before using it in a signature or constructor."]
+                  related
+              ]
+          mapM_ (ensureKnownType scopedParams primarySpan related) args
         TFunction args result ->
-          mapM_ (ensureKnownType primarySpan related) (args <> [result])
+          mapM_ (ensureKnownType scopedParams primarySpan related) (args <> [result])
 
     ensureSchemaFieldType recordDecl fieldDecl =
       case recordFieldDeclType fieldDecl of
@@ -2350,6 +2393,19 @@ ensureKnownTypes typeDeclEnv recordDeclEnv typeDecls recordDecls workflowDecls f
                   ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> name <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
                   (Just (recordFieldDeclSpan fieldDecl))
                   ["Record fields currently support primitive types, list types, nested record types, and nullary enum types only."]
+                  [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+              ]
+        TVar _ ->
+          pure ()
+        TApply name args -> do
+          mapM_ (\argType -> ensureSchemaFieldType recordDecl fieldDecl {recordFieldDeclType = argType}) args
+          unless (Map.member name recordDeclEnv || Map.member name typeDeclEnv) $
+            Left . diagnosticBundle $
+              [ diagnostic
+                  "E_SCHEMA_FIELD_TYPE"
+                  ("Record `" <> recordDeclName recordDecl <> "` uses unsupported field type `" <> name <> "` for `" <> recordFieldDeclName fieldDecl <> "`.")
+                  (Just (recordFieldDeclSpan fieldDecl))
+                  ["Record fields currently support primitive types, list types, named types, and scoped type parameters."]
                   [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
               ]
         TFunction _ _ ->
@@ -2437,6 +2493,44 @@ splitFunctionType typ =
       (args, result)
     _ ->
       ([], typ)
+
+freeTypeVars :: Type -> Set.Set Text
+freeTypeVars typ =
+  case typ of
+    TInt ->
+      Set.empty
+    TStr ->
+      Set.empty
+    TBool ->
+      Set.empty
+    TList itemType ->
+      freeTypeVars itemType
+    TNamed _ ->
+      Set.empty
+    TVar name ->
+      Set.singleton name
+    TApply _ args ->
+      Set.unions (fmap freeTypeVars args)
+    TFunction args result ->
+      Set.unions (fmap freeTypeVars (result : args))
+
+ensureUniqueScopedTypeParams :: Text -> Text -> SourceSpan -> [Text] -> Either DiagnosticBundle ()
+ensureUniqueScopedTypeParams declKind declName primarySpan = go Map.empty
+  where
+    go _ [] = pure ()
+    go seen (param : rest) =
+      case Map.lookup param seen of
+        Just previousSpan ->
+          Left . diagnosticBundle $
+            [ diagnostic
+                "E_DUPLICATE_TYPE_PARAM"
+                ("Duplicate type parameter `" <> param <> "` in " <> declKind <> " `" <> declName <> "`.")
+                (Just primarySpan)
+                ["Each type parameter may only appear once per declaration."]
+                [diagnosticRelated "previous type parameter" previousSpan]
+            ]
+        Nothing ->
+          go (Map.insert param primarySpan seen) rest
 
 ensureUniqueRecordFields :: RecordDecl -> Either DiagnosticBundle ()
 ensureUniqueRecordFields recordDecl = go Map.empty (recordDeclFields recordDecl)
@@ -2554,6 +2648,7 @@ buildConstructorEnv = foldM addTypeDecl Map.empty
               (constructorDeclName constructorDecl)
               ConstructorInfo
                 { constructorInfoTypeName = typeDeclName typeDecl
+                , constructorInfoTypeParams = typeDeclParams typeDecl
                 , constructorInfoDecl = constructorDecl
                 }
               env
@@ -2873,11 +2968,11 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
             }
         )
         (draftExprType body)
-        (typeToInferType expectedType)
+        (rigidTypeToInferType expectedType)
       pure
         DraftDecl
           { draftDeclName = name
-          , draftDeclType = typeToInferType expectedType
+          , draftDeclType = rigidTypeToInferType expectedType
           , draftDeclParams = []
           , draftDeclBody = body
           }
@@ -2900,9 +2995,9 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
                     [diagnosticRelated "declaration" (declNameSpan decl)]
                 ]
             else do
-              let draftParams = zipWith DraftParam params (fmap typeToInferType argTypes)
+              let draftParams = zipWith DraftParam params (fmap rigidTypeToInferType argTypes)
                   localEnv = Map.fromList (zip params (fmap (immutableLocalBinding . draftParamType) draftParams))
-                  resultInferType = typeToInferType resultType
+                  resultInferType = rigidTypeToInferType resultType
               body <- withReturnType resultInferType (inferExpr ctx termEnv localEnv (declBody decl))
               unify
                 ( UnifyContext
@@ -2917,7 +3012,7 @@ inferExpectedDecl ctx termEnv decl name params expectedType =
               pure
                 DraftDecl
                   { draftDeclName = name
-                  , draftDeclType = typeToInferType expectedType
+                  , draftDeclType = rigidTypeToInferType expectedType
                   , draftDeclParams = draftParams
                   , draftDeclBody = body
                   }
@@ -2978,8 +3073,9 @@ inferExpr ctx termEnv localEnv expr =
           pure (DraftExpr span' (localBindingType localBinding) (DraftVar name))
         Nothing ->
           case Map.lookup name termEnv of
-            Just topLevelType ->
-              pure (DraftExpr span' (typeToInferType topLevelType) (DraftVar name))
+            Just topLevelType -> do
+              instantiatedType <- instantiateType topLevelType
+              pure (DraftExpr span' instantiatedType (DraftVar name))
             Nothing ->
               if Map.member name (contextDeclMap ctx)
                 then throwError (InferDeferredName name span')
@@ -3846,6 +3942,7 @@ inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
           ["Declare the record before constructing it."]
     Just recordDecl -> do
       ensureUniqueRecordExprFields fields
+      typeParamEnv <- freshTypeParamEnv (recordDeclParams recordDecl)
       let expectedFields = recordDeclFields recordDecl
           expectedFieldNames = fmap recordFieldDeclName expectedFields
           actualFieldNames = fmap recordFieldExprName fields
@@ -3871,7 +3968,7 @@ inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
           ]
       let fieldTypeMap =
             Map.fromList
-              [ (recordFieldDeclName fieldDecl, typeToInferType (recordFieldDeclType fieldDecl))
+              [ (recordFieldDeclName fieldDecl, instantiateTypeWith typeParamEnv (recordFieldDeclType fieldDecl))
               | fieldDecl <- expectedFields
               ]
       draftFields <-
@@ -3902,20 +3999,20 @@ inferRecordExpr ctx termEnv localEnv recordSpan recordName fields =
       pure
         ( DraftExpr
             recordSpan
-            (INamed recordName)
+            (mkInferNamedType recordName (fmap (typeParamEnv Map.!) (recordDeclParams recordDecl)))
             (DraftRecord recordName draftFields)
         )
 
 inferFieldAccessExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr -> Text -> InferM DraftExpr
 inferFieldAccessExpr ctx termEnv localEnv accessSpan subject fieldName = do
   subjectExpr <- inferExpr ctx termEnv localEnv subject
-  recordDecl <- resolveFieldAccessRecord ctx accessSpan fieldName (draftExprType subjectExpr)
+  (recordDecl, fieldType) <- resolveFieldAccessRecord ctx accessSpan fieldName (draftExprType subjectExpr)
   case lookupRecordField fieldName recordDecl of
-    Just fieldDecl ->
+    Just _ ->
       pure
         ( DraftExpr
             accessSpan
-            (typeToInferType (recordFieldDeclType fieldDecl))
+            fieldType
             (DraftFieldAccess subjectExpr fieldName)
         )
     Nothing ->
@@ -3945,7 +4042,7 @@ inferDecodeExpr ctx termEnv localEnv decodeSpan targetType rawJson = do
   pure
     ( DraftExpr
         decodeSpan
-        (typeToInferType targetType)
+        (rigidTypeToInferType targetType)
         (DraftDecodeJson targetType rawJsonExpr)
     )
 
@@ -3965,11 +4062,11 @@ inferMatchExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Expr
 inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
   subjectExpr <- inferExpr ctx termEnv localEnv subject
   subjectType <- resolveCurrentType (draftExprType subjectExpr)
-  initialExpectedTypeName <-
+  (initialExpectedTypeName, initialExpectedSubjectType) <-
     case subjectType of
       INamed typeName ->
         if Map.member typeName (contextTypeDeclEnv ctx)
-          then pure (Just typeName)
+          then pure (Just typeName, Just subjectType)
           else
             if Map.member typeName (contextRecordDeclEnv ctx)
               then
@@ -3981,9 +4078,23 @@ inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
                       ["Record type `" <> typeName <> "` does not support constructor matching."]
                       []
                   ]
-              else pure (Just typeName)
+              else pure (Just typeName, Just subjectType)
+      IApply typeName _
+        | Map.member typeName (contextTypeDeclEnv ctx) ->
+            pure (Just typeName, Just subjectType)
+        | Map.member typeName (contextRecordDeclEnv ctx) ->
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_MATCH_SUBJECT"
+                  "Match expressions require an algebraic data type subject."
+                  (Just matchSpan)
+                  ["Record type `" <> typeName <> "` does not support constructor matching."]
+                  []
+              ]
+        | otherwise ->
+            pure (Just typeName, Just subjectType)
       IVar _ ->
-        pure Nothing
+        pure (Nothing, Nothing)
       _ ->
         throwDiagnostic . diagnosticBundle $
           [ diagnostic
@@ -3997,7 +4108,7 @@ inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
   accumulator <-
     foldM
       (inferMatchBranch ctx termEnv localEnv)
-      (MatchResultAccumulator initialExpectedTypeName Map.empty Nothing [])
+      (MatchResultAccumulator initialExpectedTypeName initialExpectedSubjectType Map.empty Nothing [])
       branches
 
   expectedTypeName <-
@@ -4023,7 +4134,7 @@ inferMatchExpr ctx termEnv localEnv matchSpan subject branches = do
         }
     )
     (draftExprType subjectExpr)
-    (INamed expectedTypeName)
+    (fromMaybe (INamed expectedTypeName) (accumulatorExpectedSubjectType accumulator))
 
   typeDecl <-
     case Map.lookup expectedTypeName (contextTypeDeclEnv ctx) of
@@ -4068,8 +4179,8 @@ inferMatchBranch ::
   MatchBranch ->
   InferM MatchResultAccumulator
 inferMatchBranch ctx termEnv localEnv accumulator branch = do
-  (constructorName, constructorTypeName, draftPattern) <-
-    resolveBranchPattern ctx (accumulatorExpectedTypeName accumulator) branch
+  (constructorName, constructorTypeName, constructorResultType, draftPattern) <-
+    resolveBranchPattern ctx (accumulatorExpectedSubjectType accumulator) branch
 
   case Map.lookup constructorName (accumulatorSeenBranches accumulator) of
     Just previousBranch ->
@@ -4115,10 +4226,17 @@ inferMatchBranch ctx termEnv localEnv accumulator branch = do
             Just existingTypeName
           Nothing ->
             Just constructorTypeName
+      nextExpectedSubjectType =
+        case accumulatorExpectedSubjectType accumulator of
+          Just existingSubjectType ->
+            Just existingSubjectType
+          Nothing ->
+            Just constructorResultType
 
   pure
     MatchResultAccumulator
       { accumulatorExpectedTypeName = nextExpectedTypeName
+      , accumulatorExpectedSubjectType = nextExpectedSubjectType
       , accumulatorSeenBranches = Map.insert constructorName branch (accumulatorSeenBranches accumulator)
       , accumulatorFirstBranchType = nextFirstBranchType
       , accumulatorDraftBranches =
@@ -4133,10 +4251,10 @@ inferMatchBranch ctx termEnv localEnv accumulator branch = do
 
 resolveBranchPattern ::
   ModuleContext ->
-  Maybe Text ->
+  Maybe InferType ->
   MatchBranch ->
-  InferM (Text, Text, DraftPattern)
-resolveBranchPattern ctx maybeExpectedTypeName branch =
+  InferM (Text, Text, InferType, DraftPattern)
+resolveBranchPattern ctx maybeExpectedSubjectType branch =
   case matchBranchPattern branch of
     PConstructor constructorSpan constructorName binders ->
       case Map.lookup constructorName (contextConstructorEnv ctx) of
@@ -4149,20 +4267,23 @@ resolveBranchPattern ctx maybeExpectedTypeName branch =
               ["Declare the constructor before using it in a match branch."]
         Just constructorInfo -> do
           let actualTypeName = constructorInfoTypeName constructorInfo
-          case maybeExpectedTypeName of
-            Just expectedTypeName ->
-              when (expectedTypeName /= actualTypeName) $
-                throwDiagnostic . diagnosticBundle $
-                  [ diagnostic
-                      "E_PATTERN_TYPE_MISMATCH"
-                      ("Constructor `" <> constructorName <> "` does not belong to type `" <> expectedTypeName <> "`.")
-                      (Just constructorSpan)
-                      ["Use a constructor declared by the matched type."]
-                      [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
-                  ]
+          typeParamEnv <- freshTypeParamEnv (constructorInfoTypeParams constructorInfo)
+          let fieldTypes = fmap (instantiateTypeWith typeParamEnv) (constructorDeclFields (constructorInfoDecl constructorInfo))
+              constructorResultType = mkInferNamedType actualTypeName (fmap (typeParamEnv Map.!) (constructorInfoTypeParams constructorInfo))
+          case maybeExpectedSubjectType of
+            Just expectedSubjectType ->
+              unify
+                ( UnifyContext
+                    { unifyCode = "E_PATTERN_TYPE_MISMATCH"
+                    , unifySummary = "Constructor pattern does not belong to the matched type."
+                    , unifyPrimarySpan = constructorSpan
+                    , unifyRelated = [diagnosticRelated "constructor declaration" (constructorDeclNameSpan (constructorInfoDecl constructorInfo))]
+                    }
+                )
+                constructorResultType
+                expectedSubjectType
             Nothing ->
               pure ()
-          let fieldTypes = fmap typeToInferType (constructorDeclFields (constructorInfoDecl constructorInfo))
           when (length binders /= length fieldTypes) $
             throwDiagnostic . diagnosticBundle $
               [ diagnostic
@@ -4192,6 +4313,7 @@ resolveBranchPattern ctx maybeExpectedTypeName branch =
           pure
             ( constructorName
             , actualTypeName
+            , constructorResultType
             , DraftConstructorPattern constructorSpan constructorName draftBinders
             )
 
@@ -4246,14 +4368,27 @@ lookupRecordField fieldName recordDecl =
       | recordFieldDeclName fieldDecl == fieldName = Just fieldDecl
       | otherwise = go rest
 
-resolveFieldAccessRecord :: ModuleContext -> SourceSpan -> Text -> InferType -> InferM RecordDecl
+resolveFieldAccessRecord :: ModuleContext -> SourceSpan -> Text -> InferType -> InferM (RecordDecl, InferType)
 resolveFieldAccessRecord ctx accessSpan fieldName subjectType = do
   resolvedSubjectType <- resolveCurrentType subjectType
   case resolvedSubjectType of
     INamed typeName ->
       case Map.lookup typeName (contextRecordDeclEnv ctx) of
         Just recordDecl ->
-          pure recordDecl
+          resolveKnownRecordField recordDecl []
+        Nothing ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_FIELD_ACCESS"
+                "Field access requires a record value."
+                (Just accessSpan)
+                ["Expected a record type but got `" <> typeName <> "`."]
+                []
+            ]
+    IApply typeName args ->
+      case Map.lookup typeName (contextRecordDeclEnv ctx) of
+        Just recordDecl ->
+          resolveKnownRecordField recordDecl args
         Nothing ->
           throwDiagnostic . diagnosticBundle $
             [ diagnostic
@@ -4275,6 +4410,8 @@ resolveFieldAccessRecord ctx accessSpan fieldName subjectType = do
                 []
             ]
         [recordDecl] -> do
+          typeParamEnv <- freshTypeParamEnv (recordDeclParams recordDecl)
+          let inferArgs = fmap (typeParamEnv Map.!) (recordDeclParams recordDecl)
           unify
             ( UnifyContext
                 { unifyCode = "E_FIELD_ACCESS"
@@ -4284,8 +4421,19 @@ resolveFieldAccessRecord ctx accessSpan fieldName subjectType = do
                 }
             )
             resolvedSubjectType
-            (INamed (recordDeclName recordDecl))
-          pure recordDecl
+            (mkInferNamedType (recordDeclName recordDecl) inferArgs)
+          case lookupInstantiatedRecordField recordDecl inferArgs fieldName of
+            Just fieldType ->
+              pure (recordDecl, fieldType)
+            Nothing ->
+              throwDiagnostic . diagnosticBundle $
+                [ diagnostic
+                    "E_UNKNOWN_FIELD"
+                    ("Record `" <> recordDeclName recordDecl <> "` does not define field `" <> fieldName <> "`.")
+                    (Just accessSpan)
+                    ["Use one of the declared record fields."]
+                    [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+                ]
         candidates ->
           throwDiagnostic . diagnosticBundle $
             [ diagnostic
@@ -4304,6 +4452,26 @@ resolveFieldAccessRecord ctx accessSpan fieldName subjectType = do
             ["Expected a record type but got " <> renderInferType resolvedSubjectType <> "."]
             []
         ]
+  where
+    resolveKnownRecordField recordDecl inferArgs =
+      case lookupInstantiatedRecordField recordDecl inferArgs fieldName of
+        Just fieldType ->
+          pure (recordDecl, fieldType)
+        Nothing ->
+          throwDiagnostic . diagnosticBundle $
+            [ diagnostic
+                "E_UNKNOWN_FIELD"
+                ("Record `" <> recordDeclName recordDecl <> "` does not define field `" <> fieldName <> "`.")
+                (Just accessSpan)
+                ["Use one of the declared record fields."]
+                [diagnosticRelated "record declaration" (recordDeclNameSpan recordDecl)]
+            ]
+
+lookupInstantiatedRecordField :: RecordDecl -> [InferType] -> Text -> Maybe InferType
+lookupInstantiatedRecordField recordDecl inferArgs fieldName = do
+  fieldDecl <- lookupRecordField fieldName recordDecl
+  let typeParamEnv = Map.fromList (zip (recordDeclParams recordDecl) inferArgs)
+  pure (instantiateTypeWith typeParamEnv (recordFieldDeclType fieldDecl))
 
 recordsWithField :: ModuleContext -> Text -> [RecordDecl]
 recordsWithField ctx fieldName =
@@ -4346,6 +4514,16 @@ inferTypeToJsonType ctx inferType =
           Right (TNamed name)
       | otherwise ->
           Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TNamed name)))
+    IParam name ->
+      Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TVar name)))
+    IApply name args
+      | Map.member name (contextRecordDeclEnv ctx) ->
+          TApply name <$> traverse (inferTypeToJsonType ctx) args
+      | maybe False isJsonEnumTypeDecl (Map.lookup name (contextTypeDeclEnv ctx))
+      , null args ->
+          Right (TNamed name)
+      | otherwise ->
+          Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TApply name (fmap inferTypeToTypeUnsafe args))))
     IFunction args result ->
       Left (Just (jsonTypeUnsupportedBundle (Just "<inferred value>") (TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result))))
     IVar _ ->
@@ -4358,6 +4536,8 @@ inferTypeToJsonType ctx inferType =
         IBool -> TBool
         IList itemType -> TList (inferTypeToTypeUnsafe itemType)
         INamed name -> TNamed name
+        IParam name -> TVar name
+        IApply name args -> TApply name (fmap inferTypeToTypeUnsafe args)
         IFunction args result -> TFunction (fmap inferTypeToTypeUnsafe args) (inferTypeToTypeUnsafe result)
         IVar _ -> TNamed "<unknown>"
 
@@ -4386,6 +4566,17 @@ jsonTypeSupportError ctx primarySpan typ =
                   ["Use a record type, a primitive type, a list type, or a nullary enum type at the JSON boundary."]
                   []
               ]
+    TVar _ ->
+      Just (jsonTypeUnsupportedBundle Nothing typ)
+    TApply name args
+      | Map.member name (contextRecordDeclEnv ctx)
+      , all (isNothing . jsonTypeSupportError ctx primarySpan) args ->
+          Nothing
+      | maybe False isJsonEnumTypeDecl (Map.lookup name (contextTypeDeclEnv ctx))
+      , null args ->
+          Nothing
+      | otherwise ->
+          Just (jsonTypeUnsupportedBundle Nothing typ)
     TFunction _ _ ->
       Just . diagnosticBundle $
         [ diagnostic
@@ -4675,6 +4866,10 @@ hasUnresolvedListItem inferType =
       containsTypeVar itemType || hasUnresolvedListItem itemType
     INamed _ ->
       False
+    IParam _ ->
+      False
+    IApply _ args ->
+      any hasUnresolvedListItem args
     IFunction args result ->
       any hasUnresolvedListItem (result : args)
     IVar _ ->
@@ -4693,6 +4888,10 @@ containsTypeVar inferType =
       containsTypeVar itemType
     INamed _ ->
       False
+    IParam _ ->
+      False
+    IApply _ args ->
+      any containsTypeVar args
     IFunction args result ->
       any containsTypeVar (result : args)
     IVar _ ->
@@ -4711,13 +4910,17 @@ inferTypeToType inferState inferType =
       TList <$> inferTypeToType inferState itemType
     INamed name ->
       Right (TNamed name)
+    IParam name ->
+      Right (TVar name)
+    IApply name args ->
+      TApply name <$> traverse (inferTypeToType inferState) args
     IFunction args result ->
       TFunction <$> traverse (inferTypeToType inferState) args <*> inferTypeToType inferState result
     IVar varId ->
       Left [varId]
 
-typeToInferType :: Type -> InferType
-typeToInferType typ =
+rigidTypeToInferType :: Type -> InferType
+rigidTypeToInferType typ =
   case typ of
     TInt ->
       IInt
@@ -4726,11 +4929,50 @@ typeToInferType typ =
     TBool ->
       IBool
     TList itemType ->
-      IList (typeToInferType itemType)
+      IList (rigidTypeToInferType itemType)
     TNamed name ->
       INamed name
+    TVar name ->
+      IParam name
+    TApply name args ->
+      IApply name (fmap rigidTypeToInferType args)
     TFunction args result ->
-      IFunction (fmap typeToInferType args) (typeToInferType result)
+      IFunction (fmap rigidTypeToInferType args) (rigidTypeToInferType result)
+
+instantiateType :: Type -> InferM InferType
+instantiateType typ = do
+  let params = Set.toList (freeTypeVars typ)
+  env <- freshTypeParamEnv params
+  pure (instantiateTypeWith env typ)
+
+freshTypeParamEnv :: [Text] -> InferM (Map.Map Text InferType)
+freshTypeParamEnv params = do
+  inferParams <- traverse (const freshTypeVar) params
+  pure (Map.fromList (zip params inferParams))
+
+mkInferNamedType :: Text -> [InferType] -> InferType
+mkInferNamedType name [] = INamed name
+mkInferNamedType name args = IApply name args
+
+instantiateTypeWith :: Map.Map Text InferType -> Type -> InferType
+instantiateTypeWith env typ =
+  case typ of
+    TInt ->
+      IInt
+    TStr ->
+      IStr
+    TBool ->
+      IBool
+    TList itemType ->
+      IList (instantiateTypeWith env itemType)
+    TNamed name ->
+      INamed name
+    TVar name ->
+      fromMaybe (IParam name) (Map.lookup name env)
+    TApply name args ->
+      IApply name (fmap (instantiateTypeWith env) args)
+    TFunction args result ->
+      IFunction (fmap (instantiateTypeWith env) args) (instantiateTypeWith env result)
 
 freshTypeVar :: InferM InferType
 freshTypeVar = do
@@ -4766,6 +5008,10 @@ resolveInferType substitution inferType =
       IList (resolveInferType substitution itemType)
     INamed name ->
       INamed name
+    IParam name ->
+      IParam name
+    IApply name args ->
+      IApply name (fmap (resolveInferType substitution) args)
     IFunction args result ->
       IFunction (fmap (resolveInferType substitution) args) (resolveInferType substitution result)
     IVar varId ->
@@ -4793,10 +5039,25 @@ unify context leftType rightType = do
       pure ()
     (IBool, IBool) ->
       pure ()
+    (IParam leftName, IParam rightName)
+      | leftName == rightName ->
+          pure ()
     (IList leftItem, IList rightItem) ->
       unify context leftItem rightItem
     (INamed leftName, INamed rightName)
       | leftName == rightName ->
+          pure ()
+    (IApply leftName leftArgs, IApply rightName rightArgs)
+      | leftName == rightName
+      , length leftArgs == length rightArgs -> do
+          zipWithM_ (unify context) leftArgs rightArgs
+    (INamed leftName, IApply rightName rightArgs)
+      | leftName == rightName
+      , null rightArgs ->
+          pure ()
+    (IApply leftName leftArgs, INamed rightName)
+      | leftName == rightName
+      , null leftArgs ->
           pure ()
     (IFunction leftArgs leftResult, IFunction rightArgs rightResult)
       | length leftArgs == length rightArgs -> do
@@ -4836,6 +5097,10 @@ occursInType varId inferType =
       occursInType varId itemType
     INamed _ ->
       False
+    IParam _ ->
+      False
+    IApply _ args ->
+      any (occursInType varId) args
     IFunction args result ->
       any (occursInType varId) args || occursInType varId result
     IVar otherVarId ->
@@ -4865,6 +5130,10 @@ renderInferType inferType =
       "[" <> renderInferType itemType <> "]"
     INamed name ->
       name
+    IParam name ->
+      name
+    IApply name args ->
+      T.unwords (name : fmap renderAtomicInferType args)
     IFunction args result ->
       T.intercalate " -> " (fmap renderAtomicInferType (args <> [result]))
     IVar varId ->
@@ -4936,7 +5205,12 @@ relatedForHandler handlerName declMap foreignDeclEnv =
 constructorInfoType :: ConstructorInfo -> Type
 constructorInfoType constructorInfo =
   let fieldTypes = constructorDeclFields (constructorInfoDecl constructorInfo)
-      resultType = TNamed (constructorInfoTypeName constructorInfo)
+      resultType =
+        case constructorInfoTypeParams constructorInfo of
+          [] ->
+            TNamed (constructorInfoTypeName constructorInfo)
+          params ->
+            TApply (constructorInfoTypeName constructorInfo) (fmap TVar params)
    in case fieldTypes of
         [] ->
           resultType

@@ -440,6 +440,7 @@ data TypeDecl = TypeDecl
   { typeDeclName :: Text
   , typeDeclSpan :: SourceSpan
   , typeDeclNameSpan :: SourceSpan
+  , typeDeclParams :: [Text]
   , typeDeclConstructors :: [ConstructorDecl]
   }
   deriving (Eq, Show)
@@ -456,6 +457,7 @@ data RecordDecl = RecordDecl
   { recordDeclName :: Text
   , recordDeclSpan :: SourceSpan
   , recordDeclNameSpan :: SourceSpan
+  , recordDeclParams :: [Text]
   , recordDeclProjectionSource :: Maybe Text
   , recordDeclProjectionPolicy :: Maybe Text
   , recordDeclFields :: [RecordFieldDecl]
@@ -563,6 +565,8 @@ data Type
   | TBool
   | TList Type
   | TNamed Text
+  | TVar Text
+  | TApply Text [Type]
   | TFunction [Type] Type
   deriving (Eq, Ord, Show)
 
@@ -730,6 +734,10 @@ renderType typ =
       "[" <> renderType itemType <> "]"
     TNamed name ->
       name
+    TVar name ->
+      name
+    TApply name args ->
+      T.unwords (name : fmap renderAtomicType args)
     TFunction args result ->
       T.intercalate " -> " (fmap renderAtomicType (args <> [result]))
 
@@ -792,6 +800,7 @@ renderTypeDecl :: TypeDecl -> Text
 renderTypeDecl typeDecl =
   "type "
     <> typeDeclName typeDecl
+    <> renderTypeParams (typeDeclParams typeDecl)
     <> " = "
     <> T.intercalate " | " (fmap renderConstructorDecl (typeDeclConstructors typeDecl))
 
@@ -803,8 +812,13 @@ renderRecordDecl :: RecordDecl -> Text
 renderRecordDecl recordDecl =
   "record "
     <> recordDeclName recordDecl
+    <> renderTypeParams (recordDeclParams recordDecl)
     <> " = "
     <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderTypeParams :: [Text] -> Text
+renderTypeParams [] = ""
+renderTypeParams params = " " <> T.unwords params
 
 renderRecordFieldDecl :: RecordFieldDecl -> Text
 renderRecordFieldDecl fieldDecl =

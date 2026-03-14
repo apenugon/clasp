@@ -363,6 +363,7 @@ renderTypeDecl :: TypeDecl -> Text
 renderTypeDecl typeDecl =
   "type "
     <> typeDeclName typeDecl
+    <> renderTypeParams (typeDeclParams typeDecl)
     <> " = "
     <> T.intercalate " | " (fmap renderConstructorDecl (typeDeclConstructors typeDecl))
 
@@ -374,8 +375,13 @@ renderRecordDecl :: RecordDecl -> Text
 renderRecordDecl recordDecl =
   "record "
     <> recordDeclName recordDecl
+    <> renderTypeParams (recordDeclParams recordDecl)
     <> " = "
     <> renderBracedInline (fmap renderRecordFieldDecl (recordDeclFields recordDecl))
+
+renderTypeParams :: [Text] -> Text
+renderTypeParams [] = ""
+renderTypeParams params = " " <> T.unwords params
 
 renderDomainObjectDecl :: CoreDomainObjectDecl -> Text
 renderDomainObjectDecl (CoreDomainObjectDecl domainObjectDecl) =
