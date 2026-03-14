@@ -2956,18 +2956,23 @@ inferExpr ctx termEnv localEnv expr =
               targetSpan
               ["Declare the name in the current block with `let mut " <> binderName <> " = ...;` before assigning to it."]
     EFor loopSpan _ binderName iterable loopBody body -> do
-      itemType <- freshTypeVar
       iterableExpr <- inferExpr ctx termEnv localEnv iterable
-      unify
-        ( UnifyContext
-            { unifyCode = "E_FOR_ITERABLE"
-            , unifySummary = "For-loops must iterate over list values."
-            , unifyPrimarySpan = exprSpan iterable
-            , unifyRelated = []
-            }
-        )
-        (draftExprType iterableExpr)
-        (IList itemType)
+      resolvedIterableType <- resolveCurrentType (draftExprType iterableExpr)
+      itemType <-
+        case resolvedIterableType of
+          IList loopItemType ->
+            pure loopItemType
+          IStr ->
+            pure IStr
+          _ -> do
+            throwDiagnostic . diagnosticBundle $
+              [ diagnostic
+                  "E_FOR_ITERABLE"
+                  "For-loops must iterate over list or string values."
+                  (Just (exprSpan iterable))
+                  ["Expected [a] or Str but got " <> renderInferType resolvedIterableType <> "."]
+                  []
+              ]
       loopBodyExpr <- inferExpr ctx termEnv (Map.insert binderName (immutableLocalBinding itemType) localEnv) loopBody
       bodyExpr <- inferExpr ctx termEnv localEnv body
       pure (DraftExpr loopSpan (draftExprType bodyExpr) (DraftFor binderName iterableExpr loopBodyExpr bodyExpr))

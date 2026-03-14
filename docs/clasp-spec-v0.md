@@ -37,7 +37,7 @@ It includes:
 - Block expressions
 - Local `let` expressions
 - Early `return` expressions inside function bodies
-- Block-scoped `for` loops over list values
+- Block-scoped `for` loops over list and string values
 - Equality operators for `Int`, `Str`, and `Bool`
 - Integer comparison operators for branching
 - Field access
@@ -224,7 +224,7 @@ greeting = {
 }
 ```
 
-Blocks may also include `for` loops over list values. The loop binder is scoped to the loop body, the body result is ignored, and outer `let mut` locals can be updated from inside the loop:
+Blocks may also include `for` loops over list and string values. The loop binder is scoped to the loop body, the body result is ignored, and outer `let mut` locals can be updated from inside the loop. String iteration yields one-character `Str` values:
 
 ```clasp
 module Main
@@ -234,6 +234,20 @@ pickLast names = {
   let mut current = "nobody";
   for name in names {
     current = name;
+    current
+  };
+  current
+}
+```
+
+```clasp
+module Main
+
+pickLastChar : Str -> Str
+pickLastChar name = {
+  let mut current = "";
+  for char in name {
+    current = char;
     current
   };
   current
@@ -432,7 +446,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
-- Blocks return their final expression and may contain leading local `let` declarations, `for` loops over list values, or assignments to previously declared `let mut` locals.
+- Blocks return their final expression and may contain leading local `let` declarations, `for` loops over list or string values, or assignments to previously declared `let mut` locals.
 - `return` is only valid inside function bodies and exits the enclosing function immediately.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
@@ -485,7 +499,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Generated JavaScript modules also export `__claspPythonInterop`, a versioned Python boundary contract that maps hook and JSON route schemas into compiler-managed worker and service descriptors, and the Bun runtime exposes lifecycle-managed Python module or package adapters that reuse the same schema registry for typed stdio interop.
 - Route declarations also emit compiler-owned `__claspSeededFixtures` entries so hosts can inspect stable request and response seed shapes for benchmark and dogfood surfaces.
 - Function application compiles to JavaScript function calls.
-- Block-scoped `for` loops compile to JavaScript `for...of` loops over checked list values.
+- Block-scoped `for` loops compile to JavaScript `for...of` loops over checked list or string values.
 - Match expressions compile to a JavaScript `switch` over constructor tags.
 - Boolean, integer, string, and variable references map directly to JavaScript equivalents.
 - Declarations may omit type signatures when local inference can resolve all parameter and result types.

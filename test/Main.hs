@@ -777,6 +777,21 @@ parserTests =
                     assertFailure ("expected parsed for-loop body, got " <> show other)
               Nothing ->
                 assertFailure "expected pickLast declaration"
+    , testCase "parses for-loops over string values inside blocks" $
+        case parseSource "inline" stringLoopIterationSource of
+          Left err ->
+            assertFailure ("expected string loop iteration source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "pickLastChar" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EBlock _ (EMutableLet _ _ "current" (EString _ "") (EFor _ loopBinder "char" (EVar _ "name") (EBlock _ (EAssign _ assignSpan "current" (EVar _ "char") (EVar _ "current"))) (EVar _ "current"))) -> do
+                    assertEqual "loop binder line" 6 (positionLine (sourceSpanStart loopBinder))
+                    assertEqual "assignment line" 7 (positionLine (sourceSpanStart assignSpan))
+                  other ->
+                    assertFailure ("expected parsed string for-loop body, got " <> show other)
+              Nothing ->
+                assertFailure "expected pickLastChar declaration"
     , testCase "parses early return expressions inside function bodies" $
         case parseSource "inline" earlyReturnSource of
           Left err ->
@@ -1279,6 +1294,24 @@ checkerTests =
                     assertFailure ("expected checked for-loop expression, got " <> show other)
               Nothing ->
                 assertFailure "expected pickLast declaration"
+    , testCase "typechecks for-loops over string values with string binders" $
+        case checkSource "string-for-loop" stringLoopIterationSource of
+          Left err ->
+            assertFailure ("expected string loop iteration source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "pickLastChar") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CMutableLet _ outerType "current" (CString _ "") (CFor _ loopType "char" (CVar _ TStr "name") (CAssign _ innerType "current" (CVar _ TStr "char") (CVar _ bodyType "current")) (CVar _ resultType "current")) -> do
+                    assertEqual "outer let result type" TStr outerType
+                    assertEqual "loop result type" TStr loopType
+                    assertEqual "assignment result type" TStr innerType
+                    assertEqual "inner body variable type" TStr bodyType
+                    assertEqual "final variable type" TStr resultType
+                  other ->
+                    assertFailure ("expected checked string for-loop expression, got " <> show other)
+              Nothing ->
+                assertFailure "expected pickLastChar declaration"
     , testCase "typechecks early returns against the enclosing function result" $
         case checkSource "return" earlyReturnSource of
           Left err ->
@@ -1686,7 +1719,7 @@ checkerTests =
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" immutableBlockAssignmentSource)
     , testCase "rejects assignment to names that are not mutable block locals" $
         assertHasCode "E_ASSIGNMENT_TARGET" (checkSource "bad" nonLocalAssignmentSource)
-    , testCase "rejects for-loops over non-list iterables" $
+    , testCase "rejects for-loops over non-iterable values" $
         assertHasCode "E_FOR_ITERABLE" (checkSource "bad" invalidForIterableSource)
     , testCase "rejects return outside function bodies" $
         assertHasCode "E_RETURN_OUTSIDE_FUNCTION" (checkSource "bad" invalidEarlyReturnSource)
@@ -2637,6 +2670,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered for-loop declaration: " <> show other)
+    , testCase "lowering preserves for-loops over string values" $
+        case lowerChecked "string-for-loop" stringLoopIterationSource of
+          Left err ->
+            assertFailure ("expected string loop iteration lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "pickLastChar" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["name"] (LMutableLet "current" (LString "") (LFor "char" (LVar "name") (LAssign "current" (LVar "char") (LVar "current")) (LVar "current")))) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered string for-loop declaration: " <> show other)
     , testCase "lowering preserves early returns inside nested control flow" $
         case lowerChecked "return" earlyReturnSource of
           Left err ->
@@ -3989,6 +4032,22 @@ compileTests =
                 , "console.log(compiledModule.pickLast([\"Ada\", \"Grace\"]));"
                 ]
             assertEqual "expected for-loop result" "Grace" runtimeOutput
+    , testCase "compile evaluates for-loops over string values" $
+        case compileSource "string-for-loop" stringLoopIterationSource of
+          Left err ->
+            assertFailure ("expected string for-loop compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected string for-of emission" ("for (const char of name)" `T.isInfixOf` emitted)
+            let compiledPath = "dist/string-for-loop.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.pickLastChar(\"Ada\"));"
+                ]
+            assertEqual "expected string for-loop result" "a" runtimeOutput
     , testCase "compile implements early returns in function bodies" $
         case compileSource "return" earlyReturnSource of
           Left err ->
@@ -8014,6 +8073,22 @@ loopIterationSource =
     , "}"
     ]
 
+stringLoopIterationSource :: Text
+stringLoopIterationSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "pickLastChar : Str -> Str"
+    , "pickLastChar name = {"
+    , "  let mut current = \"\";"
+    , "  for char in name {"
+    , "    current = char;"
+    , "    current"
+    , "  };"
+    , "  current"
+    , "}"
+    ]
+
 earlyReturnSource :: Text
 earlyReturnSource =
   T.unlines
@@ -8098,8 +8173,8 @@ invalidForIterableSource =
     , ""
     , "greeting : Str"
     , "greeting = {"
-    , "  for char in \"Ada\" {"
-    , "    char"
+    , "  for count in 3 {"
+    , "    count"
     , "  };"
     , "  \"done\""
     , "}"
