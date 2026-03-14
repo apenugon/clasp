@@ -3457,13 +3457,86 @@ emitListCodecHelper typ =
 
 emitRequestSchemaHelpers :: [TypeDecl] -> [RecordDecl] -> [Text]
 emitRequestSchemaHelpers typeDecls recordDecls =
-  [ "const $claspSchema_Int = { kind: \"int\" };"
+  [ "function $claspDefineHiddenProperty(target, key, value) {"
+  , "  Object.defineProperty(target, key, { value, enumerable: false, configurable: false, writable: false });"
+  , "  return target;"
+  , "}"
+  , "function $claspCreateSchemaProjectionView(schema, fieldIdentity = null) {"
+  , "  const view = {"
+  , "    kind: schema.kind ?? null,"
+  , "    name: schema.name ?? null,"
+  , "    fieldIdentity,"
+  , "    schemaFingerprint: schema.schemaFingerprint ?? null"
+  , "  };"
+  , "  if (Object.prototype.hasOwnProperty.call(schema, \"classificationPolicy\")) {"
+  , "    view.classificationPolicy = schema.classificationPolicy ?? null;"
+  , "  }"
+  , "  if (Object.prototype.hasOwnProperty.call(schema, \"projectionSource\")) {"
+  , "    view.projectionSource = schema.projectionSource ?? null;"
+  , "  }"
+  , "  if (schema.kind === \"list\") {"
+  , "    view.item = typeof schema.item?.projection === \"function\" ? schema.item.projection() : null;"
+  , "  }"
+  , "  return Object.freeze(view);"
+  , "}"
+  , "function $claspAttachSchemaHelpers(schema, schemaFingerprint, partialSchema = null) {"
+  , "  Object.defineProperty(schema, \"schemaFingerprint\", {"
+  , "    enumerable: true,"
+  , "    configurable: false,"
+  , "    get() {"
+  , "      return typeof schemaFingerprint === \"function\" ? schemaFingerprint() : schemaFingerprint;"
+  , "    }"
+  , "  });"
+  , "  const targetPartialSchema = partialSchema ?? schema;"
+  , "  $claspDefineHiddenProperty(schema, \"$claspPartialSchema\", targetPartialSchema);"
+  , "  $claspDefineHiddenProperty(schema, \"projection\", function (fieldIdentity = null) {"
+  , "    return $claspCreateSchemaProjectionView(schema, fieldIdentity);"
+  , "  });"
+  , "  $claspDefineHiddenProperty(schema, \"partialProjection\", function (fieldIdentity = null) {"
+  , "    return $claspCreateSchemaProjectionView(targetPartialSchema, fieldIdentity);"
+  , "  });"
+  , "  return schema;"
+  , "}"
+  , "function $claspCreateListSchema(itemSchema) {"
+  , "  const partialItemSchema = itemSchema?.$claspPartialSchema ?? itemSchema;"
+  , "  const partialSchema = $claspAttachSchemaHelpers("
+  , "    { kind: \"list\", item: partialItemSchema },"
+  , "    () => `partial-list:${partialItemSchema?.schemaFingerprint ?? \"unknown\"}`"
+  , "  );"
+  , "  return $claspAttachSchemaHelpers("
+  , "    { kind: \"list\", item: itemSchema },"
+  , "    () => `list:${itemSchema?.schemaFingerprint ?? \"unknown\"}`,"
+  , "    partialSchema"
+  , "  );"
+  , "}"
+  , "function $claspCreatePartialListSchema(itemSchema) {"
+  , "  return $claspAttachSchemaHelpers("
+  , "    { kind: \"list\", item: itemSchema },"
+  , "    () => `partial-list:${itemSchema?.schemaFingerprint ?? \"unknown\"}`"
+  , "  );"
+  , "}"
+  , "function $claspAttachFieldProjectionHelpers(field, fieldIdentity) {"
+  , "  field.fieldIdentity = fieldIdentity;"
+  , "  $claspDefineHiddenProperty(field, \"projection\", function () {"
+  , "    return typeof field.schema?.projection === \"function\""
+  , "      ? field.schema.projection(fieldIdentity)"
+  , "      : Object.freeze({ kind: field.schema?.kind ?? null, name: field.schema?.name ?? null, fieldIdentity, schemaFingerprint: field.schema?.schemaFingerprint ?? null });"
+  , "  });"
+  , "  $claspDefineHiddenProperty(field, \"partialProjection\", function () {"
+  , "    return typeof field.schema?.partialProjection === \"function\""
+  , "      ? field.schema.partialProjection(fieldIdentity)"
+  , "      : Object.freeze({ kind: field.schema?.kind ?? null, name: field.schema?.name ?? null, fieldIdentity, schemaFingerprint: field.schema?.schemaFingerprint ?? null });"
+  , "  });"
+  , "  return field;"
+  , "}"
+  , "const $claspSchema_Int = { kind: \"int\" };"
   , "const $claspSchema_Str = { kind: \"str\" };"
   , "const $claspSchema_Bool = { kind: \"bool\" };"
   ]
     <> concatMap emitTypeSchema typeDecls
     <> concatMap emitRecordSchema recordDecls
     <> concatMap emitPartialRecordSchema recordDecls
+    <> emitSchemaAnnotations
     <> [""]
   where
     emitTypeSchema typeDecl
@@ -3526,13 +3599,48 @@ emitRequestSchemaHelpers typeDecls recordDecls =
         TBool ->
           "$claspSchema_Bool"
         TList itemType ->
-          "{ kind: \"list\", item: " <> emitRequestSchemaRef itemType <> " }"
+          "$claspCreateListSchema(" <> emitRequestSchemaRef itemType <> ")"
         TNamed name ->
           if hasSchemaContractName typeDecls recordDecls name
             then "$claspSchema_" <> name
             else "null"
         TFunction _ _ ->
           "null"
+
+    emitSchemaAnnotations =
+      [ "$claspAttachSchemaHelpers($claspSchema_Int, \"int\");"
+      , "$claspAttachSchemaHelpers($claspSchema_Str, \"str\");"
+      , "$claspAttachSchemaHelpers($claspSchema_Bool, \"bool\");"
+      ]
+        <> concatMap emitTypeSchemaAnnotations typeDecls
+        <> concatMap emitRecordSchemaAnnotations recordDecls
+
+    emitTypeSchemaAnnotations typeDecl
+      | isJsonEnumTypeDecl typeDecl =
+          [ "$claspAttachSchemaHelpers($claspSchema_" <> typeDeclName typeDecl <> ", " <> emitStringLiteral ("enum:" <> typeDeclName typeDecl) <> ");"
+          ]
+      | otherwise =
+          []
+
+    emitRecordSchemaAnnotations recordDecl =
+      concatMap (emitFieldAnnotation sourceRecordName "$claspSchema_" recordDecl) (recordDeclFields recordDecl)
+        <> concatMap (emitFieldAnnotation sourceRecordName "$claspPartialSchema_" recordDecl) (recordDeclFields recordDecl)
+        <> [ "$claspAttachSchemaHelpers($claspPartialSchema_" <> recordDeclName recordDecl <> ", " <> emitStringLiteral ("partial-record:" <> recordDeclName recordDecl) <> ");"
+           , "$claspAttachSchemaHelpers($claspSchema_" <> recordDeclName recordDecl <> ", " <> emitStringLiteral ("record:" <> recordDeclName recordDecl) <> ", $claspPartialSchema_" <> recordDeclName recordDecl <> ");"
+           ]
+      where
+        sourceRecordName = maybe (recordDeclName recordDecl) id (recordDeclProjectionSource recordDecl)
+
+    emitFieldAnnotation sourceRecordName schemaPrefix recordDecl fieldDecl =
+      [ "$claspAttachFieldProjectionHelpers("
+          <> schemaPrefix
+          <> recordDeclName recordDecl
+          <> ".fields."
+          <> recordFieldDeclName fieldDecl
+          <> ", "
+          <> emitStringLiteral (sourceRecordName <> "." <> recordFieldDeclName fieldDecl)
+          <> ");"
+      ]
 
 emitOptionalText :: Maybe Text -> Text
 emitOptionalText maybeText =
@@ -5759,7 +5867,7 @@ emitSchemaRef typeDecls recordDecls typ =
     TBool ->
       "$claspSchema_Bool"
     TList itemType ->
-      "{ kind: \"list\", item: " <> emitSchemaRef typeDecls recordDecls itemType <> " }"
+      "$claspCreateListSchema(" <> emitSchemaRef typeDecls recordDecls itemType <> ")"
     TNamed name ->
       if hasSchemaContractName typeDecls recordDecls name
         then "$claspSchema_" <> name
@@ -5777,7 +5885,7 @@ emitPartialSchemaRef typeDecls recordDecls typ =
     TBool ->
       "$claspSchema_Bool"
     TList itemType ->
-      "{ kind: \"list\", item: " <> emitPartialSchemaRef typeDecls recordDecls itemType <> " }"
+      "$claspCreatePartialListSchema(" <> emitPartialSchemaRef typeDecls recordDecls itemType <> ")"
     TNamed name ->
       case findRecordDecl name recordDecls of
         Just _ ->

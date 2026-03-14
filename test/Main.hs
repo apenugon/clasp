@@ -3657,7 +3657,7 @@ compileTests =
             assertBool "expected nested list literal" ("[[10, 20], [30]]" `T.isInfixOf` emitted)
             assertBool "expected list decoder" ("function $decode_List_User(jsonText)" `T.isInfixOf` emitted)
             assertBool "expected list encoder" ("function $encode_List_User(value)" `T.isInfixOf` emitted)
-            assertBool "expected nested list schema" ("kind: \"list\", item: { kind: \"list\", item: $claspSchema_Int }" `T.isInfixOf` emitted)
+            assertBool "expected nested list schema" ("$claspCreateListSchema($claspCreateListSchema($claspSchema_Int))" `T.isInfixOf` emitted)
     , testCase "compile evaluates the let example file" $ do
         source <- readExampleSource "let.clasp"
         case compileSource "examples/let.clasp" source of
@@ -4168,6 +4168,20 @@ compileTests =
             assertBool "expected projection metadata" ("classificationPolicy: \"SupportDisclosure\"" `T.isInfixOf` emitted)
             assertBool "expected projection source metadata" ("projectionSource: \"Customer\"" `T.isInfixOf` emitted)
             assertBool "expected foreign manifest to use projection schema" ("schema: $claspSchema_SupportCustomer" `T.isInfixOf` emitted)
+    , testCase "projection field helpers preserve fingerprints for projected list fields" $
+        case compileSource "projection-list" classifiedProjectionListSource of
+          Left err ->
+            assertFailure ("expected projected list source to compile:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/test-projects/projection-list/compiled.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript (projectionSchemaRuntimeScript absoluteCompiledPath)
+            assertEqual
+              "expected stable fingerprints for projected list field helpers"
+              "{\"fieldIdentity\":\"Customer.emails\",\"projectionFingerprint\":\"list:str\",\"partialFingerprint\":\"partial-list:str\",\"schemaProjectionFingerprint\":\"list:str\",\"schemaPartialProjectionFingerprint\":\"partial-list:str\",\"itemFingerprint\":\"str\",\"partialItemFingerprint\":\"str\"}"
+              runtimeOutput
     , testCase "compile emits safe page rendering helpers and page route metadata" $
         case compileSource "page" pageSource of
           Left err ->
@@ -5475,6 +5489,28 @@ streamingPartialRuntimeScript compiledPath =
     , "  incomplete = error.message;"
     , "}"
     , "console.log(JSON.stringify({ parsedPartial, first, second, third, final, formattedPartial, incomplete }));"
+    ]
+
+projectionSchemaRuntimeScript :: FilePath -> Text
+projectionSchemaRuntimeScript compiledPath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "const schemaEntry = compiledModule.__claspSchemas['SupportCustomer'];"
+    , "if (!schemaEntry) { throw new Error('missing SupportCustomer schema'); }"
+    , "const field = schemaEntry.schema.fields.emails;"
+    , "const projection = field.projection();"
+    , "const partialProjection = field.partialProjection();"
+    , "const schemaProjection = field.schema.projection(field.fieldIdentity);"
+    , "const schemaPartialProjection = field.schema.partialProjection(field.fieldIdentity);"
+    , "console.log(JSON.stringify({"
+    , "  fieldIdentity: field.fieldIdentity,"
+    , "  projectionFingerprint: projection.schemaFingerprint,"
+    , "  partialFingerprint: partialProjection.schemaFingerprint,"
+    , "  schemaProjectionFingerprint: schemaProjection.schemaFingerprint,"
+    , "  schemaPartialProjectionFingerprint: schemaPartialProjection.schemaFingerprint,"
+    , "  itemFingerprint: projection.item?.schemaFingerprint ?? null,"
+    , "  partialItemFingerprint: partialProjection.item?.schemaFingerprint ?? null"
+    , "}));"
     ]
 
 runNodeModule :: FilePath -> IO Text
@@ -6830,6 +6866,34 @@ classifiedProjectionSource =
     , "encodedCustomer = encode currentCustomer"
     , ""
     , "route shareCustomerRoute = GET \"/customer\" Empty -> SupportCustomer shareCustomer"
+    ]
+
+classifiedProjectionListSource :: Text
+classifiedProjectionListSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record Customer = {"
+    , "  id : Str,"
+    , "  emails : [Str] classified pii,"
+    , "  tier : Str"
+    , "}"
+    , ""
+    , "policy SupportDisclosure = public, pii permits {"
+    , "  file \"/workspace\","
+    , "  network \"api.openai.com\","
+    , "  process \"rg\","
+    , "  secret \"OPENAI_API_KEY\""
+    , "}"
+    , ""
+    , "projection SupportCustomer = Customer with SupportDisclosure { id, emails, tier }"
+    , ""
+    , "currentCustomer : SupportCustomer"
+    , "currentCustomer = SupportCustomer {"
+    , "  id = \"cust-1\","
+    , "  emails = [\"ada@example.com\", \"ops@example.com\"],"
+    , "  tier = \"gold\""
+    , "}"
     ]
 
 disallowedProjectionSource :: Text
