@@ -13,6 +13,7 @@ log_jsonl="$4"
 feedback_file="${5:-}"
 model="${CODEX_MODEL:-gpt-5.4}"
 reasoning_effort="${CODEX_REASONING_EFFORT:-medium}"
+sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_schema_file="$project_root/agents/schemas/builder-report.schema.json"
 schema_file="$(mktemp "${TMPDIR:-/tmp}/clasp-builder-schema.XXXXXX")"
@@ -22,6 +23,7 @@ prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-builder-prompt.XXXXXX")"
 shared_codex_home="${CODEX_HOME:-$HOME/.codex}"
 run_dir="$(dirname "$report_json")"
 isolated_codex_home="$run_dir/codex-home"
+codex_sandbox_args=()
 
 source "$project_root/scripts/clasp-codex-home.sh"
 source "$project_root/scripts/clasp-swarm-common.sh"
@@ -32,6 +34,17 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+case "$sandbox_mode" in
+  read-only|workspace-write|danger-full-access)
+    # Keep each lane contained to its worktree by default.
+    codex_sandbox_args=(--sandbox "$sandbox_mode")
+    ;;
+  *)
+    echo "CLASP_SWARM_CODEX_SANDBOX must be read-only, workspace-write, or danger-full-access" >&2
+    exit 1
+    ;;
+esac
 
 clasp_prepare_isolated_codex_home "$shared_codex_home" "$isolated_codex_home"
 
@@ -170,7 +183,7 @@ CODEX_HOME="$isolated_codex_home" codex exec - \
   -c "model_reasoning_effort=\"$reasoning_effort\"" \
   --skip-git-repo-check \
   --cd "$workspace" \
-  --dangerously-bypass-approvals-and-sandbox \
+  "${codex_sandbox_args[@]}" \
   --ephemeral \
   --output-schema "$schema_file" \
   -o "$report_json" \
