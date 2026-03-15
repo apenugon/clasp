@@ -369,41 +369,53 @@ wait_for_dependencies() {
   local task_id="$2"
   local waiting_log="$logs_root/$task_id.waiting.log"
   local deps=()
+  local deps_count=0
   local dependency_labels=()
+  local dependency_labels_count=0
   local unmet=()
+  local unmet_count=0
   local dependency_id=""
   local dependency_label=""
 
   while IFS= read -r dependency_id; do
     [[ -n "$dependency_id" ]] || continue
     deps+=("$dependency_id")
+    deps_count=$((deps_count + 1))
   done < <(clasp_swarm_task_dependencies "$task_file")
 
   while IFS= read -r dependency_label; do
     [[ -n "$dependency_label" ]] || continue
     dependency_labels+=("$dependency_label")
+    dependency_labels_count=$((dependency_labels_count + 1))
   done < <(clasp_swarm_task_dependency_labels "$task_file")
 
-  if [[ "${#deps[@]}" -eq 0 && "${#dependency_labels[@]}" -eq 0 ]]; then
+  if [[ "$deps_count" -eq 0 && "$dependency_labels_count" -eq 0 ]]; then
     return 0
   fi
 
   while true; do
     unmet=()
+    unmet_count=0
 
-    for dependency_id in "${deps[@]}"; do
-      if ! dependency_is_complete "$dependency_id"; then
-        unmet+=("$dependency_id")
-      fi
-    done
+    if [[ "$deps_count" -gt 0 ]]; then
+      for dependency_id in "${deps[@]}"; do
+        if ! dependency_is_complete "$dependency_id"; then
+          unmet+=("$dependency_id")
+          unmet_count=$((unmet_count + 1))
+        fi
+      done
+    fi
 
-    for dependency_label in "${dependency_labels[@]}"; do
-      if ! dependency_label_is_complete "$dependency_label"; then
-        unmet+=("label:$dependency_label")
-      fi
-    done
+    if [[ "$dependency_labels_count" -gt 0 ]]; then
+      for dependency_label in "${dependency_labels[@]}"; do
+        if ! dependency_label_is_complete "$dependency_label"; then
+          unmet+=("label:$dependency_label")
+          unmet_count=$((unmet_count + 1))
+        fi
+      done
+    fi
 
-    if [[ "${#unmet[@]}" -eq 0 ]]; then
+    if [[ "$unmet_count" -eq 0 ]]; then
       rm -f "$waiting_log"
       return 0
     fi

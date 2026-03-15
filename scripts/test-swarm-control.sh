@@ -788,8 +788,19 @@ bash -lc "
 
 spawn_root="$(mktemp -d)"
 spawn_path_root="$(mktemp -d)"
-ln -s "$(command -v bash)" "$spawn_path_root/bash"
-ln -s "$(command -v python3)" "$spawn_path_root/python3"
+spawn_bash_bin="$(command -v bash)"
+spawn_python3_bin="$(command -v python3)"
+
+if [[ -x /bin/bash ]]; then
+  spawn_bash_bin="/bin/bash"
+fi
+
+if [[ -x /usr/bin/python3 ]]; then
+  spawn_python3_bin="/usr/bin/python3"
+fi
+
+ln -s "$spawn_bash_bin" "$spawn_path_root/bash"
+ln -s "$spawn_python3_bin" "$spawn_path_root/python3"
 ln -s "$(command -v nohup)" "$spawn_path_root/nohup"
 ln -s "$(command -v sleep)" "$spawn_path_root/sleep"
 

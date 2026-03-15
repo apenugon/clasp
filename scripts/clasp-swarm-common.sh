@@ -246,13 +246,17 @@ clasp_swarm_assert_prompt_size() {
 clasp_swarm_spawn_detached() {
   local log_file="$1"
   shift
+  local python3_bin=""
 
-  if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" >"$log_file" 2>&1 < /dev/null &
-  elif command -v nohup >/dev/null 2>&1; then
-    nohup "$@" >"$log_file" 2>&1 < /dev/null &
+  # Prefer python3 so we can return the real child pid on macOS.
+  if [[ -x /usr/bin/python3 ]]; then
+    python3_bin="/usr/bin/python3"
   elif command -v python3 >/dev/null 2>&1; then
-    python3 - "$log_file" "$@" <<'PY'
+    python3_bin="$(command -v python3)"
+  fi
+
+  if [[ -n "$python3_bin" ]]; then
+    "$python3_bin" - "$log_file" "$@" <<'PY'
 import os
 import subprocess
 import sys
@@ -273,6 +277,10 @@ with open(log_path, "ab", buffering=0) as log_handle, open(os.devnull, "rb") as 
 print(process.pid)
 PY
     return 0
+  elif command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$log_file" 2>&1 < /dev/null &
+  elif command -v nohup >/dev/null 2>&1; then
+    nohup "$@" >"$log_file" 2>&1 < /dev/null &
   else
     "$@" >"$log_file" 2>&1 < /dev/null &
   fi
