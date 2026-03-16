@@ -1280,6 +1280,20 @@ checkerTests =
                     assertFailure ("unexpected checked emptyRoster declaration: " <> show other)
               Nothing ->
                 assertFailure "expected emptyRoster declaration"
+    , testCase "uses surrounding list annotations to typecheck nested empty list literals" $
+        case checkSource "nested-lists" nestedEmptyListSource of
+          Left err ->
+            assertFailure ("expected nested empty list source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "matrix") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList (TList TInt)) [CList _ (TList TInt) [], CList _ (TList TInt) [CInt _ 1, CInt _ 2]] ->
+                    assertEqual "matrix type" (TList (TList TInt)) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked matrix declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected matrix declaration"
     , testCase "typechecks local let expressions" $
         case checkSource "let" letExpressionSource of
           Left err ->
@@ -3560,6 +3574,10 @@ docsTests =
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
         assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`." `T.isInfixOf` spec)
+    , testCase "v0 spec documents homogeneous list literals and contextual empty lists" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected homogeneous list rule" ("List literals use the same brackets and must stay homogeneous." `T.isInfixOf` spec)
+        assertBool "expected empty list context rule" ("Empty lists need surrounding type information from an annotation or another checked context:" `T.isInfixOf` spec)
     , testCase "v0 spec documents type parameters for records, ADTs, and functions" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected generic record example" ("record Box a = { value : a }" `T.isInfixOf` spec)
@@ -4147,6 +4165,12 @@ compileTests =
           Right emitted -> do
             assertBool "expected array literal" ("[\"Ada\", \"Grace\"]" `T.isInfixOf` emitted)
             assertBool "expected empty array literal" ("const emptyRoster = [];" `T.isInfixOf` emitted)
+    , testCase "compile preserves nested empty lists once annotations fix the item type" $
+        case compileSource "nested-lists" nestedEmptyListSource of
+          Left err ->
+            assertFailure ("expected nested list compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool "expected nested array literal" ("[[], [1, 2]]" `T.isInfixOf` emitted)
     , testCase "compile emits list json codecs for explicit encode and decode boundaries" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -8346,6 +8370,15 @@ listLiteralSource =
     , ""
     , "emptyRoster : [Str]"
     , "emptyRoster = []"
+    ]
+
+nestedEmptyListSource :: Text
+nestedEmptyListSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "matrix : [[Int]]"
+    , "matrix = [[], [1, 2]]"
     ]
 
 listJsonBoundarySource :: Text

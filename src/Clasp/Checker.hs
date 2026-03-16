@@ -3223,6 +3223,7 @@ inferListExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> [Expr
 inferListExpr ctx termEnv localEnv listSpan values = do
   itemType <- freshTypeVar
   draftValues <- traverse (inferExpr ctx termEnv localEnv) values
+  let firstValue = listToMaybe draftValues
   zipWithM_
     ( \index draftValue ->
         unify
@@ -3231,16 +3232,13 @@ inferListExpr ctx termEnv localEnv listSpan values = do
               , unifySummary = "List elements must all have the same type."
               , unifyPrimarySpan = draftExprSpan draftValue
               , unifyRelated =
-                  case drop index draftValues of
-                    [] ->
+                  case firstValue of
+                    Just firstDraftValue
+                      | index > (0 :: Int)
+                      , draftExprSpan firstDraftValue /= draftExprSpan draftValue ->
+                          [diagnosticRelated "first list element" (draftExprSpan firstDraftValue)]
+                    _ ->
                       []
-                    _ : _ ->
-                      case draftValues of
-                        firstValue : _
-                          | draftExprSpan firstValue /= draftExprSpan draftValue ->
-                              [diagnosticRelated "first list element" (draftExprSpan firstValue)]
-                        _ ->
-                          []
               }
           )
           (draftExprType draftValue)
