@@ -2064,7 +2064,16 @@ bash -lc "
   task_branch='agents/swarm/test-wave/01-cleanup/SW-006-cleanup'
 
   mkdir -p \"\$stale_run\"
-  git worktree add --force -B \"\$task_branch\" \"\$task_worktree\" agents/swarm-trunk >/dev/null
+  cat > \"\$stale_run/builder-report.json\" <<'EOF'
+{
+  \"summary\": \"stale builder report\",
+  \"files_touched\": [],
+  \"tests_run\": [],
+  \"residual_risks\": []
+}
+EOF
+  git branch \"\$task_branch\" agents/swarm-trunk >/dev/null
+  mkdir -p \"\$task_worktree\"
   printf 'stale-worktree\n' > \"\$task_worktree/feature.txt\"
   mkdir -p \"\$stale_run/baseline-worktree\"
   printf '%s\n' 999999 > \"\$runtime_root/pid\"

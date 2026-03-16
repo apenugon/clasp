@@ -595,6 +595,8 @@ garbage_collect_stale_runs() {
   local task_id=""
   local task_branch=""
   local task_worktree=""
+  local has_builder_report=0
+  local has_verifier_report=0
 
   if [[ ! -d "$runs_root" ]]; then
     return 0
@@ -605,14 +607,34 @@ garbage_collect_stale_runs() {
 
     cleanup_run_worktrees "$run_dir"
 
-    if [[ -f "$run_dir/builder-report.json" || -f "$run_dir/verifier-report.json" ]]; then
-      continue
-    fi
+    has_builder_report=0
+    has_verifier_report=0
+    [[ -f "$run_dir/builder-report.json" ]] && has_builder_report=1
+    [[ -f "$run_dir/verifier-report.json" ]] && has_verifier_report=1
 
     task_id="$(task_id_from_run_dir "$run_dir" 2>/dev/null || true)"
     if [[ -n "$task_id" ]]; then
       task_worktree="$(task_worktree_of "$task_id")"
       task_branch="$(task_branch_of "$task_id")"
+    else
+      task_worktree=""
+      task_branch=""
+    fi
+
+    if [[ "$has_builder_report" == "1" && "$has_verifier_report" == "0" && -n "$task_worktree" ]]; then
+      if ! task_worktree_is_usable "$task_worktree"; then
+        remove_worktree_if_present "$task_worktree"
+        remove_task_branch_if_present "$task_branch"
+        rm -rf "$run_dir"
+        continue
+      fi
+    fi
+
+    if [[ "$has_builder_report" == "1" || "$has_verifier_report" == "1" ]]; then
+      continue
+    fi
+
+    if [[ -n "$task_id" ]]; then
       remove_worktree_if_present "$task_worktree"
       remove_task_branch_if_present "$task_branch"
     fi

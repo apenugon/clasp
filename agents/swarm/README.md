@@ -34,6 +34,8 @@ Supervisor status is available in both human and machine-readable forms:
 - `bash scripts/clasp-swarm-status.sh`: lane-by-lane text summary with current run state plus an aggregated `run-states:` line for the latest lane outcomes
 - `bash scripts/clasp-swarm-status.sh --json`: structured lane status for tooling and dashboards, including `summary.runStateCounts`
 
+When a lane starts, it also prunes leftover per-run baseline worktrees and discards stale incomplete runs that no longer have a usable task worktree to resume.
+
 Wave directories:
 
 - `full/`: full materialized project backlog and the default swarm target
