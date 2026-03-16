@@ -88,9 +88,12 @@ Your job:
 
 Rules:
 - Work only in the current checkout.
-- The current checkout may be a plain copied workspace rather than a Git repository.
+- The current checkout is pre-provisioned for you. It may occasionally lack Git metadata, but you must preserve it in place.
 - Read `AGENTS.md` first if it exists.
-- Do not rely on Git commands; use direct file inspection and `diff` if needed.
+- Do not replace the checkout or copy in a fresh repo snapshot.
+- If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.
+- Do not rewrite the workspace root, remove `.git`, or materialize a new checkout.
+- Do not rely on Git commands for core task progress; use direct file inspection and `diff` if needed.
 - Do not push.
 - Prefer minimal, coherent edits over broad refactors.
 - Start with the file paths named in the task findings or follow-up before scanning anything else.

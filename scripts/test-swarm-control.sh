@@ -17,6 +17,7 @@ autopilot_test_root_2=""
 autopilot_test_root_3=""
 lane_merge_test_root=""
 lane_cleanup_test_root=""
+lane_worktree_retry_test_root=""
 batch_start_test_root=""
 prompt_test_root=""
 prompt_test_root_2=""
@@ -40,7 +41,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}"
 }
 
@@ -511,6 +512,161 @@ Regression coverage for lane restart cleanup should stay end-to-end.
 ## Scope
 
 - Exercise one stale run and one fresh retry
+
+## Likely Files
+
+- `scripts/clasp-swarm-lane.sh`
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- `bash scripts/verify-all.sh` passes
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+  (
+    cd "$project_dir"
+    git init -b main >/dev/null
+    git config user.name 'Swarm Test'
+    git config user.email 'swarm-test@example.com'
+    printf 'base\n' > feature.txt
+    git add .
+    git commit -m 'base snapshot' >/dev/null
+  )
+
+  printf '%s\n' "$project_dir"
+}
+
+make_lane_worktree_retry_test_project() {
+  local target_root="$1"
+  local project_dir="$target_root/repo"
+
+  mkdir -p \
+    "$project_dir/scripts" \
+    "$project_dir/agents/swarm/test-wave/01-worktree-retry"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-lane.sh" \
+    "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/"
+  cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
+
+  cat > "$project_dir/scripts/clasp-builder.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+task_id="$(basename "$task_file" .md)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+attempt_file="$project_root/builder-attempt.txt"
+attempt=0
+
+if [[ -f "$attempt_file" ]]; then
+  attempt="$(< "$attempt_file")"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" > "$attempt_file"
+
+if [[ "$attempt" == "1" ]]; then
+  rm -f "$workspace/.git"
+  printf 'builder stripped git metadata\n' > "$log_jsonl"
+  cat > "$report_json" <<JSON
+{
+  "summary": "builder finished for $task_id",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+  exit 0
+fi
+
+printf 'recovered-builder-change\n' > "$workspace/feature.txt"
+
+cat > "$report_json" <<JSON
+{
+  "summary": "builder finished for $task_id",
+  "files_touched": [
+    "feature.txt"
+  ],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+
+printf 'builder retry preserved git metadata\n' > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/clasp-verifier.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+task_id="$(basename "$task_file" .md)"
+
+[[ "$(< "$baseline_workspace/feature.txt")" == "base" ]]
+[[ "$(< "$workspace/feature.txt")" == "recovered-builder-change" ]]
+
+cat > "$report_json" <<JSON
+{
+  "verdict": "pass",
+  "summary": "verified $task_id",
+  "findings": [],
+  "tests_run": [
+    "broken worktree retry scenario"
+  ],
+  "follow_up": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/verify-all.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ "$(< feature.txt)" == "recovered-builder-change" ]]
+EOF
+
+  chmod +x \
+    "$project_dir/scripts/clasp-builder.sh" \
+    "$project_dir/scripts/clasp-swarm-common.sh" \
+    "$project_dir/scripts/clasp-swarm-lane.sh" \
+    "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/clasp-verifier.sh" \
+    "$project_dir/scripts/verify-all.sh"
+
+  cat > "$project_dir/agents/swarm/test-wave/01-worktree-retry/SW-007-worktree-retry.md" <<'EOF'
+# SW-007 Worktree retry
+
+## Goal
+
+Retry the lane after a builder leaves the task workspace without usable Git metadata.
+
+## Why
+
+Regression coverage for builder-side workspace corruption should stay end-to-end.
+
+## Scope
+
+- Exercise one retry after an infra failure
 
 ## Likely Files
 
@@ -1608,6 +1764,9 @@ bash -lc "
   grep -F '\${HOME}' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Previous verifier said \$(printf verifier-summary) should stay literal.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'touch /tmp/feedback' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Do not replace the checkout or copy in a fresh repo snapshot.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Do not rewrite the workspace root, remove `.git`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
 
   PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
     CLASP_TEST_CODEX_MODE=verifier \
@@ -1763,6 +1922,28 @@ bash -lc "
   [[ -f \"\$latest_run/verifier-report.json\" ]]
   [[ -f .clasp-swarm/completed/SW-006 ]]
   [[ \"\$(< feature.txt)\" == 'fresh-builder-change' ]]
+  bash scripts/verify-all.sh
+" >/dev/null
+
+lane_worktree_retry_test_root="$(mktemp -d)"
+lane_worktree_retry_project_root="$(make_lane_worktree_retry_test_project "$lane_worktree_retry_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$lane_worktree_retry_project_root'
+  bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-worktree-retry >/dev/null 2>&1
+
+  runs_root='.clasp-swarm/test-wave/01-worktree-retry/runs'
+  run_count=\$(find \"\$runs_root\" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')
+  [[ \"\$run_count\" == '2' ]]
+  first_run=\$(find \"\$runs_root\" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)
+  second_run=\$(find \"\$runs_root\" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
+  [[ -f \"\$first_run/verifier-report.json\" ]]
+  grep -F 'usable Git worktree' \"\$first_run/verifier-report.json\" >/dev/null
+  [[ -f \"\$second_run/builder-report.json\" ]]
+  [[ -f \"\$second_run/verifier-report.json\" ]]
+  [[ -f .clasp-swarm/completed/SW-007 ]]
+  [[ \"\$(< feature.txt)\" == 'recovered-builder-change' ]]
   bash scripts/verify-all.sh
 " >/dev/null
 

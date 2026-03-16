@@ -174,6 +174,20 @@ task_worktree_registered() {
   git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $task_worktree"
 }
 
+task_worktree_is_git_repo() {
+  local task_worktree="$1"
+
+  [[ -d "$task_worktree" ]] || return 1
+  git -C "$task_worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+task_worktree_is_usable() {
+  local task_worktree="$1"
+
+  task_worktree_registered "$task_worktree" || return 1
+  task_worktree_is_git_repo "$task_worktree"
+}
+
 task_id_from_run_dir() {
   local run_dir="$1"
   local base=""
@@ -235,6 +249,7 @@ resume_incomplete_run() {
   local task_branch="$3"
   local run_dir=""
   local builder_report=""
+  local builder_log=""
   local verifier_report=""
   local verifier_log=""
   local baseline_worktree=""
@@ -253,6 +268,7 @@ resume_incomplete_run() {
   fi
 
   builder_report="$run_dir/builder-report.json"
+  builder_log="$run_dir/builder-log.jsonl"
   verifier_report="$run_dir/verifier-report.json"
   verifier_log="$run_dir/verifier-log.jsonl"
   baseline_worktree="$run_dir/baseline-worktree"
@@ -264,6 +280,20 @@ resume_incomplete_run() {
 
   if ! task_worktree_registered "$task_worktree"; then
     return 1
+  fi
+
+  if ! task_worktree_is_git_repo "$task_worktree"; then
+    write_unusable_task_worktree_report \
+      "$verifier_report" \
+      "A previous builder run cannot be resumed because the task workspace is no longer a usable Git worktree." \
+      "$builder_log" \
+      "$task_id"
+    archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+    remove_worktree_if_present "$task_worktree"
+    remove_task_branch_if_present "$task_branch"
+    cooldown_after_infra_failure
+    resume_feedback_file="$verifier_report"
+    return 2
   fi
 
   echo "resuming $task_id from $(basename "$run_dir")" >&2
@@ -666,6 +696,47 @@ const report = {
   follow_up: [
     "Retry the task from the current swarm trunk branch.",
     "If the failure repeats, split the task further or block the lane on this task.",
+  ],
+};
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+EOF
+}
+
+write_unusable_task_worktree_report() {
+  local report_file="$1"
+  local summary="$2"
+  local log_file="$3"
+  local task_id="$4"
+
+  node - <<'EOF' "$report_file" "$summary" "$log_file" "$task_id"
+const fs = require("fs");
+const [reportPath, summary, logPath, taskId] = process.argv.slice(2);
+let logTail = "";
+const truncate = (value, max) =>
+  value.length > max ? `${value.slice(0, max - 3)}...` : value;
+try {
+  const text = fs.readFileSync(logPath, "utf8");
+  logTail = text
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-6)
+    .map((line) => truncate(line, 220))
+    .join("\n");
+} catch (_) {
+  logTail = "";
+}
+
+const report = {
+  verdict: "fail",
+  summary,
+  findings: [
+    `The task workspace for ${taskId} stopped being a usable Git worktree after the builder step.`,
+    ...(logTail.length > 0 ? [`Recent builder log lines:\n${logTail}`] : []),
+  ],
+  tests_run: [],
+  follow_up: [
+    "Discard the broken task workspace and retry from the current swarm trunk branch.",
+    "If the failure repeats, inspect the builder instructions and workspace materialization path.",
   ],
 };
 fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -1081,6 +1152,24 @@ while true; do
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      cooldown_after_infra_failure
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    if task_worktree_is_usable "$task_worktree"; then
+      :
+    else
+      write_unusable_task_worktree_report \
+        "$verifier_report" \
+        "Builder completed, but the task workspace is no longer a usable Git worktree." \
+        "$builder_log" \
+        "$task_id"
+      archive_task_state "$task_worktree" "$run_dir" "$task_branch"
+      feedback_file="$verifier_report"
+      remove_worktree_if_present "$baseline_worktree"
+      remove_worktree_if_present "$task_worktree"
+      remove_task_branch_if_present "$task_branch"
       cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
