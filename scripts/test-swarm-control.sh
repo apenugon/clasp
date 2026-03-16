@@ -1013,6 +1013,7 @@ bash -lc "
   text=\$(cat '$status_text_output')
   [[ \"\$text\" == *'wave: $status_wave_name'* ]]
   [[ \"\$text\" == *'summary: lanes=2 running=1 stopped=1 completed=3 blocked=1'* ]]
+  [[ \"\$text\" == *'run-states: builder-complete=1 pass=1'* ]]
   [[ \"\$text\" == *'lane: 01-active'* ]]
   [[ \"\$text\" == *'stale pid: '* ]]
   [[ \"\$text\" == *'current task: AA-100-sample'* ]]
@@ -1037,6 +1038,12 @@ if (payload.summary.laneCount !== 2 || payload.summary.runningCount !== 1 || pay
 }
 if (payload.summary.completedCount !== 3 || payload.summary.blockedCount !== 1) {
   throw new Error('unexpected completion summary counts');
+}
+if (payload.summary.runStateCounts?.pass !== 1 || payload.summary.runStateCounts?.['builder-complete'] !== 1) {
+  throw new Error('unexpected run-state summary counts');
+}
+if (Object.keys(payload.summary.runStateCounts || {}).length !== 2) {
+  throw new Error('unexpected run-state summary keys');
 }
 const active = payload.lanes.find((lane) => lane.lane === '01-active');
 const idle = payload.lanes.find((lane) => lane.lane === '02-idle');

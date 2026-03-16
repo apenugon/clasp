@@ -93,9 +93,10 @@ fi
 
 lane_text_file="$(mktemp)"
 lane_jsonl_file="$(mktemp)"
+run_state_file="$(mktemp)"
 
 cleanup() {
-  rm -f "$lane_text_file" "$lane_jsonl_file"
+  rm -f "$lane_text_file" "$lane_jsonl_file" "$run_state_file"
 }
 
 trap cleanup EXIT
@@ -146,6 +147,7 @@ while IFS= read -r lane_dir; do
   blocked_total=$((blocked_total + blocked_count))
 
   collect_latest_run_state "$runs_root" "$lane_name"
+  printf '%s\n' "${latest_run_status:-no-run}" >> "$run_state_file"
 
   {
     echo "lane: $lane_name"
@@ -250,6 +252,15 @@ const lanes = fs.existsSync(laneJsonl)
       .filter(Boolean)
       .map((line) => JSON.parse(line))
   : [];
+const runStateCounts = Object.fromEntries(
+  lanes
+    .reduce((counts, lane) => {
+      const key = lane.latestRun?.status || "no-run";
+      counts.set(key, (counts.get(key) || 0) + 1);
+      return counts;
+    }, new Map())
+    .entries(),
+);
 const payload = {
   wave,
   summary: {
@@ -258,6 +269,7 @@ const payload = {
     stoppedCount: Number(stoppedCount),
     completedCount: Number(completedCount),
     blockedCount: Number(blockedCount),
+    runStateCounts,
   },
   lanes,
 };
@@ -266,8 +278,25 @@ EOF
   exit 0
 fi
 
+run_state_summary="$(
+  node - <<'EOF' "$run_state_file"
+const fs = require("fs");
+const [runStateFile] = process.argv.slice(2);
+const counts = new Map();
+for (const state of fs.readFileSync(runStateFile, "utf8").split(/\r?\n/).filter(Boolean).sort()) {
+  counts.set(state, (counts.get(state) || 0) + 1);
+}
+process.stdout.write(
+  Array.from(counts.entries())
+    .map(([state, count]) => `${state}=${count}`)
+    .join(" "),
+);
+EOF
+)"
+
 echo "wave: $wave_name"
 echo "summary: lanes=$lane_count running=$running_count stopped=$stopped_count completed=$completed_total blocked=$blocked_total"
+echo "run-states: ${run_state_summary:-none}"
 
 if [[ -s "$lane_text_file" ]]; then
   cat "$lane_text_file"
