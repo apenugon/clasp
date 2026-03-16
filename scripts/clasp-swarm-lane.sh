@@ -488,7 +488,11 @@ remove_worktree_if_present() {
     git -C "$project_root" worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
   fi
 
-  rm -rf "$worktree_path"
+  if [[ -e "$worktree_path" || -L "$worktree_path" ]]; then
+    chflags -R nouchg,noschg "$worktree_path" >/dev/null 2>&1 || true
+    chmod -R u+w "$worktree_path" >/dev/null 2>&1 || true
+    rm -rf "$worktree_path" >/dev/null 2>&1 || true
+  fi
   release_lock "$worktree_lock_file"
 }
 
