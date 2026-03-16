@@ -168,10 +168,27 @@ task_file_list() {
   clasp_swarm_task_files "$lane_dir"
 }
 
+canonicalize_dir_path() {
+  local dir_path="$1"
+
+  if [[ -d "$dir_path" ]]; then
+    (
+      cd "$dir_path"
+      pwd -P
+    )
+    return 0
+  fi
+
+  printf '%s\n' "$dir_path"
+}
+
 task_worktree_registered() {
   local task_worktree="$1"
+  local canonical_task_worktree=""
 
-  git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $task_worktree"
+  canonical_task_worktree="$(canonicalize_dir_path "$task_worktree")"
+
+  git -C "$project_root" worktree list --porcelain | grep -Fxq "worktree $canonical_task_worktree"
 }
 
 task_worktree_is_git_repo() {
@@ -353,14 +370,19 @@ resume_incomplete_run() {
     return 2
   fi
 
-  remove_worktree_if_present "$baseline_worktree"
   verdict="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(data.verdict);' "$verifier_report")"
 
   if [[ "$verdict" != "pass" ]]; then
+    remove_worktree_if_present "$baseline_worktree"
     archive_task_state "$task_worktree" "$run_dir" "$task_branch"
     resume_feedback_file="$verifier_report"
     return 2
   fi
+
+  capture_workspace_snapshot "$baseline_worktree" "$run_dir/verified-baseline-snapshot"
+  capture_workspace_snapshot "$task_worktree" "$run_dir/verified-workspace-snapshot"
+  remove_worktree_if_present "$baseline_worktree"
+  run_post_verifier_test_hook "$task_worktree" "$run_dir"
 
   if integrate_task_branch "$task_worktree" "$run_dir" "$task_id"; then
     integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
@@ -513,6 +535,59 @@ cleanup_run_worktrees() {
     [[ -e "$path" ]] || continue
     remove_worktree_if_present "$path"
   done
+}
+
+repo_paths_for_root() {
+  local root_path="$1"
+
+  if git -C "$root_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$root_path" ls-files --cached --others --exclude-standard
+    return 0
+  fi
+
+  if [[ ! -d "$root_path" ]]; then
+    return 0
+  fi
+
+  (
+    cd "$root_path"
+    find . -mindepth 1 \( -type f -o -type l \) -print | sed 's#^\./##'
+  )
+}
+
+capture_workspace_snapshot() {
+  local src_root="$1"
+  local snapshot_root="$2"
+  local relative_path=""
+  local path_list=""
+
+  rm -rf "$snapshot_root"
+  mkdir -p "$snapshot_root"
+
+  path_list="$(mktemp)"
+  repo_paths_for_root "$src_root" | sort -u > "$path_list"
+
+  while IFS= read -r relative_path; do
+    [[ -n "$relative_path" ]] || continue
+    if ! worktree_path_exists "$src_root" "$relative_path"; then
+      continue
+    fi
+    copy_relative_path_between_worktrees "$src_root" "$snapshot_root" "$relative_path"
+  done < "$path_list"
+
+  rm -f "$path_list"
+}
+
+run_post_verifier_test_hook() {
+  local task_worktree="$1"
+  local run_dir="$2"
+  local hook_command="${CLASP_SWARM_TEST_POST_VERIFIER_HOOK:-}"
+
+  [[ -n "$hook_command" ]] || return 0
+
+  CLASP_SWARM_TEST_TASK_WORKTREE="$task_worktree" \
+  CLASP_SWARM_TEST_RUN_DIR="$run_dir" \
+  bash -lc "$hook_command"
 }
 
 garbage_collect_stale_runs() {
@@ -812,7 +887,7 @@ archive_task_state() {
 worktree_repo_paths() {
   local worktree_path="$1"
 
-  git -C "$worktree_path" ls-files --cached --others --exclude-standard
+  repo_paths_for_root "$worktree_path"
 }
 
 worktree_path_exists() {
@@ -909,6 +984,8 @@ integrate_task_branch() {
   local integration_log="$run_dir/integration.log"
   local merge_baseline_worktree="$run_dir/merge-baseline-worktree"
   local accepted_worktree="$run_dir/accepted-snapshot-worktree"
+  local verified_baseline_snapshot="$run_dir/verified-baseline-snapshot"
+  local verified_workspace_snapshot="$run_dir/verified-workspace-snapshot"
   local base_head
   local old_trunk
   local task_head
@@ -945,7 +1022,7 @@ integrate_task_branch() {
 
     prepare_baseline_worktree "$merge_baseline_worktree"
     prepare_baseline_worktree "$accepted_worktree"
-    apply_verified_workspace_delta "$merge_baseline_worktree" "$task_worktree" "$accepted_worktree"
+    apply_verified_workspace_delta "$verified_baseline_snapshot" "$verified_workspace_snapshot" "$accepted_worktree"
 
     (
       cd "$accepted_worktree"
@@ -1243,15 +1320,20 @@ while true; do
       continue
     fi
 
-    remove_worktree_if_present "$baseline_worktree"
     verdict="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(data.verdict);' "$verifier_report")"
 
     if [[ "$verdict" != "pass" ]]; then
+      remove_worktree_if_present "$baseline_worktree"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       attempt=$((attempt + 1))
       continue
     fi
+
+    capture_workspace_snapshot "$baseline_worktree" "$run_dir/verified-baseline-snapshot"
+    capture_workspace_snapshot "$task_worktree" "$run_dir/verified-workspace-snapshot"
+    remove_worktree_if_present "$baseline_worktree"
+    run_post_verifier_test_hook "$task_worktree" "$run_dir"
 
     if integrate_task_branch "$task_worktree" "$run_dir" "$task_id"; then
       integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"

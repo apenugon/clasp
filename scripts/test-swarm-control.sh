@@ -16,6 +16,7 @@ autopilot_test_root=""
 autopilot_test_root_2=""
 autopilot_test_root_3=""
 lane_merge_test_root=""
+lane_merge_gate_snapshot_test_root=""
 lane_cleanup_test_root=""
 lane_worktree_retry_test_root=""
 batch_start_test_root=""
@@ -41,7 +42,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}"
 }
 
@@ -407,6 +408,146 @@ EOF
     git config user.email 'swarm-test@example.com'
     printf 'base\n' > feature.txt
     printf 'remove-this\n' > remove-me.txt
+    git add .
+    git commit -m 'base snapshot' >/dev/null
+  )
+
+  printf '%s\n' "$project_dir"
+}
+
+make_lane_merge_snapshot_gate_test_project() {
+  local target_root="$1"
+  local project_dir="$target_root/repo"
+
+  mkdir -p \
+    "$project_dir/scripts" \
+    "$project_dir/tools" \
+    "$project_dir/agents/swarm/test-wave/01-merge-gate"
+
+  cp \
+    "$project_root/scripts/clasp-swarm-common.sh" \
+    "$project_root/scripts/clasp-swarm-lane.sh" \
+    "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/"
+  cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
+
+  cat > "$project_dir/scripts/clasp-builder.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+report_json="$3"
+log_jsonl="$4"
+task_id="$(basename "$task_file" .md)"
+
+printf 'builder-change\n' > "$workspace/feature.txt"
+
+cat > "$report_json" <<JSON
+{
+  "summary": "builder finished for $task_id",
+  "files_touched": [
+    "feature.txt"
+  ],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/clasp-verifier.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file="$1"
+workspace="$2"
+baseline_workspace="$3"
+report_json="$4"
+log_jsonl="$5"
+task_id="$(basename "$task_file" .md)"
+
+if [[ "$(cat "$baseline_workspace/feature.txt")" != "base\n" && "$(cat "$baseline_workspace/feature.txt")" != "base" ]]; then
+  echo "unexpected baseline contents" >&2
+  exit 1
+fi
+
+printf 'verified-by-verifier\n' > "$workspace/verifier-only.txt"
+
+cat > "$report_json" <<JSON
+{
+  "verdict": "pass",
+  "summary": "verified $task_id",
+  "findings": [],
+  "tests_run": [
+    "verified snapshot capture scenario"
+  ],
+  "follow_up": []
+}
+JSON
+
+: > "$log_jsonl"
+EOF
+
+  cat > "$project_dir/scripts/verify-all.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ -f feature.txt ]]
+[[ "$(< feature.txt)" == "builder-change" ]]
+[[ -f verifier-only.txt ]]
+[[ "$(< verifier-only.txt)" == "verified-by-verifier" ]]
+EOF
+
+  chmod +x \
+    "$project_dir/scripts/clasp-builder.sh" \
+    "$project_dir/scripts/clasp-swarm-common.sh" \
+    "$project_dir/scripts/clasp-swarm-lane.sh" \
+    "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/clasp-verifier.sh" \
+    "$project_dir/scripts/verify-all.sh"
+
+  cat > "$project_dir/agents/swarm/test-wave/01-merge-gate/SW-005-verified-snapshot.md" <<'EOF'
+# SW-005 Verified snapshot
+
+## Goal
+
+Verify that the merge gate copies only the verified workspace snapshot into the accepted snapshot.
+
+## Why
+
+Regression coverage for post-verifier task workspace mutations should stay end-to-end.
+
+## Scope
+
+- Exercise one lane task
+
+## Likely Files
+
+- `scripts/clasp-swarm-lane.sh`
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- `bash scripts/verify-all.sh` passes
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+  (
+    cd "$project_dir"
+    git init -b main >/dev/null
+    git config user.name 'Swarm Test'
+    git config user.email 'swarm-test@example.com'
+    printf 'base\n' > feature.txt
     git add .
     git commit -m 'base snapshot' >/dev/null
   )
@@ -1153,12 +1294,14 @@ EOF
 
 sleep 30 >/dev/null 2>&1 &
 status_live_pid="$!"
+mkdir -p "$status_runtime_root_1"
 printf '%s\n' "$status_live_pid" > "$status_runtime_root_1/pid"
 kill "$status_live_pid" >/dev/null 2>&1 || true
 wait "$status_live_pid" 2>/dev/null || true
 
 sleep 30 >/dev/null 2>&1 &
 status_live_pid="$!"
+mkdir -p "$status_runtime_root_2"
 printf '%s\n' "$status_live_pid" > "$status_runtime_root_2/pid"
 
 bash "$project_root/scripts/clasp-swarm-status.sh" "$status_wave_name" > "$status_text_output"
@@ -1766,7 +1909,7 @@ bash -lc "
   grep -F 'touch /tmp/feedback' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not replace the checkout or copy in a fresh repo snapshot.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
-  grep -F 'Do not rewrite the workspace root, remove `.git`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Do not rewrite the workspace root, remove \`.git\`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
 
   PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
     CLASP_TEST_CODEX_MODE=verifier \
@@ -1883,6 +2026,25 @@ bash -lc "
   run_dir=\$(find .clasp-swarm/test-wave/01-merge-gate/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
   [[ -n \"\$run_dir\" ]]
   [[ -f \"\$run_dir/integration.log\" ]]
+" >/dev/null
+
+lane_merge_gate_snapshot_test_root="$(mktemp -d)"
+lane_merge_gate_snapshot_project_root="$(make_lane_merge_snapshot_gate_test_project "$lane_merge_gate_snapshot_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$lane_merge_gate_snapshot_project_root'
+  CLASP_SWARM_TEST_POST_VERIFIER_HOOK=\"printf 'unverified-after-verifier\\n' > \\\"\\\$CLASP_SWARM_TEST_TASK_WORKTREE/post-verify-only.txt\\\"\" \
+    bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
+
+  [[ \$(git rev-parse main) == \$(git rev-parse agents/swarm-trunk) ]]
+  [[ \$(< feature.txt) == 'builder-change' ]]
+  [[ \$(< verifier-only.txt) == 'verified-by-verifier' ]]
+  [[ ! -e post-verify-only.txt ]]
+  run_dir=\$(find .clasp-swarm/test-wave/01-merge-gate/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  [[ -n \"\$run_dir\" ]]
+  [[ -f \"\$run_dir/verified-workspace-snapshot/verifier-only.txt\" ]]
+  [[ ! -e \"\$run_dir/verified-workspace-snapshot/post-verify-only.txt\" ]]
 " >/dev/null
 
 lane_cleanup_test_root="$(mktemp -d)"
