@@ -85,6 +85,7 @@ Every task file should include:
 
 The canonical markdown template lives at `agents/swarm/task-template.md`.
 The parsed machine-readable manifest is validated against `agents/swarm/task.schema.json`.
+The first infra batch should be explicit in the backlog itself: `SW-002` through `SW-004` can share the `swarm-infra-foundation` batch, and `SW-005` should wait on that batch label before opening the merge-gate slice.
 
 Task sizing guidance:
 

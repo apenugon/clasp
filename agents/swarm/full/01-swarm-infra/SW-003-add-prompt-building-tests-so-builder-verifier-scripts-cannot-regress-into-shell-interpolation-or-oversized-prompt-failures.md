@@ -23,9 +23,13 @@ The swarm itself needs to be reliable before it can safely drive the rest of the
 - `scripts/test-swarm-control.sh`
 - `docs/clasp-project-plan.md`
 
+## Batch
+
+swarm-infra-foundation
+
 ## Dependencies
 
-- `SW-002`
+- `SW-001`
 
 ## Acceptance
 

@@ -1085,6 +1085,10 @@ bash -lc "
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskId '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskKey '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == '' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-002-add-tests-for-autopilot-queue-behavior-especially-blocked-task-handling-workaround-generation-and-restart-behavior.md') == 'swarm-infra-foundation' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencies '$project_root/agents/swarm/full/01-swarm-infra/SW-003-add-prompt-building-tests-so-builder-verifier-scripts-cannot-regress-into-shell-interpolation-or-oversized-prompt-failures.md') == 'SW-001' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencyLabels '$project_root/agents/swarm/full/01-swarm-infra/SW-005-add-a-merge-gate-that-copies-only-verified-workspace-changes-into-the-accepted-snapshot.md') == 'swarm-infra-foundation' ]]
+  [[ \$(bash '$project_root/scripts/clasp-swarm-start.sh' --list-batches full) == *'swarm-infra-foundation'* ]]
   clasp_swarm_retry_limit_is_bounded '2'
   ! clasp_swarm_retry_limit_is_bounded '0'
   ! clasp_swarm_retry_limit_is_bounded '-1'
