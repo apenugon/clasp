@@ -1580,6 +1580,9 @@ cat > "$prompt_project_root/feedback.json" <<'EOF'
 EOF
 
 mkdir -p "$prompt_project_root/workspace" "$prompt_project_root/baseline" "$prompt_project_root/run"
+prompt_workspace_path="$prompt_project_root/workspace-\$(printf workspace-path)-\${HOME}"
+prompt_baseline_path="$prompt_project_root/baseline-\$(printf baseline-path)-\${HOME}"
+mkdir -p "$prompt_workspace_path" "$prompt_baseline_path"
 
 bash -lc "
   set -euo pipefail
@@ -1589,7 +1592,7 @@ bash -lc "
     CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/builder.prompt' \
     bash scripts/clasp-builder.sh \
       '$prompt_project_root/task-literal.md' \
-      '$prompt_project_root/workspace' \
+      '$prompt_workspace_path' \
       '$prompt_project_root/run/builder-report.json' \
       '$prompt_project_root/run/builder-log.jsonl' \
       '$prompt_project_root/feedback.json'
@@ -1604,12 +1607,14 @@ bash -lc "
     CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/verifier.prompt' \
     bash scripts/clasp-verifier.sh \
       '$prompt_project_root/task-literal.md' \
-      '$prompt_project_root/workspace' \
-      '$prompt_project_root/baseline' \
+      '$prompt_workspace_path' \
+      '$prompt_baseline_path' \
       '$prompt_project_root/run/verifier-report.json' \
       '$prompt_project_root/run/verifier-log.jsonl'
 
-  grep -F 'Baseline workspace: $prompt_project_root/baseline' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F 'Baseline workspace: $prompt_baseline_path' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F '\$(printf baseline-path)' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\$(printf prompt-substitution)' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
 " >/dev/null
