@@ -14,6 +14,7 @@ spawn_path_root=""
 invalid_lane_root=""
 autopilot_test_root=""
 autopilot_test_root_2=""
+autopilot_test_root_3=""
 lane_merge_test_root=""
 lane_cleanup_test_root=""
 batch_start_test_root=""
@@ -39,7 +40,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_cleanup_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}"
 }
 
@@ -1784,4 +1785,30 @@ bash -lc "
   [[ -f .clasp-agents/blocked/AA-001-parent--workaround.json ]]
   [[ -f .clasp-agents/generated-tasks/AA-001-parent--workaround.md ]]
   [[ \$(< test-events.log) == \$'builder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:fail\nbuilder:AA-002-later\nverifier:AA-002-later:pass' ]]
+" >/dev/null
+
+autopilot_test_root_3="$(mktemp -d)"
+autopilot_project_root_3="$(make_autopilot_test_project "$autopilot_test_root_3" "pass-workaround")"
+write_task_manifest "$autopilot_project_root_3/agents/tasks/AA-001-parent.md" "AA-001 Parent" "None"
+
+bash -lc "
+  set -euo pipefail
+  cd '$autopilot_project_root_3'
+  PATH='$autopilot_project_root_3/tools':\"\$PATH\" CLASP_AUTOPILOT_RETRY_LIMIT=2 CLASP_AUTOPILOT_MAX_TASKS=1 bash scripts/clasp-autopilot.sh >/dev/null 2>&1
+
+  [[ ! -f .clasp-agents/completed/AA-001-parent ]]
+  [[ ! -f .clasp-agents/blocked/AA-001-parent.json ]]
+  [[ ! -f .clasp-agents/blocked/AA-001-parent--workaround.json ]]
+  [[ ! -f .clasp-agents/generated-tasks/AA-001-parent--workaround.md ]]
+  run_dir=\$(find .clasp-agents/runs -maxdepth 1 -mindepth 1 -type d -name '*-AA-001-parent--workaround-attempt1' | head -n 1)
+  [[ -n \"\$run_dir\" ]]
+  [[ -f \"\$run_dir/verifier-report.json\" ]]
+  [[ \$(< test-events.log) == \$'builder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:pass' ]]
+
+  PATH='$autopilot_project_root_3/tools':\"\$PATH\" CLASP_AUTOPILOT_RETRY_LIMIT=2 bash scripts/clasp-autopilot.sh >/dev/null 2>&1
+
+  [[ -f .clasp-agents/completed/AA-001-parent ]]
+  [[ ! -f .clasp-agents/blocked/AA-001-parent.json ]]
+  [[ ! -f .clasp-agents/generated-tasks/AA-001-parent--workaround.md ]]
+  [[ \$(< test-events.log) == \$'builder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent\nverifier:AA-001-parent:fail\nbuilder:AA-001-parent--workaround\nverifier:AA-001-parent--workaround:pass\nbuilder:AA-001-parent\nverifier:AA-001-parent:pass' ]]
 " >/dev/null
