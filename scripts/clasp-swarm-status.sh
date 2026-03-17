@@ -18,6 +18,16 @@ count_files() {
   fi
 }
 
+count_task_files() {
+  local lane_dir="$1"
+
+  if [[ -d "$lane_dir" ]]; then
+    find "$lane_dir" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d '[:space:]'
+  else
+    printf '0\n'
+  fi
+}
+
 collect_latest_run_state() {
   local runs_root="$1"
   local lane_name="$2"
@@ -143,10 +153,19 @@ while IFS= read -r lane_dir; do
 
   completed_count="$(count_files "$completed_root")"
   blocked_count="$(count_files "$blocked_root")"
+  lane_task_count="$(count_task_files "$lane_dir")"
   completed_total=$((completed_total + completed_count))
   blocked_total=$((blocked_total + blocked_count))
 
   collect_latest_run_state "$runs_root" "$lane_name"
+
+  if [[ "$status" == "stopped" && "$blocked_count" == "0" && "$completed_count" == "$lane_task_count" ]]; then
+    latest_run_path=""
+    latest_run_attempt=""
+    latest_run_status="complete"
+    latest_run_summary="Lane $lane_name has no remaining tasks."
+  fi
+
   printf '%s\n' "${latest_run_status:-no-run}" >> "$run_state_file"
 
   {
