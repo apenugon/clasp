@@ -243,6 +243,8 @@ resume_feedback_file=""
 sync_completed_markers_from_global() {
   local task_file=""
   local task_id=""
+  local git_commit=""
+  local git_stamp=""
 
   while IFS= read -r task_file; do
     task_id="$(task_id_of "$task_file")"
@@ -256,6 +258,16 @@ sync_completed_markers_from_global() {
         "$task_id" \
         "$(clasp_swarm_completion_commit "$global_completed_root" "$task_id")" \
         "$(clasp_swarm_completion_stamp "$global_completed_root" "$task_id")"
+      continue
+    fi
+
+    if clasp_swarm_git_completion_marker_exists "$project_root" "$task_id" "$main_branch" "$trunk_branch"; then
+      git_commit="$(clasp_swarm_git_completion_commit "$project_root" "$task_id" "$main_branch" "$trunk_branch")"
+      git_stamp="$(clasp_swarm_git_completion_stamp "$project_root" "$task_id" "$main_branch" "$trunk_branch")"
+
+      if [[ -n "$git_commit" && -n "$git_stamp" ]]; then
+        mark_completed "$task_id" "$git_commit" "$git_stamp"
+      fi
     fi
   done < <(task_file_list)
 }

@@ -1099,7 +1099,7 @@ bash -lc "
 spawn_root="$(mktemp -d)"
 spawn_path_root="$(mktemp -d)"
 spawn_bash_bin="$(command -v bash)"
-spawn_python3_bin="$(command -v python3)"
+spawn_python3_bin="$(command -v python3 || true)"
 
 if [[ -x /bin/bash ]]; then
   spawn_bash_bin="/bin/bash"
@@ -1110,7 +1110,9 @@ if [[ -x /usr/bin/python3 ]]; then
 fi
 
 ln -s "$spawn_bash_bin" "$spawn_path_root/bash"
-ln -s "$spawn_python3_bin" "$spawn_path_root/python3"
+if [[ -n "$spawn_python3_bin" ]]; then
+  ln -s "$spawn_python3_bin" "$spawn_path_root/python3"
+fi
 ln -s "$(command -v nohup)" "$spawn_path_root/nohup"
 ln -s "$(command -v sleep)" "$spawn_path_root/sleep"
 
@@ -1735,6 +1737,40 @@ This task proves batch labels only clear after every member completes.
 ## Batch
 
 foundation
+
+## Dependencies
+
+- None
+
+## Acceptance
+
+- done
+
+## Verification
+
+```sh
+bash scripts/verify-all.sh
+```
+EOF
+
+cat > "$lane_root/LG-001-already-in-git.md" <<'EOF'
+# LG-001 Already in git
+
+## Goal
+
+Prove the swarm skips tasks already recorded in trusted git history.
+
+## Why
+
+Completion should not depend only on marker files when the task already landed on main.
+
+## Scope
+
+- Skip already-landed tasks during ready-task selection
+
+## Likely Files
+
+- `scripts/clasp-swarm-common.sh`
 
 ## Dependencies
 

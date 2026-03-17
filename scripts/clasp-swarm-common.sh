@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+CLASP_SWARM_GIT_COMPLETION_CACHE_KEY=""
+CLASP_SWARM_GIT_COMPLETION_CACHE_FILE=""
+
 clasp_swarm_project_root() {
   cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
 }
@@ -144,6 +147,119 @@ clasp_swarm_completion_stamp() {
 
 clasp_swarm_completion_commit() {
   clasp_swarm_completion_marker_field "$1" "$2" 2
+}
+
+clasp_swarm_git_completion_cache_cleanup() {
+  if [[ -n "${CLASP_SWARM_GIT_COMPLETION_CACHE_FILE:-}" ]]; then
+    rm -f "$CLASP_SWARM_GIT_COMPLETION_CACHE_FILE"
+    CLASP_SWARM_GIT_COMPLETION_CACHE_FILE=""
+  fi
+}
+
+clasp_swarm_git_completion_cache_file() {
+  local repo_root="$1"
+  local main_branch="${2:-main}"
+  local trunk_branch="${3:-agents/swarm-trunk}"
+  local key=""
+  local cache_file=""
+  local refs=()
+
+  key="${repo_root}"$'\t'"${main_branch}"$'\t'"${trunk_branch}"
+
+  if [[ "${CLASP_SWARM_GIT_COMPLETION_CACHE_KEY:-}" == "$key" ]] && \
+     [[ -n "${CLASP_SWARM_GIT_COMPLETION_CACHE_FILE:-}" ]] && \
+     [[ -f "${CLASP_SWARM_GIT_COMPLETION_CACHE_FILE}" ]]; then
+    printf '%s\n' "$CLASP_SWARM_GIT_COMPLETION_CACHE_FILE"
+    return 0
+  fi
+
+  clasp_swarm_git_completion_cache_cleanup
+  cache_file="$(mktemp)"
+
+  if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$main_branch"; then
+      refs+=("refs/heads/$main_branch")
+    fi
+    if [[ "$trunk_branch" != "$main_branch" ]] && \
+       git -C "$repo_root" show-ref --verify --quiet "refs/heads/$trunk_branch"; then
+      refs+=("refs/heads/$trunk_branch")
+    fi
+    if [[ "${#refs[@]}" -gt 0 ]]; then
+      git -C "$repo_root" log --format='%H%x09%cI%x09%s' "${refs[@]}" | \
+        awk -F '\t' '
+          {
+            subject = $3
+            while (match(subject, /(^|[^A-Z0-9])([A-Z]{2,3}-[0-9]{3})([^A-Z0-9]|$)/, match_parts)) {
+              task_id = match_parts[2]
+              if (!(task_id in seen)) {
+                print task_id "\t" $1 "\t" $2
+                seen[task_id] = 1
+              }
+              subject = substr(subject, RSTART + RLENGTH)
+            }
+          }
+        ' > "$cache_file"
+    else
+      : > "$cache_file"
+    fi
+  else
+    : > "$cache_file"
+  fi
+
+  CLASP_SWARM_GIT_COMPLETION_CACHE_KEY="$key"
+  CLASP_SWARM_GIT_COMPLETION_CACHE_FILE="$cache_file"
+  printf '%s\n' "$cache_file"
+}
+
+clasp_swarm_git_completion_marker_exists() {
+  local repo_root="$1"
+  local task_ref="$2"
+  local main_branch="${3:-main}"
+  local trunk_branch="${4:-agents/swarm-trunk}"
+  local key=""
+  local cache_file=""
+
+  key="$(clasp_swarm_completion_key "$task_ref")"
+  cache_file="$(clasp_swarm_git_completion_cache_file "$repo_root" "$main_branch" "$trunk_branch")"
+
+  [[ -f "$cache_file" ]] && awk -F '\t' -v key="$key" '$1 == key { found = 1; exit } END { exit(found ? 0 : 1) }' "$cache_file"
+}
+
+clasp_swarm_git_completion_field() {
+  local repo_root="$1"
+  local task_ref="$2"
+  local field_index="$3"
+  local main_branch="${4:-main}"
+  local trunk_branch="${5:-agents/swarm-trunk}"
+  local key=""
+  local cache_file=""
+
+  key="$(clasp_swarm_completion_key "$task_ref")"
+  cache_file="$(clasp_swarm_git_completion_cache_file "$repo_root" "$main_branch" "$trunk_branch")"
+
+  awk -F '\t' -v key="$key" -v idx="$field_index" '$1 == key { print $idx; exit }' "$cache_file"
+}
+
+clasp_swarm_git_completion_commit() {
+  clasp_swarm_git_completion_field "$1" "$2" 2 "${3:-main}" "${4:-agents/swarm-trunk}"
+}
+
+clasp_swarm_git_completion_stamp() {
+  clasp_swarm_git_completion_field "$1" "$2" 3 "${3:-main}" "${4:-agents/swarm-trunk}"
+}
+
+clasp_swarm_task_is_completed() {
+  local markers_dir="$1"
+  local task_ref="$2"
+  local repo_root="${3:-$(clasp_swarm_project_root)}"
+  local main_branch="${4:-main}"
+  local trunk_branch="${5:-agents/swarm-trunk}"
+
+  if clasp_swarm_completion_marker_exists "$markers_dir" "$task_ref"; then
+    return 0
+  fi
+
+  clasp_swarm_git_completion_marker_exists "$repo_root" "$task_ref" "$main_branch" "$trunk_branch"
 }
 
 clasp_swarm_feedback_activation_task() {
@@ -322,6 +438,8 @@ clasp_swarm_batch_is_complete() {
   local task_batch=""
   local found=0
   local project_root=""
+  local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
+  local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
   local scan_lanes=()
 
   [[ -n "$batch_label" ]] || return 1
@@ -345,7 +463,7 @@ clasp_swarm_batch_is_complete() {
       fi
 
       found=1
-      if ! clasp_swarm_completion_marker_exists "$completed_root" "$task_file"; then
+      if ! clasp_swarm_task_is_completed "$completed_root" "$task_file" "$project_root" "$main_branch" "$trunk_branch"; then
         return 1
       fi
     done < <(clasp_swarm_task_files "$scan_lane")
@@ -360,10 +478,15 @@ clasp_swarm_task_dependencies_met() {
   local completed_root="$3"
   local dep=""
   local dependency_label=""
+  local project_root=""
+  local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
+  local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
+
+  project_root="$(clasp_swarm_project_root)"
 
   while IFS= read -r dep; do
     [[ -z "$dep" ]] && continue
-    if ! clasp_swarm_completion_marker_exists "$completed_root" "$dep"; then
+    if ! clasp_swarm_task_is_completed "$completed_root" "$dep" "$project_root" "$main_branch" "$trunk_branch"; then
       return 1
     fi
   done < <(clasp_swarm_task_dependencies "$task_file")
@@ -388,6 +511,11 @@ clasp_swarm_select_next_ready_task() {
   local task_id=""
   local first_pending=""
   local task_batch=""
+  local project_root=""
+  local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
+  local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
+
+  project_root="$(clasp_swarm_project_root)"
 
   while IFS= read -r task_file; do
     if [[ -n "$batch_filter" ]]; then
@@ -399,11 +527,11 @@ clasp_swarm_select_next_ready_task() {
 
     task_id="$(clasp_swarm_completion_key "$task_file")"
 
-    if clasp_swarm_completion_marker_exists "$completed_root" "$task_id"; then
+    if clasp_swarm_task_is_completed "$completed_root" "$task_id" "$project_root" "$main_branch" "$trunk_branch"; then
       continue
     fi
 
-    if clasp_swarm_completion_marker_exists "$global_completed_root" "$task_id"; then
+    if clasp_swarm_task_is_completed "$global_completed_root" "$task_id" "$project_root" "$main_branch" "$trunk_branch"; then
       continue
     fi
 
