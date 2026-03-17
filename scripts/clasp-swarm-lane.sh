@@ -1072,6 +1072,10 @@ integrate_task_branch() {
     fi
 
     accepted_head="$(git -C "$accepted_worktree" rev-parse HEAD)"
+    if [[ "$accepted_head" == "$old_trunk" ]]; then
+      echo "accepted snapshot did not advance beyond $old_trunk" >&2
+      exit 12
+    fi
     git -C "$project_root" merge --ff-only "$accepted_head"
     git -C "$project_root" update-ref "refs/heads/$trunk_branch" "$accepted_head" "$old_trunk"
     printf '%s\n' "$(git -C "$project_root" rev-parse "$main_branch")"
@@ -1122,6 +1126,8 @@ printf '%s\n' "$$" > "$pid_file"
 ensure_trunk_branch
 clasp_swarm_normalize_completion_dir "$completed_root"
 clasp_swarm_normalize_completion_dir "$global_completed_root"
+clasp_swarm_reconcile_completion_dir_with_git "$completed_root" "$project_root" "$main_branch" "$trunk_branch"
+clasp_swarm_reconcile_completion_dir_with_git "$global_completed_root" "$project_root" "$main_branch" "$trunk_branch"
 garbage_collect_stale_runs
 
 while true; do

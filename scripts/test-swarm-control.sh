@@ -2096,6 +2096,74 @@ bash -lc "
   [[ ! -e \"\$run_dir/verified-workspace-snapshot/post-verify-only.txt\" ]]
 " >/dev/null
 
+lane_merge_noop_test_root="$(mktemp -d)"
+lane_merge_noop_project_root="$(make_lane_merge_test_project "$lane_merge_noop_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$lane_merge_noop_project_root'
+
+  cat > scripts/clasp-builder.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file=\"\$1\"
+workspace=\"\$2\"
+report_json=\"\$3\"
+log_jsonl=\"\$4\"
+task_id=\"\$(basename \"\$task_file\" .md)\"
+
+printf 'base\n' > \"\$workspace/feature.txt\"
+
+cat > \"\$report_json\" <<JSON
+{
+  \"summary\": \"builder finished for \$task_id\",
+  \"files_touched\": [],
+  \"tests_run\": [],
+  \"residual_risks\": []
+}
+JSON
+
+: > \"\$log_jsonl\"
+EOF
+
+  cat > scripts/clasp-verifier.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_file=\"\$1\"
+workspace=\"\$2\"
+baseline_workspace=\"\$3\"
+report_json=\"\$4\"
+log_jsonl=\"\$5\"
+task_id=\"\$(basename \"\$task_file\" .md)\"
+
+cat > \"\$report_json\" <<JSON
+{
+  \"verdict\": \"pass\",
+  \"summary\": \"verified \$task_id\",
+  \"findings\": [],
+  \"tests_run\": [],
+  \"follow_up\": []
+}
+JSON
+
+: > \"\$log_jsonl\"
+EOF
+
+  chmod +x scripts/clasp-builder.sh scripts/clasp-verifier.sh
+
+  bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
+
+  [[ \$(git rev-parse main) == \$(git rev-parse agents/swarm-trunk) ]]
+  [[ ! -f .clasp-swarm/test-wave/01-merge-gate/completed/SW-005 ]]
+  run_dir=\$(find .clasp-swarm/test-wave/01-merge-gate/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  [[ -n \"\$run_dir\" ]]
+  [[ -f \"\$run_dir/integration.log\" ]]
+  grep -F 'accepted snapshot did not advance' \"\$run_dir/integration.log\" >/dev/null
+  grep -F 'Merge gate or final verification failed before the task could be integrated.' \"\$run_dir/verifier-report.json\" >/dev/null
+" >/dev/null
+
 lane_cleanup_test_root="$(mktemp -d)"
 lane_cleanup_project_root="$(make_lane_cleanup_test_project "$lane_cleanup_test_root")"
 

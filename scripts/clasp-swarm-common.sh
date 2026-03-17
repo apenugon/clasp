@@ -262,6 +262,37 @@ clasp_swarm_task_is_completed() {
   clasp_swarm_git_completion_marker_exists "$repo_root" "$task_ref" "$main_branch" "$trunk_branch"
 }
 
+clasp_swarm_reconcile_completion_dir_with_git() {
+  local markers_dir="$1"
+  local repo_root="${2:-$(clasp_swarm_project_root)}"
+  local main_branch="${3:-main}"
+  local trunk_branch="${4:-agents/swarm-trunk}"
+  local path=""
+  local base=""
+  local key=""
+  local git_commit=""
+  local git_stamp=""
+
+  mkdir -p "$markers_dir"
+
+  shopt -s nullglob
+  for path in "$markers_dir"/*; do
+    [[ -f "$path" ]] || continue
+    base="$(basename "$path")"
+    key="$(clasp_swarm_completion_key "$base")"
+    git_commit="$(clasp_swarm_git_completion_commit "$repo_root" "$key" "$main_branch" "$trunk_branch" || true)"
+    git_stamp="$(clasp_swarm_git_completion_stamp "$repo_root" "$key" "$main_branch" "$trunk_branch" || true)"
+
+    if [[ -n "$git_commit" && -n "$git_stamp" ]]; then
+      printf '%s\t%s\n' "$git_stamp" "$git_commit" > "$markers_dir/$key"
+      continue
+    fi
+
+    rm -f "$path"
+  done
+  shopt -u nullglob
+}
+
 clasp_swarm_feedback_activation_task() {
   printf '%s\n' "${CLASP_SWARM_FEEDBACK_AFTER_TASK:-SH-014}"
 }
