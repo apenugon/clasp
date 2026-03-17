@@ -400,7 +400,7 @@ resume_incomplete_run() {
     "$run_dir/integration.log" \
     "$task_id" \
     "merge-gate" \
-    "$merge_exit"
+    "${merge_exit:-1}"
   archive_task_state "$task_worktree" "$run_dir" "$task_branch"
   resume_feedback_file="$verifier_report"
   return 2
@@ -1357,6 +1357,7 @@ while true; do
     remove_worktree_if_present "$baseline_worktree"
     run_post_verifier_test_hook "$task_worktree" "$run_dir"
 
+    merge_exit=1
     if integrate_task_branch "$task_worktree" "$run_dir" "$task_id"; then
       integrated_commit="$(git -C "$project_root" rev-parse "$trunk_branch")"
       mark_completed "$task_id" "$integrated_commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -1372,7 +1373,7 @@ while true; do
         "$run_dir/integration.log" \
         "$task_id" \
         "merge-gate" \
-        "$merge_exit"
+        "${merge_exit:-1}"
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       attempt=$((attempt + 1))
