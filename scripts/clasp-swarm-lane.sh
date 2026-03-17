@@ -1022,7 +1022,11 @@ integrate_task_branch() {
   local verified_workspace_snapshot="$run_dir/verified-workspace-snapshot"
   local base_head
   local old_trunk
+  local old_trunk_tree
   local task_head
+  local pre_verify_tree
+  local final_tree
+  local accepted_head_tree
   local accepted_head
   local status=0
 
@@ -1036,6 +1040,7 @@ integrate_task_branch() {
     clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch"
     base_head="$(git -C "$project_root" rev-parse "$main_branch")"
     old_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
+    old_trunk_tree="$(git -C "$project_root" rev-parse "$old_trunk^{tree}")"
     task_head="$(git -C "$task_worktree" rev-parse HEAD)"
 
     if [[ "$task_head" != "$base_head" ]]; then
@@ -1058,17 +1063,38 @@ integrate_task_branch() {
     prepare_baseline_worktree "$accepted_worktree"
     apply_verified_workspace_delta "$verified_baseline_snapshot" "$verified_workspace_snapshot" "$accepted_worktree"
 
+    git -C "$accepted_worktree" add -A
+    pre_verify_tree="$(git -C "$accepted_worktree" write-tree)"
+    if [[ "$pre_verify_tree" == "$old_trunk_tree" ]]; then
+      echo "accepted snapshot tree matched $old_trunk before final verification" >&2
+      git -C "$accepted_worktree" status --short >&2 || true
+      exit 12
+    fi
+
+    git -C "$accepted_worktree" \
+      -c user.name="Clasp Swarm" \
+      -c user.email="swarm@local" \
+      commit -m "[$lane_name] $task_id" >/dev/null
+
     (
       cd "$accepted_worktree"
       bash scripts/verify-all.sh
     )
 
     git -C "$accepted_worktree" add -A
-    if ! git -C "$accepted_worktree" diff --cached --quiet --ignore-submodules --exit-code; then
+    final_tree="$(git -C "$accepted_worktree" write-tree)"
+    if [[ "$final_tree" == "$old_trunk_tree" ]]; then
+      echo "accepted snapshot tree matched $old_trunk after final verification" >&2
+      git -C "$accepted_worktree" status --short >&2 || true
+      exit 12
+    fi
+
+    accepted_head_tree="$(git -C "$accepted_worktree" rev-parse HEAD^{tree})"
+    if [[ "$final_tree" != "$accepted_head_tree" ]]; then
       git -C "$accepted_worktree" \
         -c user.name="Clasp Swarm" \
         -c user.email="swarm@local" \
-        commit -m "[$lane_name] $task_id" >/dev/null
+        commit --amend --no-edit >/dev/null
     fi
 
     accepted_head="$(git -C "$accepted_worktree" rev-parse HEAD)"

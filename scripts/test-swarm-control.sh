@@ -2160,7 +2160,7 @@ EOF
   run_dir=\$(find .clasp-swarm/test-wave/01-merge-gate/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
   [[ -n \"\$run_dir\" ]]
   [[ -f \"\$run_dir/integration.log\" ]]
-  grep -F 'accepted snapshot did not advance' \"\$run_dir/integration.log\" >/dev/null
+  grep -F 'accepted snapshot tree matched' \"\$run_dir/integration.log\" >/dev/null
   grep -F 'Merge gate or final verification failed before the task could be integrated.' \"\$run_dir/verifier-report.json\" >/dev/null
 " >/dev/null
 
