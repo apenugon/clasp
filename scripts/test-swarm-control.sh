@@ -125,6 +125,18 @@ done
 
 cat > "${CLASP_TEST_PROMPT_CAPTURE:?}"
 
+if [[ -n "${CLASP_TEST_ENV_CAPTURE:-}" ]]; then
+  cat > "$CLASP_TEST_ENV_CAPTURE" <<ENV
+HOME=$HOME
+XDG_CACHE_HOME=${XDG_CACHE_HOME:-}
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}
+XDG_DATA_HOME=${XDG_DATA_HOME:-}
+XDG_STATE_HOME=${XDG_STATE_HOME:-}
+TMPDIR=${TMPDIR:-}
+CODEX_HOME=${CODEX_HOME:-}
+ENV
+fi
+
 case "${CLASP_TEST_CODEX_MODE:-builder}" in
   builder)
     cat > "$output_file" <<'JSON'
@@ -1945,6 +1957,7 @@ bash -lc "
   PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
     CLASP_TEST_CODEX_MODE=builder \
     CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/builder.prompt' \
+    CLASP_TEST_ENV_CAPTURE='$prompt_project_root/builder.env' \
     bash scripts/clasp-builder.sh \
       '$prompt_project_root/task-literal.md' \
       '$prompt_workspace_path' \
@@ -1959,10 +1972,14 @@ bash -lc "
   grep -F 'Do not replace the checkout or copy in a fresh repo snapshot.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not rewrite the workspace root, remove \`.git\`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -E '^HOME=.*/clasp-codex-runtime-home\\.[^/]+$' '$prompt_project_root/builder.env' >/dev/null
+  grep -E '^XDG_CACHE_HOME=.*/clasp-codex-runtime-home\\.[^/]+/.cache$' '$prompt_project_root/builder.env' >/dev/null
+  grep -E '^TMPDIR=.*/clasp-codex-runtime-home\\.[^/]+/tmp$' '$prompt_project_root/builder.env' >/dev/null
 
   PATH='$prompt_project_root/tools':\"\$PATH\" HOME='$prompt_project_root/home' \
     CLASP_TEST_CODEX_MODE=verifier \
     CLASP_TEST_PROMPT_CAPTURE='$prompt_project_root/verifier.prompt' \
+    CLASP_TEST_ENV_CAPTURE='$prompt_project_root/verifier.env' \
     bash scripts/clasp-verifier.sh \
       '$prompt_project_root/task-literal.md' \
       '$prompt_workspace_path' \
@@ -1975,6 +1992,9 @@ bash -lc "
   grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\$(printf prompt-substitution)' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -E '^HOME=.*/clasp-codex-runtime-home\\.[^/]+$' '$prompt_project_root/verifier.env' >/dev/null
+  grep -E '^XDG_CACHE_HOME=.*/clasp-codex-runtime-home\\.[^/]+/.cache$' '$prompt_project_root/verifier.env' >/dev/null
+  grep -E '^TMPDIR=.*/clasp-codex-runtime-home\\.[^/]+/tmp$' '$prompt_project_root/verifier.env' >/dev/null
 " >/dev/null
 
 prompt_test_root_2="$(mktemp -d)"

@@ -20,6 +20,7 @@ prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-verifier-prompt.XXXXXX")"
 shared_codex_home="${CODEX_HOME:-$HOME/.codex}"
 run_dir="$(dirname "$report_json")"
 isolated_codex_home="$run_dir/codex-home"
+sandbox_runtime_home="$(mktemp -d "${TMPDIR:-/tmp}/clasp-codex-runtime-home.XXXXXX")"
 codex_sandbox_args=()
 
 source "$project_root/scripts/clasp-codex-home.sh"
@@ -27,6 +28,7 @@ source "$project_root/scripts/clasp-swarm-common.sh"
 
 cleanup() {
   rm -f "$prompt_file"
+  rm -rf "$sandbox_runtime_home"
 }
 
 trap cleanup EXIT
@@ -43,6 +45,7 @@ case "$sandbox_mode" in
 esac
 
 clasp_prepare_isolated_codex_home "$shared_codex_home" "$isolated_codex_home"
+clasp_prepare_isolated_runtime_home "$sandbox_runtime_home"
 
 feedback_required=0
 feedback_activation_task="$(clasp_swarm_feedback_activation_task)"
@@ -85,6 +88,12 @@ cat "$task_file" >> "$prompt_file"
 
 clasp_swarm_assert_prompt_size "$prompt_file" "verifier"
 
+HOME="$sandbox_runtime_home" \
+XDG_CACHE_HOME="$sandbox_runtime_home/.cache" \
+XDG_CONFIG_HOME="$sandbox_runtime_home/.config" \
+XDG_DATA_HOME="$sandbox_runtime_home/.local/share" \
+XDG_STATE_HOME="$sandbox_runtime_home/.local/state" \
+TMPDIR="$sandbox_runtime_home/tmp" \
 CODEX_HOME="$isolated_codex_home" codex exec - \
   --json \
   -m "$model" \

@@ -40,3 +40,20 @@ clasp_prepare_isolated_codex_home() {
     fi
   fi
 }
+
+clasp_prepare_isolated_runtime_home() {
+  if [[ $# -ne 1 ]]; then
+    echo "usage: clasp_prepare_isolated_runtime_home <runtime-home>" >&2
+    return 1
+  fi
+
+  local runtime_home="$1"
+
+  rm -rf "$runtime_home"
+  mkdir -p \
+    "$runtime_home/.cache" \
+    "$runtime_home/.config" \
+    "$runtime_home/.local/share" \
+    "$runtime_home/.local/state" \
+    "$runtime_home/tmp"
+}
