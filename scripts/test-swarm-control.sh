@@ -37,13 +37,14 @@ summary_runtime_root_1=""
 summary_runtime_root_2=""
 summary_text_output=""
 summary_json_output=""
+summary_markdown_output=""
 
 cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
   rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
-  rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}"
+  rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}" "${summary_markdown_output:-}"
 }
 
 trap cleanup EXIT
@@ -1385,6 +1386,7 @@ summary_runtime_root_1="$project_root/.clasp-swarm/$summary_wave_name/01-core"
 summary_runtime_root_2="$project_root/.clasp-swarm/$summary_wave_name/02-language"
 summary_text_output="$(mktemp)"
 summary_json_output="$(mktemp)"
+summary_markdown_output="$(mktemp)"
 
 mkdir -p \
   "$summary_lane_root_1" \
@@ -1443,14 +1445,21 @@ TZ=UTC touch -t 202603141502 "$summary_runtime_root_2/runs/20260314T150000Z-LG-0
 
 bash "$project_root/scripts/clasp-swarm-summary.sh" "$summary_wave_name" > "$summary_text_output"
 bash "$project_root/scripts/clasp-swarm-summary.sh" --json "$summary_wave_name" > "$summary_json_output"
+bash "$project_root/scripts/clasp-swarm-summary.sh" --markdown "$summary_wave_name" > "$summary_markdown_output"
 
 bash -lc "
   set -euo pipefail
   text=\$(cat '$summary_text_output')
+  markdown=\$(cat '$summary_markdown_output')
   [[ \"\$text\" == *'wave: $summary_wave_name'* ]]
   [[ \"\$text\" == *'summary: runs=4 completed=3 incomplete=1 pass-rate=33.3% timeout-rate=33.3% mean-time=700.0s'* ]]
   [[ \"\$text\" == *'family: LG runs=2 completed=1 incomplete=1 pass-rate=0.0% timeout-rate=0.0% mean-time=300.0s'* ]]
   [[ \"\$text\" == *'family: SW runs=2 completed=2 incomplete=0 pass-rate=50.0% timeout-rate=50.0% mean-time=900.0s'* ]]
+  [[ \"\$markdown\" == *'# Swarm Summary: $summary_wave_name'* ]]
+  [[ \"\$markdown\" == *'| scope | runs | completed | incomplete | pass rate | timeout rate | mean time |'* ]]
+  [[ \"\$markdown\" == *'| overall | 4 | 3 | 1 | 33.3% | 33.3% | 700.0s |'* ]]
+  [[ \"\$markdown\" == *'| LG | 2 | 1 | 1 | 0.0% | 0.0% | 300.0s |'* ]]
+  [[ \"\$markdown\" == *'| SW | 2 | 2 | 0 | 50.0% | 50.0% | 900.0s |'* ]]
   node - <<'EOF' '$summary_json_output' '$summary_wave_name'
 const fs = require('fs');
 const [jsonPath, expectedWave] = process.argv.slice(2);

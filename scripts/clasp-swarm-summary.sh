@@ -5,10 +5,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$project_root/scripts/clasp-swarm-common.sh"
 
 usage() {
-  echo "usage: $0 [--json] [wave-name]" >&2
+  echo "usage: $0 [--json|--markdown] [wave-name]" >&2
 }
 
 json_mode=0
+markdown_mode=0
 wave_name="$(clasp_swarm_default_wave)"
 
 if [[ $# -gt 2 ]]; then
@@ -19,15 +20,18 @@ fi
 if [[ "${1:-}" == "--json" ]]; then
   json_mode=1
   wave_name="${2:-$(clasp_swarm_default_wave)}"
+elif [[ "${1:-}" == "--markdown" ]]; then
+  markdown_mode=1
+  wave_name="${2:-$(clasp_swarm_default_wave)}"
 elif [[ $# -ge 1 ]]; then
   wave_name="$1"
 fi
 
-node - <<'EOF' "$project_root/.clasp-swarm/$wave_name" "$wave_name" "$json_mode"
+node - <<'EOF' "$project_root/.clasp-swarm/$wave_name" "$wave_name" "$json_mode" "$markdown_mode"
 const fs = require("fs");
 const path = require("path");
 
-const [runtimeRoot, waveName, jsonMode] = process.argv.slice(2);
+const [runtimeRoot, waveName, jsonMode, markdownMode] = process.argv.slice(2);
 
 function parseRunName(name) {
   const match = name.match(/^([0-9]{8}T[0-9]{6}Z)-(.+)-attempt([0-9]+)$/);
@@ -253,6 +257,21 @@ function formatRate(value) {
 
 function formatSeconds(value) {
   return value === null ? "n/a" : `${value.toFixed(1)}s`;
+}
+
+function formatRow(scope, summary) {
+  return `| ${scope} | ${summary.totalRuns} | ${summary.completedRuns} | ${summary.incompleteRuns} | ${formatRate(summary.passRate)} | ${formatRate(summary.timeoutRate)} | ${formatSeconds(summary.meanTimeSeconds)} |`;
+}
+
+if (markdownMode === "1") {
+  process.stdout.write(`# Swarm Summary: ${payload.wave}\n`);
+  process.stdout.write(`| scope | runs | completed | incomplete | pass rate | timeout rate | mean time |\n`);
+  process.stdout.write(`| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n`);
+  process.stdout.write(`${formatRow("overall", payload.summary)}\n`);
+  for (const family of payload.families) {
+    process.stdout.write(`${formatRow(family.taskFamily, family)}\n`);
+  }
+  process.exit(0);
 }
 
 process.stdout.write(`wave: ${payload.wave}\n`);
