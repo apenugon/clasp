@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../dist/server/main.js";
@@ -27,8 +28,34 @@ async function request(port, path, init = {}) {
   return fetch(`http://127.0.0.1:${port}${path}`, init);
 }
 
+async function allocatePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createServer();
+
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+
+      if (!address || typeof address === "string") {
+        socket.close(() => reject(new Error("failed to allocate an ephemeral port")));
+        return;
+      }
+
+      const { port } = address;
+      socket.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(port);
+      });
+    });
+  });
+}
+
 async function withServer(binding, callback, options = {}) {
-  const port = 4300 + Math.floor(Math.random() * 300);
+  const port = await allocatePort();
   const server = createServer(
     {
       mockLeadSummaryModel: binding
