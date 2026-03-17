@@ -2065,7 +2065,7 @@ lane_merge_project_root="$(make_lane_merge_test_project "$lane_merge_test_root")
 bash -lc "
   set -euo pipefail
   cd '$lane_merge_project_root'
-  bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
+  CLASP_SWARM_RETRY_LIMIT=1 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
 
   [[ \$(git rev-parse main) == \$(git rev-parse agents/swarm-trunk) ]]
   [[ \$(< feature.txt) == 'builder-change' ]]
@@ -2153,7 +2153,7 @@ EOF
 
   chmod +x scripts/clasp-builder.sh scripts/clasp-verifier.sh
 
-  bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
+  CLASP_SWARM_RETRY_LIMIT=1 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-merge-gate >/dev/null 2>&1
 
   [[ \$(git rev-parse main) == \$(git rev-parse agents/swarm-trunk) ]]
   [[ ! -f .clasp-swarm/test-wave/01-merge-gate/completed/SW-005 ]]
