@@ -4,6 +4,8 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 nix_config_features='experimental-features = nix-command flakes'
 readonly_nix_cache_root="/tmp/clasp-nix-cache"
+verify_lock_file="${CLASP_VERIFY_LOCK_FILE:-}"
+verify_lock_owner=0
 full_verify_commands=$'
 bash scripts/test-verify-all.sh
 bash scripts/test-swarm-control.sh
@@ -29,6 +31,47 @@ fallback_verify_commands=$'
 bash scripts/test-verify-all.sh
 bash scripts/test-task-manifest.sh
 '
+
+if [[ -z "$verify_lock_file" ]]; then
+  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    verify_lock_file="$(
+      git -C "$project_root" rev-parse --path-format=absolute --git-common-dir
+    )/clasp-verify.lock"
+  else
+    verify_lock_file="$project_root/.clasp-verify.lock"
+  fi
+fi
+
+verify_lock_dir="${verify_lock_file}.d"
+
+release_verify_lock() {
+  if [[ "$verify_lock_owner" != "1" ]]; then
+    return 0
+  fi
+
+  rm -f "$verify_lock_dir/pid"
+  rmdir "$verify_lock_dir" >/dev/null 2>&1 || true
+  verify_lock_owner=0
+}
+
+acquire_verify_lock() {
+  local owner_pid=""
+
+  mkdir -p "$(dirname "$verify_lock_file")"
+
+  while ! mkdir "$verify_lock_dir" >/dev/null 2>&1; do
+    owner_pid="$(cat "$verify_lock_dir/pid" 2>/dev/null || true)"
+    if [[ -n "$owner_pid" ]] && ! kill -0 "$owner_pid" >/dev/null 2>&1; then
+      rm -f "$verify_lock_dir/pid"
+      rmdir "$verify_lock_dir" >/dev/null 2>&1 || true
+      continue
+    fi
+    sleep 1
+  done
+
+  printf '%s\n' "$$" > "$verify_lock_dir/pid"
+  verify_lock_owner=1
+}
 
 if [[ -n "${NIX_CONFIG:-}" ]]; then
   export NIX_CONFIG="${NIX_CONFIG}"$'\n'"${nix_config_features}"
@@ -57,7 +100,12 @@ if [[ -z "${XDG_CACHE_HOME:-}" || ! -w "${XDG_CACHE_HOME:-/nonexistent}" ]]; the
 fi
 
 nix_failure_log="$(mktemp)"
-trap 'rm -f "$nix_failure_log"' EXIT
+trap 'rm -f "$nix_failure_log"; release_verify_lock' EXIT
+
+if [[ "${CLASP_VERIFY_LOCK_HELD:-0}" != "1" ]]; then
+  acquire_verify_lock
+  export CLASP_VERIFY_LOCK_HELD=1
+fi
 
 if nix develop -c bash -lc "
   set -euo pipefail
