@@ -170,6 +170,10 @@ defaultFixHints code =
       ["Make the hook handler accept the declared input schema and return the declared output schema."]
     "E_HOOK_TYPE" ->
       ["Declare hook input and output schemas with named record types."]
+    "E_IF_BRANCH_TYPE" ->
+      ["Make both `if` branches return the same type, or add annotations that force a shared result type."]
+    "E_IF_CONDITION" ->
+      ["Use a `Bool` condition in the `if`, or rewrite the condition so it evaluates to `true` or `false`."]
     "E_MULTIPLE_SUPERVISOR_PARENTS" ->
       ["Attach each workflow or child supervisor to exactly one parent supervisor."]
     "E_PRIMARY_COMPILER_RUNTIME" ->

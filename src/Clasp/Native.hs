@@ -358,6 +358,7 @@ data NativeExpr
   = NativeLocal Text
   | NativeLiteralExpr NativeLiteral
   | NativeList [NativeExpr]
+  | NativeIf NativeExpr NativeExpr NativeExpr
   | NativeReturn NativeExpr
   | NativeCompare NativeCompareOp NativeExpr NativeExpr
   | NativeLet NativeMutability Text NativeExpr NativeExpr
@@ -650,6 +651,8 @@ renderNativeExpr expr =
       renderLiteral literal
     NativeList items ->
       "list[" <> commaSeparated (fmap renderNativeExpr items) <> "]"
+    NativeIf condition thenBranch elseBranch ->
+      "if " <> renderNativeExpr condition <> " then " <> renderNativeExpr thenBranch <> " else " <> renderNativeExpr elseBranch
     NativeReturn value ->
       "return(" <> renderNativeExpr value <> ")"
     NativeCompare op left right ->
@@ -1270,6 +1273,8 @@ lowerExprToNative expr =
       NativeLiteralExpr (NativeBool value)
     LList items ->
       NativeList (fmap lowerExprToNative items)
+    LIf condition thenBranch elseBranch ->
+      NativeIf (lowerExprToNative condition) (lowerExprToNative thenBranch) (lowerExprToNative elseBranch)
     LReturn value ->
       NativeReturn (lowerExprToNative value)
     LEqual left right ->

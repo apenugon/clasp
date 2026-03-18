@@ -107,6 +107,7 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LList [LowerExpr]
+  | LIf LowerExpr LowerExpr LowerExpr
   | LListAppend LowerExpr LowerExpr
   | LReturn LowerExpr
   | LEqual LowerExpr LowerExpr
@@ -292,6 +293,8 @@ collectExprCodecTypes expr =
       []
     CList _ _ items ->
       concatMap collectExprCodecTypes items
+    CIf _ _ condition thenBranch elseBranch ->
+      collectExprCodecTypes condition <> collectExprCodecTypes thenBranch <> collectExprCodecTypes elseBranch
     CListAppend _ _ left right ->
       collectExprCodecTypes left <> collectExprCodecTypes right
     CReturn _ _ value ->
@@ -431,6 +434,8 @@ lowerCoreExpr expr =
       LBool value
     CList _ _ items ->
       LList (fmap lowerCoreExpr items)
+    CIf _ _ condition thenBranch elseBranch ->
+      LIf (lowerCoreExpr condition) (lowerCoreExpr thenBranch) (lowerCoreExpr elseBranch)
     CListAppend _ _ left right ->
       LListAppend (lowerCoreExpr left) (lowerCoreExpr right)
     CReturn _ _ value ->
@@ -627,6 +632,8 @@ expandExpr declEnv subst visited expr =
       LPromptAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LPromptText promptExpr ->
       LPromptText (expandExpr declEnv subst visited promptExpr)
+    LIf condition thenBranch elseBranch ->
+      LIf (expandExpr declEnv subst visited condition) (expandExpr declEnv subst visited thenBranch) (expandExpr declEnv subst visited elseBranch)
     LListAppend left right ->
       LListAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LCall fn args ->
@@ -834,6 +841,8 @@ summarizeValue expr =
       "false"
     LList items ->
       "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
+    LIf condition thenBranch elseBranch ->
+      "if " <> summarizeValue condition <> " then " <> summarizeValue thenBranch <> " else " <> summarizeValue elseBranch
     LListAppend left right ->
       summarizeValue left <> " ++ " <> summarizeValue right
     LReturn value ->

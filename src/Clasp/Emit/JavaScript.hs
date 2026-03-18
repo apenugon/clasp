@@ -3702,6 +3702,8 @@ collectStyledRefsExpr expr =
       collectStyledRefsExpr promptExpr
     LList items ->
       concatMap collectStyledRefsExpr items
+    LIf condition thenBranch elseBranch ->
+      collectStyledRefsExpr condition <> collectStyledRefsExpr thenBranch <> collectStyledRefsExpr elseBranch
     LListAppend left right ->
       collectStyledRefsExpr left <> collectStyledRefsExpr right
     LCall fn args ->
@@ -3736,6 +3738,8 @@ lowerExprContainsReturn expr =
       False
     LList items ->
       any lowerExprContainsReturn items
+    LIf condition thenBranch elseBranch ->
+      lowerExprContainsReturn condition || lowerExprContainsReturn thenBranch || lowerExprContainsReturn elseBranch
     LListAppend left right ->
       lowerExprContainsReturn left || lowerExprContainsReturn right
     LReturn _ ->
@@ -6718,6 +6722,20 @@ emitExpr counter expr =
     LList items ->
       let (nextCounter, itemTexts) = emitExprList counter items
        in (nextCounter, "[" <> T.intercalate ", " itemTexts <> "]")
+    LIf condition thenBranch elseBranch ->
+      let (counterAfterCondition, conditionText) = emitExpr counter condition
+          (counterAfterThen, thenText) = emitExpr counterAfterCondition thenBranch
+          (counterAfterElse, elseText) = emitExpr counterAfterThen elseBranch
+       in ( counterAfterElse
+          , T.unlines
+              [ "(() => {"
+              , "  if (" <> conditionText <> ") {"
+              , "    return " <> thenText <> ";"
+              , "  }"
+              , "  return " <> elseText <> ";"
+              , "})()"
+              ]
+          )
     LListAppend left right ->
       let (counterAfterLeft, leftText) = emitExpr counter left
           (counterAfterRight, rightText) = emitExpr counterAfterLeft right

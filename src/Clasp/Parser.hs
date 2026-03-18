@@ -1187,7 +1187,18 @@ declParser = do
 
 exprParser :: Parser Expr
 exprParser =
-  letExprParser <|> equalityExprParser
+  letExprParser <|> ifExprParser <|> equalityExprParser
+
+ifExprParser :: Parser Expr
+ifExprParser = do
+  start <- getSourcePos
+  keyword "if"
+  condition <- exprParser
+  keyword "then"
+  thenBranch <- exprParser
+  keyword "else"
+  elseBranch <- exprParser
+  pure (EIf (mergeSourceSpans (makeSourceSpan start start) (exprSpan elseBranch)) condition thenBranch elseBranch)
 
 equalityExprParser :: Parser Expr
 equalityExprParser = do
@@ -1884,6 +1895,9 @@ reservedWords =
   , "encode"
   , "return"
   , "match"
+  , "if"
+  , "then"
+  , "else"
   , "classified"
   , "true"
   , "false"

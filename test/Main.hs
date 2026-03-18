@@ -765,7 +765,20 @@ parserTests =
                     assertFailure ("expected let expression body, got " <> show other)
               Nothing ->
                 assertFailure "expected greeting declaration"
-
+    , testCase "parses if expressions" $
+        case parseSource "inline" ifExpressionSource of
+          Left err ->
+            assertFailure ("expected if source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "main" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EIf _ (EVar _ "isReady") (EString _ "ready") (EString _ "waiting") ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected if expression body, got " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "parses block expressions" $
         case parseSource "inline" blockExpressionSource of
           Left err ->
@@ -1306,6 +1319,20 @@ checkerTests =
                     assertEqual "list append result type" (TList TStr) (coreDeclType decl)
                   other ->
                     assertFailure ("unexpected checked list append declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
+    , testCase "typechecks if expressions" $
+        case checkSource "if-expression" ifExpressionSource of
+          Left err ->
+            assertFailure ("expected if source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CIf _ TStr (CVar _ TBool "isReady") (CString _ "ready") (CString _ "waiting") ->
+                    assertEqual "if result type" TStr (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked if declaration: " <> show other)
               Nothing ->
                 assertFailure "expected main declaration"
     , testCase "typechecks local let expressions" $
@@ -3489,6 +3516,22 @@ nativeTests =
                 assertFailure ("expected native global main declaration, got " <> show other)
               Nothing ->
                 assertFailure "expected native main declaration"
+    , testCase "native lowering preserves if expressions" $
+        case nativeSource "if-expression" ifExpressionSource of
+          Left err ->
+            assertFailure ("expected if source native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod ->
+            case findNativeDecl "main" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl globalDecl) ->
+                case nativeGlobalBody globalDecl of
+                  NativeIf (NativeLocal "isReady") (NativeLiteralExpr (NativeString "ready")) (NativeLiteralExpr (NativeString "waiting")) ->
+                    pure ()
+                  other ->
+                    assertFailure ("unexpected native if body: " <> show other)
+              Just other ->
+                assertFailure ("expected native global main declaration, got " <> show other)
+              Nothing ->
+                assertFailure "expected native main declaration"
     , testCase "native runtime tracks json codecs and runtime boundaries for app surfaces" $
         case nativeSource "native-boundaries" nativeBoundarySource of
           Left err ->
@@ -4231,6 +4274,15 @@ compileTests =
             assertFailure ("expected list append compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected list append spread expression" ("export const main = [...leading, ...trailing];" `T.isInfixOf` emitted)
+    , testCase "compile lowers if expressions to JavaScript conditionals" $
+        case compileSource "if-expression" ifExpressionSource of
+          Left err ->
+            assertFailure ("expected if source compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected if expression iife" ("export const main = (() => {" `T.isInfixOf` emitted)
+            assertBool "expected if condition" ("if (isReady) {" `T.isInfixOf` emitted)
+            assertBool "expected then branch" ("return \"ready\";" `T.isInfixOf` emitted)
+            assertBool "expected else branch" ("return \"waiting\";" `T.isInfixOf` emitted)
     , testCase "compile emits list json codecs for explicit encode and decode boundaries" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -4538,6 +4590,21 @@ compileTests =
                 , "console.log(JSON.stringify(compiledModule.main));"
                 ]
             assertEqual "expected appended list runtime result" "[\"Ada\",\"Grace\",\"Linus\"]" runtimeOutput
+    , testCase "compile evaluates if expressions end to end" $
+        case compileSource "if-expression" ifExpressionSource of
+          Left err ->
+            assertFailure ("expected if source compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/if-expression-example.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify(compiledModule.main));"
+                ]
+            assertEqual "expected if runtime result" "\"ready\"" runtimeOutput
     , testCase "compile evaluates the let example file" $ do
         source <- readExampleSource "let.clasp"
         case compileSource "examples/let.clasp" source of
@@ -8469,6 +8536,18 @@ listAppendSource =
     , ""
     , "main : [Str]"
     , "main = append leading trailing"
+    ]
+
+ifExpressionSource :: Text
+ifExpressionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "isReady : Bool"
+    , "isReady = true"
+    , ""
+    , "main : Str"
+    , "main = if isReady then \"ready\" else \"waiting\""
     ]
 
 listJsonBoundarySource :: Text

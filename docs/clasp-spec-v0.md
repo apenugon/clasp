@@ -485,6 +485,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
 - A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type.
+- `if condition then left else right` requires a `Bool` condition and matching branch types.
 - `append left right` is overloaded by the checker: list operands lower to array concatenation, while `View` operands keep the view-append surface.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.

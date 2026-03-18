@@ -643,6 +643,7 @@ data Expr
   | EString SourceSpan Text
   | EBool SourceSpan Bool
   | EList SourceSpan [Expr]
+  | EIf SourceSpan Expr Expr Expr
   | EReturn SourceSpan Expr
   | EBlock SourceSpan Expr
   | EEqual SourceSpan Expr Expr
@@ -675,6 +676,8 @@ exprSpan expr =
     EBool span' _ ->
       span'
     EList span' _ ->
+      span'
+    EIf span' _ _ _ ->
       span'
     EReturn span' _ ->
       span'
@@ -1123,6 +1126,14 @@ renderExpr parentPrecedence expr =
       if value then "true" else "false"
     EList _ values ->
       "[" <> T.intercalate ", " (fmap (renderExpr 0) values) <> "]"
+    EIf _ condition thenBranch elseBranch ->
+      renderWithParensIfNeeded parentPrecedence 0 $
+        "if "
+          <> renderExpr 0 condition
+          <> " then "
+          <> renderExpr 0 thenBranch
+          <> " else "
+          <> renderExpr 0 elseBranch
     EReturn _ value ->
       "return " <> renderExpr 4 value
     EBlock _ body ->

@@ -204,6 +204,7 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftList [DraftExpr]
+  | DraftIf DraftExpr DraftExpr DraftExpr
   | DraftListAppend DraftExpr DraftExpr
   | DraftReturn DraftExpr
   | DraftEqual DraftExpr DraftExpr
@@ -499,6 +500,10 @@ exprUsesBuiltinStdlibForeignDecl name expr =
       False
     EList _ values ->
       any (exprUsesBuiltinStdlibForeignDecl name) values
+    EIf _ condition thenBranch elseBranch ->
+      exprUsesBuiltinStdlibForeignDecl name condition
+        || exprUsesBuiltinStdlibForeignDecl name thenBranch
+        || exprUsesBuiltinStdlibForeignDecl name elseBranch
     EReturn _ value ->
       exprUsesBuiltinStdlibForeignDecl name value
     EBlock _ body ->
@@ -660,6 +665,10 @@ collectExprOptionConstructors expr =
       []
     EList _ values ->
       concatMap collectExprOptionConstructors values
+    EIf _ condition thenBranch elseBranch ->
+      collectExprOptionConstructors condition
+        <> collectExprOptionConstructors thenBranch
+        <> collectExprOptionConstructors elseBranch
     EReturn _ value ->
       collectExprOptionConstructors value
     EBlock _ body ->
@@ -753,6 +762,10 @@ collectExprResultConstructors expr =
       []
     EList _ values ->
       concatMap collectExprResultConstructors values
+    EIf _ condition thenBranch elseBranch ->
+      collectExprResultConstructors condition
+        <> collectExprResultConstructors thenBranch
+        <> collectExprResultConstructors elseBranch
     EReturn _ value ->
       collectExprResultConstructors value
     EBlock _ body ->
@@ -3095,6 +3108,42 @@ inferExpr ctx termEnv localEnv expr =
       pure (DraftExpr span' IBool (DraftBool value))
     EList span' values ->
       inferListExpr ctx termEnv localEnv span' values
+    EIf ifSpan condition thenBranch elseBranch -> do
+      conditionExpr <- inferExpr ctx termEnv localEnv condition
+      unify
+        ( UnifyContext
+            { unifyCode = "E_IF_CONDITION"
+            , unifySummary = "If conditions must have type Bool."
+            , unifyPrimarySpan = exprSpan condition
+            , unifyRelated = []
+            }
+        )
+        (draftExprType conditionExpr)
+        IBool
+      thenExpr <- inferExpr ctx termEnv localEnv thenBranch
+      elseExpr <- inferExpr ctx termEnv localEnv elseBranch
+      resultType <- freshTypeVar
+      unify
+        ( UnifyContext
+            { unifyCode = "E_IF_BRANCH_TYPE"
+            , unifySummary = "If branches must return the same type."
+            , unifyPrimarySpan = exprSpan thenBranch
+            , unifyRelated = [diagnosticRelated "else branch" (exprSpan elseBranch)]
+            }
+        )
+        (draftExprType thenExpr)
+        resultType
+      unify
+        ( UnifyContext
+            { unifyCode = "E_IF_BRANCH_TYPE"
+            , unifySummary = "If branches must return the same type."
+            , unifyPrimarySpan = exprSpan elseBranch
+            , unifyRelated = [diagnosticRelated "then branch" (exprSpan thenBranch)]
+            }
+        )
+        (draftExprType elseExpr)
+        resultType
+      pure (DraftExpr ifSpan resultType (DraftIf conditionExpr thenExpr elseExpr))
     EReturn returnSpan value -> do
       maybeReturnType <- gets inferReturnType
       case maybeReturnType of
@@ -4711,6 +4760,12 @@ freezeDraftExpr ctx decl inferState draftExpr =
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
       pure (CList (draftExprSpan draftExpr) exprType frozenItems)
+    DraftIf condition thenBranch elseBranch -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenCondition <- freezeDraftExpr ctx decl inferState condition
+      frozenThen <- freezeDraftExpr ctx decl inferState thenBranch
+      frozenElse <- freezeDraftExpr ctx decl inferState elseBranch
+      pure (CIf (draftExprSpan draftExpr) exprType frozenCondition frozenThen frozenElse)
     DraftListAppend left right -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenLeft <- freezeDraftExpr ctx decl inferState left

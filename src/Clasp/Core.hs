@@ -269,6 +269,7 @@ data CoreExpr
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CList SourceSpan Type [CoreExpr]
+  | CIf SourceSpan Type CoreExpr CoreExpr CoreExpr
   | CListAppend SourceSpan Type CoreExpr CoreExpr
   | CReturn SourceSpan Type CoreExpr
   | CEqual SourceSpan CoreExpr CoreExpr
@@ -659,6 +660,8 @@ renderCoreExpr parentPrecedence expr =
       renderTypedAtom (if value then "true" else "false") TBool
     CList _ typ values ->
       renderTypedAtom ("[" <> T.intercalate ", " (fmap (renderCoreExpr 0) values) <> "]") typ
+    CIf _ typ condition thenBranch elseBranch ->
+      renderTypedExpr parentPrecedence 0 ("if " <> renderCoreExpr 0 condition <> " then " <> renderCoreExpr 0 thenBranch <> " else " <> renderCoreExpr 0 elseBranch) typ
     CListAppend _ typ left right ->
       renderTypedAtom ("append " <> renderCoreExpr 4 left <> " " <> renderCoreExpr 4 right) typ
     CReturn _ typ value ->
@@ -818,6 +821,8 @@ coreExprType expr =
       TBool
     CList _ typ _ ->
       typ
+    CIf _ typ _ _ _ ->
+      typ
     CListAppend _ typ _ _ ->
       typ
     CReturn _ typ _ ->
@@ -951,6 +956,8 @@ renameDecl oldName newName modl
           CPromptText span' (renameDeclExpr boundNames promptExpr)
         CList span' typ items ->
           CList span' typ (fmap (renameDeclExpr boundNames) items)
+        CIf span' typ condition thenBranch elseBranch ->
+          CIf span' typ (renameDeclExpr boundNames condition) (renameDeclExpr boundNames thenBranch) (renameDeclExpr boundNames elseBranch)
         CListAppend span' typ left right ->
           CListAppend span' typ (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CEqual span' left right ->
@@ -1154,6 +1161,8 @@ renameSchema oldName newName modl
           CPromptText span' (renameExprTypes promptExpr)
         CList span' typ items ->
           CList span' (renameType typ) (fmap renameExprTypes items)
+        CIf span' typ condition thenBranch elseBranch ->
+          CIf span' (renameType typ) (renameExprTypes condition) (renameExprTypes thenBranch) (renameExprTypes elseBranch)
         CListAppend span' typ left right ->
           CListAppend span' (renameType typ) (renameExprTypes left) (renameExprTypes right)
         CEqual span' left right ->
