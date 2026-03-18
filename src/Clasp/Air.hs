@@ -691,6 +691,12 @@ buildExprGraph nodeId expr =
           let itemIds = fmap (\index -> childSegmentId nodeId ("item" <> showText index)) [(0 :: Int) .. length items - 1]
               itemNodes = concat (zipWith buildExprGraph itemIds items)
            in ([("items", AirAttrNodes itemIds)], itemNodes)
+        CListAppend _ _ left right ->
+          let leftId = exprChildId "left"
+              rightId = exprChildId "right"
+           in ( [("left", AirAttrNode leftId), ("right", AirAttrNode rightId)]
+              , buildExprGraph leftId left <> buildExprGraph rightId right
+              )
         CReturn _ _ value ->
           let valueId = exprChildId "value"
            in ([("value", AirAttrNode valueId)], buildExprGraph valueId value)
@@ -938,6 +944,7 @@ exprKind expr =
     CString {} -> "string"
     CBool {} -> "bool"
     CList {} -> "list"
+    CListAppend {} -> "listAppend"
     CReturn {} -> "return"
     CEqual {} -> "equal"
     CNotEqual {} -> "notEqual"
@@ -978,6 +985,7 @@ exprSpan expr =
     CString span' _ -> span'
     CBool span' _ -> span'
     CList span' _ _ -> span'
+    CListAppend span' _ _ _ -> span'
     CReturn span' _ _ -> span'
     CEqual span' _ _ -> span'
     CNotEqual span' _ _ -> span'

@@ -485,6 +485,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
 - A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type.
+- `append left right` is overloaded by the checker: list operands lower to array concatenation, while `View` operands keep the view-append surface.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
 - Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.
@@ -536,7 +537,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Hooks currently require record request and response types.
 - Routes currently require record request and response types.
 - Routes may also return compiler-known `Page` values, which emit stable default SSR HTML rather than JSON.
-- `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`.
+- `Page` and `View` are compiler-known types; the current safe view surface is `page`, `text`, `empty`, `append`, `element`, and `styled`, with `append` remaining valid for view composition even though the same surface now also concatenates lists.
 - Generated JavaScript page modules also export `__claspStyleIR`, a compiler-owned style contract with stable style refs, default design tokens, baseline variants, per-target lowering for web and native runtimes, and explicit raw host styling escape-hatch metadata.
 - Page-flow machine metadata is emitted through generated sidecar exports such as `__claspUiGraph`, `__claspNavigationGraph`, and `__claspActionGraph`; HTML flow attributes are available only through the opt-in `__claspRenderPage(value, __claspPageRenderModes.htmlWithFlowMetadata)` projection.
 - `AuthSession`, `Principal`, `Tenant`, `ResourceIdentity`, `AuditActor`, `AuditAction`, `AuditProvenance`, `StandardAuditEnvelope`, and `SqliteConnection` are compiler-known record-shaped types. The current constructor surface is `authSession`, `principal`, `tenant`, `resourceIdentity`, `auditActor`, `auditAction`, `auditProvenance`, and `auditEnvelope`; `SqliteConnection` values currently come from `sqliteOpen` and `sqliteOpenReadonly`.

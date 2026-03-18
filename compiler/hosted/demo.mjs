@@ -51,6 +51,10 @@ console.log(
     mismatchDiagnostic: snapshot.mismatchDiagnostic,
     emittedModule: snapshot.emittedModule,
     emittedNativeModule: snapshot.emittedNativeModule,
+    parsedSampleModuleName: snapshot.parsedSampleModuleName,
+    parsedSampleImports: snapshot.parsedSampleImports,
+    parsedSampleDeclNames: snapshot.parsedSampleDeclNames,
+    parsedSampleMainExpr: snapshot.parsedSampleMainExpr,
     emittedGreeting: emittedModule.greeting,
     emittedRender: emittedModule.renderLead(42)
   })

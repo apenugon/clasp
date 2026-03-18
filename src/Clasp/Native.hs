@@ -374,6 +374,7 @@ data NativeExpr
 data NativeIntrinsic
   = NativePageIntrinsic NativeExpr NativeExpr
   | NativeRedirectIntrinsic Text
+  | NativeListAppendIntrinsic NativeExpr NativeExpr
   | NativeViewEmptyIntrinsic
   | NativeViewTextIntrinsic NativeExpr
   | NativeViewAppendIntrinsic NativeExpr NativeExpr
@@ -689,6 +690,8 @@ renderIntrinsic intrinsic =
       "intrinsic.page(" <> renderNativeExpr title <> ", " <> renderNativeExpr body <> ")"
     NativeRedirectIntrinsic targetPath ->
       "intrinsic.redirect(" <> renderQuoted targetPath <> ")"
+    NativeListAppendIntrinsic left right ->
+      "intrinsic.list.append(" <> renderNativeExpr left <> ", " <> renderNativeExpr right <> ")"
     NativeViewEmptyIntrinsic ->
       "intrinsic.view.empty"
     NativeViewTextIntrinsic value ->
@@ -1293,6 +1296,8 @@ lowerExprToNative expr =
       NativeIntrinsic (NativePageIntrinsic (lowerExprToNative title) (lowerExprToNative body))
     LRedirect targetPath ->
       NativeIntrinsic (NativeRedirectIntrinsic targetPath)
+    LListAppend left right ->
+      NativeIntrinsic (NativeListAppendIntrinsic (lowerExprToNative left) (lowerExprToNative right))
     LViewEmpty ->
       NativeIntrinsic NativeViewEmptyIntrinsic
     LViewText value ->

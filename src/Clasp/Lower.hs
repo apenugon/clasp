@@ -107,6 +107,7 @@ data LowerExpr
   | LString Text
   | LBool Bool
   | LList [LowerExpr]
+  | LListAppend LowerExpr LowerExpr
   | LReturn LowerExpr
   | LEqual LowerExpr LowerExpr
   | LNotEqual LowerExpr LowerExpr
@@ -291,6 +292,8 @@ collectExprCodecTypes expr =
       []
     CList _ _ items ->
       concatMap collectExprCodecTypes items
+    CListAppend _ _ left right ->
+      collectExprCodecTypes left <> collectExprCodecTypes right
     CReturn _ _ value ->
       collectExprCodecTypes value
     CEqual _ left right ->
@@ -428,6 +431,8 @@ lowerCoreExpr expr =
       LBool value
     CList _ _ items ->
       LList (fmap lowerCoreExpr items)
+    CListAppend _ _ left right ->
+      LListAppend (lowerCoreExpr left) (lowerCoreExpr right)
     CReturn _ _ value ->
       LReturn (lowerCoreExpr value)
     CEqual _ left right ->
@@ -622,6 +627,8 @@ expandExpr declEnv subst visited expr =
       LPromptAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LPromptText promptExpr ->
       LPromptText (expandExpr declEnv subst visited promptExpr)
+    LListAppend left right ->
+      LListAppend (expandExpr declEnv subst visited left) (expandExpr declEnv subst visited right)
     LCall fn args ->
       let fn' = expandExpr declEnv subst visited fn
           args' = fmap (expandExpr declEnv subst visited) args
@@ -827,6 +834,8 @@ summarizeValue expr =
       "false"
     LList items ->
       "[" <> T.intercalate ", " (fmap summarizeValue items) <> "]"
+    LListAppend left right ->
+      summarizeValue left <> " ++ " <> summarizeValue right
     LReturn value ->
       summarizeValue value
     LEqual left right ->

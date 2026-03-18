@@ -269,6 +269,7 @@ data CoreExpr
   | CString SourceSpan Text
   | CBool SourceSpan Bool
   | CList SourceSpan Type [CoreExpr]
+  | CListAppend SourceSpan Type CoreExpr CoreExpr
   | CReturn SourceSpan Type CoreExpr
   | CEqual SourceSpan CoreExpr CoreExpr
   | CNotEqual SourceSpan CoreExpr CoreExpr
@@ -658,6 +659,8 @@ renderCoreExpr parentPrecedence expr =
       renderTypedAtom (if value then "true" else "false") TBool
     CList _ typ values ->
       renderTypedAtom ("[" <> T.intercalate ", " (fmap (renderCoreExpr 0) values) <> "]") typ
+    CListAppend _ typ left right ->
+      renderTypedAtom ("append " <> renderCoreExpr 4 left <> " " <> renderCoreExpr 4 right) typ
     CReturn _ typ value ->
       renderTypedExpr parentPrecedence 0 ("return " <> renderCoreExpr 1 value) typ
     CEqual _ left right ->
@@ -815,6 +818,8 @@ coreExprType expr =
       TBool
     CList _ typ _ ->
       typ
+    CListAppend _ typ _ _ ->
+      typ
     CReturn _ typ _ ->
       typ
     CEqual _ _ _ ->
@@ -946,6 +951,8 @@ renameDecl oldName newName modl
           CPromptText span' (renameDeclExpr boundNames promptExpr)
         CList span' typ items ->
           CList span' typ (fmap (renameDeclExpr boundNames) items)
+        CListAppend span' typ left right ->
+          CListAppend span' typ (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CEqual span' left right ->
           CEqual span' (renameDeclExpr boundNames left) (renameDeclExpr boundNames right)
         CNotEqual span' left right ->
@@ -1147,6 +1154,8 @@ renameSchema oldName newName modl
           CPromptText span' (renameExprTypes promptExpr)
         CList span' typ items ->
           CList span' (renameType typ) (fmap renameExprTypes items)
+        CListAppend span' typ left right ->
+          CListAppend span' (renameType typ) (renameExprTypes left) (renameExprTypes right)
         CEqual span' left right ->
           CEqual span' (renameExprTypes left) (renameExprTypes right)
         CNotEqual span' left right ->

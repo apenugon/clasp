@@ -1,5 +1,6 @@
 module Main
 
+import Compiler.Ast
 import Compiler.Checker
 import Compiler.Emit.JavaScript
 import Compiler.Emit.Native
@@ -15,7 +16,11 @@ record HostedCompilerSnapshot = {
   explainModule : Str,
   mismatchDiagnostic : Str,
   emittedModule : Str,
-  emittedNativeModule : Str
+  emittedNativeModule : Str,
+  parsedSampleModuleName : Str,
+  parsedSampleImports : [Str],
+  parsedSampleDeclNames : [Str],
+  parsedSampleMainExpr : Str
 }
 
 checkEntrypoint : Str
@@ -30,6 +35,12 @@ compileEntrypoint = emittedModule
 nativeEntrypoint : Str
 nativeEntrypoint = emittedNativeModule
 
+astSampleSource : Str
+astSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
+
+parsedSampleModule : HostedModuleAst
+parsedSampleModule = parseModuleAst astSampleSource
+
 snapshot : HostedCompilerSnapshot
 snapshot = HostedCompilerSnapshot {
   loweredValue = renderLowerDecl loweredValueDecl,
@@ -41,7 +52,11 @@ snapshot = HostedCompilerSnapshot {
   explainModule = explainEntrypoint,
   mismatchDiagnostic = mismatchDiagnostic,
   emittedModule = compileEntrypoint,
-  emittedNativeModule = nativeEntrypoint
+  emittedNativeModule = nativeEntrypoint,
+  parsedSampleModuleName = parsedSampleModule.moduleName,
+  parsedSampleImports = parsedSampleModule.imports,
+  parsedSampleDeclNames = declNames parsedSampleModule,
+  parsedSampleMainExpr = renderMainExpr parsedSampleModule
 }
 
 snapshotJson : Str

@@ -204,6 +204,7 @@ data DraftExprNode
   | DraftString Text
   | DraftBool Bool
   | DraftList [DraftExpr]
+  | DraftListAppend DraftExpr DraftExpr
   | DraftReturn DraftExpr
   | DraftEqual DraftExpr DraftExpr
   | DraftNotEqual DraftExpr DraftExpr
@@ -3195,6 +3196,10 @@ inferExpr ctx termEnv localEnv expr =
     ECall callSpan fn args ->
       case fn of
         EVar _ name
+          | name == "append"
+          , Map.notMember name localEnv
+          , Map.notMember name termEnv ->
+              inferBuiltinAppendCall ctx termEnv localEnv callSpan args
           | isBuiltinViewFunctionName name
           , Map.notMember name localEnv
           , Map.notMember name termEnv ->
@@ -3247,6 +3252,46 @@ inferListExpr ctx termEnv localEnv listSpan values = do
     [(0 :: Int) ..]
     draftValues
   pure (DraftExpr listSpan (IList itemType) (DraftList draftValues))
+
+inferBuiltinAppendCall :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> [Expr] -> InferM DraftExpr
+inferBuiltinAppendCall ctx termEnv localEnv callSpan args =
+  case args of
+    [leftExpr, rightExpr] -> do
+      draftLeft <- inferExpr ctx termEnv localEnv leftExpr
+      draftRight <- inferExpr ctx termEnv localEnv rightExpr
+      leftType <- resolveCurrentType (draftExprType draftLeft)
+      rightType <- resolveCurrentType (draftExprType draftRight)
+      case (leftType, rightType) of
+        (INamed leftName, INamed rightName)
+          | leftName == viewTypeName
+          , rightName == viewTypeName ->
+              pure (DraftExpr callSpan (INamed viewTypeName) (DraftViewAppend draftLeft draftRight))
+        _ -> do
+          itemType <- freshTypeVar
+          let listType = IList itemType
+          unify
+            ( UnifyContext
+                { unifyCode = "E_TYPE_MISMATCH"
+                , unifySummary = "List append expects list values of the same item type."
+                , unifyPrimarySpan = draftExprSpan draftLeft
+                , unifyRelated = [diagnosticRelated "append right operand" (draftExprSpan draftRight)]
+                }
+            )
+            (draftExprType draftLeft)
+            listType
+          unify
+            ( UnifyContext
+                { unifyCode = "E_TYPE_MISMATCH"
+                , unifySummary = "List append expects list values of the same item type."
+                , unifyPrimarySpan = draftExprSpan draftRight
+                , unifyRelated = [diagnosticRelated "append left operand" (draftExprSpan draftLeft)]
+                }
+            )
+            (draftExprType draftRight)
+            listType
+          pure (DraftExpr callSpan listType (DraftListAppend draftLeft draftRight))
+    _ ->
+      throwViewBuiltinArity callSpan "append" 2 (length args)
 
 inferEqualityExpr :: ModuleContext -> DeclTypeEnv -> LocalEnv -> SourceSpan -> Bool -> Expr -> Expr -> InferM DraftExpr
 inferEqualityExpr ctx termEnv localEnv equalitySpan isEqual left right = do
@@ -4666,6 +4711,11 @@ freezeDraftExpr ctx decl inferState draftExpr =
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenItems <- traverse (freezeDraftExpr ctx decl inferState) items
       pure (CList (draftExprSpan draftExpr) exprType frozenItems)
+    DraftListAppend left right -> do
+      exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
+      frozenLeft <- freezeDraftExpr ctx decl inferState left
+      frozenRight <- freezeDraftExpr ctx decl inferState right
+      pure (CListAppend (draftExprSpan draftExpr) exprType frozenLeft frozenRight)
     DraftReturn value -> do
       exprType <- freezeInferTypeForDecl decl inferState (draftExprType draftExpr)
       frozenValue <- freezeDraftExpr ctx decl inferState value

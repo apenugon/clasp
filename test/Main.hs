@@ -1294,6 +1294,20 @@ checkerTests =
                     assertFailure ("unexpected checked matrix declaration: " <> show other)
               Nothing ->
                 assertFailure "expected matrix declaration"
+    , testCase "typechecks general list append expressions" $
+        case checkSource "list-append" listAppendSource of
+          Left err ->
+            assertFailure ("expected list append source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CListAppend _ (TList TStr) (CVar _ (TList TStr) "leading") (CVar _ (TList TStr) "trailing") ->
+                    assertEqual "list append result type" (TList TStr) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked list append declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "typechecks local let expressions" $
         case checkSource "let" letExpressionSource of
           Left err ->
@@ -3459,6 +3473,22 @@ nativeTests =
                 assertEqual "readFile symbol" "clasp_rt_read_file" (nativeRuntimeBindingSymbol binding)
               Nothing ->
                 assertFailure "expected readFile runtime binding"
+    , testCase "native lowering preserves list append as a dedicated intrinsic" $
+        case nativeSource "list-append" listAppendSource of
+          Left err ->
+            assertFailure ("expected list append native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod ->
+            case findNativeDecl "main" (nativeModuleDecls nativeMod) of
+              Just (NativeGlobalDecl globalDecl) ->
+                case nativeGlobalBody globalDecl of
+                  NativeIntrinsic (NativeListAppendIntrinsic (NativeLocal "leading") (NativeLocal "trailing")) ->
+                    pure ()
+                  other ->
+                    assertFailure ("unexpected native list append body: " <> show other)
+              Just other ->
+                assertFailure ("expected native global main declaration, got " <> show other)
+              Nothing ->
+                assertFailure "expected native main declaration"
     , testCase "native runtime tracks json codecs and runtime boundaries for app surfaces" $
         case nativeSource "native-boundaries" nativeBoundarySource of
           Left err ->
@@ -4031,6 +4061,30 @@ compileTests =
               "expected emitted render export"
               (Just (String "42"))
               (lookupObjectKey "emittedRender" runtimeValue)
+            assertEqual
+              "expected parsed sample module name"
+              (Just (String "Main"))
+              (lookupObjectKey "parsedSampleModuleName" runtimeValue)
+            case lookupObjectKey "parsedSampleImports" runtimeValue of
+              Just (Array importsValue) ->
+                assertEqual
+                  "expected parsed sample imports"
+                  [String "Compiler.Lower"]
+                  (toList importsValue)
+              _ ->
+                assertFailure "expected parsedSampleImports field"
+            case lookupObjectKey "parsedSampleDeclNames" runtimeValue of
+              Just (Array declNamesValue) ->
+                assertEqual
+                  "expected parsed sample declaration names"
+                  [String "hello", String "id", String "main"]
+                  (toList declNamesValue)
+              _ ->
+                assertFailure "expected parsedSampleDeclNames field"
+            assertEqual
+              "expected parsed sample main expression"
+              (Just (String "call id(hello)"))
+              (lookupObjectKey "parsedSampleMainExpr" runtimeValue)
     , testCase "claspc compile prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         let compiledPath = "dist/compiler-selfhost-json.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4171,6 +4225,12 @@ compileTests =
             assertFailure ("expected nested list compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected nested array literal" ("[[], [1, 2]]" `T.isInfixOf` emitted)
+    , testCase "compile lowers list append to JavaScript spread arrays" $
+        case compileSource "list-append" listAppendSource of
+          Left err ->
+            assertFailure ("expected list append compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted ->
+            assertBool "expected list append spread expression" ("export const main = [...leading, ...trailing];" `T.isInfixOf` emitted)
     , testCase "compile emits list json codecs for explicit encode and decode boundaries" $
         case compileSource "list-json" listJsonBoundarySource of
           Left err ->
@@ -4463,6 +4523,21 @@ compileTests =
               "expected list example runtime result"
               "{\"main\":[{\"name\":\"Ada\",\"active\":true},{\"name\":\"Grace\",\"active\":false}],\"usersJson\":\"[{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true},{\\\"name\\\":\\\"Grace\\\",\\\"active\\\":false}]\",\"directory\":{\"names\":[\"Ada\",\"Grace\"],\"scoreBuckets\":[[10,20],[30]]}}"
               runtimeOutput
+    , testCase "compile evaluates list append end to end" $
+        case compileSource "list-append" listAppendSource of
+          Left err ->
+            assertFailure ("expected list append compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            let compiledPath = "dist/list-append-example.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify(compiledModule.main));"
+                ]
+            assertEqual "expected appended list runtime result" "[\"Ada\",\"Grace\",\"Linus\"]" runtimeOutput
     , testCase "compile evaluates the let example file" $ do
         source <- readExampleSource "let.clasp"
         case compileSource "examples/let.clasp" source of
@@ -8379,6 +8454,21 @@ nestedEmptyListSource =
     , ""
     , "matrix : [[Int]]"
     , "matrix = [[], [1, 2]]"
+    ]
+
+listAppendSource :: Text
+listAppendSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "leading : [Str]"
+    , "leading = [\"Ada\"]"
+    , ""
+    , "trailing : [Str]"
+    , "trailing = [\"Grace\", \"Linus\"]"
+    , ""
+    , "main : [Str]"
+    , "main = append leading trailing"
     ]
 
 listJsonBoundarySource :: Text
