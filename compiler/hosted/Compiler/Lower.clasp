@@ -1,27 +1,19 @@
 module Compiler.Lower
 
-type CoreExprText = CoreVar Str | CoreString Str | CoreCall Str [Str]
-type CoreDeclText = CoreValue Str CoreExprText | CoreFunction Str Str CoreExprText
-
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInvoke Str Str
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInvoke Str [LowerExprText]
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str Str LowerExprText
 
-lowerExpr : CoreExprText -> LowerExprText
-lowerExpr expr = match expr {
-  CoreVar name ->
-    LowerName name,
-  CoreString value ->
-    LowerLiteral value,
-  CoreCall callee args ->
-    LowerInvoke callee (textJoin ", " args)
-}
+appendLowerRenderedText : [Str] -> Str -> [Str]
+appendLowerRenderedText values value = append values [value]
 
-lowerDecl : CoreDeclText -> LowerDeclText
-lowerDecl decl = match decl {
-  CoreValue name body ->
-    LowerConst name (lowerExpr body),
-  CoreFunction name param body ->
-    LowerFn name param (lowerExpr body)
+renderLowerExprs : [LowerExprText] -> [Str]
+renderLowerExprs values = {
+  let mut rendered = [];
+  for value in values {
+    rendered = appendLowerRenderedText rendered (renderLowerExpr value);
+    rendered
+  };
+  rendered
 }
 
 renderLowerExpr : LowerExprText -> Str
@@ -31,7 +23,7 @@ renderLowerExpr expr = match expr {
   LowerLiteral value ->
     textConcat ["literal:", value],
   LowerInvoke callee args ->
-    textConcat ["call ", callee, "(", args, ")"]
+    textConcat ["call ", callee, "(", textJoin ", " (renderLowerExprs args), ")"]
 }
 
 renderLowerDecl : LowerDeclText -> Str
@@ -42,17 +34,14 @@ renderLowerDecl decl = match decl {
     textConcat ["function ", name, "(", param, ") = ", renderLowerExpr body]
 }
 
-sampleValueDecl : CoreDeclText
-sampleValueDecl = CoreValue "greeting" (CoreString "hello")
-
-sampleFunctionDecl : CoreDeclText
-sampleFunctionDecl = CoreFunction "renderLead" "lead" (CoreCall "String" ["lead"])
-
 loweredValueDecl : LowerDeclText
-loweredValueDecl = lowerDecl sampleValueDecl
+loweredValueDecl = LowerConst "hello" (LowerLiteral "Hello from Clasp")
 
 loweredFunctionDecl : LowerDeclText
-loweredFunctionDecl = lowerDecl sampleFunctionDecl
+loweredFunctionDecl = LowerFn "id" "value" (LowerName "value")
+
+loweredMainDecl : LowerDeclText
+loweredMainDecl = LowerConst "main" (LowerInvoke "id" [LowerName "hello"])
 
 loweredSummary : Str
-loweredSummary = textJoin "\n" [renderLowerDecl loweredValueDecl, renderLowerDecl loweredFunctionDecl]
+loweredSummary = textJoin "\n" [renderLowerDecl loweredValueDecl, renderLowerDecl loweredFunctionDecl, renderLowerDecl loweredMainDecl]

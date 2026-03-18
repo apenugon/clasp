@@ -23,6 +23,12 @@ record HostedCompilerSnapshot = {
   parsedSampleMainExpr : Str
 }
 
+astSampleSource : Str
+astSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
+
+parsedSampleModule : HostedModuleAst
+parsedSampleModule = parseModuleAst astSampleSource
+
 checkEntrypoint : Str
 checkEntrypoint = checkedModuleSummary
 
@@ -34,12 +40,6 @@ compileEntrypoint = emittedModule
 
 nativeEntrypoint : Str
 nativeEntrypoint = emittedNativeModule
-
-astSampleSource : Str
-astSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
-
-parsedSampleModule : HostedModuleAst
-parsedSampleModule = parseModuleAst astSampleSource
 
 snapshot : HostedCompilerSnapshot
 snapshot = HostedCompilerSnapshot {

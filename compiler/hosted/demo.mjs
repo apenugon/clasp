@@ -55,7 +55,8 @@ console.log(
     parsedSampleImports: snapshot.parsedSampleImports,
     parsedSampleDeclNames: snapshot.parsedSampleDeclNames,
     parsedSampleMainExpr: snapshot.parsedSampleMainExpr,
-    emittedGreeting: emittedModule.greeting,
-    emittedRender: emittedModule.renderLead(42)
+    emittedHello: emittedModule.hello,
+    emittedIdentity: emittedModule.id("Ada"),
+    emittedMain: emittedModule.main
   })
 );
