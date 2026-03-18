@@ -32,15 +32,33 @@ bash scripts/test-verify-all.sh
 bash scripts/test-task-manifest.sh
 '
 
-if [[ -z "$verify_lock_file" ]]; then
-  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    verify_lock_file="$(
-      git -C "$project_root" rev-parse --path-format=absolute --git-common-dir
-    )/clasp-verify.lock"
-  else
-    verify_lock_file="$project_root/.clasp-verify.lock"
+default_verify_lock_file() {
+  local git_common_dir=""
+  local fingerprint=""
+
+  if ! git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '%s/.clasp-verify.lock\n' "$project_root"
+    return 0
   fi
+
+  git_common_dir="$(
+    git -C "$project_root" rev-parse --path-format=absolute --git-common-dir
+  )"
+  if [[ -w "$git_common_dir" ]]; then
+    printf '%s/clasp-verify.lock\n' "$git_common_dir"
+    return 0
+  fi
+
+  fingerprint="$(
+    printf '%s\n' "$project_root" | cksum | awk '{print $1}'
+  )"
+  printf '/tmp/clasp-verify-%s.lock\n' "$fingerprint"
+}
+
+if [[ -z "$verify_lock_file" ]]; then
+  verify_lock_file="$(default_verify_lock_file)"
 fi
+export CLASP_VERIFY_EFFECTIVE_LOCK_FILE="$verify_lock_file"
 
 verify_lock_dir="${verify_lock_file}.d"
 

@@ -122,8 +122,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/test/priority.test.mjs",
-      "size": 3051,
-      "sha256": "e994b9804cdb292ff1ebe95aa7dd443b6eb318a0feb17b8b1ca3d15dde574fff"
+      "size": 3654,
+      "sha256": "3edd46428c55508b6ca87f1312429726492bde3df89405e739a27d270978a955"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/task.json",
