@@ -87,7 +87,7 @@ Your job:
 - implement exactly the task described below in the current checkout
 - keep changes as small and local as possible
 - add or update tests
-- run the full repo verification command before finishing
+- run the narrowest checks that cover your changes before finishing
 
 Rules:
 - Work only in the current checkout.
@@ -103,7 +103,8 @@ Rules:
 - Avoid broad repo tours and repeated rereads of unrelated modules.
 - Update docs only if the task changes the visible language/runtime behavior.
 - If the task changes runtime behavior, trust boundaries, workflows, interop, or app-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path in addition to any local regression.
-- Before finishing, run `bash scripts/verify-all.sh`.
+- Before finishing, run targeted checks for the surfaces you changed and record them in `tests_run`.
+- Do not run `bash scripts/verify-all.sh`; the verifier and final merge gate own the repo-wide verification step.
 
 Your final response must satisfy the provided JSON schema.
 EOF

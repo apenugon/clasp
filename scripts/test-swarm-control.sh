@@ -1972,6 +1972,10 @@ bash -lc "
   grep -F 'Do not replace the checkout or copy in a fresh repo snapshot.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not rewrite the workspace root, remove \`.git\`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'run the narrowest checks that cover your changes before finishing' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Do not run ' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'the verifier and final merge gate own the repo-wide verification step.' '$prompt_project_root/builder.prompt' >/dev/null
+  ! grep -F 'Before finishing, run bash scripts/verify-all.sh.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -E '^HOME=.*/clasp-codex-runtime-home\\.[^/]+$' '$prompt_project_root/builder.env' >/dev/null
   grep -E '^XDG_CACHE_HOME=.*/clasp-codex-runtime-home\\.[^/]+/.cache$' '$prompt_project_root/builder.env' >/dev/null
   grep -E '^TMPDIR=.*/clasp-codex-runtime-home\\.[^/]+/tmp$' '$prompt_project_root/builder.env' >/dev/null
