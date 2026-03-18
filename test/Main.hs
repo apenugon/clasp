@@ -3929,7 +3929,7 @@ compileTests =
             absoluteCompiledPath <- makeAbsolute compiledPath
             stage2CompilerPath <- makeAbsolute "dist/compiler-selfhost-stage2.mjs"
             emittedModulePath <- makeAbsolute "dist/compiler-selfhost-emitted.mjs"
-            runtimeOutput <- runBunScript ["compiler/hosted/demo.mjs", absoluteCompiledPath, stage2CompilerPath, emittedModulePath]
+            runtimeOutput <- runNodeFileScript ["compiler/hosted/demo.mjs", absoluteCompiledPath, stage2CompilerPath, emittedModulePath]
             runtimeValue <- case eitherDecodeStrictText runtimeOutput of
               Left decodeErr ->
                 assertFailure ("expected hosted compiler runtime output json to decode:\n" <> decodeErr)
@@ -6604,18 +6604,18 @@ runNodeScript script = do
     ExitFailure _ ->
       assertFailure ("node script failed:\n" <> stderrText)
 
-runBunScript :: [FilePath] -> IO Text
-runBunScript args = do
+runNodeFileScript :: [FilePath] -> IO Text
+runNodeFileScript args = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
-      "bun"
+      "node"
       args
       ""
   case exitCode of
     ExitSuccess ->
       pure (T.strip (T.pack stdoutText))
     ExitFailure _ ->
-      assertFailure ("bun script failed:\n" <> stderrText)
+      assertFailure ("node script failed:\n" <> stderrText)
 
 runClaspc :: [String] -> IO (ExitCode, String, String)
 runClaspc args =

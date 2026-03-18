@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 const [, , compiledPathArg, stage2CompilerPathArg, emittedPathArg] = process.argv;
 
 if (!compiledPathArg || !stage2CompilerPathArg || !emittedPathArg) {
-  throw new Error("usage: bun compiler/hosted/demo.mjs <stage1-path> <stage2-compiler-path> <stage2-output-path>");
+  throw new Error("usage: node compiler/hosted/demo.mjs <stage1-path> <stage2-compiler-path> <stage2-output-path>");
 }
 
 const compiledPath = resolve(compiledPathArg);

@@ -328,7 +328,7 @@ runHostedTool command entryPath = do
             writeFileText bootstrapOutputPath output
             (exitCode, _stdoutText, stderrText) <-
               readProcessWithExitCode
-                "bun"
+                "node"
                 [ hostedCompilerToolRunnerPath
                 , renderHostedToolCommand command
                 , entryPath

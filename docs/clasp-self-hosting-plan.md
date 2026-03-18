@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move `Clasp` from a Haskell-bootstrapped compiler to a compiler primarily implemented in `Clasp`, first through the `JS/Bun` path and later through a native backend.
+Move `Clasp` from a Haskell-bootstrapped compiler to a compiler primarily implemented in `Clasp`, first through a JavaScript host-runtime path and later through a native backend.
 
 The important distinction is:
 
@@ -76,7 +76,7 @@ The bootstrap compiler implementation in Haskell is responsible for:
 - remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass
 - supporting the self-hosting subset before the `Clasp` compiler is allowed to depend on it
 - serving as the semantic reference when the hosted compiler disagrees with expected output
-- compiling the `Clasp` compiler to the first runnable JS/Bun artifact
+- compiling the `Clasp` compiler to the first runnable JavaScript host-runtime artifact
 
 The primary compiler implementation in `Clasp` is responsible for:
 
@@ -148,7 +148,7 @@ At this point, the Haskell compiler should be able to compile a mostly-`Clasp` c
 
 Use the Haskell bootstrap compiler to build the `Clasp` compiler written in `Clasp`.
 
-Run that compiler on `Bun`, then add bootstrap checks:
+Run that compiler on a JavaScript host runtime, then add bootstrap checks:
 
 - stage0 Haskell compiler builds stage1 Clasp compiler
 - stage1 Clasp compiler builds stage2 Clasp compiler
@@ -174,7 +174,7 @@ Hosted self-hosting is complete when:
 - the primary compiler implementation is written in `Clasp`
 - the hosted compiler lives in a real compiler implementation tree rather than only under `examples/compiler-selfhost`
 - ordinary `check`, `compile`, `explain`, manifest, and package-tool flows default to the Clasp compiler path
-- `Clasp` can compile itself through the JS/Bun path
+- `Clasp` can compile itself through the JavaScript host-runtime path
 - bootstrap reproducibility checks pass
 - the Haskell compiler is needed only as an explicit bootstrap/recovery path and not as an ordinary workflow fallback
 

@@ -231,7 +231,7 @@ Exit criteria:
 
 Outcome:
 
-- the primary compiler implementation is written in `Clasp` and runs through the `JS/Bun` path
+- the primary compiler implementation is written in `Clasp` and runs through a JavaScript host runtime
 
 Exit criteria:
 
@@ -585,7 +585,7 @@ Critical path:
 - `SH-005` Port the parser to Clasp.
 - `SH-006` Port lowered IR helpers and the JavaScript emitter to Clasp.
 - `SH-007` Port checker and type-inference logic to Clasp.
-- `SH-008` Build the hosted Clasp compiler in Clasp and run it through JS/Bun.
+- `SH-008` Build the hosted Clasp compiler in Clasp and run it through a JavaScript host runtime.
 - `SH-009` Add stage0/stage1/stage2 bootstrap reproducibility checks.
 - `SH-010` Switch the primary compiler implementation to Clasp while retaining the Haskell bootstrap fallback.
 - `SH-011` Promote the hosted Clasp compiler from `examples/compiler-selfhost` into a real compiler implementation tree that can serve ordinary compiler entrypoints instead of only the special self-hosting proof harness.

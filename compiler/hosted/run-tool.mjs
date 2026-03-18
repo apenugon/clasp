@@ -6,7 +6,7 @@ const [, , commandArg, entryPathArg, stage1PathArg, bootstrapOutputPathArg, resu
 
 if (!commandArg || !entryPathArg || !stage1PathArg || !bootstrapOutputPathArg || !resultPathArg) {
   throw new Error(
-    "usage: bun compiler/hosted/run-tool.mjs <check|compile|explain|native> <entry-path> <stage1-path> <bootstrap-output-path> <result-path>"
+    "usage: node compiler/hosted/run-tool.mjs <check|compile|explain|native> <entry-path> <stage1-path> <bootstrap-output-path> <result-path>"
   );
 }
 

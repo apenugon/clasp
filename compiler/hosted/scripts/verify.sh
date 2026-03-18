@@ -17,7 +17,7 @@ run_verify() {
   cd "$project_root"
   cabal run claspc -- check compiler/hosted/Main.clasp
   cabal run claspc -- compile compiler/hosted/Main.clasp -o "$stage1_path"
-  bun compiler/hosted/demo.mjs "$stage1_path" "$stage2_compiler_path" "$stage2_output_path"
+  node compiler/hosted/demo.mjs "$stage1_path" "$stage2_compiler_path" "$stage2_output_path"
 }
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
