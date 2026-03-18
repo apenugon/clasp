@@ -223,10 +223,20 @@ next_attempt_number_for_task() {
   local task_id="$1"
   local latest_run=""
   local latest_attempt=""
+  local latest_run_trunk=""
+  local current_trunk=""
 
   latest_run="$(clasp_swarm_latest_task_run_dir "$runs_root" "$task_id")"
 
   if [[ -z "$latest_run" ]]; then
+    printf '1\n'
+    return 0
+  fi
+
+  current_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
+  latest_run_trunk="$(cat "$latest_run/trunk-base.txt" 2>/dev/null || true)"
+
+  if [[ -z "$latest_run_trunk" || "$latest_run_trunk" != "$current_trunk" ]]; then
     printf '1\n'
     return 0
   fi
@@ -288,6 +298,8 @@ resume_incomplete_run() {
   local merge_exit=""
   local verdict=""
   local integrated_commit=""
+  local current_trunk=""
+  local run_trunk=""
 
   resume_feedback_file=""
   run_dir="$(clasp_swarm_latest_task_run_dir "$runs_root" "$task_id")"
@@ -339,6 +351,19 @@ resume_incomplete_run() {
     archive_task_state "$task_worktree" "$run_dir" "$task_branch"
     resume_feedback_file="$verifier_report"
     return 2
+  fi
+
+  current_trunk="$(git -C "$project_root" rev-parse "$trunk_branch")"
+  run_trunk="$(cat "$run_dir/trunk-base.txt" 2>/dev/null || true)"
+
+  if [[ -z "$run_trunk" || "$run_trunk" != "$current_trunk" ]] || \
+     ! git -C "$task_worktree" merge-base --is-ancestor "$current_trunk" HEAD; then
+    echo "discarding stale run $(basename "$run_dir") for $task_id after trunk advanced to $current_trunk" >&2
+    remove_worktree_if_present "$baseline_worktree"
+    remove_worktree_if_present "$task_worktree"
+    remove_task_branch_if_present "$task_branch"
+    rm -rf "$run_dir"
+    return 1
   fi
 
   if prepare_baseline_worktree "$baseline_worktree" 2>>"$verifier_log"; then
@@ -1212,6 +1237,7 @@ while true; do
     baseline_worktree="$run_dir/baseline-worktree"
 
     if sync_trunk_with_main "$builder_log"; then
+      git -C "$project_root" rev-parse "$trunk_branch" > "$run_dir/trunk-base.txt"
       :
     else
       sync_exit="$?"
