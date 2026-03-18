@@ -21,6 +21,12 @@ emitNativeExpr expr = match expr {
     textConcat ["local(", name, ")"],
   LowerLiteral value ->
     textConcat ["string(\"", value, "\")"],
+  LowerInt value ->
+    textConcat ["int(", value, ")"],
+  LowerBool value ->
+    textConcat ["bool(", if value then "true" else "false", ")"],
+  LowerArray values ->
+    textConcat ["list([", textJoin ", " (emitNativeExprs values), "])"],
   LowerInvoke callee args ->
     textConcat ["call(local(", callee, "), [", textJoin ", " (emitNativeExprs args), "])"]
 }
@@ -29,8 +35,8 @@ emitNativeDecl : LowerDeclText -> Str
 emitNativeDecl decl = match decl {
   LowerConst name body ->
     textConcat ["global ", name, " = ", emitNativeExpr body],
-  LowerFn name param body ->
-    textConcat ["function ", name, "(", param, ") = ", emitNativeExpr body]
+  LowerFn name params body ->
+    textConcat ["function ", name, "(", textJoin ", " params, ") = ", emitNativeExpr body]
 }
 
 collectLowerDeclNames : [LowerDeclText] -> [Str]
@@ -47,7 +53,7 @@ nativeDeclName : LowerDeclText -> Str
 nativeDeclName decl = match decl {
   LowerConst name body ->
     name,
-  LowerFn name param body ->
+  LowerFn name params body ->
     name
 }
 

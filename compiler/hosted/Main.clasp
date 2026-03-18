@@ -25,7 +25,17 @@ record HostedCompilerSnapshot = {
   secondaryParsedDeclNames : [Str],
   secondaryCheckedModule : Str,
   secondaryLoweredModule : Str,
-  secondaryEmittedModule : Str
+  secondaryEmittedModule : Str,
+  tertiaryParsedModuleName : Str,
+  tertiaryParsedDeclNames : [Str],
+  tertiaryCheckedModule : Str,
+  tertiaryLoweredModule : Str,
+  tertiaryEmittedModule : Str,
+  quaternaryParsedModuleName : Str,
+  quaternaryParsedDeclNames : [Str],
+  quaternaryCheckedModule : Str,
+  quaternaryLoweredModule : Str,
+  quaternaryEmittedModule : Str
 }
 
 compilerSampleSource : Str
@@ -37,6 +47,12 @@ mismatchSampleSource = textJoin "\n" ["module Main", "", "greeting : Int", "gree
 secondarySampleSource : Str
 secondarySampleSource = textJoin "\n" ["module Secondary", "", "salute = \"Hi\"", "", "echo : Str -> Str", "echo value = value", "", "main = echo salute"]
 
+tertiarySampleSource : Str
+tertiarySampleSource = textJoin "\n" ["module Collections", "", "flags = [true, false]", "", "scores = [7, 9]", "", "main = scores"]
+
+quaternarySampleSource : Str
+quaternarySampleSource = textJoin "\n" ["module Pairing", "", "select : Str -> Str -> Str", "select left right = right", "", "main = select \"left\" \"right\""]
+
 parsedSampleModule : HostedModuleAst
 parsedSampleModule = parseModuleAst compilerSampleSource
 
@@ -46,11 +62,23 @@ parsedMismatchModule = parseModuleAst mismatchSampleSource
 parsedSecondaryModule : HostedModuleAst
 parsedSecondaryModule = parseModuleAst secondarySampleSource
 
+parsedTertiaryModule : HostedModuleAst
+parsedTertiaryModule = parseModuleAst tertiarySampleSource
+
+parsedQuaternaryModule : HostedModuleAst
+parsedQuaternaryModule = parseModuleAst quaternarySampleSource
+
 loweredSampleDecls : [LowerDeclText]
 loweredSampleDecls = lowerModule parsedSampleModule
 
 loweredSecondaryDecls : [LowerDeclText]
 loweredSecondaryDecls = lowerModule parsedSecondaryModule
+
+loweredTertiaryDecls : [LowerDeclText]
+loweredTertiaryDecls = lowerModule parsedTertiaryModule
+
+loweredQuaternaryDecls : [LowerDeclText]
+loweredQuaternaryDecls = lowerModule parsedQuaternaryModule
 
 checkedModuleSummary : Str
 checkedModuleSummary = renderModuleSummary parsedSampleModule
@@ -82,15 +110,25 @@ snapshot = HostedCompilerSnapshot {
   mismatchDiagnostic = mismatchDiagnosticForModule parsedMismatchModule,
   emittedModule = compileEntrypoint,
   emittedNativeModule = nativeEntrypoint,
-  parsedSampleModuleName = parsedSampleModule.moduleName,
-  parsedSampleImports = parsedSampleModule.imports,
+  parsedSampleModuleName = moduleNameOf parsedSampleModule,
+  parsedSampleImports = moduleImports parsedSampleModule,
   parsedSampleDeclNames = declNames parsedSampleModule,
   parsedSampleMainExpr = renderMainExpr parsedSampleModule,
-  secondaryParsedModuleName = parsedSecondaryModule.moduleName,
+  secondaryParsedModuleName = moduleNameOf parsedSecondaryModule,
   secondaryParsedDeclNames = declNames parsedSecondaryModule,
   secondaryCheckedModule = renderModuleSummary parsedSecondaryModule,
   secondaryLoweredModule = renderLowerModuleSummary loweredSecondaryDecls,
-  secondaryEmittedModule = emitModule loweredSecondaryDecls
+  secondaryEmittedModule = emitModule loweredSecondaryDecls,
+  tertiaryParsedModuleName = moduleNameOf parsedTertiaryModule,
+  tertiaryParsedDeclNames = declNames parsedTertiaryModule,
+  tertiaryCheckedModule = renderModuleSummary parsedTertiaryModule,
+  tertiaryLoweredModule = renderLowerModuleSummary loweredTertiaryDecls,
+  tertiaryEmittedModule = emitModule loweredTertiaryDecls,
+  quaternaryParsedModuleName = moduleNameOf parsedQuaternaryModule,
+  quaternaryParsedDeclNames = declNames parsedQuaternaryModule,
+  quaternaryCheckedModule = renderModuleSummary parsedQuaternaryModule,
+  quaternaryLoweredModule = renderLowerModuleSummary loweredQuaternaryDecls,
+  quaternaryEmittedModule = emitModule loweredQuaternaryDecls
 }
 
 snapshotJson : Str

@@ -2,13 +2,14 @@ module Compiler.Checker
 
 import Compiler.Ast
 
-type TypeText = TInt | TStr | TBool | TFunction TypeText TypeText | TUnknown Str
+type TypeText = TInt | TStr | TBool | TList TypeText | TFunction TypeText TypeText | TUnknown Str
 type LookupResult = FoundType TypeText | MissingType Str
-type ParamShape = NoParam | OneParam Str | TooManyParams
 type InferExprResult = InferredExpr TypeText | InferExprError Str
 type InferDeclResult = InferredDecl TypeBinding | InferDeclError Str
 type InferModuleResult = InferredModule [TypeBinding] | InferModuleError Str
 type ApplyCallResult = ApplyCallOk TypeText | ApplyCallError Str
+type ListInferState = WaitingForItem | SeenItemType TypeText | SeenListError Str
+type BindParamsState = BindingParams [TypeBinding] TypeText | BindingParamError Str
 type TypeBinding = TypeBinding Str TypeText
 
 emptyTypeBindings : [TypeBinding]
@@ -24,6 +25,8 @@ renderAtomicType : TypeText -> Str
 renderAtomicType typeText = match typeText {
   TFunction input result ->
     textConcat ["(", renderType typeText, ")"],
+  TList itemType ->
+    textConcat ["[", renderType itemType, "]"],
   TInt ->
     "Int",
   TStr ->
@@ -42,6 +45,8 @@ renderType typeText = match typeText {
     "Str",
   TBool ->
     "Bool",
+  TList itemType ->
+    textConcat ["[", renderType itemType, "]"],
   TUnknown label ->
     textConcat ["?", label],
   TFunction input result ->
@@ -52,35 +57,18 @@ sameType : TypeText -> TypeText -> Bool
 sameType left right = renderType left == renderType right
 
 parseAtomicType : Str -> TypeText
-parseAtomicType value = if value == "Int" then TInt else if value == "Str" then TStr else if value == "Bool" then TBool else TUnknown value
+parseAtomicType value = if value == "Int" then TInt else if value == "Str" then TStr else if value == "Bool" then TBool else if isListLiteral value then TList (parseType (betweenBrackets value)) else TUnknown value
 
 parseType : Str -> TypeText
 parseType value = match textSplitFirst value " -> " {
   Ok payload ->
-    TFunction (parseAtomicType (firstSegment payload)) (parseAtomicType (remainingSegments payload)),
+    TFunction (parseAtomicType (firstSegment payload)) (parseType (remainingSegments payload)),
   Err noArrow ->
     parseAtomicType value
 }
 
 typeMismatchMessage : Str -> TypeText -> TypeText -> Str
 typeMismatchMessage name expectedType actualType = textConcat ["Type mismatch for `", name, "`: expected ", renderType expectedType, ", found ", renderType actualType, "."]
-
-classifyParams : [Str] -> ParamShape
-classifyParams params = {
-  let mut state = NoParam;
-  for param in params {
-    state = match state {
-      NoParam ->
-        OneParam param,
-      OneParam current ->
-        TooManyParams,
-      TooManyParams ->
-        TooManyParams
-    };
-    state
-  };
-  state
-}
 
 lookupTypeBinding : [TypeBinding] -> Str -> LookupResult
 lookupTypeBinding env targetName = {
@@ -93,30 +81,76 @@ lookupTypeBinding env targetName = {
   MissingType targetName
 }
 
-inferExpr : [TypeBinding] -> [TypeBinding] -> Str -> InferExprResult
-inferExpr env localEnv body = match textPrefix body "\"" {
-  Ok tail ->
+hasDeclParams : HostedDeclAst -> Bool
+hasDeclParams decl = {
+  for paramName in declParams decl {
+    return true
+  };
+  false
+}
+
+inferExpr : [TypeBinding] -> [TypeBinding] -> HostedExprAst -> InferExprResult
+inferExpr env localEnv expr = match expr {
+  HostedString value ->
     InferredExpr TStr,
-  Err missingPrefix ->
-    match textSplitFirst body " " {
-      Ok payload ->
-        match lookupTypeBinding (append env localEnv) (firstSegment payload) {
-          FoundType calleeType ->
-            applyCallType env localEnv (firstSegment payload) calleeType (splitWords (remainingSegments payload)),
-          MissingType missing ->
-            InferExprError (textConcat ["Unknown name `", missing, "`."])
-        },
-      Err noArgs ->
-        match lookupTypeBinding (append env localEnv) body {
-          FoundType bindingType ->
-            InferredExpr bindingType,
-          MissingType missing ->
-            InferExprError (textConcat ["Unknown name `", missing, "`."])
-        }
+  HostedInt value ->
+    InferredExpr TInt,
+  HostedBool value ->
+    InferredExpr TBool,
+  HostedList values ->
+    inferListExpr env localEnv values,
+  HostedCall callee args ->
+    match lookupTypeBinding (append env localEnv) callee {
+      FoundType calleeType ->
+        applyCallType env localEnv callee calleeType args,
+      MissingType missing ->
+        InferExprError (textConcat ["Unknown name `", missing, "`."])
+    },
+  HostedName name ->
+    match lookupTypeBinding (append env localEnv) name {
+      FoundType bindingType ->
+        InferredExpr bindingType,
+      MissingType missing ->
+        InferExprError (textConcat ["Unknown name `", missing, "`."])
     }
 }
 
-applyCallType : [TypeBinding] -> [TypeBinding] -> Str -> TypeText -> [Str] -> InferExprResult
+inferListExpr : [TypeBinding] -> [TypeBinding] -> [HostedExprAst] -> InferExprResult
+inferListExpr env localEnv values = {
+  let mut state = WaitingForItem;
+  for value in values {
+    let step = inferExpr env localEnv value;
+    state = match state {
+      WaitingForItem ->
+        match step {
+          InferredExpr valueType ->
+            SeenItemType valueType,
+          InferExprError message ->
+            SeenListError message
+        },
+      SeenItemType currentType ->
+        match step {
+          InferredExpr valueType ->
+            if sameType currentType valueType then SeenItemType currentType else SeenListError (textConcat ["expected ", renderType currentType, " but found ", renderType valueType]),
+          InferExprError message ->
+            SeenListError message
+        },
+      SeenListError message ->
+        SeenListError message
+    };
+    state
+  };
+  match state {
+    WaitingForItem ->
+      InferExprError "Empty list needs context.",
+    SeenItemType itemType ->
+      InferredExpr (TList itemType),
+    SeenListError message ->
+      InferExprError message
+  }
+}
+
+applyCallType : [TypeBinding] -> [TypeBinding] -> Str -> TypeText -> [HostedExprAst] -> InferExprResult
 applyCallType env localEnv calleeName calleeType argValues = {
   let mut result = ApplyCallOk calleeType;
   for argValue in argValues {
@@ -131,7 +165,7 @@ applyCallType env localEnv calleeName calleeType argValues = {
   }
 }
 
-applyCallArg : [TypeBinding] -> [TypeBinding] -> Str -> ApplyCallResult -> Str -> ApplyCallResult
+applyCallArg : [TypeBinding] -> [TypeBinding] -> Str -> ApplyCallResult -> HostedExprAst -> ApplyCallResult
 applyCallArg env localEnv calleeName state argValue = match state {
   ApplyCallError message ->
     ApplyCallError message,
@@ -142,8 +176,10 @@ applyCallArg env localEnv calleeName state argValue = match state {
           InferExprError message ->
             ApplyCallError message,
           InferredExpr actualType ->
-            if sameType actualType inputType then ApplyCallOk resultType else ApplyCallError (typeMismatchMessage argValue inputType actualType)
+            if sameType actualType inputType then ApplyCallOk resultType else ApplyCallError (typeMismatchMessage (expressionSummary argValue) inputType actualType)
         },
+      TList itemType ->
+        ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
       TInt ->
         ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
       TStr ->
@@ -156,31 +192,63 @@ applyCallArg env localEnv calleeName state argValue = match state {
 }
 
 inferDecl : [TypeBinding] -> HostedDeclAst -> InferDeclResult
-inferDecl env decl = match classifyParams decl.params {
-  TooManyParams ->
-    InferDeclError (textConcat ["Hosted bootstrap currently supports at most one parameter for `", decl.name, "`."]),
-  NoParam ->
-    match inferExpr env emptyTypeBindings decl.body {
-      InferExprError message ->
-        InferDeclError message,
-      InferredExpr bodyType ->
-        inferValueDecl decl bodyType
-    },
-  OneParam paramName ->
-    inferFunctionDecl env decl paramName
-}
+inferDecl env decl = if hasDeclParams decl then inferFunctionDecl env decl (declParams decl) else match inferExpr env emptyTypeBindings (declBody decl) { InferExprError message -> InferDeclError message, InferredExpr bodyType -> inferValueDecl decl bodyType }
+
+validateDeclaredType : Str -> TypeText -> TypeText -> InferDeclResult
+validateDeclaredType name expectedType actualType = if sameType actualType expectedType then InferredDecl (TypeBinding name expectedType) else InferDeclError (typeMismatchMessage name expectedType actualType)
 
 inferValueDecl : HostedDeclAst -> TypeText -> InferDeclResult
-inferValueDecl decl bodyType = if decl.annotation == "" then InferredDecl (TypeBinding decl.name bodyType) else match parseType decl.annotation { TFunction inputType resultType -> InferDeclError (textConcat ["Expected a value annotation for `", decl.name, "`."]), TInt -> if sameType bodyType TInt then InferredDecl (TypeBinding decl.name TInt) else InferDeclError (typeMismatchMessage decl.name TInt bodyType), TStr -> if sameType bodyType TStr then InferredDecl (TypeBinding decl.name TStr) else InferDeclError (typeMismatchMessage decl.name TStr bodyType), TBool -> if sameType bodyType TBool then InferredDecl (TypeBinding decl.name TBool) else InferDeclError (typeMismatchMessage decl.name TBool bodyType), TUnknown label -> if sameType bodyType (TUnknown label) then InferredDecl (TypeBinding decl.name (TUnknown label)) else InferDeclError (typeMismatchMessage decl.name (TUnknown label) bodyType) }
+inferValueDecl decl bodyType = if declAnnotation decl == "" then InferredDecl (TypeBinding (declName decl) bodyType) else match parseType (declAnnotation decl) { TFunction inputType resultType -> InferDeclError (textConcat ["Expected a value annotation for `", declName decl, "`."]), TInt -> validateDeclaredType (declName decl) TInt bodyType, TStr -> validateDeclaredType (declName decl) TStr bodyType, TBool -> validateDeclaredType (declName decl) TBool bodyType, TList itemType -> validateDeclaredType (declName decl) (TList itemType) bodyType, TUnknown label -> validateDeclaredType (declName decl) (TUnknown label) bodyType }
 
-inferFunctionDecl : [TypeBinding] -> HostedDeclAst -> Str -> InferDeclResult
-inferFunctionDecl env decl paramName = if decl.annotation == "" then InferDeclError (textConcat ["Could not infer the parameter type of `", decl.name, "`."]) else match parseType decl.annotation { TFunction inputType resultType -> match inferExpr env [TypeBinding paramName inputType] decl.body { InferExprError message -> InferDeclError message, InferredExpr bodyType -> if sameType bodyType resultType then InferredDecl (TypeBinding decl.name (TFunction inputType resultType)) else InferDeclError (typeMismatchMessage decl.name resultType bodyType) }, TInt -> InferDeclError (textConcat ["Expected a function annotation for `", decl.name, "`."]), TStr -> InferDeclError (textConcat ["Expected a function annotation for `", decl.name, "`."]), TBool -> InferDeclError (textConcat ["Expected a function annotation for `", decl.name, "`."]), TUnknown label -> InferDeclError (textConcat ["Expected a function annotation for `", decl.name, "`."]) }
+bindFunctionParams : HostedDeclAst -> TypeText -> BindParamsState
+bindFunctionParams decl declaredType = {
+  let mut state = BindingParams [] declaredType;
+  for paramName in declParams decl {
+    state = match state {
+      BindingParamError message ->
+        BindingParamError message,
+      BindingParams localEnv currentType ->
+        match currentType {
+          TFunction inputType resultType ->
+            BindingParams (appendTypeBinding localEnv (TypeBinding paramName inputType)) resultType,
+          TInt ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TStr ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TBool ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TList itemType ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TUnknown label ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."])
+        }
+    };
+    state
+  };
+  state
+}
+
+inferFunctionDecl : [TypeBinding] -> HostedDeclAst -> [Str] -> InferDeclResult
+inferFunctionDecl env decl params = if declAnnotation decl == "" then InferDeclError (textConcat ["Could not infer the parameter type of `", declName decl, "`."]) else {
+  let declaredType = parseType (declAnnotation decl);
+  match bindFunctionParams decl declaredType {
+    BindingParamError message ->
+      InferDeclError message,
+    BindingParams localEnv expectedBodyType ->
+      match inferExpr env localEnv (declBody decl) {
+        InferExprError message ->
+          InferDeclError message,
+        InferredExpr bodyType ->
+          if sameType bodyType expectedBodyType then InferredDecl (TypeBinding (declName decl) declaredType) else InferDeclError (typeMismatchMessage (declName decl) expectedBodyType bodyType)
+      }
+  }
+}
 
 collectAnnotatedBindings : HostedModuleAst -> [TypeBinding]
 collectAnnotatedBindings modl = {
   let mut bindings = emptyTypeBindings;
-  for decl in modl.declarations {
-    bindings = if decl.annotation == "" then bindings else appendTypeBinding bindings (TypeBinding decl.name (parseType decl.annotation));
+  for decl in moduleDeclarations modl {
+    bindings = if declAnnotation decl == "" then bindings else appendTypeBinding bindings (TypeBinding (declName decl) (parseType (declAnnotation decl)));
     bindings
   };
   bindings
@@ -196,7 +264,7 @@ inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {
   let mut env = append baseEnv (collectAnnotatedBindings modl);
   let mut failure = "";
-  for decl in modl.declarations {
+  for decl in moduleDeclarations modl {
     env = match inferDecl env decl {
       InferredDecl binding ->
         appendTypeBinding env binding,
@@ -211,9 +279,9 @@ inferModuleBindings modl = {
 }
 
 renderDeclSummary : [TypeBinding] -> HostedDeclAst -> Str
-renderDeclSummary env decl = match lookupTypeBinding env decl.name {
+renderDeclSummary env decl = match lookupTypeBinding env (declName decl) {
   FoundType bindingType ->
-    textConcat [decl.name, " : ", renderType bindingType],
+    textConcat [declName decl, " : ", renderType bindingType],
   MissingType missing ->
     textConcat [missing, " : ?", missing]
 }
@@ -224,7 +292,7 @@ renderModuleSummary modl = match inferModuleBindings modl {
     message,
   InferredModule env -> {
     let mut summaries = [];
-    for decl in modl.declarations {
+    for decl in moduleDeclarations modl {
       summaries = appendCheckerRenderedText summaries (renderDeclSummary env decl);
       summaries
     };

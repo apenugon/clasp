@@ -21,6 +21,12 @@ emitExpr expr = match expr {
     name,
   LowerLiteral value ->
     textConcat ["\"", value, "\""],
+  LowerInt value ->
+    value,
+  LowerBool value ->
+    if value then "true" else "false",
+  LowerArray values ->
+    textConcat ["[", textJoin ", " (emitExprs values), "]"],
   LowerInvoke callee args ->
     textConcat [callee, "(", textJoin ", " (emitExprs args), ")"]
 }
@@ -29,8 +35,8 @@ emitDecl : LowerDeclText -> Str
 emitDecl decl = match decl {
   LowerConst name body ->
     textConcat ["export const ", name, " = ", emitExpr body, ";"],
-  LowerFn name param body ->
-    textConcat ["export function ", name, "(", param, ") { return ", emitExpr body, "; }"]
+  LowerFn name params body ->
+    textConcat ["export function ", name, "(", textJoin ", " params, ") { return ", emitExpr body, "; }"]
 }
 
 emitModule : [LowerDeclText] -> Str

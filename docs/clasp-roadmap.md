@@ -326,6 +326,8 @@ The first native runtime slice for compiler and backend workloads should stay ex
 - root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects
 - retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage
 - ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives
+- keep the lowest native runtime layer in `C` with a narrow ABI instead of embedding the Haskell RTS into production server/runtime targets
+- build higher-level supervision, upgrade, workflow, and compiler behavior in `Clasp` on top of that kernel rather than growing the kernel into a second application platform
 
 ## Phase 14: Native Storage With SQLite First
 

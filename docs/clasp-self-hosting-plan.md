@@ -167,6 +167,45 @@ Only after the hosted path is reliable should the project move to native self-ho
 
 This is the point where `Clasp` truly stands on its own runtime feet.
 
+## Native Runtime Boundary
+
+The native runtime should stay a small trusted kernel rather than becoming a second application platform.
+
+Its job is to host native `Clasp` code, enforce the upgrade and supervision invariants, and provide the narrow runtime substrate that compiler and backend workloads cannot avoid.
+
+The native runtime kernel is responsible for:
+
+- loading compiled module images and maintaining a stable native ABI between generated code and the runtime
+- versioned dispatch indirection so old and new module versions can overlap during supervised upgrades
+- mailbox, scheduler, and process-isolation primitives for workflow and long-running process execution
+- supervision-tree execution, restart rules, operator handoff, rollback, and kill-switch enforcement
+- snapshot, replay, and state-handoff primitives at explicit hot-swap boundaries
+- explicit object layout, retain/release, roots, and other memory-lifetime invariants
+- the minimal compiler-support runtime surface for text, path, file, transport, and machine-protocol behavior
+- host boundary shims for capabilities such as filesystem, network, process, and secret access
+
+The native runtime kernel is explicitly not responsible for:
+
+- parser, checker, lowering, emitters, or other compiler-pass logic
+- route, workflow, agent, or tool business logic that can live in ordinary `Clasp` libraries
+- schema derivation, boundary projection planning, and other compiler-owned metadata computation
+- application-level provider, storage, or policy behavior beyond the narrow host capability hooks needed to cross the boundary safely
+
+Those higher-level behaviors should move into `Clasp` code as soon as the self-hosting subset can express them, with the runtime only enforcing the low-level invariants they rely on.
+
+## Native Runtime Implementation Language
+
+The lowest native runtime layer should stay `C`, not `Haskell`.
+
+That choice keeps the trusted kernel small and predictable:
+
+- `C` gives the native backend a simple, stable ABI for generated code and foreign boundaries
+- `C` matches the explicit ownership and object-layout rules already documented for the native runtime
+- `C` avoids coupling the production runtime to the Haskell RTS, GC, scheduler, and deployment footprint
+- `C` makes it easier to keep the runtime bundle portable across future native backends or bytecode targets
+
+`Haskell` still makes sense for the bootstrap compiler, recovery tooling, and offline developer tooling, but it should not be the long-term server/runtime kernel once `Clasp` is fully native and self-hosted.
+
 ## Definition Of Done
 
 Hosted self-hosting is complete when:
