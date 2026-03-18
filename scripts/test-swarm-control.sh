@@ -2,6 +2,8 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export CLASP_VERIFY_IN_PROGRESS=1
+export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
 runs_root=""
 markers_root=""
 repo_root=""
@@ -1973,7 +1975,7 @@ bash -lc "
   grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not rewrite the workspace root, remove \`.git\`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'run the narrowest checks that cover your changes before finishing' '$prompt_project_root/builder.prompt' >/dev/null
-  grep -F 'Do not run ' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Do not run \`bash scripts/verify-all.sh\`' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'the verifier and final merge gate own the repo-wide verification step.' '$prompt_project_root/builder.prompt' >/dev/null
   ! grep -F 'Before finishing, run bash scripts/verify-all.sh.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -E '^HOME=.*/clasp-codex-runtime-home\\.[^/]+$' '$prompt_project_root/builder.env' >/dev/null
@@ -1996,6 +1998,10 @@ bash -lc "
   grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\$(printf prompt-substitution)' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -F '\${HOME}' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F 'run the narrowest task-focused verification needed to establish correctness' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F 'Do not fail solely because \`bash scripts/verify-all.sh\` cannot run inside this sandboxed verifier.' '$prompt_project_root/verifier.prompt' >/dev/null
+  grep -F 'The final merge gate runs the authoritative \`bash scripts/verify-all.sh\` on trunk before landing.' '$prompt_project_root/verifier.prompt' >/dev/null
+  ! grep -F 'Treat \`bash scripts/verify-all.sh\` as the required verification gate.' '$prompt_project_root/verifier.prompt' >/dev/null
   grep -E '^HOME=.*/clasp-codex-runtime-home\\.[^/]+$' '$prompt_project_root/verifier.env' >/dev/null
   grep -E '^XDG_CACHE_HOME=.*/clasp-codex-runtime-home\\.[^/]+/.cache$' '$prompt_project_root/verifier.env' >/dev/null
   grep -E '^TMPDIR=.*/clasp-codex-runtime-home\\.[^/]+/tmp$' '$prompt_project_root/verifier.env' >/dev/null

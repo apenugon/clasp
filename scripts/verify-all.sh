@@ -112,6 +112,16 @@ run_command_block() {
   done <<< "$commands"
 }
 
+nested_verify_commands="${CLASP_VERIFY_NESTED_COMMANDS:-${CLASP_VERIFY_FALLBACK_COMMANDS:-$fallback_verify_commands}}"
+
+if [[ "${CLASP_VERIFY_IN_PROGRESS:-0}" == "1" && "${CLASP_VERIFY_ACTIVE_ROOT:-}" == "$project_root" ]]; then
+  run_command_block "$nested_verify_commands"
+  exit 0
+fi
+
+export CLASP_VERIFY_IN_PROGRESS=1
+export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
+
 if [[ -z "${XDG_CACHE_HOME:-}" || ! -w "${XDG_CACHE_HOME:-/nonexistent}" ]]; then
   export XDG_CACHE_HOME="$readonly_nix_cache_root"
   mkdir -p "$XDG_CACHE_HOME"

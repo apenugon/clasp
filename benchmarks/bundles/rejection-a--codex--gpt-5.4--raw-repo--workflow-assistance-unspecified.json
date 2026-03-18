@@ -177,13 +177,13 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/test/priority.test.mjs",
-      "size": 2728,
-      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+      "size": 3331,
+      "sha256": "807e517e50ea1238b63678a2a6a29f13dfc35831c7c8639a43f72a5cd5916498"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/test/rejection.test.mjs",
-      "size": 2728,
-      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+      "size": 3331,
+      "sha256": "807e517e50ea1238b63678a2a6a29f13dfc35831c7c8639a43f72a5cd5916498"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/tsconfig.json",

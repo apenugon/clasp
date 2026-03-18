@@ -446,8 +446,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-priority/repo/test/priority.test.mjs",
-      "size": 2728,
-      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+      "size": 3331,
+      "sha256": "807e517e50ea1238b63678a2a6a29f13dfc35831c7c8639a43f72a5cd5916498"
     },
     {
       "path": "benchmarks/tasks/ts-lead-priority/repo/tsconfig.json",
@@ -501,13 +501,13 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/test/priority.test.mjs",
-      "size": 2728,
-      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+      "size": 3331,
+      "sha256": "807e517e50ea1238b63678a2a6a29f13dfc35831c7c8639a43f72a5cd5916498"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/test/rejection.test.mjs",
-      "size": 2728,
-      "sha256": "5766ac529782dba3154cf0e95245edec6e101c295fa1849277bc2c2347eeac9e"
+      "size": 3331,
+      "sha256": "807e517e50ea1238b63678a2a6a29f13dfc35831c7c8639a43f72a5cd5916498"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/tsconfig.json",
@@ -576,8 +576,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/test/lead-app.test.mjs",
-      "size": 5727,
-      "sha256": "10a1095bc75fcb9d4e3f6583cd551c3f006e40da79f69615bfaaeea513119c9c"
+      "size": 6330,
+      "sha256": "930178cbe0ade44e7bfb102ffdf1cff140797c72a774c5ba2f9a3fc878af4352"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/tsconfig.json",

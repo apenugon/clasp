@@ -28,6 +28,7 @@ chmod +x "$test_root/bin/nix"
 fallback_capture="$test_root/fallback.txt"
 env_capture="$test_root/nix-env.txt"
 lock_capture="$test_root/lock-path.txt"
+writable_nested_capture="$test_root/nested.txt"
 writable_cache_root="$test_root/writable-cache"
 mkdir -p "$writable_cache_root"
 fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"
@@ -79,6 +80,15 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 [[ ! -e "$git_test_root/.git/clasp-verify.lock.d" ]]
 chmod u+w "$git_test_root/.git"
 chmod_restore_needed=0
+
+rm -f "$writable_nested_capture"
+PATH="$test_root/bin:$PATH" \
+CLASP_VERIFY_IN_PROGRESS=1 \
+CLASP_VERIFY_ACTIVE_ROOT="$test_root" \
+CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+
+[[ "$(< "$writable_nested_capture")" == "nested-ok" ]]
 
 rm -f "$fallback_capture"
 if PATH="$test_root/bin:$PATH" \
