@@ -1,10 +1,84 @@
 module Compiler.Lower
 
+import Compiler.Ast
+
 type LowerExprText = LowerName Str | LowerLiteral Str | LowerInvoke Str [LowerExprText]
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str Str LowerExprText
+type LowerParamShape = LowerNoParam | LowerOneParam Str | LowerTooManyParams
 
 appendLowerRenderedText : [Str] -> Str -> [Str]
 appendLowerRenderedText values value = append values [value]
+
+appendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]
+appendLowerExpr values value = append values [value]
+
+appendLowerDecl : [LowerDeclText] -> LowerDeclText -> [LowerDeclText]
+appendLowerDecl values value = append values [value]
+
+classifyLowerParams : [Str] -> LowerParamShape
+classifyLowerParams params = {
+  let mut state = LowerNoParam;
+  for param in params {
+    state = match state {
+      LowerNoParam ->
+        LowerOneParam param,
+      LowerOneParam current ->
+        LowerTooManyParams,
+      LowerTooManyParams ->
+        LowerTooManyParams
+    };
+    state
+  };
+  state
+}
+
+lowerExprArgs : [Str] -> [LowerExprText]
+lowerExprArgs values = {
+  let mut lowered = [];
+  for value in values {
+    lowered = appendLowerExpr lowered (lowerExpr value);
+    lowered
+  };
+  lowered
+}
+
+lowerExpr : Str -> LowerExprText
+lowerExpr value = match textPrefix value "\"" {
+  Ok tail ->
+    match textSplitFirst tail "\"" {
+      Ok payload ->
+        LowerLiteral (firstSegment payload),
+      Err missingClose ->
+        LowerName value
+    },
+  Err missingPrefix ->
+    match textSplitFirst value " " {
+      Ok payload ->
+        LowerInvoke (firstSegment payload) (lowerExprArgs (splitWords (remainingSegments payload))),
+      Err noArgs ->
+        LowerName value
+    }
+}
+
+lowerDecl : HostedDeclAst -> LowerDeclText
+lowerDecl decl = match classifyLowerParams decl.params {
+  LowerNoParam ->
+    LowerConst decl.name (lowerExpr decl.body),
+  LowerOneParam paramName ->
+    LowerFn decl.name paramName (lowerExpr decl.body),
+  LowerTooManyParams ->
+    LowerFn decl.name "_unsupported" (lowerExpr decl.body)
+}
+
+lowerModule : HostedModuleAst -> [LowerDeclText]
+lowerModule modl = {
+  let mut lowered = [];
+  for decl in modl.declarations {
+    lowered = appendLowerDecl lowered (lowerDecl decl);
+    lowered
+  };
+  lowered
+}
 
 renderLowerExprs : [LowerExprText] -> [Str]
 renderLowerExprs values = {
@@ -34,14 +108,30 @@ renderLowerDecl decl = match decl {
     textConcat ["function ", name, "(", param, ") = ", renderLowerExpr body]
 }
 
-loweredValueDecl : LowerDeclText
-loweredValueDecl = LowerConst "hello" (LowerLiteral "Hello from Clasp")
+renderLowerModuleSummary : [LowerDeclText] -> Str
+renderLowerModuleSummary decls = {
+  let mut rendered = [];
+  for decl in decls {
+    rendered = appendLowerRenderedText rendered (renderLowerDecl decl);
+    rendered
+  };
+  textJoin "\n" rendered
+}
 
-loweredFunctionDecl : LowerDeclText
-loweredFunctionDecl = LowerFn "id" "value" (LowerName "value")
+renderLowerDeclByName : [LowerDeclText] -> Str -> Str
+renderLowerDeclByName decls targetName = {
+  let mut rendered = textConcat ["<missing:", targetName, ">"];
+  for decl in decls {
+    rendered = if lowerDeclName decl == targetName then renderLowerDecl decl else rendered;
+    rendered
+  };
+  rendered
+}
 
-loweredMainDecl : LowerDeclText
-loweredMainDecl = LowerConst "main" (LowerInvoke "id" [LowerName "hello"])
-
-loweredSummary : Str
-loweredSummary = textJoin "\n" [renderLowerDecl loweredValueDecl, renderLowerDecl loweredFunctionDecl, renderLowerDecl loweredMainDecl]
+lowerDeclName : LowerDeclText -> Str
+lowerDeclName decl = match decl {
+  LowerConst name body ->
+    name,
+  LowerFn name param body ->
+    name
+}

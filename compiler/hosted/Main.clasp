@@ -20,14 +20,43 @@ record HostedCompilerSnapshot = {
   parsedSampleModuleName : Str,
   parsedSampleImports : [Str],
   parsedSampleDeclNames : [Str],
-  parsedSampleMainExpr : Str
+  parsedSampleMainExpr : Str,
+  secondaryParsedModuleName : Str,
+  secondaryParsedDeclNames : [Str],
+  secondaryCheckedModule : Str,
+  secondaryLoweredModule : Str,
+  secondaryEmittedModule : Str
 }
 
-astSampleSource : Str
-astSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
+compilerSampleSource : Str
+compilerSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
+
+mismatchSampleSource : Str
+mismatchSampleSource = textJoin "\n" ["module Main", "", "greeting : Int", "greeting = \"hello\""]
+
+secondarySampleSource : Str
+secondarySampleSource = textJoin "\n" ["module Secondary", "", "salute = \"Hi\"", "", "echo : Str -> Str", "echo value = value", "", "main = echo salute"]
 
 parsedSampleModule : HostedModuleAst
-parsedSampleModule = parseModuleAst astSampleSource
+parsedSampleModule = parseModuleAst compilerSampleSource
+
+parsedMismatchModule : HostedModuleAst
+parsedMismatchModule = parseModuleAst mismatchSampleSource
+
+parsedSecondaryModule : HostedModuleAst
+parsedSecondaryModule = parseModuleAst secondarySampleSource
+
+loweredSampleDecls : [LowerDeclText]
+loweredSampleDecls = lowerModule parsedSampleModule
+
+loweredSecondaryDecls : [LowerDeclText]
+loweredSecondaryDecls = lowerModule parsedSecondaryModule
+
+checkedModuleSummary : Str
+checkedModuleSummary = renderModuleSummary parsedSampleModule
+
+loweredSummary : Str
+loweredSummary = renderLowerModuleSummary loweredSampleDecls
 
 checkEntrypoint : Str
 checkEntrypoint = checkedModuleSummary
@@ -36,27 +65,32 @@ explainEntrypoint : Str
 explainEntrypoint = textJoin "\n\n" [checkedModuleSummary, loweredSummary]
 
 compileEntrypoint : Str
-compileEntrypoint = emittedModule
+compileEntrypoint = emitModule loweredSampleDecls
 
 nativeEntrypoint : Str
-nativeEntrypoint = emittedNativeModule
+nativeEntrypoint = emitNativeModule loweredSampleDecls
 
 snapshot : HostedCompilerSnapshot
 snapshot = HostedCompilerSnapshot {
-  loweredValue = renderLowerDecl loweredValueDecl,
-  loweredFunction = renderLowerDecl loweredFunctionDecl,
+  loweredValue = renderLowerDeclByName loweredSampleDecls "hello",
+  loweredFunction = renderLowerDeclByName loweredSampleDecls "id",
   loweredModule = loweredSummary,
-  checkedValueType = renderType checkedValueType,
-  checkedFunctionType = renderType checkedFunctionType,
+  checkedValueType = renderType (checkedTypeForDecl parsedSampleModule "hello"),
+  checkedFunctionType = renderType (checkedTypeForDecl parsedSampleModule "id"),
   checkedModule = checkEntrypoint,
   explainModule = explainEntrypoint,
-  mismatchDiagnostic = mismatchDiagnostic,
+  mismatchDiagnostic = mismatchDiagnosticForModule parsedMismatchModule,
   emittedModule = compileEntrypoint,
   emittedNativeModule = nativeEntrypoint,
   parsedSampleModuleName = parsedSampleModule.moduleName,
   parsedSampleImports = parsedSampleModule.imports,
   parsedSampleDeclNames = declNames parsedSampleModule,
-  parsedSampleMainExpr = renderMainExpr parsedSampleModule
+  parsedSampleMainExpr = renderMainExpr parsedSampleModule,
+  secondaryParsedModuleName = parsedSecondaryModule.moduleName,
+  secondaryParsedDeclNames = declNames parsedSecondaryModule,
+  secondaryCheckedModule = renderModuleSummary parsedSecondaryModule,
+  secondaryLoweredModule = renderLowerModuleSummary loweredSecondaryDecls,
+  secondaryEmittedModule = emitModule loweredSecondaryDecls
 }
 
 snapshotJson : Str

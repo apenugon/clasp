@@ -42,6 +42,3 @@ emitModule decls = {
   };
   textJoin "\n" rendered
 }
-
-emittedModule : Str
-emittedModule = emitModule [loweredValueDecl, loweredFunctionDecl, loweredMainDecl]

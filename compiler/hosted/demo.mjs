@@ -55,6 +55,11 @@ console.log(
     parsedSampleImports: snapshot.parsedSampleImports,
     parsedSampleDeclNames: snapshot.parsedSampleDeclNames,
     parsedSampleMainExpr: snapshot.parsedSampleMainExpr,
+    secondaryParsedModuleName: snapshot.secondaryParsedModuleName,
+    secondaryParsedDeclNames: snapshot.secondaryParsedDeclNames,
+    secondaryCheckedModule: snapshot.secondaryCheckedModule,
+    secondaryLoweredModule: snapshot.secondaryLoweredModule,
+    secondaryEmittedModule: snapshot.secondaryEmittedModule,
     emittedHello: emittedModule.hello,
     emittedIdentity: emittedModule.id("Ada"),
     emittedMain: emittedModule.main

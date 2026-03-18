@@ -1,0 +1,162 @@
+module Compiler.Ast
+
+record HostedDeclAst = {
+  name : Str,
+  annotation : Str,
+  params : [Str],
+  body : Str
+}
+
+record HostedModuleAst = {
+  moduleName : Str,
+  imports : [Str],
+  declarations : [HostedDeclAst],
+  mainExprSummary : Str
+}
+
+record ParserState = {
+  moduleName : Str,
+  imports : [Str],
+  declarations : [HostedDeclAst],
+  pendingAnnotation : Str,
+  mainExprSummary : Str
+}
+
+type SplitTailState = WaitingForHead | CapturingTail Str
+
+hostedDeclAst : Str -> Str -> [Str] -> Str -> HostedDeclAst
+hostedDeclAst name annotation params body = HostedDeclAst { name = name, annotation = annotation, params = params, body = body }
+
+hostedModuleAst : Str -> [Str] -> [HostedDeclAst] -> Str -> HostedModuleAst
+hostedModuleAst moduleName imports declarations mainExprSummary = HostedModuleAst { moduleName = moduleName, imports = imports, declarations = declarations, mainExprSummary = mainExprSummary }
+
+parserState : Str -> [Str] -> [HostedDeclAst] -> Str -> Str -> ParserState
+parserState moduleName imports declarations pendingAnnotation mainExprSummary = ParserState { moduleName = moduleName, imports = imports, declarations = declarations, pendingAnnotation = pendingAnnotation, mainExprSummary = mainExprSummary }
+
+appendDecl : [HostedDeclAst] -> HostedDeclAst -> [HostedDeclAst]
+appendDecl values value = append values [value]
+
+appendRenderedText : [Str] -> Str -> [Str]
+appendRenderedText values value = append values [value]
+
+firstSegment : Str -> Str
+firstSegment value = {
+  for segment in textSplit value "\n" {
+    return segment
+  };
+  ""
+}
+
+remainingSegments : Str -> Str
+remainingSegments value = {
+  let mut state = WaitingForHead;
+  for segment in textSplit value "\n" {
+    state = match state {
+      WaitingForHead ->
+        CapturingTail "",
+      CapturingTail current ->
+        CapturingTail (textConcat [current, segment])
+    };
+    state
+  };
+  match state {
+    WaitingForHead ->
+      "",
+    CapturingTail current ->
+      current
+  }
+}
+
+splitWords : Str -> [Str]
+splitWords value = textSplit value " "
+
+expressionSummary : Str -> Str
+expressionSummary value = match textPrefix value "\"" {
+  Ok tail ->
+    match textSplitFirst tail "\"" {
+      Ok payload ->
+        textConcat ["\"", firstSegment payload, "\""],
+      Err missingClose ->
+        value
+    },
+  Err missingPrefix ->
+    match textSplitFirst value " " {
+      Ok payload ->
+        textConcat ["call ", firstSegment payload, "(", textJoin ", " (splitWords (remainingSegments payload)), ")"],
+      Err noArgs ->
+        value
+    }
+}
+
+declarationHead : Str -> Str
+declarationHead lhs = match textSplitFirst lhs " " {
+  Ok payload ->
+    firstSegment payload,
+  Err noParams ->
+    lhs
+}
+
+declarationParams : Str -> [Str]
+declarationParams lhs = match textSplitFirst lhs " " {
+  Ok payload ->
+    splitWords (remainingSegments payload),
+  Err noParams ->
+    []
+}
+
+appendDefinition : ParserState -> Str -> Str -> ParserState
+appendDefinition state lhs rhs = parserState state.moduleName state.imports (appendDecl state.declarations (hostedDeclAst (declarationHead lhs) state.pendingAnnotation (declarationParams lhs) rhs)) "" state.mainExprSummary
+
+appendMainDefinition : ParserState -> Str -> ParserState
+appendMainDefinition state body = parserState state.moduleName state.imports (appendDecl state.declarations (hostedDeclAst "main" state.pendingAnnotation [] body)) "" (expressionSummary body)
+
+stepParser : ParserState -> Str -> ParserState
+stepParser state line = match textPrefix line "module " {
+  Ok moduleName ->
+    parserState moduleName state.imports state.declarations state.pendingAnnotation state.mainExprSummary,
+  Err moduleMiss ->
+    match textPrefix line "import " {
+      Ok importName ->
+        parserState state.moduleName (appendRenderedText state.imports importName) state.declarations state.pendingAnnotation state.mainExprSummary,
+      Err importMiss ->
+        match textSplitFirst line " : " {
+          Ok annotationPayload ->
+            parserState state.moduleName state.imports state.declarations (remainingSegments annotationPayload) state.mainExprSummary,
+          Err annotationMiss ->
+            match textPrefix line "main = " {
+              Ok mainBody ->
+                appendMainDefinition state mainBody,
+              Err notMain ->
+                match textSplitFirst line " = " {
+                  Ok definitionPayload ->
+                    appendDefinition state (firstSegment definitionPayload) (remainingSegments definitionPayload),
+                  Err notDefinition ->
+                    state
+                }
+            }
+        }
+    }
+}
+
+parseModuleAst : Str -> HostedModuleAst
+parseModuleAst source = {
+  let mut state = parserState "Main" [] [] "" "<missing>";
+  for line in textSplit source "\n" {
+    state = stepParser state line;
+    state
+  };
+  hostedModuleAst state.moduleName state.imports state.declarations state.mainExprSummary
+}
+
+declNames : HostedModuleAst -> [Str]
+declNames modl = {
+  let mut names = [];
+  for decl in modl.declarations {
+    names = appendRenderedText names decl.name;
+    names
+  };
+  names
+}
+
+renderMainExpr : HostedModuleAst -> Str
+renderMainExpr modl = modl.mainExprSummary

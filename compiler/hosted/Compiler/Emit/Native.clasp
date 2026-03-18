@@ -33,6 +33,24 @@ emitNativeDecl decl = match decl {
     textConcat ["function ", name, "(", param, ") = ", emitNativeExpr body]
 }
 
+collectLowerDeclNames : [LowerDeclText] -> [Str]
+collectLowerDeclNames decls = {
+  let mut names = [];
+  for decl in decls {
+    names = append names [nativeDeclName decl];
+    names
+  };
+  names
+}
+
+nativeDeclName : LowerDeclText -> Str
+nativeDeclName decl = match decl {
+  LowerConst name body ->
+    name,
+  LowerFn name param body ->
+    name
+}
+
 renderNativeDecls : [LowerDeclText] -> [Str]
 renderNativeDecls decls = {
   let mut rendered = [];
@@ -43,5 +61,5 @@ renderNativeDecls decls = {
   rendered
 }
 
-emittedNativeModule : Str
-emittedNativeModule = textJoin "\n" (append ["format clasp-native-ir-v1", "module Main", "exports [hello, id, main]", "abi {", "  version clasp-native-v1", "  word_bytes 8", "  memory_strategy reference_counting", "  allocation { immediate = stack, handle = heap, global = static }", "  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]", "  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]", "  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]", "  builtin_layout Int { storage = immediate, words = 1 }", "  builtin_layout Bool { storage = immediate, words = 1 }", "  builtin_layout Str { storage = handle, words = 1 }", "  builtin_layout List { storage = handle, words = 1 }", "  builtin_layout Page { storage = handle, words = 1 }", "  builtin_layout Redirect { storage = handle, words = 1 }", "  builtin_layout View { storage = handle, words = 1 }", "  builtin_layout Prompt { storage = handle, words = 1 }", "}", "runtime {", "  profile compiler_backend_minimal", "  artifacts [\"runtime/native/clasp_runtime.h\", \"runtime/native/clasp_runtime.c\"]", "  memory_symbols [clasp_rt_init, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_register_static_root, clasp_rt_text_split, clasp_rt_read_file, clasp_rt_json_from_string, clasp_rt_json_to_string]", "  bindings []", "  json_codecs []", "  boundaries []", "}", "decls {"] (append (renderNativeDecls [loweredValueDecl, loweredFunctionDecl, loweredMainDecl]) ["}"]))
+emitNativeModule : [LowerDeclText] -> Str
+emitNativeModule decls = textJoin "\n" (append ["format clasp-native-ir-v1", "module Main", textConcat ["exports [", textJoin ", " (collectLowerDeclNames decls), "]"], "abi {", "  version clasp-native-v1", "  word_bytes 8", "  memory_strategy reference_counting", "  allocation { immediate = stack, handle = heap, global = static }", "  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]", "  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]", "  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]", "  builtin_layout Int { storage = immediate, words = 1 }", "  builtin_layout Bool { storage = immediate, words = 1 }", "  builtin_layout Str { storage = handle, words = 1 }", "  builtin_layout List { storage = handle, words = 1 }", "  builtin_layout Page { storage = handle, words = 1 }", "  builtin_layout Redirect { storage = handle, words = 1 }", "  builtin_layout View { storage = handle, words = 1 }", "  builtin_layout Prompt { storage = handle, words = 1 }", "}", "runtime {", "  profile compiler_backend_minimal", "  artifacts [\"runtime/native/clasp_runtime.h\", \"runtime/native/clasp_runtime.c\"]", "  memory_symbols [clasp_rt_init, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_register_static_root, clasp_rt_text_split, clasp_rt_read_file, clasp_rt_json_from_string, clasp_rt_json_to_string]", "  bindings []", "  json_codecs []", "  boundaries []", "}", "decls {"] (append (renderNativeDecls decls) ["}"]))
