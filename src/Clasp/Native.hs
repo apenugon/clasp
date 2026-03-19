@@ -41,12 +41,21 @@ module Clasp.Native
   , NativeVariantLayout (..)
   , buildNativeModule
   , renderNativeModule
+  , renderNativeModuleImageJson
   ) where
 
+import Data.Aeson (Value, object, (.=))
+import Data.Aeson.Text (encodeToLazyText)
+import Data.Bits (xor)
+import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum, isUpper, toLower)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Lazy as LT
+import Numeric (showHex)
+import Data.Word (Word64)
 import Clasp.Lower
   ( LowerDecl (..)
   , LowerExpr (..)
@@ -76,9 +85,18 @@ import Clasp.Syntax
 data NativeModule = NativeModule
   { nativeModuleName :: ModuleName
   , nativeModuleExports :: [Text]
+  , nativeModuleEntrypoints :: [NativeEntrypoint]
   , nativeModuleAbi :: NativeAbi
   , nativeModuleRuntime :: NativeRuntime
   , nativeModuleDecls :: [NativeDecl]
+  }
+  deriving (Eq, Show)
+
+data NativeEntrypoint = NativeEntrypoint
+  { nativeEntrypointName :: Text
+  , nativeEntrypointSymbol :: Text
+  , nativeEntrypointKind :: Text
+  , nativeEntrypointArity :: Int
   }
   deriving (Eq, Show)
 
@@ -290,6 +308,7 @@ data NativeWorkflowBoundary = NativeWorkflowBoundary
   , nativeWorkflowBoundaryStateType :: Type
   , nativeWorkflowBoundaryCheckpointSymbol :: Text
   , nativeWorkflowBoundaryRestoreSymbol :: Text
+  , nativeWorkflowBoundaryHandoffSymbol :: Text
   }
   deriving (Eq, Show)
 
@@ -408,6 +427,7 @@ buildNativeModule modl =
   NativeModule
     { nativeModuleName = lowerModuleName modl
     , nativeModuleExports = fmap lowerDeclName (lowerModuleDecls modl)
+    , nativeModuleEntrypoints = buildNativeEntrypoints (lowerModuleName modl) (fmap lowerDeclToNative (lowerModuleDecls modl))
     , nativeModuleAbi = buildNativeAbi modl
     , nativeModuleRuntime = buildNativeRuntime modl
     , nativeModuleDecls = fmap lowerDeclToNative (lowerModuleDecls modl)
@@ -419,6 +439,7 @@ renderNativeModule nativeMod =
     [ "format clasp-native-ir-v1"
     , "module " <> renderModuleNameText (nativeModuleName nativeMod)
     , "exports [" <> commaSeparated (nativeModuleExports nativeMod) <> "]"
+    , "entrypoints [" <> commaSeparated (fmap renderNativeEntrypoint (nativeModuleEntrypoints nativeMod)) <> "]"
     , ""
     , "abi {"
     ]
@@ -432,6 +453,324 @@ renderNativeModule nativeMod =
          , ""
          ]
       <> concatMap renderNativeDecl (nativeModuleDecls nativeMod)
+
+renderNativeModuleImageJson :: NativeModule -> LT.Text
+renderNativeModuleImageJson =
+  encodeToLazyText . nativeModuleImageValue
+
+nativeModuleImageValue :: NativeModule -> Value
+nativeModuleImageValue nativeMod =
+  object
+    [ "format" .= ("clasp-native-image-v1" :: Text)
+    , "irFormat" .= ("clasp-native-ir-v1" :: Text)
+    , "module" .= renderModuleNameText (nativeModuleName nativeMod)
+    , "exports" .= nativeModuleExports nativeMod
+    , "entrypoints" .= fmap nativeEntrypointImageValue (nativeModuleEntrypoints nativeMod)
+    , "abi" .= nativeAbiImageValue (nativeModuleAbi nativeMod)
+    , "runtime" .= nativeRuntimeImageValue (nativeModuleRuntime nativeMod)
+    , "compatibility" .= nativeModuleCompatibilityImageValue nativeMod
+    , "decls" .= fmap nativeDeclImageValue (nativeModuleDecls nativeMod)
+    ]
+
+nativeModuleCompatibilityImageValue :: NativeModule -> Value
+nativeModuleCompatibilityImageValue nativeMod =
+  object
+    [ "kind" .= ("clasp-native-compatibility-v1" :: Text)
+    , "interfaceFingerprint" .= nativeModuleInterfaceFingerprint nativeMod
+    , "acceptedPreviousFingerprints" .= [nativeModuleInterfaceFingerprint nativeMod]
+    , "migration" .= nativeModuleMigrationImageValue nativeMod
+    ]
+
+nativeModuleMigrationImageValue :: NativeModule -> Value
+nativeModuleMigrationImageValue nativeMod =
+  object
+    [ "kind" .= ("clasp-native-migration-v1" :: Text)
+    , "strategy" .= ("exact-interface-only" :: Text)
+    , "stateType" .= nativeModuleMigrationStateType nativeMod
+    , "snapshotSymbol" .= nativeModuleMigrationSnapshotSymbol nativeMod
+    , "handoffSymbol" .= nativeModuleMigrationHandoffSymbol nativeMod
+    ]
+
+nativeModuleMigrationStateType :: NativeModule -> Maybe Text
+nativeModuleMigrationStateType nativeMod =
+  case nativeModuleWorkflowBoundaries nativeMod of
+    [workflowBoundary] -> Just (renderType (nativeWorkflowBoundaryStateType workflowBoundary))
+    _ -> Nothing
+
+nativeModuleMigrationSnapshotSymbol :: NativeModule -> Maybe Text
+nativeModuleMigrationSnapshotSymbol nativeMod =
+  case nativeModuleWorkflowBoundaries nativeMod of
+    [workflowBoundary] -> Just (nativeWorkflowBoundaryCheckpointSymbol workflowBoundary)
+    _ -> Nothing
+
+nativeModuleMigrationHandoffSymbol :: NativeModule -> Maybe Text
+nativeModuleMigrationHandoffSymbol nativeMod =
+  case nativeModuleWorkflowBoundaries nativeMod of
+    [workflowBoundary] -> Just (nativeWorkflowBoundaryHandoffSymbol workflowBoundary)
+    _ -> Nothing
+
+nativeModuleWorkflowBoundaries :: NativeModule -> [NativeWorkflowBoundary]
+nativeModuleWorkflowBoundaries nativeMod =
+  [ workflowBoundary
+  | NativeWorkflowContract workflowBoundary <- nativeRuntimeBoundaryContracts (nativeModuleRuntime nativeMod)
+  ]
+
+nativeModuleInterfaceFingerprint :: NativeModule -> Text
+nativeModuleInterfaceFingerprint nativeMod =
+  "native-compat:" <> renderFingerprint (fingerprintLazyText (encodeToLazyText (nativeModuleCompatibilitySurfaceValue nativeMod)))
+
+nativeModuleCompatibilitySurfaceValue :: NativeModule -> Value
+nativeModuleCompatibilitySurfaceValue nativeMod =
+  object
+    [ "module" .= renderModuleNameText (nativeModuleName nativeMod)
+    , "exports" .= nativeModuleExports nativeMod
+    , "entrypoints" .= fmap nativeEntrypointImageValue (nativeModuleEntrypoints nativeMod)
+    , "abi" .= nativeAbiImageValue (nativeModuleAbi nativeMod)
+    , "runtime" .= nativeRuntimeImageValue (nativeModuleRuntime nativeMod)
+    ]
+
+fingerprintLazyText :: LT.Text -> Word64
+fingerprintLazyText textValue =
+  BS.foldl' step fnvOffset (TE.encodeUtf8 (LT.toStrict textValue))
+  where
+    step acc byte = (acc `xor` fromIntegral byte) * fnvPrime
+    fnvOffset = 14695981039346656037
+    fnvPrime = 1099511628211
+
+renderFingerprint :: Word64 -> Text
+renderFingerprint fingerprint =
+  T.justifyRight 16 '0' (T.pack (showHex fingerprint ""))
+
+nativeEntrypointImageValue :: NativeEntrypoint -> Value
+nativeEntrypointImageValue entrypoint =
+  object
+    [ "name" .= nativeEntrypointName entrypoint
+    , "symbol" .= nativeEntrypointSymbol entrypoint
+    , "kind" .= nativeEntrypointKind entrypoint
+    , "arity" .= nativeEntrypointArity entrypoint
+    ]
+
+nativeAbiImageValue :: NativeAbi -> Value
+nativeAbiImageValue abi =
+  object
+    [ "version" .= nativeAbiVersion abi
+    , "wordBytes" .= nativeAbiWordBytes abi
+    , "memoryStrategy" .= renderMemoryStrategy (nativeAbiMemoryStrategy abi)
+    , "allocation" .= nativeAllocationModelImageValue (nativeAbiAllocationModel abi)
+    , "ownershipRules" .= fmap renderOwnershipRule (nativeAbiOwnershipRules abi)
+    , "rootDiscoveryRules" .= fmap renderRootDiscoveryRule (nativeAbiRootDiscoveryRules abi)
+    , "lifetimeInvariants" .= fmap renderLifetimeInvariant (nativeAbiLifetimeInvariants abi)
+    , "builtinLayouts" .= fmap nativeBuiltinLayoutImageValue (nativeAbiBuiltinLayouts abi)
+    , "recordLayouts" .= fmap nativeRecordLayoutImageValue (nativeAbiRecordLayouts abi)
+    , "variantLayouts" .= fmap nativeVariantLayoutImageValue (nativeAbiVariantLayouts abi)
+    , "objectLayouts" .= fmap nativeObjectLayoutImageValue (nativeAbiObjectLayouts abi)
+    ]
+
+nativeAllocationModelImageValue :: NativeAllocationModel -> Value
+nativeAllocationModelImageValue allocation =
+  object
+    [ "immediate" .= renderAllocationRegion (nativeAllocationImmediateRegion allocation)
+    , "handle" .= renderAllocationRegion (nativeAllocationHandleRegion allocation)
+    , "global" .= renderAllocationRegion (nativeAllocationGlobalRegion allocation)
+    ]
+
+nativeBuiltinLayoutImageValue :: NativeBuiltinLayout -> Value
+nativeBuiltinLayoutImageValue layout =
+  object
+    [ "name" .= nativeBuiltinLayoutName layout
+    , "storage" .= renderLayoutStorage (nativeBuiltinLayoutStorage layout)
+    , "words" .= nativeBuiltinLayoutWordCount layout
+    ]
+
+nativeFieldLayoutImageValue :: NativeFieldLayout -> Value
+nativeFieldLayoutImageValue fieldLayout =
+  object
+    [ "name" .= nativeFieldLayoutName fieldLayout
+    , "type" .= renderType (nativeFieldLayoutType fieldLayout)
+    , "storage" .= renderLayoutStorage (nativeFieldLayoutStorage fieldLayout)
+    , "wordOffset" .= nativeFieldLayoutWordOffset fieldLayout
+    , "wordCount" .= nativeFieldLayoutWordCount fieldLayout
+    ]
+
+nativeRecordLayoutImageValue :: NativeRecordLayout -> Value
+nativeRecordLayoutImageValue layout =
+  object
+    [ "name" .= nativeRecordLayoutName layout
+    , "words" .= nativeRecordLayoutWordCount layout
+    , "fields" .= fmap nativeFieldLayoutImageValue (nativeRecordLayoutFields layout)
+    ]
+
+nativeSlotLayoutImageValue :: NativeSlotLayout -> Value
+nativeSlotLayoutImageValue slotLayout =
+  object
+    [ "name" .= nativeSlotLayoutName slotLayout
+    , "type" .= renderType (nativeSlotLayoutType slotLayout)
+    , "storage" .= renderLayoutStorage (nativeSlotLayoutStorage slotLayout)
+    , "wordOffset" .= nativeSlotLayoutWordOffset slotLayout
+    , "wordCount" .= nativeSlotLayoutWordCount slotLayout
+    ]
+
+nativeConstructorLayoutImageValue :: NativeConstructorLayout -> Value
+nativeConstructorLayoutImageValue layout =
+  object
+    [ "name" .= nativeConstructorLayoutName layout
+    , "tagWord" .= nativeConstructorLayoutTagWord layout
+    , "payloadWords" .= nativeConstructorLayoutPayloadWords layout
+    , "words" .= nativeConstructorLayoutWordCount layout
+    , "payloads" .= fmap nativeSlotLayoutImageValue (nativeConstructorLayoutPayloads layout)
+    ]
+
+nativeVariantLayoutImageValue :: NativeVariantLayout -> Value
+nativeVariantLayoutImageValue layout =
+  object
+    [ "name" .= nativeVariantLayoutName layout
+    , "tagWord" .= nativeVariantLayoutTagWord layout
+    , "maxPayloadWords" .= nativeVariantLayoutMaxPayloadWords layout
+    , "words" .= nativeVariantLayoutWordCount layout
+    , "constructors" .= fmap nativeConstructorLayoutImageValue (nativeVariantLayoutConstructors layout)
+    ]
+
+nativeObjectLayoutImageValue :: NativeObjectLayout -> Value
+nativeObjectLayoutImageValue layout =
+  object
+    [ "name" .= nativeObjectLayoutName layout
+    , "kind" .= renderObjectKind (nativeObjectLayoutKind layout)
+    , "headerWords" .= nativeObjectLayoutHeaderWords layout
+    , "words" .= nativeObjectLayoutWordCount layout
+    , "roots" .= nativeObjectLayoutRootOffsets layout
+    ]
+
+nativeRuntimeImageValue :: NativeRuntime -> Value
+nativeRuntimeImageValue runtime =
+  object
+    [ "profile" .= nativeRuntimeProfile runtime
+    , "artifacts" .= nativeRuntimeArtifacts runtime
+    , "memorySymbols" .= nativeRuntimeMemorySymbols runtime
+    , "bindings" .= fmap nativeRuntimeBindingImageValue (nativeRuntimeBindings runtime)
+    , "jsonCodecs" .= fmap nativeJsonCodecImageValue (nativeRuntimeJsonCodecs runtime)
+    , "binaryCodecs" .= fmap nativeBinaryCodecImageValue (nativeRuntimeBinaryCodecs runtime)
+    , "boundaries" .= fmap nativeBoundaryContractImageValue (nativeRuntimeBoundaryContracts runtime)
+    , "serviceTransports" .= fmap nativeServiceTransportImageValue (nativeRuntimeServiceTransports runtime)
+    ]
+
+nativeRuntimeBindingImageValue :: NativeRuntimeBinding -> Value
+nativeRuntimeBindingImageValue binding =
+  object
+    [ "name" .= nativeRuntimeBindingName binding
+    , "runtime" .= nativeRuntimeBindingRuntimeName binding
+    , "symbol" .= nativeRuntimeBindingSymbol binding
+    , "type" .= renderType (nativeRuntimeBindingType binding)
+    ]
+
+nativeJsonCodecImageValue :: NativeJsonCodec -> Value
+nativeJsonCodecImageValue codec =
+  object
+    [ "type" .= renderType (nativeJsonCodecType codec)
+    , "encode" .= nativeJsonCodecEncodeSymbol codec
+    , "decode" .= nativeJsonCodecDecodeSymbol codec
+    ]
+
+nativeBinaryCodecImageValue :: NativeBinaryCodec -> Value
+nativeBinaryCodecImageValue codec =
+  object
+    [ "type" .= renderType (nativeBinaryCodecType codec)
+    , "encode" .= nativeBinaryCodecEncodeSymbol codec
+    , "decode" .= nativeBinaryCodecDecodeSymbol codec
+    , "framing" .= nativeBinaryCodecFraming codec
+    ]
+
+nativeBoundaryContractImageValue :: NativeBoundaryContract -> Value
+nativeBoundaryContractImageValue contract =
+  case contract of
+    NativeRouteContract routeBoundary ->
+      object
+        [ "kind" .= ("route" :: Text)
+        , "name" .= nativeRouteBoundaryName routeBoundary
+        , "id" .= nativeRouteBoundaryIdentity routeBoundary
+        , "method" .= nativeRouteBoundaryMethod routeBoundary
+        , "path" .= nativeRouteBoundaryPath routeBoundary
+        , "request" .= nativeRouteBoundaryRequestType routeBoundary
+        , "response" .= nativeRouteBoundaryResponseType routeBoundary
+        , "responseKind" .= nativeRouteBoundaryResponseKind routeBoundary
+        , "encode" .= nativeRouteBoundaryEncodeSymbol routeBoundary
+        , "decode" .= nativeRouteBoundaryDecodeSymbol routeBoundary
+        ]
+    NativeHookContract hookBoundary ->
+      object
+        [ "kind" .= ("hook" :: Text)
+        , "name" .= nativeHookBoundaryName hookBoundary
+        , "id" .= nativeHookBoundaryIdentity hookBoundary
+        , "event" .= nativeHookBoundaryEvent hookBoundary
+        , "request" .= nativeHookBoundaryRequestType hookBoundary
+        , "response" .= nativeHookBoundaryResponseType hookBoundary
+        , "handler" .= nativeHookBoundaryHandler hookBoundary
+        , "encode" .= nativeHookBoundaryEncodeSymbol hookBoundary
+        , "decode" .= nativeHookBoundaryDecodeSymbol hookBoundary
+        ]
+    NativeToolServerContract toolServerBoundary ->
+      object
+        [ "kind" .= ("toolserver" :: Text)
+        , "name" .= nativeToolServerBoundaryName toolServerBoundary
+        , "id" .= nativeToolServerBoundaryIdentity toolServerBoundary
+        , "protocol" .= nativeToolServerBoundaryProtocol toolServerBoundary
+        , "location" .= nativeToolServerBoundaryLocation toolServerBoundary
+        , "policy" .= nativeToolServerBoundaryPolicy toolServerBoundary
+        ]
+    NativeToolContract toolBoundary ->
+      object
+        [ "kind" .= ("tool" :: Text)
+        , "name" .= nativeToolBoundaryName toolBoundary
+        , "id" .= nativeToolBoundaryIdentity toolBoundary
+        , "server" .= nativeToolBoundaryServer toolBoundary
+        , "operation" .= nativeToolBoundaryOperation toolBoundary
+        , "request" .= nativeToolBoundaryRequestType toolBoundary
+        , "response" .= nativeToolBoundaryResponseType toolBoundary
+        , "encode" .= nativeToolBoundaryEncodeSymbol toolBoundary
+        , "decode" .= nativeToolBoundaryDecodeSymbol toolBoundary
+        ]
+    NativeWorkflowContract workflowBoundary ->
+      object
+        [ "kind" .= ("workflow" :: Text)
+        , "name" .= nativeWorkflowBoundaryName workflowBoundary
+        , "id" .= nativeWorkflowBoundaryIdentity workflowBoundary
+        , "state" .= renderType (nativeWorkflowBoundaryStateType workflowBoundary)
+        , "checkpoint" .= nativeWorkflowBoundaryCheckpointSymbol workflowBoundary
+        , "restore" .= nativeWorkflowBoundaryRestoreSymbol workflowBoundary
+        , "handoff" .= nativeWorkflowBoundaryHandoffSymbol workflowBoundary
+        ]
+
+nativeServiceTransportImageValue :: NativeServiceTransport -> Value
+nativeServiceTransportImageValue transport =
+  object
+    [ "kind" .= nativeServiceTransportKind transport
+    , "name" .= nativeServiceTransportName transport
+    , "id" .= nativeServiceTransportIdentity transport
+    , "mode" .= nativeServiceTransportMode transport
+    , "request" .= nativeServiceTransportRequestType transport
+    , "requestEncode" .= nativeServiceTransportRequestEncodeSymbol transport
+    , "requestDecode" .= nativeServiceTransportRequestDecodeSymbol transport
+    , "response" .= nativeServiceTransportResponseType transport
+    , "responseEncode" .= nativeServiceTransportResponseEncodeSymbol transport
+    , "responseDecode" .= nativeServiceTransportResponseDecodeSymbol transport
+    , "framing" .= nativeServiceTransportFraming transport
+    ]
+
+nativeDeclImageValue :: NativeDecl -> Value
+nativeDeclImageValue decl =
+  case decl of
+    NativeGlobalDecl globalDecl ->
+      object
+        [ "kind" .= ("global" :: Text)
+        , "name" .= nativeGlobalName globalDecl
+        , "bodyText" .= renderNativeExpr (nativeGlobalBody globalDecl)
+        ]
+    NativeFunctionDecl functionDecl ->
+      object
+        [ "kind" .= ("function" :: Text)
+        , "name" .= nativeFunctionName functionDecl
+        , "params" .= nativeFunctionParams functionDecl
+        , "bodyText" .= renderNativeExpr (nativeFunctionBody functionDecl)
+        ]
 
 renderNativeAbi :: NativeAbi -> [Text]
 renderNativeAbi abi =
@@ -461,6 +800,17 @@ renderNativeDecl decl =
       [ "function " <> nativeFunctionName functionDecl <> "(" <> commaSeparated (nativeFunctionParams functionDecl) <> ") = " <> renderNativeExpr (nativeFunctionBody functionDecl)
       , ""
       ]
+
+renderNativeEntrypoint :: NativeEntrypoint -> Text
+renderNativeEntrypoint entrypoint =
+  nativeEntrypointName entrypoint
+    <> "{symbol="
+    <> nativeEntrypointSymbol entrypoint
+    <> ", kind="
+    <> nativeEntrypointKind entrypoint
+    <> ", arity="
+    <> renderInt (nativeEntrypointArity entrypoint)
+    <> "}"
 
 renderBuiltinLayout :: NativeBuiltinLayout -> Text
 renderBuiltinLayout layout =
@@ -603,6 +953,8 @@ renderBoundaryContract contract =
         <> nativeWorkflowBoundaryCheckpointSymbol workflowBoundary
         <> ", restore="
         <> nativeWorkflowBoundaryRestoreSymbol workflowBoundary
+        <> ", handoff="
+        <> nativeWorkflowBoundaryHandoffSymbol workflowBoundary
         <> "}"
 
 renderServiceTransport :: NativeServiceTransport -> Text
@@ -735,6 +1087,14 @@ renderRouteContract routeContract =
 renderModuleNameText :: ModuleName -> Text
 renderModuleNameText =
   T.intercalate "." . splitModuleName
+
+renderNativeModuleSymbolPrefix :: ModuleName -> Text
+renderNativeModuleSymbolPrefix modName =
+  "clasp_native__" <> T.intercalate "__" (fmap sanitizeSymbolPart (splitModuleName modName))
+
+sanitizeSymbolPart :: Text -> Text
+sanitizeSymbolPart =
+  T.map (\char -> if isAlphaNum char then char else '_')
 
 renderMemoryStrategy :: NativeMemoryStrategy -> Text
 renderMemoryStrategy NativeReferenceCounting = "reference_counting"
@@ -879,7 +1239,7 @@ buildNativeRuntime modl =
     { nativeRuntimeProfile = "compiler_backend_minimal"
     , nativeRuntimeArtifacts =
         [ "runtime/native/clasp_runtime.h"
-        , "runtime/native/clasp_runtime.c"
+        , "runtime/native/clasp_runtime.rs"
         ]
     , nativeRuntimeMemorySymbols =
         [ "clasp_rt_init"
@@ -907,7 +1267,7 @@ buildNativeRuntime modl =
           <> fmap (NativeHookContract . hookDeclToBoundary) (lowerModuleHookDecls modl)
           <> fmap (NativeToolServerContract . toolServerDeclToBoundary) (lowerModuleToolServerDecls modl)
           <> fmap (NativeToolContract . toolDeclToBoundary) (lowerModuleToolDecls modl)
-          <> fmap (NativeWorkflowContract . workflowDeclToBoundary) (lowerModuleWorkflowDecls modl)
+          <> fmap (NativeWorkflowContract . workflowDeclToBoundary (lowerModuleName modl)) (lowerModuleWorkflowDecls modl)
     , nativeRuntimeServiceTransports =
         fmap lowerRouteToServiceTransport (filter isBinaryServiceRoute (lowerModuleRoutes modl))
           <> fmap hookDeclToServiceTransport (lowerModuleHookDecls modl)
@@ -994,14 +1354,19 @@ toolDeclToBoundary toolDecl =
     , nativeToolBoundaryDecodeSymbol = "$decode_" <> toolDeclRequestType toolDecl
     }
 
-workflowDeclToBoundary :: WorkflowDecl -> NativeWorkflowBoundary
-workflowDeclToBoundary workflowDecl =
+workflowDeclToBoundary :: ModuleName -> WorkflowDecl -> NativeWorkflowBoundary
+workflowDeclToBoundary modName workflowDecl =
   NativeWorkflowBoundary
     { nativeWorkflowBoundaryName = workflowDeclName workflowDecl
     , nativeWorkflowBoundaryIdentity = workflowDeclIdentity workflowDecl
     , nativeWorkflowBoundaryStateType = workflowDeclStateType workflowDecl
     , nativeWorkflowBoundaryCheckpointSymbol = "$encode_" <> nativeCodecSuffix (workflowDeclStateType workflowDecl)
     , nativeWorkflowBoundaryRestoreSymbol = "$decode_" <> nativeCodecSuffix (workflowDeclStateType workflowDecl)
+    , nativeWorkflowBoundaryHandoffSymbol =
+        renderNativeModuleSymbolPrefix modName
+          <> "__"
+          <> sanitizeSymbolPart (workflowDeclName workflowDecl)
+          <> "__handoff"
     }
 
 lowerRouteToServiceTransport :: LowerRoute -> NativeServiceTransport
@@ -1259,6 +1624,32 @@ lowerDeclToNative decl =
           , nativeFunctionParams = params
           , nativeFunctionBody = lowerExprToNative body
           }
+
+buildNativeEntrypoints :: ModuleName -> [NativeDecl] -> [NativeEntrypoint]
+buildNativeEntrypoints modName decls =
+  fmap (nativeDeclEntrypoint modName) decls
+
+nativeDeclEntrypoint :: ModuleName -> NativeDecl -> NativeEntrypoint
+nativeDeclEntrypoint modName decl =
+  case decl of
+    NativeGlobalDecl globalDecl ->
+      NativeEntrypoint
+        { nativeEntrypointName = nativeGlobalName globalDecl
+        , nativeEntrypointSymbol = nativeEntrypointSymbolName modName (nativeGlobalName globalDecl)
+        , nativeEntrypointKind = "global"
+        , nativeEntrypointArity = 0
+        }
+    NativeFunctionDecl functionDecl ->
+      NativeEntrypoint
+        { nativeEntrypointName = nativeFunctionName functionDecl
+        , nativeEntrypointSymbol = nativeEntrypointSymbolName modName (nativeFunctionName functionDecl)
+        , nativeEntrypointKind = "function"
+        , nativeEntrypointArity = length (nativeFunctionParams functionDecl)
+        }
+
+nativeEntrypointSymbolName :: ModuleName -> Text -> Text
+nativeEntrypointSymbolName modName exportName =
+  renderNativeModuleSymbolPrefix modName <> "__" <> sanitizeSymbolPart exportName
 
 lowerExprToNative :: LowerExpr -> NativeExpr
 lowerExprToNative expr =

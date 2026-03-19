@@ -2,14 +2,23 @@ module Compiler.Checker
 
 import Compiler.Ast
 
-type TypeText = TInt | TStr | TBool | TList TypeText | TFunction TypeText TypeText | TUnknown Str
+type TypeText = TInt | TStr | TBool | TList TypeText | TFunction TypeText TypeText | TNamed Str | TUnknown Str
 type LookupResult = FoundType TypeText | MissingType Str
+type TypeDeclLookupResult = FoundTypeDecl HostedTypeDeclAst | MissingTypeDecl Str
+type RecordLookupResult = FoundRecord HostedRecordDeclAst | MissingRecord Str
+type RecordFieldLookupResult = FoundRecordField HostedRecordFieldDeclAst | MissingRecordField Str
+type RecordExprFieldLookupResult = FoundRecordExprField HostedRecordFieldExprAst | MissingRecordExprField Str
+type ConstructorLookupResult = FoundConstructor Str HostedConstructorDeclAst | MissingConstructor Str
+type TypeConstructorLookupResult = FoundTypeConstructor HostedConstructorDeclAst | MissingTypeConstructor Str
+type PatternBindResult = BoundPattern [TypeBinding] | PatternBindError Str
+type InferMatchBranchResult = InferredMatchBranch Str TypeText | InferMatchBranchError Str
 type InferExprResult = InferredExpr TypeText | InferExprError Str
 type InferDeclResult = InferredDecl TypeBinding | InferDeclError Str
 type InferModuleResult = InferredModule [TypeBinding] | InferModuleError Str
 type ApplyCallResult = ApplyCallOk TypeText | ApplyCallError Str
 type ListInferState = WaitingForItem | SeenItemType TypeText | SeenListError Str
 type BindParamsState = BindingParams [TypeBinding] TypeText | BindingParamError Str
+type MatchBranchState = WaitingForBranch [Str] | SeenBranchType [Str] TypeText | SeenMatchError Str
 type TypeBinding = TypeBinding Str TypeText
 
 emptyTypeBindings : [TypeBinding]
@@ -33,6 +42,8 @@ renderAtomicType typeText = match typeText {
     "Str",
   TBool ->
     "Bool",
+  TNamed label ->
+    label,
   TUnknown label ->
     textConcat ["?", label]
 }
@@ -47,6 +58,8 @@ renderType typeText = match typeText {
     "Bool",
   TList itemType ->
     textConcat ["[", renderType itemType, "]"],
+  TNamed label ->
+    label,
   TUnknown label ->
     textConcat ["?", label],
   TFunction input result ->
@@ -56,15 +69,38 @@ renderType typeText = match typeText {
 sameType : TypeText -> TypeText -> Bool
 sameType left right = renderType left == renderType right
 
-parseAtomicType : Str -> TypeText
-parseAtomicType value = if value == "Int" then TInt else if value == "Str" then TStr else if value == "Bool" then TBool else if isListLiteral value then TList (parseType (betweenBrackets value)) else TUnknown value
+typeFromHostedTypeAst : HostedTypeAst -> TypeText
+typeFromHostedTypeAst typeAst = match typeAst {
+  HostedTypeName name ->
+    if name == "Int" then TInt else if name == "Str" then TStr else if name == "Bool" then TBool else TNamed name,
+  HostedTypeList itemType ->
+    TList (typeFromHostedTypeAst itemType),
+  HostedTypeFunction input result ->
+    TFunction (typeFromHostedTypeAst input) (typeFromHostedTypeAst result)
+}
 
-parseType : Str -> TypeText
-parseType value = match textSplitFirst value " -> " {
-  Ok payload ->
-    TFunction (parseAtomicType (firstSegment payload)) (parseType (remainingSegments payload)),
-  Err noArrow ->
-    parseAtomicType value
+remainingHostedTypes : [HostedTypeAst] -> [HostedTypeAst]
+remainingHostedTypes values = {
+  let mut remaining = [];
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      remaining = append remaining [value];
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+buildFunctionType : [HostedTypeAst] -> TypeText -> TypeText
+buildFunctionType payloadTypes resultType = {
+  for payloadType in payloadTypes {
+    return TFunction (typeFromHostedTypeAst payloadType) (buildFunctionType (remainingHostedTypes payloadTypes) resultType)
+  };
+  resultType
 }
 
 typeMismatchMessage : Str -> TypeText -> TypeText -> Str
@@ -81,6 +117,129 @@ lookupTypeBinding env targetName = {
   MissingType targetName
 }
 
+lookupTypeDecl : [HostedTypeDeclAst] -> Str -> TypeDeclLookupResult
+lookupTypeDecl typeDecls targetName = {
+  for typeDecl in typeDecls {
+    if typeDeclName typeDecl == targetName then {
+      return FoundTypeDecl typeDecl
+    } else {
+      MissingTypeDecl targetName
+    }
+  };
+  MissingTypeDecl targetName
+}
+
+lookupRecordDecl : [HostedRecordDeclAst] -> Str -> RecordLookupResult
+lookupRecordDecl recordDecls targetName = {
+  for recordDecl in recordDecls {
+    if recordDeclName recordDecl == targetName then {
+      return FoundRecord recordDecl
+    } else {
+      MissingRecord targetName
+    }
+  };
+  MissingRecord targetName
+}
+
+lookupRecordField : [HostedRecordFieldDeclAst] -> Str -> RecordFieldLookupResult
+lookupRecordField fields targetName = {
+  for field in fields {
+    if recordFieldDeclName field == targetName then {
+      return FoundRecordField field
+    } else {
+      MissingRecordField targetName
+    }
+  };
+  MissingRecordField targetName
+}
+
+lookupRecordExprField : [HostedRecordFieldExprAst] -> Str -> RecordExprFieldLookupResult
+lookupRecordExprField fields targetName = {
+  for field in fields {
+    if recordExprFieldName field == targetName then {
+      return FoundRecordExprField field
+    } else {
+      MissingRecordExprField targetName
+    }
+  };
+  MissingRecordExprField targetName
+}
+
+lookupTypeConstructor : HostedTypeDeclAst -> Str -> TypeConstructorLookupResult
+lookupTypeConstructor typeDecl constructorName = {
+  for constructorDecl in typeDeclConstructors typeDecl {
+    if constructorDeclName constructorDecl == constructorName then {
+      return FoundTypeConstructor constructorDecl
+    } else {
+      MissingTypeConstructor constructorName
+    }
+  };
+  MissingTypeConstructor constructorName
+}
+
+lookupConstructorDecl : [HostedTypeDeclAst] -> Str -> ConstructorLookupResult
+lookupConstructorDecl typeDecls constructorName = {
+  for typeDecl in typeDecls {
+    match lookupTypeConstructor typeDecl constructorName {
+      FoundTypeConstructor constructorDecl ->
+        return FoundConstructor (typeDeclName typeDecl) constructorDecl,
+      MissingTypeConstructor missing ->
+        MissingConstructor constructorName
+    }
+  };
+  MissingConstructor constructorName
+}
+
+containsText : [Str] -> Str -> Bool
+containsText values target = {
+  for value in values {
+    if value == target then return true else false
+  };
+  false
+}
+
+findMissingBranchName : HostedTypeDeclAst -> [Str] -> Str
+findMissingBranchName typeDecl seen = {
+  for constructorDecl in typeDeclConstructors typeDecl {
+    let constructorName = constructorDeclName constructorDecl;
+    if containsText seen constructorName then {
+      ""
+    } else {
+      return constructorName
+    }
+  };
+  ""
+}
+
+bindPatternArgs : Str -> [HostedTypeAst] -> [Str] -> PatternBindResult
+bindPatternArgs constructorName payloadTypes binders = {
+  for payloadType in payloadTypes {
+    let binder = firstText binders;
+    if binder == "" then {
+      return PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` is missing a binder."])
+    } else {
+      match bindPatternArgs constructorName (remainingHostedTypes payloadTypes) (remainingTexts binders) {
+        BoundPattern remaining ->
+          return BoundPattern (append [TypeBinding binder (typeFromHostedTypeAst payloadType)] remaining),
+        PatternBindError message ->
+          return PatternBindError message
+      }
+    }
+  };
+  if firstText binders == "" then BoundPattern [] else PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` binds too many values."])
+}
+
+bindPattern : HostedTypeDeclAst -> HostedPatternAst -> PatternBindResult
+bindPattern typeDecl pattern = {
+  let constructorName = patternConstructorName pattern;
+  match lookupTypeConstructor typeDecl constructorName {
+    FoundTypeConstructor constructorDecl ->
+      bindPatternArgs constructorName (constructorDeclPayloadTypes constructorDecl) (patternBinders pattern),
+    MissingTypeConstructor missing ->
+      PatternBindError (textConcat ["Constructor `", missing, "` is not part of `", typeDeclName typeDecl, "`."])
+  }
+}
+
 hasDeclParams : HostedDeclAst -> Bool
 hasDeclParams decl = {
   for paramName in declParams decl {
@@ -89,8 +248,8 @@ hasDeclParams decl = {
   false
 }
 
-inferExpr : [TypeBinding] -> [TypeBinding] -> HostedExprAst -> InferExprResult
-inferExpr env localEnv expr = match expr {
+inferExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedExprAst -> InferExprResult
+inferExpr typeDecls recordDecls env localEnv expr = match expr {
   HostedString value ->
     InferredExpr TStr,
   HostedInt value ->
@@ -98,14 +257,24 @@ inferExpr env localEnv expr = match expr {
   HostedBool value ->
     InferredExpr TBool,
   HostedList values ->
-    inferListExpr env localEnv values,
+    inferListExpr typeDecls recordDecls env localEnv values,
   HostedCall callee args ->
     match lookupTypeBinding (append env localEnv) callee {
       FoundType calleeType ->
-        applyCallType env localEnv callee calleeType args,
+        applyCallType typeDecls recordDecls env localEnv callee calleeType args,
       MissingType missing ->
         InferExprError (textConcat ["Unknown name `", missing, "`."])
     },
+  HostedConstructor constructorName args ->
+    inferConstructorExpr typeDecls recordDecls env localEnv constructorName args,
+  HostedMatch subject branches ->
+    inferMatchExpr typeDecls recordDecls env localEnv subject branches,
+  HostedRecord recordName fields ->
+    inferRecordExpr typeDecls recordDecls env localEnv recordName fields,
+  HostedFieldAccess subject fieldName ->
+    inferFieldAccessExpr typeDecls recordDecls env localEnv subject fieldName,
+  HostedLet binder value body ->
+    inferLetExpr typeDecls recordDecls env localEnv binder value body,
   HostedName name ->
     match lookupTypeBinding (append env localEnv) name {
       FoundType bindingType ->
@@ -115,11 +284,19 @@ inferExpr env localEnv expr = match expr {
     }
 }
 
-inferListExpr : [TypeBinding] -> [TypeBinding] -> [HostedExprAst] -> InferExprResult
-inferListExpr env localEnv values = {
+inferLetExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferLetExpr typeDecls recordDecls env localEnv binder value body = match inferExpr typeDecls recordDecls env localEnv value {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr valueType ->
+    inferExpr typeDecls recordDecls env (appendTypeBinding localEnv (TypeBinding binder valueType)) body
+}
+
+inferListExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> [HostedExprAst] -> InferExprResult
+inferListExpr typeDecls recordDecls env localEnv values = {
   let mut state = WaitingForItem;
   for value in values {
-    let step = inferExpr env localEnv value;
+    let step = inferExpr typeDecls recordDecls env localEnv value;
     state = match state {
       WaitingForItem ->
         match step {
@@ -150,11 +327,205 @@ inferListExpr env localEnv values = {
   }
 }
 
-applyCallType : [TypeBinding] -> [TypeBinding] -> Str -> TypeText -> [HostedExprAst] -> InferExprResult
-applyCallType env localEnv calleeName calleeType argValues = {
+inferRecordFieldValue : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedRecordDeclAst -> HostedRecordFieldDeclAst -> [HostedRecordFieldExprAst] -> InferExprResult
+inferRecordFieldValue typeDecls recordDecls env localEnv recordDecl fieldDecl fields = {
+  let fieldName = recordFieldDeclName fieldDecl;
+  let recordName = recordDeclName recordDecl;
+  let expectedType = typeFromHostedTypeAst (recordFieldDeclType fieldDecl);
+  match lookupRecordExprField fields fieldName {
+    MissingRecordExprField missingField ->
+      InferExprError (textConcat ["Record literal for `", recordName, "` is missing field `", missingField, "`."]),
+    FoundRecordExprField exprField ->
+      match inferExpr typeDecls recordDecls env localEnv (recordExprFieldValue exprField) {
+        InferExprError message ->
+          InferExprError message,
+        InferredExpr actualType ->
+          if sameType actualType expectedType then InferredExpr expectedType else InferExprError (typeMismatchMessage fieldName expectedType actualType)
+      }
+  }
+}
+
+findUnknownRecordLiteralField : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findUnknownRecordLiteralField recordDecl fields = {
+  for exprField in fields {
+    match lookupRecordField (recordDeclFields recordDecl) (recordExprFieldName exprField) {
+      FoundRecordField fieldDecl ->
+        "",
+      MissingRecordField missingField ->
+        return missingField
+    }
+  };
+  ""
+}
+
+findRecordLiteralFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFailure typeDecls recordDecls env localEnv recordDecl fields = {
+  for fieldDecl in recordDeclFields recordDecl {
+    match inferRecordFieldValue typeDecls recordDecls env localEnv recordDecl fieldDecl fields {
+      InferredExpr inferredType ->
+        "",
+      InferExprError message ->
+        return message
+    }
+  };
+  ""
+}
+
+inferRecordExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> Str -> [HostedRecordFieldExprAst] -> InferExprResult
+inferRecordExpr typeDecls recordDecls env localEnv recordName fields = match lookupRecordDecl recordDecls recordName {
+  MissingRecord missing ->
+    InferExprError (textConcat ["Unknown record `", missing, "`."]),
+  FoundRecord recordDecl -> {
+    let unknownField = findUnknownRecordLiteralField recordDecl fields;
+    if unknownField == "" then {
+      let failure = findRecordLiteralFailure typeDecls recordDecls env localEnv recordDecl fields;
+      if failure == "" then InferredExpr (TNamed recordName) else InferExprError failure
+    } else {
+      InferExprError (textConcat ["Record literal for `", recordName, "` includes unknown field `", unknownField, "`."])
+    }
+  }
+}
+
+inferFieldAccessExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedExprAst -> Str -> InferExprResult
+inferFieldAccessExpr typeDecls recordDecls env localEnv subject fieldName = match inferExpr typeDecls recordDecls env localEnv subject {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr subjectType ->
+    match subjectType {
+      TNamed recordName ->
+        match lookupRecordDecl recordDecls recordName {
+          FoundRecord recordDecl ->
+            match lookupRecordField (recordDeclFields recordDecl) fieldName {
+              FoundRecordField field ->
+                InferredExpr (typeFromHostedTypeAst (recordFieldDeclType field)),
+              MissingRecordField missingField ->
+                InferExprError (textConcat ["Record `", recordName, "` does not define field `", missingField, "`."])
+            },
+          MissingRecord missing ->
+            match lookupTypeDecl typeDecls recordName {
+              FoundTypeDecl typeDecl ->
+                InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+              MissingTypeDecl missingType ->
+                InferExprError (textConcat ["Unknown record `", missing, "`."])
+            }
+        },
+      TInt ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TStr ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TBool ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TList itemType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TFunction inputType resultType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TUnknown label ->
+        InferExprError (textConcat ["Could not infer the record type of `", expressionSummary subject, "`."])
+    }
+}
+
+inferConstructorExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> Str -> [HostedExprAst] -> InferExprResult
+inferConstructorExpr typeDecls recordDecls env localEnv constructorName args = match lookupConstructorDecl typeDecls constructorName {
+  FoundConstructor typeName constructorDecl ->
+    applyCallType typeDecls recordDecls env localEnv constructorName (buildFunctionType (constructorDeclPayloadTypes constructorDecl) (TNamed typeName)) args,
+  MissingConstructor missing ->
+    InferExprError (textConcat ["Unknown constructor `", missing, "`."])
+}
+
+inferMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedTypeDeclAst -> HostedMatchBranchAst -> InferMatchBranchResult
+inferMatchBranch typeDecls recordDecls env localEnv typeDecl branch = {
+  let pattern = branchPatternAst branch;
+  let constructorName = patternConstructorName pattern;
+  match bindPattern typeDecl pattern {
+    PatternBindError message ->
+      InferMatchBranchError message,
+    BoundPattern bindings ->
+      match inferExpr typeDecls recordDecls env (append bindings localEnv) (branchBodyExpr branch) {
+        InferExprError message ->
+          InferMatchBranchError message,
+        InferredExpr bodyType ->
+          InferredMatchBranch constructorName bodyType
+      }
+  }
+}
+
+inferMatchExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> HostedExprAst -> [HostedMatchBranchAst] -> InferExprResult
+inferMatchExpr typeDecls recordDecls env localEnv subject branches = match inferExpr typeDecls recordDecls env localEnv subject {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr subjectType ->
+    match subjectType {
+      TNamed typeName ->
+        match lookupTypeDecl typeDecls typeName {
+          MissingTypeDecl missing ->
+            InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+          FoundTypeDecl typeDecl -> {
+            let mut state = WaitingForBranch [];
+            for branch in branches {
+              state = match state {
+                SeenMatchError message ->
+                  SeenMatchError message,
+                WaitingForBranch seen -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv typeDecl branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        SeenBranchType (append seen [seenConstructor]) bodyType
+                    }
+                  }
+                },
+                SeenBranchType seen currentType -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv typeDecl branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        if sameType currentType bodyType then SeenBranchType (append seen [seenConstructor]) currentType else SeenMatchError (typeMismatchMessage constructorName currentType bodyType)
+                    }
+                  }
+                }
+              };
+              state
+            };
+            match state {
+              SeenMatchError message ->
+                InferExprError message,
+              WaitingForBranch seen ->
+                InferExprError "Match expression needs at least one branch.",
+              SeenBranchType seen resultType -> {
+                let missingBranch = findMissingBranchName typeDecl seen;
+                if missingBranch == "" then InferredExpr resultType else InferExprError (textConcat ["Non-exhaustive match for `", typeName, "` is missing branch `", missingBranch, "`."])
+              }
+            }
+          }
+        },
+      TInt ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TStr ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TBool ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TList itemType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TFunction inputType resultType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TUnknown label ->
+        InferExprError (textConcat ["Could not infer the match type of `", expressionSummary subject, "`."])
+    }
+}
+
+applyCallType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> Str -> TypeText -> [HostedExprAst] -> InferExprResult
+applyCallType typeDecls recordDecls env localEnv calleeName calleeType argValues = {
   let mut result = ApplyCallOk calleeType;
   for argValue in argValues {
-    result = applyCallArg env localEnv calleeName result argValue;
+    result = applyCallArg typeDecls recordDecls env localEnv calleeName result argValue;
     result
   };
   match result {
@@ -165,14 +536,14 @@ applyCallType env localEnv calleeName calleeType argValues = {
   }
 }
 
-applyCallArg : [TypeBinding] -> [TypeBinding] -> Str -> ApplyCallResult -> HostedExprAst -> ApplyCallResult
-applyCallArg env localEnv calleeName state argValue = match state {
+applyCallArg : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> Str -> ApplyCallResult -> HostedExprAst -> ApplyCallResult
+applyCallArg typeDecls recordDecls env localEnv calleeName state argValue = match state {
   ApplyCallError message ->
     ApplyCallError message,
   ApplyCallOk currentType ->
     match currentType {
       TFunction inputType resultType ->
-        match inferExpr env localEnv argValue {
+        match inferExpr typeDecls recordDecls env localEnv argValue {
           InferExprError message ->
             ApplyCallError message,
           InferredExpr actualType ->
@@ -186,19 +557,21 @@ applyCallArg env localEnv calleeName state argValue = match state {
         ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
       TBool ->
         ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+      TNamed label ->
+        ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
       TUnknown label ->
         ApplyCallError (textConcat ["Could not infer the callable type of `", calleeName, "`."])
     }
 }
 
-inferDecl : [TypeBinding] -> HostedDeclAst -> InferDeclResult
-inferDecl env decl = if hasDeclParams decl then inferFunctionDecl env decl (declParams decl) else match inferExpr env emptyTypeBindings (declBody decl) { InferExprError message -> InferDeclError message, InferredExpr bodyType -> inferValueDecl decl bodyType }
+inferDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferDecl typeDecls recordDecls env decl = if hasDeclParams decl then inferFunctionDecl typeDecls recordDecls env decl else match inferExpr typeDecls recordDecls env emptyTypeBindings (declBody decl) { InferExprError message -> InferDeclError message, InferredExpr bodyType -> inferValueDecl decl bodyType }
 
 validateDeclaredType : Str -> TypeText -> TypeText -> InferDeclResult
 validateDeclaredType name expectedType actualType = if sameType actualType expectedType then InferredDecl (TypeBinding name expectedType) else InferDeclError (typeMismatchMessage name expectedType actualType)
 
 inferValueDecl : HostedDeclAst -> TypeText -> InferDeclResult
-inferValueDecl decl bodyType = if declAnnotation decl == "" then InferredDecl (TypeBinding (declName decl) bodyType) else match parseType (declAnnotation decl) { TFunction inputType resultType -> InferDeclError (textConcat ["Expected a value annotation for `", declName decl, "`."]), TInt -> validateDeclaredType (declName decl) TInt bodyType, TStr -> validateDeclaredType (declName decl) TStr bodyType, TBool -> validateDeclaredType (declName decl) TBool bodyType, TList itemType -> validateDeclaredType (declName decl) (TList itemType) bodyType, TUnknown label -> validateDeclaredType (declName decl) (TUnknown label) bodyType }
+inferValueDecl decl bodyType = if hasAnnotationAst (declAnnotation decl) then match typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)) { TFunction inputType resultType -> InferDeclError (textConcat ["Expected a value annotation for `", declName decl, "`."]), TInt -> validateDeclaredType (declName decl) TInt bodyType, TStr -> validateDeclaredType (declName decl) TStr bodyType, TBool -> validateDeclaredType (declName decl) TBool bodyType, TList itemType -> validateDeclaredType (declName decl) (TList itemType) bodyType, TNamed label -> validateDeclaredType (declName decl) (TNamed label) bodyType, TUnknown label -> validateDeclaredType (declName decl) (TUnknown label) bodyType } else InferredDecl (TypeBinding (declName decl) bodyType)
 
 bindFunctionParams : HostedDeclAst -> TypeText -> BindParamsState
 bindFunctionParams decl declaredType = {
@@ -219,6 +592,8 @@ bindFunctionParams decl declaredType = {
             BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
           TList itemType ->
             BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TNamed label ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
           TUnknown label ->
             BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."])
         }
@@ -228,27 +603,41 @@ bindFunctionParams decl declaredType = {
   state
 }
 
-inferFunctionDecl : [TypeBinding] -> HostedDeclAst -> [Str] -> InferDeclResult
-inferFunctionDecl env decl params = if declAnnotation decl == "" then InferDeclError (textConcat ["Could not infer the parameter type of `", declName decl, "`."]) else {
-  let declaredType = parseType (declAnnotation decl);
+inferFunctionDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferFunctionDecl typeDecls recordDecls env decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
   match bindFunctionParams decl declaredType {
     BindingParamError message ->
       InferDeclError message,
     BindingParams localEnv expectedBodyType ->
-      match inferExpr env localEnv (declBody decl) {
+      match inferExpr typeDecls recordDecls env localEnv (declBody decl) {
         InferExprError message ->
           InferDeclError message,
         InferredExpr bodyType ->
           if sameType bodyType expectedBodyType then InferredDecl (TypeBinding (declName decl) declaredType) else InferDeclError (typeMismatchMessage (declName decl) expectedBodyType bodyType)
       }
   }
-}
+} else InferDeclError (textConcat ["Could not infer the parameter type of `", declName decl, "`."])
 
 collectAnnotatedBindings : HostedModuleAst -> [TypeBinding]
 collectAnnotatedBindings modl = {
   let mut bindings = emptyTypeBindings;
   for decl in moduleDeclarations modl {
-    bindings = if declAnnotation decl == "" then bindings else appendTypeBinding bindings (TypeBinding (declName decl) (parseType (declAnnotation decl)));
+    bindings = if hasAnnotationAst (declAnnotation decl) then appendTypeBinding bindings (TypeBinding (declName decl) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)))) else bindings;
+    bindings
+  };
+  bindings
+}
+
+collectConstructorBindings : [HostedTypeDeclAst] -> [TypeBinding]
+collectConstructorBindings typeDecls = {
+  let mut bindings = [];
+  for typeDecl in typeDecls {
+    for constructorDecl in typeDeclConstructors typeDecl {
+      let constructorType = buildFunctionType (constructorDeclPayloadTypes constructorDecl) (TNamed (typeDeclName typeDecl));
+      bindings = appendTypeBinding bindings (TypeBinding (constructorDeclName constructorDecl) constructorType);
+      bindings
+    };
     bindings
   };
   bindings
@@ -262,10 +651,12 @@ baseEnv = [TypeBinding "String" stringBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {
-  let mut env = append baseEnv (collectAnnotatedBindings modl);
+  let typeDecls = moduleTypeDeclarations modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut env = append baseEnv (append (collectConstructorBindings typeDecls) (collectAnnotatedBindings modl));
   let mut failure = "";
   for decl in moduleDeclarations modl {
-    env = match inferDecl env decl {
+    env = match inferDecl typeDecls recordDecls env decl {
       InferredDecl binding ->
         appendTypeBinding env binding,
       InferDeclError message -> {

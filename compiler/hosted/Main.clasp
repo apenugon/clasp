@@ -35,7 +35,27 @@ record HostedCompilerSnapshot = {
   quaternaryParsedDeclNames : [Str],
   quaternaryCheckedModule : Str,
   quaternaryLoweredModule : Str,
-  quaternaryEmittedModule : Str
+  quaternaryEmittedModule : Str,
+  quinaryParsedModuleName : Str,
+  quinaryParsedRecordNames : [Str],
+  quinaryParsedRecordFieldTypes : [Str],
+  quinaryParsedDeclNames : [Str],
+  quinaryCheckedModule : Str,
+  quinaryLoweredModule : Str,
+  quinaryEmittedModule : Str,
+  senaryParsedModuleName : Str,
+  senaryParsedTypeNames : [Str],
+  senaryParsedConstructorSummaries : [Str],
+  senaryChooseAnnotation : Str,
+  senaryParsedDeclNames : [Str],
+  senaryCheckedModule : Str,
+  senaryLoweredModule : Str,
+  senaryEmittedModule : Str,
+  septenaryParsedModuleName : Str,
+  septenaryParsedDeclNames : [Str],
+  septenaryCheckedModule : Str,
+  septenaryLoweredModule : Str,
+  septenaryEmittedModule : Str
 }
 
 compilerSampleSource : Str
@@ -51,7 +71,16 @@ tertiarySampleSource : Str
 tertiarySampleSource = textJoin "\n" ["module Collections", "", "flags = [true, false]", "", "scores = [7, 9]", "", "main = scores"]
 
 quaternarySampleSource : Str
-quaternarySampleSource = textJoin "\n" ["module Pairing", "", "select : Str -> Str -> Str", "select left right = right", "", "main = select \"left\" \"right\""]
+quaternarySampleSource = textJoin "\n" ["module Pairing", "", "select : Str -> Str -> Str", "select left right = right", "", "wrap : Str -> Str", "wrap value = value", "", "labels = [wrap (select \"left\" \"right\"), \"done\"]", "", "main = wrap (select \"alpha\" \"beta\")"]
+
+quinarySampleSource : Str
+quinarySampleSource = textJoin "\n" ["module Records", "", "record User = { name : Str, active : Bool }", "", "defaultUser : User", "defaultUser = User { name = \"Ada\", active = true }", "", "userName : User -> Str", "userName user = user.name", "", "main = userName defaultUser"]
+
+senarySampleSource : Str
+senarySampleSource = textJoin "\n" ["module Decisions", "", "type Decision = Keep Str Str | Drop", "", "choose : Decision -> Str", "choose decision = match decision { Keep left right -> left, Drop -> \"drop\" }", "", "main = choose (Keep \"alpha\" \"beta\")"]
+
+septenarySampleSource : Str
+septenarySampleSource = textJoin "\n" ["module Lettings", "", "describe : Str -> Str", "describe name = let alias = name in alias", "", "main = let current = describe \"Ada\" in current"]
 
 parsedSampleModule : HostedModuleAst
 parsedSampleModule = parseModuleAst compilerSampleSource
@@ -68,6 +97,15 @@ parsedTertiaryModule = parseModuleAst tertiarySampleSource
 parsedQuaternaryModule : HostedModuleAst
 parsedQuaternaryModule = parseModuleAst quaternarySampleSource
 
+parsedQuinaryModule : HostedModuleAst
+parsedQuinaryModule = parseModuleAst quinarySampleSource
+
+parsedSenaryModule : HostedModuleAst
+parsedSenaryModule = parseModuleAst senarySampleSource
+
+parsedSeptenaryModule : HostedModuleAst
+parsedSeptenaryModule = parseModuleAst septenarySampleSource
+
 loweredSampleDecls : [LowerDeclText]
 loweredSampleDecls = lowerModule parsedSampleModule
 
@@ -79,6 +117,15 @@ loweredTertiaryDecls = lowerModule parsedTertiaryModule
 
 loweredQuaternaryDecls : [LowerDeclText]
 loweredQuaternaryDecls = lowerModule parsedQuaternaryModule
+
+loweredQuinaryDecls : [LowerDeclText]
+loweredQuinaryDecls = lowerModule parsedQuinaryModule
+
+loweredSenaryDecls : [LowerDeclText]
+loweredSenaryDecls = lowerModule parsedSenaryModule
+
+loweredSeptenaryDecls : [LowerDeclText]
+loweredSeptenaryDecls = lowerModule parsedSeptenaryModule
 
 checkedModuleSummary : Str
 checkedModuleSummary = renderModuleSummary parsedSampleModule
@@ -96,7 +143,25 @@ compileEntrypoint : Str
 compileEntrypoint = emitModule loweredSampleDecls
 
 nativeEntrypoint : Str
-nativeEntrypoint = emitNativeModule loweredSampleDecls
+nativeEntrypoint = emitNativeModule (moduleNameOf parsedSampleModule) loweredSampleDecls
+
+sourceModule : Str -> HostedModuleAst
+sourceModule source = parseModuleAst source
+
+sourceLoweredDecls : Str -> [LowerDeclText]
+sourceLoweredDecls source = lowerModule (sourceModule source)
+
+checkSourceText : Str -> Str
+checkSourceText source = renderModuleSummary (sourceModule source)
+
+explainSourceText : Str -> Str
+explainSourceText source = renderModuleSummary (sourceModule source)
+
+compileSourceText : Str -> Str
+compileSourceText source = emitModule (sourceLoweredDecls source)
+
+nativeSourceText : Str -> Str
+nativeSourceText source = emitNativeModule (moduleNameOf (sourceModule source)) (sourceLoweredDecls source)
 
 snapshot : HostedCompilerSnapshot
 snapshot = HostedCompilerSnapshot {
@@ -128,7 +193,27 @@ snapshot = HostedCompilerSnapshot {
   quaternaryParsedDeclNames = declNames parsedQuaternaryModule,
   quaternaryCheckedModule = renderModuleSummary parsedQuaternaryModule,
   quaternaryLoweredModule = renderLowerModuleSummary loweredQuaternaryDecls,
-  quaternaryEmittedModule = emitModule loweredQuaternaryDecls
+  quaternaryEmittedModule = emitModule loweredQuaternaryDecls,
+  quinaryParsedModuleName = moduleNameOf parsedQuinaryModule,
+  quinaryParsedRecordNames = recordDeclNames parsedQuinaryModule,
+  quinaryParsedRecordFieldTypes = renderRecordFieldTypeSummaries (firstRecordDecl parsedQuinaryModule),
+  quinaryParsedDeclNames = declNames parsedQuinaryModule,
+  quinaryCheckedModule = renderModuleSummary parsedQuinaryModule,
+  quinaryLoweredModule = renderLowerModuleSummary loweredQuinaryDecls,
+  quinaryEmittedModule = emitModule loweredQuinaryDecls,
+  senaryParsedModuleName = moduleNameOf parsedSenaryModule,
+  senaryParsedTypeNames = typeDeclNames parsedSenaryModule,
+  senaryParsedConstructorSummaries = renderConstructorSummaries (firstTypeDecl parsedSenaryModule),
+  senaryChooseAnnotation = declAnnotationTextByName parsedSenaryModule "choose",
+  senaryParsedDeclNames = declNames parsedSenaryModule,
+  senaryCheckedModule = renderModuleSummary parsedSenaryModule,
+  senaryLoweredModule = renderLowerModuleSummary loweredSenaryDecls,
+  senaryEmittedModule = emitModule loweredSenaryDecls,
+  septenaryParsedModuleName = moduleNameOf parsedSeptenaryModule,
+  septenaryParsedDeclNames = declNames parsedSeptenaryModule,
+  septenaryCheckedModule = renderModuleSummary parsedSeptenaryModule,
+  septenaryLoweredModule = renderLowerModuleSummary loweredSeptenaryDecls,
+  septenaryEmittedModule = emitModule loweredSeptenaryDecls
 }
 
 snapshotJson : Str

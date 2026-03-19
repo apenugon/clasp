@@ -130,10 +130,11 @@ function selectWorkloads(available, requestedList) {
 }
 
 async function detectEnvironment() {
-  const [bunVersion, ccVersion, cabalVersion] = await Promise.all([
+  const [bunVersion, ccVersion, cabalVersion, rustcVersion] = await Promise.all([
     captureVersion(["bun", "--version"]),
     captureVersion(["cc", "--version"]),
-    captureVersion(["cabal", "--version"])
+    captureVersion(["cabal", "--version"]),
+    captureVersion(["rustc", "--version"])
   ]);
 
   return {
@@ -142,7 +143,8 @@ async function detectEnvironment() {
     hostname: os.hostname(),
     bunVersion,
     ccVersion,
-    cabalVersion
+    cabalVersion,
+    rustcVersion
   };
 }
 
@@ -153,12 +155,48 @@ async function captureVersion(command) {
 
 async function buildNativeRuntimeHarness() {
   const outputPath = path.join(distRoot, "runtime-bench");
+  const rustRuntimeSource = path.join(projectRoot, "runtime", "native", "clasp_runtime.rs");
+  const rustRuntimeLibrary = path.join(distRoot, "libclasp_runtime.a");
+
+  await runCommand([
+    "rustc",
+    "--edition=2021",
+    "--crate-type",
+    "staticlib",
+    "-C",
+    "panic=abort",
+    rustRuntimeSource,
+    "-o",
+    rustRuntimeLibrary
+  ]);
+
+  const nativeStaticLibs = await runCommand([
+    "rustc",
+    "--edition=2021",
+    "--crate-type",
+    "staticlib",
+    "-C",
+    "panic=abort",
+    "--print",
+    "native-static-libs",
+    rustRuntimeSource
+  ]);
+
+  const rustLinkArgs = (nativeStaticLibs.stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("note: native-static-libs: ")) ?? "")
+    .replace("note: native-static-libs: ", "")
+    .split(/\s+/)
+    .filter((value) => value.length > 0);
+
   await runCommand([
     "cc",
     "-O2",
     "-std=c11",
     path.join(projectRoot, "benchmarks", "backend", "runtime-bench.c"),
-    path.join(projectRoot, "runtime", "native", "clasp_runtime.c"),
+    rustRuntimeLibrary,
+    ...rustLinkArgs,
     "-o",
     outputPath
   ]);

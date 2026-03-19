@@ -461,6 +461,7 @@ builtinStdlibForeignDecls =
   [ builtinForeignDecl "textConcat" (TFunction [TList TStr] TStr)
   , builtinForeignDecl "textJoin" (TFunction [TStr, TList TStr] TStr)
   , builtinForeignDecl "textSplit" (TFunction [TStr, TStr] (TList TStr))
+  , builtinForeignDecl "textChars" (TFunction [TStr] (TList TStr))
   , builtinForeignDecl "textPrefix" (TFunction [TStr, TStr] (TNamed resultTypeName))
   , builtinForeignDecl "textSplitFirst" (TFunction [TStr, TStr] (TNamed resultTypeName))
   , builtinForeignDecl "pathJoin" (TFunction [TList TStr] TStr)

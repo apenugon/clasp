@@ -30,10 +30,12 @@
           packages = with pkgs; [
             bun
             cabal-install
+            cargo
             git
             haskellPackages.ghc
             nodejs_22
             python3
+            rustc
           ];
         };
       });

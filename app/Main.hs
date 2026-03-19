@@ -18,12 +18,14 @@ import Clasp.Compiler
   , compileEntryWithPreference
   , explainEntryWithPreference
   , formatSource
+  , nativeEntryBootstrap
   , parseSource
   , renderAirEntryJsonWithPreference
   , renderContextEntryJsonWithPreference
   , renderNativeEntryWithPreference
   )
 import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
+import Clasp.Native (renderNativeModuleImageJson)
 
 data OutputFormat
   = Pretty
@@ -252,9 +254,29 @@ runNative format compilerPreference inputPath outputPath = do
     Right nativeIr -> do
       let resolvedOutput = maybe (replaceExtension inputPath "native.ir") id outputPath
       TIO.writeFile resolvedOutput nativeIr
+      imageOutputPath <-
+        case implementation of
+          CompilerImplementationBootstrap -> do
+            nativeModuleResult <- nativeEntryBootstrap inputPath
+            case nativeModuleResult of
+              Left err -> do
+                writeFailure format err
+                exitFailure
+              Right nativeModule -> do
+                let resolvedImageOutput = replaceExtension resolvedOutput "native.image.json"
+                LTIO.writeFile resolvedImageOutput (renderNativeModuleImageJson nativeModule)
+                pure (Just resolvedImageOutput)
+          CompilerImplementationClasp ->
+            pure Nothing
       case format of
         Pretty ->
-          hPutStrLn stderr ("Wrote " <> resolvedOutput <> " with " <> renderCompilerImplementation implementation)
+          do
+            hPutStrLn stderr ("Wrote " <> resolvedOutput <> " with " <> renderCompilerImplementation implementation)
+            case imageOutputPath of
+              Just resolvedImageOutput ->
+                hPutStrLn stderr ("Wrote " <> resolvedImageOutput <> " with " <> renderCompilerImplementation implementation)
+              Nothing ->
+                pure ()
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
@@ -264,6 +286,7 @@ runNative format compilerPreference inputPath outputPath = do
                 , "input" .= inputPath
                 , "implementation" .= renderCompilerImplementation implementation
                 , "output" .= resolvedOutput
+                , "image" .= imageOutputPath
                 ]
 
 writeFailure :: OutputFormat -> DiagnosticBundle -> IO ()

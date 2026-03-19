@@ -94,6 +94,7 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `textConcat : [Str] -> Str`
 - `textJoin : Str -> [Str] -> Str`
 - `textSplit : Str -> Str -> [Str]`
+- `textChars : Str -> [Str]`
 - `pathJoin : [Str] -> Str`
 - `pathDirname : Str -> Str`
 - `pathBasename : Str -> Str`
@@ -546,6 +547,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - The checker currently rejects duplicate declarations, duplicate parameters, duplicate record fields, duplicate hook names, duplicate agent-role names, duplicate agent names, duplicate verifier and merge-gate names, duplicate route names/endpoints, unknown names, unknown types, unknown guide/policy references in roles, unknown role references in agents, unknown tool references in verifiers, unknown verifier references in merge gates, annotation arity mismatches, ambiguous declarations, non-exhaustive matches, wrong constructors in match branches, duplicate match branches, missing record fields, unknown record fields, unsupported JSON boundary types, wrong hook or route handler signatures, and simple type mismatches before code generation.
 - AIR JSON is emitted as `clasp-air-v1`, with stable node IDs, explicit `ref` edges, root node IDs, and a module-level node count so tools can replay declaration, policy, projection, route, and expression graphs without reconstructing them from raw files.
 - The CLI can persist that graph directly with `claspc air <input.clasp> [-o output.air.json]`.
+- `claspc native` currently writes an inspectable `.native.ir` artifact and, on the bootstrap-native path, a companion `.native.image.json` artifact that carries generated export entrypoint symbols, a native compatibility fingerprint, and explicit migration metadata including workflow snapshot and handoff symbols so the Rust runtime can activate compatible module generations, require declared typed state snapshots plus state-handoff hooks for type-surface upgrades, resolve those symbols, bind native entrypoints, dispatch the newest live generation, and retire older generations without reparsing debug text.
 
 ## Compiler Pipeline
 

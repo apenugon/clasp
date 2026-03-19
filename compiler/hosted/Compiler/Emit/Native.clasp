@@ -15,6 +15,38 @@ emitNativeExprs exprs = {
   rendered
 }
 
+emitNativeRecordFields : [LowerRecordFieldText] -> [Str]
+emitNativeRecordFields fields = {
+  let mut rendered = [];
+  for field in fields {
+    rendered = appendNativeRenderedText rendered (emitNativeRecordField field);
+    rendered
+  };
+  rendered
+}
+
+emitNativeRecordField : LowerRecordFieldText -> Str
+emitNativeRecordField field = match field {
+  LowerRecordFieldText name value ->
+    textConcat [name, " = ", emitNativeExpr value]
+}
+
+emitNativeMatchBranch : LowerMatchBranchText -> Str
+emitNativeMatchBranch branch = match branch {
+  LowerMatchBranchText constructorName binders body ->
+    textConcat [constructorName, "(", textJoin ", " binders, ") -> ", emitNativeExpr body]
+}
+
+emitNativeMatchBranches : [LowerMatchBranchText] -> [Str]
+emitNativeMatchBranches branches = {
+  let mut rendered = [];
+  for branch in branches {
+    rendered = appendNativeRenderedText rendered (emitNativeMatchBranch branch);
+    rendered
+  };
+  rendered
+}
+
 emitNativeExpr : LowerExprText -> Str
 emitNativeExpr expr = match expr {
   LowerName name ->
@@ -28,7 +60,17 @@ emitNativeExpr expr = match expr {
   LowerArray values ->
     textConcat ["list([", textJoin ", " (emitNativeExprs values), "])"],
   LowerInvoke callee args ->
-    textConcat ["call(local(", callee, "), [", textJoin ", " (emitNativeExprs args), "])"]
+    textConcat ["call(local(", callee, "), [", textJoin ", " (emitNativeExprs args), "])"],
+  LowerConstructor constructorName args ->
+    textConcat ["ctor ", constructorName, "([", textJoin ", " (emitNativeExprs args), "])"],
+  LowerMatch subject branches ->
+    textConcat ["match(", emitNativeExpr subject, ") [", textJoin ", " (emitNativeMatchBranches branches), "]"],
+  LowerRecord recordName fields ->
+    textConcat ["record ", recordName, " {", textJoin ", " (emitNativeRecordFields fields), "}"],
+  LowerFieldAccess subject fieldName ->
+    textConcat ["field(", emitNativeExpr subject, ", ", fieldName, ")"],
+  LowerLet binder value body ->
+    textConcat ["let ", binder, " = ", emitNativeExpr value, " in ", emitNativeExpr body]
 }
 
 emitNativeDecl : LowerDeclText -> Str
@@ -49,6 +91,43 @@ collectLowerDeclNames decls = {
   names
 }
 
+incrementNativeArity : Str -> Str
+incrementNativeArity value = { if value == "0" then "1" else if value == "1" then "2" else if value == "2" then "3" else if value == "3" then "4" else if value == "4" then "5" else if value == "5" then "6" else if value == "6" then "7" else if value == "7" then "8" else if value == "8" then "9" else if value == "9" then "10" else value }
+renderNativeArity : [Str] -> Str
+renderNativeArity params = {
+  let mut count = "0";
+  for param in params {
+    let ignored = param;
+    count = incrementNativeArity count;
+    count
+  };
+  count
+}
+
+nativeModuleSymbolPrefix : Str -> Str
+nativeModuleSymbolPrefix moduleName = textConcat ["clasp_native__", textJoin "__" (textSplit moduleName ".")]
+
+nativeEntrypointSymbol : Str -> Str -> Str
+nativeEntrypointSymbol moduleName declName = textConcat [nativeModuleSymbolPrefix moduleName, "__", declName]
+
+emitNativeEntrypoint : Str -> LowerDeclText -> Str
+emitNativeEntrypoint moduleName decl = match decl {
+  LowerConst name body ->
+    textConcat [name, "{symbol=", nativeEntrypointSymbol moduleName name, ", kind=global, arity=0}"],
+  LowerFn name params body ->
+    textConcat [name, "{symbol=", nativeEntrypointSymbol moduleName name, ", kind=function, arity=", renderNativeArity params, "}"]
+}
+
+emitNativeEntrypoints : Str -> [LowerDeclText] -> [Str]
+emitNativeEntrypoints moduleName decls = {
+  let mut rendered = [];
+  for decl in decls {
+    rendered = appendNativeRenderedText rendered (emitNativeEntrypoint moduleName decl);
+    rendered
+  };
+  rendered
+}
+
 nativeDeclName : LowerDeclText -> Str
 nativeDeclName decl = match decl {
   LowerConst name body ->
@@ -67,5 +146,102 @@ renderNativeDecls decls = {
   rendered
 }
 
-emitNativeModule : [LowerDeclText] -> Str
-emitNativeModule decls = textJoin "\n" (append ["format clasp-native-ir-v1", "module Main", textConcat ["exports [", textJoin ", " (collectLowerDeclNames decls), "]"], "abi {", "  version clasp-native-v1", "  word_bytes 8", "  memory_strategy reference_counting", "  allocation { immediate = stack, handle = heap, global = static }", "  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]", "  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]", "  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]", "  builtin_layout Int { storage = immediate, words = 1 }", "  builtin_layout Bool { storage = immediate, words = 1 }", "  builtin_layout Str { storage = handle, words = 1 }", "  builtin_layout List { storage = handle, words = 1 }", "  builtin_layout Page { storage = handle, words = 1 }", "  builtin_layout Redirect { storage = handle, words = 1 }", "  builtin_layout View { storage = handle, words = 1 }", "  builtin_layout Prompt { storage = handle, words = 1 }", "}", "runtime {", "  profile compiler_backend_minimal", "  artifacts [\"runtime/native/clasp_runtime.h\", \"runtime/native/clasp_runtime.c\"]", "  memory_symbols [clasp_rt_init, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_register_static_root, clasp_rt_text_split, clasp_rt_read_file, clasp_rt_json_from_string, clasp_rt_json_to_string]", "  bindings []", "  json_codecs []", "  boundaries []", "}", "decls {"] (append (renderNativeDecls decls) ["}"]))
+nativeAbiRecordLayoutLines : [Str]
+nativeAbiRecordLayoutLines = {
+  let mut lines = [];
+  lines = appendNativeRenderedText lines "  record_layout Principal { words = 1, fields = [id:Str@word0/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout Tenant { words = 1, fields = [id:Str@word0/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout ResourceIdentity { words = 2, fields = [resourceType:Str@word0/handle, resourceId:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditActor { words = 2, fields = [actorType:Str@word0/handle, actorId:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditAction { words = 2, fields = [actionType:Str@word0/handle, summary:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditProvenance { words = 3, fields = [source:Str@word0/handle, requestId:Str@word1/handle, traceId:Str@word2/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout SqliteConnection { words = 4, fields = [id:Str@word0/handle, databasePath:Str@word1/handle, readOnly:Bool@word2/immediate, memory:Bool@word3/immediate] }";
+  lines = appendNativeRenderedText lines "  record_layout AuthSession { words = 4, fields = [sessionId:Str@word0/handle, principal:Principal@word1/handle, tenant:Tenant@word2/handle, resource:ResourceIdentity@word3/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout StandardAuditEnvelope { words = 5, fields = [actor:AuditActor@word0/handle, resource:ResourceIdentity@word1/handle, action:AuditAction@word2/handle, timestamp:Int@word3/immediate, provenance:AuditProvenance@word4/handle] }";
+  lines
+}
+
+nativeAbiObjectLayoutLines : [Str]
+nativeAbiObjectLayoutLines = {
+  let mut lines = [];
+  lines = appendNativeRenderedText lines "  object_layout Principal { kind = record, header_words = 2, words = 3, roots = [2] }";
+  lines = appendNativeRenderedText lines "  object_layout Tenant { kind = record, header_words = 2, words = 3, roots = [2] }";
+  lines = appendNativeRenderedText lines "  object_layout ResourceIdentity { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditActor { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditAction { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditProvenance { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }";
+  lines = appendNativeRenderedText lines "  object_layout SqliteConnection { kind = record, header_words = 2, words = 6, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuthSession { kind = record, header_words = 2, words = 6, roots = [2, 3, 4, 5] }";
+  lines = appendNativeRenderedText lines "  object_layout StandardAuditEnvelope { kind = record, header_words = 2, words = 7, roots = [2, 3, 4, 6] }";
+  lines
+}
+
+nativeAbiLines : [Str]
+nativeAbiLines = {
+  let mut lines = [];
+  lines = appendNativeRenderedText lines "abi {";
+  lines = appendNativeRenderedText lines "  version clasp-native-v1";
+  lines = appendNativeRenderedText lines "  word_bytes 8";
+  lines = appendNativeRenderedText lines "  memory_strategy reference_counting";
+  lines = appendNativeRenderedText lines "  allocation { immediate = stack, handle = heap, global = static }";
+  lines = appendNativeRenderedText lines "  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]";
+  lines = appendNativeRenderedText lines "  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]";
+  lines = appendNativeRenderedText lines "  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]";
+  lines = appendNativeRenderedText lines "  builtin_layout Int { storage = immediate, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Bool { storage = immediate, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Str { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout List { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Page { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Redirect { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout View { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Prompt { storage = handle, words = 1 }";
+  lines = append lines nativeAbiRecordLayoutLines;
+  lines = append lines nativeAbiObjectLayoutLines;
+  lines = appendNativeRenderedText lines "}";
+  lines
+}
+
+nativeRuntimeLines : [Str]
+nativeRuntimeLines = {
+  let mut lines = [];
+  lines = appendNativeRenderedText lines "runtime {";
+  lines = appendNativeRenderedText lines "  profile compiler_backend_minimal";
+  lines = appendNativeRenderedText lines "  artifacts [\"runtime/native/clasp_runtime.h\", \"runtime/native/clasp_runtime.rs\"]";
+  lines = appendNativeRenderedText lines "  memory_symbols [clasp_rt_init, clasp_rt_register_static_root, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_string_from_utf8, clasp_rt_bytes_new, clasp_rt_string_list_new, clasp_rt_result_ok_string, clasp_rt_result_err_string, clasp_rt_json_from_string, clasp_rt_json_to_string, clasp_rt_binary_from_json, clasp_rt_json_from_binary, clasp_rt_transport_frame, clasp_rt_transport_unframe]";
+  lines = appendNativeRenderedText lines "  bindings []";
+  lines = appendNativeRenderedText lines "  json_codecs []";
+  lines = appendNativeRenderedText lines "  binary_codecs []";
+  lines = appendNativeRenderedText lines "  boundaries []";
+  lines = appendNativeRenderedText lines "  service_transports []";
+  lines = appendNativeRenderedText lines "}";
+  lines
+}
+
+emitNativeHeaderSection : Str -> [LowerDeclText] -> Str
+emitNativeHeaderSection moduleName decls = {
+  let mut lines = [];
+  lines = appendNativeRenderedText lines "format clasp-native-ir-v1";
+  lines = appendNativeRenderedText lines (textConcat ["module ", moduleName]);
+  lines = appendNativeRenderedText lines (textConcat ["exports [", textJoin ", " (collectLowerDeclNames decls), "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["entrypoints [", textJoin ", " (emitNativeEntrypoints moduleName decls), "]"]);
+  textJoin "\n" lines
+}
+
+emitNativeAbiSection : Str
+emitNativeAbiSection = textJoin "\n" nativeAbiLines
+
+emitNativeRuntimeSection : Str
+emitNativeRuntimeSection = textJoin "\n" nativeRuntimeLines
+
+emitNativeDeclSection : [LowerDeclText] -> Str
+emitNativeDeclSection decls = textJoin "\n\n" (renderNativeDecls decls)
+
+emitNativeModule : Str -> [LowerDeclText] -> Str
+emitNativeModule moduleName decls = {
+  let mut sections = [];
+  sections = appendNativeRenderedText sections (emitNativeHeaderSection moduleName decls);
+  sections = appendNativeRenderedText sections emitNativeAbiSection;
+  sections = appendNativeRenderedText sections emitNativeRuntimeSection;
+  sections = appendNativeRenderedText sections (emitNativeDeclSection decls);
+  textConcat [textJoin "\n\n" sections, "\n\n"]
+}

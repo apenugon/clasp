@@ -5,11 +5,51 @@ import Compiler.Lower
 appendJsRenderedText : [Str] -> Str -> [Str]
 appendJsRenderedText values value = append values [value]
 
+hasJsValues : [Str] -> Bool
+hasJsValues values = {
+  for value in values {
+    return true
+  };
+  false
+}
+
 emitExprs : [LowerExprText] -> [Str]
 emitExprs exprs = {
   let mut rendered = [];
   for expr in exprs {
     rendered = appendJsRenderedText rendered (emitExpr expr);
+    rendered
+  };
+  rendered
+}
+
+emitRecordFields : [LowerRecordFieldText] -> [Str]
+emitRecordFields fields = {
+  let mut rendered = [];
+  for field in fields {
+    rendered = appendJsRenderedText rendered (emitRecordField field);
+    rendered
+  };
+  rendered
+}
+
+emitRecordField : LowerRecordFieldText -> Str
+emitRecordField field = match field {
+  LowerRecordFieldText name value ->
+    textConcat [name, ": ", emitExpr value]
+}
+
+emitMatchBranchLines : LowerMatchBranchText -> [Str]
+emitMatchBranchLines branch = match branch {
+  LowerMatchBranchText constructorName binders body ->
+    if hasJsValues binders then [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    const [_, ", textJoin ", " binders, "] = __match;"], textConcat ["    return ", emitExpr body, ";"], "  }"] else [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    return ", emitExpr body, ";"], "  }"]
+}
+
+emitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]
+emitMatchBranchBlocks branches = {
+  let mut rendered = [];
+  for branch in branches {
+    rendered = append rendered (emitMatchBranchLines branch);
     rendered
   };
   rendered
@@ -28,7 +68,19 @@ emitExpr expr = match expr {
   LowerArray values ->
     textConcat ["[", textJoin ", " (emitExprs values), "]"],
   LowerInvoke callee args ->
-    textConcat [callee, "(", textJoin ", " (emitExprs args), ")"]
+    textConcat [callee, "(", textJoin ", " (emitExprs args), ")"],
+  LowerConstructor constructorName args -> {
+    let renderedArgs = emitExprs args;
+    if hasJsValues renderedArgs then textConcat ["[\"", constructorName, "\", ", textJoin ", " renderedArgs, "]"] else textConcat ["[\"", constructorName, "\"]"]
+  },
+  LowerMatch subject branches ->
+    textJoin "\n" (append ["(() => {", textConcat ["  const __match = ", emitExpr subject, ";"]] (append (emitMatchBranchBlocks branches) ["  return undefined;", "})()"])),
+  LowerRecord recordName fields ->
+    textConcat ["{ ", textJoin ", " (emitRecordFields fields), " }"],
+  LowerFieldAccess subject fieldName ->
+    textConcat ["(", emitExpr subject, ").", fieldName],
+  LowerLet binder value body ->
+    textJoin "\n" ["(() => {", textConcat ["  const ", binder, " = ", emitExpr value, ";"], textConcat ["  return ", emitExpr body, ";"], "})()"]
 }
 
 emitDecl : LowerDeclText -> Str

@@ -1,14 +1,139 @@
 module Compiler.Ast
 
-type HostedExprAst = HostedName Str | HostedString Str | HostedInt Str | HostedBool Bool | HostedList [HostedExprAst] | HostedCall Str [HostedExprAst]
-type HostedDeclAst = HostedDeclAst Str Str [Str] HostedExprAst
-type HostedModuleAst = HostedModuleAst Str [Str] [HostedDeclAst] Str
-type ParserState = ParserState Str [Str] [HostedDeclAst] Str Str
+type HostedTypeAst = HostedTypeName Str | HostedTypeList HostedTypeAst | HostedTypeFunction HostedTypeAst HostedTypeAst
+type HostedAnnotationAst = MissingAnnotation | PresentAnnotation HostedTypeAst
+type HostedExprAst = HostedName Str | HostedString Str | HostedInt Str | HostedBool Bool | HostedList [HostedExprAst] | HostedCall Str [HostedExprAst] | HostedConstructor Str [HostedExprAst] | HostedMatch HostedExprAst [HostedMatchBranchAst] | HostedRecord Str [HostedRecordFieldExprAst] | HostedFieldAccess HostedExprAst Str | HostedLet Str HostedExprAst HostedExprAst
+type HostedRecordFieldExprAst = HostedRecordFieldExprAst Str HostedExprAst
+type HostedRecordFieldDeclAst = HostedRecordFieldDeclAst Str HostedTypeAst
+type HostedRecordDeclAst = HostedRecordDeclAst Str [HostedRecordFieldDeclAst]
+type HostedConstructorDeclAst = HostedConstructorDeclAst Str [HostedTypeAst]
+type HostedTypeDeclAst = HostedTypeDeclAst Str [HostedConstructorDeclAst]
+type HostedPatternAst = HostedPatternAst Str [Str]
+type HostedMatchBranchAst = HostedMatchBranchAst HostedPatternAst HostedExprAst
+type HostedDeclAst = HostedDeclAst Str HostedAnnotationAst [Str] HostedExprAst
+type HostedModuleAst = HostedModuleAst Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedDeclAst] Str
+type ParserState = ParserState Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedDeclAst] HostedAnnotationAst Str
 
 type SplitTailState = WaitingForHead | CapturingTail Str
+type ParserTextResult = ParsedText Str | MissingText Str
+type NestDepth = ZeroDepth | DeeperDepth NestDepth
+type RecordLiteralParseResult = ParsedRecordLiteral Str [HostedRecordFieldExprAst] | MissingRecordLiteral Str
+type MatchParseResult = ParsedMatch HostedExprAst [HostedMatchBranchAst] | MissingMatch Str
+type LetPartsResult = FoundLetParts [Str] [Str] | MissingLetParts
+type LetParseResult = ParsedLet Str HostedExprAst HostedExprAst | MissingLet Str
 
-hostedDeclAst : Str -> Str -> [Str] -> HostedExprAst -> HostedDeclAst
+renderHostedAtomicType : HostedTypeAst -> Str
+renderHostedAtomicType typeAst = match typeAst {
+  HostedTypeFunction input result ->
+    textConcat ["(", renderHostedType typeAst, ")"],
+  HostedTypeList itemType ->
+    textConcat ["[", renderHostedType itemType, "]"],
+  HostedTypeName name ->
+    name
+}
+
+renderHostedType : HostedTypeAst -> Str
+renderHostedType typeAst = match typeAst {
+  HostedTypeName name ->
+    name,
+  HostedTypeList itemType ->
+    textConcat ["[", renderHostedType itemType, "]"],
+  HostedTypeFunction input result ->
+    textConcat [renderHostedAtomicType input, " -> ", renderHostedType result]
+}
+
+missingAnnotation : HostedAnnotationAst
+missingAnnotation = MissingAnnotation
+
+presentAnnotation : HostedTypeAst -> HostedAnnotationAst
+presentAnnotation typeAst = PresentAnnotation typeAst
+
+annotationTypeAst : HostedAnnotationAst -> HostedTypeAst
+annotationTypeAst annotation = match annotation {
+  MissingAnnotation ->
+    HostedTypeName "",
+  PresentAnnotation typeAst ->
+    typeAst
+}
+
+hasAnnotationAst : HostedAnnotationAst -> Bool
+hasAnnotationAst annotation = match annotation {
+  MissingAnnotation ->
+    false,
+  PresentAnnotation typeAst ->
+    true
+}
+
+renderAnnotationAst : HostedAnnotationAst -> Str
+renderAnnotationAst annotation = match annotation {
+  MissingAnnotation ->
+    "",
+  PresentAnnotation typeAst ->
+    renderHostedType typeAst
+}
+
+hostedDeclAst : Str -> HostedAnnotationAst -> [Str] -> HostedExprAst -> HostedDeclAst
 hostedDeclAst name annotation params body = HostedDeclAst name annotation params body
+
+hostedConstructorDeclAst : Str -> [HostedTypeAst] -> HostedConstructorDeclAst
+hostedConstructorDeclAst name payloadTypes = HostedConstructorDeclAst name payloadTypes
+
+constructorDeclName : HostedConstructorDeclAst -> Str
+constructorDeclName decl = match decl {
+  HostedConstructorDeclAst name payloadTypes ->
+    name
+}
+
+constructorDeclPayloadTypes : HostedConstructorDeclAst -> [HostedTypeAst]
+constructorDeclPayloadTypes decl = match decl {
+  HostedConstructorDeclAst name payloadTypes ->
+    payloadTypes
+}
+
+hostedTypeDeclAst : Str -> [HostedConstructorDeclAst] -> HostedTypeDeclAst
+hostedTypeDeclAst name constructors = HostedTypeDeclAst name constructors
+
+typeDeclName : HostedTypeDeclAst -> Str
+typeDeclName decl = match decl {
+  HostedTypeDeclAst name constructors ->
+    name
+}
+
+typeDeclConstructors : HostedTypeDeclAst -> [HostedConstructorDeclAst]
+typeDeclConstructors decl = match decl {
+  HostedTypeDeclAst name constructors ->
+    constructors
+}
+
+hostedPatternAst : Str -> [Str] -> HostedPatternAst
+hostedPatternAst constructorName binders = HostedPatternAst constructorName binders
+
+patternConstructorName : HostedPatternAst -> Str
+patternConstructorName pattern = match pattern {
+  HostedPatternAst constructorName binders ->
+    constructorName
+}
+
+patternBinders : HostedPatternAst -> [Str]
+patternBinders pattern = match pattern {
+  HostedPatternAst constructorName binders ->
+    binders
+}
+
+hostedMatchBranchAst : HostedPatternAst -> HostedExprAst -> HostedMatchBranchAst
+hostedMatchBranchAst pattern body = HostedMatchBranchAst pattern body
+
+branchPatternAst : HostedMatchBranchAst -> HostedPatternAst
+branchPatternAst branch = match branch {
+  HostedMatchBranchAst pattern body ->
+    pattern
+}
+
+branchBodyExpr : HostedMatchBranchAst -> HostedExprAst
+branchBodyExpr branch = match branch {
+  HostedMatchBranchAst pattern body ->
+    body
+}
 
 declName : HostedDeclAst -> Str
 declName decl = match decl {
@@ -16,7 +141,7 @@ declName decl = match decl {
     name
 }
 
-declAnnotation : HostedDeclAst -> Str
+declAnnotation : HostedDeclAst -> HostedAnnotationAst
 declAnnotation decl = match decl {
   HostedDeclAst name annotation params body ->
     annotation
@@ -34,65 +159,177 @@ declBody decl = match decl {
     body
 }
 
-hostedModuleAst : Str -> [Str] -> [HostedDeclAst] -> Str -> HostedModuleAst
-hostedModuleAst moduleName imports declarations mainExprSummary = HostedModuleAst moduleName imports declarations mainExprSummary
+hostedRecordFieldExprAst : Str -> HostedExprAst -> HostedRecordFieldExprAst
+hostedRecordFieldExprAst name value = HostedRecordFieldExprAst name value
+
+recordExprFieldName : HostedRecordFieldExprAst -> Str
+recordExprFieldName field = match field {
+  HostedRecordFieldExprAst name value ->
+    name
+}
+
+recordExprFieldValue : HostedRecordFieldExprAst -> HostedExprAst
+recordExprFieldValue field = match field {
+  HostedRecordFieldExprAst name value ->
+    value
+}
+
+hostedRecordFieldDeclAst : Str -> HostedTypeAst -> HostedRecordFieldDeclAst
+hostedRecordFieldDeclAst name typ = HostedRecordFieldDeclAst name typ
+
+recordFieldDeclName : HostedRecordFieldDeclAst -> Str
+recordFieldDeclName field = match field {
+  HostedRecordFieldDeclAst name typ ->
+    name
+}
+
+recordFieldDeclType : HostedRecordFieldDeclAst -> HostedTypeAst
+recordFieldDeclType field = match field {
+  HostedRecordFieldDeclAst name typ ->
+    typ
+}
+
+hostedRecordDeclAst : Str -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst
+hostedRecordDeclAst name fields = HostedRecordDeclAst name fields
+
+recordDeclName : HostedRecordDeclAst -> Str
+recordDeclName decl = match decl {
+  HostedRecordDeclAst name fields ->
+    name
+}
+
+recordDeclFields : HostedRecordDeclAst -> [HostedRecordFieldDeclAst]
+recordDeclFields decl = match decl {
+  HostedRecordDeclAst name fields ->
+    fields
+}
+
+renderHostedTypeList : [HostedTypeAst] -> [Str]
+renderHostedTypeList values = {
+  let mut rendered = [];
+  for value in values {
+    rendered = appendRenderedText rendered (renderHostedType value);
+    rendered
+  };
+  rendered
+}
+
+renderRecordFieldTypeSummaries : HostedRecordDeclAst -> [Str]
+renderRecordFieldTypeSummaries decl = {
+  let mut rendered = [];
+  for field in recordDeclFields decl {
+    rendered = appendRenderedText rendered (textConcat [recordFieldDeclName field, " : ", renderHostedType (recordFieldDeclType field)]);
+    rendered
+  };
+  rendered
+}
+
+renderConstructorSummary : HostedConstructorDeclAst -> Str
+renderConstructorSummary decl = {
+  let name = constructorDeclName decl;
+  let payloads = renderHostedTypeList (constructorDeclPayloadTypes decl);
+  if firstText payloads == "" then name else textConcat [name, " ", textJoin " " payloads]
+}
+
+renderConstructorSummaries : HostedTypeDeclAst -> [Str]
+renderConstructorSummaries decl = {
+  let mut rendered = [];
+  for constructorDecl in typeDeclConstructors decl {
+    rendered = appendRenderedText rendered (renderConstructorSummary constructorDecl);
+    rendered
+  };
+  rendered
+}
+
+hostedModuleAst : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedDeclAst] -> Str -> HostedModuleAst
+hostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary = HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary
 
 moduleNameOf : HostedModuleAst -> Str
 moduleNameOf modl = match modl {
-  HostedModuleAst moduleName imports declarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
     moduleName
 }
 
 moduleImports : HostedModuleAst -> [Str]
 moduleImports modl = match modl {
-  HostedModuleAst moduleName imports declarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
     imports
+}
+
+moduleTypeDeclarations : HostedModuleAst -> [HostedTypeDeclAst]
+moduleTypeDeclarations modl = match modl {
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
+    typeDeclarations
+}
+
+moduleRecordDeclarations : HostedModuleAst -> [HostedRecordDeclAst]
+moduleRecordDeclarations modl = match modl {
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
+    recordDeclarations
 }
 
 moduleDeclarations : HostedModuleAst -> [HostedDeclAst]
 moduleDeclarations modl = match modl {
-  HostedModuleAst moduleName imports declarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
     declarations
 }
 
 moduleMainExprSummary : HostedModuleAst -> Str
 moduleMainExprSummary modl = match modl {
-  HostedModuleAst moduleName imports declarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations declarations mainExprSummary ->
     mainExprSummary
 }
 
-parserState : Str -> [Str] -> [HostedDeclAst] -> Str -> Str -> ParserState
-parserState moduleName imports declarations pendingAnnotation mainExprSummary = ParserState moduleName imports declarations pendingAnnotation mainExprSummary
+parserState : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedDeclAst] -> HostedAnnotationAst -> Str -> ParserState
+parserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary = ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary
 
 stateModuleName : ParserState -> Str
 stateModuleName state = match state {
-  ParserState moduleName imports declarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
     moduleName
 }
 
 stateImports : ParserState -> [Str]
 stateImports state = match state {
-  ParserState moduleName imports declarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
     imports
+}
+
+stateTypeDeclarations : ParserState -> [HostedTypeDeclAst]
+stateTypeDeclarations state = match state {
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
+    typeDeclarations
+}
+
+stateRecordDeclarations : ParserState -> [HostedRecordDeclAst]
+stateRecordDeclarations state = match state {
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
+    recordDeclarations
 }
 
 stateDeclarations : ParserState -> [HostedDeclAst]
 stateDeclarations state = match state {
-  ParserState moduleName imports declarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
     declarations
 }
 
-statePendingAnnotation : ParserState -> Str
+statePendingAnnotation : ParserState -> HostedAnnotationAst
 statePendingAnnotation state = match state {
-  ParserState moduleName imports declarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
     pendingAnnotation
 }
 
 stateMainExprSummary : ParserState -> Str
 stateMainExprSummary state = match state {
-  ParserState moduleName imports declarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations declarations pendingAnnotation mainExprSummary ->
     mainExprSummary
 }
+
+appendTypeDecl : [HostedTypeDeclAst] -> HostedTypeDeclAst -> [HostedTypeDeclAst]
+appendTypeDecl values value = append values [value]
+
+appendRecordDecl : [HostedRecordDeclAst] -> HostedRecordDeclAst -> [HostedRecordDeclAst]
+appendRecordDecl values value = append values [value]
 
 appendDecl : [HostedDeclAst] -> HostedDeclAst -> [HostedDeclAst]
 appendDecl values value = append values [value]
@@ -100,8 +337,56 @@ appendDecl values value = append values [value]
 appendRenderedText : [Str] -> Str -> [Str]
 appendRenderedText values value = append values [value]
 
+appendRecordFieldDecl : [HostedRecordFieldDeclAst] -> HostedRecordFieldDeclAst -> [HostedRecordFieldDeclAst]
+appendRecordFieldDecl values value = append values [value]
+
+appendRecordFieldExpr : [HostedRecordFieldExprAst] -> HostedRecordFieldExprAst -> [HostedRecordFieldExprAst]
+appendRecordFieldExpr values value = append values [value]
+
+appendConstructorDecl : [HostedConstructorDeclAst] -> HostedConstructorDeclAst -> [HostedConstructorDeclAst]
+appendConstructorDecl values value = append values [value]
+
+appendMatchBranch : [HostedMatchBranchAst] -> HostedMatchBranchAst -> [HostedMatchBranchAst]
+appendMatchBranch values value = append values [value]
+
 appendExpr : [HostedExprAst] -> HostedExprAst -> [HostedExprAst]
 appendExpr values value = append values [value]
+
+appendChar : Str -> Str -> Str
+appendChar value char = textConcat [value, char]
+
+trimSpaces : Str -> Str
+trimSpaces value = {
+  let mut started = false;
+  let mut result = "";
+  let mut pendingSpaces = "";
+  for char in textChars value {
+    if started then {
+      if char == " " then {
+        pendingSpaces = appendChar pendingSpaces char;
+        pendingSpaces
+      } else {
+        result = textConcat [result, pendingSpaces, char];
+        pendingSpaces = "";
+        started = true;
+        result
+      }
+    } else if char == " " then {
+      result
+    } else {
+      result = appendChar result char;
+      started = true;
+      result
+    }
+  };
+  result
+}
+
+appendNonEmptyText : [Str] -> Str -> [Str]
+appendNonEmptyText values value = {
+  let trimmed = trimSpaces value;
+  if trimmed == "" then values else appendRenderedText values trimmed
+}
 
 firstSegment : Str -> Str
 firstSegment value = {
@@ -134,8 +419,19 @@ remainingSegments value = {
 splitWords : Str -> [Str]
 splitWords value = if value == "" then [] else textSplit value " "
 
-splitItems : Str -> [Str]
-splitItems value = if value == "" then [] else textSplit value ", "
+firstCharText : Str -> Str
+firstCharText value = {
+  for char in textChars value {
+    return char
+  };
+  ""
+}
+
+isUppercaseChar : Str -> Bool
+isUppercaseChar value = if value == "A" then true else if value == "B" then true else if value == "C" then true else if value == "D" then true else if value == "E" then true else if value == "F" then true else if value == "G" then true else if value == "H" then true else if value == "I" then true else if value == "J" then true else if value == "K" then true else if value == "L" then true else if value == "M" then true else if value == "N" then true else if value == "O" then true else if value == "P" then true else if value == "Q" then true else if value == "R" then true else if value == "S" then true else if value == "T" then true else if value == "U" then true else if value == "V" then true else if value == "W" then true else if value == "X" then true else if value == "Y" then true else if value == "Z" then true else false
+
+startsWithUppercase : Str -> Bool
+startsWithUppercase value = isUppercaseChar (firstCharText (trimSpaces value))
 
 stripToken : Str -> Str -> Str
 stripToken value token = textJoin "" (textSplit value token)
@@ -146,63 +442,544 @@ stripDigits value = stripToken (stripToken (stripToken (stripToken (stripToken (
 isIntLiteral : Str -> Bool
 isIntLiteral value = if value == "" then false else stripDigits value == ""
 
-betweenBrackets : Str -> Str
-betweenBrackets value = match textPrefix value "[" {
-  Ok tail ->
-    match textSplitFirst tail "]" {
-      Ok payload ->
-        if remainingSegments payload == "" then firstSegment payload else value,
-      Err missingClose ->
-        value
+increaseDepth : NestDepth -> NestDepth
+increaseDepth depth = DeeperDepth depth
+
+decreaseDepth : NestDepth -> NestDepth
+decreaseDepth depth = match depth {
+  ZeroDepth ->
+    ZeroDepth,
+  DeeperDepth inner ->
+    inner
+}
+
+isZeroDepth : NestDepth -> Bool
+isZeroDepth depth = match depth {
+  ZeroDepth ->
+    true,
+  DeeperDepth inner ->
+    false
+}
+
+isTopLevel : NestDepth -> NestDepth -> NestDepth -> Bool
+isTopLevel parenDepth bracketDepth braceDepth = if isZeroDepth parenDepth then if isZeroDepth bracketDepth then isZeroDepth braceDepth else false else false
+
+splitTopLevel : Str -> Str -> [Str]
+splitTopLevel value separator = {
+  let mut parts = [];
+  let mut current = "";
+  let mut parenDepth = ZeroDepth;
+  let mut bracketDepth = ZeroDepth;
+  let mut braceDepth = ZeroDepth;
+  let mut inString = false;
+  for char in textChars value {
+    if inString then {
+      if char == "\"" then {
+        current = appendChar current char;
+        inString = false;
+        current
+      } else {
+        current = appendChar current char;
+        current
+      }
+    } else if char == "\"" then {
+      current = appendChar current char;
+      inString = true;
+      current
+    } else if char == "(" then {
+      current = appendChar current char;
+      parenDepth = increaseDepth parenDepth;
+      current
+    } else if char == ")" then {
+      current = appendChar current char;
+      parenDepth = decreaseDepth parenDepth;
+      current
+    } else if char == "[" then {
+      current = appendChar current char;
+      bracketDepth = increaseDepth bracketDepth;
+      current
+    } else if char == "]" then {
+      current = appendChar current char;
+      bracketDepth = decreaseDepth bracketDepth;
+      current
+    } else if char == "{" then {
+      current = appendChar current char;
+      braceDepth = increaseDepth braceDepth;
+      current
+    } else if char == "}" then {
+      current = appendChar current char;
+      braceDepth = decreaseDepth braceDepth;
+      current
+    } else if char == separator then {
+      if isTopLevel parenDepth bracketDepth braceDepth then {
+        parts = appendNonEmptyText parts current;
+        current = "";
+        current
+      } else {
+        current = appendChar current char;
+        current
+      }
+    } else {
+      current = appendChar current char;
+      current
+    }
+  };
+  appendNonEmptyText parts current
+}
+
+firstText : [Str] -> Str
+firstText values = {
+  for value in values {
+    return value
+  };
+  ""
+}
+
+remainingTexts : [Str] -> [Str]
+remainingTexts values = {
+  let mut remaining = [];
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      remaining = appendRenderedText remaining value;
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+hasAdditionalText : [Str] -> Bool
+hasAdditionalText values = {
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      return true
+    } else {
+      seenFirst = true;
+      seenFirst
+    }
+  };
+  false
+}
+
+unwrapDelimited : Str -> Str -> Str -> ParserTextResult
+unwrapDelimited value open close = {
+  let trimmed = trimSpaces value;
+  match textPrefix trimmed open {
+    Ok tail -> {
+      let mut body = "";
+      let mut trailing = "";
+      let mut depth = increaseDepth ZeroDepth;
+      let mut inString = false;
+      let mut closed = false;
+      for char in textChars tail {
+        if closed then {
+          trailing = appendChar trailing char;
+          trailing
+        } else if inString then {
+          if char == "\"" then {
+            body = appendChar body char;
+            inString = false;
+            body
+          } else {
+            body = appendChar body char;
+            body
+          }
+        } else if char == "\"" then {
+          body = appendChar body char;
+          inString = true;
+          body
+        } else if char == open then {
+          body = appendChar body char;
+          depth = increaseDepth depth;
+          body
+        } else if char == close then {
+          let nextDepth = decreaseDepth depth;
+          if isZeroDepth nextDepth then {
+            depth = nextDepth;
+            closed = true;
+            body
+          } else {
+            body = appendChar body char;
+            depth = nextDepth;
+            body
+          }
+        } else {
+          body = appendChar body char;
+          body
+        }
+      };
+      if closed then {
+        if trimSpaces trailing == "" then ParsedText body else MissingText trimmed
+      } else {
+        MissingText trimmed
+      }
     },
-  Err missingPrefix ->
+    Err missingPrefix ->
+      MissingText trimmed
+  }
+}
+
+unwrapStringLiteral : Str -> ParserTextResult
+unwrapStringLiteral value = {
+  let trimmed = trimSpaces value;
+  match textPrefix trimmed "\"" {
+    Ok tail -> {
+      let mut body = "";
+      let mut trailing = "";
+      let mut closed = false;
+      for char in textChars tail {
+        if closed then {
+          trailing = appendChar trailing char;
+          trailing
+        } else if char == "\"" then {
+          closed = true;
+          body
+        } else {
+          body = appendChar body char;
+          body
+        }
+      };
+      if closed then {
+        if trimSpaces trailing == "" then ParsedText body else MissingText trimmed
+      } else {
+        MissingText trimmed
+      }
+    },
+    Err missingPrefix ->
+      MissingText trimmed
+  }
+}
+
+betweenBrackets : Str -> Str
+betweenBrackets value = match unwrapDelimited value "[" "]" {
+  ParsedText payload ->
+    payload,
+  MissingText missing ->
     value
 }
 
 isListLiteral : Str -> Bool
-isListLiteral value = match textPrefix value "[" {
-  Ok tail ->
-    match textSplitFirst tail "]" {
-      Ok payload ->
-        remainingSegments payload == "",
-      Err missingClose ->
-        false
-    },
-  Err missingPrefix ->
+isListLiteral value = match unwrapDelimited value "[" "]" {
+  ParsedText payload ->
+    true,
+  MissingText missingPrefix ->
     false
+}
+
+betweenBraces : Str -> Str
+betweenBraces value = match unwrapDelimited value "{" "}" {
+  ParsedText payload ->
+    payload,
+  MissingText missing ->
+    value
+}
+
+parseAtomicHostedType : Str -> HostedTypeAst
+parseAtomicHostedType rawValue = {
+  let value = trimSpaces rawValue;
+  if isListLiteral value then HostedTypeList (parseHostedType (betweenBrackets value)) else HostedTypeName value
+}
+
+parseHostedType : Str -> HostedTypeAst
+parseHostedType rawValue = {
+  let value = trimSpaces rawValue;
+  match textSplitFirst value " -> " {
+    Ok payload ->
+      HostedTypeFunction (parseAtomicHostedType (firstSegment payload)) (parseHostedType (remainingSegments payload)),
+    Err noArrow ->
+      parseAtomicHostedType value
+  }
+}
+
+parseConstructorDecl : Str -> HostedConstructorDeclAst
+parseConstructorDecl rawValue = {
+  let value = trimSpaces rawValue;
+  let parts = splitWords value;
+  if hasAdditionalText parts then hostedConstructorDeclAst (firstText parts) (parseHostedTypes (remainingTexts parts)) else hostedConstructorDeclAst value []
+}
+
+parseHostedTypes : [Str] -> [HostedTypeAst]
+parseHostedTypes values = {
+  let mut parsed = [];
+  for value in values {
+    parsed = append parsed [parseHostedType value];
+    parsed
+  };
+  parsed
+}
+
+parseConstructorDecls : Str -> [HostedConstructorDeclAst]
+parseConstructorDecls value = {
+  let mut constructors = [];
+  for constructorValue in splitTopLevel value "|" {
+    constructors = appendConstructorDecl constructors (parseConstructorDecl constructorValue);
+    constructors
+  };
+  constructors
+}
+
+parseTypeDecl : Str -> HostedTypeDeclAst
+parseTypeDecl value = match textSplitFirst value " = " {
+  Ok payload -> {
+    let name = trimSpaces (firstSegment payload);
+    let constructors = parseConstructorDecls (remainingSegments payload);
+    hostedTypeDeclAst name constructors
+  },
+  Err missingBody ->
+    hostedTypeDeclAst (trimSpaces value) []
+}
+
+parseRecordFieldDecl : Str -> HostedRecordFieldDeclAst
+parseRecordFieldDecl rawValue = {
+  let value = trimSpaces rawValue;
+  match textSplitFirst value " : " {
+    Ok payload ->
+      hostedRecordFieldDeclAst (trimSpaces (firstSegment payload)) (parseHostedType (remainingSegments payload)),
+    Err missingType ->
+      match textSplitFirst value ": " {
+        Ok payload ->
+          hostedRecordFieldDeclAst (trimSpaces (firstSegment payload)) (parseHostedType (remainingSegments payload)),
+        Err missingCompactType ->
+          hostedRecordFieldDeclAst value (HostedTypeName "")
+      }
+  }
+}
+
+parseRecordFieldDecls : Str -> [HostedRecordFieldDeclAst]
+parseRecordFieldDecls value = {
+  let mut fields = [];
+  for fieldValue in splitTopLevel value "," {
+    fields = appendRecordFieldDecl fields (parseRecordFieldDecl fieldValue);
+    fields
+  };
+  fields
+}
+
+parseRecordDecl : Str -> HostedRecordDeclAst
+parseRecordDecl value = match textSplitFirst value " = " {
+  Ok payload -> {
+    let name = trimSpaces (firstSegment payload);
+    let body = trimSpaces (remainingSegments payload);
+    hostedRecordDeclAst name (parseRecordFieldDecls (betweenBraces body))
+  },
+  Err missingBody ->
+    hostedRecordDeclAst (trimSpaces value) []
+}
+
+parseRecordFieldExpr : Str -> HostedRecordFieldExprAst
+parseRecordFieldExpr rawValue = {
+  let value = trimSpaces rawValue;
+  match textSplitFirst value " = " {
+    Ok payload ->
+      hostedRecordFieldExprAst (trimSpaces (firstSegment payload)) (parseExpr (remainingSegments payload)),
+    Err missingValue ->
+      hostedRecordFieldExprAst value (HostedName value)
+  }
+}
+
+parseRecordFieldExprs : Str -> [HostedRecordFieldExprAst]
+parseRecordFieldExprs value = {
+  let mut fields = [];
+  for fieldValue in splitTopLevel value "," {
+    fields = appendRecordFieldExpr fields (parseRecordFieldExpr fieldValue);
+    fields
+  };
+  fields
+}
+
+parseFieldAccessChain : HostedExprAst -> [Str] -> HostedExprAst
+parseFieldAccessChain subject fields = {
+  let mut current = subject;
+  for fieldName in fields {
+    current = HostedFieldAccess current (trimSpaces fieldName);
+    current
+  };
+  current
+}
+
+parseRecordLiteral : Str -> RecordLiteralParseResult
+parseRecordLiteral value = match textSplitFirst value " {" {
+  Ok payload -> {
+    let recordName = trimSpaces (firstSegment payload);
+    let body = textConcat ["{", remainingSegments payload];
+    match unwrapDelimited body "{" "}" {
+      ParsedText fieldBody ->
+        ParsedRecordLiteral recordName (parseRecordFieldExprs fieldBody),
+      MissingText notRecord ->
+        MissingRecordLiteral value
+    }
+  },
+  Err missingRecord ->
+    match textSplitFirst value "{" {
+      Ok payload -> {
+        let recordName = trimSpaces (firstSegment payload);
+        let body = textConcat ["{", remainingSegments payload];
+        match unwrapDelimited body "{" "}" {
+          ParsedText fieldBody ->
+            ParsedRecordLiteral recordName (parseRecordFieldExprs fieldBody),
+          MissingText notRecord ->
+            MissingRecordLiteral value
+        }
+      },
+      Err missingCompactRecord ->
+        MissingRecordLiteral value
+    }
 }
 
 parseExprItems : Str -> [HostedExprAst]
 parseExprItems value = {
   let mut items = [];
-  for item in splitItems value {
+  for item in splitTopLevel value "," {
     items = appendExpr items (parseExpr item);
     items
   };
   items
 }
 
-parseExprArgs : Str -> [HostedExprAst]
-parseExprArgs value = {
+parseExprArgs : [Str] -> [HostedExprAst]
+parseExprArgs values = {
   let mut args = [];
-  for argValue in splitWords value {
+  for argValue in values {
     args = appendExpr args (parseExpr argValue);
     args
   };
   args
 }
 
+splitLetParts : [Str] -> LetPartsResult
+splitLetParts values = {
+  let mut valueTokens = [];
+  let mut bodyTokens = [];
+  let mut seenIn = false;
+  for value in values {
+    if seenIn then {
+      bodyTokens = appendRenderedText bodyTokens value;
+      bodyTokens
+    } else if value == "in" then {
+      seenIn = true;
+      bodyTokens
+    } else {
+      valueTokens = appendRenderedText valueTokens value;
+      valueTokens
+    }
+  };
+  if seenIn then FoundLetParts valueTokens bodyTokens else MissingLetParts
+}
+
+parseLetExpr : Str -> LetParseResult
+parseLetExpr value = match textPrefix value "let " {
+  Ok tail -> {
+    let parts = splitTopLevel tail " ";
+    let binder = firstText parts;
+    let afterBinder = remainingTexts parts;
+    if binder == "" then {
+      MissingLet value
+    } else if firstText afterBinder == "=" then {
+      match splitLetParts (remainingTexts afterBinder) {
+        FoundLetParts valueTokens bodyTokens ->
+          if firstText valueTokens == "" then MissingLet value else if firstText bodyTokens == "" then MissingLet value else ParsedLet binder (parseExpr (textJoin " " valueTokens)) (parseExpr (textJoin " " bodyTokens)),
+        MissingLetParts ->
+          MissingLet value
+      }
+    } else {
+      MissingLet value
+    }
+  },
+  Err notLet ->
+    MissingLet value
+}
+
 parseExpr : Str -> HostedExprAst
-parseExpr value = match textPrefix value "\"" {
+parseExpr rawValue = {
+  let value = trimSpaces rawValue;
+  match unwrapDelimited value "(" ")" {
+    ParsedText payload ->
+      parseExpr payload,
+    MissingText notParen ->
+      match unwrapStringLiteral value {
+        ParsedText payload ->
+          HostedString payload,
+        MissingText notString ->
+          if value == "true" then HostedBool true else if value == "false" then HostedBool false else if isListLiteral value then HostedList (parseExprItems (betweenBrackets value)) else if isIntLiteral value then HostedInt value else match parseMatchExpr value {
+            ParsedMatch subject branches ->
+              HostedMatch subject branches,
+            MissingMatch notMatch ->
+              match parseLetExpr value {
+                ParsedLet binder valueExpr bodyExpr ->
+                  HostedLet binder valueExpr bodyExpr,
+                MissingLet notLet -> {
+                  let fieldParts = splitTopLevel value ".";
+                  if hasAdditionalText fieldParts then parseFieldAccessChain (parseExpr (firstText fieldParts)) (remainingTexts fieldParts) else match parseRecordLiteral value {
+                    ParsedRecordLiteral recordName fields ->
+                      HostedRecord recordName fields,
+                    MissingRecordLiteral missingRecord -> {
+                      let callParts = splitTopLevel value " ";
+                      if hasAdditionalText callParts then {
+                        let callee = firstText callParts;
+                        let args = parseExprArgs (remainingTexts callParts);
+                        if startsWithUppercase callee then HostedConstructor callee args else HostedCall callee args
+                      } else {
+                        if startsWithUppercase value then HostedConstructor value [] else HostedName value
+                      }
+                    }
+                  }
+                }
+              }
+          }
+      }
+  }
+}
+
+parsePattern : Str -> HostedPatternAst
+parsePattern rawValue = {
+  let parts = splitWords (trimSpaces rawValue);
+  if hasAdditionalText parts then hostedPatternAst (firstText parts) (remainingTexts parts) else hostedPatternAst (firstText parts) []
+}
+
+parseMatchBranch : Str -> HostedMatchBranchAst
+parseMatchBranch rawValue = {
+  let value = trimSpaces rawValue;
+  match textSplitFirst value " -> " {
+    Ok payload ->
+      hostedMatchBranchAst (parsePattern (firstSegment payload)) (parseExpr (remainingSegments payload)),
+    Err missingBody ->
+      hostedMatchBranchAst (parsePattern value) (HostedName value)
+  }
+}
+
+parseMatchBranches : Str -> [HostedMatchBranchAst]
+parseMatchBranches value = {
+  let mut branches = [];
+  for branchValue in splitTopLevel value "," {
+    branches = appendMatchBranch branches (parseMatchBranch branchValue);
+    branches
+  };
+  branches
+}
+
+parseMatchExpr : Str -> MatchParseResult
+parseMatchExpr value = match textPrefix value "match " {
   Ok tail ->
-    match textSplitFirst tail "\"" {
-      Ok payload ->
-        HostedString (firstSegment payload),
-      Err missingClose ->
-        HostedName value
+    match textSplitFirst tail " {" {
+      Ok payload -> {
+        let subject = parseExpr (firstSegment payload);
+        let body = textConcat ["{", remainingSegments payload];
+        match unwrapDelimited body "{" "}" {
+          ParsedText branchBody ->
+            ParsedMatch subject (parseMatchBranches branchBody),
+          MissingText notMatch ->
+            MissingMatch value
+        }
+      },
+      Err missingBody ->
+        MissingMatch value
     },
-  Err missingPrefix ->
-    if value == "true" then HostedBool true else if value == "false" then HostedBool false else if isListLiteral value then HostedList (parseExprItems (betweenBrackets value)) else if isIntLiteral value then HostedInt value else match textSplitFirst value " " { Ok payload -> HostedCall (firstSegment payload) (parseExprArgs (remainingSegments payload)), Err noArgs -> HostedName value }
+  Err notMatch ->
+    MissingMatch value
 }
 
 renderExprSummaries : [HostedExprAst] -> [Str]
@@ -218,6 +995,42 @@ renderExprSummaries values = {
 renderBoolLiteral : Bool -> Str
 renderBoolLiteral value = if value then "true" else "false"
 
+renderRecordFieldExprSummaries : [HostedRecordFieldExprAst] -> [Str]
+renderRecordFieldExprSummaries fields = {
+  let mut rendered = [];
+  for field in fields {
+    rendered = appendRenderedText rendered (textConcat [recordExprFieldName field, " = ", expressionSummary (recordExprFieldValue field)]);
+    rendered
+  };
+  rendered
+}
+
+renderPatternSummary : HostedPatternAst -> Str
+renderPatternSummary pattern = {
+  let constructorName = patternConstructorName pattern;
+  let binders = patternBinders pattern;
+  if firstText binders == "" then constructorName else textConcat [constructorName, " ", textJoin " " binders]
+}
+
+renderMatchBranchSummary : HostedMatchBranchAst -> Str
+renderMatchBranchSummary branch = {
+  let pattern = branchPatternAst branch;
+  let body = branchBodyExpr branch;
+  let patternText = renderPatternSummary pattern;
+  let bodyText = expressionSummary body;
+  textConcat [patternText, " -> ", bodyText]
+}
+
+renderMatchBranchSummaries : [HostedMatchBranchAst] -> [Str]
+renderMatchBranchSummaries values = {
+  let mut rendered = [];
+  for value in values {
+    rendered = appendRenderedText rendered (renderMatchBranchSummary value);
+    rendered
+  };
+  rendered
+}
+
 expressionSummary : HostedExprAst -> Str
 expressionSummary expr = match expr {
   HostedName name ->
@@ -231,7 +1044,17 @@ expressionSummary expr = match expr {
   HostedList values ->
     textConcat ["[", textJoin ", " (renderExprSummaries values), "]"],
   HostedCall callee args ->
-    textConcat ["call ", callee, "(", textJoin ", " (renderExprSummaries args), ")"]
+    textConcat ["call ", callee, "(", textJoin ", " (renderExprSummaries args), ")"],
+  HostedConstructor constructorName args ->
+    textConcat ["ctor ", constructorName, "(", textJoin ", " (renderExprSummaries args), ")"],
+  HostedMatch subject branches ->
+    textConcat ["match ", expressionSummary subject, " { ", textJoin ", " (renderMatchBranchSummaries branches), " }"],
+  HostedRecord recordName fields ->
+    textConcat [recordName, " { ", textJoin ", " (renderRecordFieldExprSummaries fields), " }"],
+  HostedFieldAccess subject fieldName ->
+    textConcat [expressionSummary subject, ".", fieldName],
+  HostedLet binder value body ->
+    textConcat ["let ", binder, " = ", expressionSummary value, " in ", expressionSummary body]
 }
 
 declarationHead : Str -> Str
@@ -251,36 +1074,52 @@ declarationParams lhs = match textSplitFirst lhs " " {
 }
 
 appendDefinition : ParserState -> Str -> Str -> ParserState
-appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (appendDecl (stateDeclarations state) (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs))) "" (stateMainExprSummary state)
+appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs))) missingAnnotation (stateMainExprSummary state)
+
+appendTypeDefinition : ParserState -> Str -> ParserState
+appendTypeDefinition state body = parserState (stateModuleName state) (stateImports state) (appendTypeDecl (stateTypeDeclarations state) (parseTypeDecl body)) (stateRecordDeclarations state) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
+
+appendRecordDefinition : ParserState -> Str -> ParserState
+appendRecordDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (appendRecordDecl (stateRecordDeclarations state) (parseRecordDecl body)) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
 
 appendMainDefinition : ParserState -> Str -> ParserState
 appendMainDefinition state body = {
   let expr = parseExpr body;
-  parserState (stateModuleName state) (stateImports state) (appendDecl (stateDeclarations state) (hostedDeclAst "main" (statePendingAnnotation state) [] expr)) "" (expressionSummary expr)
+  parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst "main" (statePendingAnnotation state) [] expr)) missingAnnotation (expressionSummary expr)
 }
 
 stepParser : ParserState -> Str -> ParserState
 stepParser state line = match textPrefix line "module " {
   Ok moduleName ->
-    parserState moduleName (stateImports state) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+    parserState moduleName (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
   Err moduleMiss ->
     match textPrefix line "import " {
       Ok importName ->
-        parserState (stateModuleName state) (appendRenderedText (stateImports state) importName) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+        parserState (stateModuleName state) (appendRenderedText (stateImports state) importName) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
       Err importMiss ->
-        match textSplitFirst line " : " {
-          Ok annotationPayload ->
-            parserState (stateModuleName state) (stateImports state) (stateDeclarations state) (remainingSegments annotationPayload) (stateMainExprSummary state),
-          Err annotationMiss ->
-            match textPrefix line "main = " {
-              Ok mainBody ->
-                appendMainDefinition state mainBody,
-              Err notMain ->
-                match textSplitFirst line " = " {
-                  Ok definitionPayload ->
-                    appendDefinition state (firstSegment definitionPayload) (remainingSegments definitionPayload),
-                  Err notDefinition ->
-                    state
+        match textPrefix line "type " {
+          Ok typeBody ->
+            appendTypeDefinition state typeBody,
+          Err notType ->
+            match textPrefix line "record " {
+              Ok recordBody ->
+                appendRecordDefinition state recordBody,
+              Err notRecord ->
+                match textSplitFirst line " : " {
+                  Ok annotationPayload ->
+                    parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateDeclarations state) (presentAnnotation (parseHostedType (remainingSegments annotationPayload))) (stateMainExprSummary state),
+                  Err annotationMiss ->
+                    match textPrefix line "main = " {
+                      Ok mainBody ->
+                        appendMainDefinition state mainBody,
+                      Err notMain ->
+                        match textSplitFirst line " = " {
+                          Ok definitionPayload ->
+                            appendDefinition state (firstSegment definitionPayload) (remainingSegments definitionPayload),
+                          Err notDefinition ->
+                            state
+                        }
+                    }
                 }
             }
         }
@@ -289,12 +1128,12 @@ stepParser state line = match textPrefix line "module " {
 
 parseModuleAst : Str -> HostedModuleAst
 parseModuleAst source = {
-  let mut state = parserState "Main" [] [] "" "<missing>";
+  let mut state = parserState "Main" [] [] [] [] missingAnnotation "<missing>";
   for line in textSplit source "\n" {
     state = stepParser state line;
     state
   };
-  hostedModuleAst (stateModuleName state) (stateImports state) (stateDeclarations state) (stateMainExprSummary state)
+  hostedModuleAst (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateDeclarations state) (stateMainExprSummary state)
 }
 
 declNames : HostedModuleAst -> [Str]
@@ -305,6 +1144,54 @@ declNames modl = {
     names
   };
   names
+}
+
+recordDeclNames : HostedModuleAst -> [Str]
+recordDeclNames modl = {
+  let mut names = [];
+  for decl in moduleRecordDeclarations modl {
+    names = appendRenderedText names (recordDeclName decl);
+    names
+  };
+  names
+}
+
+firstRecordDecl : HostedModuleAst -> HostedRecordDeclAst
+firstRecordDecl modl = {
+  for decl in moduleRecordDeclarations modl {
+    return decl
+  };
+  hostedRecordDeclAst "" []
+}
+
+typeDeclNames : HostedModuleAst -> [Str]
+typeDeclNames modl = {
+  let mut names = [];
+  for decl in moduleTypeDeclarations modl {
+    names = appendRenderedText names (typeDeclName decl);
+    names
+  };
+  names
+}
+
+firstTypeDecl : HostedModuleAst -> HostedTypeDeclAst
+firstTypeDecl modl = {
+  for decl in moduleTypeDeclarations modl {
+    return decl
+  };
+  hostedTypeDeclAst "" []
+}
+
+declAnnotationTextByName : HostedModuleAst -> Str -> Str
+declAnnotationTextByName modl targetName = {
+  for decl in moduleDeclarations modl {
+    if declName decl == targetName then {
+      return renderAnnotationAst (declAnnotation decl)
+    } else {
+      ""
+    }
+  };
+  ""
 }
 
 renderMainExpr : HostedModuleAst -> Str

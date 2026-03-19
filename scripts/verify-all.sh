@@ -10,6 +10,7 @@ full_verify_commands=$'
 bash scripts/test-verify-all.sh
 bash scripts/test-swarm-control.sh
 cabal test
+bash scripts/test-native-runtime.sh
 cabal run claspc -- check compiler/hosted/Main.clasp
 bash compiler/hosted/scripts/verify.sh
 bash examples/lead-app-ts/scripts/verify.sh

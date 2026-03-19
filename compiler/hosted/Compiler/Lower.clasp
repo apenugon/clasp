@@ -2,7 +2,9 @@ module Compiler.Lower
 
 import Compiler.Ast
 
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerInvoke Str [LowerExprText]
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess LowerExprText Str | LowerLet Str LowerExprText LowerExprText
+type LowerRecordFieldText = LowerRecordFieldText Str LowerExprText
+type LowerMatchBranchText = LowerMatchBranchText Str [Str] LowerExprText
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str [Str] LowerExprText
 
 appendLowerRenderedText : [Str] -> Str -> [Str]
@@ -10,6 +12,12 @@ appendLowerRenderedText values value = append values [value]
 
 appendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]
 appendLowerExpr values value = append values [value]
+
+appendLowerRecordField : [LowerRecordFieldText] -> LowerRecordFieldText -> [LowerRecordFieldText]
+appendLowerRecordField values value = append values [value]
+
+appendLowerMatchBranch : [LowerMatchBranchText] -> LowerMatchBranchText -> [LowerMatchBranchText]
+appendLowerMatchBranch values value = append values [value]
 
 appendLowerDecl : [LowerDeclText] -> LowerDeclText -> [LowerDeclText]
 appendLowerDecl values value = append values [value]
@@ -32,6 +40,27 @@ lowerExprs values = {
   lowered
 }
 
+lowerRecordFields : [HostedRecordFieldExprAst] -> [LowerRecordFieldText]
+lowerRecordFields fields = {
+  let mut lowered = [];
+  for field in fields {
+    lowered = appendLowerRecordField lowered (LowerRecordFieldText (recordExprFieldName field) (lowerExpr (recordExprFieldValue field)));
+    lowered
+  };
+  lowered
+}
+
+lowerMatchBranches : [HostedMatchBranchAst] -> [LowerMatchBranchText]
+lowerMatchBranches branches = {
+  let mut lowered = [];
+  for branch in branches {
+    let pattern = branchPatternAst branch;
+    lowered = appendLowerMatchBranch lowered (LowerMatchBranchText (patternConstructorName pattern) (patternBinders pattern) (lowerExpr (branchBodyExpr branch)));
+    lowered
+  };
+  lowered
+}
+
 lowerExpr : HostedExprAst -> LowerExprText
 lowerExpr expr = match expr {
   HostedName name ->
@@ -45,7 +74,17 @@ lowerExpr expr = match expr {
   HostedList values ->
     LowerArray (lowerExprs values),
   HostedCall callee args ->
-    LowerInvoke callee (lowerExprs args)
+    LowerInvoke callee (lowerExprs args),
+  HostedConstructor constructorName args ->
+    LowerConstructor constructorName (lowerExprs args),
+  HostedMatch subject branches ->
+    LowerMatch (lowerExpr subject) (lowerMatchBranches branches),
+  HostedRecord recordName fields ->
+    LowerRecord recordName (lowerRecordFields fields),
+  HostedFieldAccess subject fieldName ->
+    LowerFieldAccess (lowerExpr subject) fieldName,
+  HostedLet binder value body ->
+    LowerLet binder (lowerExpr value) (lowerExpr body)
 }
 
 lowerDecl : HostedDeclAst -> LowerDeclText
@@ -71,6 +110,38 @@ renderLowerExprs values = {
   rendered
 }
 
+renderLowerRecordFields : [LowerRecordFieldText] -> [Str]
+renderLowerRecordFields fields = {
+  let mut rendered = [];
+  for field in fields {
+    rendered = appendLowerRenderedText rendered (renderLowerRecordField field);
+    rendered
+  };
+  rendered
+}
+
+renderLowerRecordField : LowerRecordFieldText -> Str
+renderLowerRecordField field = match field {
+  LowerRecordFieldText name value ->
+    textConcat [name, " = ", renderLowerExpr value]
+}
+
+renderLowerMatchBranch : LowerMatchBranchText -> Str
+renderLowerMatchBranch branch = match branch {
+  LowerMatchBranchText constructorName binders body ->
+    textConcat [constructorName, "(", textJoin ", " binders, ") -> ", renderLowerExpr body]
+}
+
+renderLowerMatchBranches : [LowerMatchBranchText] -> [Str]
+renderLowerMatchBranches branches = {
+  let mut rendered = [];
+  for branch in branches {
+    rendered = appendLowerRenderedText rendered (renderLowerMatchBranch branch);
+    rendered
+  };
+  rendered
+}
+
 renderLowerExpr : LowerExprText -> Str
 renderLowerExpr expr = match expr {
   LowerName name ->
@@ -84,7 +155,17 @@ renderLowerExpr expr = match expr {
   LowerArray values ->
     textConcat ["list:[", textJoin ", " (renderLowerExprs values), "]"],
   LowerInvoke callee args ->
-    textConcat ["call ", callee, "(", textJoin ", " (renderLowerExprs args), ")"]
+    textConcat ["call ", callee, "(", textJoin ", " (renderLowerExprs args), ")"],
+  LowerConstructor constructorName args ->
+    textConcat ["ctor ", constructorName, "(", textJoin ", " (renderLowerExprs args), ")"],
+  LowerMatch subject branches ->
+    textConcat ["match ", renderLowerExpr subject, " [", textJoin ", " (renderLowerMatchBranches branches), "]"],
+  LowerRecord recordName fields ->
+    textConcat ["record ", recordName, " {", textJoin ", " (renderLowerRecordFields fields), "}"],
+  LowerFieldAccess subject fieldName ->
+    textConcat ["field(", renderLowerExpr subject, ", ", fieldName, ")"],
+  LowerLet binder value body ->
+    textConcat ["let ", binder, " = ", renderLowerExpr value, " in ", renderLowerExpr body]
 }
 
 renderLowerDecl : LowerDeclText -> Str

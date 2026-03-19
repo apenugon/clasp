@@ -141,6 +141,7 @@ import Clasp.Native
   , NativeToolServerBoundary (..)
   , NativeVariantLayout (..)
   , NativeWorkflowBoundary (..)
+  , renderNativeModuleImageJson
   )
 import Clasp.Syntax
   ( AgentDecl (..)
@@ -1521,6 +1522,7 @@ checkerTests =
           Right checked -> do
             let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
             assertBool "expected textJoin builtin" ("textJoin" `elem` foreignNames)
+            assertBool "expected textChars builtin" ("textChars" `elem` foreignNames)
             assertBool "expected textPrefix builtin" ("textPrefix" `elem` foreignNames)
             assertBool "expected textSplitFirst builtin" ("textSplitFirst" `elem` foreignNames)
             assertBool "expected pathJoin builtin" ("pathJoin" `elem` foreignNames)
@@ -1752,14 +1754,38 @@ checkerTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check rejects ordinary programs unless bootstrap recovery mode is requested" $ do
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json"]
+    , testCase "claspc check supports simple ordinary programs on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json"]
         case exitCode of
           ExitSuccess ->
-            assertFailure "expected default compiler check for an ordinary program to fail"
-          ExitFailure _ ->
             pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler check for a simple ordinary program to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted ordinary check json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc check supports imported subset projects on the hosted Clasp path" $
+        withProjectFiles "check-primary-import-success" importSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["check", inputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted primary compiler check for an imported subset project to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted imported check json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
     , testCase "claspc check can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
@@ -1788,14 +1814,16 @@ checkerTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check reports unsupported explicit Clasp-primary requests" $ do
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=clasp"]
-        case exitCode of
-          ExitSuccess ->
-            assertFailure "expected explicit unsupported primary compiler request to fail"
-          ExitFailure _ ->
-            pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "claspc check reports unsupported explicit Clasp-primary requests for package-backed imports" $
+        withProjectFiles "check-primary-package-imports-unsupported" packageImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["check", inputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected explicit unsupported primary compiler request to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2056,14 +2084,44 @@ explainTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc explain rejects ordinary programs unless bootstrap recovery mode is requested" $ do
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json"]
+    , testCase "claspc explain supports simple ordinary programs on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json"]
         case exitCode of
           ExitSuccess ->
-            assertFailure "expected default compiler explain for an ordinary program to fail"
-          ExitFailure _ ->
             pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler explain for a simple ordinary program to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted ordinary explain json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc explain supports imported subset projects on the hosted Clasp path" $
+        withProjectFiles "explain-primary-import-success" importSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted primary compiler explain for an imported subset project to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted imported explain json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          case lookupObjectKey "explanation" jsonValue of
+            Just (String explanation) -> do
+              assertBool "expected imported helper declaration in explanation" ("formatUser : User -> Str" `T.isInfixOf` explanation)
+              assertBool "expected entry declaration in explanation" ("main : Str" `T.isInfixOf` explanation)
+            _ ->
+              assertFailure "expected explanation string in hosted imported explain json"
     , testCase "claspc explain can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
@@ -2078,14 +2136,16 @@ explainTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc explain reports unsupported explicit Clasp-primary requests" $ do
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json", "--compiler=clasp"]
-        case exitCode of
-          ExitSuccess ->
-            assertFailure "expected explicit unsupported primary compiler explain request to fail"
-          ExitFailure _ ->
-            pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "claspc explain reports unsupported explicit Clasp-primary requests for package-backed imports" $
+        withProjectFiles "explain-primary-package-imports-unsupported" packageImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected explicit unsupported primary compiler explain request to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
     ]
 
 diagnosticTests :: TestTree
@@ -3439,12 +3499,74 @@ nativeTests =
           Right nativeIr -> do
             assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
             assertBool "expected native IR module header" ("module Main" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR entrypoint table" ("entrypoints [" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR main entrypoint" ("main{symbol=clasp_native__Main__main, kind=global, arity=0}" `T.isInfixOf` nativeIr)
             assertBool "expected native IR ABI version" ("version clasp-native-v1" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime profile" ("profile compiler_backend_minimal" `T.isInfixOf` nativeIr)
-            assertBool "expected native runtime artifact" ("\"runtime/native/clasp_runtime.c\"" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime artifact" ("\"runtime/native/clasp_runtime.rs\"" `T.isInfixOf` nativeIr)
             assertBool "expected native IR record layout" ("record_layout LeadEnvelope { words = 3, fields = [title:Str@word0/handle, tags:[Str]@word1/handle, owner:Principal@word2/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR object layout" ("object_layout RenderResult.RenderedFlag { kind = variant, header_words = 2, words = 4, roots = [] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR decl emission" ("global main = string(\"ok\")" `T.isInfixOf` nativeIr)
+    , testCase "native renderer emits a machine-readable module image artifact" $
+        case nativeSource "native-abi" nativeAbiSource of
+          Left err ->
+            assertFailure ("expected native image rendering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let imageJsonText = LT.toStrict (renderNativeModuleImageJson nativeMod)
+            imageValue <- case eitherDecodeStrictText imageJsonText of
+              Left decodeErr ->
+                assertFailure ("expected native image json output to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "image format" (Just (String "clasp-native-image-v1")) (lookupObjectKey "format" imageValue)
+            assertEqual "image ir format" (Just (String "clasp-native-ir-v1")) (lookupObjectKey "irFormat" imageValue)
+            assertEqual "image module" (Just (String "Main")) (lookupObjectKey "module" imageValue)
+            case lookupObjectKey "entrypoints" imageValue of
+              Just (Array entrypoints) ->
+                assertBool
+                  "expected native image main entrypoint symbol"
+                  (objectHasTextField [("name", "main"), ("symbol", "clasp_native__Main__main")] `any` toList entrypoints)
+              _ ->
+                assertFailure "expected native image entrypoints array"
+            case lookupObjectKey "runtime" imageValue of
+              Just runtimeValue -> do
+                assertEqual "runtime profile" (Just (String "compiler_backend_minimal")) (lookupObjectKey "profile" runtimeValue)
+                case lookupObjectKey "artifacts" runtimeValue of
+                  Just (Array artifacts) ->
+                    assertBool "expected native runtime source artifact in image" (String "runtime/native/clasp_runtime.rs" `elem` toList artifacts)
+                  _ ->
+                    assertFailure "expected runtime artifacts array"
+              _ ->
+                assertFailure "expected runtime object in native image"
+            case lookupObjectKey "compatibility" imageValue of
+              Just compatibilityValue -> do
+                assertEqual "compatibility kind" (Just (String "clasp-native-compatibility-v1")) (lookupObjectKey "kind" compatibilityValue)
+                case lookupObjectKey "interfaceFingerprint" compatibilityValue of
+                  Just (String fingerprint) ->
+                    assertBool "expected native compatibility fingerprint prefix" ("native-compat:" `T.isPrefixOf` fingerprint)
+                  _ ->
+                    assertFailure "expected native image interface fingerprint"
+                case lookupObjectKey "acceptedPreviousFingerprints" compatibilityValue of
+                  Just (Array acceptedFingerprints) ->
+                    assertBool "expected accepted previous fingerprints in native image" (not (null (toList acceptedFingerprints)))
+                  _ ->
+                    assertFailure "expected accepted previous fingerprints array"
+                case lookupObjectKey "migration" compatibilityValue of
+                  Just migrationValue -> do
+                    assertEqual "migration kind" (Just (String "clasp-native-migration-v1")) (lookupObjectKey "kind" migrationValue)
+                    assertEqual "migration strategy" (Just (String "exact-interface-only")) (lookupObjectKey "strategy" migrationValue)
+                    assertEqual "migration state type" (Just Null) (lookupObjectKey "stateType" migrationValue)
+                    assertEqual "migration snapshot symbol" (Just Null) (lookupObjectKey "snapshotSymbol" migrationValue)
+                    assertEqual "migration handoff symbol" (Just Null) (lookupObjectKey "handoffSymbol" migrationValue)
+                  _ ->
+                    assertFailure "expected migration object in native image"
+              _ ->
+                assertFailure "expected compatibility object in native image"
+            case lookupObjectKey "decls" imageValue of
+              Just (Array decls) ->
+                assertBool "expected at least one declaration in native image" (not (null (toList decls)))
+              _ ->
+                assertFailure "expected declaration array in native image"
     , testCase "claspc native preserves static record types for same-shape record access end to end" $
         withProjectFiles "native-same-shape-records" [("Main.clasp", nativeSameShapeRecordSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -3484,7 +3606,7 @@ nativeTests =
             assertEqual "runtime profile" "compiler_backend_minimal" (nativeRuntimeProfile runtime)
             assertEqual
               "runtime artifacts"
-              ["runtime/native/clasp_runtime.h", "runtime/native/clasp_runtime.c"]
+              ["runtime/native/clasp_runtime.h", "runtime/native/clasp_runtime.rs"]
               (nativeRuntimeArtifacts runtime)
             assertBool "expected alloc symbol" ("clasp_rt_alloc_object" `elem` nativeRuntimeMemorySymbols runtime)
             assertBool "expected release symbol" ("clasp_rt_release" `elem` nativeRuntimeMemorySymbols runtime)
@@ -3495,6 +3617,13 @@ nativeTests =
                 assertEqual "textSplit type" (TFunction [TStr, TStr] (TList TStr)) (nativeRuntimeBindingType binding)
               Nothing ->
                 assertFailure "expected textSplit runtime binding"
+            case findRuntimeBinding "textChars" (nativeRuntimeBindings runtime) of
+              Just binding -> do
+                assertEqual "textChars runtime name" "textChars" (nativeRuntimeBindingRuntimeName binding)
+                assertEqual "textChars symbol" "clasp_rt_text_chars" (nativeRuntimeBindingSymbol binding)
+                assertEqual "textChars type" (TFunction [TStr] (TList TStr)) (nativeRuntimeBindingType binding)
+              Nothing ->
+                assertFailure "expected textChars runtime binding"
             case findRuntimeBinding "readFile" (nativeRuntimeBindings runtime) of
               Just binding ->
                 assertEqual "readFile symbol" "clasp_rt_read_file" (nativeRuntimeBindingSymbol binding)
@@ -3570,7 +3699,7 @@ nativeTests =
               , NativeHookContract (NativeHookBoundary "workerStart" "hook:workerStart" "worker.start" "WorkerBoot" "HookAck" "bootstrapWorker" "$encode_HookAck" "$decode_WorkerBoot")
               , NativeToolServerContract (NativeToolServerBoundary "RepoTools" "toolserver:RepoTools" "mcp" "stdio://repo-tools" "SupportDisclosure")
               , NativeToolContract (NativeToolBoundary "searchRepo" "tool:searchRepo" "RepoTools" "search_repo" "SearchRequest" "SearchResponse" "$encode_SearchResponse" "$decode_SearchRequest")
-              , NativeWorkflowContract (NativeWorkflowBoundary "CounterFlow" "workflow:CounterFlow" (TNamed "Counter") "$encode_Counter" "$decode_Counter")
+              , NativeWorkflowContract (NativeWorkflowBoundary "CounterFlow" "workflow:CounterFlow" (TNamed "Counter") "$encode_Counter" "$decode_Counter" "clasp_native__Main__CounterFlow__handoff")
               ]
               (nativeRuntimeBoundaryContracts runtime)
             assertEqual
@@ -3596,20 +3725,69 @@ nativeTests =
               assertBool "expected route boundary contract" ("route summarizeLeadRoute{id=route:summarizeLeadRoute, method=POST, path=\"/lead/summary\", request=LeadRequest, response=LeadSummary, response_kind=json, encode=$encode_LeadSummary, decode=$decode_LeadRequest}" `T.isInfixOf` nativeIr)
               assertBool "expected hook boundary contract" ("hook workerStart{id=hook:workerStart, event=\"worker.start\", request=WorkerBoot, response=HookAck, handler=bootstrapWorker, encode=$encode_HookAck, decode=$decode_WorkerBoot}" `T.isInfixOf` nativeIr)
               assertBool "expected tool boundary contract" ("tool searchRepo{id=tool:searchRepo, server=RepoTools, operation=\"search_repo\", request=SearchRequest, response=SearchResponse, encode=$encode_SearchResponse, decode=$decode_SearchRequest}" `T.isInfixOf` nativeIr)
-              assertBool "expected workflow boundary contract" ("workflow CounterFlow{id=workflow:CounterFlow, state=Counter, checkpoint=$encode_Counter, restore=$decode_Counter}" `T.isInfixOf` nativeIr)
+              assertBool "expected workflow boundary contract" ("workflow CounterFlow{id=workflow:CounterFlow, state=Counter, checkpoint=$encode_Counter, restore=$decode_Counter, handoff=clasp_native__Main__CounterFlow__handoff}" `T.isInfixOf` nativeIr)
               assertBool "expected service transport contract" ("service_transports [route summarizeLeadRoute{id=route:summarizeLeadRoute, mode=request_response, request=LeadRequest, request_encode=$encode_binary_LeadRequest, request_decode=$decode_binary_LeadRequest, response=LeadSummary, response_encode=$encode_binary_LeadSummary, response_decode=$decode_binary_LeadSummary, framing=length_prefixed}" `T.isInfixOf` nativeIr)
+    , testCase "claspc native emits workflow snapshot symbols in native image metadata" $
+        withProjectFiles "native-workflow-image" [("Main.clasp", nativeBoundarySource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "dist" </> "Main.native.ir"
+          createDirectoryIfMissing True (takeDirectory outputPath)
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap", "--json"]
+          case exitCode of
+            ExitFailure _ ->
+              assertFailure ("expected workflow native image emission to succeed:\n" <> stdoutText <> stderrText)
+            ExitSuccess -> do
+              jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+                Left decodeErr ->
+                  assertFailure ("expected workflow native json output to decode:\n" <> decodeErr)
+                Right value ->
+                  pure value
+              imagePath <- case lookupObjectKey "image" jsonValue of
+                Just (String value) -> pure (T.unpack value)
+                _ -> assertFailure "expected workflow native image path in json output"
+              imageJsonText <- TIO.readFile imagePath
+              imageValue <- case eitherDecodeStrictText imageJsonText of
+                Left decodeErr ->
+                  assertFailure ("expected workflow native image to decode:\n" <> decodeErr)
+                Right value ->
+                  pure value
+              case lookupObjectKey "compatibility" imageValue of
+                Just compatibilityValue ->
+                  case lookupObjectKey "migration" compatibilityValue of
+                    Just migrationValue -> do
+                      assertEqual "workflow migration state type" (Just (String "Counter")) (lookupObjectKey "stateType" migrationValue)
+                      assertEqual "workflow migration snapshot symbol" (Just (String "$encode_Counter")) (lookupObjectKey "snapshotSymbol" migrationValue)
+                      assertEqual "workflow migration handoff symbol" (Just (String "clasp_native__Main__CounterFlow__handoff")) (lookupObjectKey "handoffSymbol" migrationValue)
+                    _ ->
+                      assertFailure "expected workflow migration object in native image"
+                _ ->
+                  assertFailure "expected workflow compatibility object in native image"
     , testCase "claspc native emits a native IR artifact for compiler workloads end to end in bootstrap recovery mode" $ do
         let outputPath = "dist/compiler-parser.native.ir"
+        let imagePath = replaceExtension outputPath "native.image.json"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath, "--compiler=bootstrap", "--json"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler parser native emission to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
+            jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+              Left decodeErr ->
+                assertFailure ("expected native bootstrap json output to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+            assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+            assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            assertEqual "image path" (Just (String (T.pack imagePath))) (lookupObjectKey "image" jsonValue)
             outputExists <- doesFileExist outputPath
             assertBool "expected native IR artifact to exist" outputExists
+            imageExists <- doesFileExist imagePath
+            assertBool "expected native image artifact to exist" imageExists
             nativeIr <- TIO.readFile outputPath
             assertBool "expected native IR format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR entrypoint table" ("entrypoints [" `T.isInfixOf` nativeIr)
+            assertBool "expected native IR parser entrypoint symbol" ("parseModuleSummary{symbol=clasp_native__Main__parseModuleSummary, kind=function, arity=1}" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime section" ("runtime {" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime header artifact" ("\"runtime/native/clasp_runtime.h\"" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime textSplit binding" ("textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" `T.isInfixOf` nativeIr)
@@ -3617,26 +3795,143 @@ nativeTests =
             assertBool "expected parser state record layout" ("record_layout ParserState { words = 4, fields = [moduleName:Str@word0/handle, imports:Str@word1/handle, signatures:Str@word2/handle, declarations:Str@word3/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser variant object layout" ("object_layout LineKind.ModuleLine { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser function emission" ("function parseModuleSummary(source) =" `T.isInfixOf` nativeIr)
+            imageJsonText <- TIO.readFile imagePath
+            imageValue <- case eitherDecodeStrictText imageJsonText of
+              Left decodeErr ->
+                assertFailure ("expected native image artifact to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "image format" (Just (String "clasp-native-image-v1")) (lookupObjectKey "format" imageValue)
+            case lookupObjectKey "entrypoints" imageValue of
+              Just (Array entrypoints) ->
+                assertBool
+                  "expected compiler parser main entrypoint symbol"
+                  (objectHasTextField [("name", "main"), ("symbol", "clasp_native__Main__main")] `any` toList entrypoints)
+              _ ->
+                assertFailure "expected native image entrypoints array"
+            case lookupObjectKey "runtime" imageValue of
+              Just runtimeValue ->
+                assertEqual "image runtime profile" (Just (String "compiler_backend_minimal")) (lookupObjectKey "profile" runtimeValue)
+              _ ->
+                assertFailure "expected native image runtime object"
+            case lookupObjectKey "compatibility" imageValue of
+              Just compatibilityValue ->
+                assertEqual "image compatibility kind" (Just (String "clasp-native-compatibility-v1")) (lookupObjectKey "kind" compatibilityValue)
+              _ ->
+                assertFailure "expected native image compatibility object"
+    , testCase "claspc native emits the compiler text traversal helper when a workload uses textChars" $
+        withProjectFiles "native-text-chars" [("Main.clasp", textCharsNativeSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "dist" </> "Main.native.ir"
+          createDirectoryIfMissing True (takeDirectory outputPath)
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          case exitCode of
+            ExitFailure _ ->
+              assertFailure ("expected native textChars emission to succeed:\n" <> stdoutText <> stderrText)
+            ExitSuccess -> do
+              nativeIr <- TIO.readFile outputPath
+              assertBool "expected native runtime textChars binding" ("textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" `T.isInfixOf` nativeIr)
+              assertBool "expected textChars call in emitted native function" ("function charsSummary(value) = call(local(textChars), [local(value)])" `T.isInfixOf` nativeIr)
     , testCase "native runtime bundle files declare the compiler/backend runtime surface" $ do
         headerExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.h")
-        sourceExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.c")
+        sourceExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.rs")
+        harnessExists <- doesFileExist ("runtime" </> "native" </> "test_native_image.c")
         assertBool "expected native runtime header to exist" headerExists
         assertBool "expected native runtime source to exist" sourceExists
+        assertBool "expected native runtime smoke harness to exist" harnessExists
         header <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.h")
-        source <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.c")
+        source <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.rs")
+        harness <- TIO.readFile ("runtime" </> "native" </> "test_native_image.c")
         assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
+        assertBool "expected runtime shutdown export" ("void clasp_rt_shutdown(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
         assertBool "expected runtime json helper export" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value);" `T.isInfixOf` header)
         assertBool "expected runtime bytes helper export" ("ClaspRtBytes *clasp_rt_bytes_new(size_t length);" `T.isInfixOf` header)
         assertBool "expected runtime binary codec export" ("ClaspRtBytes *clasp_rt_binary_from_json(ClaspRtJson *value);" `T.isInfixOf` header)
         assertBool "expected runtime transport export" ("ClaspRtBytes *clasp_rt_transport_frame(ClaspRtBytes *payload);" `T.isInfixOf` header)
+        assertBool "expected native image validation export" ("bool clasp_rt_native_image_validate(ClaspRtJson *image);" `T.isInfixOf` header)
+        assertBool "expected native image module export" ("ClaspRtResultString *clasp_rt_native_image_module_name(ClaspRtJson *image);" `T.isInfixOf` header)
+        assertBool "expected native image decl count export" ("size_t clasp_rt_native_image_decl_count(ClaspRtJson *image);" `T.isInfixOf` header)
+        assertBool "expected native module image load export" ("ClaspRtNativeModuleImage *clasp_rt_native_module_image_load(ClaspRtJson *image);" `T.isInfixOf` header)
+        assertBool "expected native module image interface fingerprint export" ("ClaspRtString *clasp_rt_native_module_image_interface_fingerprint(ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected native module image migration strategy export" ("ClaspRtString *clasp_rt_native_module_image_migration_strategy(ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected native module image state type export" ("ClaspRtString *clasp_rt_native_module_image_state_type(ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected native module image snapshot symbol export" ("ClaspRtString *clasp_rt_native_module_image_snapshot_symbol(ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected native module image handoff symbol export" ("ClaspRtString *clasp_rt_native_module_image_handoff_symbol(ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected native module image export query export" ("bool clasp_rt_native_module_image_has_export(ClaspRtNativeModuleImage *image, ClaspRtString *export_name);" `T.isInfixOf` header)
+        assertBool "expected native module image fingerprint acceptance export" ("bool clasp_rt_native_module_image_accepts_previous_fingerprint(" `T.isInfixOf` header)
+        assertBool "expected native module image entrypoint symbol export" ("ClaspRtResultString *clasp_rt_native_module_image_entrypoint_symbol(" `T.isInfixOf` header)
+        assertBool "expected native module activation export" ("bool clasp_rt_activate_native_module_image(ClaspRtRuntime *runtime, ClaspRtNativeModuleImage *image);" `T.isInfixOf` header)
+        assertBool "expected active generation export" ("size_t clasp_rt_active_native_module_generation(ClaspRtRuntime *runtime, ClaspRtString *module_name);" `T.isInfixOf` header)
+        assertBool "expected active generation count export" ("size_t clasp_rt_active_native_module_generation_count(ClaspRtRuntime *runtime, ClaspRtString *module_name);" `T.isInfixOf` header)
+        assertBool "expected active generation query export" ("bool clasp_rt_has_active_native_module_generation(" `T.isInfixOf` header)
+        assertBool "expected generation retirement export" ("bool clasp_rt_retire_native_module_generation(" `T.isInfixOf` header)
+        assertBool "expected native dispatch export" ("ClaspRtResultString *clasp_rt_resolve_native_dispatch(" `T.isInfixOf` header)
+        assertBool "expected generation-specific native dispatch export" ("ClaspRtResultString *clasp_rt_resolve_native_dispatch_generation(" `T.isInfixOf` header)
+        assertBool "expected native entrypoint bind export" ("bool clasp_rt_bind_native_entrypoint(" `T.isInfixOf` header)
+        assertBool "expected native entrypoint symbol bind export" ("bool clasp_rt_bind_native_entrypoint_symbol(" `T.isInfixOf` header)
+        assertBool "expected native snapshot bind export" ("bool clasp_rt_bind_native_snapshot(" `T.isInfixOf` header)
+        assertBool "expected native snapshot symbol bind export" ("bool clasp_rt_bind_native_snapshot_symbol(" `T.isInfixOf` header)
+        assertBool "expected native handoff bind export" ("bool clasp_rt_bind_native_handoff(" `T.isInfixOf` header)
+        assertBool "expected native handoff symbol bind export" ("bool clasp_rt_bind_native_handoff_symbol(" `T.isInfixOf` header)
+        assertBool "expected native entrypoint resolve export" ("ClaspRtNativeEntrypointFn clasp_rt_resolve_native_entrypoint(" `T.isInfixOf` header)
+        assertBool "expected generation-specific native entrypoint resolve export" ("ClaspRtNativeEntrypointFn clasp_rt_resolve_native_entrypoint_generation(" `T.isInfixOf` header)
+        assertBool "expected native snapshot resolve export" ("ClaspRtNativeSnapshotFn clasp_rt_resolve_native_snapshot(" `T.isInfixOf` header)
+        assertBool "expected native handoff resolve export" ("ClaspRtNativeHandoffFn clasp_rt_resolve_native_handoff(" `T.isInfixOf` header)
+        assertBool "expected native state snapshot store export" ("bool clasp_rt_store_native_module_state_snapshot(" `T.isInfixOf` header)
+        assertBool "expected native generation state type export" ("ClaspRtString *clasp_rt_native_module_generation_state_type(" `T.isInfixOf` header)
+        assertBool "expected native generation state snapshot export" ("ClaspRtJson *clasp_rt_native_module_generation_state_snapshot(" `T.isInfixOf` header)
+        assertBool "expected native dispatch call export" ("ClaspRtHeader *clasp_rt_call_native_dispatch(" `T.isInfixOf` header)
+        assertBool "expected generation-specific native dispatch call export" ("ClaspRtHeader *clasp_rt_call_native_dispatch_generation(" `T.isInfixOf` header)
         assertBool "expected runtime stdlib text split export" ("ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);" `T.isInfixOf` header)
-        assertBool "expected runtime static root registration" ("void clasp_rt_register_static_root(ClaspRtRuntime *runtime, ClaspRtHeader **slot)" `T.isInfixOf` source)
-        assertBool "expected runtime json helper implementation" ("ClaspRtJson *clasp_rt_json_from_string(ClaspRtString *value)" `T.isInfixOf` source)
-        assertBool "expected runtime binary codec implementation" ("ClaspRtBytes *clasp_rt_binary_from_json(ClaspRtJson *value)" `T.isInfixOf` source)
-        assertBool "expected runtime transport unframe implementation" ("ClaspRtBytes *clasp_rt_transport_unframe(ClaspRtBytes *frame)" `T.isInfixOf` source)
-        assertBool "expected runtime object destroy path" ("static void clasp_rt_destroy_object" `T.isInfixOf` source)
-        assertBool "expected runtime file read helper" ("ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path)" `T.isInfixOf` source)
+        assertBool "expected runtime stdlib text chars export" ("ClaspRtStringList *clasp_rt_text_chars(ClaspRtString *value);" `T.isInfixOf` header)
+        assertBool "expected runtime safe module image helpers" ("impl ClaspRtNativeModuleImage {" `T.isInfixOf` source)
+        assertBool "expected runtime safe registry helpers" ("impl ClaspRtRuntime {" `T.isInfixOf` source)
+        assertBool "expected runtime safe activation helper" ("fn activate_native_module_image(&mut self, image: NonNull<ClaspRtNativeModuleImage>) -> bool {" `T.isInfixOf` source)
+        assertBool "expected runtime safe retirement helper" ("fn retire_native_module_generation(&mut self, module_name: *mut ClaspRtString, generation: usize) -> bool {" `T.isInfixOf` source)
+        assertBool "expected runtime safe snapshot helper" ("fn store_native_module_state_snapshot(" `T.isInfixOf` source)
+        assertBool "expected runtime shutdown implementation" ("pub unsafe extern \"C\" fn clasp_rt_shutdown(runtime: *mut ClaspRtRuntime)" `T.isInfixOf` source)
+        assertBool "expected runtime static root registration" ("pub unsafe extern \"C\" fn clasp_rt_register_static_root(runtime: *mut ClaspRtRuntime, slot: *mut *mut ClaspRtHeader)" `T.isInfixOf` source)
+        assertBool "expected runtime json helper implementation" ("pub unsafe extern \"C\" fn clasp_rt_json_from_string(value: *mut ClaspRtString) -> *mut ClaspRtJson" `T.isInfixOf` source)
+        assertBool "expected runtime binary codec implementation" ("pub unsafe extern \"C\" fn clasp_rt_binary_from_json(value: *mut ClaspRtJson) -> *mut ClaspRtBytes" `T.isInfixOf` source)
+        assertBool "expected runtime transport unframe implementation" ("pub unsafe extern \"C\" fn clasp_rt_transport_unframe(frame: *mut ClaspRtBytes) -> *mut ClaspRtBytes" `T.isInfixOf` source)
+        assertBool "expected native image validation implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_image_validate(image: *mut ClaspRtJson) -> bool" `T.isInfixOf` source)
+        assertBool "expected native image artifact query implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_image_has_runtime_artifact(" `T.isInfixOf` source)
+        assertBool "expected native module image load implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_load(" `T.isInfixOf` source)
+        assertBool "expected native module image interface fingerprint implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_interface_fingerprint(" `T.isInfixOf` source)
+        assertBool "expected native module image migration strategy implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_migration_strategy(" `T.isInfixOf` source)
+        assertBool "expected native module image state type implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_state_type(" `T.isInfixOf` source)
+        assertBool "expected native module image snapshot symbol implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_snapshot_symbol(" `T.isInfixOf` source)
+        assertBool "expected native module image handoff symbol implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_handoff_symbol(" `T.isInfixOf` source)
+        assertBool "expected native module image export query implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_has_export(" `T.isInfixOf` source)
+        assertBool "expected native module image fingerprint acceptance implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_accepts_previous_fingerprint(" `T.isInfixOf` source)
+        assertBool "expected native module image entrypoint symbol implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_image_entrypoint_symbol(" `T.isInfixOf` source)
+        assertBool "expected native module activation implementation" ("pub unsafe extern \"C\" fn clasp_rt_activate_native_module_image(" `T.isInfixOf` source)
+        assertBool "expected active generation implementation" ("pub unsafe extern \"C\" fn clasp_rt_active_native_module_generation(" `T.isInfixOf` source)
+        assertBool "expected active generation count implementation" ("pub unsafe extern \"C\" fn clasp_rt_active_native_module_generation_count(" `T.isInfixOf` source)
+        assertBool "expected active generation query implementation" ("pub unsafe extern \"C\" fn clasp_rt_has_active_native_module_generation(" `T.isInfixOf` source)
+        assertBool "expected generation retirement implementation" ("pub unsafe extern \"C\" fn clasp_rt_retire_native_module_generation(" `T.isInfixOf` source)
+        assertBool "expected native dispatch implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_dispatch(" `T.isInfixOf` source)
+        assertBool "expected generation-specific native dispatch implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_dispatch_generation(" `T.isInfixOf` source)
+        assertBool "expected native entrypoint bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_entrypoint(" `T.isInfixOf` source)
+        assertBool "expected native entrypoint symbol bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_entrypoint_symbol(" `T.isInfixOf` source)
+        assertBool "expected native snapshot bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_snapshot(" `T.isInfixOf` source)
+        assertBool "expected native snapshot symbol bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_snapshot_symbol(" `T.isInfixOf` source)
+        assertBool "expected native handoff bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_handoff(" `T.isInfixOf` source)
+        assertBool "expected native handoff symbol bind implementation" ("pub unsafe extern \"C\" fn clasp_rt_bind_native_handoff_symbol(" `T.isInfixOf` source)
+        assertBool "expected native entrypoint resolve implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_entrypoint(" `T.isInfixOf` source)
+        assertBool "expected generation-specific native entrypoint resolve implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_entrypoint_generation(" `T.isInfixOf` source)
+        assertBool "expected native snapshot resolve implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_snapshot(" `T.isInfixOf` source)
+        assertBool "expected native handoff resolve implementation" ("pub unsafe extern \"C\" fn clasp_rt_resolve_native_handoff(" `T.isInfixOf` source)
+        assertBool "expected native state snapshot store implementation" ("pub unsafe extern \"C\" fn clasp_rt_store_native_module_state_snapshot(" `T.isInfixOf` source)
+        assertBool "expected native generation state type implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_generation_state_type(" `T.isInfixOf` source)
+        assertBool "expected native generation state snapshot implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_generation_state_snapshot(" `T.isInfixOf` source)
+        assertBool "expected native dispatch call implementation" ("pub unsafe extern \"C\" fn clasp_rt_call_native_dispatch(" `T.isInfixOf` source)
+        assertBool "expected generation-specific native dispatch call implementation" ("pub unsafe extern \"C\" fn clasp_rt_call_native_dispatch_generation(" `T.isInfixOf` source)
+        assertBool "expected runtime object destroy path" ("unsafe extern \"C\" fn destroy_object(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader)" `T.isInfixOf` source)
+        assertBool "expected runtime text chars implementation" ("pub unsafe extern \"C\" fn clasp_rt_text_chars(value: *mut ClaspRtString) -> *mut ClaspRtStringList" `T.isInfixOf` source)
+        assertBool "expected runtime file read helper" ("pub unsafe extern \"C\" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut ClaspRtResultString" `T.isInfixOf` source)
+        assertBool "expected native runtime smoke harness summary" ("native-image-ok module=%s profile=%s fingerprint=%s next_fingerprint=%s handoff_strategy=%s state_type=%s snapshot_symbol=%s handoff_symbol=%s snapshot=%s snapshot_hook=%d handoff=%d active_modules=%zu latest_generation=%zu overlap=%zu rejected_incompatible_upgrade=%d symbol=%s dispatch=%s old_dispatch=%s call=%s old_call=%s exports=%zu decls=%zu" `T.isInfixOf` harness)
     ]
 
 docsTests :: TestTree
@@ -3647,6 +3942,12 @@ docsTests =
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
         assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`." `T.isInfixOf` spec)
+    , testCase "v0 spec documents the compiler-support text traversal helper" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected textChars bootstrap helper" ("- `textChars : Str -> [Str]`" `T.isInfixOf` spec)
+    , testCase "v0 spec documents the bootstrap native image sidecar" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected bootstrap native image artifact note" ("- `claspc native` currently writes an inspectable `.native.ir` artifact and, on the bootstrap-native path, a companion `.native.image.json` artifact that carries generated export entrypoint symbols, a native compatibility fingerprint, and explicit migration metadata including workflow snapshot and handoff symbols so the Rust runtime can activate compatible module generations, require declared typed state snapshots plus state-handoff hooks for type-surface upgrades, resolve those symbols, bind native entrypoints, dispatch the newest live generation, and retire older generations without reparsing debug text." `T.isInfixOf` spec)
     , testCase "v0 spec documents homogeneous list literals and contextual empty lists" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected homogeneous list rule" ("List literals use the same brackets and must stay homogeneous." `T.isInfixOf` spec)
@@ -3668,11 +3969,16 @@ docsTests =
     , testCase "self-hosting plan defines the native runtime boundary and language choice" $ do
         plan <- TIO.readFile ("docs" </> "clasp-self-hosting-plan.md")
         assertBool "expected native runtime boundary section" ("## Native Runtime Boundary" `T.isInfixOf` plan)
-        assertBool "expected kernel module loading rule" ("- loading compiled module images and maintaining a stable native ABI between generated code and the runtime" `T.isInfixOf` plan)
+        assertBool "expected kernel module loading rule" ("- loading compiled module images into native module descriptors with stable export tables and runtime activation records while maintaining a stable native ABI between generated code and the runtime" `T.isInfixOf` plan)
+        assertBool "expected kernel image validation rule" ("- validating machine-readable native module image headers, runtime profile metadata, and bundled runtime artifacts before binding or dispatch" `T.isInfixOf` plan)
+        assertBool "expected kernel entrypoint binding rule" ("- binding stable native entrypoints plus workflow snapshot and handoff hooks onto activated module exports through generated image-declared symbols instead of reparsing debug IR" `T.isInfixOf` plan)
+        assertBool "expected kernel compatibility rule" ("- compatibility checks over native interface fingerprints so a new generation can overlap only when it explicitly accepts the previous generation's type surface" `T.isInfixOf` plan)
+        assertBool "expected kernel handoff rule" ("- explicit migration metadata, typed state snapshot payloads, and runtime-bound handoff hooks so changed type surfaces can retire older generations only after a supervised state handoff succeeds" `T.isInfixOf` plan)
+        assertBool "expected versioned overlap rule" ("- versioned dispatch indirection so old and new module generations can overlap during supervised upgrades, with default dispatch targeting the newest live generation until older generations are retired" `T.isInfixOf` plan)
         assertBool "expected kernel supervision rule" ("- supervision-tree execution, restart rules, operator handoff, rollback, and kill-switch enforcement" `T.isInfixOf` plan)
         assertBool "expected parser exclusion" ("- parser, checker, lowering, emitters, or other compiler-pass logic" `T.isInfixOf` plan)
         assertBool "expected implementation language section" ("## Native Runtime Implementation Language" `T.isInfixOf` plan)
-        assertBool "expected C runtime decision" ("The lowest native runtime layer should stay `C`, not `Haskell`." `T.isInfixOf` plan)
+        assertBool "expected Rust runtime decision" ("The lowest native runtime layer should stay `Rust`, not `Haskell`." `T.isInfixOf` plan)
         assertBool "expected Haskell demotion to bootstrap tooling" ("`Haskell` still makes sense for the bootstrap compiler, recovery tooling, and offline developer tooling" `T.isInfixOf` plan)
     , testCase "roadmap defines the first native memory-management model" $ do
         roadmap <- TIO.readFile ("docs" </> "clasp-roadmap.md")
@@ -3685,7 +3991,8 @@ docsTests =
         assertBool "expected root discovery rule" ("- root discovery walks static globals, active stack handle slots, and layout-declared child offsets inside heap objects" `T.isInfixOf` roadmap)
         assertBool "expected release invariant" ("- retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage" `T.isInfixOf` roadmap)
         assertBool "expected runtime bundle rule" ("- ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives" `T.isInfixOf` roadmap)
-        assertBool "expected C kernel rule" ("- keep the lowest native runtime layer in `C` with a narrow ABI instead of embedding the Haskell RTS into production server/runtime targets" `T.isInfixOf` roadmap)
+        assertBool "expected native image rule" ("- emit both inspectable `.native.ir` output and a machine-readable `.native.image.json` module image so the kernel can load, validate, compare compatibility fingerprints, require explicit generated snapshot plus handoff symbols and typed state snapshot payloads for changed interfaces, activate, resolve generated export symbols, bind native entrypoints, dispatch the newest live generation, and retire drained generations without depending on debug text" `T.isInfixOf` roadmap)
+        assertBool "expected Rust kernel rule" ("- keep the lowest native runtime layer in `Rust` behind a narrow C-shaped ABI instead of embedding the Haskell RTS into production server/runtime targets" `T.isInfixOf` roadmap)
         assertBool "expected Clasp-above-kernel rule" ("- build higher-level supervision, upgrade, workflow, and compiler behavior in `Clasp` on top of that kernel rather than growing the kernel into a second application platform" `T.isInfixOf` roadmap)
     ]
 
@@ -3751,6 +4058,7 @@ compileTests =
             assertBool "expected textJoin host binding" ("\"textJoin\"" `T.isInfixOf` emitted)
             assertBool "expected pathJoin builtin runtime" ("pathJoin(parts) {" `T.isInfixOf` emitted)
             assertBool "expected readFile host binding" ("\"readFile\"" `T.isInfixOf` emitted)
+            assertBool "expected textChars builtin runtime" ("textChars(value) {" `T.isInfixOf` emitted)
             let compiledPath = "dist/compiler-stdlib.mjs"
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
@@ -3766,6 +4074,7 @@ compileTests =
                 , "};"
                 , "console.log(JSON.stringify({"
                 , "  main: compiledModule.main,"
+                , "  chars: compiledModule.charsSummary('abc'),"
                 , "  split: compiledModule.splitSummary('alpha:beta'),"
                 , "  prefixOk: compiledModule.prefixSummary('src/Clasp/Parser.hs'),"
                 , "  prefixMiss: compiledModule.prefixSummary('examples/hello.clasp'),"
@@ -3779,7 +4088,7 @@ compileTests =
                 ]
             assertEqual
               "expected compiler stdlib runtime output"
-              "{\"main\":\"src/Clasp :: Checker.hs\",\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
+              "{\"main\":\"src/Clasp :: Checker.hs\",\"chars\":[\"a\",\"b\",\"c\"],\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
     , testCase "compile evaluates the compiler renderers example end-to-end in bootstrap recovery mode" $ do
         let compiledPath = "dist/compiler-renderers.mjs"
@@ -4104,7 +4413,7 @@ compileTests =
             case lookupObjectKey "stage2NativeOutput" runtimeValue of
               Just (String nativeText) -> do
                 assertBool "expected stage2 native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
-                assertBool "expected stage2 native decl block" ("decls {" `T.isInfixOf` nativeText)
+                assertBool "expected stage2 native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeText)
               _ ->
                 assertFailure "expected stage2NativeOutput field"
             assertEqual
@@ -4199,22 +4508,130 @@ compileTests =
               Just (Array declNamesValue) ->
                 assertEqual
                   "expected quaternary parsed declaration names"
-                  [String "select", String "main"]
+                  [String "select", String "wrap", String "labels", String "main"]
                   (toList declNamesValue)
               _ ->
                 assertFailure "expected quaternaryParsedDeclNames field"
             assertEqual
               "expected quaternary checked module summary"
-              (Just (String "select : Str -> Str -> Str\nmain : Str"))
+              (Just (String "select : Str -> Str -> Str\nwrap : Str -> Str\nlabels : [Str]\nmain : Str"))
               (lookupObjectKey "quaternaryCheckedModule" runtimeValue)
             assertEqual
               "expected quaternary lowered module summary"
-              (Just (String "function select(left, right) = name:right\nconst main = call select(literal:left, literal:right)"))
+              (Just (String "function select(left, right) = name:right\nfunction wrap(value) = name:value\nconst labels = list:[call wrap(call select(literal:left, literal:right)), literal:done]\nconst main = call wrap(call select(literal:alpha, literal:beta))"))
               (lookupObjectKey "quaternaryLoweredModule" runtimeValue)
             assertEqual
               "expected quaternary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport function select(left, right) { return right; }\nexport const main = select(\"left\", \"right\");"))
+              (Just (String "// Generated by compiler-selfhost\nexport function select(left, right) { return right; }\nexport function wrap(value) { return value; }\nexport const labels = [wrap(select(\"left\", \"right\")), \"done\"];\nexport const main = wrap(select(\"alpha\", \"beta\"));"))
               (lookupObjectKey "quaternaryEmittedModule" runtimeValue)
+            assertEqual
+              "expected quinary parsed module name"
+              (Just (String "Records"))
+              (lookupObjectKey "quinaryParsedModuleName" runtimeValue)
+            case lookupObjectKey "quinaryParsedRecordNames" runtimeValue of
+              Just (Array recordNamesValue) ->
+                assertEqual
+                  "expected quinary parsed record names"
+                  [String "User"]
+                  (toList recordNamesValue)
+              _ ->
+                assertFailure "expected quinaryParsedRecordNames field"
+            case lookupObjectKey "quinaryParsedRecordFieldTypes" runtimeValue of
+              Just (Array fieldTypesValue) ->
+                assertEqual
+                  "expected quinary parsed record field types"
+                  [String "name : Str", String "active : Bool"]
+                  (toList fieldTypesValue)
+              _ ->
+                assertFailure "expected quinaryParsedRecordFieldTypes field"
+            case lookupObjectKey "quinaryParsedDeclNames" runtimeValue of
+              Just (Array declNamesValue) ->
+                assertEqual
+                  "expected quinary parsed declaration names"
+                  [String "defaultUser", String "userName", String "main"]
+                  (toList declNamesValue)
+              _ ->
+                assertFailure "expected quinaryParsedDeclNames field"
+            assertEqual
+              "expected quinary checked module summary"
+              (Just (String "defaultUser : User\nuserName : User -> Str\nmain : Str"))
+              (lookupObjectKey "quinaryCheckedModule" runtimeValue)
+            assertEqual
+              "expected quinary lowered module summary"
+              (Just (String "const defaultUser = record User {name = literal:Ada, active = bool:true}\nfunction userName(user) = field(name:user, name)\nconst main = call userName(name:defaultUser)"))
+              (lookupObjectKey "quinaryLoweredModule" runtimeValue)
+            assertEqual
+              "expected quinary emitted module text"
+              (Just (String "// Generated by compiler-selfhost\nexport const defaultUser = { name: \"Ada\", active: true };\nexport function userName(user) { return (user).name; }\nexport const main = userName(defaultUser);"))
+              (lookupObjectKey "quinaryEmittedModule" runtimeValue)
+            assertEqual
+              "expected senary parsed module name"
+              (Just (String "Decisions"))
+              (lookupObjectKey "senaryParsedModuleName" runtimeValue)
+            case lookupObjectKey "senaryParsedTypeNames" runtimeValue of
+              Just (Array typeNamesValue) ->
+                assertEqual
+                  "expected senary parsed type names"
+                  [String "Decision"]
+                  (toList typeNamesValue)
+              _ ->
+                assertFailure "expected senaryParsedTypeNames field"
+            case lookupObjectKey "senaryParsedConstructorSummaries" runtimeValue of
+              Just (Array constructorValue) ->
+                assertEqual
+                  "expected senary parsed constructor summaries"
+                  [String "Keep Str Str", String "Drop"]
+                  (toList constructorValue)
+              _ ->
+                assertFailure "expected senaryParsedConstructorSummaries field"
+            assertEqual
+              "expected senary choose annotation"
+              (Just (String "Decision -> Str"))
+              (lookupObjectKey "senaryChooseAnnotation" runtimeValue)
+            case lookupObjectKey "senaryParsedDeclNames" runtimeValue of
+              Just (Array declNamesValue) ->
+                assertEqual
+                  "expected senary parsed declaration names"
+                  [String "choose", String "main"]
+                  (toList declNamesValue)
+              _ ->
+                assertFailure "expected senaryParsedDeclNames field"
+            assertEqual
+              "expected senary checked module summary"
+              (Just (String "choose : Decision -> Str\nmain : Str"))
+              (lookupObjectKey "senaryCheckedModule" runtimeValue)
+            assertEqual
+              "expected senary lowered module summary"
+              (Just (String "function choose(decision) = match name:decision [Keep(left, right) -> name:left, Drop() -> literal:drop]\nconst main = call choose(ctor Keep(literal:alpha, literal:beta))"))
+              (lookupObjectKey "senaryLoweredModule" runtimeValue)
+            assertEqual
+              "expected senary emitted module text"
+              (Just (String "// Generated by compiler-selfhost\nexport function choose(decision) { return (() => {\n  const __match = decision;\n  if (__match[0] === \"Keep\") {\n    const [_, left, right] = __match;\n    return left;\n  }\n  if (__match[0] === \"Drop\") {\n    return \"drop\";\n  }\n  return undefined;\n})(); }\nexport const main = choose([\"Keep\", \"alpha\", \"beta\"]);"))
+              (lookupObjectKey "senaryEmittedModule" runtimeValue)
+            assertEqual
+              "expected septenary parsed module name"
+              (Just (String "Lettings"))
+              (lookupObjectKey "septenaryParsedModuleName" runtimeValue)
+            case lookupObjectKey "septenaryParsedDeclNames" runtimeValue of
+              Just (Array declNamesValue) ->
+                assertEqual
+                  "expected septenary parsed declaration names"
+                  [String "describe", String "main"]
+                  (toList declNamesValue)
+              _ ->
+                assertFailure "expected septenaryParsedDeclNames field"
+            assertEqual
+              "expected septenary checked module summary"
+              (Just (String "describe : Str -> Str\nmain : Str"))
+              (lookupObjectKey "septenaryCheckedModule" runtimeValue)
+            assertEqual
+              "expected septenary lowered module summary"
+              (Just (String "function describe(name) = let alias = name:name in name:alias\nconst main = let current = call describe(literal:Ada) in name:current"))
+              (lookupObjectKey "septenaryLoweredModule" runtimeValue)
+            assertEqual
+              "expected septenary emitted module text"
+              (Just (String "// Generated by compiler-selfhost\nexport function describe(name) { return (() => {\n  const alias = name;\n  return alias;\n})(); }\nexport const main = (() => {\n  const current = describe(\"Ada\");\n  return current;\n})();"))
+              (lookupObjectKey "septenaryEmittedModule" runtimeValue)
     , testCase "claspc compile prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         let compiledPath = "dist/compiler-selfhost-json.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4251,31 +4668,57 @@ compileTests =
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
         nativeIr <- TIO.readFile outputPath
         assertBool "expected hosted native bootstrap artifact format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
-        assertBool "expected hosted native bootstrap artifact decl section" ("decls {" `T.isInfixOf` nativeIr)
-    , testCase "claspc native rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+        assertBool "expected hosted native bootstrap artifact module header" ("module Main" `T.isInfixOf` nativeIr)
+        assertBool "expected hosted native bootstrap artifact compiler snapshot layout" ("record_layout HostedCompilerSnapshot" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports simple ordinary programs on the hosted Clasp path" $ do
         let outputPath = "dist/hello-default.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["native", "examples/hello.clasp", "-o", outputPath, "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/hello.clasp", "-o", outputPath, "--json"]
         case exitCode of
           ExitSuccess ->
-            assertFailure "expected default native command for an ordinary program to fail"
-          ExitFailure _ ->
             pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
-        outputExists <- doesFileExist outputPath
-        assertBool "expected default native command not to write an artifact" (not outputExists)
-    , testCase "claspc compile rejects ordinary programs unless bootstrap recovery mode is requested" $ do
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler native emission for a simple ordinary program to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted ordinary native json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+        nativeIr <- TIO.readFile outputPath
+        assertBool "expected hosted ordinary native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+        assertBool "expected hosted ordinary native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeIr)
+    , testCase "claspc native reports unsupported explicit Clasp-primary requests for imported record projects" $
+        withProjectFiles "native-primary-record-imports-unsupported" importSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", root </> "main.native.ir", "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected explicit unsupported primary compiler native request to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "claspc compile supports simple ordinary programs on the hosted Clasp path" $ do
         let compiledPath = "dist/hello-default.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json"]
         case exitCode of
           ExitSuccess ->
-            assertFailure "expected default compiler compile for an ordinary program to fail"
-          ExitFailure _ ->
             pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
-        outputExists <- doesFileExist compiledPath
-        assertBool "expected default compile command not to write an artifact" (not outputExists)
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler compile for a simple ordinary program to succeed:\n" <> stdoutText <> stderrText)
+        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+          Left decodeErr ->
+            assertFailure ("expected hosted ordinary compile json output to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+        assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+        assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+        compiledJs <- TIO.readFile compiledPath
+        assertBool "expected hosted ordinary compile output" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` compiledJs)
     , testCase "claspc compile can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         let compiledPath = "dist/hello-bootstrap.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4292,20 +4735,43 @@ compileTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc compile reports unsupported explicit Clasp-primary requests" $ do
-        (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", "dist/hello-clasp.mjs", "--json", "--compiler=clasp"]
-        case exitCode of
-          ExitSuccess ->
-            assertFailure "expected explicit unsupported primary compiler compile request to fail"
-          ExitFailure _ ->
-            pure ()
-        assertUnsupportedPrimaryCompilerJson stderrText
-    , testCase "hosted tool runner rejects entrypoints that do not expose the requested command" $
+    , testCase "claspc compile supports imported subset projects on the hosted Clasp path" $
+        withProjectFiles "compile-primary-import-success" importSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted primary compiler compile for an imported subset project to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted imported compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted imported compile output" ("export const defaultUser = { name: \"Ada\", active: true };" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted imported compile main" ("export const main = formatUser(defaultUser);" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile reports unsupported explicit Clasp-primary requests for package-backed imports" $
+        withProjectFiles "compile-primary-package-imports-unsupported" packageImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", root </> "main.mjs", "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              assertFailure "expected explicit unsupported primary compiler compile request to fail"
+            ExitFailure _ ->
+              pure ()
+          assertUnsupportedPrimaryCompilerJson stderrText
+    , testCase "hosted tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let stage1Path = root </> "stage1.mjs"
           let bootstrapOutputPath = root </> "bootstrap-output.txt"
           let resultPath = root </> "result.txt"
-          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", stage1Path, "--compiler=bootstrap"]
+          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["compile", root </> "Fake.clasp", "-o", stage1Path, "--compiler=bootstrap"]
           case compileExitCode of
             ExitSuccess ->
               pure ()
@@ -4314,7 +4780,7 @@ compileTests =
           TIO.writeFile bootstrapOutputPath "ignored"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
-              "bun"
+              "node"
               [ "compiler/hosted/run-tool.mjs"
               , "check"
               , root </> "Fake.clasp"
@@ -4325,7 +4791,7 @@ compileTests =
               ""
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected hosted tool runner to reject an entrypoint without the requested command marker"
+              assertFailure "expected hosted tool runner to reject a compiler artifact without the requested command support"
             ExitFailure _ ->
               assertBool "expected hosted tool runner to report missing hosted command support" ("does not expose hosted check support" `isInfixOf` stderrText)
     , testCase "compile preserves inferred functions" $
@@ -6861,6 +7327,13 @@ lookupObjectKey key value =
     _ ->
       Nothing
 
+objectHasTextField :: [(Text, Text)] -> Value -> Bool
+objectHasTextField expectedFields value =
+  all fieldMatches expectedFields
+  where
+    fieldMatches (fieldName, expectedValue) =
+      lookupObjectKey fieldName value == Just (String expectedValue)
+
 extractNodeIds :: Value -> [Text]
 extractNodeIds value =
   case lookupObjectKey "nodes" value of
@@ -7127,6 +7600,9 @@ compilerStdlibSource =
     , "splitSummary : Str -> [Str]"
     , "splitSummary value = textSplit value \":\""
     , ""
+    , "charsSummary : Str -> [Str]"
+    , "charsSummary value = textChars value"
+    , ""
     , "prefixSummary : Str -> Str"
     , "prefixSummary value = match textPrefix value \"src/\" {"
     , "  Ok rest -> rest,"
@@ -7150,6 +7626,18 @@ compilerStdlibSource =
     , ""
     , "main : Str"
     , "main = textJoin \" :: \" [pathDirname joinedPath, pathBasename joinedPath]"
+    ]
+
+textCharsNativeSource :: Text
+textCharsNativeSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "charsSummary : Str -> [Str]"
+    , "charsSummary value = textChars value"
+    , ""
+    , "main : [Str]"
+    , "main = charsSummary \"abc\""
     ]
 
 sqliteRuntimeSource :: Text

@@ -175,8 +175,12 @@ Its job is to host native `Clasp` code, enforce the upgrade and supervision inva
 
 The native runtime kernel is responsible for:
 
-- loading compiled module images and maintaining a stable native ABI between generated code and the runtime
-- versioned dispatch indirection so old and new module versions can overlap during supervised upgrades
+- loading compiled module images into native module descriptors with stable export tables and runtime activation records while maintaining a stable native ABI between generated code and the runtime
+- validating machine-readable native module image headers, runtime profile metadata, and bundled runtime artifacts before binding or dispatch
+- binding stable native entrypoints plus workflow snapshot and handoff hooks onto activated module exports through generated image-declared symbols instead of reparsing debug IR
+- compatibility checks over native interface fingerprints so a new generation can overlap only when it explicitly accepts the previous generation's type surface
+- explicit migration metadata, typed state snapshot payloads, and runtime-bound handoff hooks so changed type surfaces can retire older generations only after a supervised state handoff succeeds
+- versioned dispatch indirection so old and new module generations can overlap during supervised upgrades, with default dispatch targeting the newest live generation until older generations are retired
 - mailbox, scheduler, and process-isolation primitives for workflow and long-running process execution
 - supervision-tree execution, restart rules, operator handoff, rollback, and kill-switch enforcement
 - snapshot, replay, and state-handoff primitives at explicit hot-swap boundaries
@@ -195,14 +199,14 @@ Those higher-level behaviors should move into `Clasp` code as soon as the self-h
 
 ## Native Runtime Implementation Language
 
-The lowest native runtime layer should stay `C`, not `Haskell`.
+The lowest native runtime layer should stay `Rust`, not `Haskell`.
 
-That choice keeps the trusted kernel small and predictable:
+That choice keeps the trusted kernel small enough to audit while avoiding most manual memory-management bugs:
 
-- `C` gives the native backend a simple, stable ABI for generated code and foreign boundaries
-- `C` matches the explicit ownership and object-layout rules already documented for the native runtime
-- `C` avoids coupling the production runtime to the Haskell RTS, GC, scheduler, and deployment footprint
-- `C` makes it easier to keep the runtime bundle portable across future native backends or bytecode targets
+- `Rust` lets the runtime internals stay memory-safe while preserving a stable C-shaped ABI for generated code and foreign boundaries
+- `Rust` matches the explicit ownership and object-layout rules already documented for the native runtime without pushing raw allocation discipline onto every runtime change
+- `Rust` avoids coupling the production runtime to the Haskell RTS, GC, scheduler, and deployment footprint
+- `Rust` still keeps the runtime bundle portable across future native backends or bytecode targets because the external ABI remains narrow and C-shaped
 
 `Haskell` still makes sense for the bootstrap compiler, recovery tooling, and offline developer tooling, but it should not be the long-term server/runtime kernel once `Clasp` is fully native and self-hosted.
 

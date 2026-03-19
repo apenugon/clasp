@@ -19,33 +19,35 @@ const resultPath = resolve(resultPathArg);
 const entrySource = readFileSync(entryPath, "utf8");
 const bootstrapOutput = readFileSync(bootstrapOutputPath, "utf8");
 const stage1Module = await import(pathToFileURL(stage1Path).href);
-const stage2CompilerPath = `${resultPath}.stage2.mjs`;
 
-writeFileSync(stage2CompilerPath, stage1Module.stage2CompilerModule);
-
-const stage2Compiler = await import(pathToFileURL(stage2CompilerPath).href);
-const snapshot = JSON.parse(stage1Module.main);
+async function validateHostedCompileOutput(outputPath) {
+  await import(`${pathToFileURL(outputPath).href}?clasp-verify=${Date.now()}`);
+}
 
 const commandPlans = {
   check: {
+    exportName: "checkSourceText",
     marker: "checkEntrypoint : Str",
-    run: () => stage2Compiler.checkEntrypoint(),
-    expected: snapshot.checkedModule
+    stage2Name: "checkEntrypoint",
+    snapshotField: "checkedModule"
   },
   explain: {
+    exportName: "explainSourceText",
     marker: "explainEntrypoint : Str",
-    run: () => stage2Compiler.explainEntrypoint(),
-    expected: snapshot.explainModule
+    stage2Name: "explainEntrypoint",
+    snapshotField: "explainModule"
   },
   compile: {
+    exportName: "compileSourceText",
     marker: "compileEntrypoint : Str",
-    run: () => stage2Compiler.compileEntrypoint(),
-    expected: snapshot.emittedModule
+    stage2Name: "compileEntrypoint",
+    snapshotField: "emittedModule"
   },
   native: {
+    exportName: "nativeSourceText",
     marker: "nativeEntrypoint : Str",
-    run: () => stage2Compiler.nativeEntrypoint(),
-    expected: snapshot.emittedNativeModule
+    stage2Name: "nativeEntrypoint",
+    snapshotField: "emittedNativeModule"
   }
 };
 
@@ -55,14 +57,37 @@ if (!plan) {
   throw new Error(`unsupported hosted tool command: ${command}`);
 }
 
-if (!entrySource.includes(plan.marker)) {
-  throw new Error(`entrypoint ${entryPath} does not expose hosted ${command} support`);
+if (entrySource.includes(plan.marker) && typeof stage1Module.stage2CompilerModule === "string" && typeof stage1Module.main === "string") {
+  const stage2CompilerPath = `${resultPath}.stage2.mjs`;
+  writeFileSync(stage2CompilerPath, stage1Module.stage2CompilerModule);
+  const stage2Compiler = await import(pathToFileURL(stage2CompilerPath).href);
+  const snapshot = JSON.parse(stage1Module.main);
+  const stage2Run = stage2Compiler[plan.stage2Name];
+  if (typeof stage2Run !== "function") {
+    throw new Error(`compiler artifact ${stage1Path} does not expose hosted ${command} support`);
+  }
+  const stage2Output = stage2Run();
+  if (stage2Output !== snapshot[plan.snapshotField]) {
+    throw new Error(`hosted ${command} compatibility check did not reproduce the stage1 snapshot`);
+  }
+  writeFileSync(resultPath, bootstrapOutput);
+} else {
+  const compileSource = stage1Module[plan.exportName];
+  if (typeof compileSource !== "function") {
+    throw new Error(`compiler artifact ${stage1Path} does not expose hosted ${command} support`);
+  }
+  const stage1Output = compileSource(entrySource);
+  if (command === "compile") {
+    writeFileSync(resultPath, stage1Output);
+    try {
+      await validateHostedCompileOutput(resultPath);
+    } catch (error) {
+      throw new Error(`hosted compile compatibility check emitted an invalid JavaScript module\n${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+    }
+  } else {
+    if (stage1Output !== bootstrapOutput) {
+      throw new Error(`hosted ${command} compatibility check did not reproduce the bootstrap output`);
+    }
+    writeFileSync(resultPath, stage1Output);
+  }
 }
-
-const stage2Output = plan.run();
-
-if (stage2Output !== plan.expected) {
-  throw new Error(`hosted ${command} compatibility check did not reproduce the stage1 snapshot`);
-}
-
-writeFileSync(resultPath, bootstrapOutput);

@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
   }
 
   char *input_text = read_file(argv[3]);
-  ClaspRtRuntime runtime;
+  ClaspRtRuntime runtime = {0};
   clasp_rt_init(&runtime);
 
   uint64_t checksum = 0u;
@@ -140,8 +140,8 @@ int main(int argc, char **argv) {
     checksum = run_boundary_transport(&runtime, input_text, iterations);
   } else {
     fprintf(stderr, "unknown workload: %s\n", workload);
+    clasp_rt_shutdown(&runtime);
     free(input_text);
-    free(runtime.static_roots);
     return 1;
   }
 
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
     (unsigned long long) checksum
   );
 
-  free(runtime.static_roots);
+  clasp_rt_shutdown(&runtime);
   free(input_text);
   return 0;
 }

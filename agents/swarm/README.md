@@ -47,3 +47,5 @@ Wave directories:
 - `benchmark-v1/`: clickable vertical-slice benchmark with HTML templating and browser-runnable flows in both repos
 - `benchmark-win-v0/`: focused remediation wave to beat the mirrored TypeScript baseline on the clickable lead-segment benchmark
 - `auth-air-v0/`: focused first pass on AIR, authorization primitives, proof-carrying access, and field-level data classification
+- `native-backend-v0/`: full dependency-closure wave for the native backend path
+- `selfhost-native-endgame-v0/`: focused endgame wave for hosted compiler takeover, native self-hosting, and removing ordinary server-side JS dependence
