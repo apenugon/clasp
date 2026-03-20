@@ -166,6 +166,12 @@ listSnapshot = summarizeListLiteral sampleListLiteral
 listSnapshotJson : Str
 listSnapshotJson = encode listSnapshot
 
+sampleImports : Str
+sampleImports = snapshot.imports
+
+sampleSignatures : Str
+sampleSignatures = snapshot.signatures
+
 moduleBody : Str
 moduleBody = match textPrefix sampleSource "module Compiler.Parser\n" {
   Ok body ->

@@ -14,18 +14,17 @@ import System.IO (hPutStrLn, stderr)
 import Clasp.Compiler
   ( CompilerImplementation (..)
   , CompilerPreference (..)
-  , checkEntryWithPreference
+  , checkEntrySummaryWithPreference
   , compileEntryWithPreference
   , explainEntryWithPreference
   , formatSource
-  , nativeEntryBootstrap
   , parseSource
   , renderAirEntryJsonWithPreference
   , renderContextEntryJsonWithPreference
   , renderNativeEntryWithPreference
+  , renderNativeImageEntryWithPreference
   )
-import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson)
-import Clasp.Native (renderNativeModuleImageJson)
+import Clasp.Diagnostic (DiagnosticBundle, renderDiagnosticBundle, renderDiagnosticBundleJson, singleDiagnostic)
 
 data OutputFormat
   = Pretty
@@ -133,7 +132,7 @@ runFormat format inputPath = do
 
 runCheck :: OutputFormat -> CompilerPreference -> FilePath -> IO ()
 runCheck format compilerPreference inputPath = do
-  (implementation, result) <- checkEntryWithPreference compilerPreference inputPath
+  (implementation, result) <- checkEntrySummaryWithPreference compilerPreference inputPath
   case result of
     Left err -> do
       writeFailure format err
@@ -254,20 +253,28 @@ runNative format compilerPreference inputPath outputPath = do
     Right nativeIr -> do
       let resolvedOutput = maybe (replaceExtension inputPath "native.ir") id outputPath
       TIO.writeFile resolvedOutput nativeIr
+      (imageImplementation, imageResult) <- renderNativeImageEntryWithPreference compilerPreference inputPath
       imageOutputPath <-
-        case implementation of
-          CompilerImplementationBootstrap -> do
-            nativeModuleResult <- nativeEntryBootstrap inputPath
-            case nativeModuleResult of
-              Left err -> do
-                writeFailure format err
+        case imageResult of
+          Left err -> do
+            writeFailure format err
+            exitFailure
+          Right imageJson ->
+            if imageImplementation /= implementation
+              then do
+                writeFailure
+                  format
+                  ( singleDiagnostic
+                      "E_NATIVE_IMAGE_IMPLEMENTATION_MISMATCH"
+                      "Native IR and native image emission selected different compiler implementations."
+                      [ "Keep native artifact emission on one compiler path so the `.native.ir` and `.native.image.json` outputs describe the same module."
+                      ]
+                  )
                 exitFailure
-              Right nativeModule -> do
+              else do
                 let resolvedImageOutput = replaceExtension resolvedOutput "native.image.json"
-                LTIO.writeFile resolvedImageOutput (renderNativeModuleImageJson nativeModule)
+                TIO.writeFile resolvedImageOutput imageJson
                 pure (Just resolvedImageOutput)
-          CompilerImplementationClasp ->
-            pure Nothing
       case format of
         Pretty ->
           do

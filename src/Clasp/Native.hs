@@ -762,6 +762,7 @@ nativeDeclImageValue decl =
       object
         [ "kind" .= ("global" :: Text)
         , "name" .= nativeGlobalName globalDecl
+        , "body" .= nativeExprImageValue (nativeGlobalBody globalDecl)
         , "bodyText" .= renderNativeExpr (nativeGlobalBody globalDecl)
         ]
     NativeFunctionDecl functionDecl ->
@@ -769,8 +770,241 @@ nativeDeclImageValue decl =
         [ "kind" .= ("function" :: Text)
         , "name" .= nativeFunctionName functionDecl
         , "params" .= nativeFunctionParams functionDecl
+        , "body" .= nativeExprImageValue (nativeFunctionBody functionDecl)
         , "bodyText" .= renderNativeExpr (nativeFunctionBody functionDecl)
         ]
+
+nativeExprImageValue :: NativeExpr -> Value
+nativeExprImageValue expr =
+  case expr of
+    NativeLocal name ->
+      object
+        [ "kind" .= ("local" :: Text)
+        , "name" .= name
+        ]
+    NativeLiteralExpr literal ->
+      nativeLiteralImageValue literal
+    NativeList items ->
+      object
+        [ "kind" .= ("list" :: Text)
+        , "items" .= fmap nativeExprImageValue items
+        ]
+    NativeIf condition thenBranch elseBranch ->
+      object
+        [ "kind" .= ("if" :: Text)
+        , "condition" .= nativeExprImageValue condition
+        , "thenBranch" .= nativeExprImageValue thenBranch
+        , "elseBranch" .= nativeExprImageValue elseBranch
+        ]
+    NativeReturn value ->
+      object
+        [ "kind" .= ("return" :: Text)
+        , "value" .= nativeExprImageValue value
+        ]
+    NativeCompare op left right ->
+      object
+        [ "kind" .= ("compare" :: Text)
+        , "op" .= renderCompareOp op
+        , "left" .= nativeExprImageValue left
+        , "right" .= nativeExprImageValue right
+        ]
+    NativeLet mutability name value body ->
+      object
+        [ "kind" .= ("let" :: Text)
+        , "mutability" .= renderMutability mutability
+        , "name" .= name
+        , "value" .= nativeExprImageValue value
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeAssign name value body ->
+      object
+        [ "kind" .= ("assign" :: Text)
+        , "name" .= name
+        , "value" .= nativeExprImageValue value
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeForEach name iterable loopBody body ->
+      object
+        [ "kind" .= ("for_each" :: Text)
+        , "name" .= name
+        , "iterable" .= nativeExprImageValue iterable
+        , "loopBody" .= nativeExprImageValue loopBody
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeIntrinsic intrinsic ->
+      nativeIntrinsicImageValue intrinsic
+    NativeCall callee args ->
+      object
+        [ "kind" .= ("call" :: Text)
+        , "callee" .= nativeExprImageValue callee
+        , "args" .= fmap nativeExprImageValue args
+        ]
+    NativeConstruct name args ->
+      object
+        [ "kind" .= ("construct" :: Text)
+        , "name" .= name
+        , "args" .= fmap nativeExprImageValue args
+        ]
+    NativeMatch scrutinee branches ->
+      object
+        [ "kind" .= ("match" :: Text)
+        , "scrutinee" .= nativeExprImageValue scrutinee
+        , "branches" .= fmap nativeMatchBranchImageValue branches
+        ]
+    NativeRecord recordName fields ->
+      object
+        [ "kind" .= ("record" :: Text)
+        , "recordName" .= recordName
+        , "fields" .= fmap nativeFieldImageValue fields
+        ]
+    NativeFieldAccess recordName target fieldName ->
+      object
+        [ "kind" .= ("field_access" :: Text)
+        , "recordName" .= recordName
+        , "target" .= nativeExprImageValue target
+        , "fieldName" .= fieldName
+        ]
+
+nativeLiteralImageValue :: NativeLiteral -> Value
+nativeLiteralImageValue literal =
+  case literal of
+    NativeInt value ->
+      object
+        [ "kind" .= ("int" :: Text)
+        , "value" .= value
+        ]
+    NativeString value ->
+      object
+        [ "kind" .= ("string" :: Text)
+        , "value" .= value
+        ]
+    NativeBool value ->
+      object
+        [ "kind" .= ("bool" :: Text)
+        , "value" .= value
+        ]
+
+nativeIntrinsicImageValue :: NativeIntrinsic -> Value
+nativeIntrinsicImageValue intrinsic =
+  case intrinsic of
+    NativePageIntrinsic title body ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("page" :: Text)
+        , "title" .= nativeExprImageValue title
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeRedirectIntrinsic targetPath ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("redirect" :: Text)
+        , "targetPath" .= targetPath
+        ]
+    NativeListAppendIntrinsic left right ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("list.append" :: Text)
+        , "left" .= nativeExprImageValue left
+        , "right" .= nativeExprImageValue right
+        ]
+    NativeViewEmptyIntrinsic ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.empty" :: Text)
+        ]
+    NativeViewTextIntrinsic value ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.text" :: Text)
+        , "value" .= nativeExprImageValue value
+        ]
+    NativeViewAppendIntrinsic left right ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.append" :: Text)
+        , "left" .= nativeExprImageValue left
+        , "right" .= nativeExprImageValue right
+        ]
+    NativeViewElementIntrinsic tagName body ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.element" :: Text)
+        , "tagName" .= tagName
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeViewStyledIntrinsic className body ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.styled" :: Text)
+        , "className" .= className
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeViewLinkIntrinsic routeContract href body ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.link" :: Text)
+        , "routeContract" .= renderRouteContract routeContract
+        , "href" .= href
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeViewFormIntrinsic routeContract method action body ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.form" :: Text)
+        , "routeContract" .= renderRouteContract routeContract
+        , "method" .= method
+        , "action" .= action
+        , "body" .= nativeExprImageValue body
+        ]
+    NativeViewInputIntrinsic name inputKind value ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.input" :: Text)
+        , "fieldName" .= name
+        , "inputKind" .= inputKind
+        , "value" .= nativeExprImageValue value
+        ]
+    NativeViewSubmitIntrinsic value ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("view.submit" :: Text)
+        , "value" .= nativeExprImageValue value
+        ]
+    NativePromptMessageIntrinsic role value ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("prompt.message" :: Text)
+        , "role" .= role
+        , "value" .= nativeExprImageValue value
+        ]
+    NativePromptAppendIntrinsic left right ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("prompt.append" :: Text)
+        , "left" .= nativeExprImageValue left
+        , "right" .= nativeExprImageValue right
+        ]
+    NativePromptTextIntrinsic value ->
+      object
+        [ "kind" .= ("intrinsic" :: Text)
+        , "name" .= ("prompt.text" :: Text)
+        , "value" .= nativeExprImageValue value
+        ]
+
+nativeMatchBranchImageValue :: NativeMatchBranch -> Value
+nativeMatchBranchImageValue branch =
+  object
+    [ "tag" .= nativeMatchBranchTag branch
+    , "binders" .= nativeMatchBranchBinders branch
+    , "body" .= nativeExprImageValue (nativeMatchBranchBody branch)
+    ]
+
+nativeFieldImageValue :: NativeField -> Value
+nativeFieldImageValue field =
+  object
+    [ "name" .= nativeFieldName field
+    , "value" .= nativeExprImageValue (nativeFieldValue field)
+    ]
 
 renderNativeAbi :: NativeAbi -> [Text]
 renderNativeAbi abi =

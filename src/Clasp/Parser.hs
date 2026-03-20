@@ -1170,7 +1170,7 @@ declParser = do
   start <- getSourcePos
   (nameSpan, name) <- locatedLowerIdentifier
   params <- many lowerIdentifier
-  _ <- symbol "="
+  _ <- symbolN "="
   body <- exprParser
   end <- getSourcePos
   _ <- optional eol
@@ -1231,7 +1231,7 @@ letExprParser = do
   start <- getSourcePos
   keyword "let"
   (nameSpan, name) <- locatedLowerIdentifier
-  _ <- symbol "="
+  _ <- symbolN "="
   value <- exprParser
   keyword "in"
   body <- exprParser
@@ -1307,7 +1307,7 @@ mutableBlockBindingParser = do
   keywordN "let"
   keywordN "mut"
   (nameSpan, name) <- locatedLowerIdentifier
-  _ <- symbol "="
+  _ <- symbolN "="
   value <- exprParser
   blockSeparatorParser
   pure (BlockMutableLetBinding start nameSpan name value)
@@ -1317,7 +1317,7 @@ immutableBlockBindingParser = do
   start <- getSourcePos
   keywordN "let"
   (nameSpan, name) <- locatedLowerIdentifier
-  _ <- symbol "="
+  _ <- symbolN "="
   value <- exprParser
   blockSeparatorParser
   pure (BlockLetBinding start nameSpan name value)
@@ -1667,7 +1667,11 @@ parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
 
 brackets :: Parser a -> Parser a
-brackets = between (symbol "[") (symbol "]")
+brackets parser =
+  between openBracket closeBracket (scn *> parser <* scn)
+  where
+    openBracket = L.symbol scn "["
+    closeBracket = L.symbol sc "]"
 
 braces :: Parser a -> Parser a
 braces parser =

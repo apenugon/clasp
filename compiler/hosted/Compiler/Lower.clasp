@@ -1,8 +1,9 @@
 module Compiler.Lower
 
 import Compiler.Ast
+import Compiler.Checker
 
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess LowerExprText Str | LowerLet Str LowerExprText LowerExprText
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
 type LowerRecordFieldText = LowerRecordFieldText Str LowerExprText
 type LowerMatchBranchText = LowerMatchBranchText Str [Str] LowerExprText
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str [Str] LowerExprText
@@ -30,39 +31,140 @@ hasLowerParams decl = {
   false
 }
 
-lowerExprs : [HostedExprAst] -> [LowerExprText]
-lowerExprs values = {
+fallbackLowerEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]
+fallbackLowerEnv modl typeDecls = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (collectAnnotatedBindings modl)))
+
+lowerModuleEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]
+lowerModuleEnv modl typeDecls = match inferModuleBindings modl {
+  InferredModule env ->
+    env,
+  InferModuleError message ->
+    fallbackLowerEnv modl typeDecls
+}
+
+unknownLowerType : TypeText
+unknownLowerType = TUnknown "<lower>"
+
+inferredExprType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> TypeText
+inferredExprType typeDecls recordDecls env localEnv fnContext expr = match inferExpr typeDecls recordDecls env localEnv fnContext expr {
+  InferredExpr exprType ->
+    exprType,
+  InferExprError message ->
+    unknownLowerType
+}
+
+recordNameForType : TypeText -> Str
+recordNameForType typ = match typ {
+  TNamed recordName ->
+    recordName,
+  TInt ->
+    "",
+  TStr ->
+    "",
+  TBool ->
+    "",
+  TList itemType ->
+    "",
+  TFunction inputType resultType ->
+    "",
+  TUnknown label ->
+    ""
+}
+
+extendLowerLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+extendLowerLocalEnv typeDecls recordDecls env localEnv fnContext binder value = match inferExpr typeDecls recordDecls env localEnv fnContext value {
+  InferredExpr valueType ->
+    appendTypeBinding localEnv (TypeBinding binder valueType),
+  InferExprError message ->
+    localEnv
+}
+
+extendLowerLoopLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+extendLowerLoopLocalEnv typeDecls recordDecls env localEnv fnContext binder iterable = match inferExpr typeDecls recordDecls env localEnv fnContext iterable {
+  InferredExpr iterableType ->
+    match iterableType {
+      TList itemType ->
+        appendTypeBinding localEnv (TypeBinding binder itemType),
+      TStr ->
+        appendTypeBinding localEnv (TypeBinding binder TStr),
+      TInt ->
+        localEnv,
+      TBool ->
+        localEnv,
+      TFunction inputType resultType ->
+        localEnv,
+      TNamed label ->
+        localEnv,
+      TUnknown label ->
+        localEnv
+    },
+  InferExprError message ->
+    localEnv
+}
+
+lowerExprs : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> [LowerExprText]
+lowerExprs typeDecls recordDecls env localEnv fnContext values = {
   let mut lowered = [];
   for value in values {
-    lowered = appendLowerExpr lowered (lowerExpr value);
+    lowered = appendLowerExpr lowered (lowerExpr typeDecls recordDecls env localEnv fnContext value);
     lowered
   };
   lowered
 }
 
-lowerRecordFields : [HostedRecordFieldExprAst] -> [LowerRecordFieldText]
-lowerRecordFields fields = {
+lowerRecordFields : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> [LowerRecordFieldText]
+lowerRecordFields typeDecls recordDecls env localEnv fnContext fields = {
   let mut lowered = [];
   for field in fields {
-    lowered = appendLowerRecordField lowered (LowerRecordFieldText (recordExprFieldName field) (lowerExpr (recordExprFieldValue field)));
+    lowered = appendLowerRecordField lowered (LowerRecordFieldText (recordExprFieldName field) (lowerExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue field)));
     lowered
   };
   lowered
 }
 
-lowerMatchBranches : [HostedMatchBranchAst] -> [LowerMatchBranchText]
-lowerMatchBranches branches = {
+lowerMatchBranches : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedMatchBranchAst] -> [LowerMatchBranchText]
+lowerMatchBranches typeDecls recordDecls env localEnv fnContext branches = {
   let mut lowered = [];
   for branch in branches {
-    let pattern = branchPatternAst branch;
-    lowered = appendLowerMatchBranch lowered (LowerMatchBranchText (patternConstructorName pattern) (patternBinders pattern) (lowerExpr (branchBodyExpr branch)));
+    let branchPattern = branchPatternAst branch;
+    lowered = appendLowerMatchBranch lowered (LowerMatchBranchText (patternConstructorName branchPattern) (patternBinders branchPattern) (lowerExpr typeDecls recordDecls env localEnv fnContext (branchBodyExpr branch)));
     lowered
   };
   lowered
 }
 
-lowerExpr : HostedExprAst -> LowerExprText
-lowerExpr expr = match expr {
+lowerAppendExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText
+lowerAppendExpr typeDecls recordDecls env localEnv fnContext args = {
+  let left = firstHostedExpr args;
+  let remaining = remainingHostedExprs args;
+  let right = firstHostedExpr remaining;
+  let extra = firstHostedExpr (remainingHostedExprs remaining);
+  if expressionSummary left == "" then {
+    LowerInvoke "append" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary right == "" then {
+    LowerInvoke "append" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary extra == "" then {
+    LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right)
+  } else {
+    LowerInvoke "append" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  }
+}
+
+lowerEncodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText
+lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args = {
+  let value = firstHostedExpr args;
+  let extra = firstHostedExpr (remainingHostedExprs args);
+  if expressionSummary value == "" then {
+    LowerInvoke "encode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary extra == "" then {
+    LowerEncode (lowerExpr typeDecls recordDecls env localEnv fnContext value)
+  } else {
+    LowerInvoke "encode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  }
+}
+
+lowerExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> LowerExprText
+lowerExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
   HostedName name ->
     LowerName name,
   HostedString value ->
@@ -72,29 +174,80 @@ lowerExpr expr = match expr {
   HostedBool value ->
     LowerBool value,
   HostedList values ->
-    LowerArray (lowerExprs values),
+    LowerArray (lowerExprs typeDecls recordDecls env localEnv fnContext values),
   HostedCall callee args ->
-    LowerInvoke callee (lowerExprs args),
+    if callee == "append" then lowerAppendExpr typeDecls recordDecls env localEnv fnContext args else if callee == "encode" then lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args else LowerInvoke callee (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedConstructor constructorName args ->
-    LowerConstructor constructorName (lowerExprs args),
+    LowerConstructor constructorName (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedMatch subject branches ->
-    LowerMatch (lowerExpr subject) (lowerMatchBranches branches),
+    LowerMatch (lowerExpr typeDecls recordDecls env localEnv fnContext subject) (lowerMatchBranches typeDecls recordDecls env localEnv fnContext branches),
   HostedRecord recordName fields ->
-    LowerRecord recordName (lowerRecordFields fields),
+    LowerRecord recordName (lowerRecordFields typeDecls recordDecls env localEnv fnContext fields),
   HostedFieldAccess subject fieldName ->
-    LowerFieldAccess (lowerExpr subject) fieldName,
+    LowerFieldAccess (recordNameForType (inferredExprType typeDecls recordDecls env localEnv fnContext subject)) (lowerExpr typeDecls recordDecls env localEnv fnContext subject) fieldName,
   HostedLet binder value body ->
-    LowerLet binder (lowerExpr value) (lowerExpr body)
+    LowerLet binder (lowerExpr typeDecls recordDecls env localEnv fnContext value) (lowerExpr typeDecls recordDecls env (extendLowerLocalEnv typeDecls recordDecls env localEnv fnContext binder value) fnContext body),
+  HostedMutableLet binder value body ->
+    LowerMutableLet binder (lowerExpr typeDecls recordDecls env localEnv fnContext value) (lowerExpr typeDecls recordDecls env (extendLowerLocalEnv typeDecls recordDecls env localEnv fnContext binder value) fnContext body),
+  HostedAssign binder value body ->
+    LowerAssign binder (lowerExpr typeDecls recordDecls env localEnv fnContext value) (lowerExpr typeDecls recordDecls env localEnv fnContext body),
+  HostedFor binder iterable loopBody body ->
+    LowerFor binder (lowerExpr typeDecls recordDecls env localEnv fnContext iterable) (lowerExpr typeDecls recordDecls env (extendLowerLoopLocalEnv typeDecls recordDecls env localEnv fnContext binder iterable) fnContext loopBody) (lowerExpr typeDecls recordDecls env localEnv fnContext body),
+  HostedReturn value ->
+    LowerReturn (lowerExpr typeDecls recordDecls env localEnv fnContext value),
+  HostedIf condition thenBranch elseBranch ->
+    LowerIf (lowerExpr typeDecls recordDecls env localEnv fnContext condition) (lowerExpr typeDecls recordDecls env localEnv fnContext thenBranch) (lowerExpr typeDecls recordDecls env localEnv fnContext elseBranch),
+  HostedEqual left right ->
+    LowerEqual (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+  HostedNotEqual left right ->
+    LowerNotEqual (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+  HostedLessThan left right ->
+    LowerLessThan (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+  HostedLessThanOrEqual left right ->
+    LowerLessThanOrEqual (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+  HostedGreaterThan left right ->
+    LowerGreaterThan (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+  HostedGreaterThanOrEqual left right ->
+    LowerGreaterThanOrEqual (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right)
 }
 
-lowerDecl : HostedDeclAst -> LowerDeclText
-lowerDecl decl = if hasLowerParams decl then LowerFn (declName decl) (declParams decl) (lowerExpr (declBody decl)) else LowerConst (declName decl) (lowerExpr (declBody decl))
+lowerFunctionLocalEnv : HostedDeclAst -> [TypeBinding]
+lowerFunctionLocalEnv decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  match bindFunctionParams decl declaredType {
+    BindingParams localEnv expectedBodyType ->
+      localEnv,
+    BindingParamError message ->
+      emptyTypeBindings
+  }
+} else {
+  emptyTypeBindings
+}
+
+lowerFunctionFnContext : HostedDeclAst -> ReturnContext
+lowerFunctionFnContext decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  match bindFunctionParams decl declaredType {
+    BindingParams localEnv expectedBodyType ->
+      InsideFunction expectedBodyType,
+    BindingParamError message ->
+      OutsideFunction
+  }
+} else {
+  OutsideFunction
+}
+
+lowerDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> LowerDeclText
+lowerDecl typeDecls recordDecls env decl = if hasLowerParams decl then LowerFn (declName decl) (declParams decl) (lowerExpr typeDecls recordDecls env (lowerFunctionLocalEnv decl) (lowerFunctionFnContext decl) (declBody decl)) else LowerConst (declName decl) (lowerExpr typeDecls recordDecls env emptyTypeBindings OutsideFunction (declBody decl))
 
 lowerModule : HostedModuleAst -> [LowerDeclText]
 lowerModule modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let env = lowerModuleEnv modl typeDecls;
   let mut lowered = [];
   for decl in moduleDeclarations modl {
-    lowered = appendLowerDecl lowered (lowerDecl decl);
+    lowered = appendLowerDecl lowered (lowerDecl typeDecls recordDecls env decl);
     lowered
   };
   lowered
@@ -154,6 +307,10 @@ renderLowerExpr expr = match expr {
     textConcat ["bool:", if value then "true" else "false"],
   LowerArray values ->
     textConcat ["list:[", textJoin ", " (renderLowerExprs values), "]"],
+  LowerListAppend left right ->
+    textConcat ["list.append(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerEncode value ->
+    textConcat ["encode(", renderLowerExpr value, ")"],
   LowerInvoke callee args ->
     textConcat ["call ", callee, "(", textJoin ", " (renderLowerExprs args), ")"],
   LowerConstructor constructorName args ->
@@ -162,10 +319,32 @@ renderLowerExpr expr = match expr {
     textConcat ["match ", renderLowerExpr subject, " [", textJoin ", " (renderLowerMatchBranches branches), "]"],
   LowerRecord recordName fields ->
     textConcat ["record ", recordName, " {", textJoin ", " (renderLowerRecordFields fields), "}"],
-  LowerFieldAccess subject fieldName ->
-    textConcat ["field(", renderLowerExpr subject, ", ", fieldName, ")"],
+  LowerFieldAccess recordName subject fieldName ->
+    if recordName == "" then textConcat ["field(", renderLowerExpr subject, ", ", fieldName, ")"] else textConcat ["field(", recordName, ", ", renderLowerExpr subject, ", ", fieldName, ")"],
   LowerLet binder value body ->
-    textConcat ["let ", binder, " = ", renderLowerExpr value, " in ", renderLowerExpr body]
+    textConcat ["let ", binder, " = ", renderLowerExpr value, " in ", renderLowerExpr body],
+  LowerMutableLet binder value body ->
+    textConcat ["let mut ", binder, " = ", renderLowerExpr value, " in ", renderLowerExpr body],
+  LowerAssign binder value body ->
+    textConcat ["assign ", binder, " = ", renderLowerExpr value, " then ", renderLowerExpr body],
+  LowerFor binder iterable loopBody body ->
+    textConcat ["for ", binder, " in ", renderLowerExpr iterable, " do ", renderLowerExpr loopBody, " then ", renderLowerExpr body],
+  LowerReturn value ->
+    textConcat ["return ", renderLowerExpr value],
+  LowerIf condition thenBranch elseBranch ->
+    textConcat ["if ", renderLowerExpr condition, " then ", renderLowerExpr thenBranch, " else ", renderLowerExpr elseBranch],
+  LowerEqual left right ->
+    textConcat ["eq(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerNotEqual left right ->
+    textConcat ["ne(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerLessThan left right ->
+    textConcat ["lt(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerLessThanOrEqual left right ->
+    textConcat ["le(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerGreaterThan left right ->
+    textConcat ["gt(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerGreaterThanOrEqual left right ->
+    textConcat ["ge(", renderLowerExpr left, ", ", renderLowerExpr right, ")"]
 }
 
 renderLowerDecl : LowerDeclText -> Str

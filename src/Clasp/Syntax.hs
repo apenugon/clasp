@@ -1152,7 +1152,7 @@ renderExpr parentPrecedence expr =
       renderInfixExpr parentPrecedence 2 ">=" left right
     ECall _ fn args ->
       renderWithParensIfNeeded parentPrecedence 3 $
-        T.unwords (renderExpr 3 fn : fmap (renderExpr 4) args)
+        T.unwords (renderExpr 3 fn : fmap renderCallArgExpr args)
     ELet _ _ name value body ->
       renderWithParensIfNeeded parentPrecedence 0 $
         "let " <> name <> " = " <> renderExpr 0 value <> " in " <> renderExpr 0 body
@@ -1176,6 +1176,26 @@ renderExpr parentPrecedence expr =
       "decode " <> renderAtomicType targetType <> " " <> renderExpr 4 rawJson
     EEncode _ value ->
       "encode " <> renderExpr 4 value
+
+renderCallArgExpr :: Expr -> Text
+renderCallArgExpr expr =
+  case expr of
+    EVar {} ->
+      renderExpr 4 expr
+    EInt {} ->
+      renderExpr 4 expr
+    EString {} ->
+      renderExpr 4 expr
+    EBool {} ->
+      renderExpr 4 expr
+    EList {} ->
+      renderExpr 4 expr
+    EFieldAccess {} ->
+      renderExpr 4 expr
+    ECall {} ->
+      renderExpr 4 expr
+    _ ->
+      "(" <> renderExpr 0 expr <> ")"
 
 renderInfixExpr :: Int -> Int -> Text -> Expr -> Expr -> Text
 renderInfixExpr parentPrecedence operatorPrecedence operatorText left right =

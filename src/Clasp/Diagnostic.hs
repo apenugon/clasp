@@ -178,6 +178,12 @@ defaultFixHints code =
       ["Attach each workflow or child supervisor to exactly one parent supervisor."]
     "E_PRIMARY_COMPILER_RUNTIME" ->
       ["Fix the hosted compiler runtime failure, or rerun with `--compiler=bootstrap` while the hosted path is unavailable."]
+    "E_PRIMARY_COMPILER_CHECK_ARTIFACT" ->
+      ["Fix the hosted compiler checked-core artifact path, or rerun with `--compiler=bootstrap` while the hosted path is unavailable."]
+    "E_PRIMARY_COMPILER_SEED_MISSING" ->
+      ["Regenerate `compiler/hosted/stage1.mjs`, or rerun with `--compiler=bootstrap` until the promoted hosted seed is restored."]
+    "E_PRIMARY_COMPILER_NATIVE_SEED_MISSING" ->
+      ["Regenerate `compiler/hosted/stage1.native.image.json`, or rerun with `--compiler=bootstrap` until the promoted hosted native seed is restored."]
     "E_PRIMARY_COMPILER_UNSUPPORTED" ->
       ["Use `--compiler=bootstrap` for sources the hosted compiler does not support yet, or switch to a supported entrypoint."]
     "E_RETURN_OUTSIDE_FUNCTION" ->

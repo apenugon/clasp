@@ -254,6 +254,7 @@ ClaspRtString *clasp_rt_text_concat(ClaspRtStringList *parts);
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);
 ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);
 ClaspRtStringList *clasp_rt_text_chars(ClaspRtString *value);
+ClaspRtString *clasp_rt_text_fingerprint64_hex(ClaspRtString *value);
 ClaspRtResultString *clasp_rt_text_prefix(ClaspRtString *value, ClaspRtString *prefix);
 ClaspRtResultString *clasp_rt_text_split_first(ClaspRtString *value, ClaspRtString *separator);
 ClaspRtString *clasp_rt_path_join(ClaspRtStringList *parts);

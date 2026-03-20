@@ -39,22 +39,30 @@ import Clasp.Air
   , AirNodeId (..)
   )
 import Clasp.Compiler
-  ( SemanticEdit (..)
+  ( CompilerImplementation (..)
+  , CompilerPreference (..)
+  , SemanticEdit (..)
   , airEntry
   , airSource
   , checkEntry
+  , checkEntrySummaryWithPreference
+  , checkEntryWithPreference
   , checkSource
   , compileEntry
+  , compileEntryWithPreference
   , compileSource
   , explainEntry
+  , explainEntryWithPreference
   , explainSource
   , formatSource
   , nativeEntry
+  , renderNativeEntryWithPreference
   , renderNativeSource
   , nativeSource
   , parseSource
   , renderAirSourceJson
   , renderContextSourceJson
+  , renderHostedPrimaryEntrySource
   , semanticEditSource
   )
 import Clasp.Core
@@ -751,6 +759,20 @@ parserTests =
                     assertFailure ("expected list literal body, got " <> show other)
               Nothing ->
                 assertFailure "expected roster declaration"
+    , testCase "parses multiline list literals" $
+        case parseSource "inline" multilineListLiteralSource of
+          Left err ->
+            assertFailure ("expected multiline list literal source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl ->
+            case findDecl "roster" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EList _ [EString _ "Ada", EString _ "Grace"] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected multiline list literal body, got " <> show other)
+              Nothing ->
+                assertFailure "expected roster declaration"
     , testCase "parses local let expressions" $
         case parseSource "inline" letExpressionSource of
           Left err ->
@@ -1308,6 +1330,29 @@ checkerTests =
                     assertFailure ("unexpected checked matrix declaration: " <> show other)
               Nothing ->
                 assertFailure "expected matrix declaration"
+    , testCase "accepts multiline list literals" $
+        case checkSource "multiline-lists" multilineListLiteralSource of
+          Left err ->
+            assertFailure ("expected multiline list literal source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "roster") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList TStr) [CString _ "Ada", CString _ "Grace"] ->
+                    assertEqual "multiline roster type" (TList TStr) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked multiline roster declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected multiline roster declaration"
+            case find ((== "emptyRoster") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList TStr) [] ->
+                    assertEqual "multiline empty roster type" (TList TStr) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked multiline emptyRoster declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected multiline emptyRoster declaration"
     , testCase "typechecks general list append expressions" $
         case checkSource "list-append" listAppendSource of
           Left err ->
@@ -1814,16 +1859,72 @@ checkerTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check reports unsupported explicit Clasp-primary requests for package-backed imports" $
+    , testCase "claspc check supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "check-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, _stdoutText, stderrText) <- runClaspc ["check", inputPath, "--json", "--compiler=clasp"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["check", inputPath, "--json", "--compiler=clasp"]
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected explicit unsupported primary compiler request to fail"
-            ExitFailure _ ->
               pure ()
-          assertUnsupportedPrimaryCompilerJson stderrText
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler check for package-backed imports to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted package-import check json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "checkEntryWithPreference Auto prefers the hosted Clasp compiler for hosted-subset projects" $ do
+        (implementation, result) <- checkEntryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted auto check to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            assertBool "expected main declaration in checked module" (any ((== "main") . coreDeclName) (coreModuleDecls checked))
+    , testCase "checkEntryWithPreference Clasp reconstructs typed core for hosted ordinary programs" $ do
+        (implementation, result) <- checkEntryWithPreference CompilerPreferenceClasp ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected explicit hosted check to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CCall _ TStr (CVar _ (TFunction [TStr] TStr) "id") [CVar _ TStr "hello"] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected hosted checked core to preserve the typed main call, got " <> show other)
+              Nothing ->
+                assertFailure "expected hosted checked module to contain main"
+    , testCase "checkEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+        (implementation, result) <- checkEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
+        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        case result of
+          Left err ->
+            assertFailure ("expected bootstrap fallback check to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            assertBool "expected main declaration in checked module" (any ((== "main") . coreDeclName) (coreModuleDecls checked))
+    , testCase "checkEntrySummaryWithPreference Auto prefers the hosted Clasp compiler for hosted-subset projects" $ do
+        (implementation, result) <- checkEntrySummaryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted auto check summary to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right summary -> do
+            assertBool "expected hosted summary hello declaration" ("hello : Str" `T.isInfixOf` summary)
+            assertBool "expected hosted summary main declaration" ("main : Str" `T.isInfixOf` summary)
+    , testCase "checkEntrySummaryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+        (implementation, result) <- checkEntrySummaryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
+        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        case result of
+          Left err ->
+            assertFailure ("expected bootstrap fallback check summary to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right summary ->
+            assertBool "expected bootstrap fallback summary lines" (" : " `T.isInfixOf` summary)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2136,16 +2237,45 @@ explainTests =
             pure value
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc explain reports unsupported explicit Clasp-primary requests for package-backed imports" $
+    , testCase "claspc explain supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "explain-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, _stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json", "--compiler=clasp"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json", "--compiler=clasp"]
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected explicit unsupported primary compiler explain request to fail"
-            ExitFailure _ ->
               pure ()
-          assertUnsupportedPrimaryCompilerJson stderrText
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler explain for package-backed imports to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted package-import explain json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "explain")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          case lookupObjectKey "explanation" jsonValue of
+            Just (String explanation) -> do
+              assertBool "expected package-backed foreign helper in explanation" ("shout : Str -> Str" `T.isInfixOf` explanation)
+              assertBool "expected package-backed describe helper in explanation" ("describe : LeadRequest -> Str" `T.isInfixOf` explanation)
+            _ ->
+              assertFailure "expected explanation string in hosted package-import explain json"
+    , testCase "explainEntryWithPreference Auto prefers the hosted Clasp compiler for simple ordinary projects" $ do
+        (implementation, result) <- explainEntryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted auto explain to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right explanation ->
+            assertBool "expected hello declaration in explanation" ("hello : Str" `T.isInfixOf` explanation)
+    , testCase "explainEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+        (implementation, result) <- explainEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
+        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        case result of
+          Left err ->
+            assertFailure ("expected bootstrap fallback explain to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right explanation ->
+            assertBool "expected control-plane explanation to mention the main declaration" ("main :" `T.isInfixOf` explanation)
     ]
 
 diagnosticTests :: TestTree
@@ -3563,8 +3693,20 @@ nativeTests =
               _ ->
                 assertFailure "expected compatibility object in native image"
             case lookupObjectKey "decls" imageValue of
-              Just (Array decls) ->
+              Just (Array decls) -> do
                 assertBool "expected at least one declaration in native image" (not (null (toList decls)))
+                assertBool
+                  "expected structured declaration bodies in native image"
+                  (any
+                     (\declValue ->
+                        case lookupObjectKey "body" declValue of
+                          Just bodyValue ->
+                            lookupObjectKey "kind" bodyValue /= Nothing
+                              && lookupObjectKey "bodyText" declValue /= Nothing
+                          Nothing ->
+                            False
+                     )
+                     (toList decls))
               _ ->
                 assertFailure "expected declaration array in native image"
     , testCase "claspc native preserves static record types for same-shape record access end to end" $
@@ -3819,6 +3961,70 @@ nativeTests =
                 assertEqual "image compatibility kind" (Just (String "clasp-native-compatibility-v1")) (lookupObjectKey "kind" compatibilityValue)
               _ ->
                 assertFailure "expected native image compatibility object"
+            case lookupObjectKey "decls" imageValue of
+              Just (Array decls) ->
+                assertBool
+                  "expected compiler native image decl bodies to stay machine-readable"
+                  (any
+                     (\declValue ->
+                        case lookupObjectKey "body" declValue of
+                          Just bodyValue ->
+                            lookupObjectKey "kind" bodyValue /= Nothing
+                          Nothing ->
+                            False
+                     )
+                     (toList decls))
+              _ ->
+                assertFailure "expected native image declaration array"
+    , testCase "claspc native emits a machine-readable image artifact on the hosted Clasp path" $ do
+        let outputPath = "dist/compiler-hosted-clasp.native.ir"
+        let imagePath = replaceExtension outputPath "native.image.json"
+        createDirectoryIfMissing True (takeDirectory outputPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "compiler/hosted/Main.clasp", "-o", outputPath, "--compiler=clasp", "--json"]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted primary compiler native emission to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+              Left decodeErr ->
+                assertFailure ("expected hosted primary native json output to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+            assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+            assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+            assertEqual "image path" (Just (String (T.pack imagePath))) (lookupObjectKey "image" jsonValue)
+            outputExists <- doesFileExist outputPath
+            assertBool "expected hosted primary native IR artifact to exist" outputExists
+            imageExists <- doesFileExist imagePath
+            assertBool "expected hosted primary native image artifact to exist" imageExists
+            imageJsonText <- TIO.readFile imagePath
+            imageValue <- case eitherDecodeStrictText imageJsonText of
+              Left decodeErr ->
+                assertFailure ("expected hosted primary native image artifact to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "image format" (Just (String "clasp-native-image-v1")) (lookupObjectKey "format" imageValue)
+            case lookupObjectKey "runtime" imageValue of
+              Just runtimeValue ->
+                assertEqual "image runtime profile" (Just (String "compiler_backend_minimal")) (lookupObjectKey "profile" runtimeValue)
+              _ ->
+                assertFailure "expected hosted primary native image runtime object"
+            case lookupObjectKey "decls" imageValue of
+              Just (Array decls) ->
+                assertBool
+                  "expected hosted primary native image decl bodies to stay machine-readable"
+                  (any
+                     (\declValue ->
+                        case lookupObjectKey "body" declValue of
+                          Just bodyValue ->
+                            lookupObjectKey "kind" bodyValue /= Nothing
+                          Nothing ->
+                            False
+                     )
+                     (toList decls))
+              _ ->
+                assertFailure "expected hosted primary native image declaration array"
     , testCase "claspc native emits the compiler text traversal helper when a workload uses textChars" $
         withProjectFiles "native-text-chars" [("Main.clasp", textCharsNativeSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -3931,6 +4137,10 @@ nativeTests =
         assertBool "expected runtime object destroy path" ("unsafe extern \"C\" fn destroy_object(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader)" `T.isInfixOf` source)
         assertBool "expected runtime text chars implementation" ("pub unsafe extern \"C\" fn clasp_rt_text_chars(value: *mut ClaspRtString) -> *mut ClaspRtStringList" `T.isInfixOf` source)
         assertBool "expected runtime file read helper" ("pub unsafe extern \"C\" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut ClaspRtResultString" `T.isInfixOf` source)
+        assertBool "expected generic runtime list layout" ("const CLASP_RT_LAYOUT_LIST_VALUE: u32 = 11;" `T.isInfixOf` source)
+        assertBool "expected interpreted if support" ("ClaspRtInterpretedExpr::If(" `T.isInfixOf` source)
+        assertBool "expected interpreted compare support" ("ClaspRtInterpretedExpr::Compare(" `T.isInfixOf` source)
+        assertBool "expected interpreted list append intrinsic" ("ClaspRtInterpretedIntrinsic::ListAppend" `T.isInfixOf` source)
         assertBool "expected native runtime smoke harness summary" ("native-image-ok module=%s profile=%s fingerprint=%s next_fingerprint=%s handoff_strategy=%s state_type=%s snapshot_symbol=%s handoff_symbol=%s snapshot=%s snapshot_hook=%d handoff=%d active_modules=%zu latest_generation=%zu overlap=%zu rejected_incompatible_upgrade=%d symbol=%s dispatch=%s old_dispatch=%s call=%s old_call=%s exports=%zu decls=%zu" `T.isInfixOf` harness)
     ]
 
@@ -3947,7 +4157,8 @@ docsTests =
         assertBool "expected textChars bootstrap helper" ("- `textChars : Str -> [Str]`" `T.isInfixOf` spec)
     , testCase "v0 spec documents the bootstrap native image sidecar" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
-        assertBool "expected bootstrap native image artifact note" ("- `claspc native` currently writes an inspectable `.native.ir` artifact and, on the bootstrap-native path, a companion `.native.image.json` artifact that carries generated export entrypoint symbols, a native compatibility fingerprint, and explicit migration metadata including workflow snapshot and handoff symbols so the Rust runtime can activate compatible module generations, require declared typed state snapshots plus state-handoff hooks for type-surface upgrades, resolve those symbols, bind native entrypoints, dispatch the newest live generation, and retire older generations without reparsing debug text." `T.isInfixOf` spec)
+        assertBool "expected bootstrap native image artifact note" ("- `claspc native` currently writes an inspectable `.native.ir` artifact and a companion `.native.image.json` artifact on both the bootstrap-native path and the Clasp-primary native path for supported programs. The image carries generated export entrypoint symbols, a native compatibility fingerprint, and explicit migration metadata including workflow snapshot and handoff symbols so the Rust runtime can activate compatible module generations, require declared typed state snapshots plus state-handoff hooks for type-surface upgrades, resolve those symbols, bind native entrypoints, dispatch the newest live generation, and retire older generations without reparsing debug text." `T.isInfixOf` spec)
+        assertBool "expected compiler image runtime execution note" ("- The Rust native runtime can already execute machine-readable compiler-image exports such as the hosted compiler's `compileSourceText` directly from structured native image bodies without depending on `bodyText` reparsing or a JS host at execution time." `T.isInfixOf` spec)
     , testCase "v0 spec documents homogeneous list literals and contextual empty lists" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected homogeneous list rule" ("List literals use the same brackets and must stay homogeneous." `T.isInfixOf` spec)
@@ -3992,6 +4203,7 @@ docsTests =
         assertBool "expected release invariant" ("- retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage" `T.isInfixOf` roadmap)
         assertBool "expected runtime bundle rule" ("- ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives" `T.isInfixOf` roadmap)
         assertBool "expected native image rule" ("- emit both inspectable `.native.ir` output and a machine-readable `.native.image.json` module image so the kernel can load, validate, compare compatibility fingerprints, require explicit generated snapshot plus handoff symbols and typed state snapshot payloads for changed interfaces, activate, resolve generated export symbols, bind native entrypoints, dispatch the newest live generation, and retire drained generations without depending on debug text" `T.isInfixOf` roadmap)
+        assertBool "expected compiler image execution rule" ("- make the kernel execute structured compiler-image exports directly so compiler entrypoints like `compileSourceText` stop depending on a JS host at runtime" `T.isInfixOf` roadmap)
         assertBool "expected Rust kernel rule" ("- keep the lowest native runtime layer in `Rust` behind a narrow C-shaped ABI instead of embedding the Haskell RTS into production server/runtime targets" `T.isInfixOf` roadmap)
         assertBool "expected Clasp-above-kernel rule" ("- build higher-level supervision, upgrade, workflow, and compiler behavior in `Clasp` on top of that kernel rather than growing the kernel into a second application platform" `T.isInfixOf` roadmap)
     ]
@@ -4384,7 +4596,7 @@ compileTests =
               (lookupObjectKey "explainModule" runtimeValue)
             assertEqual
               "expected mismatch diagnostic"
-              (Just (String "Type mismatch for `greeting`: expected Int, found Str."))
+              (Just (String "In `greeting`: Type mismatch for `greeting`: expected Int, found Str."))
               (lookupObjectKey "mismatchDiagnostic" runtimeValue)
             assertEqual
               "expected emitted module text"
@@ -4558,7 +4770,7 @@ compileTests =
               (lookupObjectKey "quinaryCheckedModule" runtimeValue)
             assertEqual
               "expected quinary lowered module summary"
-              (Just (String "const defaultUser = record User {name = literal:Ada, active = bool:true}\nfunction userName(user) = field(name:user, name)\nconst main = call userName(name:defaultUser)"))
+              (Just (String "const defaultUser = record User {name = literal:Ada, active = bool:true}\nfunction userName(user) = field(User, name:user, name)\nconst main = call userName(name:defaultUser)"))
               (lookupObjectKey "quinaryLoweredModule" runtimeValue)
             assertEqual
               "expected quinary emitted module text"
@@ -4632,6 +4844,401 @@ compileTests =
               "expected septenary emitted module text"
               (Just (String "// Generated by compiler-selfhost\nexport function describe(name) { return (() => {\n  const alias = name;\n  return alias;\n})(); }\nexport const main = (() => {\n  const current = describe(\"Ada\");\n  return current;\n})();"))
               (lookupObjectKey "septenaryEmittedModule" runtimeValue)
+    , testCase "promoted hosted compiler seed evaluates stage2 end-to-end" $ do
+        stage1Path <- makeAbsolute "compiler/hosted/stage1.mjs"
+        stage2CompilerPath <- makeAbsolute "dist/compiler-selfhost-promoted-stage2.mjs"
+        emittedModulePath <- makeAbsolute "dist/compiler-selfhost-promoted-emitted.mjs"
+        runtimeOutput <- runNodeFileScript ["compiler/hosted/demo.mjs", stage1Path, stage2CompilerPath, emittedModulePath]
+        runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+          Left decodeErr ->
+            assertFailure ("expected promoted hosted compiler runtime output json to decode:\n" <> decodeErr)
+          Right value ->
+            pure value
+        stage2CompilerExists <- doesFileExist stage2CompilerPath
+        assertBool "expected promoted stage1 seed to write a stage2 compiler artifact" stage2CompilerExists
+        assertEqual
+          "expected promoted stage2 snapshot json to match stage1"
+          (Just (Bool True))
+          (lookupObjectKey "stage2MatchesStage1Snapshot" runtimeValue)
+        assertEqual
+          "expected promoted stage2 compiler snapshot object to match stage1"
+          (Just (Bool True))
+          (lookupObjectKey "stage2CompilerMatchesStage1Snapshot" runtimeValue)
+        assertEqual
+          "expected promoted stage2 check entrypoint to match stage1 output"
+          (Just (Bool True))
+          (lookupObjectKey "stage2CheckMatchesStage1" runtimeValue)
+        assertEqual
+          "expected promoted stage2 explain entrypoint to match stage1 output"
+          (Just (Bool True))
+          (lookupObjectKey "stage2ExplainMatchesStage1" runtimeValue)
+        assertEqual
+          "expected promoted stage2 compiler output to match stage1 output"
+          (Just (Bool True))
+          (lookupObjectKey "stage2OutputMatchesStage1" runtimeValue)
+        assertEqual
+          "expected promoted stage2 native output to match stage1 output"
+          (Just (Bool True))
+          (lookupObjectKey "stage2NativeMatchesStage1" runtimeValue)
+    , testCase "hosted verify scripts avoid Haskell and Node in the promoted native self-check loop" $ do
+        verifyScript <- TIO.readFile "compiler/hosted/scripts/verify.sh"
+        verifyAllScript <- TIO.readFile "scripts/verify-all.sh"
+        assertBool
+          "expected hosted verify script to rebuild via nativeProjectText"
+          ("nativeProjectText" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected hosted verify script to rebuild via nativeImageProjectText"
+          ("nativeImageProjectText" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected hosted verify script to use project-entry bundling instead of a flattened seed"
+          ("--project-entry=" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected hosted verify script to call the native tool runner"
+          ("run-native-tool.sh" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected hosted verify script to avoid cabal-driven hosted verification"
+          (not ("cabal run claspc" `T.isInfixOf` verifyScript))
+        assertBool
+          "expected hosted verify script to avoid node-driven hosted verification"
+          (not ("node compiler/hosted/demo.mjs" `T.isInfixOf` verifyScript))
+        assertBool
+          "expected top-level verify-all to defer hosted verification to the native hosted loop"
+          (not ("cabal run claspc -- check compiler/hosted/Main.clasp" `T.isInfixOf` verifyAllScript))
+    , testCase "renderHostedPrimaryEntrySource flattens the hosted compiler entrypoint for self-hosted verification" $ do
+        renderedResult <- renderHostedPrimaryEntrySource "compiler/hosted/Main.clasp"
+        renderedSource <- case renderedResult of
+          Left err ->
+            assertFailure ("expected hosted primary entry source render to succeed:\n" <> show (renderDiagnosticBundle err))
+          Right source ->
+            pure source
+        assertBool
+          "expected flattened hosted source to keep the hosted entrypoint declarations"
+          ("checkEntrypoint : Str" `T.isInfixOf` renderedSource)
+        assertBool
+          "expected flattened hosted source to inline imported compiler declarations"
+          ("type HostedTypeAst = HostedTypeName Str" `T.isInfixOf` renderedSource)
+        assertBool
+          "expected flattened hosted source to remove import declarations"
+          (not ("import Compiler.Ast" `T.isInfixOf` renderedSource))
+    , testCase "hosted tool runner compiles compiler-entrypoint-shaped sources without a bootstrap oracle" $
+        withProjectFiles
+          "hosted-primary-marker-no-bootstrap"
+          [ ( "Main.clasp"
+            , "module Main\n\ncompileEntrypoint : Str\ncompileEntrypoint = \"compiler-marker\"\n\nmain : Str\nmain = \"hello\"\n"
+            )
+          ]
+          $ \root -> do
+          stage1Path <- makeAbsolute "compiler/hosted/stage1.mjs"
+          let renderedPath = root </> "Main.clasp"
+              bootstrapOutputPath = root </> "bootstrap-output.txt"
+              resultPath = root </> "result.mjs"
+          TIO.writeFile bootstrapOutputPath ""
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "node"
+              [ "compiler/hosted/run-tool.mjs"
+              , "compile"
+              , renderedPath
+              , stage1Path
+              , bootstrapOutputPath
+              , resultPath
+              , root
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted tool runner to compile compiler-entrypoint-shaped source without a bootstrap oracle:\n" <> stderrText)
+          rebuiltModule <- TIO.readFile resultPath
+          assertBool "expected emitted compileEntrypoint export" ("export const compileEntrypoint = \"compiler-marker\";" `T.isInfixOf` rebuiltModule)
+          assertBool "expected emitted main export" ("export const main = \"hello\";" `T.isInfixOf` rebuiltModule)
+    , testCase "compiled hosted compiler accepts multiline continuation formatting" $ do
+        let compiledPath = "dist/compiler-selfhost-layout.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let multilineSource :: Text
+                multilineSource = "module Main\n\nselect : Str -> Str -> Str\nselect left right =\n  right\n\nwrap : Str -> Str\nwrap value =\n  value\n\nlabels =\n  [\n    wrap\n      (select\n        \"left\"\n        \"right\"),\n    \"done\"\n  ]\n\nmain =\n  wrap\n    (select\n      \"alpha\"\n      \"beta\")\n"
+                runtimeScript :: Text
+                runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const multilineSource = " <> T.pack (show multilineSource) <> ";"
+                    , "console.log(compiledModule.compileSourceText(multilineSource));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            assertBool "expected multiline labels output" ("export const labels = [wrap(select(\"left\", \"right\")), \"done\"];" `T.isInfixOf` runtimeOutput)
+            assertBool "expected multiline main output" ("export const main = wrap(select(\"alpha\", \"beta\"));" `T.isInfixOf` runtimeOutput)
+    , testCase "compiled hosted compiler handles block expressions and block-local declarations end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-blocks.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const blockSource = " <> T.pack (show blockLocalDeclarationsSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  checked: compiledModule.checkSourceText(blockSource),"
+                    , "  compiled: compiledModule.compileSourceText(blockSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler block runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected hosted block check output"
+              (Just (String "greeting : Str"))
+              (lookupObjectKey "checked" runtimeValue)
+            case lookupObjectKey "compiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted block local message binding" ("const message = \"Ada\";" `T.isInfixOf` compiledText)
+                assertBool "expected hosted block local alias binding" ("const alias = message;" `T.isInfixOf` compiledText)
+                assertBool "expected hosted block local return" ("return alias;" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled block text"
+    , testCase "compiled hosted compiler handles mutable block assignments end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-mutable-blocks.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const mutableBlockSource = " <> T.pack (show mutableBlockAssignmentSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  compiled: compiledModule.compileSourceText(mutableBlockSource),"
+                    , "  native: compiledModule.nativeSourceText(mutableBlockSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler mutable block runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            case lookupObjectKey "compiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted mutable block initial binding" ("let message = \"Ada\";" `T.isInfixOf` compiledText)
+                assertBool "expected hosted mutable block reassignment" ("message = \"Grace\";" `T.isInfixOf` compiledText)
+                assertBool "expected hosted mutable block return" ("return message;" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled mutable block text"
+            case lookupObjectKey "native" runtimeValue of
+              Just (String nativeText) -> do
+                assertBool "expected hosted mutable block native binding" ("let.mutable message = string(\"Ada\")" `T.isInfixOf` nativeText)
+                assertBool "expected hosted mutable block native assignment" ("assign message = string(\"Grace\") then local(message)" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected native mutable block text"
+    , testCase "compiled hosted compiler handles for-loops over list and string values end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-for-loops.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const listLoopSource = " <> T.pack (show loopIterationSource) <> ";"
+                    , "const stringLoopSource = " <> T.pack (show stringLoopIterationSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  checked: compiledModule.checkSourceText(listLoopSource),"
+                    , "  compiled: compiledModule.compileSourceText(listLoopSource),"
+                    , "  listNative: compiledModule.nativeSourceText(listLoopSource),"
+                    , "  stringNative: compiledModule.nativeSourceText(stringLoopSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler loop runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected hosted list loop check output"
+              (Just (String "pickLast : [Str] -> Str"))
+              (lookupObjectKey "checked" runtimeValue)
+            case lookupObjectKey "compiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted loop compile mutable binding" ("let current = \"nobody\";" `T.isInfixOf` compiledText)
+                assertBool "expected hosted loop compile for-of" ("for (const name of names)" `T.isInfixOf` compiledText)
+                assertBool "expected hosted loop compile assignment" ("current = name;" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled loop text"
+            case lookupObjectKey "listNative" runtimeValue of
+              Just (String nativeText) ->
+                assertBool "expected hosted list loop native for_each" ("for_each name in local(names) do assign current = local(name) then local(current) then local(current)" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected listNative field"
+            case lookupObjectKey "stringNative" runtimeValue of
+              Just (String nativeText) ->
+                assertBool "expected hosted string loop native for_each" ("for_each char in local(name) do assign current = local(char) then local(current) then local(current)" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected stringNative field"
+    , testCase "compiled hosted compiler handles early returns end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-early-return.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const returnSource = " <> T.pack (show earlyReturnSource) <> ";"
+                    , "const loopReturnSource = " <> T.pack (show loopEarlyReturnSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  checked: compiledModule.checkSourceText(returnSource),"
+                    , "  compiled: compiledModule.compileSourceText(returnSource),"
+                    , "  loopCompiled: compiledModule.compileSourceText(loopReturnSource),"
+                    , "  native: compiledModule.nativeSourceText(returnSource),"
+                    , "  loopNative: compiledModule.nativeSourceText(loopReturnSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler early return runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            case lookupObjectKey "checked" runtimeValue of
+              Just (String checkedText) ->
+                assertBool "expected hosted early return check output" ("choose : Decision -> Str -> Str" `T.isInfixOf` checkedText)
+              _ ->
+                assertFailure "expected checked early return text"
+            case lookupObjectKey "compiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted early return helper" ("function $claspEarlyReturn(value)" `T.isInfixOf` compiledText)
+                assertBool "expected hosted early return catch wrapper" ("if (error && error.$claspEarlyReturn === true)" `T.isInfixOf` compiledText)
+                assertBool "expected hosted early return throw" ("throw $claspEarlyReturn(alias)" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled early return text"
+            case lookupObjectKey "loopCompiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted loop early return helper" ("function $claspEarlyReturn(value)" `T.isInfixOf` compiledText)
+                assertBool "expected hosted loop early return throw" ("throw $claspEarlyReturn(\"stopped\")" `T.isInfixOf` compiledText)
+                assertBool "expected hosted loop early return for-of" ("for (const decision of decisions)" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled loop early return text"
+            case lookupObjectKey "native" runtimeValue of
+              Just (String nativeText) ->
+                assertBool "expected hosted native early return" ("return(local(alias))" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected native early return text"
+            case lookupObjectKey "loopNative" runtimeValue of
+              Just (String nativeText) ->
+                assertBool "expected hosted native loop early return" ("return(string(\"stopped\"))" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected native loop early return text"
+    , testCase "compiled hosted compiler handles if expressions end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-if.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const ifSource = " <> T.pack (show ifExpressionSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  checked: compiledModule.checkSourceText(ifSource),"
+                    , "  compiled: compiledModule.compileSourceText(ifSource),"
+                    , "  native: compiledModule.nativeSourceText(ifSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler if runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual
+              "expected hosted if check output"
+              (Just (String "isReady : Bool\nmain : Str"))
+              (lookupObjectKey "checked" runtimeValue)
+            case lookupObjectKey "compiled" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted if compile bool global" ("export const isReady = true;" `T.isInfixOf` compiledText)
+                assertBool "expected hosted if compile condition" ("if (isReady) {" `T.isInfixOf` compiledText)
+                assertBool "expected hosted if compile else branch" ("return \"waiting\";" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected compiled if text"
+            case lookupObjectKey "native" runtimeValue of
+              Just (String nativeText) -> do
+                assertBool "expected hosted if native bool global" ("global isReady = bool(true)" `T.isInfixOf` nativeText)
+                assertBool "expected hosted if native conditional" ("global main = if local(isReady) then string(\"ready\") else string(\"waiting\")" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected native if text"
+    , testCase "compiled hosted compiler handles equality and integer comparisons end to end" $ do
+        let compiledPath = "dist/compiler-selfhost-operators.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const equalitySource = " <> T.pack (show equalitySource) <> ";"
+                    , "const comparisonSource = " <> T.pack (show integerComparisonSource) <> ";"
+                    , "console.log(JSON.stringify({"
+                    , "  equalityJs: compiledModule.compileSourceText(equalitySource),"
+                    , "  comparisonNative: compiledModule.nativeSourceText(comparisonSource)"
+                    , "}));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+              Left decodeErr ->
+                assertFailure ("expected hosted compiler operator runtime output json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            case lookupObjectKey "equalityJs" runtimeValue of
+              Just (String compiledText) -> do
+                assertBool "expected hosted equality js strict equality" ("(left === right)" `T.isInfixOf` compiledText)
+                assertBool "expected hosted equality js strict inequality" ("(left !== right)" `T.isInfixOf` compiledText)
+              _ ->
+                assertFailure "expected equalityJs field"
+            case lookupObjectKey "comparisonNative" runtimeValue of
+              Just (String nativeText) -> do
+                assertBool "expected hosted native less-than comparison" ("compare.lt(local(left), local(right))" `T.isInfixOf` nativeText)
+                assertBool "expected hosted native less-than-or-equal comparison" ("compare.le(local(left), local(right))" `T.isInfixOf` nativeText)
+                assertBool "expected hosted native greater-than comparison" ("compare.gt(local(left), local(right))" `T.isInfixOf` nativeText)
+                assertBool "expected hosted native greater-than-or-equal comparison" ("compare.ge(local(left), local(right))" `T.isInfixOf` nativeText)
+              _ ->
+                assertFailure "expected comparisonNative field"
     , testCase "claspc compile prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         let compiledPath = "dist/compiler-selfhost-json.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4690,16 +5297,209 @@ compileTests =
         nativeIr <- TIO.readFile outputPath
         assertBool "expected hosted ordinary native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
         assertBool "expected hosted ordinary native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeIr)
-    , testCase "claspc native reports unsupported explicit Clasp-primary requests for imported record projects" $
-        withProjectFiles "native-primary-record-imports-unsupported" importSuccessFiles $ \root -> do
+        assertBool "expected hosted ordinary native exports to stay source-shaped" ("exports [hello, id, main]" `T.isInfixOf` nativeIr)
+        assertBool "expected hosted ordinary native output to omit builtin Result layout noise" ("variant_layout Result" `T.isInfixOf` nativeIr == False)
+    , testCase "renderNativeEntryWithPreference Auto prefers the hosted Clasp compiler for simple ordinary projects" $ do
+        (implementation, result) <- renderNativeEntryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted auto native emission for a simple ordinary project to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeIr -> do
+            assertBool "expected hosted ordinary native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+            assertBool "expected hosted ordinary native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for ordinary if programs" $
+        withProjectFiles "native-primary-if" [("Main.clasp", ifExpressionSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, _stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", root </> "main.native.ir", "--json", "--compiler=clasp"]
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected explicit unsupported primary compiler native request to fail"
-            ExitFailure _ ->
               pure ()
-          assertUnsupportedPrimaryCompilerJson stderrText
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native if request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted if native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted if native bool global" ("global isReady = bool(true)" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted if native conditional" ("global main = if local(isReady) then string(\"ready\") else string(\"waiting\")" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for integer comparison programs" $
+        withProjectFiles "native-primary-comparisons" [("Main.clasp", integerComparisonSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native comparison request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted comparison native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted native less-than comparison" ("compare.lt(local(left), local(right))" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted native greater-than-or-equal comparison" ("compare.ge(local(left), local(right))" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for block-local declarations" $
+        withProjectFiles "native-primary-block-locals" [("Main.clasp", blockLocalDeclarationsSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native block request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted block native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted block native first binding" ("let.immutable message = string(\"Ada\")" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted block native second binding" ("let.immutable alias = local(message)" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for mutable block assignments" $
+        withProjectFiles "native-primary-mutable-block" [("Main.clasp", mutableBlockAssignmentSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native mutable block request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted mutable block native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted mutable block native binding" ("let.mutable message = string(\"Ada\")" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted mutable block native assignment" ("assign message = string(\"Grace\") then local(message)" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for for-loops over list values" $
+        withProjectFiles "native-primary-for-loop" [("Main.clasp", loopIterationSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native for-loop request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted for-loop native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted loop native mutable binding" ("let.mutable current = string(\"nobody\")" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted loop native for_each" ("for_each name in local(names) do assign current = local(name) then local(current) then local(current)" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for for-loops over string values" $
+        withProjectFiles "native-primary-string-for-loop" [("Main.clasp", stringLoopIterationSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native string for-loop request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted string for-loop native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted string loop native mutable binding" ("let.mutable current = string(\"\")" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted string loop native for_each" ("for_each char in local(name) do assign current = local(char) then local(current) then local(current)" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for early returns" $
+        withProjectFiles "native-primary-early-return" [("Main.clasp", earlyReturnSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native early return request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted early return native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted early return native match" ("match local(decision)" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted early return native return" ("return(local(alias))" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for imported record projects" $
+        withProjectFiles "native-primary-record-imports-unsupported" importSuccessFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted imported native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted imported native module header" ("module Main" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted imported native record layout" ("record_layout User" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted imported typed field access" ("function formatUser(user) = field(User, local(user), name)" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted imported native main call" ("global main = call(local(formatUser), [local(defaultUser)])" `T.isInfixOf` nativeIr)
+    , testCase "claspc native supports explicit Clasp-primary requests for ordinary ADT programs" $
+        withProjectFiles "native-primary-adt" [("Main.clasp", hostedNativeDecisionSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.native.ir"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler native ADT request to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted ADT native json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          nativeIr <- TIO.readFile outputPath
+          assertBool "expected hosted ADT native variant layout" ("variant_layout Decision { tag_word = 0, max_payload_words = 2, words = 3, constructors = [Keep{tag_word=0, payload_words=2, words=3, payloads=[$0:Str@word1/handle, $1:Str@word2/handle]}, Drop{tag_word=0, payload_words=0, words=1, payloads=[]}] }" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted ADT native object layout" ("object_layout Decision.Keep { kind = variant, header_words = 2, words = 5, roots = [3, 4] }" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted ADT native constructor call" ("global main = call(local(choose), [call(local(Keep), [string(\"alpha\"), string(\"beta\")])])" `T.isInfixOf` nativeIr)
     , testCase "claspc compile supports simple ordinary programs on the hosted Clasp path" $ do
         let compiledPath = "dist/hello-default.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4719,6 +5519,137 @@ compileTests =
         assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
         compiledJs <- TIO.readFile compiledPath
         assertBool "expected hosted ordinary compile output" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for ordinary if programs" $
+        withProjectFiles "compile-primary-if" [("Main.clasp", ifExpressionSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for if programs to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted if compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted if compile condition" ("if (isReady) {" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted if compile then branch" ("return \"ready\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted if compile else branch" ("return \"waiting\";" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for equality programs" $
+        withProjectFiles "compile-primary-equality" [("Main.clasp", equalitySource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for equality programs to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted equality compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted equality strict equality" ("(left === right)" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted equality strict inequality" ("(left !== right)" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for block-local declarations" $
+        withProjectFiles "compile-primary-block-locals" [("Main.clasp", blockLocalDeclarationsSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for block locals to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted block compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted block compile first binding" ("const message = \"Ada\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted block compile second binding" ("const alias = message;" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted block compile return" ("return alias;" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for mutable block assignments" $
+        withProjectFiles "compile-primary-mutable-block" [("Main.clasp", mutableBlockAssignmentSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for mutable blocks to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted mutable block compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted mutable block compile binding" ("let message = \"Ada\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted mutable block compile assignment" ("message = \"Grace\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted mutable block compile return" ("return message;" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for for-loops over list values" $
+        withProjectFiles "compile-primary-for-loop" [("Main.clasp", loopIterationSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for for-loops to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted for-loop compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted loop compile mutable binding" ("let current = \"nobody\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted loop compile for-of" ("for (const name of names)" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted loop compile assignment" ("current = name;" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile supports explicit Clasp-primary requests for loop early returns" $
+        withProjectFiles "compile-primary-loop-early-return" [("Main.clasp", loopEarlyReturnSource)] $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for loop early returns to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted loop early return compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted loop early return helper" ("function $claspEarlyReturn(value)" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted loop early return catch" ("if (error && error.$claspEarlyReturn === true)" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted loop early return throw" ("throw $claspEarlyReturn(\"stopped\")" `T.isInfixOf` compiledJs)
     , testCase "claspc compile can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         let compiledPath = "dist/hello-bootstrap.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
@@ -4756,16 +5687,64 @@ compileTests =
           compiledJs <- TIO.readFile outputPath
           assertBool "expected hosted imported compile output" ("export const defaultUser = { name: \"Ada\", active: true };" `T.isInfixOf` compiledJs)
           assertBool "expected hosted imported compile main" ("export const main = formatUser(defaultUser);" `T.isInfixOf` compiledJs)
-    , testCase "claspc compile reports unsupported explicit Clasp-primary requests for package-backed imports" $
+    , testCase "claspc compile supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "compile-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, _stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", root </> "main.mjs", "--json", "--compiler=clasp"]
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected explicit unsupported primary compiler compile request to fail"
-            ExitFailure _ ->
               pure ()
-          assertUnsupportedPrimaryCompilerJson stderrText
+            ExitFailure _ ->
+              assertFailure ("expected explicit hosted primary compiler compile for package-backed imports to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted package-import compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted package npm import" ("import { upperCase as $claspPackageBinding_upperCase } from \"local-upper\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted package ts import" ("import { formatLead as $claspPackageBinding_formatLead } from \"./support/formatLead.mjs\";" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted package imports export" ("export const __claspPackageImports = [" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted package signature metadata" ("signature: \"export declare function upperCase(value: string): string;\"" `T.isInfixOf` compiledJs)
+          absoluteCompiledPath <- makeAbsolute outputPath
+          absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+          runtimeOutput <- runNodeScript (hostedPackageImportRuntimeScript absoluteCompiledPath absoluteRuntimePath)
+          assertEqual
+            "expected hosted package-backed foreign declarations to execute through emitted imports"
+            "{\"formatted\":\"Acme Labs:7\",\"upper\":\"HELLO ADA\"}"
+            runtimeOutput
+    , testCase "compileEntryWithPreference Auto prefers the hosted Clasp compiler for package-backed subset projects" $
+        withProjectFiles "compile-entry-auto-package-imports" packageImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto inputPath
+          assertEqual "implementation" CompilerImplementationClasp implementation
+          case result of
+            Left err ->
+              assertFailure ("expected hosted auto compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right compiledJs -> do
+              assertBool "expected hosted package imports export" ("export const __claspPackageImports = [" `T.isInfixOf` compiledJs)
+              assertBool "expected hosted package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` compiledJs)
+    , testCase "compileEntryWithPreference Auto prefers the hosted Clasp compiler for simple ordinary projects" $ do
+        (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted auto compile for a simple ordinary project to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right compiledJs ->
+            assertBool "expected hosted ordinary compile output" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` compiledJs)
+    , testCase "compileEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+        (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
+        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        case result of
+          Left err ->
+            assertFailure ("expected bootstrap fallback compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right compiledJs ->
+            assertBool "expected compiled control-plane output" ("export " `T.isInfixOf` compiledJs)
     , testCase "hosted tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let stage1Path = root </> "stage1.mjs"
@@ -4787,6 +5766,7 @@ compileTests =
               , stage1Path
               , bootstrapOutputPath
               , resultPath
+              , root
               ]
               ""
           case exitCode of
@@ -4794,6 +5774,219 @@ compileTests =
               assertFailure "expected hosted tool runner to reject a compiler artifact without the requested command support"
             ExitFailure _ ->
               assertBool "expected hosted tool runner to report missing hosted command support" ("does not expose hosted check support" `isInfixOf` stderrText)
+    , testCase "hosted native tool runner accepts ordinary native output without a bootstrap oracle" $
+        withProjectFiles "hosted-native-tool-runner-native-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
+          stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+          let resultPath = root </> "result.native.ir"
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "nativeSourceText"
+              , root </> "Main.clasp"
+              , resultPath
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native tool runner without a bootstrap oracle to succeed:\n" <> stderrText)
+          nativeIr <- TIO.readFile resultPath
+          assertBool "expected hosted native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeIr)
+          assertBool "expected hosted native global" ("global main = string(\"hello\")" `T.isInfixOf` nativeIr)
+    , testCase "hosted native tool runner accepts ordinary compile output without a bootstrap oracle" $
+        withProjectFiles "hosted-native-tool-runner-compile-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
+          stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+          let resultPath = root </> "result.mjs"
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "compileSourceText"
+              , root </> "Main.clasp"
+              , resultPath
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native compile runner without a bootstrap oracle to succeed:\n" <> stderrText)
+          compiledJs <- TIO.readFile resultPath
+          assertBool "expected hosted compile output" ("export const main = \"hello\";" `T.isInfixOf` compiledJs)
+    , testCase "hosted native tool runner handles examples/hello.clasp end to end" $ do
+        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+        helloExampleSource <- readExampleSource "hello.clasp"
+        withProjectFiles "hosted-native-tool-runner-hello" [("Main.clasp", helloExampleSource)] $ \root -> do
+          helloPath <- makeAbsolute (root </> "Main.clasp")
+          let checkPath = root </> "hello.check"
+          let checkCorePath = root </> "hello.core.json"
+          let compilePath = root </> "hello.mjs"
+          let nativePath = root </> "hello.native.ir"
+          let nativeImagePath = root </> "hello.native.image.json"
+          (checkExitCode, _checkStdout, checkStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "checkSourceText"
+              , helloPath
+              , checkPath
+              ]
+              ""
+          case checkExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native hello check to succeed:\n" <> checkStderr)
+          checkedSummary <- TIO.readFile checkPath
+          assertBool "expected hello summary" ("hello : Str" `T.isInfixOf` checkedSummary)
+          assertBool "expected id summary" ("id : Str -> Str" `T.isInfixOf` checkedSummary)
+          assertBool "expected main summary" ("main : Str" `T.isInfixOf` checkedSummary)
+          (checkCoreExitCode, _checkCoreStdout, checkCoreStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "checkCoreSourceText"
+              , helloPath
+              , checkCorePath
+              ]
+              ""
+          case checkCoreExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native hello check-core to succeed:\n" <> checkCoreStderr)
+          checkedCore <- TIO.readFile checkCorePath
+          assertBool "expected checked-core decl tag" ("CheckedCoreDeclArtifact" `T.isInfixOf` checkedCore)
+          assertBool "expected checked-core hello decl" ("\"hello\"" `T.isInfixOf` checkedCore)
+          assertBool "expected checked-core main decl" ("\"main\"" `T.isInfixOf` checkedCore)
+          (compileExitCode, _compileStdout, compileStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "compileSourceText"
+              , helloPath
+              , compilePath
+              ]
+              ""
+          case compileExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native hello compile to succeed:\n" <> compileStderr)
+          compiledJs <- TIO.readFile compilePath
+          assertBool "expected hello const" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` compiledJs)
+          assertBool "expected id function" ("export function id(v) { return v; }" `T.isInfixOf` compiledJs)
+          assertBool "expected main call" ("export const main = id(hello);" `T.isInfixOf` compiledJs)
+          (nativeExitCode, _nativeStdout, nativeStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "nativeSourceText"
+              , helloPath
+              , nativePath
+              ]
+              ""
+          case nativeExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native hello native emit to succeed:\n" <> nativeStderr)
+          nativeIr <- TIO.readFile nativePath
+          assertBool "expected hello exports" ("exports [hello, id, main]" `T.isInfixOf` nativeIr)
+          assertBool "expected hello native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeIr)
+          assertBool "expected id native function" ("function id(v) = local(v)" `T.isInfixOf` nativeIr)
+          assertBool "expected hello main native call" ("global main = call(local(id), [local(hello)])" `T.isInfixOf` nativeIr)
+          assertBool "expected hello native output to omit builtin Result constructor exports" ("function Ok($0) = construct Ok(local($0))" `T.isInfixOf` nativeIr == False)
+          (nativeImageExitCode, _nativeImageStdout, nativeImageStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "nativeImageSourceText"
+              , helloPath
+              , nativeImagePath
+              ]
+              ""
+          case nativeImageExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native hello native-image emit to succeed:\n" <> nativeImageStderr)
+          nativeImage <- TIO.readFile nativeImagePath
+          assertBool "expected hello native image format" ("clasp-native-image-v1" `T.isInfixOf` nativeImage)
+          assertBool "expected hello native image module" ("\"module\": \"Main\"" `T.isInfixOf` nativeImage)
+          assertBool "expected hello native image main entry" ("\"name\": \"main\"" `T.isInfixOf` nativeImage)
+    , testCase "hosted native tool runner rebuilds the hosted compiler project with native list append intrinsics" $ do
+        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+        hostedCompilerPath <- makeAbsolute "compiler/hosted/Main.clasp"
+        withProjectFiles "hosted-native-tool-runner-self-rebuild" [] $ \root -> do
+          let nativePath = root </> "hosted.native.ir"
+          let nativeImagePath = root </> "hosted.native.image.json"
+          (nativeExitCode, _nativeStdout, nativeStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "nativeProjectText"
+              , "--project-entry=" <> hostedCompilerPath
+              , nativePath
+              ]
+              ""
+          case nativeExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native self-rebuild to succeed:\n" <> nativeStderr)
+          nativeIr <- TIO.readFile nativePath
+          assertBool "expected hosted native self-rebuild to preserve list append intrinsics" ("intrinsic.list.append(" `T.isInfixOf` nativeIr)
+          (nativeImageExitCode, _nativeImageStdout, nativeImageStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "nativeImageProjectText"
+              , "--project-entry=" <> hostedCompilerPath
+              , nativeImagePath
+              ]
+              ""
+          case nativeImageExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native self-rebuild native image to succeed:\n" <> nativeImageStderr)
+          nativeImage <- TIO.readFile nativeImagePath
+          assertBool "expected hosted native self-rebuild native image to preserve list append intrinsics" ("\"name\": \"list.append\"" `T.isInfixOf` nativeImage)
+    , testCase "promoted hosted native seed preserves escaped string literals across self-hosted compile" $ do
+        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+        withProjectFiles "hosted-native-tool-runner-escaped-string" [("Main.clasp", "module Main\n\nmain : Str\nmain = textJoin \"\\n\" [\"left\", \"right\"]\n")] $ \root -> do
+          let compilePath = root </> "escaped.mjs"
+          (compileExitCode, _compileStdout, compileStderr) <-
+            readProcessWithExitCode
+              "bash"
+              [ "compiler/hosted/scripts/run-native-tool.sh"
+              , stage1Path
+              , "compileSourceText"
+              , root </> "Main.clasp"
+              , compilePath
+              ]
+              ""
+          case compileExitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native compile with escaped string literals to succeed:\n" <> compileStderr)
+          compiledJs <- TIO.readFile compilePath
+          assertBool
+            "expected escaped newline literal to survive the promoted hosted native seed"
+            ("textJoin(\"\\n\", [\"left\", \"right\"])" `T.isInfixOf` compiledJs)
     , testCase "compile preserves inferred functions" $
         case compileSource "inferred" inferredFunctionSource of
           Left err ->
@@ -5888,6 +7081,27 @@ compileTests =
           case result of
             Left err ->
               assertFailure ("expected package-backed project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+            Right modl ->
+              case coreModuleForeignDecls modl of
+                [npmDecl, tsDecl] -> do
+                  assertEqual
+                    "npm declaration signature"
+                    (Just "export declare function upperCase(value: string): string;")
+                    (foreignPackageImportSignature =<< foreignDeclPackageImport npmDecl)
+                  assertEqual
+                    "typescript declaration signature"
+                    (Just "export declare function formatLead(request: { company: string; budget: number }): string;")
+                    (foreignPackageImportSignature =<< foreignDeclPackageImport tsDecl)
+                other ->
+                  assertFailure ("expected two foreign declarations, got " <> show (length other))
+    , testCase "checkEntryWithPreference Clasp preserves package declaration signatures" $
+        withProjectFiles "package-import-signatures-clasp" packageImportFiles $ \root -> do
+          let entryPath = root </> "Main.clasp"
+          (implementation, result) <- checkEntryWithPreference CompilerPreferenceClasp entryPath
+          assertEqual "implementation" CompilerImplementationClasp implementation
+          case result of
+            Left err ->
+              assertFailure ("expected explicit hosted package-backed project to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
             Right modl ->
               case coreModuleForeignDecls modl of
                 [npmDecl, tsDecl] -> do
@@ -7186,6 +8400,18 @@ packageImportRuntimeScript compiledPath runtimePath =
     , "}));"
     ]
 
+hostedPackageImportRuntimeScript :: FilePath -> FilePath -> Text
+hostedPackageImportRuntimeScript compiledPath runtimePath =
+  T.pack . unlines $
+    [ "import * as compiledModule from " <> show ("file://" <> compiledPath) <> ";"
+    , "import { installCompiledModule } from " <> show ("file://" <> runtimePath) <> ";"
+    , "installCompiledModule(compiledModule);"
+    , "console.log(JSON.stringify({"
+    , "  formatted: compiledModule.describe({ company: 'Acme Labs', budget: 7 }),"
+    , "  upper: compiledModule.shout('hello ada')"
+    , "}));"
+    ]
+
 promptRuntimeScript :: FilePath -> Text
 promptRuntimeScript compiledPath =
   T.pack . unlines $
@@ -7587,6 +8813,20 @@ builtinOptionSource =
     , ""
     , "main : Str"
     , "main = unwrap (Some \"present\")"
+    ]
+
+hostedNativeDecisionSource :: Text
+hostedNativeDecisionSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type Decision = Keep Str Str | Drop"
+    , ""
+    , "choose : Decision -> Str"
+    , "choose decision = match decision { Keep left right -> left, Drop -> \"drop\" }"
+    , ""
+    , "main : Str"
+    , "main = choose (Keep \"alpha\" \"beta\")"
     ]
 
 compilerStdlibSource :: Text
@@ -9087,6 +10327,22 @@ listLiteralSource =
     , ""
     , "emptyRoster : [Str]"
     , "emptyRoster = []"
+    ]
+
+multilineListLiteralSource :: Text
+multilineListLiteralSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "roster : [Str]"
+    , "roster = ["
+    , "  \"Ada\","
+    , "  \"Grace\""
+    , "]"
+    , ""
+    , "emptyRoster : [Str]"
+    , "emptyRoster = ["
+    , "]"
     ]
 
 nestedEmptyListSource :: Text

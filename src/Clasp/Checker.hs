@@ -462,6 +462,7 @@ builtinStdlibForeignDecls =
   , builtinForeignDecl "textJoin" (TFunction [TStr, TList TStr] TStr)
   , builtinForeignDecl "textSplit" (TFunction [TStr, TStr] (TList TStr))
   , builtinForeignDecl "textChars" (TFunction [TStr] (TList TStr))
+  , builtinForeignDecl "textFingerprint64Hex" (TFunction [TStr] TStr)
   , builtinForeignDecl "textPrefix" (TFunction [TStr, TStr] (TNamed resultTypeName))
   , builtinForeignDecl "textSplitFirst" (TFunction [TStr, TStr] (TNamed resultTypeName))
   , builtinForeignDecl "pathJoin" (TFunction [TList TStr] TStr)

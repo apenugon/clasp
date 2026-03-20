@@ -1,4 +1,6 @@
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
+use std::collections::HashMap;
+use std::env;
 use std::ffi::{c_char, CStr};
 use std::fs::File;
 use std::io::Read;
@@ -11,6 +13,21 @@ const CLASP_RT_LAYOUT_BYTES: u32 = 2;
 const CLASP_RT_LAYOUT_STRING_LIST: u32 = 3;
 const CLASP_RT_LAYOUT_RESULT_STRING: u32 = 4;
 const CLASP_RT_LAYOUT_GENERIC_OBJECT: u32 = 5;
+const CLASP_RT_LAYOUT_MUTABLE_CELL: u32 = 6;
+const CLASP_RT_LAYOUT_VARIANT_VALUE: u32 = 7;
+const CLASP_RT_LAYOUT_RECORD_VALUE: u32 = 8;
+const CLASP_RT_LAYOUT_INT: u32 = 9;
+const CLASP_RT_LAYOUT_BOOL: u32 = 10;
+const CLASP_RT_LAYOUT_LIST_VALUE: u32 = 11;
+const CLASP_RT_LAYOUT_EARLY_RETURN: u32 = 12;
+const CLASP_RT_INTERPRETER_MAX_DEPTH: usize = 4096;
+
+fn trace_interpreter_enabled() -> bool {
+    match env::var("CLASP_RT_TRACE_INTERPRETER") {
+        Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
+        Err(_) => false,
+    }
+}
 
 type DestroyFn = unsafe extern "C" fn(*mut ClaspRtRuntime, *mut ClaspRtHeader);
 
@@ -98,10 +115,58 @@ pub struct ClaspRtResultString {
 }
 
 #[repr(C)]
+struct ClaspRtInt {
+    header: ClaspRtHeader,
+    value: i64,
+}
+
+#[repr(C)]
+struct ClaspRtBool {
+    header: ClaspRtHeader,
+    value: bool,
+}
+
+#[repr(C)]
 pub struct ClaspRtObject {
     pub header: ClaspRtHeader,
     pub layout: *const ClaspRtObjectLayout,
     pub words: [usize; 0],
+}
+
+#[repr(C)]
+struct ClaspRtMutableCell {
+    header: ClaspRtHeader,
+    value: *mut ClaspRtHeader,
+}
+
+#[repr(C)]
+struct ClaspRtVariantValue {
+    header: ClaspRtHeader,
+    tag: *mut ClaspRtString,
+    item_count: usize,
+    items: *mut *mut ClaspRtHeader,
+}
+
+#[repr(C)]
+struct ClaspRtRecordValue {
+    header: ClaspRtHeader,
+    record_name: *mut ClaspRtString,
+    field_count: usize,
+    field_names: *mut *mut ClaspRtString,
+    field_values: *mut *mut ClaspRtHeader,
+}
+
+#[repr(C)]
+struct ClaspRtListValue {
+    header: ClaspRtHeader,
+    item_count: usize,
+    items: *mut *mut ClaspRtHeader,
+}
+
+#[repr(C)]
+struct ClaspRtEarlyReturn {
+    header: ClaspRtHeader,
+    value: *mut ClaspRtHeader,
 }
 
 pub struct ClaspRtNativeModuleImage {
@@ -118,10 +183,92 @@ pub struct ClaspRtNativeModuleImage {
     state_snapshot_type: *mut ClaspRtString,
     state_snapshot: *mut ClaspRtJson,
     generation: usize,
+    runtime_bindings: Vec<ClaspRtNativeRuntimeBinding>,
+    runtime_binding_indexes: HashMap<String, usize>,
     exports: Vec<*mut ClaspRtString>,
     entrypoint_symbols: Vec<*mut ClaspRtString>,
     entrypoints: Vec<ClaspRtNativeEntrypointFn>,
+    interpreted_decls: Vec<ClaspRtInterpretedDecl>,
+    interpreted_decl_indexes: HashMap<String, usize>,
     decl_count: usize,
+}
+
+#[derive(Clone)]
+enum ClaspRtInterpretedExpr {
+    IntLiteral(i64),
+    BoolLiteral(bool),
+    StringLiteral(Vec<u8>),
+    Local(String),
+    List(Vec<ClaspRtInterpretedExpr>),
+    If(
+        Box<ClaspRtInterpretedExpr>,
+        Box<ClaspRtInterpretedExpr>,
+        Box<ClaspRtInterpretedExpr>,
+    ),
+    Compare(
+        ClaspRtInterpretedCompareOp,
+        Box<ClaspRtInterpretedExpr>,
+        Box<ClaspRtInterpretedExpr>,
+    ),
+    CallLocal(String, Vec<ClaspRtInterpretedExpr>),
+    Return(Box<ClaspRtInterpretedExpr>),
+    Match(Box<ClaspRtInterpretedExpr>, Vec<ClaspRtInterpretedMatchBranch>),
+    Let(bool, String, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    Assign(String, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    ForEach(String, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    Construct(String, Vec<ClaspRtInterpretedExpr>),
+    Record(String, Vec<ClaspRtInterpretedRecordField>),
+    FieldAccess(String, Box<ClaspRtInterpretedExpr>, String),
+    Intrinsic(ClaspRtInterpretedIntrinsic),
+}
+
+#[derive(Clone, Copy)]
+enum ClaspRtInterpretedCompareOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Clone)]
+enum ClaspRtInterpretedIntrinsic {
+    ListAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    Encode(Box<ClaspRtInterpretedExpr>),
+}
+
+#[derive(Clone)]
+enum ClaspRtInterpretedDeclKind {
+    Global,
+    Function,
+}
+
+#[derive(Clone)]
+struct ClaspRtInterpretedDecl {
+    kind: ClaspRtInterpretedDeclKind,
+    name: String,
+    params: Vec<String>,
+    body: ClaspRtInterpretedExpr,
+}
+
+#[derive(Clone)]
+struct ClaspRtInterpretedMatchBranch {
+    tag: String,
+    binders: Vec<String>,
+    body: ClaspRtInterpretedExpr,
+}
+
+#[derive(Clone)]
+struct ClaspRtInterpretedRecordField {
+    name: String,
+    value: ClaspRtInterpretedExpr,
+}
+
+#[derive(Clone)]
+struct ClaspRtNativeRuntimeBinding {
+    name: String,
+    runtime_name: String,
 }
 
 impl ClaspRtNativeModuleImage {
@@ -192,6 +339,18 @@ impl ClaspRtNativeModuleImage {
             return false;
         }
         unsafe { json_root_object(string_bytes(self.state_snapshot as *mut ClaspRtString)).is_some() }
+    }
+
+    fn interpreted_decl(&self, target_name: &str) -> Option<&ClaspRtInterpretedDecl> {
+        self.interpreted_decl_indexes
+            .get(target_name)
+            .and_then(|index| self.interpreted_decls.get(*index))
+    }
+
+    fn runtime_binding(&self, target_name: &str) -> Option<&ClaspRtNativeRuntimeBinding> {
+        self.runtime_binding_indexes
+            .get(target_name)
+            .and_then(|index| self.runtime_bindings.get(*index))
     }
 }
 
@@ -749,6 +908,913 @@ impl ClaspRtRuntime {
             (*image).state_snapshot
         }
     }
+
+    fn interpret_native_dispatch(
+        &self,
+        runtime: *mut ClaspRtRuntime,
+        module_name: *mut ClaspRtString,
+        export_name: *mut ClaspRtString,
+        args: *mut *mut ClaspRtHeader,
+        arg_count: usize,
+    ) -> *mut ClaspRtHeader {
+        let Some(module_index) = self.find_latest_active_module_index(module_name) else {
+            return null_mut();
+        };
+        interpret_native_dispatch_for_image(runtime, self.module_slice()[module_index], export_name, args, arg_count)
+    }
+
+    fn interpret_native_dispatch_generation(
+        &self,
+        runtime: *mut ClaspRtRuntime,
+        module_name: *mut ClaspRtString,
+        generation: usize,
+        export_name: *mut ClaspRtString,
+        args: *mut *mut ClaspRtHeader,
+        arg_count: usize,
+    ) -> *mut ClaspRtHeader {
+        let Some(module_index) = self.find_active_module_generation_index(module_name, generation) else {
+            return null_mut();
+        };
+        interpret_native_dispatch_for_image(runtime, self.module_slice()[module_index], export_name, args, arg_count)
+    }
+}
+
+fn interpret_native_dispatch_for_image(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    export_name: *mut ClaspRtString,
+    args: *mut *mut ClaspRtHeader,
+    arg_count: usize,
+) -> *mut ClaspRtHeader {
+    if image.is_null() || export_name.is_null() {
+        return null_mut();
+    }
+    let Some(export_name_text) = (unsafe { String::from_utf8(string_bytes(export_name).to_vec()).ok() }) else {
+        return null_mut();
+    };
+    let arg_slice = if args.is_null() || arg_count == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(args, arg_count) }
+    };
+    interpret_native_decl(runtime, image, &export_name_text, arg_slice, 0)
+}
+
+fn interpret_native_decl(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    decl_name: &str,
+    args: &[*mut ClaspRtHeader],
+    depth: usize,
+) -> *mut ClaspRtHeader {
+    if image.is_null() || depth > CLASP_RT_INTERPRETER_MAX_DEPTH {
+        return null_mut();
+    }
+    let Some(decl) = (unsafe { (*image).interpreted_decl(decl_name) }) else {
+        let codec_result = unsafe { interpret_native_codec_decl(decl_name, args) };
+        if !codec_result.is_null() {
+            return codec_result;
+        }
+        if trace_interpreter_enabled() {
+            eprintln!("clasp native trace: missing decl `{}` at depth {}", decl_name, depth);
+        }
+        return null_mut();
+    };
+
+    let mut env: Vec<(&str, *mut ClaspRtHeader)> = Vec::new();
+    if matches!(decl.kind, ClaspRtInterpretedDeclKind::Function) {
+        if decl.params.len() != args.len() {
+            return null_mut();
+        }
+        for (name, value) in decl.params.iter().zip(args.iter().copied()) {
+            env.push((name.as_str(), value));
+        }
+    } else if !args.is_empty() {
+        return null_mut();
+    }
+
+    let result = interpret_native_expr(runtime, image, &decl.body, &env, depth + 1);
+    let result = unsafe { unwrap_early_return(runtime, result) };
+    if result.is_null() && trace_interpreter_enabled() {
+        eprintln!(
+            "clasp native trace: decl `{}` returned null at depth {} with {} arg(s)",
+            decl_name,
+            depth,
+            args.len()
+        );
+    }
+    result
+}
+
+fn append_json_string_literal(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.push(b'"');
+    for &byte in bytes {
+        match byte {
+            b'"' => out.extend_from_slice(br#"\""#),
+            b'\\' => out.extend_from_slice(br#"\\"#),
+            b'\n' => out.extend_from_slice(br#"\n"#),
+            b'\r' => out.extend_from_slice(br#"\r"#),
+            b'\t' => out.extend_from_slice(br#"\t"#),
+            b'\x08' => out.extend_from_slice(br#"\b"#),
+            b'\x0c' => out.extend_from_slice(br#"\f"#),
+            0x00..=0x1f => {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                out.extend_from_slice(br#"\u00"#);
+                out.push(HEX[(byte >> 4) as usize]);
+                out.push(HEX[(byte & 0x0f) as usize]);
+            }
+            _ => out.push(byte),
+        }
+    }
+    out.push(b'"');
+}
+
+unsafe fn encode_runtime_value_json(value: *mut ClaspRtHeader) -> Option<Vec<u8>> {
+    if value.is_null() {
+        return None;
+    }
+
+    match (*value).layout_id {
+        CLASP_RT_LAYOUT_STRING => {
+            let mut encoded = Vec::with_capacity(string_bytes(value as *mut ClaspRtString).len() + 2);
+            append_json_string_literal(&mut encoded, string_bytes(value as *mut ClaspRtString));
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_INT => Some((*(value as *mut ClaspRtInt)).value.to_string().into_bytes()),
+        CLASP_RT_LAYOUT_BOOL => Some(
+            if (*(value as *mut ClaspRtBool)).value {
+                b"true".to_vec()
+            } else {
+                b"false".to_vec()
+            },
+        ),
+        CLASP_RT_LAYOUT_STRING_LIST => {
+            let mut encoded = Vec::from([b'[']);
+            for (index, item) in string_list_items_mut(value as *mut ClaspRtStringList).iter().enumerate() {
+                if index > 0 {
+                    encoded.push(b',');
+                }
+                append_json_string_literal(&mut encoded, string_bytes(*item));
+            }
+            encoded.push(b']');
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_LIST_VALUE => {
+            let mut encoded = Vec::from([b'[']);
+            for (index, item) in list_value_items(value as *mut ClaspRtListValue).iter().enumerate() {
+                if index > 0 {
+                    encoded.push(b',');
+                }
+                encoded.extend_from_slice(&encode_runtime_value_json(*item)?);
+            }
+            encoded.push(b']');
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_RESULT_STRING => {
+            let result = value as *mut ClaspRtResultString;
+            let tag = if (*result).is_ok { b"Ok".as_slice() } else { b"Err".as_slice() };
+            let payload = encode_runtime_value_json((*result).value as *mut ClaspRtHeader)?;
+            let mut encoded = Vec::from([b'{']);
+            append_json_string_literal(&mut encoded, b"$tag");
+            encoded.extend_from_slice(b":");
+            append_json_string_literal(&mut encoded, tag);
+            encoded.extend_from_slice(b",");
+            append_json_string_literal(&mut encoded, b"$0");
+            encoded.extend_from_slice(b":");
+            encoded.extend_from_slice(&payload);
+            encoded.push(b'}');
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_RECORD_VALUE => {
+            let record = value as *mut ClaspRtRecordValue;
+            let mut encoded = Vec::from([b'{']);
+            for (index, (field_name, field_value)) in record_field_names(record)
+                .iter()
+                .zip(record_field_values(record).iter())
+                .enumerate()
+            {
+                if index > 0 {
+                    encoded.push(b',');
+                }
+                append_json_string_literal(&mut encoded, string_bytes(*field_name));
+                encoded.extend_from_slice(b":");
+                encoded.extend_from_slice(&encode_runtime_value_json(*field_value)?);
+            }
+            encoded.push(b'}');
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_VARIANT_VALUE => {
+            let variant = value as *mut ClaspRtVariantValue;
+            let mut encoded = Vec::from([b'{']);
+            append_json_string_literal(&mut encoded, b"$tag");
+            encoded.extend_from_slice(b":");
+            append_json_string_literal(&mut encoded, string_bytes((*variant).tag));
+            for (index, item) in variant_items(variant).iter().enumerate() {
+                encoded.push(b',');
+                append_json_string_literal(&mut encoded, format!("${index}").as_bytes());
+                encoded.extend_from_slice(b":");
+                encoded.extend_from_slice(&encode_runtime_value_json(*item)?);
+            }
+            encoded.push(b'}');
+            Some(encoded)
+        }
+        CLASP_RT_LAYOUT_MUTABLE_CELL => encode_runtime_value_json((*(value as *mut ClaspRtMutableCell)).value),
+        CLASP_RT_LAYOUT_EARLY_RETURN => encode_runtime_value_json((*(value as *mut ClaspRtEarlyReturn)).value),
+        _ => None,
+    }
+}
+
+unsafe fn interpret_native_codec_decl(
+    decl_name: &str,
+    args: &[*mut ClaspRtHeader],
+) -> *mut ClaspRtHeader {
+    if !decl_name.starts_with("$encode_") || args.len() != 1 {
+        return null_mut();
+    }
+
+    match encode_runtime_value_json(args[0]) {
+        Some(encoded) => build_runtime_string(&encoded) as *mut ClaspRtHeader,
+        None => null_mut(),
+    }
+}
+
+fn lookup_env_value(env: &[(&str, *mut ClaspRtHeader)], name: &str) -> *mut ClaspRtHeader {
+    env.iter()
+        .rev()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, value)| *value)
+        .unwrap_or(null_mut())
+}
+
+fn read_env_value(env: &[(&str, *mut ClaspRtHeader)], name: &str) -> *mut ClaspRtHeader {
+    let value = lookup_env_value(env, name);
+    if value.is_null() {
+        return null_mut();
+    }
+
+    unsafe {
+        if (*value).layout_id == CLASP_RT_LAYOUT_MUTABLE_CELL {
+            let cell = value as *mut ClaspRtMutableCell;
+            retain_header((*cell).value);
+            (*cell).value
+        } else {
+            retain_header(value);
+            value
+        }
+    }
+}
+
+unsafe fn is_early_return_value(value: *mut ClaspRtHeader) -> bool {
+    !value.is_null() && (*value).layout_id == CLASP_RT_LAYOUT_EARLY_RETURN
+}
+
+unsafe fn unwrap_early_return(runtime: *mut ClaspRtRuntime, value: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if !is_early_return_value(value) {
+        return value;
+    }
+
+    let wrapper = value as *mut ClaspRtEarlyReturn;
+    let inner = (*wrapper).value;
+    retain_header(inner);
+    release_header(runtime, value);
+    inner
+}
+
+fn update_mutable_binding(
+    runtime: *mut ClaspRtRuntime,
+    env: &[(&str, *mut ClaspRtHeader)],
+    name: &str,
+    value: *mut ClaspRtHeader,
+) -> bool {
+    let binding = lookup_env_value(env, name);
+    if binding.is_null() {
+        unsafe {
+            release_header(runtime, value);
+        }
+        return false;
+    }
+
+    unsafe {
+        if (*binding).layout_id != CLASP_RT_LAYOUT_MUTABLE_CELL {
+            release_header(runtime, value);
+            return false;
+        }
+        let cell = binding as *mut ClaspRtMutableCell;
+        release_header(runtime, (*cell).value);
+        (*cell).value = value;
+    }
+    true
+}
+
+unsafe fn header_bool_value(value: *mut ClaspRtHeader) -> Option<bool> {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_BOOL {
+        None
+    } else {
+        Some((value as *mut ClaspRtBool).as_ref()?.value)
+    }
+}
+
+unsafe fn header_int_value(value: *mut ClaspRtHeader) -> Option<i64> {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_INT {
+        None
+    } else {
+        Some((value as *mut ClaspRtInt).as_ref()?.value)
+    }
+}
+
+unsafe fn list_like_string_items(value: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtString>> {
+    if value.is_null() {
+        return None;
+    }
+    if (*value).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+        return Some(
+            string_list_items_mut(value as *mut ClaspRtStringList)
+                .iter()
+                .copied()
+                .collect(),
+        );
+    }
+    if (*value).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+        let mut items = Vec::with_capacity(list_value_items(value as *mut ClaspRtListValue).len());
+        for item in list_value_items(value as *mut ClaspRtListValue) {
+            if (*item).is_null() || (**item).layout_id != CLASP_RT_LAYOUT_STRING {
+                return None;
+            }
+            items.push(*item as *mut ClaspRtString);
+        }
+        return Some(items);
+    }
+    None
+}
+
+unsafe fn append_list_like_values(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> Option<Vec<*mut ClaspRtHeader>> {
+    let mut items = Vec::new();
+    for value in [left, right] {
+        if value.is_null() {
+            return None;
+        }
+        if (*value).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+            for item in string_list_items_mut(value as *mut ClaspRtStringList) {
+                retain_header(*item as *mut ClaspRtHeader);
+                items.push(*item as *mut ClaspRtHeader);
+            }
+        } else if (*value).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+            for item in list_value_items(value as *mut ClaspRtListValue) {
+                retain_header(*item);
+                items.push(*item);
+            }
+        } else {
+            for item in items {
+                release_header(null_mut(), item);
+            }
+            return None;
+        }
+    }
+    Some(items)
+}
+
+unsafe fn compare_runtime_values(
+    op: ClaspRtInterpretedCompareOp,
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> Option<bool> {
+    if left.is_null() || right.is_null() {
+        return None;
+    }
+
+    if (*left).layout_id == CLASP_RT_LAYOUT_STRING && (*right).layout_id == CLASP_RT_LAYOUT_STRING {
+        let ordering = string_bytes(left as *mut ClaspRtString).cmp(string_bytes(right as *mut ClaspRtString));
+        return Some(match op {
+            ClaspRtInterpretedCompareOp::Eq => ordering.is_eq(),
+            ClaspRtInterpretedCompareOp::Ne => !ordering.is_eq(),
+            ClaspRtInterpretedCompareOp::Lt => ordering.is_lt(),
+            ClaspRtInterpretedCompareOp::Le => ordering.is_le(),
+            ClaspRtInterpretedCompareOp::Gt => ordering.is_gt(),
+            ClaspRtInterpretedCompareOp::Ge => ordering.is_ge(),
+        });
+    }
+
+    if let (Some(left_value), Some(right_value)) = (header_int_value(left), header_int_value(right)) {
+        return Some(match op {
+            ClaspRtInterpretedCompareOp::Eq => left_value == right_value,
+            ClaspRtInterpretedCompareOp::Ne => left_value != right_value,
+            ClaspRtInterpretedCompareOp::Lt => left_value < right_value,
+            ClaspRtInterpretedCompareOp::Le => left_value <= right_value,
+            ClaspRtInterpretedCompareOp::Gt => left_value > right_value,
+            ClaspRtInterpretedCompareOp::Ge => left_value >= right_value,
+        });
+    }
+
+    if let (Some(left_value), Some(right_value)) = (header_bool_value(left), header_bool_value(right)) {
+        return Some(match op {
+            ClaspRtInterpretedCompareOp::Eq => left_value == right_value,
+            ClaspRtInterpretedCompareOp::Ne => left_value != right_value,
+            ClaspRtInterpretedCompareOp::Lt => (!left_value) && right_value,
+            ClaspRtInterpretedCompareOp::Le => left_value == right_value || ((!left_value) && right_value),
+            ClaspRtInterpretedCompareOp::Gt => left_value && (!right_value),
+            ClaspRtInterpretedCompareOp::Ge => left_value == right_value || (left_value && (!right_value)),
+        });
+    }
+
+    None
+}
+
+fn interpret_native_expr(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    expr: &ClaspRtInterpretedExpr,
+    env: &[(&str, *mut ClaspRtHeader)],
+    depth: usize,
+) -> *mut ClaspRtHeader {
+    if depth > CLASP_RT_INTERPRETER_MAX_DEPTH {
+        return null_mut();
+    }
+
+    match expr {
+        ClaspRtInterpretedExpr::IntLiteral(value) => unsafe { build_runtime_int(*value) as *mut ClaspRtHeader },
+        ClaspRtInterpretedExpr::BoolLiteral(value) => unsafe { build_runtime_bool(*value) as *mut ClaspRtHeader },
+        ClaspRtInterpretedExpr::StringLiteral(bytes) => unsafe { build_runtime_string(bytes) as *mut ClaspRtHeader },
+        ClaspRtInterpretedExpr::Local(name) => {
+            let value = read_env_value(env, name);
+            if value.is_null() {
+                interpret_native_decl(runtime, image, name, &[], depth + 1)
+            } else {
+                value
+            }
+        }
+        ClaspRtInterpretedExpr::List(items) => {
+            let mut interpreted_items: Vec<*mut ClaspRtHeader> = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                let value = interpret_native_expr(runtime, image, item, env, depth + 1);
+                if value.is_null() {
+                    for interpreted in interpreted_items {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return null_mut();
+                }
+                if unsafe { is_early_return_value(value) } {
+                    for interpreted in interpreted_items {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return value;
+                }
+                interpreted_items.push(value);
+            }
+            unsafe { build_runtime_list_value(interpreted_items) as *mut ClaspRtHeader }
+        }
+        ClaspRtInterpretedExpr::If(condition, then_branch, else_branch) => {
+            let condition_value = interpret_native_expr(runtime, image, condition, env, depth + 1);
+            if condition_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(condition_value) } {
+                return condition_value;
+            }
+            let condition_bool = unsafe { header_bool_value(condition_value) };
+            unsafe {
+                release_header(runtime, condition_value);
+            }
+            match condition_bool {
+                Some(true) => interpret_native_expr(runtime, image, then_branch, env, depth + 1),
+                Some(false) => interpret_native_expr(runtime, image, else_branch, env, depth + 1),
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Compare(op, left, right) => {
+            let left_value = interpret_native_expr(runtime, image, left, env, depth + 1);
+            if left_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return left_value;
+            }
+            let right_value = interpret_native_expr(runtime, image, right, env, depth + 1);
+            if right_value.is_null() {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return right_value;
+            }
+            let compared = unsafe { compare_runtime_values(*op, left_value, right_value) };
+            unsafe {
+                release_header(runtime, left_value);
+                release_header(runtime, right_value);
+            }
+            match compared {
+                Some(value) => unsafe { build_runtime_bool(value) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Return(value) => {
+            let result = interpret_native_expr(runtime, image, value, env, depth + 1);
+            if result.is_null() || unsafe { is_early_return_value(result) } {
+                result
+            } else {
+                unsafe { build_runtime_early_return(result) as *mut ClaspRtHeader }
+            }
+        }
+        ClaspRtInterpretedExpr::CallLocal(name, args) => {
+            let mut interpreted_args: Vec<*mut ClaspRtHeader> = Vec::with_capacity(args.len());
+            for arg in args {
+                let value = interpret_native_expr(runtime, image, arg, env, depth + 1);
+                if value.is_null() {
+                    for interpreted in interpreted_args {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return null_mut();
+                }
+                if unsafe { is_early_return_value(value) } {
+                    for interpreted in interpreted_args {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return value;
+                }
+                interpreted_args.push(value);
+            }
+
+            let result = if let Some(binding) = unsafe { (*image).runtime_binding(name) } {
+                interpret_runtime_binding(binding, &interpreted_args)
+            } else {
+                interpret_native_decl(runtime, image, name, &interpreted_args, depth + 1)
+            };
+            if result.is_null() && trace_interpreter_enabled() {
+                eprintln!(
+                    "clasp native trace: call `{}` returned null at depth {} with {} arg(s)",
+                    name,
+                    depth,
+                    interpreted_args.len()
+                );
+            }
+            for interpreted in interpreted_args {
+                unsafe { release_header(runtime, interpreted) };
+            }
+            result
+        }
+        ClaspRtInterpretedExpr::Match(scrutinee, branches) => {
+            let scrutinee_value = interpret_native_expr(runtime, image, scrutinee, env, depth + 1);
+            if scrutinee_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(scrutinee_value) } {
+                return scrutinee_value;
+            }
+
+            let result = interpret_match_value(runtime, image, scrutinee_value, branches, env, depth + 1);
+            unsafe {
+                release_header(runtime, scrutinee_value);
+            }
+            result
+        }
+        ClaspRtInterpretedExpr::Let(is_mutable, name, value, body) => {
+            let bound_value = interpret_native_expr(runtime, image, value, env, depth + 1);
+            if bound_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(bound_value) } {
+                return bound_value;
+            }
+            let scoped_value = if *is_mutable {
+                unsafe { build_runtime_mutable_cell(bound_value) as *mut ClaspRtHeader }
+            } else {
+                bound_value
+            };
+            let mut extended_env = env.to_vec();
+            extended_env.push((name.as_str(), scoped_value));
+            let result = interpret_native_expr(runtime, image, body, &extended_env, depth + 1);
+            unsafe {
+                release_header(runtime, scoped_value);
+            }
+            result
+        }
+        ClaspRtInterpretedExpr::Assign(name, value, body) => {
+            let assigned_value = interpret_native_expr(runtime, image, value, env, depth + 1);
+            if assigned_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(assigned_value) } {
+                return assigned_value;
+            }
+            if !update_mutable_binding(runtime, env, name, assigned_value) {
+                return null_mut();
+            }
+            interpret_native_expr(runtime, image, body, env, depth + 1)
+        }
+        ClaspRtInterpretedExpr::ForEach(name, iterable, loop_body, body) => {
+            let iterable_value = interpret_native_expr(runtime, image, iterable, env, depth + 1);
+            if iterable_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(iterable_value) } {
+                return iterable_value;
+            }
+            unsafe {
+                if (*iterable_value).layout_id != CLASP_RT_LAYOUT_STRING_LIST
+                    && (*iterable_value).layout_id != CLASP_RT_LAYOUT_LIST_VALUE
+                {
+                    release_header(runtime, iterable_value);
+                    return null_mut();
+                }
+                let iterable_items: Vec<*mut ClaspRtHeader> =
+                    if (*iterable_value).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+                        string_list_items_mut(iterable_value as *mut ClaspRtStringList)
+                            .iter()
+                            .map(|item| *item as *mut ClaspRtHeader)
+                            .collect()
+                    } else {
+                        list_value_items(iterable_value as *mut ClaspRtListValue)
+                            .iter()
+                            .copied()
+                            .collect()
+                    };
+                for item in iterable_items {
+                    let mut iteration_env = env.to_vec();
+                    iteration_env.push((name.as_str(), item));
+                    let loop_result = interpret_native_expr(runtime, image, loop_body, &iteration_env, depth + 1);
+                    if is_early_return_value(loop_result) {
+                        release_header(runtime, iterable_value);
+                        return loop_result;
+                    }
+                    release_header(runtime, loop_result);
+                }
+                release_header(runtime, iterable_value);
+            }
+            interpret_native_expr(runtime, image, body, env, depth + 1)
+        }
+        ClaspRtInterpretedExpr::Construct(name, args) => {
+            let mut interpreted_args: Vec<*mut ClaspRtHeader> = Vec::with_capacity(args.len());
+            for arg in args {
+                let value = interpret_native_expr(runtime, image, arg, env, depth + 1);
+                if value.is_null() {
+                    for interpreted in interpreted_args {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return null_mut();
+                }
+                if unsafe { is_early_return_value(value) } {
+                    for interpreted in interpreted_args {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return value;
+                }
+                interpreted_args.push(value);
+            }
+            let mut owned_args = Some(interpreted_args);
+            let result = match name.as_str() {
+                "Ok" if owned_args.as_ref().map_or(0, Vec::len) == 1 => unsafe {
+                    let args = owned_args.as_ref().unwrap();
+                    if (*args[0]).layout_id != CLASP_RT_LAYOUT_STRING {
+                        null_mut()
+                    } else {
+                        let built = build_runtime_result_string(true, args[0] as *mut ClaspRtString);
+                        release_header(runtime, args[0]);
+                        built as *mut ClaspRtHeader
+                    }
+                },
+                "Err" if owned_args.as_ref().map_or(0, Vec::len) == 1 => unsafe {
+                    let args = owned_args.as_ref().unwrap();
+                    if (*args[0]).layout_id != CLASP_RT_LAYOUT_STRING {
+                        null_mut()
+                    } else {
+                        let built = build_runtime_result_string(false, args[0] as *mut ClaspRtString);
+                        release_header(runtime, args[0]);
+                        built as *mut ClaspRtHeader
+                    }
+                },
+                _ => unsafe {
+                    build_runtime_variant_value(name, owned_args.take().unwrap()) as *mut ClaspRtHeader
+                },
+            };
+            if result.is_null() {
+                for interpreted in owned_args.unwrap_or_default() {
+                    unsafe { release_header(runtime, interpreted) };
+                }
+            }
+            result
+        }
+        ClaspRtInterpretedExpr::Record(record_name, fields) => {
+            let mut interpreted_fields: Vec<(String, *mut ClaspRtHeader)> = Vec::with_capacity(fields.len());
+            for field in fields {
+                let value = interpret_native_expr(runtime, image, &field.value, env, depth + 1);
+                if value.is_null() {
+                    for (_, interpreted) in interpreted_fields {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return null_mut();
+                }
+                if unsafe { is_early_return_value(value) } {
+                    for (_, interpreted) in interpreted_fields {
+                        unsafe { release_header(runtime, interpreted) };
+                    }
+                    return value;
+                }
+                interpreted_fields.push((field.name.clone(), value));
+            }
+            unsafe { build_runtime_record_value(record_name, interpreted_fields) as *mut ClaspRtHeader }
+        }
+        ClaspRtInterpretedExpr::FieldAccess(record_name, target, field_name) => {
+            let target_value = interpret_native_expr(runtime, image, target, env, depth + 1);
+            if target_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(target_value) } {
+                return target_value;
+            }
+            let result = unsafe {
+                if (*target_value).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+                    null_mut()
+                } else {
+                    let record_value = target_value as *mut ClaspRtRecordValue;
+                    let record_matches = record_name.is_empty()
+                        || string_bytes((*record_value).record_name) == record_name.as_bytes();
+                    if !record_matches {
+                        null_mut()
+                    } else {
+                        let mut matched = null_mut();
+                        for (name_ptr, value_ptr) in record_field_names(record_value)
+                            .iter()
+                            .zip(record_field_values(record_value).iter())
+                        {
+                            if string_bytes(*name_ptr) == field_name.as_bytes() {
+                                retain_header(*value_ptr);
+                                matched = *value_ptr;
+                                break;
+                            }
+                        }
+                        matched
+                    }
+                }
+            };
+            unsafe {
+                release_header(runtime, target_value);
+            }
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListAppend(left, right)) => {
+            let left_value = interpret_native_expr(runtime, image, left, env, depth + 1);
+            if left_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return left_value;
+            }
+            let right_value = interpret_native_expr(runtime, image, right, env, depth + 1);
+            if right_value.is_null() {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return right_value;
+            }
+            let appended = unsafe { append_list_like_values(left_value, right_value) };
+            unsafe {
+                release_header(runtime, left_value);
+                release_header(runtime, right_value);
+            }
+            match appended {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::Encode(value_expr)) => {
+            let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
+            if value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(value) } {
+                return value;
+            }
+            let encoded = unsafe { encode_runtime_value_json(value) };
+            unsafe {
+                release_header(runtime, value);
+            }
+            match encoded {
+                Some(bytes) => unsafe { build_runtime_string(&bytes) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+    }
+}
+
+fn interpret_runtime_binding(
+    binding: &ClaspRtNativeRuntimeBinding,
+    args: &[*mut ClaspRtHeader],
+) -> *mut ClaspRtHeader {
+    match (binding.runtime_name.as_str(), args.len()) {
+        ("textConcat", 1) => unsafe {
+            list_like_string_items(args[0])
+                .map(|parts| build_runtime_string(&join_string_bytes(&parts, &[])) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
+        ("textJoin", 2) => unsafe {
+            list_like_string_items(args[1])
+                .map(|parts| build_runtime_string(&join_string_bytes(&parts, string_bytes(args[0] as *mut ClaspRtString))) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
+        ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("pathJoin", 1) => unsafe {
+            list_like_string_items(args[0])
+                .map(|parts| build_runtime_string(&join_string_bytes(&parts, b"/")) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
+        ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        _ => null_mut(),
+    }
+}
+
+fn interpret_match_value(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    value: *mut ClaspRtHeader,
+    branches: &[ClaspRtInterpretedMatchBranch],
+    env: &[(&str, *mut ClaspRtHeader)],
+    depth: usize,
+) -> *mut ClaspRtHeader {
+    if value.is_null() {
+        return null_mut();
+    }
+
+    unsafe {
+        if (*value).layout_id == CLASP_RT_LAYOUT_RESULT_STRING {
+            let result = value as *mut ClaspRtResultString;
+            let tag = if (*result).is_ok { "Ok" } else { "Err" };
+            let payload = (*result).value as *mut ClaspRtHeader;
+            return interpret_match_branch(runtime, image, branches, tag, payload, env, depth);
+        }
+        if (*value).layout_id == CLASP_RT_LAYOUT_VARIANT_VALUE {
+            let variant = value as *mut ClaspRtVariantValue;
+            let tag = String::from_utf8_lossy(string_bytes((*variant).tag)).into_owned();
+            return interpret_match_branch_many(runtime, image, branches, &tag, variant_items(variant), env, depth);
+        }
+    }
+
+    null_mut()
+}
+
+fn interpret_match_branch(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    branches: &[ClaspRtInterpretedMatchBranch],
+    tag: &str,
+    payload: *mut ClaspRtHeader,
+    env: &[(&str, *mut ClaspRtHeader)],
+    depth: usize,
+) -> *mut ClaspRtHeader {
+    let Some(branch) = branches.iter().find(|branch| branch.tag == tag) else {
+        return null_mut();
+    };
+
+    if branch.binders.len() > 1 {
+        return null_mut();
+    }
+
+    let mut extended_env: Vec<(&str, *mut ClaspRtHeader)> = env.to_vec();
+    if let Some(binder) = branch.binders.first() {
+        extended_env.push((binder.as_str(), payload));
+    }
+    interpret_native_expr(runtime, image, &branch.body, &extended_env, depth + 1)
+}
+
+fn interpret_match_branch_many(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    branches: &[ClaspRtInterpretedMatchBranch],
+    tag: &str,
+    payloads: &[*mut ClaspRtHeader],
+    env: &[(&str, *mut ClaspRtHeader)],
+    depth: usize,
+) -> *mut ClaspRtHeader {
+    let Some(branch) = branches.iter().find(|branch| branch.tag == tag) else {
+        return null_mut();
+    };
+
+    if branch.binders.len() != payloads.len() {
+        return null_mut();
+    }
+
+    let mut extended_env: Vec<(&str, *mut ClaspRtHeader)> = env.to_vec();
+    for (binder, payload) in branch.binders.iter().zip(payloads.iter().copied()) {
+        extended_env.push((binder.as_str(), payload));
+    }
+    interpret_native_expr(runtime, image, &branch.body, &extended_env, depth + 1)
 }
 
 impl Drop for ClaspRtNativeModuleImage {
@@ -889,6 +1955,28 @@ unsafe fn build_runtime_bytes(len: usize) -> *mut ClaspRtBytes {
     }))
 }
 
+unsafe fn build_runtime_int(value: i64) -> *mut ClaspRtInt {
+    Box::into_raw(Box::new(ClaspRtInt {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_INT,
+            retain_count: 1,
+            destroy: Some(destroy_int),
+        },
+        value,
+    }))
+}
+
+unsafe fn build_runtime_bool(value: bool) -> *mut ClaspRtBool {
+    Box::into_raw(Box::new(ClaspRtBool {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_BOOL,
+            retain_count: 1,
+            destroy: Some(destroy_bool),
+        },
+        value,
+    }))
+}
+
 unsafe fn build_runtime_string_list(len: usize) -> *mut ClaspRtStringList {
     Box::into_raw(Box::new(ClaspRtStringList {
         header: ClaspRtHeader {
@@ -898,6 +1986,35 @@ unsafe fn build_runtime_string_list(len: usize) -> *mut ClaspRtStringList {
         },
         length: len,
         items: alloc_zeroed_array::<*mut ClaspRtString>(len),
+    }))
+}
+
+unsafe fn build_runtime_list_value(items: Vec<*mut ClaspRtHeader>) -> *mut ClaspRtListValue {
+    let item_count = items.len();
+    let item_ptr = alloc_zeroed_array::<*mut ClaspRtHeader>(item_count);
+    for (index, item) in items.into_iter().enumerate() {
+        *item_ptr.add(index) = item;
+    }
+
+    Box::into_raw(Box::new(ClaspRtListValue {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_LIST_VALUE,
+            retain_count: 1,
+            destroy: Some(destroy_list_value),
+        },
+        item_count,
+        items: item_ptr,
+    }))
+}
+
+unsafe fn build_runtime_early_return(value: *mut ClaspRtHeader) -> *mut ClaspRtEarlyReturn {
+    Box::into_raw(Box::new(ClaspRtEarlyReturn {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_EARLY_RETURN,
+            retain_count: 1,
+            destroy: Some(destroy_early_return),
+        },
+        value,
     }))
 }
 
@@ -911,6 +2028,61 @@ unsafe fn build_runtime_result_string(is_ok: bool, value: *mut ClaspRtString) ->
         },
         is_ok,
         value,
+    }))
+}
+
+unsafe fn build_runtime_mutable_cell(value: *mut ClaspRtHeader) -> *mut ClaspRtMutableCell {
+    Box::into_raw(Box::new(ClaspRtMutableCell {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_MUTABLE_CELL,
+            retain_count: 1,
+            destroy: Some(destroy_mutable_cell),
+        },
+        value,
+    }))
+}
+
+unsafe fn build_runtime_variant_value(tag: &str, items: Vec<*mut ClaspRtHeader>) -> *mut ClaspRtVariantValue {
+    let item_count = items.len();
+    let item_ptr = alloc_zeroed_array::<*mut ClaspRtHeader>(item_count);
+    for (index, item) in items.into_iter().enumerate() {
+        *item_ptr.add(index) = item;
+    }
+
+    Box::into_raw(Box::new(ClaspRtVariantValue {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_VARIANT_VALUE,
+            retain_count: 1,
+            destroy: Some(destroy_variant_value),
+        },
+        tag: build_runtime_string(tag.as_bytes()),
+        item_count,
+        items: item_ptr,
+    }))
+}
+
+unsafe fn build_runtime_record_value(
+    record_name: &str,
+    fields: Vec<(String, *mut ClaspRtHeader)>,
+) -> *mut ClaspRtRecordValue {
+    let field_count = fields.len();
+    let field_name_ptr = alloc_zeroed_array::<*mut ClaspRtString>(field_count);
+    let field_value_ptr = alloc_zeroed_array::<*mut ClaspRtHeader>(field_count);
+    for (index, (name, value)) in fields.into_iter().enumerate() {
+        *field_name_ptr.add(index) = build_runtime_string(name.as_bytes());
+        *field_value_ptr.add(index) = value;
+    }
+
+    Box::into_raw(Box::new(ClaspRtRecordValue {
+        header: ClaspRtHeader {
+            layout_id: CLASP_RT_LAYOUT_RECORD_VALUE,
+            retain_count: 1,
+            destroy: Some(destroy_record_value),
+        },
+        record_name: build_runtime_string(record_name.as_bytes()),
+        field_count,
+        field_names: field_name_ptr,
+        field_values: field_value_ptr,
     }))
 }
 
@@ -940,6 +2112,38 @@ unsafe fn string_list_items_mut<'a>(list: *mut ClaspRtStringList) -> &'a mut [*m
         &mut []
     } else {
         slice::from_raw_parts_mut((*list).items, (*list).length)
+    }
+}
+
+unsafe fn variant_items<'a>(value: *mut ClaspRtVariantValue) -> &'a [*mut ClaspRtHeader] {
+    if value.is_null() || (*value).item_count == 0 || (*value).items.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts((*value).items, (*value).item_count)
+    }
+}
+
+unsafe fn list_value_items<'a>(value: *mut ClaspRtListValue) -> &'a [*mut ClaspRtHeader] {
+    if value.is_null() || (*value).item_count == 0 || (*value).items.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts((*value).items, (*value).item_count)
+    }
+}
+
+unsafe fn record_field_names<'a>(value: *mut ClaspRtRecordValue) -> &'a [*mut ClaspRtString] {
+    if value.is_null() || (*value).field_count == 0 || (*value).field_names.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts((*value).field_names, (*value).field_count)
+    }
+}
+
+unsafe fn record_field_values<'a>(value: *mut ClaspRtRecordValue) -> &'a [*mut ClaspRtHeader] {
+    if value.is_null() || (*value).field_count == 0 || (*value).field_values.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts((*value).field_values, (*value).field_count)
     }
 }
 
@@ -1367,6 +2571,447 @@ unsafe fn json_optional_string_value(bytes: &[u8], value_slice: JsonSlice) -> *m
     }
 }
 
+fn json_string_owned(bytes: &[u8], string_slice: JsonSlice) -> Option<String> {
+    json_decode_string(bytes, string_slice).and_then(|decoded| String::from_utf8(decoded).ok())
+}
+
+fn json_bool_value(bytes: &[u8], value_slice: JsonSlice) -> Option<bool> {
+    match bytes.get(value_slice.start..value_slice.end) {
+        Some(b"true") => Some(true),
+        Some(b"false") => Some(false),
+        _ => None,
+    }
+}
+
+fn json_i64_value(bytes: &[u8], value_slice: JsonSlice) -> Option<i64> {
+    std::str::from_utf8(bytes.get(value_slice.start..value_slice.end)?)
+        .ok()?
+        .parse::<i64>()
+        .ok()
+}
+
+fn trim_ascii(bytes: &[u8]) -> &[u8] {
+    let mut start = 0usize;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    &bytes[start..end]
+}
+
+fn split_top_level_once(bytes: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (index, byte) in bytes.iter().enumerate() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if *byte == b'\\' {
+                escape = true;
+            } else if *byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match *byte {
+            b'"' => in_string = true,
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth = brace_depth.saturating_sub(1),
+            _ => {}
+        }
+
+        if *byte == delimiter && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            return Some((&bytes[..index], &bytes[index + 1..]));
+        }
+    }
+    None
+}
+
+fn split_top_level_items(bytes: &[u8]) -> Option<Vec<&[u8]>> {
+    let bytes = trim_ascii(bytes);
+    if bytes.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    let mut cursor = 0usize;
+    let mut item_start = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        match byte {
+            b'"' => in_string = true,
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth = brace_depth.saturating_sub(1),
+            b',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                items.push(trim_ascii(&bytes[item_start..cursor]));
+                item_start = cursor + 1;
+            }
+            _ => {}
+        }
+        cursor += 1;
+    }
+
+    items.push(trim_ascii(&bytes[item_start..]));
+    Some(items)
+}
+
+fn parse_local_name(bytes: &[u8]) -> Option<String> {
+    let bytes = trim_ascii(bytes);
+    if !(bytes.starts_with(b"local(") && bytes.ends_with(b")")) {
+        return None;
+    }
+    String::from_utf8(trim_ascii(&bytes[6..bytes.len() - 1]).to_vec()).ok()
+}
+
+fn parse_interpreted_expr_text(bytes: &[u8]) -> Option<ClaspRtInterpretedExpr> {
+    let bytes = trim_ascii(bytes);
+    if bytes.starts_with(b"string(") && bytes.ends_with(b")") {
+        let literal_bytes = trim_ascii(&bytes[7..bytes.len() - 1]);
+        let decoded = json_decode_string(
+            literal_bytes,
+            JsonSlice {
+                start: 0,
+                end: literal_bytes.len(),
+            },
+        )?;
+        return Some(ClaspRtInterpretedExpr::StringLiteral(decoded));
+    }
+
+    if let Some(name) = parse_local_name(bytes) {
+        return Some(ClaspRtInterpretedExpr::Local(name));
+    }
+
+    if bytes.starts_with(b"return(") && bytes.ends_with(b")") {
+        return parse_interpreted_expr_text(&bytes[7..bytes.len() - 1])
+            .map(|expr| ClaspRtInterpretedExpr::Return(Box::new(expr)));
+    }
+
+    if bytes.starts_with(b"call(") && bytes.ends_with(b")") {
+        let inner = trim_ascii(&bytes[5..bytes.len() - 1]);
+        let (callee_bytes, args_bytes) = split_top_level_once(inner, b',')?;
+        let callee_name = parse_local_name(callee_bytes)?;
+        let args_bytes = trim_ascii(args_bytes);
+        if !(args_bytes.starts_with(b"[") && args_bytes.ends_with(b"]")) {
+            return None;
+        }
+        let arg_slices = split_top_level_items(&args_bytes[1..args_bytes.len() - 1])?;
+        let mut args = Vec::with_capacity(arg_slices.len());
+        for arg_bytes in arg_slices {
+            args.push(parse_interpreted_expr_text(arg_bytes)?);
+        }
+        return Some(ClaspRtInterpretedExpr::CallLocal(callee_name, args));
+    }
+
+    None
+}
+
+fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<ClaspRtInterpretedExpr> {
+    let kind_slice = json_object_lookup(bytes, expr_slice, "kind")?;
+
+    if json_string_equals(bytes, kind_slice, "int") {
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        return json_i64_value(bytes, value_slice).map(ClaspRtInterpretedExpr::IntLiteral);
+    }
+
+    if json_string_equals(bytes, kind_slice, "bool") {
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        return json_bool_value(bytes, value_slice).map(ClaspRtInterpretedExpr::BoolLiteral);
+    }
+
+    if json_string_equals(bytes, kind_slice, "string") {
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        let decoded = json_decode_string(bytes, value_slice)?;
+        return Some(ClaspRtInterpretedExpr::StringLiteral(decoded));
+    }
+
+    if json_string_equals(bytes, kind_slice, "local") {
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        let name = json_string_owned(bytes, name_slice)?;
+        return Some(ClaspRtInterpretedExpr::Local(name));
+    }
+
+    if json_string_equals(bytes, kind_slice, "list") {
+        let items_slice = json_object_lookup(bytes, expr_slice, "items")?;
+        let mut items = Vec::with_capacity(json_array_length(bytes, items_slice));
+        for index in 0..json_array_length(bytes, items_slice) {
+            let item_slice = json_array_item(bytes, items_slice, index)?;
+            items.push(parse_interpreted_expr_json(bytes, item_slice)?);
+        }
+        return Some(ClaspRtInterpretedExpr::List(items));
+    }
+
+    if json_string_equals(bytes, kind_slice, "if") {
+        let condition_slice = json_object_lookup(bytes, expr_slice, "condition")?;
+        let then_slice = json_object_lookup(bytes, expr_slice, "thenBranch")?;
+        let else_slice = json_object_lookup(bytes, expr_slice, "elseBranch")?;
+        return Some(ClaspRtInterpretedExpr::If(
+            Box::new(parse_interpreted_expr_json(bytes, condition_slice)?),
+            Box::new(parse_interpreted_expr_json(bytes, then_slice)?),
+            Box::new(parse_interpreted_expr_json(bytes, else_slice)?),
+        ));
+    }
+
+    if json_string_equals(bytes, kind_slice, "return") {
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        return parse_interpreted_expr_json(bytes, value_slice)
+            .map(|expr| ClaspRtInterpretedExpr::Return(Box::new(expr)));
+    }
+
+    if json_string_equals(bytes, kind_slice, "compare") {
+        let op_slice = json_object_lookup(bytes, expr_slice, "op")?;
+        let left_slice = json_object_lookup(bytes, expr_slice, "left")?;
+        let right_slice = json_object_lookup(bytes, expr_slice, "right")?;
+        let op = if json_string_equals(bytes, op_slice, "eq") {
+            ClaspRtInterpretedCompareOp::Eq
+        } else if json_string_equals(bytes, op_slice, "ne") {
+            ClaspRtInterpretedCompareOp::Ne
+        } else if json_string_equals(bytes, op_slice, "lt") {
+            ClaspRtInterpretedCompareOp::Lt
+        } else if json_string_equals(bytes, op_slice, "le") {
+            ClaspRtInterpretedCompareOp::Le
+        } else if json_string_equals(bytes, op_slice, "gt") {
+            ClaspRtInterpretedCompareOp::Gt
+        } else if json_string_equals(bytes, op_slice, "ge") {
+            ClaspRtInterpretedCompareOp::Ge
+        } else {
+            return None;
+        };
+        return Some(ClaspRtInterpretedExpr::Compare(
+            op,
+            Box::new(parse_interpreted_expr_json(bytes, left_slice)?),
+            Box::new(parse_interpreted_expr_json(bytes, right_slice)?),
+        ));
+    }
+
+    if json_string_equals(bytes, kind_slice, "call") {
+        let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+        let args_slice = json_object_lookup(bytes, expr_slice, "args")?;
+        let callee_name = match parse_interpreted_expr_json(bytes, callee_slice)? {
+            ClaspRtInterpretedExpr::Local(name) => name,
+            _ => return None,
+        };
+        let mut args = Vec::with_capacity(json_array_length(bytes, args_slice));
+        for index in 0..json_array_length(bytes, args_slice) {
+            let arg_slice = json_array_item(bytes, args_slice, index)?;
+            args.push(parse_interpreted_expr_json(bytes, arg_slice)?);
+        }
+        return Some(ClaspRtInterpretedExpr::CallLocal(callee_name, args));
+    }
+
+    if json_string_equals(bytes, kind_slice, "match") {
+        let scrutinee_slice = json_object_lookup(bytes, expr_slice, "scrutinee")?;
+        let branches_slice = json_object_lookup(bytes, expr_slice, "branches")?;
+        let scrutinee = parse_interpreted_expr_json(bytes, scrutinee_slice)?;
+        let mut branches = Vec::with_capacity(json_array_length(bytes, branches_slice));
+        for index in 0..json_array_length(bytes, branches_slice) {
+            let branch_slice = json_array_item(bytes, branches_slice, index)?;
+            branches.push(parse_interpreted_match_branch_json(bytes, branch_slice)?);
+        }
+        return Some(ClaspRtInterpretedExpr::Match(Box::new(scrutinee), branches));
+    }
+
+    if json_string_equals(bytes, kind_slice, "let") {
+        let mutability_slice = json_object_lookup(bytes, expr_slice, "mutability")?;
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        let body_slice = json_object_lookup(bytes, expr_slice, "body")?;
+        let name = json_string_owned(bytes, name_slice)?;
+        let is_mutable = json_string_equals(bytes, mutability_slice, "mutable");
+        let value = parse_interpreted_expr_json(bytes, value_slice)?;
+        let body = parse_interpreted_expr_json(bytes, body_slice)?;
+        return Some(ClaspRtInterpretedExpr::Let(
+            is_mutable,
+            name,
+            Box::new(value),
+            Box::new(body),
+        ));
+    }
+
+    if json_string_equals(bytes, kind_slice, "assign") {
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+        let body_slice = json_object_lookup(bytes, expr_slice, "body")?;
+        let name = json_string_owned(bytes, name_slice)?;
+        let value = parse_interpreted_expr_json(bytes, value_slice)?;
+        let body = parse_interpreted_expr_json(bytes, body_slice)?;
+        return Some(ClaspRtInterpretedExpr::Assign(name, Box::new(value), Box::new(body)));
+    }
+
+    if json_string_equals(bytes, kind_slice, "for_each") {
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        let iterable_slice = json_object_lookup(bytes, expr_slice, "iterable")?;
+        let loop_body_slice = json_object_lookup(bytes, expr_slice, "loopBody")?;
+        let body_slice = json_object_lookup(bytes, expr_slice, "body")?;
+        let name = json_string_owned(bytes, name_slice)?;
+        let iterable = parse_interpreted_expr_json(bytes, iterable_slice)?;
+        let loop_body = parse_interpreted_expr_json(bytes, loop_body_slice)?;
+        let body = parse_interpreted_expr_json(bytes, body_slice)?;
+        return Some(ClaspRtInterpretedExpr::ForEach(
+            name,
+            Box::new(iterable),
+            Box::new(loop_body),
+            Box::new(body),
+        ));
+    }
+
+    if json_string_equals(bytes, kind_slice, "construct") {
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        let args_slice = json_object_lookup(bytes, expr_slice, "args")?;
+        let name = json_string_owned(bytes, name_slice)?;
+        let mut args = Vec::with_capacity(json_array_length(bytes, args_slice));
+        for index in 0..json_array_length(bytes, args_slice) {
+            let arg_slice = json_array_item(bytes, args_slice, index)?;
+            args.push(parse_interpreted_expr_json(bytes, arg_slice)?);
+        }
+        return Some(ClaspRtInterpretedExpr::Construct(name, args));
+    }
+
+    if json_string_equals(bytes, kind_slice, "record") {
+        let record_name_slice = json_object_lookup(bytes, expr_slice, "recordName")?;
+        let fields_slice = json_object_lookup(bytes, expr_slice, "fields")?;
+        let record_name = json_string_owned(bytes, record_name_slice)?;
+        let mut fields = Vec::with_capacity(json_array_length(bytes, fields_slice));
+        for index in 0..json_array_length(bytes, fields_slice) {
+            let field_slice = json_array_item(bytes, fields_slice, index)?;
+            fields.push(parse_interpreted_record_field_json(bytes, field_slice)?);
+        }
+        return Some(ClaspRtInterpretedExpr::Record(record_name, fields));
+    }
+
+    if json_string_equals(bytes, kind_slice, "field_access") {
+        let record_name_slice = json_object_lookup(bytes, expr_slice, "recordName")?;
+        let target_slice = json_object_lookup(bytes, expr_slice, "target")?;
+        let field_name_slice = json_object_lookup(bytes, expr_slice, "fieldName")?;
+        let record_name = json_string_owned(bytes, record_name_slice)?;
+        let target = parse_interpreted_expr_json(bytes, target_slice)?;
+        let field_name = json_string_owned(bytes, field_name_slice)?;
+        return Some(ClaspRtInterpretedExpr::FieldAccess(record_name, Box::new(target), field_name));
+    }
+
+    if json_string_equals(bytes, kind_slice, "intrinsic") {
+        let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
+        if json_string_equals(bytes, name_slice, "list.append") {
+            let left_slice = json_object_lookup(bytes, expr_slice, "left")?;
+            let right_slice = json_object_lookup(bytes, expr_slice, "right")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListAppend(
+                    Box::new(parse_interpreted_expr_json(bytes, left_slice)?),
+                    Box::new(parse_interpreted_expr_json(bytes, right_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "encode") {
+            let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::Encode(
+                    Box::new(parse_interpreted_expr_json(bytes, value_slice)?),
+                ),
+            ));
+        }
+    }
+
+    None
+}
+
+fn parse_interpreted_match_branch_json(
+    bytes: &[u8],
+    branch_slice: JsonSlice,
+) -> Option<ClaspRtInterpretedMatchBranch> {
+    let tag_slice = json_object_lookup(bytes, branch_slice, "tag")?;
+    let binders_slice = json_object_lookup(bytes, branch_slice, "binders")?;
+    let body_slice = json_object_lookup(bytes, branch_slice, "body")?;
+    let tag = json_string_owned(bytes, tag_slice)?;
+    let body = parse_interpreted_expr_json(bytes, body_slice)?;
+    let mut binders = Vec::with_capacity(json_array_length(bytes, binders_slice));
+    for index in 0..json_array_length(bytes, binders_slice) {
+        let binder_slice = json_array_item(bytes, binders_slice, index)?;
+        binders.push(json_string_owned(bytes, binder_slice)?);
+    }
+    Some(ClaspRtInterpretedMatchBranch { tag, binders, body })
+}
+
+fn parse_interpreted_record_field_json(
+    bytes: &[u8],
+    field_slice: JsonSlice,
+) -> Option<ClaspRtInterpretedRecordField> {
+    let name_slice = json_object_lookup(bytes, field_slice, "name")?;
+    let value_slice = json_object_lookup(bytes, field_slice, "value")?;
+    let name = json_string_owned(bytes, name_slice)?;
+    let value = parse_interpreted_expr_json(bytes, value_slice)?;
+    Some(ClaspRtInterpretedRecordField { name, value })
+}
+
+fn parse_interpreted_decl(bytes: &[u8], decl_slice: JsonSlice) -> Option<ClaspRtInterpretedDecl> {
+    let kind_slice = json_object_lookup(bytes, decl_slice, "kind")?;
+    let name_slice = json_object_lookup(bytes, decl_slice, "name")?;
+    let kind = json_string_owned(bytes, kind_slice)?;
+    let name = json_string_owned(bytes, name_slice)?;
+    let body = json_object_lookup(bytes, decl_slice, "body")
+        .and_then(|body_slice| parse_interpreted_expr_json(bytes, body_slice))
+        .or_else(|| {
+            let body_slice = json_object_lookup(bytes, decl_slice, "bodyText")?;
+            let body_text = json_string_owned(bytes, body_slice)?;
+            parse_interpreted_expr_text(body_text.as_bytes())
+        })?;
+
+    match kind.as_str() {
+        "global" => Some(ClaspRtInterpretedDecl {
+            kind: ClaspRtInterpretedDeclKind::Global,
+            name,
+            params: Vec::new(),
+            body,
+        }),
+        "function" => {
+            let params_slice = json_object_lookup(bytes, decl_slice, "params")?;
+            let mut params = Vec::new();
+            for index in 0..json_array_length(bytes, params_slice) {
+                let param_slice = json_array_item(bytes, params_slice, index)?;
+                params.push(json_string_owned(bytes, param_slice)?);
+            }
+            Some(ClaspRtInterpretedDecl {
+                kind: ClaspRtInterpretedDeclKind::Function,
+                name,
+                params,
+                body,
+            })
+        }
+        _ => None,
+    }
+}
+
 unsafe extern "C" fn destroy_string(_runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
     let string = header as *mut ClaspRtString;
     if !string.is_null() {
@@ -1383,6 +3028,20 @@ unsafe extern "C" fn destroy_bytes(_runtime: *mut ClaspRtRuntime, header: *mut C
     }
 }
 
+unsafe extern "C" fn destroy_int(_runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let value = header as *mut ClaspRtInt;
+    if !value.is_null() {
+        drop(Box::from_raw(value));
+    }
+}
+
+unsafe extern "C" fn destroy_bool(_runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let value = header as *mut ClaspRtBool;
+    if !value.is_null() {
+        drop(Box::from_raw(value));
+    }
+}
+
 unsafe extern "C" fn destroy_string_list(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
     let list = header as *mut ClaspRtStringList;
     if !list.is_null() {
@@ -1394,11 +3053,66 @@ unsafe extern "C" fn destroy_string_list(runtime: *mut ClaspRtRuntime, header: *
     }
 }
 
+unsafe extern "C" fn destroy_list_value(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let list = header as *mut ClaspRtListValue;
+    if !list.is_null() {
+        for item in list_value_items(list) {
+            release_header(runtime, *item);
+        }
+        free_array::<*mut ClaspRtHeader>((*list).items, (*list).item_count);
+        drop(Box::from_raw(list));
+    }
+}
+
+unsafe extern "C" fn destroy_early_return(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let value = header as *mut ClaspRtEarlyReturn;
+    if !value.is_null() {
+        release_header(runtime, (*value).value);
+        drop(Box::from_raw(value));
+    }
+}
+
 unsafe extern "C" fn destroy_result_string(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
     let result = header as *mut ClaspRtResultString;
     if !result.is_null() {
         release_header(runtime, (*result).value as *mut ClaspRtHeader);
         drop(Box::from_raw(result));
+    }
+}
+
+unsafe extern "C" fn destroy_mutable_cell(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let cell = header as *mut ClaspRtMutableCell;
+    if !cell.is_null() {
+        release_header(runtime, (*cell).value);
+        drop(Box::from_raw(cell));
+    }
+}
+
+unsafe extern "C" fn destroy_variant_value(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let value = header as *mut ClaspRtVariantValue;
+    if !value.is_null() {
+        release_header(runtime, (*value).tag as *mut ClaspRtHeader);
+        for item in variant_items(value) {
+            release_header(runtime, *item);
+        }
+        free_array::<*mut ClaspRtHeader>((*value).items, (*value).item_count);
+        drop(Box::from_raw(value));
+    }
+}
+
+unsafe extern "C" fn destroy_record_value(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader) {
+    let value = header as *mut ClaspRtRecordValue;
+    if !value.is_null() {
+        release_header(runtime, (*value).record_name as *mut ClaspRtHeader);
+        for field_name in record_field_names(value) {
+            release_header(runtime, *field_name as *mut ClaspRtHeader);
+        }
+        for field_value in record_field_values(value) {
+            release_header(runtime, *field_value);
+        }
+        free_array::<*mut ClaspRtString>((*value).field_names, (*value).field_count);
+        free_array::<*mut ClaspRtHeader>((*value).field_values, (*value).field_count);
+        drop(Box::from_raw(value));
     }
 }
 
@@ -1733,6 +3447,9 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
     let Some(runtime_profile) = json_object_lookup(bytes, runtime, "profile") else {
         return null_mut();
     };
+    let Some(runtime_bindings) = json_object_lookup(bytes, runtime, "bindings") else {
+        return null_mut();
+    };
     let Some(exports) = json_object_lookup(bytes, root, "exports") else {
         return null_mut();
     };
@@ -1783,9 +3500,13 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         state_snapshot_type: null_mut(),
         state_snapshot: null_mut(),
         generation: 0,
+        runtime_bindings: Vec::new(),
+        runtime_binding_indexes: HashMap::new(),
         exports: Vec::new(),
         entrypoint_symbols: vec![null_mut(); json_array_length(bytes, exports)],
         entrypoints: vec![None; json_array_length(bytes, exports)],
+        interpreted_decls: Vec::new(),
+        interpreted_decl_indexes: HashMap::new(),
         decl_count: json_array_length(bytes, decls),
     });
 
@@ -1809,6 +3530,32 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
             return null_mut();
         }
         loaded.accepted_previous_fingerprints.push(fingerprint);
+    }
+
+    for index in 0..json_array_length(bytes, runtime_bindings) {
+        let Some(binding_value) = json_array_item(bytes, runtime_bindings, index) else {
+            drop(loaded);
+            return null_mut();
+        };
+        let Some(name_slice) = json_object_lookup(bytes, binding_value, "name") else {
+            drop(loaded);
+            return null_mut();
+        };
+        let Some(runtime_name_slice) = json_object_lookup(bytes, binding_value, "runtime") else {
+            drop(loaded);
+            return null_mut();
+        };
+        let Some(name) = json_string_owned(bytes, name_slice) else {
+            drop(loaded);
+            return null_mut();
+        };
+        let Some(runtime_name) = json_string_owned(bytes, runtime_name_slice) else {
+            drop(loaded);
+            return null_mut();
+        };
+        let binding_index = loaded.runtime_bindings.len();
+        loaded.runtime_binding_indexes.insert(name.clone(), binding_index);
+        loaded.runtime_bindings.push(ClaspRtNativeRuntimeBinding { name, runtime_name });
     }
 
     for index in 0..json_array_length(bytes, exports) {
@@ -1851,6 +3598,18 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
             return null_mut();
         }
         loaded.entrypoint_symbols[export_index] = symbol;
+    }
+
+    for index in 0..json_array_length(bytes, decls) {
+        let Some(decl_value) = json_array_item(bytes, decls, index) else {
+            drop(loaded);
+            return null_mut();
+        };
+        if let Some(decl) = parse_interpreted_decl(bytes, decl_value) {
+            let decl_index = loaded.interpreted_decls.len();
+            loaded.interpreted_decl_indexes.insert(decl.name.clone(), decl_index);
+            loaded.interpreted_decls.push(decl);
+        }
     }
 
     Box::into_raw(loaded)
@@ -2273,7 +4032,7 @@ pub unsafe extern "C" fn clasp_rt_call_native_dispatch(
     };
     match runtime_ref.resolve_native_entrypoint(module_name, export_name) {
         Some(entrypoint) => entrypoint(runtime, args, arg_count),
-        None => null_mut(),
+        None => runtime_ref.interpret_native_dispatch(runtime, module_name, export_name, args, arg_count),
     }
 }
 
@@ -2291,7 +4050,7 @@ pub unsafe extern "C" fn clasp_rt_call_native_dispatch_generation(
     };
     match runtime_ref.resolve_native_entrypoint_generation(module_name, generation, export_name) {
         Some(entrypoint) => entrypoint(runtime, args, arg_count),
-        None => null_mut(),
+        None => runtime_ref.interpret_native_dispatch_generation(runtime, module_name, generation, export_name, args, arg_count),
     }
 }
 
@@ -2349,6 +4108,20 @@ pub unsafe extern "C" fn clasp_rt_text_chars(value: *mut ClaspRtString) -> *mut 
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_text_fingerprint64_hex(value: *mut ClaspRtString) -> *mut ClaspRtString {
+    const FNV_OFFSET: u64 = 14695981039346656037;
+    const FNV_PRIME: u64 = 1099511628211;
+
+    let mut fingerprint = FNV_OFFSET;
+    for &byte in string_bytes(value) {
+        fingerprint ^= u64::from(byte);
+        fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+    }
+
+    build_runtime_string(format!("{fingerprint:016x}").as_bytes())
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_text_prefix(
     value: *mut ClaspRtString,
     prefix: *mut ClaspRtString,
@@ -2369,11 +4142,20 @@ pub unsafe extern "C" fn clasp_rt_text_split_first(
 ) -> *mut ClaspRtResultString {
     let value_bytes = string_bytes(value);
     let separator_bytes = string_bytes(separator);
+    if separator_bytes.is_empty() {
+        let mut payload = Vec::with_capacity(value_bytes.len() + 1);
+        payload.extend_from_slice(value_bytes);
+        payload.push(b'\n');
+        return clasp_rt_result_ok_string(build_runtime_string(&payload));
+    }
     match find_subslice(value_bytes, separator_bytes, 0) {
         Some(match_index) => {
-            clasp_rt_result_ok_string(build_runtime_string(
-                &value_bytes[match_index + separator_bytes.len()..],
-            ))
+            let mut payload =
+                Vec::with_capacity(value_bytes.len().saturating_sub(separator_bytes.len()) + 1);
+            payload.extend_from_slice(&value_bytes[..match_index]);
+            payload.push(b'\n');
+            payload.extend_from_slice(&value_bytes[match_index + separator_bytes.len()..]);
+            clasp_rt_result_ok_string(build_runtime_string(&payload))
         }
         None => clasp_rt_result_err_string(build_runtime_string(value_bytes)),
     }

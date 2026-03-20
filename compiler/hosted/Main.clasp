@@ -2,6 +2,7 @@ module Main
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.CheckedCore
 import Compiler.Emit.JavaScript
 import Compiler.Emit.Native
 import Compiler.Lower
@@ -17,6 +18,7 @@ record HostedCompilerSnapshot = {
   mismatchDiagnostic : Str,
   emittedModule : Str,
   emittedNativeModule : Str,
+  emittedNativeImageModule : Str,
   parsedSampleModuleName : Str,
   parsedSampleImports : [Str],
   parsedSampleDeclNames : [Str],
@@ -57,6 +59,10 @@ record HostedCompilerSnapshot = {
   septenaryLoweredModule : Str,
   septenaryEmittedModule : Str
 }
+
+type HostedProjectModuleLookupResult = FoundHostedProjectModule HostedModuleAst | MissingHostedProjectModule Str
+type HostedProjectModulesResult = HostedProjectModules [HostedModuleAst] | HostedProjectModulesError Str
+type HostedProjectBundleResult = HostedProjectBundleOk HostedModuleAst | HostedProjectBundleError Str
 
 compilerSampleSource : Str
 compilerSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
@@ -140,16 +146,130 @@ explainEntrypoint : Str
 explainEntrypoint = textJoin "\n\n" [checkedModuleSummary, loweredSummary]
 
 compileEntrypoint : Str
-compileEntrypoint = emitModule loweredSampleDecls
+compileEntrypoint = emitModule parsedSampleModule loweredSampleDecls
 
 nativeEntrypoint : Str
-nativeEntrypoint = emitNativeModule (moduleNameOf parsedSampleModule) loweredSampleDecls
+nativeEntrypoint = emitNativeModule parsedSampleModule loweredSampleDecls
+
+nativeImageEntrypoint : Str
+nativeImageEntrypoint = emitNativeModuleImage parsedSampleModule loweredSampleDecls
 
 sourceModule : Str -> HostedModuleAst
 sourceModule source = parseModuleAst source
 
 sourceLoweredDecls : Str -> [LowerDeclText]
 sourceLoweredDecls source = lowerModule (sourceModule source)
+
+projectBundleSeparator : Str
+projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n"
+
+parseProjectModules : Str -> [HostedModuleAst]
+parseProjectModules bundle = {
+  let mut modules = [];
+  for source in textSplit bundle projectBundleSeparator {
+    let trimmed = trimSpaces source;
+    if trimmed == "" then {
+      modules
+    } else {
+      modules = append modules [parseModuleAst trimmed];
+      modules
+    }
+  };
+  modules
+}
+
+lookupProjectModule : [HostedModuleAst] -> Str -> HostedProjectModuleLookupResult
+lookupProjectModule modules targetName = {
+  for modl in modules {
+    if moduleNameOf modl == targetName then {
+      return FoundHostedProjectModule modl
+    } else {
+      MissingHostedProjectModule targetName
+    }
+  };
+  MissingHostedProjectModule targetName
+}
+
+containsProjectModule : [HostedModuleAst] -> Str -> Bool
+containsProjectModule modules targetName = {
+  for modl in modules {
+    if moduleNameOf modl == targetName then return true else false
+  };
+  false
+}
+
+appendUniqueProjectModules : [HostedModuleAst] -> [HostedModuleAst] -> [HostedModuleAst]
+appendUniqueProjectModules modules additions = {
+  let mut combined = modules;
+  for modl in additions {
+    let name = moduleNameOf modl;
+    if containsProjectModule combined name then {
+      combined
+    } else {
+      combined = append combined [modl];
+      combined
+    }
+  };
+  combined
+}
+
+collectProjectImports : [HostedModuleAst] -> [Str] -> [Str] -> HostedProjectModulesResult
+collectProjectImports modules seen dependencyNames = {
+  let dependencyName = firstText dependencyNames;
+  let remainingDependencyNames = remainingTexts dependencyNames;
+  if dependencyName == "" then {
+    HostedProjectModules []
+  } else if containsText seen dependencyName then {
+    collectProjectImports modules seen remainingDependencyNames
+  } else {
+    match lookupProjectModule modules dependencyName {
+      FoundHostedProjectModule imported ->
+        match collectProjectImports modules (append seen [dependencyName]) (moduleImports imported) {
+          HostedProjectModules nestedImports ->
+            match collectProjectImports modules (append seen [dependencyName]) remainingDependencyNames {
+              HostedProjectModules remainingImports ->
+                HostedProjectModules (appendUniqueProjectModules (appendUniqueProjectModules nestedImports [imported]) remainingImports),
+              HostedProjectModulesError message ->
+                HostedProjectModulesError message
+            },
+          HostedProjectModulesError message ->
+            HostedProjectModulesError message
+        },
+      MissingHostedProjectModule missing ->
+        HostedProjectModulesError (textConcat ["Missing imported module `", missing, "`."])
+    }
+  }
+}
+
+mergeProjectModules : HostedModuleAst -> [HostedModuleAst] -> HostedModuleAst
+mergeProjectModules entry importedModules = {
+  let mut typeDeclarations = [];
+  let mut recordDeclarations = [];
+  let mut foreignDeclarations = [];
+  let mut declarations = [];
+  for modl in append importedModules [entry] {
+    typeDeclarations = append typeDeclarations (moduleTypeDeclarations modl);
+    recordDeclarations = append recordDeclarations (moduleRecordDeclarations modl);
+    foreignDeclarations = append foreignDeclarations (moduleForeignDeclarations modl);
+    declarations = append declarations (moduleDeclarations modl);
+    declarations
+  };
+  hostedModuleAst (moduleNameOf entry) [] typeDeclarations recordDeclarations foreignDeclarations declarations (moduleMainExprSummary entry)
+}
+
+resolveProjectBundle : Str -> HostedProjectBundleResult
+resolveProjectBundle bundle = {
+  let modules = parseProjectModules bundle;
+  for entry in modules {
+    match collectProjectImports modules [moduleNameOf entry] (moduleImports entry) {
+      HostedProjectModules importedModules ->
+        return HostedProjectBundleOk (mergeProjectModules entry importedModules),
+      HostedProjectModulesError message ->
+        return HostedProjectBundleError message
+    }
+  };
+  HostedProjectBundleError "Missing project entry module."
+}
 
 checkSourceText : Str -> Str
 checkSourceText source = renderModuleSummary (sourceModule source)
@@ -158,10 +278,59 @@ explainSourceText : Str -> Str
 explainSourceText source = renderModuleSummary (sourceModule source)
 
 compileSourceText : Str -> Str
-compileSourceText source = emitModule (sourceLoweredDecls source)
+compileSourceText source = emitModule (sourceModule source) (sourceLoweredDecls source)
 
 nativeSourceText : Str -> Str
-nativeSourceText source = emitNativeModule (moduleNameOf (sourceModule source)) (sourceLoweredDecls source)
+nativeSourceText source = emitNativeModule (sourceModule source) (sourceLoweredDecls source)
+
+nativeImageSourceText : Str -> Str
+nativeImageSourceText source = emitNativeModuleImage (sourceModule source) (sourceLoweredDecls source)
+
+checkCoreSourceText : Str -> Str
+checkCoreSourceText source = checkedCoreSourceJson source
+
+checkProjectText : Str -> Str
+checkProjectText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    renderModuleSummary modl,
+  HostedProjectBundleError message ->
+    message
+}
+
+explainProjectText : Str -> Str
+explainProjectText bundle = checkProjectText bundle
+
+compileProjectText : Str -> Str
+compileProjectText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    emitModule modl (lowerModule modl),
+  HostedProjectBundleError message ->
+    textConcat ["// compiler-selfhost project error: ", message]
+}
+
+nativeProjectText : Str -> Str
+nativeProjectText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    emitNativeModule modl (lowerModule modl),
+  HostedProjectBundleError message ->
+    textConcat ["// compiler-selfhost project error: ", message]
+}
+
+nativeImageProjectText : Str -> Str
+nativeImageProjectText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    emitNativeModuleImage modl (lowerModule modl),
+  HostedProjectBundleError message ->
+    renderJsonObject [renderJsonField "format" (encode "clasp-native-image-v1"), renderJsonField "error" (encode message)]
+}
+
+checkCoreProjectText : Str -> Str
+checkCoreProjectText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    renderCheckedCoreArtifactResultJson (checkedCoreArtifactResult modl),
+  HostedProjectBundleError message ->
+    renderCheckedCoreArtifactResultJson (CheckedCoreArtifactError message)
+}
 
 snapshot : HostedCompilerSnapshot
 snapshot = HostedCompilerSnapshot {
@@ -175,6 +344,7 @@ snapshot = HostedCompilerSnapshot {
   mismatchDiagnostic = mismatchDiagnosticForModule parsedMismatchModule,
   emittedModule = compileEntrypoint,
   emittedNativeModule = nativeEntrypoint,
+  emittedNativeImageModule = nativeImageEntrypoint,
   parsedSampleModuleName = moduleNameOf parsedSampleModule,
   parsedSampleImports = moduleImports parsedSampleModule,
   parsedSampleDeclNames = declNames parsedSampleModule,
@@ -183,24 +353,24 @@ snapshot = HostedCompilerSnapshot {
   secondaryParsedDeclNames = declNames parsedSecondaryModule,
   secondaryCheckedModule = renderModuleSummary parsedSecondaryModule,
   secondaryLoweredModule = renderLowerModuleSummary loweredSecondaryDecls,
-  secondaryEmittedModule = emitModule loweredSecondaryDecls,
+  secondaryEmittedModule = emitModule parsedSecondaryModule loweredSecondaryDecls,
   tertiaryParsedModuleName = moduleNameOf parsedTertiaryModule,
   tertiaryParsedDeclNames = declNames parsedTertiaryModule,
   tertiaryCheckedModule = renderModuleSummary parsedTertiaryModule,
   tertiaryLoweredModule = renderLowerModuleSummary loweredTertiaryDecls,
-  tertiaryEmittedModule = emitModule loweredTertiaryDecls,
+  tertiaryEmittedModule = emitModule parsedTertiaryModule loweredTertiaryDecls,
   quaternaryParsedModuleName = moduleNameOf parsedQuaternaryModule,
   quaternaryParsedDeclNames = declNames parsedQuaternaryModule,
   quaternaryCheckedModule = renderModuleSummary parsedQuaternaryModule,
   quaternaryLoweredModule = renderLowerModuleSummary loweredQuaternaryDecls,
-  quaternaryEmittedModule = emitModule loweredQuaternaryDecls,
+  quaternaryEmittedModule = emitModule parsedQuaternaryModule loweredQuaternaryDecls,
   quinaryParsedModuleName = moduleNameOf parsedQuinaryModule,
   quinaryParsedRecordNames = recordDeclNames parsedQuinaryModule,
   quinaryParsedRecordFieldTypes = renderRecordFieldTypeSummaries (firstRecordDecl parsedQuinaryModule),
   quinaryParsedDeclNames = declNames parsedQuinaryModule,
   quinaryCheckedModule = renderModuleSummary parsedQuinaryModule,
   quinaryLoweredModule = renderLowerModuleSummary loweredQuinaryDecls,
-  quinaryEmittedModule = emitModule loweredQuinaryDecls,
+  quinaryEmittedModule = emitModule parsedQuinaryModule loweredQuinaryDecls,
   senaryParsedModuleName = moduleNameOf parsedSenaryModule,
   senaryParsedTypeNames = typeDeclNames parsedSenaryModule,
   senaryParsedConstructorSummaries = renderConstructorSummaries (firstTypeDecl parsedSenaryModule),
@@ -208,19 +378,22 @@ snapshot = HostedCompilerSnapshot {
   senaryParsedDeclNames = declNames parsedSenaryModule,
   senaryCheckedModule = renderModuleSummary parsedSenaryModule,
   senaryLoweredModule = renderLowerModuleSummary loweredSenaryDecls,
-  senaryEmittedModule = emitModule loweredSenaryDecls,
+  senaryEmittedModule = emitModule parsedSenaryModule loweredSenaryDecls,
   septenaryParsedModuleName = moduleNameOf parsedSeptenaryModule,
   septenaryParsedDeclNames = declNames parsedSeptenaryModule,
   septenaryCheckedModule = renderModuleSummary parsedSeptenaryModule,
   septenaryLoweredModule = renderLowerModuleSummary loweredSeptenaryDecls,
-  septenaryEmittedModule = emitModule loweredSeptenaryDecls
+  septenaryEmittedModule = emitModule parsedSeptenaryModule loweredSeptenaryDecls
 }
 
 snapshotJson : Str
 snapshotJson = encode snapshot
 
+snapshotJsonLiteral : Str
+snapshotJsonLiteral = encode snapshotJson
+
 stage2CompilerModule : Str
-stage2CompilerModule = textJoin "\n" ["// Generated by compiler-selfhost bootstrap", textConcat ["const snapshotJson = ", encode snapshotJson, ";"], "export const snapshot = Object.freeze(JSON.parse(snapshotJson));", "export function checkEntrypoint() {", "  return snapshot.checkedModule;", "}", "export function explainEntrypoint() {", "  return snapshot.explainModule;", "}", "export function compileEntrypoint() {", "  return snapshot.emittedModule;", "}", "export function nativeEntrypoint() {", "  return snapshot.emittedNativeModule;", "}", "export const main = snapshotJson;"]
+stage2CompilerModule = textJoin "\n" ["// Generated by compiler-selfhost bootstrap", textConcat ["const snapshotJson = ", snapshotJsonLiteral, ";"], "export const snapshot = Object.freeze(JSON.parse(snapshotJson));", "export function checkEntrypoint() {", "  return snapshot.checkedModule;", "}", "export function explainEntrypoint() {", "  return snapshot.explainModule;", "}", "export function compileEntrypoint() {", "  return snapshot.emittedModule;", "}", "export function nativeEntrypoint() {", "  return snapshot.emittedNativeModule;", "}", "export function nativeImageEntrypoint() {", "  return snapshot.emittedNativeImageModule;", "}", "export const main = snapshotJson;"]
 
 main : Str
 main = snapshotJson

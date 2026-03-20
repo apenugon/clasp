@@ -327,6 +327,7 @@ The first native runtime slice for compiler and backend workloads should stay ex
 - retain and release only visit handle slots declared by the object layout, and release walks those child roots before freeing storage
 - ship a small native runtime bundle with explicit retain/release helpers, static-root registration, generic object allocation, and compiler-support text/path/file primitives
 - emit both inspectable `.native.ir` output and a machine-readable `.native.image.json` module image so the kernel can load, validate, compare compatibility fingerprints, require explicit generated snapshot plus handoff symbols and typed state snapshot payloads for changed interfaces, activate, resolve generated export symbols, bind native entrypoints, dispatch the newest live generation, and retire drained generations without depending on debug text
+- make the kernel execute structured compiler-image exports directly so compiler entrypoints like `compileSourceText` stop depending on a JS host at runtime
 - keep the lowest native runtime layer in `Rust` behind a narrow C-shaped ABI instead of embedding the Haskell RTS into production server/runtime targets
 - build higher-level supervision, upgrade, workflow, and compiler behavior in `Clasp` on top of that kernel rather than growing the kernel into a second application platform
 
