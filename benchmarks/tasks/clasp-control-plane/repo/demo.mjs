@@ -24,7 +24,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
       return {
         jsonrpc: "2.0",
         id: request.id,
-        result: { summary: "src/Clasp/Compiler.hs\ntest/Main.hs" }
+        result: { summary: "deprecated/bootstrap/src/Clasp/Compiler.hs\ntest/Main.hs" }
       };
     }
     if (query === "bash scripts/verify-all.sh") {
@@ -78,7 +78,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
     sandbox: agent.role.sandboxPolicy,
     hookAccepted: boot.accepted,
     allowed: {
-      file: agent.policy.decideFile("/workspace/src/Clasp/Compiler.hs", loopContext).allowed,
+      file: agent.policy.decideFile("/workspace/deprecated/bootstrap/src/Clasp/Compiler.hs", loopContext).allowed,
       network: agent.policy.decideNetwork("api.openai.com", loopContext).allowed,
       processRg: agent.policy.decideProcess("rg", { step: "inspect" }).allowed,
       processBash: agent.policy.decideProcess("bash", { step: "verify" }).allowed,

@@ -35,7 +35,7 @@ assert.deepEqual(result.steps, [
     requestId: "release:inspect",
     method: "search_repo",
     allowed: true,
-    summary: "src/Clasp/Compiler.hs\ntest/Main.hs"
+    summary: "deprecated/bootstrap/src/Clasp/Compiler.hs\ntest/Main.hs"
   },
   {
     step: "verify",

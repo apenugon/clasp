@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createBamlShim } from "../../runtime/bun/server.mjs";
+import { createBamlShim } from "../../deprecated/runtime/server.mjs";
 
 function runTool(call) {
   if (call.method === "lookup_customer") {

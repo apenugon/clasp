@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
-import { installCompiledModule } from "../../runtime/bun/server.mjs";
-import { createReactNativeBridge } from "../../runtime/bun/react.mjs";
+import { installCompiledModule } from "../../deprecated/runtime/server.mjs";
+import { createReactNativeBridge } from "../../src/runtime/react.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 export async function renderLeadMobileDemo(compiledModule, options = {}) {

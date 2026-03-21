@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createWorkerRuntime } from "../../runtime/bun/worker.mjs";
+import { createWorkerRuntime } from "../../deprecated/runtime/worker.mjs";
 
 function reduceCounter(state, payload) {
   return {

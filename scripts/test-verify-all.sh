@@ -14,6 +14,13 @@ trap cleanup EXIT
 test_root="$(mktemp -d)"
 mkdir -p "$test_root/bin" "$test_root/scripts"
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
+cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
+cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+
+grep -F 'cabal test' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash
@@ -28,6 +35,7 @@ chmod +x "$test_root/bin/nix"
 fallback_capture="$test_root/fallback.txt"
 env_capture="$test_root/nix-env.txt"
 lock_capture="$test_root/lock-path.txt"
+stderr_capture="$test_root/stderr.txt"
 writable_nested_capture="$test_root/nested.txt"
 writable_cache_root="$test_root/writable-cache"
 mkdir -p "$writable_cache_root"
@@ -52,6 +60,24 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$env_capture")" == "$writable_cache_root" ]]
 [[ "$(< "$lock_capture")" == "$test_root/.clasp-verify.lock" ]]
+
+rm -f "$fallback_capture" "$stderr_capture"
+PATH="$test_root/bin:$PATH" \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+"$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
+
+[[ "$(< "$fallback_capture")" == "fallback-ok" ]]
+grep -F 'verify-fast: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
+
+rm -f "$fallback_capture" "$stderr_capture"
+PATH="$test_root/bin:$PATH" \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+"$bash_bin" "$test_root/scripts/verify-selfhost.sh" >/dev/null 2>"$stderr_capture"
+
+[[ "$(< "$fallback_capture")" == "fallback-ok" ]]
+grep -F 'verify-selfhost: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
 git_test_root="$test_root/git-repo"
 mkdir -p "$git_test_root/scripts"

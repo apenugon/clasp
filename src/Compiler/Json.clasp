@@ -1,0 +1,47 @@
+module Compiler.Json
+
+type JsonField = JsonFieldRaw Str Str | JsonFieldText Str Str | JsonFieldArray Str [Str]
+
+appendRenderedJson : [Str] -> Str -> [Str]
+appendRenderedJson values value = append values [value]
+
+renderJsonArray : [Str] -> Str
+renderJsonArray values = textConcat ["[", textJoin ", " values, "]"]
+
+renderJsonField : JsonField -> Str
+renderJsonField field = match field {
+  JsonFieldRaw name value ->
+    textConcat [encode name, ": ", value],
+  JsonFieldText name value ->
+    textConcat [encode name, ": ", encode value],
+  JsonFieldArray name values ->
+    textConcat [encode name, ": ", renderJsonArray values]
+}
+
+renderJsonFields : [JsonField] -> [Str]
+renderJsonFields fields = {
+  let mut rendered = [];
+  for field in fields {
+    rendered = appendRenderedJson rendered (renderJsonField field);
+    rendered
+  };
+  rendered
+}
+
+renderJsonObject : [JsonField] -> Str
+renderJsonObject fields = textConcat ["{", textJoin ", " (renderJsonFields fields), "}"]
+
+jsonObject : [JsonField] -> Str
+jsonObject fields = renderJsonObject fields
+
+jsonArray : [Str] -> Str
+jsonArray values = renderJsonArray values
+
+jsonFieldRaw : Str -> Str -> JsonField
+jsonFieldRaw name value = JsonFieldRaw name value
+
+jsonFieldText : Str -> Str -> JsonField
+jsonFieldText name value = JsonFieldText name value
+
+jsonFieldArray : Str -> [Str] -> JsonField
+jsonFieldArray name values = JsonFieldArray name values

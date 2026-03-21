@@ -116,8 +116,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 82404,
-      "sha256": "47eeea731f7054877052e546da5c3e463e68209bf7120ff5f6b4f4754c827efe"
+      "size": 82933,
+      "sha256": "85dab02adeaf75a1f7da640e0a52bb8640d8130709e4eec6028fdefd729c78a5"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -171,8 +171,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/scripts/verify.sh",
-      "size": 397,
-      "sha256": "0673e8d75c3ec37b90e6aff20484b5511eb087332273ad711bbcdc0dc63f919d"
+      "size": 384,
+      "sha256": "0448a6c683641d909e7833fae8ac82163bbe3b1418503601b8383378d815d4c4"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/Shared/Lead.clasp",
@@ -226,8 +226,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/scripts/verify.sh",
-      "size": 399,
-      "sha256": "4c0540712fbac5e2b43a831ac40e232184f1e09a7e113af0f00c15d568261e82"
+      "size": 386,
+      "sha256": "f01e04311dc595ce02ee619d56bb64a61efb3f79f7e90d209f5c1b84b75c8ff8"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/test/priority.test.mjs",
@@ -271,8 +271,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/scripts/verify.sh",
-      "size": 400,
-      "sha256": "c04552ec3a454e7e721231e932e33b233ca668d4b6054621bb6fc694a73b43b2"
+      "size": 387,
+      "sha256": "c9c6b4a836888f8f735d44b8768fa9a2cc3793945da3d55187ca2fb3893acfa1"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/priority.test.mjs",
@@ -316,8 +316,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/LANGUAGE_GUIDE.md",
-      "size": 2450,
-      "sha256": "8f9044f3c4c7244c7f7e1ec59713f47497954609f1f90826ae77acea97388109"
+      "size": 2424,
+      "sha256": "38604f31e6771e38d1803852e963099e2ad3c4ab1c68de9085e5fbe48944acd3"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Main.clasp",
@@ -331,8 +331,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh",
-      "size": 415,
-      "sha256": "b99696e0c4bc622080c449f281a4e1640faa84373ea81c564a6b6dd3033f5a48"
+      "size": 402,
+      "sha256": "f08a08a4c70405038e07c0a3d22f53210a985ec1947a1c45750ee5511dd19348"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/server.mjs",

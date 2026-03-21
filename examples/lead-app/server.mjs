@@ -1,5 +1,5 @@
 import * as compiled from "./Main.js";
-import { installCompiledModule, serveCompiledModule } from "../../runtime/bun/server.mjs";
+import { installCompiledModule, serveCompiledModule } from "../../deprecated/runtime/server.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 installCompiledModule(compiled, createLeadDemoBindings());

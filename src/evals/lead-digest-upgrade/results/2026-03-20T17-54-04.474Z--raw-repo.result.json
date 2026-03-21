@@ -1,0 +1,42 @@
+{
+  "eval": "lead-digest-upgrade",
+  "mode": "raw-repo",
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T17:54:04.820Z",
+  "finishedAt": "2026-03-20T17:55:17.100Z",
+  "durationMs": 72280,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/lead-digest-upgrade/results/2026-03-20T17-54-04.474Z--raw-repo.prompt.md",
+  "promptBytes": 1173,
+  "codexExitCode": 0,
+  "tokenUsage": {
+    "prompt": 146418,
+    "completion": 3136,
+    "retry": 0,
+    "debug": 0,
+    "total": 149554
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 146418,
+    "cachedInputTokens": 128128,
+    "outputTokens": 3136,
+    "uncachedInputTokens": 18290,
+    "uncachedTotal": 21426
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"eval\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-live-raw-repo-WzWR2S\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"digestFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+  },
+  "verifyAttempts": 2,
+  "repairLoops": 1,
+  "timeToGreenMs": 67485,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

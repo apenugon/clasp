@@ -589,27 +589,40 @@ async function resolveClaspEntrypoint(task, workspace) {
 }
 
 async function runClaspCompilerCommand(command, inputPath, outputPath, env) {
-  const script = [
-    "set -euo pipefail",
-    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `cabal run claspc -- ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} --compiler=bootstrap >/dev/null 2>/dev/null`
-  ].join(" && ");
-  const result = await runProcess(
-    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
-    env.CLASP_PROJECT_ROOT,
-    env
-  );
+  const result = await runClaspCompilerCommandCapture(command, inputPath, outputPath, env);
 
   if (result.exitCode !== 0) {
     throw new Error(`failed to generate Clasp ${command} artifact for ${inputPath}`);
   }
 }
 
+async function runClaspCompilerCommandCapture(command, inputPath, outputPath, env) {
+  const script = [
+    "set -euo pipefail",
+    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
+    `claspc --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} --compiler=bootstrap >/dev/null`
+  ].join(" && ");
+  return runProcessCapture(
+    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
+    env.CLASP_PROJECT_ROOT,
+    env
+  );
+}
+
 async function renderClaspUiGraph(entryPath, prepRoot, env) {
   const tempModulePath = path.join(prepRoot, ".benchmark-prep-ui.mjs");
 
   try {
-    await runClaspCompilerCommand("compile", entryPath, tempModulePath, env);
+    const compileResult = await runClaspCompilerCommandCapture("compile", entryPath, tempModulePath, env);
+
+    if (compileResult.exitCode !== 0) {
+      if (compileResult.stderr.includes("E_BACKEND_TARGET_REQUIRES_NATIVE")) {
+        return [];
+      }
+
+      throw new Error(`failed to generate Clasp compile artifact for ${entryPath}`);
+    }
+
     const compiledModule = await import(`${pathToFileURL(tempModulePath).href}?t=${Date.now()}`);
     return compiledModule.__claspUiGraph ?? [];
   } finally {
@@ -631,7 +644,7 @@ async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `cabal run claspc -- ${command} ${shellQuote(inputPath)} --compiler=bootstrap`
+    `claspc ${command} ${shellQuote(inputPath)} --compiler=bootstrap`
   ].join(" && ");
   return runProcessCapture(
     ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
@@ -2199,19 +2212,25 @@ async function runProcessCapture(command, cwd, env = process.env) {
     const child = spawn(command[0], command.slice(1), {
       cwd,
       env,
-      stdio: ["ignore", "pipe", "inherit"]
+      stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
+    let stderr = "";
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
     });
 
     child.on("error", reject);
     child.on("exit", (exitCode) => {
       resolve({
         exitCode: exitCode ?? 1,
-        stdout
+        stdout,
+        stderr
       });
     });
   });

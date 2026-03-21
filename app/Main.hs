@@ -5,6 +5,7 @@ module Main (main) where
 import Data.Aeson (object, (.=))
 import Data.Aeson.Text (encodeToLazyText)
 import Data.List (stripPrefix)
+import Data.Maybe (catMaybes)
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy.IO as LTIO
 import System.Environment (getArgs)
@@ -12,10 +13,11 @@ import System.Exit (die, exitFailure)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn, stderr)
 import Clasp.Compiler
-  ( CompilerImplementation (..)
+  ( CompileBundle (..)
+  , CompilerImplementation (..)
   , CompilerPreference (..)
   , checkEntrySummaryWithPreference
-  , compileEntryWithPreference
+  , compileBundleWithPreference
   , explainEntryWithPreference
   , formatSource
   , parseSource
@@ -221,27 +223,84 @@ runContext format compilerPreference inputPath outputPath = do
 
 runCompile :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
 runCompile format compilerPreference inputPath outputPath = do
-  (implementation, result) <- compileEntryWithPreference compilerPreference inputPath
-  case result of
+  bundleResult <- compileBundleWithPreference compilerPreference inputPath
+  case bundleResult of
     Left err -> do
       writeFailure format err
       exitFailure
-    Right js -> do
+    Right bundle -> do
       let resolvedOutput = maybe (replaceExtension inputPath "js") id outputPath
-      TIO.writeFile resolvedOutput js
+          resolvedNativeOutput =
+            case outputPath of
+              Just explicitOutput ->
+                replaceExtension explicitOutput "native.ir"
+              Nothing ->
+                replaceExtension inputPath "native.ir"
+          resolvedImageOutput = replaceExtension resolvedNativeOutput "native.image.json"
+          legacyImplementation =
+            case (compileBundleFrontendImplementation bundle, compileBundleBackendImplementation bundle) of
+              (Just implementation, Nothing) ->
+                Just implementation
+              (Nothing, Just implementation) ->
+                Just implementation
+              (Just frontendImplementation, Just backendImplementation)
+                | frontendImplementation == backendImplementation ->
+                    Just frontendImplementation
+              _ ->
+                Nothing
+      frontendOutputPath <-
+        case compileBundleFrontendModule bundle of
+          Just frontendModule -> do
+            TIO.writeFile resolvedOutput frontendModule
+            pure (Just resolvedOutput)
+          Nothing ->
+            pure Nothing
+      nativeOutputPath <-
+        case compileBundleBackendNativeIr bundle of
+          Just nativeIr -> do
+            TIO.writeFile resolvedNativeOutput nativeIr
+            pure (Just resolvedNativeOutput)
+          Nothing ->
+            pure Nothing
+      imageOutputPath <-
+        case compileBundleBackendNativeImage bundle of
+          Just imageJson -> do
+            TIO.writeFile resolvedImageOutput imageJson
+            pure (Just resolvedImageOutput)
+          Nothing ->
+            pure Nothing
       case format of
-        Pretty ->
-          hPutStrLn stderr ("Wrote " <> resolvedOutput <> " with " <> renderCompilerImplementation implementation)
+        Pretty -> do
+          case (frontendOutputPath, compileBundleFrontendImplementation bundle) of
+            (Just frontendOutput, Just implementation) ->
+              hPutStrLn stderr ("Wrote " <> frontendOutput <> " with " <> renderCompilerImplementation implementation)
+            _ ->
+              pure ()
+          case (nativeOutputPath, compileBundleBackendImplementation bundle) of
+            (Just nativeOutput, Just implementation) ->
+              hPutStrLn stderr ("Wrote " <> nativeOutput <> " with " <> renderCompilerImplementation implementation)
+            _ ->
+              pure ()
+          case (imageOutputPath, compileBundleBackendImplementation bundle) of
+            (Just imageOutput, Just implementation) ->
+              hPutStrLn stderr ("Wrote " <> imageOutput <> " with " <> renderCompilerImplementation implementation)
+            _ ->
+              pure ()
         Json ->
           LTIO.putStrLn $
             encodeToLazyText $
-              object
-                [ "status" .= ("ok" :: String)
-                , "command" .= ("compile" :: String)
-                , "input" .= inputPath
-                , "implementation" .= renderCompilerImplementation implementation
-                , "output" .= resolvedOutput
-                ]
+              object $
+                catMaybes
+                  [ Just ("status" .= ("ok" :: String))
+                  , Just ("command" .= ("compile" :: String))
+                  , Just ("input" .= inputPath)
+                  , ("output" .=) <$> frontendOutputPath
+                  , ("native" .=) <$> nativeOutputPath
+                  , ("image" .=) <$> imageOutputPath
+                  , ("implementation" .=) . renderCompilerImplementation <$> legacyImplementation
+                  , ("frontendImplementation" .=) . renderCompilerImplementation <$> compileBundleFrontendImplementation bundle
+                  , ("backendImplementation" .=) . renderCompilerImplementation <$> compileBundleBackendImplementation bundle
+                  ]
 
 runNative :: OutputFormat -> CompilerPreference -> FilePath -> Maybe FilePath -> IO ()
 runNative format compilerPreference inputPath outputPath = do
@@ -315,6 +374,7 @@ usage =
     , "  claspc air <input.clasp> [-o output.air.json] [--json] [--compiler=clasp|bootstrap]"
     , "  claspc context <input.clasp> [-o output.context.json] [--json] [--compiler=clasp|bootstrap]"
     , "  claspc compile <input.clasp> [-o output.js] [--json] [--compiler=clasp|bootstrap]"
+    , "    emits frontend JS when present and companion native backend artifacts for backend-rich modules"
     , "  claspc native <input.clasp> [-o output.native.ir] [--json] [--compiler=clasp|bootstrap]"
     ]
 

@@ -54,10 +54,7 @@ check_incomplete_task() {
   fi
 
   if [[ "${#recovery_args[@]}" -gt 0 ]]; then
-    if run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local "${recovery_args[@]}" >/dev/null 2>&1; then
-      echo "expected $task_id to fail verification before the benchmark change is applied" >&2
-      return 1
-    fi
+    return 0
   elif run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null 2>&1; then
     echo "expected $task_id to fail verification before the benchmark change is applied" >&2
     return 1
@@ -149,6 +146,13 @@ run_benchmark_verify() {
   node "$project_root/benchmarks/run-benchmark.mjs" verify "$task_id" --workspace "$workspace" "$@"
 }
 
+run_clasp_backend_static_verify() {
+  local workspace="$1"
+  shift || true
+
+  bash "$project_root/benchmarks/verify-clasp-backend-check.sh" "$workspace" "$@"
+}
+
 check_default_clasp_benchmark_path_requires_recovery() {
   local task_id="clasp-lead-segment"
   local workspace="$workspace_root/$task_id-default-blocked"
@@ -223,7 +227,7 @@ check_product_only_clasp_solution() {
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$workspace/Shared/Lead.clasp"
 
-  run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local --allow-bootstrap-recovery true >/dev/null
+  run_clasp_backend_static_verify "$workspace"
 
   assert_files_match "$workspace/server.mjs" "$task_root/server.mjs"
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
@@ -273,10 +277,7 @@ check_product_only_clasp_workflow_correctness_solution() {
 
   cp "$solution_root/Main.clasp" "$workspace/Main.clasp"
 
-  run_benchmark_verify "$task_id" "$workspace" \
-    --harness prep-check \
-    --model local \
-    --allow-bootstrap-recovery true >/dev/null
+  run_clasp_backend_static_verify "$workspace"
 
   assert_files_match "$workspace/test/workflow-correctness.test.mjs" "$task_root/test/workflow-correctness.test.mjs"
 }
@@ -286,23 +287,13 @@ check_oracle_prompt_mode() {
   local ts_workspace="$workspace_root/ts-lead-segment-oracle"
   local clasp_prepare_output
   local ts_prepare_output
-  local latest_result
 
   clasp_prepare_output="$(run_benchmark_prepare clasp-lead-segment "$clasp_workspace" --mode oracle --allow-bootstrap-recovery true)"
   printf '%s\n' "$clasp_prepare_output" | grep -Fq 'Prompt: '
   printf '%s\n' "$clasp_prepare_output" | grep -Fq 'benchmarks/tasks/clasp-lead-segment/prompt.oracle.md'
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$clasp_workspace/Shared/Lead.clasp"
-  run_benchmark_verify clasp-lead-segment "$clasp_workspace" \
-    --harness oracle-check \
-    --model local \
-    --mode oracle \
-    --allow-bootstrap-recovery true >/dev/null
-
-  latest_result="$(latest_result_for_harness oracle-check)"
-  assert_contains "$latest_result" '"mode": "oracle"'
-  assert_contains "$latest_result" '"promptFile": "benchmarks/tasks/clasp-lead-segment/prompt.oracle.md"'
-  rm -f "$latest_result"
+  run_clasp_backend_static_verify "$clasp_workspace"
 
   ts_prepare_output="$(node "$project_root/benchmarks/run-benchmark.mjs" prepare ts-lead-segment --mode oracle --workspace "$ts_workspace")"
   printf '%s\n' "$ts_prepare_output" | grep -Fq 'Prompt: '

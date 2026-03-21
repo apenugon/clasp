@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../runtime/native/clasp_runtime.h"
+#include "../../runtime/clasp_runtime.h"
 
 static char *read_file(const char *path) {
   FILE *file = fopen(path, "rb");

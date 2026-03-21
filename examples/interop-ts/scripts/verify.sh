@@ -13,8 +13,8 @@ trap cleanup EXIT
 
 run_verify() {
   cd "$project_root"
-  cabal run claspc -- check examples/interop-ts/Main.clasp --compiler=bootstrap
-  cabal run claspc -- compile examples/interop-ts/Main.clasp -o examples/interop-ts/compiled.mjs --compiler=bootstrap
+  claspc check examples/interop-ts/Main.clasp --compiler=bootstrap
+  claspc compile examples/interop-ts/Main.clasp -o examples/interop-ts/compiled.mjs --compiler=bootstrap
   node examples/interop-ts/demo.mjs "$compiled_path"
 }
 

@@ -51,19 +51,19 @@ The default repo verification path now stays on the hosted compiler and non-Clas
 Check an example in explicit bootstrap recovery mode:
 
 ```sh
-cabal run claspc -- check examples/support-console/Main.clasp --compiler=bootstrap
+claspc check examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
 Emit AIR in explicit bootstrap recovery mode:
 
 ```sh
-cabal run claspc -- air examples/support-console/Main.clasp --compiler=bootstrap
+claspc air examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
 Render the expanded human-readable explain output in explicit bootstrap recovery mode:
 
 ```sh
-cabal run claspc -- explain examples/support-console/Main.clasp --compiler=bootstrap
+claspc explain examples/support-console/Main.clasp --compiler=bootstrap
 ```
 
 Verify the `npm`/`TypeScript` interop example:
@@ -72,10 +72,10 @@ Verify the `npm`/`TypeScript` interop example:
 bash examples/interop-ts/scripts/verify.sh
 ```
 
-Verify the hosted compiler on `JS/Bun`:
+Verify the hosted compiler on the native self-hosted loop:
 
 ```sh
-bash compiler/hosted/scripts/verify.sh
+bash src/scripts/verify.sh
 ```
 
 Verify the typed prompt-function example:
@@ -105,14 +105,14 @@ bash examples/release-gate/scripts/verify.sh
 Emit the context graph in explicit bootstrap recovery mode:
 
 ```sh
-cabal run claspc -- context examples/release-gate/Main.clasp --compiler=bootstrap
+claspc context examples/release-gate/Main.clasp --compiler=bootstrap
 ```
 
 Run the control-plane demo after compiling `Main.clasp` into `dist/` with explicit bootstrap recovery mode:
 
 ```sh
 mkdir -p dist/control-plane
-cabal run claspc -- compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js --compiler=bootstrap
+claspc compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js --compiler=bootstrap
 node examples/control-plane/demo.mjs dist/control-plane/Main.js
 ```
 
@@ -120,8 +120,8 @@ Run the durable workflow restart and supervised hot-swap demo after compiling bo
 
 ```sh
 mkdir -p dist/durable-workflow
-cabal run claspc -- compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js --compiler=bootstrap
-cabal run claspc -- compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js --compiler=bootstrap
+claspc compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js --compiler=bootstrap
+claspc compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js --compiler=bootstrap
 node examples/durable-workflow/demo.mjs dist/durable-workflow/Main.js dist/durable-workflow/Main.next.js
 ```
 

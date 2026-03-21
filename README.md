@@ -173,31 +173,31 @@ If that does not hold up across more tasks and more harnesses, the project shoul
 - `docs/clasp-roadmap.md`: implementation roadmap
 - `docs/clasp-benchmark-plan.md`: benchmark strategy
 - `benchmarks/`: benchmark repos, manifests, runner, and results
-- `src/Clasp/`: compiler implementation
-- `runtime/bun/`: Bun runtime helpers
+- `src/`: self-hosted Clasp compiler, promoted native seed, and self-hosted verification scripts
+- `src/runtime/`: compiler-packaged JS helper assets for client, React Native, Expo, and Python interop
+- `deprecated/bootstrap/src/Clasp/`: legacy Haskell bootstrap compiler
+- `deprecated/runtime/`: legacy JS backend server and worker shims pending full native replacement
+- `runtime/`: native runtime substrate and native tool runner
 - `examples/`: small example programs and demo app
-- `app/Main.hs`: `claspc` CLI entrypoint
+- `app/Main.hs`: current `claspc` CLI shim while the self-hosted/native takeover is still in progress
 
 ## Quick Start
 
 ```sh
 nix develop
-cabal build
-cabal test
 
-cabal run claspc -- check examples/hello.clasp --compiler=bootstrap
-cabal run claspc -- check examples/status.clasp --compiler=bootstrap
-cabal run claspc -- check examples/records.clasp --compiler=bootstrap
-cabal run claspc -- check examples/lead-app/Main.clasp --compiler=bootstrap
-cabal run claspc -- check examples/compiler-selfhost/Main.clasp --json --compiler=bootstrap
+claspc check src/Main.clasp --json --compiler=bootstrap
+bash src/scripts/verify.sh
 
-cabal run claspc -- context examples/lead-app/Main.clasp --compiler=bootstrap
-cabal run claspc -- compile examples/lead-app/Main.clasp -o examples/lead-app/Main.js --compiler=bootstrap
-bun examples/lead-app/server.mjs
+claspc check examples/hello.clasp --compiler=bootstrap
+claspc check examples/status.clasp --compiler=bootstrap
+claspc check examples/records.clasp --compiler=bootstrap
+claspc check examples/lead-app/Main.clasp --compiler=bootstrap
+claspc check examples/compiler-selfhost/Main.clasp --json --compiler=bootstrap
 
-cd examples/lead-app-ts
-npm install
-npm run start
+claspc context examples/lead-app/Main.clasp --compiler=bootstrap
+claspc native examples/lead-app/Main.clasp -o dist/lead-app.native.ir --compiler=bootstrap
+bash scripts/test-native-runtime.sh
 ```
 
 ## Near-Term Direction

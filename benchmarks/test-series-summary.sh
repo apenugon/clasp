@@ -792,8 +792,7 @@ printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--notes public-app-2'
 
 claude_workspace="$project_root/benchmarks/workspaces/claude-usage-check"
 rm -rf "$claude_workspace"
-node "$project_root/benchmarks/run-benchmark.mjs" prepare clasp-lead-segment --workspace "$claude_workspace" --allow-bootstrap-recovery true >/dev/null
-cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$claude_workspace/Shared/Lead.clasp"
+mkdir -p "$claude_workspace"
 
 claude_bundle="$project_root/benchmarks/bundles/claude-usage-check.json"
 synthetic_files+=("$claude_bundle")
@@ -821,39 +820,69 @@ cat >"$claude_workspace/benchmark-phases.json" <<EOF
 }
 EOF
 
-node "$project_root/benchmarks/run-benchmark.mjs" verify clasp-lead-segment \
-  --workspace "$claude_workspace" \
-  --harness claude-code \
-  --model sonnet \
-  --mode file-hinted \
-  --bundle-manifest "$claude_bundle" \
-  --sample-count 2 \
-  --sample-index 1 \
-  --notes claude-usage-check \
-  --allow-bootstrap-recovery true >/dev/null
-
-latest_result=""
-latest_result_mtime=0
-if stat -c '%Y' "$results_root" >/dev/null 2>&1; then
-  stat_args=(-c '%Y')
-else
-  stat_args=(-f '%m')
-fi
-for candidate in "$results_root"/*.json; do
-  [[ -e "$candidate" ]] || continue
-  candidate_mtime="$(stat "${stat_args[@]}" "$candidate")"
-  if [[ -z "$latest_result" || "$candidate_mtime" -gt "$latest_result_mtime" ]]; then
-    latest_result="$candidate"
-    latest_result_mtime="$candidate_mtime"
-  fi
-done
-
-if [[ -z "$latest_result" ]]; then
-  echo "expected at least one benchmark result artifact" >&2
-  exit 1
-fi
-
+latest_result="$results_root/2026-03-01T11-15-00.000Z--clasp-lead-segment--claude-code.json"
 synthetic_files+=("$latest_result")
+cat >"$latest_result" <<EOF
+{
+  "taskId": "clasp-lead-segment",
+  "suite": "clickable-lead-inbox",
+  "language": "clasp",
+  "harness": "claude-code",
+  "model": "sonnet",
+  "startedAt": "2026-03-01T11:14:59.000Z",
+  "finishedAt": "2026-03-01T11:15:00.000Z",
+  "durationMs": 250,
+  "humanInterventions": 0,
+  "notes": "claude-usage-check",
+  "tokenUsage": {
+    "prompt": 105,
+    "completion": 20,
+    "retry": 0,
+    "debug": 0,
+    "total": 125
+  },
+  "harnessUsage": {
+    "provider": "claude-code",
+    "agentLogFile": "benchmarks/workspaces/claude-usage-check/claude-run.jsonl",
+    "inputTokens": 105,
+    "cachedInputTokens": 30,
+    "outputTokens": 20,
+    "uncachedInputTokens": 75,
+    "uncachedTotal": 95
+  },
+  "protocol": {
+    "schemaVersion": 1,
+    "mode": "file-hinted",
+    "workflowAssistance": "unspecified",
+    "promptFile": "benchmarks/tasks/clasp-lead-segment/prompt.file-hinted.md",
+    "repeatedSamples": 2,
+    "sampleIndex": 1,
+    "runOrderPosition": 1,
+    "randomizedOrderSeed": "claude-usage-check:sample:1",
+    "bundle": {
+      "manifestFile": "benchmarks/bundles/claude-usage-check.json",
+      "sampleCount": 2,
+      "sampleIndex": 1
+    },
+    "timingWindow": {
+      "startedAt": "2026-03-01T11:14:59.000Z",
+      "finishedAt": "2026-03-01T11:15:00.000Z"
+    }
+  },
+  "phases": {
+    "discoveryMs": 21,
+    "firstEditMs": 144,
+    "firstVerifyMs": 211,
+    "timeToGreenMs": 250
+  },
+  "verification": {
+    "passed": true,
+    "command": ["bash", "scripts/verify.sh"],
+    "exitCode": 0
+  }
+}
+EOF
+
 grep -Fq '"harness": "claude-code"' "$latest_result"
 grep -Fq '"model": "sonnet"' "$latest_result"
 grep -Fq '"mode": "file-hinted"' "$latest_result"

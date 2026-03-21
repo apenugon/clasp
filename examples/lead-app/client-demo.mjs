@@ -1,11 +1,11 @@
 import { pathToFileURL } from "node:url";
-import { createRouteClientRuntime } from "../../runtime/bun/client.mjs";
+import { createRouteClientRuntime } from "../../src/runtime/client.mjs";
 import {
   bindingContractFor,
   installCompiledModule,
   requestPayloadJson,
   responseForRouteResult
-} from "../../runtime/bun/server.mjs";
+} from "../../deprecated/runtime/server.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 export async function runLeadClientDemo(compiledModule, options = {}) {

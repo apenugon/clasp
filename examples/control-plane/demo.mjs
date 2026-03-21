@@ -22,7 +22,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
       return {
         jsonrpc: "2.0",
         id: request.id,
-        result: { summary: "src/Clasp/Compiler.hs\ntest/Main.hs" }
+        result: { summary: "deprecated/bootstrap/src/Clasp/Compiler.hs\ntest/Main.hs" }
       };
     }
     if (query === "bash scripts/verify-all.sh") {
@@ -37,7 +37,7 @@ export async function runControlPlaneDemo(compiledModulePath) {
 
   const boot = hook.invoke({ workerId: "builder-7" });
   const loopContext = { actor: { id: "builder-7" }, lane: "control-plane" };
-  const fileDecision = agent.policy.decideFile("/workspace/src/Clasp/Compiler.hs", loopContext);
+  const fileDecision = agent.policy.decideFile("/workspace/deprecated/bootstrap/src/Clasp/Compiler.hs", loopContext);
   const plannedVerifierRequests = mergeGate.plan({ query: "bash scripts/verify-all.sh" }, "release");
   const queue = [
     {

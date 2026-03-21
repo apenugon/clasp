@@ -4744,9 +4744,9 @@ for (const schemaContract of Object.values(__claspSchemas)) {
 }
 
 export const __claspPlatformBridges = Object.freeze({
-  react: Object.freeze({ module: "runtime/bun/react.mjs", entry: "createReactInterop" }),
-  reactNative: Object.freeze({ module: "runtime/bun/react.mjs", entry: "createReactNativeBridge" }),
-  expo: Object.freeze({ module: "runtime/bun/react.mjs", entry: "createExpoBridge" })
+  react: Object.freeze({ module: "src/runtime/react.mjs", entry: "createReactInterop" }),
+  reactNative: Object.freeze({ module: "src/runtime/react.mjs", entry: "createReactNativeBridge" }),
+  expo: Object.freeze({ module: "src/runtime/react.mjs", entry: "createExpoBridge" })
 });
 const $claspModuleVersionId = "module:Main:1535494367";
 const $claspModuleUpgradeWindow = Object.freeze({
@@ -5062,7 +5062,7 @@ export const __claspBoundaryTransports = Object.freeze({
 
 export const __claspPythonInterop = Object.freeze({
   version: 1,
-  runtime: Object.freeze({ module: "runtime/bun/python.mjs", entry: "createPythonInteropRuntime" }),
+  runtime: Object.freeze({ module: "src/runtime/python.mjs", entry: "createPythonInteropRuntime" }),
   workers: Object.freeze([
   ]),
   services: Object.freeze([

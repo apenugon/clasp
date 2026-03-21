@@ -1,6 +1,6 @@
 # Clasp Repo Guidance
 
-This repository is building `Clasp`, an AI-oriented programming language compiler in Haskell.
+This repository is building `Clasp`, an AI-oriented programming language with a self-hosted compiler in `src/` and a legacy Haskell bootstrap compiler under `deprecated/bootstrap/`.
 
 ## Working Rules
 
@@ -16,15 +16,23 @@ The main pipeline is:
 
 `source -> parser -> checker -> typed core -> lowered IR -> JavaScript emitter`
 
-The main implementation files are:
+The current implementation is split in two:
 
-- `src/Clasp/Syntax.hs`
-- `src/Clasp/Parser.hs`
-- `src/Clasp/Checker.hs`
-- `src/Clasp/Core.hs`
-- `src/Clasp/Lower.hs`
-- `src/Clasp/Emit/JavaScript.hs`
-- `src/Clasp/Compiler.hs`
+- Self-hosted compiler:
+  - `src/Main.clasp`
+  - `src/Compiler/Ast.clasp`
+  - `src/Compiler/Checker.clasp`
+  - `src/Compiler/Lower.clasp`
+  - `src/Compiler/Emit/JavaScript.clasp`
+  - `src/Compiler/Emit/Native.clasp`
+- Legacy Haskell bootstrap compiler:
+  - `deprecated/bootstrap/src/Clasp/Syntax.hs`
+  - `deprecated/bootstrap/src/Clasp/Parser.hs`
+  - `deprecated/bootstrap/src/Clasp/Checker.hs`
+  - `deprecated/bootstrap/src/Clasp/Core.hs`
+  - `deprecated/bootstrap/src/Clasp/Lower.hs`
+  - `deprecated/bootstrap/src/Clasp/Emit/JavaScript.hs`
+  - `deprecated/bootstrap/src/Clasp/Compiler.hs`
 - `test/Main.hs`
 
 ## Task Discipline

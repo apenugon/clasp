@@ -2,7 +2,7 @@ import {
   bindingContractFor,
   createBamlShim,
   installCompiledModule
-} from "../../../../runtime/bun/server.mjs";
+} from "../../../../deprecated/runtime/server.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 function normalizeTag(value) {

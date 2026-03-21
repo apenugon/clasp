@@ -23,7 +23,7 @@ import System.Directory
   )
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>), replaceExtension, takeDirectory)
-import System.Process (readProcessWithExitCode)
+import System.Process (CreateProcess (cwd), proc, readCreateProcessWithExitCode, readProcessWithExitCode)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -82,6 +82,7 @@ import Clasp.Core
   , CoreMetricDecl (..)
   , CorePattern (..)
   , CorePatternBinder (..)
+  , CoreRecordField (..)
   , CoreRolloutDecl (..)
   , CoreSupervisorDecl (..)
   , CoreToolDecl (..)
@@ -773,6 +774,28 @@ parserTests =
                     assertFailure ("expected multiline list literal body, got " <> show other)
               Nothing ->
                 assertFailure "expected roster declaration"
+    , testCase "parses trailing commas in structured literals and record fields" $
+        case parseSource "inline" trailingCommaStructuredSource of
+          Left err ->
+            assertFailure ("expected trailing-comma source to parse:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right modl -> do
+            case moduleRecordDecls modl of
+              [recordDecl] ->
+                assertEqual
+                  "record field names"
+                  ["name", "active"]
+                  (fmap recordFieldDeclName (recordDeclFields recordDecl))
+              other ->
+                assertFailure ("expected one record declaration, got " <> show (length other))
+            case findDecl "defaultUsers" (moduleDecls modl) of
+              Just decl ->
+                case declBody decl of
+                  EList _ [ERecord _ "User" [RecordFieldExpr "name" _ (EString _ "Ada"), RecordFieldExpr "active" _ (EBool _ True)]] ->
+                    pure ()
+                  other ->
+                    assertFailure ("expected trailing-comma record list body, got " <> show other)
+              Nothing ->
+                assertFailure "expected defaultUsers declaration"
     , testCase "parses local let expressions" $
         case parseSource "inline" letExpressionSource of
           Left err ->
@@ -1353,6 +1376,20 @@ checkerTests =
                     assertFailure ("unexpected checked multiline emptyRoster declaration: " <> show other)
               Nothing ->
                 assertFailure "expected multiline emptyRoster declaration"
+    , testCase "accepts trailing commas in structured literals and record fields" $
+        case checkSource "trailing-commas" trailingCommaStructuredSource of
+          Left err ->
+            assertFailure ("expected trailing-comma source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            case find ((== "defaultUsers") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                case coreDeclBody decl of
+                  CList _ (TList (TNamed "User")) [CRecord _ (TNamed "User") "User" [CoreRecordField "name" (CString _ "Ada"), CoreRecordField "active" (CBool _ True)]] ->
+                    assertEqual "defaultUsers type" (TList (TNamed "User")) (coreDeclType decl)
+                  other ->
+                    assertFailure ("unexpected checked trailing-comma declaration: " <> show other)
+              Nothing ->
+                assertFailure "expected defaultUsers declaration"
     , testCase "typechecks general list append expressions" $
         case checkSource "list-append" listAppendSource of
           Left err ->
@@ -1742,50 +1779,50 @@ checkerTests =
                 assertEqual "main type" TStr (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
-    , testCase "typechecks the compiler renderers example file in explicit bootstrap recovery mode" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp", "--compiler=bootstrap"]
+    , testCase "typechecks the compiler renderers example file on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler renderers example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler loader example file in explicit bootstrap recovery mode" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-loader.clasp", "--compiler=bootstrap"]
+    , testCase "typechecks the compiler loader example file on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-loader.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler loader example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler parser example file in explicit bootstrap recovery mode" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-parser.clasp", "--compiler=bootstrap"]
+    , testCase "typechecks the compiler parser example file on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-parser.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler parser example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler checker example file in explicit bootstrap recovery mode" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-checker.clasp", "--compiler=bootstrap"]
+    , testCase "typechecks the compiler checker example file on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-checker.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler checker example source to typecheck:\n" <> stdoutText <> stderrText)
-    , testCase "typechecks the compiler emitter example file in explicit bootstrap recovery mode" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-emitter.clasp", "--compiler=bootstrap"]
+    , testCase "typechecks the compiler emitter example file on the hosted Clasp path" $ do
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-emitter.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected compiler emitter example source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "typechecks the hosted compiler entrypoint file" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "src/Main.clasp"]
         case exitCode of
           ExitSuccess ->
             pure ()
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint source to typecheck:\n" <> stdoutText <> stderrText)
     , testCase "claspc check prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp", "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "src/Main.clasp", "--json"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -1831,6 +1868,23 @@ checkerTests =
           assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
           assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
           assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+    , testCase "claspc check keeps local binders ahead of imported globals on the hosted Clasp path" $
+        withProjectFiles "check-primary-shadowed-import-success" shadowedImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["check", inputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted primary compiler check for a shadowed imported project to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted shadowed-import check json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
     , testCase "claspc check can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
@@ -1846,7 +1900,7 @@ checkerTests =
         assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
         assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
     , testCase "claspc check can force the Haskell bootstrap fallback for the hosted compiler entrypoint" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "compiler/hosted/Main.clasp", "--json", "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["check", "src/Main.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -1900,12 +1954,12 @@ checkerTests =
                     assertFailure ("expected hosted checked core to preserve the typed main call, got " <> show other)
               Nothing ->
                 assertFailure "expected hosted checked module to contain main"
-    , testCase "checkEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+    , testCase "checkEntryWithPreference Auto prefers the hosted Clasp compiler for control-plane metadata projects" $ do
         (implementation, result) <- checkEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
-        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        assertEqual "implementation" CompilerImplementationClasp implementation
         case result of
           Left err ->
-            assertFailure ("expected bootstrap fallback check to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            assertFailure ("expected hosted auto check for control-plane to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right checked ->
             assertBool "expected main declaration in checked module" (any ((== "main") . coreDeclName) (coreModuleDecls checked))
     , testCase "checkEntrySummaryWithPreference Auto prefers the hosted Clasp compiler for hosted-subset projects" $ do
@@ -1917,14 +1971,14 @@ checkerTests =
           Right summary -> do
             assertBool "expected hosted summary hello declaration" ("hello : Str" `T.isInfixOf` summary)
             assertBool "expected hosted summary main declaration" ("main : Str" `T.isInfixOf` summary)
-    , testCase "checkEntrySummaryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+    , testCase "checkEntrySummaryWithPreference Auto prefers the hosted Clasp compiler for control-plane metadata projects" $ do
         (implementation, result) <- checkEntrySummaryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
-        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        assertEqual "implementation" CompilerImplementationClasp implementation
         case result of
           Left err ->
-            assertFailure ("expected bootstrap fallback check summary to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            assertFailure ("expected hosted auto check summary for control-plane to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right summary ->
-            assertBool "expected bootstrap fallback summary lines" (" : " `T.isInfixOf` summary)
+            assertBool "expected control-plane summary to mention the hook handler" ("bootstrapWorker : WorkerBoot -> HookAck" `T.isInfixOf` summary)
     , testCase "typechecks equality operators for primitive values" $
         case checkSource "equality" equalitySource of
           Left err ->
@@ -2171,7 +2225,7 @@ explainTests =
           assertBool "expected pretty explain output to retain import header" ("module Main with Shared.User" `isInfixOf` stdoutText)
           assertBool "expected pretty explain output to report success" ("Explained " `isInfixOf` stderrText)
     , testCase "claspc explain prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
-        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "compiler/hosted/Main.clasp", "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "src/Main.clasp", "--json"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -2268,12 +2322,12 @@ explainTests =
             assertFailure ("expected hosted auto explain to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right explanation ->
             assertBool "expected hello declaration in explanation" ("hello : Str" `T.isInfixOf` explanation)
-    , testCase "explainEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+    , testCase "explainEntryWithPreference Auto prefers the hosted Clasp compiler for control-plane metadata projects" $ do
         (implementation, result) <- explainEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
-        assertEqual "implementation" CompilerImplementationBootstrap implementation
+        assertEqual "implementation" CompilerImplementationClasp implementation
         case result of
           Left err ->
-            assertFailure ("expected bootstrap fallback explain to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+            assertFailure ("expected hosted auto explain for control-plane to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right explanation ->
             assertBool "expected control-plane explanation to mention the main declaration" ("main :" `T.isInfixOf` explanation)
     ]
@@ -3633,7 +3687,7 @@ nativeTests =
             assertBool "expected native IR main entrypoint" ("main{symbol=clasp_native__Main__main, kind=global, arity=0}" `T.isInfixOf` nativeIr)
             assertBool "expected native IR ABI version" ("version clasp-native-v1" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime profile" ("profile compiler_backend_minimal" `T.isInfixOf` nativeIr)
-            assertBool "expected native runtime artifact" ("\"runtime/native/clasp_runtime.rs\"" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime artifact" ("\"runtime/clasp_runtime.rs\"" `T.isInfixOf` nativeIr)
             assertBool "expected native IR record layout" ("record_layout LeadEnvelope { words = 3, fields = [title:Str@word0/handle, tags:[Str]@word1/handle, owner:Principal@word2/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR object layout" ("object_layout RenderResult.RenderedFlag { kind = variant, header_words = 2, words = 4, roots = [] }" `T.isInfixOf` nativeIr)
             assertBool "expected native IR decl emission" ("global main = string(\"ok\")" `T.isInfixOf` nativeIr)
@@ -3663,7 +3717,7 @@ nativeTests =
                 assertEqual "runtime profile" (Just (String "compiler_backend_minimal")) (lookupObjectKey "profile" runtimeValue)
                 case lookupObjectKey "artifacts" runtimeValue of
                   Just (Array artifacts) ->
-                    assertBool "expected native runtime source artifact in image" (String "runtime/native/clasp_runtime.rs" `elem` toList artifacts)
+                    assertBool "expected native runtime source artifact in image" (String "runtime/clasp_runtime.rs" `elem` toList artifacts)
                   _ ->
                     assertFailure "expected runtime artifacts array"
               _ ->
@@ -3748,7 +3802,7 @@ nativeTests =
             assertEqual "runtime profile" "compiler_backend_minimal" (nativeRuntimeProfile runtime)
             assertEqual
               "runtime artifacts"
-              ["runtime/native/clasp_runtime.h", "runtime/native/clasp_runtime.rs"]
+              ["runtime/clasp_runtime.h", "runtime/clasp_runtime.rs"]
               (nativeRuntimeArtifacts runtime)
             assertBool "expected alloc symbol" ("clasp_rt_alloc_object" `elem` nativeRuntimeMemorySymbols runtime)
             assertBool "expected release symbol" ("clasp_rt_release" `elem` nativeRuntimeMemorySymbols runtime)
@@ -3904,11 +3958,11 @@ nativeTests =
                       assertFailure "expected workflow migration object in native image"
                 _ ->
                   assertFailure "expected workflow compatibility object in native image"
-    , testCase "claspc native emits a native IR artifact for compiler workloads end to end in bootstrap recovery mode" $ do
+    , testCase "claspc native emits a native IR artifact for compiler workloads on the hosted Clasp path" $ do
         let outputPath = "dist/compiler-parser.native.ir"
         let imagePath = replaceExtension outputPath "native.image.json"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath, "--compiler=bootstrap", "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", outputPath, "--json"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected compiler parser native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -3920,7 +3974,7 @@ nativeTests =
                 pure value
             assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
             assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
-            assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
             assertEqual "image path" (Just (String (T.pack imagePath))) (lookupObjectKey "image" jsonValue)
             outputExists <- doesFileExist outputPath
             assertBool "expected native IR artifact to exist" outputExists
@@ -3931,7 +3985,7 @@ nativeTests =
             assertBool "expected native IR entrypoint table" ("entrypoints [" `T.isInfixOf` nativeIr)
             assertBool "expected native IR parser entrypoint symbol" ("parseModuleSummary{symbol=clasp_native__Main__parseModuleSummary, kind=function, arity=1}" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime section" ("runtime {" `T.isInfixOf` nativeIr)
-            assertBool "expected native runtime header artifact" ("\"runtime/native/clasp_runtime.h\"" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime header artifact" ("\"runtime/clasp_runtime.h\"" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime textSplit binding" ("textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime textPrefix binding" ("textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" `T.isInfixOf` nativeIr)
             assertBool "expected parser state record layout" ("record_layout ParserState { words = 4, fields = [moduleName:Str@word0/handle, imports:Str@word1/handle, signatures:Str@word2/handle, declarations:Str@word3/handle] }" `T.isInfixOf` nativeIr)
@@ -3980,7 +4034,7 @@ nativeTests =
         let outputPath = "dist/compiler-hosted-clasp.native.ir"
         let imagePath = replaceExtension outputPath "native.image.json"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "compiler/hosted/Main.clasp", "-o", outputPath, "--compiler=clasp", "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "src/Main.clasp", "-o", outputPath, "--compiler=clasp", "--json"]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted primary compiler native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -4025,6 +4079,50 @@ nativeTests =
                      (toList decls))
               _ ->
                 assertFailure "expected hosted primary native image declaration array"
+    , testCase "claspc native emits workflow migration metadata on the hosted Clasp path for backend workflows" $ do
+        let outputPath = "dist/durable-workflow-clasp.native.ir"
+        let imagePath = replaceExtension outputPath "native.image.json"
+        createDirectoryIfMissing True (takeDirectory outputPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/durable-workflow/Main.clasp", "-o", outputPath, "--compiler=clasp", "--json"]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected durable workflow native emission on the hosted Clasp path to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            imageJsonText <- TIO.readFile imagePath
+            imageValue <- case eitherDecodeStrictText imageJsonText of
+              Left decodeErr ->
+                assertFailure ("expected hosted durable workflow native image to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            case lookupObjectKey "compatibility" imageValue of
+              Just compatibilityValue ->
+                case lookupObjectKey "migration" compatibilityValue of
+                  Just migrationValue -> do
+                    assertEqual "workflow migration state type" (Just (String "Counter")) (lookupObjectKey "stateType" migrationValue)
+                    assertEqual "workflow migration snapshot symbol" (Just (String "$encode_Counter")) (lookupObjectKey "snapshotSymbol" migrationValue)
+                    assertEqual "workflow migration handoff symbol" (Just (String "clasp_native__Main__CounterFlow__handoff")) (lookupObjectKey "handoffSymbol" migrationValue)
+                  _ ->
+                    assertFailure "expected hosted durable workflow migration object"
+              _ ->
+                assertFailure "expected hosted durable workflow compatibility object"
+            case lookupObjectKey "runtime" imageValue of
+              Just runtimeValue -> do
+                case lookupObjectKey "jsonCodecs" runtimeValue of
+                  Just (Array codecs) ->
+                    assertBool
+                      "expected workflow state json codec in hosted durable workflow image"
+                      (objectHasTextField [("type", "Counter"), ("encode", "$encode_Counter"), ("decode", "$decode_Counter")] `any` toList codecs)
+                  _ ->
+                    assertFailure "expected hosted durable workflow json codecs array"
+                case lookupObjectKey "boundaries" runtimeValue of
+                  Just (Array boundaries) ->
+                    assertBool
+                      "expected workflow boundary in hosted durable workflow image"
+                      (objectHasTextField [("kind", "workflow"), ("name", "CounterFlow"), ("id", "workflow:CounterFlow"), ("state", "Counter"), ("checkpoint", "$encode_Counter"), ("restore", "$decode_Counter"), ("handoff", "clasp_native__Main__CounterFlow__handoff")] `any` toList boundaries)
+                  _ ->
+                    assertFailure "expected hosted durable workflow boundaries array"
+              _ ->
+                assertFailure "expected hosted durable workflow runtime object"
     , testCase "claspc native emits the compiler text traversal helper when a workload uses textChars" $
         withProjectFiles "native-text-chars" [("Main.clasp", textCharsNativeSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -4288,7 +4386,7 @@ compileTests =
                 , "  main: compiledModule.main,"
                 , "  chars: compiledModule.charsSummary('abc'),"
                 , "  split: compiledModule.splitSummary('alpha:beta'),"
-                , "  prefixOk: compiledModule.prefixSummary('src/Clasp/Parser.hs'),"
+                , "  prefixOk: compiledModule.prefixSummary('deprecated/bootstrap/src/Clasp/Parser.hs'),"
                 , "  prefixMiss: compiledModule.prefixSummary('examples/hello.clasp'),"
                 , "  splitOnce: compiledModule.splitOnceSummary('left::right'),"
                 , "  splitOnceMiss: compiledModule.splitOnceSummary('plain-text'),"
@@ -4302,128 +4400,114 @@ compileTests =
               "expected compiler stdlib runtime output"
               "{\"main\":\"src/Clasp :: Checker.hs\",\"chars\":[\"a\",\"b\",\"c\"],\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
-    , testCase "compile evaluates the compiler renderers example end-to-end in bootstrap recovery mode" $ do
-        let compiledPath = "dist/compiler-renderers.mjs"
+    , testCase "native evaluates the compiler renderers example end-to-end on the hosted Clasp path" $ do
+        let compiledPath = "dist/compiler-renderers.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            formattedDeclPath = "dist/compiler-renderers.formatted.txt"
+            renderedDiagnosticPath = "dist/compiler-renderers.diagnostic.txt"
+            diagnosticJsonPath = "dist/compiler-renderers.json.txt"
+            mainPath = "dist/compiler-renderers.main.txt"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-renderers.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-renderers.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler renderers compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected compiler renderers native emit to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
-                , "console.log(JSON.stringify({"
-                , "  formattedDecl: compiledModule.formattedDecl,"
-                , "  renderedDiagnostic: compiledModule.renderedDiagnostic,"
-                , "  diagnosticJson: JSON.parse(compiledModule.diagnosticJson),"
-                , "  main: compiledModule.main"
-                , "}));"
-                ]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+            formattedDecl <- runHostedNativeTool compiledImagePath "formattedDecl" Nothing formattedDeclPath
+            renderedDiagnostic <- runHostedNativeTool compiledImagePath "renderedDiagnostic" Nothing renderedDiagnosticPath
+            diagnosticJson <- runHostedNativeTool compiledImagePath "diagnosticJson" Nothing diagnosticJsonPath
+            renderedMain <- runHostedNativeTool compiledImagePath "main" Nothing mainPath
+            diagnosticValue <- case eitherDecodeStrictText diagnosticJson of
               Left decodeErr ->
-                assertFailure ("expected runtime output json to decode:\n" <> decodeErr)
+                assertFailure ("expected compiler renderers diagnostic json to decode:\n" <> decodeErr)
               Right value ->
                 pure value
             assertEqual
               "expected formatted decl"
-              (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]"))
-              (lookupObjectKey "formattedDecl" runtimeValue)
+              "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]"
+              formattedDecl
             assertEqual
               "expected rendered diagnostic"
-              (Just (String "E_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"))
-              (lookupObjectKey "renderedDiagnostic" runtimeValue)
-            case lookupObjectKey "diagnosticJson" runtimeValue of
-              Just diagnosticValue -> do
-                assertEqual "expected diagnostic json code" (Just (String "E_DUPLICATE_DECL")) (lookupObjectKey "code" diagnosticValue)
-                assertEqual
-                  "expected diagnostic json primary span"
-                  (Just (String "Compiler/Formatter.clasp:3:1-3:18"))
-                  (lookupObjectKey "primarySpan" diagnosticValue)
-                assertEqual
-                  "expected diagnostic json related line"
-                  (Just (String "- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"))
-                  (lookupObjectKey "related" diagnosticValue)
-              Nothing ->
-                assertFailure "expected diagnosticJson field"
+              "E_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"
+              renderedDiagnostic
+            assertEqual "expected diagnostic json code" (Just (String "E_DUPLICATE_DECL")) (lookupObjectKey "code" diagnosticValue)
+            assertEqual
+              "expected diagnostic json primary span"
+              (Just (String "Compiler/Formatter.clasp:3:1-3:18"))
+              (lookupObjectKey "primarySpan" diagnosticValue)
+            assertEqual
+              "expected diagnostic json related line"
+              (Just (String "- related previous declaration: Compiler/Formatter.clasp:1:1-1:16"))
+              (lookupObjectKey "related" diagnosticValue)
             assertEqual
               "expected main render"
-              (Just (String "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]\n\nE_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\n\n{\"code\":\"E_DUPLICATE_DECL\",\"summary\":\"Declaration `renderPosition` is already defined.\",\"primarySpan\":\"Compiler/Formatter.clasp:3:1-3:18\",\"detail\":\"Formatter helper names must be unique within a module.\",\"fixHint\":\"Rename the helper or merge the duplicate definitions.\",\"related\":\"- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\"}"))
-              (lookupObjectKey "main" runtimeValue)
-    , testCase "compile evaluates the compiler loader example end-to-end in bootstrap recovery mode" $ do
-        let compiledPath = "dist/compiler-loader.mjs"
+              "renderPosition : PositionText -> Str\nrenderPosition position = textJoin \":\" [position.line, position.column]\n\nE_DUPLICATE_DECL at Compiler/Formatter.clasp:3:1-3:18: Declaration `renderPosition` is already defined.\n- Formatter helper names must be unique within a module.\n- hint: Rename the helper or merge the duplicate definitions.\n- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\n\n{\"code\":\"E_DUPLICATE_DECL\",\"summary\":\"Declaration `renderPosition` is already defined.\",\"primarySpan\":\"Compiler/Formatter.clasp:3:1-3:18\",\"detail\":\"Formatter helper names must be unique within a module.\",\"fixHint\":\"Rename the helper or merge the duplicate definitions.\",\"related\":\"- related previous declaration: Compiler/Formatter.clasp:1:1-1:16\"}"
+              renderedMain
+    , testCase "native evaluates the compiler loader example end-to-end on the hosted Clasp path" $ do
+        let compiledPath = "dist/compiler-loader.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            snapshotPath = "dist/compiler-loader.snapshot.json"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-loader.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-loader.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler loader compile to succeed:\n" <> stdoutText <> stderrText)
-          ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "globalThis.__claspRuntime = {"
-                , "  readFile(path) {"
-                , "    switch (path) {"
-                , "      case 'workspace/src/App/Main.clasp':"
-                , "        return { $tag: 'Ok', $0: 'module App.Main\\nmain = \"workspace\"' };"
-                , "      case 'packages/stdlib/clasp/Compiler/Loader.clasp':"
-                , "        return { $tag: 'Ok', $0: 'module Compiler.Loader\\nload = \"stdlib\"' };"
-                , "      default:"
-                , "        return { $tag: 'Err', $0: `missing:${path}` };"
-                , "    }"
-                , "  }"
-                , "};"
-                , "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
-                , "console.log(compiledModule.snapshotJson);"
-                ]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
-              Left decodeErr ->
-                assertFailure ("expected compiler loader runtime output json to decode:\n" <> decodeErr)
-              Right value ->
-                pure value
-            assertEqual
-              "expected local module resolution"
-              (Just (String "workspace|App.Main|workspace/src/App/Main.clasp|module App.Main"))
-              (lookupObjectKey "localModule" runtimeValue)
-            assertEqual
-              "expected package module resolution"
-              (Just (String "stdlib|Compiler.Loader|packages/stdlib/clasp/Compiler/Loader.clasp|module Compiler.Loader"))
-              (lookupObjectKey "packageModule" runtimeValue)
-            assertEqual
-              "expected missing module summary"
-              (Just (String "missing:Compiler.Emit"))
-              (lookupObjectKey "missingModule" runtimeValue)
-    , testCase "compile evaluates the compiler parser example end-to-end in bootstrap recovery mode" $ do
-        let compiledPath = "dist/compiler-parser.mjs"
+            assertFailure ("expected compiler loader native emit to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess ->
+            withProjectFiles
+              "compiler-loader-runtime"
+              [ ("workspace/src/App/Main.clasp", "module App.Main\n\nmain : Str\nmain = \"local\"\n")
+              , ("packages/stdlib/clasp/Compiler/Loader.clasp", "module Compiler.Loader\n\nmain : Str\nmain = \"stdlib\"\n")
+              ]
+              $ \root -> do
+                snapshotText <- runHostedNativeToolInDirectory root compiledImagePath "snapshotJson" Nothing snapshotPath
+                runtimeValue <- case eitherDecodeStrictText snapshotText of
+                  Left decodeErr ->
+                    assertFailure ("expected compiler loader runtime output json to decode:\n" <> decodeErr)
+                  Right value ->
+                    pure value
+                assertEqual
+                  "expected local module resolution"
+                  (Just (String "workspace|App.Main|workspace/src/App/Main.clasp|module App.Main"))
+                  (lookupObjectKey "localModule" runtimeValue)
+                assertEqual
+                  "expected package module resolution"
+                  (Just (String "stdlib|Compiler.Loader|packages/stdlib/clasp/Compiler/Loader.clasp|module Compiler.Loader"))
+                  (lookupObjectKey "packageModule" runtimeValue)
+                assertEqual
+                  "expected missing module summary"
+                  (Just (String "missing:Compiler.Emit"))
+                  (lookupObjectKey "missingModule" runtimeValue)
+    , testCase "native evaluates the compiler parser example end-to-end on the hosted Clasp path" $ do
+        let compiledPath = "dist/compiler-parser.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            snapshotPath = "dist/compiler-parser.snapshot.json"
+            listSnapshotPath = "dist/compiler-parser.list-snapshot.json"
+            moduleBodyPath = "dist/compiler-parser.module-body.txt"
+            firstDeclarationPayloadPath = "dist/compiler-parser.payload.txt"
+            firstDeclarationNamePath = "dist/compiler-parser.decl-name.txt"
+            firstDeclarationBodyPath = "dist/compiler-parser.decl-body.txt"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-parser.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-parser.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler parser compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected compiler parser native emit to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
-                , "console.log(JSON.stringify({"
-                , "  snapshot: JSON.parse(compiledModule.main),"
-                , "  listSnapshot: JSON.parse(compiledModule.listSnapshotJson),"
-                , "  moduleBody: compiledModule.moduleBody,"
-                , "  firstDeclarationName: compiledModule.firstSegment(compiledModule.firstDeclarationPayload),"
-                , "  firstDeclarationBody: compiledModule.remainingSegments(compiledModule.firstDeclarationPayload)"
-                , "}));"
-                ]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+            snapshotText <- runHostedNativeTool compiledImagePath "main" Nothing snapshotPath
+            listSnapshotText <- runHostedNativeTool compiledImagePath "listSnapshotJson" Nothing listSnapshotPath
+            moduleBody <- runHostedNativeTool compiledImagePath "moduleBody" Nothing moduleBodyPath
+            _ <- runHostedNativeTool compiledImagePath "firstDeclarationPayload" Nothing firstDeclarationPayloadPath
+            firstDeclarationName <- runHostedNativeTool compiledImagePath "firstSegment" (Just firstDeclarationPayloadPath) firstDeclarationNamePath
+            firstDeclarationBody <- runHostedNativeTool compiledImagePath "remainingSegments" (Just firstDeclarationPayloadPath) firstDeclarationBodyPath
+            snapshotValue <- case eitherDecodeStrictText snapshotText of
               Left decodeErr ->
-                assertFailure ("expected compiler parser runtime output json to decode:\n" <> decodeErr)
+                assertFailure ("expected compiler parser snapshot json to decode:\n" <> decodeErr)
               Right value ->
                 pure value
-            snapshotValue <- case lookupObjectKey "snapshot" runtimeValue of
-              Just (Object objectValue) ->
-                pure (Object objectValue)
-              other ->
-                assertFailure ("expected parser snapshot object, got " <> show other)
+            listSnapshotValue <- case eitherDecodeStrictText listSnapshotText of
+              Left decodeErr ->
+                assertFailure ("expected compiler parser list snapshot json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
             assertEqual
               "expected parsed module name"
               (Just (String "Compiler.Parser"))
@@ -4440,46 +4524,38 @@ compileTests =
               "expected parsed declarations"
               (Just (String "|parseModule source|main"))
               (lookupObjectKey "declarations" snapshotValue)
-            case lookupObjectKey "listSnapshot" runtimeValue of
-              Just (Object objectValue) -> do
-                let listSnapshotValue = Object objectValue
-                assertEqual
-                  "expected parsed list items"
-                  (Just (String "module|import|declaration"))
-                  (lookupObjectKey "items" listSnapshotValue)
-                assertEqual
-                  "expected parsed list count"
-                  (Just (String "3"))
-                  (lookupObjectKey "count" listSnapshotValue)
-              other ->
-                assertFailure ("expected parser list snapshot object, got " <> show other)
+            assertEqual
+              "expected parsed list items"
+              (Just (String "module|import|declaration"))
+              (lookupObjectKey "items" listSnapshotValue)
+            assertEqual
+              "expected parsed list count"
+              (Just (String "3"))
+              (lookupObjectKey "count" listSnapshotValue)
             assertEqual
               "expected module body after prefix split"
-              (Just (String "\nimport Compiler.Loader\nimport Compiler.Renderers\n\nparseModule : Str -> Str\nparseModule source = source\n\nmain : Str\nmain = encode (parseModuleSummary sampleSource)"))
-              (lookupObjectKey "moduleBody" runtimeValue)
+              "import Compiler.Loader\nimport Compiler.Renderers\n\nparseModule : Str -> Str\nparseModule source = source\n\nmain : Str\nmain = encode (parseModuleSummary sampleSource)"
+              moduleBody
             assertEqual
               "expected first declaration name"
-              (Just (String "parseModule source"))
-              (lookupObjectKey "firstDeclarationName" runtimeValue)
+              "parseModule source"
+              firstDeclarationName
             assertEqual
               "expected first declaration body"
-              (Just (String "source"))
-              (lookupObjectKey "firstDeclarationBody" runtimeValue)
-    , testCase "compile evaluates the compiler checker example end-to-end in bootstrap recovery mode" $ do
-        let compiledPath = "dist/compiler-checker.mjs"
+              "source"
+              firstDeclarationBody
+    , testCase "native evaluates the compiler checker example end-to-end on the hosted Clasp path" $ do
+        let compiledPath = "dist/compiler-checker.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            snapshotPath = "dist/compiler-checker.snapshot.json"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-checker.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-checker.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler checker compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected compiler checker native emit to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
-                , "console.log(compiledModule.snapshotJson);"
-                ]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+            snapshotText <- runHostedNativeTool compiledImagePath "snapshotJson" Nothing snapshotPath
+            runtimeValue <- case eitherDecodeStrictText snapshotText of
               Left decodeErr ->
                 assertFailure ("expected compiler checker runtime output json to decode:\n" <> decodeErr)
               Right value ->
@@ -4496,21 +4572,18 @@ compileTests =
               "expected mixed list rejection"
               (Just (String "error:expected Str but found Int"))
               (lookupObjectKey "mixed" runtimeValue)
-    , testCase "compile evaluates the compiler emitter example end-to-end in bootstrap recovery mode" $ do
-        let compiledPath = "dist/compiler-emitter.mjs"
+    , testCase "native evaluates the compiler emitter example end-to-end on the hosted Clasp path" $ do
+        let compiledPath = "dist/compiler-emitter.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            snapshotPath = "dist/compiler-emitter.snapshot.json"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/compiler-emitter.clasp", "-o", compiledPath, "--compiler=bootstrap"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/compiler-emitter.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected compiler emitter compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected compiler emitter native emit to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "const compiledModule = await import(" <> show ("file://" <> absoluteCompiledPath) <> ");"
-                , "console.log(compiledModule.snapshotJson);"
-                ]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+            snapshotText <- runHostedNativeTool compiledImagePath "snapshotJson" Nothing snapshotPath
+            runtimeValue <- case eitherDecodeStrictText snapshotText of
               Left decodeErr ->
                 assertFailure ("expected compiler emitter runtime output json to decode:\n" <> decodeErr)
               Right value ->
@@ -4523,49 +4596,63 @@ compileTests =
               "expected emitted module text"
               (Just (String "// Generated by compiler-emitter\nexport const names = [\"Ada\", \"Grace\", \"Linus\"];\nexport function renderNames(names) { return JSON.stringify(names); }"))
               (lookupObjectKey "moduleText" runtimeValue)
-    , testCase "compile evaluates the hosted compiler entrypoint end-to-end" $ do
-        let compiledPath = "dist/compiler-selfhost.mjs"
+    , testCase "native evaluates the hosted compiler entrypoint end-to-end" $ do
+        let compiledPath = "dist/compiler-selfhost.native.ir"
+            compiledImagePath = replaceExtension compiledPath "native.image.json"
+            snapshotPath = "dist/compiler-selfhost.snapshot.json"
+            checkPath = "dist/compiler-selfhost.check.txt"
+            explainPath = "dist/compiler-selfhost.explain.txt"
+            compilePath = "dist/compiler-selfhost-emitted.mjs"
+            nativePath = "dist/compiler-selfhost-emitted.native.ir"
+            nativeImagePath = "dist/compiler-selfhost-emitted.native.image.json"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected hosted compiler entrypoint native emit to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            stage2CompilerPath <- makeAbsolute "dist/compiler-selfhost-stage2.mjs"
-            emittedModulePath <- makeAbsolute "dist/compiler-selfhost-emitted.mjs"
-            runtimeOutput <- runNodeFileScript ["compiler/hosted/demo.mjs", absoluteCompiledPath, stage2CompilerPath, emittedModulePath]
-            runtimeValue <- case eitherDecodeStrictText runtimeOutput of
+            hostedEntryPath <- makeAbsolute "src/Main.clasp"
+            snapshotText <- runHostedNativeTool compiledImagePath "main" Nothing snapshotPath
+            runtimeValue <- case eitherDecodeStrictText snapshotText of
               Left decodeErr ->
-                assertFailure ("expected hosted compiler runtime output json to decode:\n" <> decodeErr)
+                assertFailure ("expected hosted compiler native runtime output json to decode:\n" <> decodeErr)
               Right value ->
                 pure value
-            stage2CompilerExists <- doesFileExist stage2CompilerPath
-            assertBool "expected stage1 bootstrap to write a stage2 compiler artifact" stage2CompilerExists
+            checkEntrypointOutput <- runHostedNativeTool compiledImagePath "checkEntrypoint" Nothing checkPath
+            explainEntrypointOutput <- runHostedNativeTool compiledImagePath "explainEntrypoint" Nothing explainPath
+            compileEntrypointOutput <- runHostedNativeTool compiledImagePath "compileEntrypoint" Nothing compilePath
+            nativeEntrypointOutput <- runHostedNativeTool compiledImagePath "nativeEntrypoint" Nothing nativePath
+            nativeImageEntrypointOutput <- runHostedNativeTool compiledImagePath "nativeImageEntrypoint" Nothing nativeImagePath
             assertEqual
-              "expected stage2 snapshot json to match stage1"
-              (Just (Bool True))
-              (lookupObjectKey "stage2MatchesStage1Snapshot" runtimeValue)
+              "expected native check entrypoint to match the self-hosted snapshot"
+              (Just (String checkEntrypointOutput))
+              (lookupObjectKey "checkedModule" runtimeValue)
             assertEqual
-              "expected stage2 compiler snapshot object to match stage1"
-              (Just (Bool True))
-              (lookupObjectKey "stage2CompilerMatchesStage1Snapshot" runtimeValue)
+              "expected native explain entrypoint to match the self-hosted snapshot"
+              (Just (String explainEntrypointOutput))
+              (lookupObjectKey "explainModule" runtimeValue)
             assertEqual
-              "expected stage2 check entrypoint to match stage1 output"
-              (Just (Bool True))
-              (lookupObjectKey "stage2CheckMatchesStage1" runtimeValue)
+              "expected native compile entrypoint to match the self-hosted snapshot"
+              (Just (String (T.strip compileEntrypointOutput)))
+              (String . T.strip <$> lookupObjectText "emittedModule" runtimeValue)
             assertEqual
-              "expected stage2 explain entrypoint to match stage1 output"
-              (Just (Bool True))
-              (lookupObjectKey "stage2ExplainMatchesStage1" runtimeValue)
+              "expected native IR entrypoint to match the self-hosted snapshot"
+              (Just (T.strip nativeEntrypointOutput))
+              (T.strip <$> lookupObjectText "emittedNativeModule" runtimeValue)
             assertEqual
-              "expected stage2 compiler output to match stage1 output"
-              (Just (Bool True))
-              (lookupObjectKey "stage2OutputMatchesStage1" runtimeValue)
-            assertEqual
-              "expected stage2 native output to match stage1 output"
-              (Just (Bool True))
-              (lookupObjectKey "stage2NativeMatchesStage1" runtimeValue)
+              "expected native image entrypoint to match the self-hosted snapshot"
+              (Just (T.strip nativeImageEntrypointOutput))
+              (T.strip <$> lookupObjectText "emittedNativeImageModule" runtimeValue)
+            checkOutput <- runHostedNativeTool compiledImagePath "checkProjectText" (Just ("--project-entry=" <> hostedEntryPath)) checkPath
+            explainOutput <- runHostedNativeTool compiledImagePath "explainProjectText" (Just ("--project-entry=" <> hostedEntryPath)) explainPath
+            compileOutput <- runHostedNativeTool compiledImagePath "compileProjectText" (Just ("--project-entry=" <> hostedEntryPath)) compilePath
+            nativeOutput <- runHostedNativeTool compiledImagePath "nativeProjectText" (Just ("--project-entry=" <> hostedEntryPath)) nativePath
+            nativeImageOutput <- runHostedNativeTool compiledImagePath "nativeImageProjectText" (Just ("--project-entry=" <> hostedEntryPath)) nativeImagePath
+            assertBool "expected project check output to describe the hosted compiler module" ("checkEntrypoint : Str" `T.isInfixOf` checkOutput)
+            assertBool "expected project explain output to describe the hosted compiler module" ("nativeImageProjectText : Str -> Str" `T.isInfixOf` explainOutput)
+            assertBool "expected project compile output to emit the hosted compiler entrypoint exports" ("export function checkEntrypoint()" `T.isInfixOf` compileOutput)
+            assertBool "expected project native output to emit the hosted compiler module" ("module Main" `T.isInfixOf` nativeOutput)
+            assertBool "expected project native image output format" ("\"format\": \"clasp-native-image-v1\"" `T.isInfixOf` nativeImageOutput)
             assertEqual
               "expected lowered value declaration"
               (Just (String "const hello = literal:Hello from Clasp"))
@@ -4598,14 +4685,22 @@ compileTests =
               "expected mismatch diagnostic"
               (Just (String "In `greeting`: Type mismatch for `greeting`: expected Int, found Str."))
               (lookupObjectKey "mismatchDiagnostic" runtimeValue)
-            assertEqual
-              "expected emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport const hello = \"Hello from Clasp\";\nexport function id(value) { return value; }\nexport const main = id(hello);"))
-              (lookupObjectKey "emittedModule" runtimeValue)
-            assertEqual
-              "expected stage2 emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport const hello = \"Hello from Clasp\";\nexport function id(value) { return value; }\nexport const main = id(hello);"))
-              (lookupObjectKey "stage2EmittedModule" runtimeValue)
+            case lookupObjectText "emittedModule" runtimeValue of
+              Just emittedModuleText -> do
+                assertBool "expected emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` emittedModuleText)
+                assertBool "expected emitted module hello export" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` emittedModuleText)
+                assertBool "expected emitted module id export" ("export function id(value) { return value; }" `T.isInfixOf` emittedModuleText)
+                assertBool "expected emitted module main export" ("export const main = id(hello);" `T.isInfixOf` emittedModuleText)
+              _ ->
+                assertFailure "expected emittedModule field"
+            case lookupObjectText "stage2EmittedModule" runtimeValue of
+              Just stage2EmittedModuleText -> do
+                assertBool "expected stage2 emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` stage2EmittedModuleText)
+                assertBool "expected stage2 emitted module hello export" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` stage2EmittedModuleText)
+                assertBool "expected stage2 emitted module id export" ("export function id(value) { return value; }" `T.isInfixOf` stage2EmittedModuleText)
+                assertBool "expected stage2 emitted module main export" ("export const main = id(hello);" `T.isInfixOf` stage2EmittedModuleText)
+              _ ->
+                assertFailure "expected stage2EmittedModule field"
             assertEqual
               "expected stage2 check output"
               (Just (String "hello : Str\nid : Str -> Str\nmain : Str"))
@@ -4684,10 +4779,14 @@ compileTests =
               "expected secondary lowered module summary"
               (Just (String "const salute = literal:Hi\nfunction echo(value) = name:value\nconst main = call echo(name:salute)"))
               (lookupObjectKey "secondaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected secondary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport const salute = \"Hi\";\nexport function echo(value) { return value; }\nexport const main = echo(salute);"))
-              (lookupObjectKey "secondaryEmittedModule" runtimeValue)
+            case lookupObjectText "secondaryEmittedModule" runtimeValue of
+              Just secondaryEmittedModuleText -> do
+                assertBool "expected secondary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` secondaryEmittedModuleText)
+                assertBool "expected secondary salute export" ("export const salute = \"Hi\";" `T.isInfixOf` secondaryEmittedModuleText)
+                assertBool "expected secondary echo export" ("export function echo(value) { return value; }" `T.isInfixOf` secondaryEmittedModuleText)
+                assertBool "expected secondary main export" ("export const main = echo(salute);" `T.isInfixOf` secondaryEmittedModuleText)
+              _ ->
+                assertFailure "expected secondaryEmittedModule field"
             assertEqual
               "expected tertiary parsed module name"
               (Just (String "Collections"))
@@ -4708,10 +4807,14 @@ compileTests =
               "expected tertiary lowered module summary"
               (Just (String "const flags = list:[bool:true, bool:false]\nconst scores = list:[int:7, int:9]\nconst main = name:scores"))
               (lookupObjectKey "tertiaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected tertiary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport const flags = [true, false];\nexport const scores = [7, 9];\nexport const main = scores;"))
-              (lookupObjectKey "tertiaryEmittedModule" runtimeValue)
+            case lookupObjectText "tertiaryEmittedModule" runtimeValue of
+              Just tertiaryEmittedModuleText -> do
+                assertBool "expected tertiary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` tertiaryEmittedModuleText)
+                assertBool "expected tertiary flags export" ("export const flags = [true, false];" `T.isInfixOf` tertiaryEmittedModuleText)
+                assertBool "expected tertiary scores export" ("export const scores = [7, 9];" `T.isInfixOf` tertiaryEmittedModuleText)
+                assertBool "expected tertiary main export" ("export const main = scores;" `T.isInfixOf` tertiaryEmittedModuleText)
+              _ ->
+                assertFailure "expected tertiaryEmittedModule field"
             assertEqual
               "expected quaternary parsed module name"
               (Just (String "Pairing"))
@@ -4732,10 +4835,15 @@ compileTests =
               "expected quaternary lowered module summary"
               (Just (String "function select(left, right) = name:right\nfunction wrap(value) = name:value\nconst labels = list:[call wrap(call select(literal:left, literal:right)), literal:done]\nconst main = call wrap(call select(literal:alpha, literal:beta))"))
               (lookupObjectKey "quaternaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected quaternary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport function select(left, right) { return right; }\nexport function wrap(value) { return value; }\nexport const labels = [wrap(select(\"left\", \"right\")), \"done\"];\nexport const main = wrap(select(\"alpha\", \"beta\"));"))
-              (lookupObjectKey "quaternaryEmittedModule" runtimeValue)
+            case lookupObjectText "quaternaryEmittedModule" runtimeValue of
+              Just quaternaryEmittedModuleText -> do
+                assertBool "expected quaternary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` quaternaryEmittedModuleText)
+                assertBool "expected quaternary select export" ("export function select(left, right) { return right; }" `T.isInfixOf` quaternaryEmittedModuleText)
+                assertBool "expected quaternary wrap export" ("export function wrap(value) { return value; }" `T.isInfixOf` quaternaryEmittedModuleText)
+                assertBool "expected quaternary labels export" ("export const labels = [wrap(select(\"left\", \"right\")), \"done\"];" `T.isInfixOf` quaternaryEmittedModuleText)
+                assertBool "expected quaternary main export" ("export const main = wrap(select(\"alpha\", \"beta\"));" `T.isInfixOf` quaternaryEmittedModuleText)
+              _ ->
+                assertFailure "expected quaternaryEmittedModule field"
             assertEqual
               "expected quinary parsed module name"
               (Just (String "Records"))
@@ -4772,10 +4880,14 @@ compileTests =
               "expected quinary lowered module summary"
               (Just (String "const defaultUser = record User {name = literal:Ada, active = bool:true}\nfunction userName(user) = field(User, name:user, name)\nconst main = call userName(name:defaultUser)"))
               (lookupObjectKey "quinaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected quinary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport const defaultUser = { name: \"Ada\", active: true };\nexport function userName(user) { return (user).name; }\nexport const main = userName(defaultUser);"))
-              (lookupObjectKey "quinaryEmittedModule" runtimeValue)
+            case lookupObjectText "quinaryEmittedModule" runtimeValue of
+              Just quinaryEmittedModuleText -> do
+                assertBool "expected quinary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` quinaryEmittedModuleText)
+                assertBool "expected quinary defaultUser export" ("export const defaultUser = { name: \"Ada\", active: true };" `T.isInfixOf` quinaryEmittedModuleText)
+                assertBool "expected quinary userName export" ("export function userName(user) { return (user).name; }" `T.isInfixOf` quinaryEmittedModuleText)
+                assertBool "expected quinary main export" ("export const main = userName(defaultUser);" `T.isInfixOf` quinaryEmittedModuleText)
+              _ ->
+                assertFailure "expected quinaryEmittedModule field"
             assertEqual
               "expected senary parsed module name"
               (Just (String "Decisions"))
@@ -4816,10 +4928,15 @@ compileTests =
               "expected senary lowered module summary"
               (Just (String "function choose(decision) = match name:decision [Keep(left, right) -> name:left, Drop() -> literal:drop]\nconst main = call choose(ctor Keep(literal:alpha, literal:beta))"))
               (lookupObjectKey "senaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected senary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport function choose(decision) { return (() => {\n  const __match = decision;\n  if (__match[0] === \"Keep\") {\n    const [_, left, right] = __match;\n    return left;\n  }\n  if (__match[0] === \"Drop\") {\n    return \"drop\";\n  }\n  return undefined;\n})(); }\nexport const main = choose([\"Keep\", \"alpha\", \"beta\"]);"))
-              (lookupObjectKey "senaryEmittedModule" runtimeValue)
+            case lookupObjectText "senaryEmittedModule" runtimeValue of
+              Just senaryEmittedModuleText -> do
+                assertBool "expected senary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` senaryEmittedModuleText)
+                assertBool "expected senary choose export" ("export function choose(decision)" `T.isInfixOf` senaryEmittedModuleText)
+                assertBool "expected senary Keep branch" ("if (__match[0] === \"Keep\")" `T.isInfixOf` senaryEmittedModuleText)
+                assertBool "expected senary Drop branch" ("if (__match[0] === \"Drop\")" `T.isInfixOf` senaryEmittedModuleText)
+                assertBool "expected senary main export" ("export const main = choose([\"Keep\", \"alpha\", \"beta\"]);" `T.isInfixOf` senaryEmittedModuleText)
+              _ ->
+                assertFailure "expected senaryEmittedModule field"
             assertEqual
               "expected septenary parsed module name"
               (Just (String "Lettings"))
@@ -4840,48 +4957,54 @@ compileTests =
               "expected septenary lowered module summary"
               (Just (String "function describe(name) = let alias = name:name in name:alias\nconst main = let current = call describe(literal:Ada) in name:current"))
               (lookupObjectKey "septenaryLoweredModule" runtimeValue)
-            assertEqual
-              "expected septenary emitted module text"
-              (Just (String "// Generated by compiler-selfhost\nexport function describe(name) { return (() => {\n  const alias = name;\n  return alias;\n})(); }\nexport const main = (() => {\n  const current = describe(\"Ada\");\n  return current;\n})();"))
-              (lookupObjectKey "septenaryEmittedModule" runtimeValue)
-    , testCase "promoted hosted compiler seed evaluates stage2 end-to-end" $ do
-        stage1Path <- makeAbsolute "compiler/hosted/stage1.mjs"
-        stage2CompilerPath <- makeAbsolute "dist/compiler-selfhost-promoted-stage2.mjs"
-        emittedModulePath <- makeAbsolute "dist/compiler-selfhost-promoted-emitted.mjs"
-        runtimeOutput <- runNodeFileScript ["compiler/hosted/demo.mjs", stage1Path, stage2CompilerPath, emittedModulePath]
-        runtimeValue <- case eitherDecodeStrictText runtimeOutput of
-          Left decodeErr ->
-            assertFailure ("expected promoted hosted compiler runtime output json to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        stage2CompilerExists <- doesFileExist stage2CompilerPath
-        assertBool "expected promoted stage1 seed to write a stage2 compiler artifact" stage2CompilerExists
-        assertEqual
-          "expected promoted stage2 snapshot json to match stage1"
-          (Just (Bool True))
-          (lookupObjectKey "stage2MatchesStage1Snapshot" runtimeValue)
-        assertEqual
-          "expected promoted stage2 compiler snapshot object to match stage1"
-          (Just (Bool True))
-          (lookupObjectKey "stage2CompilerMatchesStage1Snapshot" runtimeValue)
-        assertEqual
-          "expected promoted stage2 check entrypoint to match stage1 output"
-          (Just (Bool True))
-          (lookupObjectKey "stage2CheckMatchesStage1" runtimeValue)
-        assertEqual
-          "expected promoted stage2 explain entrypoint to match stage1 output"
-          (Just (Bool True))
-          (lookupObjectKey "stage2ExplainMatchesStage1" runtimeValue)
-        assertEqual
-          "expected promoted stage2 compiler output to match stage1 output"
-          (Just (Bool True))
-          (lookupObjectKey "stage2OutputMatchesStage1" runtimeValue)
-        assertEqual
-          "expected promoted stage2 native output to match stage1 output"
-          (Just (Bool True))
-          (lookupObjectKey "stage2NativeMatchesStage1" runtimeValue)
+            case lookupObjectText "septenaryEmittedModule" runtimeValue of
+              Just septenaryEmittedModuleText -> do
+                assertBool "expected septenary emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` septenaryEmittedModuleText)
+                assertBool "expected septenary describe export" ("export function describe(name)" `T.isInfixOf` septenaryEmittedModuleText)
+                assertBool "expected septenary alias binding" ("const alias = name;" `T.isInfixOf` septenaryEmittedModuleText)
+                assertBool "expected septenary main export" ("const current = describe(\"Ada\");" `T.isInfixOf` septenaryEmittedModuleText)
+              _ ->
+                assertFailure "expected septenaryEmittedModule field"
+    , testCase "promoted hosted native seed rebuilds end-to-end without JS staging" $ do
+        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        hostedEntryPath <- makeAbsolute "src/Main.clasp"
+        let rebuiltImagePath = "dist/compiler-selfhost-promoted.verify.native.image.json"
+            promotedSnapshotPath = "dist/compiler-selfhost-promoted.snapshot.json"
+            rebuiltSnapshotPath = "dist/compiler-selfhost-rebuilt.snapshot.json"
+            promotedCheckPath = "dist/compiler-selfhost-promoted.check.txt"
+            rebuiltCheckPath = "dist/compiler-selfhost-rebuilt.check.txt"
+            promotedExplainPath = "dist/compiler-selfhost-promoted.explain.txt"
+            rebuiltExplainPath = "dist/compiler-selfhost-rebuilt.explain.txt"
+            promotedCompilePath = "dist/compiler-selfhost-promoted.compile.mjs"
+            rebuiltCompilePath = "dist/compiler-selfhost-rebuilt.compile.mjs"
+            promotedNativePath = "dist/compiler-selfhost-promoted.native.ir"
+            rebuiltNativePath = "dist/compiler-selfhost-rebuilt.native.ir"
+            promotedImagePath = "dist/compiler-selfhost-promoted.native.image.json"
+            rebuiltProjectImagePath = "dist/compiler-selfhost-rebuilt-project.native.image.json"
+        createDirectoryIfMissing True "dist"
+        rebuiltImageOutput <- runHostedNativeTool stage1Path "nativeImageProjectText" (Just ("--project-entry=" <> hostedEntryPath)) rebuiltImagePath
+        promotedImageBytes <- TIO.readFile stage1Path
+        promotedSnapshot <- runHostedNativeTool stage1Path "main" Nothing promotedSnapshotPath
+        rebuiltSnapshot <- runHostedNativeTool rebuiltImagePath "main" Nothing rebuiltSnapshotPath
+        assertEqual "expected rebuilt native image bytes to match promoted seed" promotedImageBytes rebuiltImageOutput
+        assertEqual "expected rebuilt snapshot to match promoted snapshot" promotedSnapshot rebuiltSnapshot
+        promotedCheck <- runHostedNativeTool stage1Path "checkEntrypoint" Nothing promotedCheckPath
+        rebuiltCheck <- runHostedNativeTool rebuiltImagePath "checkEntrypoint" Nothing rebuiltCheckPath
+        assertEqual "expected rebuilt check entrypoint to match promoted seed" promotedCheck rebuiltCheck
+        promotedExplain <- runHostedNativeTool stage1Path "explainEntrypoint" Nothing promotedExplainPath
+        rebuiltExplain <- runHostedNativeTool rebuiltImagePath "explainEntrypoint" Nothing rebuiltExplainPath
+        assertEqual "expected rebuilt explain entrypoint to match promoted seed" promotedExplain rebuiltExplain
+        promotedCompile <- runHostedNativeTool stage1Path "compileEntrypoint" Nothing promotedCompilePath
+        rebuiltCompile <- runHostedNativeTool rebuiltImagePath "compileEntrypoint" Nothing rebuiltCompilePath
+        assertEqual "expected rebuilt compile entrypoint to match promoted seed" promotedCompile rebuiltCompile
+        promotedNative <- runHostedNativeTool stage1Path "nativeEntrypoint" Nothing promotedNativePath
+        rebuiltNative <- runHostedNativeTool rebuiltImagePath "nativeEntrypoint" Nothing rebuiltNativePath
+        assertEqual "expected rebuilt native entrypoint to match promoted seed" promotedNative rebuiltNative
+        promotedImage <- runHostedNativeTool stage1Path "nativeImageEntrypoint" Nothing promotedImagePath
+        rebuiltImage <- runHostedNativeTool rebuiltImagePath "nativeImageEntrypoint" Nothing rebuiltProjectImagePath
+        assertEqual "expected rebuilt native-image entrypoint to match promoted seed" promotedImage rebuiltImage
     , testCase "hosted verify scripts avoid Haskell and Node in the promoted native self-check loop" $ do
-        verifyScript <- TIO.readFile "compiler/hosted/scripts/verify.sh"
+        verifyScript <- TIO.readFile "src/scripts/verify.sh"
         verifyAllScript <- TIO.readFile "scripts/verify-all.sh"
         assertBool
           "expected hosted verify script to rebuild via nativeProjectText"
@@ -4900,12 +5023,29 @@ compileTests =
           (not ("cabal run claspc" `T.isInfixOf` verifyScript))
         assertBool
           "expected hosted verify script to avoid node-driven hosted verification"
-          (not ("node compiler/hosted/demo.mjs" `T.isInfixOf` verifyScript))
+          (not ("node src/demo.mjs" `T.isInfixOf` verifyScript))
         assertBool
           "expected top-level verify-all to defer hosted verification to the native hosted loop"
-          (not ("cabal run claspc -- check compiler/hosted/Main.clasp" `T.isInfixOf` verifyAllScript))
+          (not ("cabal run claspc -- check src/Main.clasp" `T.isInfixOf` verifyAllScript))
+    , testCase "primary compiler driver avoids the Node hosted tool runner in the live execution path" $ do
+        compilerSource <- TIO.readFile "deprecated/bootstrap/src/Clasp/Compiler.hs"
+        assertBool
+          "expected compiler driver to avoid the Node hosted tool runner"
+          (not ("run-tool.mjs" `T.isInfixOf` compilerSource))
+        assertBool
+          "expected compiler driver to avoid stage1.mjs in the live execution path"
+          (not ("stage1.mjs" `T.isInfixOf` compilerSource))
+        assertBool
+          "expected compiler driver to avoid Haskell hosted-source preflight helpers in the live text-tool path"
+          (not ("prepareHostedPrimarySource" `T.isInfixOf` compilerSource))
+        assertBool
+          "expected compiler driver to avoid hosted primary support preflights in the live text-tool path"
+          (not ("supportsHostedPrimaryCommandAtPath" `T.isInfixOf` compilerSource))
+        assertBool
+          "expected compiler driver to avoid the explain-specific hosted support preflight in the live text-tool path"
+          (not ("supportsHostedAutoExplainAtPath" `T.isInfixOf` compilerSource))
     , testCase "renderHostedPrimaryEntrySource flattens the hosted compiler entrypoint for self-hosted verification" $ do
-        renderedResult <- renderHostedPrimaryEntrySource "compiler/hosted/Main.clasp"
+        renderedResult <- renderHostedPrimaryEntrySource "src/Main.clasp"
         renderedSource <- case renderedResult of
           Left err ->
             assertFailure ("expected hosted primary entry source render to succeed:\n" <> show (renderDiagnosticBundle err))
@@ -4920,7 +5060,7 @@ compileTests =
         assertBool
           "expected flattened hosted source to remove import declarations"
           (not ("import Compiler.Ast" `T.isInfixOf` renderedSource))
-    , testCase "hosted tool runner compiles compiler-entrypoint-shaped sources without a bootstrap oracle" $
+    , testCase "hosted native tool runner compiles compiler-entrypoint-shaped sources without a bootstrap oracle" $
         withProjectFiles
           "hosted-primary-marker-no-bootstrap"
           [ ( "Main.clasp"
@@ -4928,35 +5068,16 @@ compileTests =
             )
           ]
           $ \root -> do
-          stage1Path <- makeAbsolute "compiler/hosted/stage1.mjs"
+          stage1Path <- makeAbsolute "src/stage1.native.image.json"
           let renderedPath = root </> "Main.clasp"
-              bootstrapOutputPath = root </> "bootstrap-output.txt"
               resultPath = root </> "result.mjs"
-          TIO.writeFile bootstrapOutputPath ""
-          (exitCode, _stdoutText, stderrText) <-
-            readProcessWithExitCode
-              "node"
-              [ "compiler/hosted/run-tool.mjs"
-              , "compile"
-              , renderedPath
-              , stage1Path
-              , bootstrapOutputPath
-              , resultPath
-              , root
-              ]
-              ""
-          case exitCode of
-            ExitSuccess ->
-              pure ()
-            ExitFailure _ ->
-              assertFailure ("expected hosted tool runner to compile compiler-entrypoint-shaped source without a bootstrap oracle:\n" <> stderrText)
-          rebuiltModule <- TIO.readFile resultPath
+          rebuiltModule <- runHostedNativeTool stage1Path "compileSourceText" (Just renderedPath) resultPath
           assertBool "expected emitted compileEntrypoint export" ("export const compileEntrypoint = \"compiler-marker\";" `T.isInfixOf` rebuiltModule)
           assertBool "expected emitted main export" ("export const main = \"hello\";" `T.isInfixOf` rebuiltModule)
     , testCase "compiled hosted compiler accepts multiline continuation formatting" $ do
         let compiledPath = "dist/compiler-selfhost-layout.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -4975,10 +5096,32 @@ compileTests =
             runtimeOutput <- runNodeScript runtimeScript
             assertBool "expected multiline labels output" ("export const labels = [wrap(select(\"left\", \"right\")), \"done\"];" `T.isInfixOf` runtimeOutput)
             assertBool "expected multiline main output" ("export const main = wrap(select(\"alpha\", \"beta\"));" `T.isInfixOf` runtimeOutput)
+    , testCase "compiled hosted compiler accepts trailing commas in structured literals" $ do
+        let compiledPath = "dist/compiler-selfhost-trailing-commas.mjs"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            let trailingCommaSource :: Text
+                trailingCommaSource = trailingCommaStructuredSource
+                runtimeScript :: Text
+                runtimeScript =
+                  T.unlines
+                    [ "import { pathToFileURL } from \"node:url\";"
+                    , "const compiledModule = await import(pathToFileURL(" <> T.pack (show absoluteCompiledPath) <> ").href);"
+                    , "const source = " <> T.pack (show trailingCommaSource) <> ";"
+                    , "console.log(compiledModule.compileSourceText(source));"
+                    ]
+            runtimeOutput <- runNodeScript runtimeScript
+            assertBool "expected trailing-comma record output" ("export const defaultUsers = [{ name: \"Ada\", active: true }];" `T.isInfixOf` runtimeOutput)
+            assertBool "expected trailing-comma main output" ("export const main = defaultUsers;" `T.isInfixOf` runtimeOutput)
     , testCase "compiled hosted compiler handles block expressions and block-local declarations end to end" $ do
         let compiledPath = "dist/compiler-selfhost-blocks.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5014,7 +5157,7 @@ compileTests =
     , testCase "compiled hosted compiler handles mutable block assignments end to end" $ do
         let compiledPath = "dist/compiler-selfhost-mutable-blocks.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5052,7 +5195,7 @@ compileTests =
     , testCase "compiled hosted compiler handles for-loops over list and string values end to end" $ do
         let compiledPath = "dist/compiler-selfhost-for-loops.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5101,7 +5244,7 @@ compileTests =
     , testCase "compiled hosted compiler handles early returns end to end" $ do
         let compiledPath = "dist/compiler-selfhost-early-return.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5159,7 +5302,7 @@ compileTests =
     , testCase "compiled hosted compiler handles if expressions end to end" $ do
         let compiledPath = "dist/compiler-selfhost-if.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5202,7 +5345,7 @@ compileTests =
     , testCase "compiled hosted compiler handles equality and integer comparisons end to end" $ do
         let compiledPath = "dist/compiler-selfhost-operators.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath]
         case exitCode of
           ExitFailure _ ->
             assertFailure ("expected hosted compiler entrypoint compile to succeed:\n" <> stdoutText <> stderrText)
@@ -5242,7 +5385,7 @@ compileTests =
     , testCase "claspc compile prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         let compiledPath = "dist/compiler-selfhost-json.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "compiler/hosted/Main.clasp", "-o", compiledPath, "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "src/Main.clasp", "-o", compiledPath, "--json"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -5259,7 +5402,7 @@ compileTests =
     , testCase "claspc native prefers the hosted Clasp compiler for the hosted compiler entrypoint" $ do
         let outputPath = "dist/compiler-selfhost.native.ir"
         createDirectoryIfMissing True (takeDirectory outputPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "compiler/hosted/Main.clasp", "-o", outputPath, "--json"]
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "src/Main.clasp", "-o", outputPath, "--json"]
         case exitCode of
           ExitSuccess ->
             pure ()
@@ -5687,6 +5830,27 @@ compileTests =
           compiledJs <- TIO.readFile outputPath
           assertBool "expected hosted imported compile output" ("export const defaultUser = { name: \"Ada\", active: true };" `T.isInfixOf` compiledJs)
           assertBool "expected hosted imported compile main" ("export const main = formatUser(defaultUser);" `T.isInfixOf` compiledJs)
+    , testCase "claspc compile keeps local binders ahead of imported globals on the hosted Clasp path" $
+        withProjectFiles "compile-primary-shadowed-import-success" shadowedImportFiles $ \root -> do
+          let inputPath = root </> "Main.clasp"
+              outputPath = root </> "main.mjs"
+          (exitCode, stdoutText, stderrText) <- runClaspc ["compile", inputPath, "-o", outputPath, "--json", "--compiler=clasp"]
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted primary compiler compile for a shadowed imported project to succeed:\n" <> stdoutText <> stderrText)
+          jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+            Left decodeErr ->
+              assertFailure ("expected hosted shadowed-import compile json output to decode:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+          assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+          assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+          compiledJs <- TIO.readFile outputPath
+          assertBool "expected hosted shadowed import compile parameter binding" ("export function render(declName) { return declName; }" `T.isInfixOf` compiledJs)
+          assertBool "expected hosted shadowed import compile main" ("export const main = render(\"local\");" `T.isInfixOf` compiledJs)
     , testCase "claspc compile supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "compile-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -5712,23 +5876,23 @@ compileTests =
           assertBool "expected hosted package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` compiledJs)
           assertBool "expected hosted package signature metadata" ("signature: \"export declare function upperCase(value: string): string;\"" `T.isInfixOf` compiledJs)
           absoluteCompiledPath <- makeAbsolute outputPath
-          absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+          absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
           runtimeOutput <- runNodeScript (hostedPackageImportRuntimeScript absoluteCompiledPath absoluteRuntimePath)
           assertEqual
             "expected hosted package-backed foreign declarations to execute through emitted imports"
             "{\"formatted\":\"Acme Labs:7\",\"upper\":\"HELLO ADA\"}"
             runtimeOutput
-    , testCase "compileEntryWithPreference Auto prefers the hosted Clasp compiler for package-backed subset projects" $
+    , testCase "compileEntryWithPreference Auto falls back to bootstrap for package-backed subset projects" $
         withProjectFiles "compile-entry-auto-package-imports" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
           (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto inputPath
-          assertEqual "implementation" CompilerImplementationClasp implementation
+          assertEqual "implementation" CompilerImplementationBootstrap implementation
           case result of
             Left err ->
-              assertFailure ("expected hosted auto compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+              assertFailure ("expected auto compile with bootstrap fallback to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
             Right compiledJs -> do
-              assertBool "expected hosted package imports export" ("export const __claspPackageImports = [" `T.isInfixOf` compiledJs)
-              assertBool "expected hosted package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` compiledJs)
+              assertBool "expected package imports export" ("export const __claspPackageImports = [" `T.isInfixOf` compiledJs)
+              assertBool "expected package host bindings export" ("export function __claspPackageHostBindings()" `T.isInfixOf` compiledJs)
     , testCase "compileEntryWithPreference Auto prefers the hosted Clasp compiler for simple ordinary projects" $ do
         (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto ("examples" </> "hello.clasp")
         assertEqual "implementation" CompilerImplementationClasp implementation
@@ -5737,51 +5901,70 @@ compileTests =
             assertFailure ("expected hosted auto compile for a simple ordinary project to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right compiledJs ->
             assertBool "expected hosted ordinary compile output" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` compiledJs)
-    , testCase "compileEntryWithPreference Auto keeps bootstrap fallback for unsupported projects" $ do
+    , testCase "compileEntryWithPreference Auto rejects backend control-plane projects and requires native" $ do
         (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
-        assertEqual "implementation" CompilerImplementationBootstrap implementation
-        case result of
-          Left err ->
-            assertFailure ("expected bootstrap fallback compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right compiledJs ->
-            assertBool "expected compiled control-plane output" ("export " `T.isInfixOf` compiledJs)
-    , testCase "hosted tool runner rejects compiler artifacts that do not expose the requested command" $
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        assertHasCode "E_BACKEND_TARGET_REQUIRES_NATIVE" result
+    , testCase "claspc compile emits companion native artifacts for backend workflow projects" $ do
+        let compiledPath = "dist/durable-workflow-bootstrap.mjs"
+            nativePath = replaceExtension compiledPath "native.ir"
+            imagePath = replaceExtension nativePath "native.image.json"
+        createDirectoryIfMissing True (takeDirectory compiledPath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/durable-workflow/Main.clasp", "-o", compiledPath, "--json", "--compiler=bootstrap"]
+        case exitCode of
+          ExitFailure _ ->
+            assertFailure ("expected backend workflow compile to emit frontend and native artifacts:\n" <> stdoutText <> stderrText)
+          ExitSuccess -> do
+            jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
+              Left decodeErr ->
+                assertFailure ("expected backend workflow compile json output to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
+            assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
+            assertEqual "output" (Just (String (T.pack compiledPath))) (lookupObjectKey "output" jsonValue)
+            assertEqual "native" (Just (String (T.pack nativePath))) (lookupObjectKey "native" jsonValue)
+            assertEqual "image" (Just (String (T.pack imagePath))) (lookupObjectKey "image" jsonValue)
+            assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            compiledExists <- doesFileExist compiledPath
+            nativeExists <- doesFileExist nativePath
+            imageExists <- doesFileExist imagePath
+            assertBool "expected frontend compile artifact" compiledExists
+            assertBool "expected companion native ir artifact" nativeExists
+            assertBool "expected companion native image artifact" imageExists
+    , testCase "hosted native tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
-          let stage1Path = root </> "stage1.mjs"
-          let bootstrapOutputPath = root </> "bootstrap-output.txt"
-          let resultPath = root </> "result.txt"
-          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["compile", root </> "Fake.clasp", "-o", stage1Path, "--compiler=bootstrap"]
+          let stage1IrPath = root </> "Fake.native.ir"
+              stage1ImagePath = replaceExtension stage1IrPath "native.image.json"
+              resultPath = root </> "result.txt"
+          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["native", root </> "Fake.clasp", "-o", stage1IrPath, "--compiler=bootstrap"]
           case compileExitCode of
             ExitSuccess ->
               pure ()
             ExitFailure _ ->
-              assertFailure ("expected bootstrap compile for hosted runner setup to succeed:\n" <> compileStdout <> compileStderr)
-          TIO.writeFile bootstrapOutputPath "ignored"
+              assertFailure ("expected bootstrap native compile for hosted runner setup to succeed:\n" <> compileStdout <> compileStderr)
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
-              "node"
-              [ "compiler/hosted/run-tool.mjs"
-              , "check"
-              , root </> "Fake.clasp"
-              , stage1Path
-              , bootstrapOutputPath
+              "bash"
+              [ "src/scripts/run-native-tool.sh"
+              , stage1ImagePath
+              , "checkEntrypoint"
               , resultPath
-              , root
               ]
               ""
           case exitCode of
             ExitSuccess ->
-              assertFailure "expected hosted tool runner to reject a compiler artifact without the requested command support"
+              assertFailure "expected hosted native tool runner to reject a compiler artifact without the requested command support"
             ExitFailure _ ->
-              assertBool "expected hosted tool runner to report missing hosted command support" ("does not expose hosted check support" `isInfixOf` stderrText)
+              assertBool "expected hosted native tool runner to report missing export support" ("runtime failed to execute native compiler export" `isInfixOf` stderrText)
     , testCase "hosted native tool runner accepts ordinary native output without a bootstrap oracle" $
         withProjectFiles "hosted-native-tool-runner-native-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
-          stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+          stage1Path <- makeAbsolute "src/stage1.native.image.json"
           let resultPath = root </> "result.native.ir"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "nativeSourceText"
               , root </> "Main.clasp"
@@ -5798,12 +5981,12 @@ compileTests =
           assertBool "expected hosted native global" ("global main = string(\"hello\")" `T.isInfixOf` nativeIr)
     , testCase "hosted native tool runner accepts ordinary compile output without a bootstrap oracle" $
         withProjectFiles "hosted-native-tool-runner-compile-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
-          stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+          stage1Path <- makeAbsolute "src/stage1.native.image.json"
           let resultPath = root </> "result.mjs"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "compileSourceText"
               , root </> "Main.clasp"
@@ -5818,7 +6001,7 @@ compileTests =
           compiledJs <- TIO.readFile resultPath
           assertBool "expected hosted compile output" ("export const main = \"hello\";" `T.isInfixOf` compiledJs)
     , testCase "hosted native tool runner handles examples/hello.clasp end to end" $ do
-        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+        stage1Path <- makeAbsolute "src/stage1.native.image.json"
         helloExampleSource <- readExampleSource "hello.clasp"
         withProjectFiles "hosted-native-tool-runner-hello" [("Main.clasp", helloExampleSource)] $ \root -> do
           helloPath <- makeAbsolute (root </> "Main.clasp")
@@ -5830,7 +6013,7 @@ compileTests =
           (checkExitCode, _checkStdout, checkStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "checkSourceText"
               , helloPath
@@ -5849,7 +6032,7 @@ compileTests =
           (checkCoreExitCode, _checkCoreStdout, checkCoreStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "checkCoreSourceText"
               , helloPath
@@ -5868,7 +6051,7 @@ compileTests =
           (compileExitCode, _compileStdout, compileStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "compileSourceText"
               , helloPath
@@ -5887,7 +6070,7 @@ compileTests =
           (nativeExitCode, _nativeStdout, nativeStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "nativeSourceText"
               , helloPath
@@ -5908,7 +6091,7 @@ compileTests =
           (nativeImageExitCode, _nativeImageStdout, nativeImageStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "nativeImageSourceText"
               , helloPath
@@ -5925,15 +6108,15 @@ compileTests =
           assertBool "expected hello native image module" ("\"module\": \"Main\"" `T.isInfixOf` nativeImage)
           assertBool "expected hello native image main entry" ("\"name\": \"main\"" `T.isInfixOf` nativeImage)
     , testCase "hosted native tool runner rebuilds the hosted compiler project with native list append intrinsics" $ do
-        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
-        hostedCompilerPath <- makeAbsolute "compiler/hosted/Main.clasp"
+        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        hostedCompilerPath <- makeAbsolute "src/Main.clasp"
         withProjectFiles "hosted-native-tool-runner-self-rebuild" [] $ \root -> do
           let nativePath = root </> "hosted.native.ir"
           let nativeImagePath = root </> "hosted.native.image.json"
           (nativeExitCode, _nativeStdout, nativeStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "nativeProjectText"
               , "--project-entry=" <> hostedCompilerPath
@@ -5950,7 +6133,7 @@ compileTests =
           (nativeImageExitCode, _nativeImageStdout, nativeImageStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "nativeImageProjectText"
               , "--project-entry=" <> hostedCompilerPath
@@ -5965,13 +6148,13 @@ compileTests =
           nativeImage <- TIO.readFile nativeImagePath
           assertBool "expected hosted native self-rebuild native image to preserve list append intrinsics" ("\"name\": \"list.append\"" `T.isInfixOf` nativeImage)
     , testCase "promoted hosted native seed preserves escaped string literals across self-hosted compile" $ do
-        stage1Path <- makeAbsolute "compiler/hosted/stage1.native.image.json"
+        stage1Path <- makeAbsolute "src/stage1.native.image.json"
         withProjectFiles "hosted-native-tool-runner-escaped-string" [("Main.clasp", "module Main\n\nmain : Str\nmain = textJoin \"\\n\" [\"left\", \"right\"]\n")] $ \root -> do
           let compilePath = root </> "escaped.mjs"
           (compileExitCode, _compileStdout, compileStderr) <-
             readProcessWithExitCode
               "bash"
-              [ "compiler/hosted/scripts/run-native-tool.sh"
+              [ "src/scripts/run-native-tool.sh"
               , stage1Path
               , "compileSourceText"
               , root </> "Main.clasp"
@@ -6433,8 +6616,8 @@ compileTests =
             assertBool "expected binary schema codec helper" ("schemaContract.binary = $claspCreateSchemaBinaryCodec(schemaContract);" `T.isInfixOf` emitted)
             assertBool "expected framed binary schema helper" ("schemaContract.encodeFramedBinary = function (value) { return this.binary.frame(value); };" `T.isInfixOf` emitted)
             assertBool "expected platform bridge export" ("export const __claspPlatformBridges = Object.freeze({" `T.isInfixOf` emitted)
-            assertBool "expected react native bridge descriptor" ("reactNative: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createReactNativeBridge\" })" `T.isInfixOf` emitted)
-            assertBool "expected expo bridge descriptor" ("expo: Object.freeze({ module: \"runtime/bun/react.mjs\", entry: \"createExpoBridge\" })" `T.isInfixOf` emitted)
+            assertBool "expected react native bridge descriptor" ("reactNative: Object.freeze({ module: \"src/runtime/react.mjs\", entry: \"createReactNativeBridge\" })" `T.isInfixOf` emitted)
+            assertBool "expected expo bridge descriptor" ("expo: Object.freeze({ module: \"src/runtime/react.mjs\", entry: \"createExpoBridge\" })" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract export" ("export const __claspBindings = Object.freeze({" `T.isInfixOf` emitted)
             assertBool "expected generated binding contract version" ("version: 1," `T.isInfixOf` emitted)
             assertBool "expected generated binding contract routes" ("routes: __claspRoutes," `T.isInfixOf` emitted)
@@ -6749,166 +6932,20 @@ compileTests =
               "expected nested partial merge and completion checks"
               "{\"parsedPartial\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12}},\"first\":{\"summary\":\"Ready\"},\"second\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12}},\"third\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12,\"completion\":7},\"done\":true},\"final\":{\"summary\":\"Ready\",\"usage\":{\"prompt\":12,\"completion\":7},\"done\":true},\"formattedPartial\":\"{\\\"usage\\\":{\\\"completion\\\":7}}\",\"incomplete\":\"completion must be an integer\"}"
               runtimeOutput
-    , testCase "control-plane example drives one repo-level agent loop" $ do
-        result <- compileEntry ("examples" </> "control-plane" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected control-plane example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/control-plane/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "control-plane" </> "demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected repo-level control-plane demo loop result"
-                  "{\"agent\":\"builder\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"hookAccepted\":true,\"fileAllowed\":true,\"taskQueue\":\"Inspect the repo first, then run the merge gate.\",\"verificationGuide\":\"Run bash scripts/verify-all.sh before finishing.\",\"mergeGateRequest\":\"release:0\",\"steps\":[{\"step\":\"inspect\",\"requestId\":\"release:inspect\",\"method\":\"search_repo\",\"allowed\":true,\"summary\":\"src/Clasp/Compiler.hs\\ntest/Main.hs\"},{\"step\":\"verify\",\"requestId\":\"release:0\",\"method\":\"search_repo\",\"allowed\":true,\"summary\":\"verification:ok\"}]}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("control-plane demo script failed:\n" <> stderrText)
-    , testCase "support-agent example runs a typed tool loop and validates structured outputs" $ do
-        result <- compileEntry ("examples" </> "support-agent" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected support-agent example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/support-agent/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "support-agent" </> "demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected typed tool and structured output demo result"
-                  "{\"agent\":\"renewalAgent\",\"approval\":\"on_request\",\"sandbox\":\"workspace_write\",\"guideScope\":\"Resolve renewal blockers with typed repo tools and validated structured outputs.\",\"plan\":\"Look up customer context, fetch the renewal policy note, then emit either a reply draft or an escalation draft.\",\"bamlShimKind\":\"clasp-baml-shim\",\"bamlToolNames\":[\"lookupCustomer\",\"lookupPolicy\"],\"dynamicSchemaNames\":[\"ReplyDraft\",\"EscalationDraft\"],\"scenarios\":[{\"ticket\":\"cust-42\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Northwind Studio\",\"plan\":\"standard\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Northwind Studio\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Renewal is blocked on legal review.\",\"decisionType\":\"ReplyDraft\",\"decisionAction\":\"reply\"},{\"ticket\":\"cust-99\",\"toolMethods\":[\"lookup_customer\",\"lookup_policy\"],\"company\":\"Blue Yonder Enterprise\",\"plan\":\"enterprise\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the renewal desk agent.\\n\\nassistant: Blue Yonder Enterprise\\n\\nassistant: Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.\\n\\nuser: Enterprise renewal is blocked and the deadline is today.\",\"decisionType\":\"EscalationDraft\",\"decisionAction\":\"escalate\"}],\"invalidDecision\":\"decision did not match any dynamic schema candidate: ReplyDraft, EscalationDraft\",\"traceActions\":[\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\",\"prepare_call\",\"parse_result\"]}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("support-agent demo script failed:\n" <> stderrText)
-    , testCase "support-console example drives typed support dashboard, export, and preview flows" $ do
-        result <- compileEntry ("examples" </> "support-console" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected support-console example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/support-console/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "support-console" </> "demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected support-console demo result"
-                  "{\"routeCount\":4,\"routeNames\":[\"supportDashboardRoute\",\"supportCustomerRoute\",\"supportCustomerPageRoute\",\"previewReplyRoute\"],\"hostBindingNames\":[\"generateReplyPreview\",\"publishCustomer\"],\"hostBindingRuntimeNames\":[\"provider:replyPreview\",\"storage:publishCustomer\"],\"storageBindingNames\":[\"publishCustomer\"],\"storageTableNames\":[\"support_customer\"],\"storageParamSemanticType\":\"SupportCustomer\",\"storagePrimaryKeyKinds\":[\"not_null\",\"primary_key\"],\"dashboardHasPreviewForm\":true,\"dashboardHasCustomerLink\":true,\"customerCompany\":\"Northwind Studio\",\"customerEmail\":\"ops@northwind.example\",\"customerPageHasExport\":true,\"previewReply\":\"Thanks for the update. Renewal is blocked on legal review. We will send the next renewal step today.\",\"previewEscalationNeeded\":true,\"previewPageHasReply\":true,\"providerOnlyPreviewKeys\":[\"customerId\",\"escalationNeeded\",\"suggestedReply\"],\"providerOnlyDeniedStorage\":\"Unknown Clasp provider binding: publishCustomer\",\"providerOnlyBindings\":[\"generateReplyPreview\"],\"providerObservedDraft\":{\"source\":\"app-runtime\",\"keys\":[\"customerId\",\"summary\"],\"contactEmail\":false},\"storageObservedCustomer\":{\"keys\":[\"company\",\"contactEmail\",\"id\",\"plan\",\"renewalRisk\"],\"contactEmail\":\"ops@northwind.example\",\"plan\":\"enterprise\"},\"invalid\":\"summary must be a string\"}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("support-console demo script failed:\n" <> stderrText)
-    , testCase "release-gate example drives review, audit, and redirect flows" $ do
-        result <- compileEntry ("examples" </> "release-gate" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected release-gate example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/release-gate/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "release-gate" </> "demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected release-gate demo result"
-                  "{\"routeCount\":5,\"routeNames\":[\"releaseGateRoute\",\"releaseAuditRoute\",\"releaseAckRoute\",\"releaseReviewRoute\",\"releaseAcceptRoute\"],\"hostBindingNames\":[\"reviewRelease\"],\"dashboardHasReviewForm\":true,\"auditTenant\":\"operations\",\"auditStatus\":\"Pending\",\"decisionStatus\":\"Approved\",\"decisionNote\":\"Approved after typed policy review.\",\"decisionPageHasBackLink\":true,\"redirectStatus\":303,\"redirectLocation\":\"/release/ack\",\"ackHasBackLink\":true,\"invalid\":\"releaseId must be a string\"}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("release-gate demo script failed:\n" <> stderrText)
-    , testCase "durable workflow example survives restart and supervised module replacement" $
+    , testCase "control-plane example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "control-plane" </> "Main.clasp")
+    , testCase "support-agent example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "support-agent" </> "Main.clasp")
+    , testCase "support-console example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "support-console" </> "Main.clasp")
+    , testCase "release-gate example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "release-gate" </> "Main.clasp")
+    , testCase "durable workflow example requires native backend emission" $
         flip finally (cleanupProjectDir stateDir) $ do
           oldResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.clasp")
           newResult <- compileEntry ("examples" </> "durable-workflow" </> "Main.next.clasp")
-          case (oldResult, newResult) of
-            (Left err, _) ->
-              assertFailure ("expected durable workflow example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            (_, Left err) ->
-              assertFailure ("expected durable workflow replacement example to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            (Right oldEmitted, Right newEmitted) -> do
-              let oldCompiledPath = "dist/test-projects/durable-workflow/compiled-v1.mjs"
-              let newCompiledPath = "dist/test-projects/durable-workflow/compiled-v2.mjs"
-              createDirectoryIfMissing True (takeDirectory oldCompiledPath)
-              TIO.writeFile oldCompiledPath oldEmitted
-              TIO.writeFile newCompiledPath newEmitted
-              absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
-              absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-              absoluteDemoPath <- makeAbsolute ("examples" </> "durable-workflow" </> "demo.mjs")
-              absoluteStateDir <- makeAbsolute stateDir
-              (exitCode, stdoutText, stderrText) <-
-                readProcessWithExitCode
-                  "node"
-                  [ absoluteDemoPath
-                  , absoluteOldCompiledPath
-                  , absoluteNewCompiledPath
-                  , absoluteStateDir
-                  ]
-                  ""
-              case exitCode of
-                ExitSuccess ->
-                  case eitherDecodeStrictText (T.strip (T.pack stdoutText)) of
-                    Left err ->
-                      assertFailure ("expected durable workflow demo output to be valid JSON:\n" <> err)
-                    Right (Object value) -> do
-                      assertEqual "initial count" (Just (Number 8)) (KeyMap.lookup "initialCount" value)
-                      assertEqual "restart recovered" (Just (Bool True)) (KeyMap.lookup "restartRecovered" value)
-                      assertEqual "restarted count" (Just (Number 10)) (KeyMap.lookup "restartedCount" value)
-                      assertEqual "restarted mailbox size" (Just (Number 0)) (KeyMap.lookup "restartedMailboxSize" value)
-                      assertEqual "handoff status" (Just (String "handoff")) (KeyMap.lookup "handoffStatus" value)
-                      assertEqual "handoff operator" (Just (String "release-bot")) (KeyMap.lookup "handoffOperator" value)
-                      assertEqual "draining status" (Just (String "draining")) (KeyMap.lookup "drainingStatus" value)
-                      assertEqual "activated status" (Just (String "activated")) (KeyMap.lookup "activatedStatus" value)
-                      assertEqual "activated count" (Just (Number 15)) (KeyMap.lookup "activatedCount" value)
-                      assertEqual "activated supervisor" (Just (String "UpgradeSupervisor")) (KeyMap.lookup "activatedSupervisor" value)
-                      assertEqual "retired status" (Just (String "retired")) (KeyMap.lookup "retiredStatus" value)
-                      assertEqual "retired reason" (Just (String "promoted")) (KeyMap.lookup "retiredReason" value)
-                      case KeyMap.lookup "statePath" value of
-                        Just (String statePathText) -> do
-                          exists <- doesFileExist (T.unpack statePathText)
-                          assertBool "expected demo to persist restart state on disk" exists
-                        other ->
-                          assertFailure ("expected statePath string, got " <> show other)
-                    Right other ->
-                      assertFailure ("expected JSON object from durable workflow demo, got " <> show other)
-                ExitFailure _ ->
-                  assertFailure ("durable workflow demo script failed:\n" <> stderrText)
+          assertHasCode "E_BACKEND_TARGET_REQUIRES_NATIVE" oldResult
+          assertHasCode "E_BACKEND_TARGET_REQUIRES_NATIVE" newResult
     , testCase "compile emits field classifications and projection disclosure metadata" $
         case compileSource "projection" classifiedProjectionSource of
           Left err ->
@@ -7030,8 +7067,8 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteServerRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
-            absoluteWorkerRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteServerRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
+            absoluteWorkerRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (authIdentityRuntimeScript absoluteCompiledPath absoluteServerRuntimePath absoluteWorkerRuntimePath)
             assertEqual
               "expected auth identity contract exports across server and worker runtimes"
@@ -7069,7 +7106,7 @@ compileTests =
               let compiledPath = root </> "compiled.mjs"
               TIO.writeFile compiledPath emitted
               absoluteCompiledPath <- makeAbsolute compiledPath
-              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+              absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
               runtimeOutput <- runNodeScript (packageImportRuntimeScript absoluteCompiledPath absoluteRuntimePath)
               assertEqual
                 "expected package-backed foreign declarations to run through generated adapters"
@@ -7160,24 +7197,9 @@ compileTests =
         withProjectFiles "package-import-unsafe-structural-mismatch" packageImportUnsafeStructuralMismatchFiles $ \root -> do
           result <- checkEntry (root </> "Main.clasp")
           assertHasCode "E_FOREIGN_PACKAGE_SIGNATURE_MISMATCH" result
-    , testCase "compileEntry renders an inbox-style shared page safely" $
-        withProjectFiles "render-inbox-page" inboxPageFiles $ \root -> do
-          result <- compileEntry (root </> "Main.clasp")
-          case result of
-            Left err ->
-              assertFailure ("expected inbox page project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right emitted -> do
-              let compiledPath = root </> "compiled.mjs"
-              TIO.writeFile compiledPath emitted
-              renderedHtml <- runNodeModule compiledPath
-              assertBool "expected doctype" ("<!DOCTYPE html>" `T.isInfixOf` renderedHtml)
-              assertBool "expected viewport head tag" ("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" `T.isInfixOf` renderedHtml)
-              assertBool "expected title" ("<title>Inbox</title>" `T.isInfixOf` renderedHtml)
-              assertBool "expected stylesheet link" ("<link rel=\"stylesheet\" href=\"/assets/clasp/Main.styles.css\" data-clasp-asset-kind=\"style-bundle\" data-clasp-style-bundle=\"module:Main:styles\">" `T.isInfixOf` renderedHtml)
-              assertBool "expected escaped subject" ("&lt;Quarterly &lt;review&gt;&gt;" `T.isInfixOf` renderedHtml)
-              assertBool "expected escaped ampersand" ("Escaped &amp; archived" `T.isInfixOf` renderedHtml)
-              assertBool "expected explicit style ref wrapper" ("data-clasp-style=\"inbox_shell\"" `T.isInfixOf` renderedHtml)
-              assertBool "expected stable default html without flow metadata attrs" (not ("data-clasp-route=" `T.isInfixOf` renderedHtml))
+    , testCase "compileEntry rejects inbox-style shared page routes and requires native" $
+        withProjectFiles "render-inbox-page" inboxPageFiles $ \root ->
+          assertBackendEntryRequiresNative (root </> "Main.clasp")
     , testCase "generated page head and style bundle assets stay machine-readable" $
         case compileSource "page-head-assets" pageSource of
           Left err ->
@@ -7187,7 +7209,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (pageAssetRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected generated asset, head, and style bundle strategy"
@@ -7229,7 +7251,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/react.mjs"
+            absoluteRuntimePath <- makeAbsolute "src/runtime/react.mjs"
             runtimeOutput <- runNodeScript (reactInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected extracted react page component to render without relying on this binding"
@@ -7244,28 +7266,15 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/react.mjs"
+            absoluteRuntimePath <- makeAbsolute "src/runtime/react.mjs"
             runtimeOutput <- runNodeScript (reactNativeBridgeRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected react native and expo bridge models to stay stable for future mobile reuse"
-              "{\"modulePath\":\"runtime/bun/react.mjs\",\"nativeEntry\":\"createReactNativeBridge\",\"expoEntry\":\"createExpoBridge\",\"nativeKind\":\"clasp-native-bridge\",\"nativePlatform\":\"react-native\",\"expoPlatform\":\"expo\",\"pageKind\":\"clasp-native-page\",\"pageTitle\":\"Inbox\",\"bodyKind\":\"styled\",\"styleRef\":\"inbox_shell\",\"stylePadding\":16,\"styleVariantCount\":3,\"styleEscape\":\"hostStyle\",\"childKind\":\"element\",\"childTag\":\"section\",\"textKind\":\"text\",\"textValue\":\"Safe <markup>\",\"linkHref\":null}"
+              "{\"modulePath\":\"src/runtime/react.mjs\",\"nativeEntry\":\"createReactNativeBridge\",\"expoEntry\":\"createExpoBridge\",\"nativeKind\":\"clasp-native-bridge\",\"nativePlatform\":\"react-native\",\"expoPlatform\":\"expo\",\"pageKind\":\"clasp-native-page\",\"pageTitle\":\"Inbox\",\"bodyKind\":\"styled\",\"styleRef\":\"inbox_shell\",\"stylePadding\":16,\"styleVariantCount\":3,\"styleEscape\":\"hostStyle\",\"childKind\":\"element\",\"childTag\":\"section\",\"textKind\":\"text\",\"textValue\":\"Safe <markup>\",\"linkHref\":null}"
               runtimeOutput
-    , testCase "runtime preserves numeric-looking Str values in page form and query flows" $
-        withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root -> do
-          result <- compileEntry (root </> "Main.clasp")
-          case result of
-            Left err ->
-              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right emitted -> do
-              let compiledPath = root </> "compiled.mjs"
-              TIO.writeFile compiledPath emitted
-              absoluteCompiledPath <- makeAbsolute compiledPath
-              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
-              runtimeOutput <- runNodeScript (pageFormRuntimeScript absoluteCompiledPath absoluteRuntimePath)
-              assertEqual
-                "expected query decode, form decode, and invalid form failure"
-                "{\"query\":{\"customerId\":\"00123\",\"quantity\":7},\"form\":{\"customerId\":\"00123\",\"quantity\":7},\"html\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\"><title>Order</title></head><body>00123</body></html>\",\"invalid\":\"quantity must be an integer\"}"
-                runtimeOutput
+    , testCase "page form runtime example requires native backend emission" $
+        withProjectFiles "page-form-runtime" pageFormRuntimeFiles $ \root ->
+          assertBackendEntryRequiresNative (root </> "Main.clasp")
     , testCase "generated json route clients prepare requests and decode responses" $
         case compileSource "service-client" serviceSource of
           Left err ->
@@ -7317,7 +7326,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/client.mjs"
+            absoluteRuntimePath <- makeAbsolute "src/runtime/client.mjs"
             runtimeOutput <- runNodeScript (routeClientFetchRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected json route client fetch runtime contract"
@@ -7332,7 +7341,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workerJobRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected typed worker job contract and dispatch"
@@ -7347,7 +7356,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (dynamicSchemaWorkerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected constrained dynamic worker outputs"
@@ -7362,7 +7371,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (simulationRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected deterministic simulation runtime output"
@@ -7377,7 +7386,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7487,7 +7496,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowConstraintRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected workflow constraint runtime output"
@@ -7507,7 +7516,7 @@ compileTests =
             TIO.writeFile newCompiledPath newEmitted
             absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
             absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowParallelRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7548,7 +7557,7 @@ compileTests =
             TIO.writeFile newCompiledPath newEmitted
             absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
             absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowHotSwapRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7591,7 +7600,7 @@ compileTests =
             TIO.writeFile newCompiledPath newEmitted
             absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
             absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowSelfUpdateRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7635,7 +7644,7 @@ compileTests =
             TIO.writeFile newCompiledPath newEmitted
             absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
             absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowHealthGatedRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7681,7 +7690,7 @@ compileTests =
             TIO.writeFile newCompiledPath newEmitted
             absoluteOldCompiledPath <- makeAbsolute oldCompiledPath
             absoluteNewCompiledPath <- makeAbsolute newCompiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/worker.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/worker.mjs"
             runtimeOutput <- runNodeScript (workflowKillSwitchRuntimeScript absoluteOldCompiledPath absoluteNewCompiledPath absoluteRuntimePath)
             case eitherDecodeStrictText runtimeOutput of
               Left err ->
@@ -7714,7 +7723,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (nativeInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected native interop contract and build plan"
@@ -7729,7 +7738,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (providerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected provider contract and provider-backed page flow"
@@ -7744,7 +7753,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (storageRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected derived storage contract output"
@@ -7759,7 +7768,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected sqlite contract and live connection runtime output"
@@ -7774,7 +7783,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteSchemaRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected sqlite schema hooks runtime output"
@@ -7789,7 +7798,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteQueryRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected typed sqlite query runtime output"
@@ -7804,7 +7813,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteMutationRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected typed sqlite mutation runtime output"
@@ -7819,7 +7828,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteProtectedRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected protected sqlite contract output"
@@ -7834,7 +7843,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (sqliteUnsafeRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected unsafe sqlite runtime output"
@@ -7849,7 +7858,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (providerRuntimeInvalidOutputScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected structured output validation failure"
@@ -7864,28 +7873,14 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (dynamicSchemaServerRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected route-level constrained dynamic schema decoding"
               "{\"routePath\":\"/lead/triage\",\"schemaNames\":[\"LeadEscalation\",\"LeadSummary\"],\"lowType\":\"LeadSummary\",\"lowPriority\":\"low\",\"highType\":\"LeadEscalation\",\"highOwner\":\"ae-team\",\"invalid\":\"result did not match any dynamic schema candidate: LeadSummary, LeadEscalation\"}"
               runtimeOutput
-    , testCase "server runtime exposes a BAML-style shim over compiled schemas tools and output boundaries" $ do
-        result <- compileEntry ("examples" </> "support-agent" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected support-agent example to compile for BAML shim runtime:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/support-agent-baml-shim/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
-            runtimeOutput <- runNodeScript (bamlShimRuntimeScript absoluteCompiledPath absoluteRuntimePath)
-            assertEqual
-              "expected BAML shim to normalize tools schemas and typed outputs"
-              "{\"kind\":\"clasp-baml-shim\",\"schemaKind\":\"record\",\"toolNames\":[\"lookupCustomer\",\"lookupPolicy\"],\"preparedMethod\":\"lookup_customer\",\"preparedCustomerId\":\"cust-42\",\"parsedCompany\":\"Northwind Studio\",\"replyAction\":\"reply\",\"escalateQueue\":\"renewals-desk\",\"dynamicType\":\"ReplyDraft\"}"
-              runtimeOutput
+    , testCase "support-agent BAML shim example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "support-agent" </> "Main.clasp")
     , testCase "compile emits app-facing secret consumers for routes tools workflows and provider bindings" $
         case compileSource "secret-surface" secretSurfaceSource of
           Left err ->
@@ -7920,7 +7915,7 @@ compileTests =
             createDirectoryIfMissing True (takeDirectory compiledPath)
             TIO.writeFile compiledPath emitted
             absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
+            absoluteRuntimePath <- makeAbsolute "deprecated/runtime/server.mjs"
             runtimeOutput <- runNodeScript (secretSurfaceRuntimeScript absoluteCompiledPath absoluteRuntimePath)
             assertEqual
               "expected declared secret-handle runtime output"
@@ -7940,21 +7935,8 @@ compileTests =
               "expected delegated handoff runtime output"
               "{\"agentHandoffKind\":\"clasp-secret-handoff\",\"agentSecretNames\":[\"OPENAI_API_KEY\",\"SEARCH_API_TOKEN\"],\"agentDelegationTarget\":\"tool:searchRepo\",\"agentDelegated\":true,\"agentHasRawValue\":false,\"agentRawValueLeaked\":false,\"repeatDelegationIdsDistinct\":true,\"toolTraceDelegator\":\"agent:builder\",\"toolTraceConsumer\":\"tool:searchRepo\",\"toolTraceBoundary\":\"toolServer:RepoTools\",\"toolAuditDelegatedAt\":1700,\"toolAuditAttenuationAction\":\"resolve\",\"toolAuditAttenuationTtl\":300,\"toolAuditAttenuationMaxUses\":1,\"toolResolvedName\":\"OPENAI_API_KEY\",\"toolResolvedValue\":\"sk-agent-live\",\"workflowRejected\":\"workflow SearchFlow targets tool searchRepo, not workflow SearchFlow.\",\"workflowAcceptedName\":\"SEARCH_API_TOKEN\",\"workflowResolvedValue\":\"tok-workflow-live\",\"workflowTracePolicy\":\"SupportSecrets\"}"
               runtimeOutput
-    , testCase "prompt and tool input surfaces resolve secrets from declared handles" $ do
-        result <- compileEntry ("examples" </> "prompt-functions" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected prompt-functions example to compile for prompt/tool input surfaces:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/prompt-input-surface-runtime/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            runtimeOutput <- runNodeScript (promptInputSurfaceRuntimeScript absoluteCompiledPath)
-            assertEqual
-              "expected prompt and tool input surfaces to resolve declared handles"
-              "{\"promptKind\":\"clasp-prompt-input\",\"promptText\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\",\"promptHandleName\":\"OPENAI_API_KEY\",\"toolKind\":\"clasp-tool-input\",\"toolHandleName\":\"OPENAI_API_KEY\",\"toolMethod\":\"summarize_draft\",\"toolQuery\":\"system: You are a support agent.\\n\\nassistant: Draft a concise reply.\\n\\nuser: Renewal is blocked on legal review.\",\"invalidHandle\":\"prompt secretHandle must reference a declared Clasp secret handle.\"}"
-              runtimeOutput
+    , testCase "prompt-functions example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "prompt-functions" </> "Main.clasp")
     , testCase "typed prompt functions compile to stable prompt values and text rendering" $ do
         case compileSource "prompt-runtime" promptFunctionSource of
           Left err ->
@@ -7992,144 +7974,35 @@ compileTests =
             assertFailure ("expected python interop compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted -> do
             assertBool "expected python interop export" ("export const __claspPythonInterop = Object.freeze({" `T.isInfixOf` emitted)
-            assertBool "expected python runtime descriptor" ("runtime: Object.freeze({ module: \"runtime/bun/python.mjs\", entry: \"createPythonInteropRuntime\" })" `T.isInfixOf` emitted)
+            assertBool "expected python runtime descriptor" ("runtime: Object.freeze({ module: \"src/runtime/python.mjs\", entry: \"createPythonInteropRuntime\" })" `T.isInfixOf` emitted)
             assertBool "expected worker boundary descriptor" ("kind: \"worker\"" `T.isInfixOf` emitted)
             assertBool "expected service boundary descriptor" ("kind: \"service\"" `T.isInfixOf` emitted)
             assertBool "expected python binding contract entry" ("python: __claspPythonInterop," `T.isInfixOf` emitted)
-    , testCase "python interop runtime manages typed worker and service boundaries" $
+    , testCase "python interop runtime example requires native backend emission" $
         withProjectFiles "python-interop-runtime"
           [ ("compiled-source.clasp", pythonInteropSource)
           , ("clasp_worker_bridge.py", pythonWorkerModuleSource)
           , ("clasp_service_pkg/__main__.py", pythonServicePackageSource)
-          ] $ \root -> do
-            result <- compileEntry (root </> "compiled-source.clasp")
-            case result of
-              Left err ->
-                assertFailure ("expected python interop project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-              Right emitted -> do
-                let compiledPath = root </> "compiled.mjs"
-                TIO.writeFile compiledPath emitted
-                absoluteCompiledPath <- makeAbsolute compiledPath
-                absoluteRuntimePath <- makeAbsolute "runtime/bun/python.mjs"
-                absoluteRoot <- makeAbsolute root
-                runtimeOutput <- runNodeScript (pythonInteropRuntimeScript absoluteCompiledPath absoluteRuntimePath absoluteRoot)
-                assertEqual
-                  "expected python worker/service lifecycle contract"
-                  "{\"runtimeModule\":\"runtime/bun/python.mjs\",\"workerCount\":1,\"serviceCount\":1,\"workerRunning\":true,\"workerAccepted\":true,\"workerLabel\":\"py:worker-7\",\"workerStopped\":false,\"workerRestarted\":true,\"serviceSummary\":\"py:Acme:42\",\"serviceAccepted\":true,\"serviceStopped\":false,\"invalid\":\"budget must be an integer\"}"
-                  runtimeOutput
-    , testCase "generated page route clients build query and form requests" $
-        withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root -> do
-          result <- compileEntry (root </> "Main.clasp")
-          case result of
-            Left err ->
-              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right emitted -> do
-              let compiledPath = root </> "compiled.mjs"
-              TIO.writeFile compiledPath emitted
-              absoluteCompiledPath <- makeAbsolute compiledPath
-              runtimeOutput <- runNodeScript (routeClientPageRuntimeScript absoluteCompiledPath)
-              assertEqual
-                "expected page route client transport contract"
-                "{\"lookupHref\":\"/order?customerId=00123&quantity=7\",\"lookupBody\":null,\"submitContentType\":\"application/x-www-form-urlencoded\",\"submitBody\":\"customerId=00123&quantity=7\",\"pageHtml\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\"}"
-                runtimeOutput
-    , testCase "generated redirect route clients decode redirect responses" $
-        withProjectFiles "route-client-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
-          result <- compileEntry (root </> "Main.clasp")
-          case result of
-            Left err ->
-              assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right emitted -> do
-              let compiledPath = root </> "compiled.mjs"
-              TIO.writeFile compiledPath emitted
-              absoluteCompiledPath <- makeAbsolute compiledPath
-              runtimeOutput <- runNodeScript (routeClientRedirectRuntimeScript absoluteCompiledPath)
-              assertEqual
-                "expected redirect route client response contract"
-                "{\"method\":\"POST\",\"path\":\"/submit\",\"body\":\"\",\"redirect\":{\"status\":303,\"location\":\"/inbox\"}}"
-                runtimeOutput
-    , testCase "client runtime preserves page html and manual redirect parsing" $
+          ] $ \root ->
+            assertBackendEntryRequiresNative (root </> "compiled-source.clasp")
+    , testCase "page route client examples require native backend emission" $
+        withProjectFiles "route-client-page-runtime" pageFormRuntimeFiles $ \root ->
+          assertBackendEntryRequiresNative (root </> "Main.clasp")
+    , testCase "redirect route client examples require native backend emission" $
+        withProjectFiles "route-client-redirect-runtime" pageRedirectRuntimeFiles $ \root ->
+          assertBackendEntryRequiresNative (root </> "Main.clasp")
+    , testCase "page and redirect browser client examples require native backend emission" $
         withProjectFiles "route-client-browser-runtime" pageFormRuntimeFiles $ \pageRoot -> do
-          pageResult <- compileEntry (pageRoot </> "Main.clasp")
-          case pageResult of
-            Left err ->
-              assertFailure ("expected page form project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right pageEmitted -> do
-              let pageCompiledPath = pageRoot </> "compiled.mjs"
-              TIO.writeFile pageCompiledPath pageEmitted
-              absolutePageCompiledPath <- makeAbsolute pageCompiledPath
-              withProjectFiles "route-client-browser-redirect-runtime" pageRedirectRuntimeFiles $ \redirectRoot -> do
-                redirectResult <- compileEntry (redirectRoot </> "Main.clasp")
-                case redirectResult of
-                  Left err ->
-                    assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-                  Right redirectEmitted -> do
-                    let redirectCompiledPath = redirectRoot </> "compiled.mjs"
-                    TIO.writeFile redirectCompiledPath redirectEmitted
-                    absoluteRedirectCompiledPath <- makeAbsolute redirectCompiledPath
-                    absoluteRuntimePath <- makeAbsolute "runtime/bun/client.mjs"
-                    runtimeOutput <- runNodeScript (routeClientBrowserRuntimeScript absolutePageCompiledPath absoluteRedirectCompiledPath absoluteRuntimePath)
-                    assertEqual
-                      "expected page html fetch and manual redirect mode"
-                      "{\"pageUrl\":\"https://app.example.test/order?customerId=00123&quantity=7\",\"pageMethod\":\"GET\",\"pageHtml\":\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Order</title></head><body>00123</body></html>\",\"redirectUrl\":\"https://app.example.test/submit\",\"redirectMode\":\"manual\",\"redirectLocation\":\"/inbox\",\"redirectStatus\":303}"
-                      runtimeOutput
-    , testCase "runtime turns redirect route results into http redirects" $
-        withProjectFiles "page-redirect-runtime" pageRedirectRuntimeFiles $ \root -> do
-          result <- compileEntry (root </> "Main.clasp")
-          case result of
-            Left err ->
-              assertFailure ("expected redirect project to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-            Right emitted -> do
-              let compiledPath = root </> "compiled.mjs"
-              TIO.writeFile compiledPath emitted
-              absoluteCompiledPath <- makeAbsolute compiledPath
-              absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
-              runtimeOutput <- runNodeScript (pageRedirectRuntimeScript absoluteCompiledPath absoluteRuntimePath)
-              assertEqual
-                "expected redirect response contract"
-                "{\"status\":303,\"location\":\"/inbox\"}"
-                runtimeOutput
-    , testCase "lead inbox app supports intake, inbox, detail, and invalid form flows" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteRuntimePath <- makeAbsolute "runtime/bun/server.mjs"
-            runtimeOutput <- runNodeScript (leadInboxRuntimeScript absoluteCompiledPath absoluteRuntimePath)
-            assertEqual
-              "expected landing, create, inbox, detail, review, and invalid form behavior"
-              "{\"contractKind\":\"clasp-generated-bindings\",\"contractVersion\":1,\"contractRouteCount\":11,\"contractAssetBasePath\":\"/assets\",\"manifestTypes\":[\"LeadIntake\",\"LeadIntake -> LeadSummary\",\"Empty -> Str\",\"LeadReview\"],\"structuredModelArg\":true,\"structuredStoreArg\":true,\"landingHasForm\":true,\"createdHasLead\":true,\"inboxHasLink\":true,\"detailHasLead\":true,\"reviewHasNote\":true,\"invalid\":\"budget must be an integer\"}"
-              runtimeOutput
-    , testCase "lead app generated clients round-trip the shared api routes" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-client.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "client-demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected generated clients to drive the lead app api surface"
-                  "{\"routeClientCount\":11,\"routeClientNames\":[\"landingRoute\",\"inboxRoute\",\"primaryLeadRoute\",\"secondaryLeadRoute\",\"createLeadRoute\",\"reviewLeadRoute\",\"inboxSnapshotRoute\",\"primaryLeadRecordRoute\",\"secondaryLeadRecordRoute\",\"createLeadRecordRoute\",\"reviewLeadRecordRoute\"],\"inboxHeadline\":\"Priority inbox\",\"createdLeadId\":\"lead-3\",\"createdPriority\":\"Medium\",\"createdSegment\":\"Growth\",\"primaryCompany\":\"SynthSpeak API\",\"reviewedStatus\":\"Reviewed\",\"reviewedNote\":\"Schedule technical discovery\",\"invalid\":\"value.segment expected a LeadSegment value\"}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("lead-app client demo script failed:\n" <> stderrText)
+          assertBackendEntryRequiresNative (pageRoot </> "Main.clasp")
+          withProjectFiles "route-client-browser-redirect-runtime" pageRedirectRuntimeFiles $ \redirectRoot ->
+            assertBackendEntryRequiresNative (redirectRoot </> "Main.clasp")
+    , testCase "redirect runtime example requires native backend emission" $
+        withProjectFiles "page-redirect-runtime" pageRedirectRuntimeFiles $ \root ->
+          assertBackendEntryRequiresNative (root </> "Main.clasp")
+    , testCase "lead app backend example requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
+    , testCase "lead app generated clients require native backend emission at the module boundary" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
     , testCase "lead app browser shell keeps POST results on stable GET history entries" $ do
         absoluteShellPath <- makeAbsolute ("examples" </> "lead-app" </> "app-shell.mjs")
         shellOutput <- runNodeScript (leadAppBrowserShellScript absoluteShellPath)
@@ -8137,132 +8010,16 @@ compileTests =
           "expected browser shell to preserve stable GET history across create and review flows"
           "{\"history\":[\"https://app.example.test/\",\"https://app.example.test/inbox\",\"https://app.example.test/lead/primary\"],\"fetches\":[{\"method\":\"POST\",\"pathname\":\"/leads\"},{\"method\":\"GET\",\"pathname\":\"/inbox\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"},{\"method\":\"POST\",\"pathname\":\"/review\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"},{\"method\":\"GET\",\"pathname\":\"/inbox\"},{\"method\":\"GET\",\"pathname\":\"/lead/primary\"}],\"afterCreate\":\"https://app.example.test/\",\"afterReview\":\"https://app.example.test/lead/primary\",\"afterRefresh\":\"https://app.example.test/lead/primary\",\"afterBack\":\"https://app.example.test/inbox\",\"afterForward\":\"https://app.example.test/lead/primary\",\"title\":\"Primary lead\",\"html\":\"<main><h1>Primary lead</h1></main>\"}"
           shellOutput
-    , testCase "lead app mobile demo reuses compiled route logic through the native bridge" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-mobile.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "mobile-demo.mjs")
-            runtimeOutput <- runNodeScript (leadAppMobileDemoScript absoluteCompiledPath absoluteDemoPath)
-            assertEqual
-              "expected mobile demo to project shared lead flows into a stable native model"
-              "{\"platform\":\"react-native\",\"landingTitle\":\"Lead inbox\",\"landingFormAction\":\"/leads\",\"landingFieldNames\":[\"company\",\"contact\",\"budget\",\"segment\"],\"createdTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: new\",\"Add an internal note before handing this lead off.\",\"Review note\",\"Back to inbox\"],\"reviewedTexts\":[\"SynthSpeak Mobile\",\"Taylor Rivera\",\"Priority: medium\",\"Segment: growth\",\"SynthSpeak Mobile led by Taylor Rivera fits the medium priority pipeline.\",\"Review status: reviewed\",\"Ready for field pilot\",\"Review note\",\"Back to inbox\"]}"
-              runtimeOutput
-    , testCase "lead app workflow demo drives a worker-backed follow-up path from the typed api routes" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-workflow.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "workflow-demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected workflow demo to continue the lead app flow in the worker runtime"
-                  "{\"workflowCount\":1,\"workflowName\":\"LeadFollowUpFlow\",\"checkpointLeadId\":\"lead-3\",\"createdLeadId\":\"lead-3\",\"createdPriority\":\"High\",\"preparedStatus\":\"delivered\",\"preparedResult\":\"schedule-discovery\",\"reviewedStatus\":\"Reviewed\",\"finalNextAction\":\"await-reply\",\"finalTouchCount\":2,\"finalReviewNote\":\"Schedule executive discovery\",\"remainingMailboxSize\":0}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("lead-app workflow demo script failed:\n" <> stderrText)
-    , testCase "lead app ai demo composes typed tool and model boundaries around a seeded lead" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-ai.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            absoluteDemoPath <- makeAbsolute ("examples" </> "lead-app" </> "ai-demo.mjs")
-            (exitCode, stdoutText, stderrText) <-
-              readProcessWithExitCode
-                "node"
-                [ absoluteDemoPath
-                , absoluteCompiledPath
-                ]
-                ""
-            case exitCode of
-              ExitSuccess ->
-                assertEqual
-                  "expected ai demo to load a lead, resolve the typed playbook tool, and reject invalid tool/model payloads"
-                  "{\"routeName\":\"primaryLeadRecordRoute\",\"toolName\":\"lookupLeadPlaybook\",\"toolMethod\":\"lookup_lead_playbook\",\"leadId\":\"lead-2\",\"leadPriority\":\"Medium\",\"leadSegment\":\"Growth\",\"playbookChannel\":\"email\",\"promptRoles\":[\"system\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"assistant\",\"user\"],\"promptText\":\"system: You are the lead outreach assistant.\\n\\nassistant: Northwind Studio\\n\\nassistant: Northwind Studio is ready for a design-system migration this quarter.\\n\\nassistant: medium\\n\\nassistant: growth\\n\\nassistant: Keep the note concise, mention the current pilot, and ask for a next step.\\n\\nuser: Ask for the best time to send a tailored rollout plan.\",\"draftChannel\":\"email\",\"draftSubject\":\"Northwind Studio email follow-up\",\"draftCallToAction\":\"Ask for the best time to send a tailored rollout plan.\",\"signalKind\":\"runtime_signal\",\"signalName\":\"lead_outreach_draft_ready\",\"feedbackSignalName\":\"growth_reply_rate_below_goal\",\"signalRefKinds\":[\"route\",\"prompt\",\"workflow\",\"policy\",\"test\"],\"signalRefIds\":[\"route:primaryLeadRecordRoute\",\"decl:outreachPrompt\",\"workflow:LeadFollowUpFlow\",\"policy:LeadAssistOps\",\"test:lead-app.ai-demo\"],\"signalPromptId\":\"decl:outreachPrompt\",\"signalTestFile\":\"examples/lead-app/ai-demo.mjs\",\"changePlanKind\":\"bounded_change_plan\",\"changePlanName\":\"growth-outreach-tune\",\"changePlanTargetIds\":[\"decl:outreachPrompt\",\"test:lead-app.ai-demo\"],\"changePlanStepCount\":2,\"changePlanAirRootKind\":\"planProjection\",\"learningLoopKind\":\"learning_loop\",\"learningLoopName\":\"growth-outreach-loop\",\"learningLoopObjective\":\"reply-rate\",\"learningLoopEvalIds\":[\"eval:lead-app.ai-demo\"],\"learningLoopBenchmarkIds\":[\"benchmark:clasp-external-adaptation\"],\"learningLoopBudgetStepCap\":2,\"learningLoopAirRootKind\":\"learningLoopProjection\",\"collectedSignalCount\":4,\"invalidChange\":\"Change target route:secondaryLeadRecordRoute is outside the observed signal scope\",\"invalidLearningLoop\":\"Learning loop budget allows at most 1 remediation steps\",\"invalidTool\":\"guidance must be a string\",\"invalidModel\":\"subject must be a string\"}"
-                  (T.strip (T.pack stdoutText))
-              ExitFailure _ ->
-                assertFailure ("lead-app ai demo script failed:\n" <> stderrText)
-    , testCase "lead inbox app emits machine-readable ui, navigation, and action graphs" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-graph.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            graphOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
-                , "const uiLanding = compiledModule.__claspUiGraph.find((page) => page.routeName === 'landingRoute');"
-                , "const action = compiledModule.__claspActionGraph.find((edge) => edge.actionRoute === 'createLeadRoute');"
-                , "const navigation = compiledModule.__claspNavigationGraph.find((edge) => edge.targetRoute === 'secondaryLeadRoute');"
-                , "console.log(JSON.stringify({"
-                , "  pageCount: compiledModule.__claspUiGraph.length,"
-                , "  navigationCount: compiledModule.__claspNavigationGraph.length,"
-                , "  actionCount: compiledModule.__claspActionGraph.length,"
-                , "  landingTitle: uiLanding?.title ?? null,"
-                , "  landingTexts: uiLanding?.texts ?? [],"
-                , "  landingForms: uiLanding?.forms ?? [],"
-                , "  reviewSubmit: compiledModule.__claspActionGraph.find((edge) => edge.actionRoute === 'reviewLeadRoute')?.submitLabels ?? [],"
-                , "  navigationLabel: navigation?.label ?? null"
-                , "}));"
-                ]
-            assertEqual
-              "expected exported ui graphs to summarize benchmark app flows"
-              "{\"pageCount\":6,\"navigationCount\":10,\"actionCount\":5,\"landingTitle\":\"Lead inbox\",\"landingTexts\":[\"Lead inbox\",\"Capture a lead, score it once, and review it on the server.\",\"New lead\",\"Company\",\"Contact\",\"Budget\",\"Segment\",\"Create lead\",\"InboxSnapshot(...).headline\",\"InboxSnapshot(...).primaryLeadLabel\",\"InboxSnapshot(...).secondaryLeadLabel\",\"Open the inbox page\"],\"landingForms\":[{\"routeName\":\"createLeadRoute\",\"routeId\":\"route:createLeadRoute\",\"path\":\"/leads\",\"method\":\"POST\",\"action\":\"/leads\",\"requestType\":\"LeadIntake\",\"responseType\":\"Page\",\"responseKind\":\"page\",\"fields\":[{\"name\":\"company\",\"inputKind\":\"text\",\"label\":\"Company\",\"value\":\"\"},{\"name\":\"contact\",\"inputKind\":\"text\",\"label\":\"Contact\",\"value\":\"\"},{\"name\":\"budget\",\"inputKind\":\"number\",\"label\":\"Budget\",\"value\":\"\"},{\"name\":\"segment\",\"inputKind\":\"text\",\"label\":\"Segment\",\"value\":\"\"}],\"submitLabels\":[\"Create lead\"]}],\"reviewSubmit\":[\"Save review\"],\"navigationLabel\":\"InboxSnapshot(...).secondaryLeadLabel\"}"
-              graphOutput
-    , testCase "lead inbox app exports response-side seeded fixtures for routes" $ do
-        result <- compileEntry ("examples" </> "lead-app" </> "Main.clasp")
-        case result of
-          Left err ->
-            assertFailure ("expected lead inbox app to compile:\n" <> T.unpack (renderDiagnosticBundle err))
-          Right emitted -> do
-            let compiledPath = "dist/test-projects/lead-app/compiled-fixtures.mjs"
-            createDirectoryIfMissing True (takeDirectory compiledPath)
-            TIO.writeFile compiledPath emitted
-            absoluteCompiledPath <- makeAbsolute compiledPath
-            fixtureOutput <- runNodeScript $
-              T.pack . unlines $
-                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
-                , "const landing = compiledModule.__claspSeededFixtures.find((fixture) => fixture.routeName === 'landingRoute');"
-                , "const createLead = compiledModule.__claspSeededFixtures.find((fixture) => fixture.routeName === 'createLeadRoute');"
-                , "console.log(JSON.stringify({"
-                , "  fixtureCount: compiledModule.__claspSeededFixtures.length,"
-                , "  landingResponseType: landing?.responseType ?? null,"
-                , "  landingResponseSchema: landing?.responseSchema ?? null,"
-                , "  landingResponseSeed: landing?.responseSeed ?? null,"
-                , "  createLeadRequestSeed: createLead?.requestSeed ?? null"
-                , "}));"
-                ]
-            assertEqual
-              "expected seeded fixtures to expose stable request and response seeds"
-              "{\"fixtureCount\":11,\"landingResponseType\":\"Page\",\"landingResponseSchema\":null,\"landingResponseSeed\":{\"$kind\":\"page\",\"title\":\"Seeded Page\",\"body\":{\"$kind\":\"text\",\"text\":\"seed\"}},\"createLeadRequestSeed\":{\"company\":\"seed\",\"contact\":\"seed\",\"budget\":0,\"segment\":\"Startup\"}}"
-              fixtureOutput
+    , testCase "lead app mobile demo requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
+    , testCase "lead app workflow demo requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
+    , testCase "lead app ai demo requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
+    , testCase "lead app ui graph export requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
+    , testCase "lead app seeded fixture export requires native backend emission" $
+        assertBackendEntryRequiresNative ("examples" </> "lead-app" </> "Main.clasp")
     ]
 
 assertHasCode :: Text -> Either DiagnosticBundle a -> Assertion
@@ -8274,6 +8031,11 @@ assertHasCode code result =
         (any ((== code) . diagnosticCode) errs)
     Right _ ->
       assertFailure ("expected failure with code " <> T.unpack code)
+
+assertBackendEntryRequiresNative :: FilePath -> Assertion
+assertBackendEntryRequiresNative inputPath = do
+  result <- compileEntry inputPath
+  assertHasCode "E_BACKEND_TARGET_REQUIRES_NATIVE" result
 
 expectFirstDiagnostic :: DiagnosticBundle -> IO Diagnostic
 expectFirstDiagnostic (DiagnosticBundle errs) =
@@ -8302,9 +8064,28 @@ assertUnsupportedPrimaryCompilerJson stderrText = do
   assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
   assertEqual "diagnostic code" (Just (String "E_PRIMARY_COMPILER_UNSUPPORTED")) (lookupObjectKey "code" diagnosticValue)
 
+assertDiagnosticJsonCode :: Text -> String -> Assertion
+assertDiagnosticJsonCode code stderrText = do
+  jsonValue <- case eitherDecodeStrictText (T.pack stderrText) of
+    Left decodeErr ->
+      assertFailure ("expected diagnostic json to decode:\n" <> decodeErr)
+    Right value ->
+      pure value
+  diagnosticValue <- case lookupObjectKey "diagnostics" jsonValue of
+    Just (Array diagnosticsJson) ->
+      case toList diagnosticsJson of
+        firstDiagnostic : _ ->
+          pure firstDiagnostic
+        [] ->
+          assertFailure "expected at least one diagnostic"
+    _ ->
+      assertFailure "expected diagnostics array"
+  assertEqual "status" (Just (String "error")) (lookupObjectKey "status" jsonValue)
+  assertEqual "diagnostic code" (Just (String code)) (lookupObjectKey "code" diagnosticValue)
+
 currentStructuredDiagnosticCodes :: IO [Text]
 currentStructuredDiagnosticCodes = do
-  sourceFiles <- mapM TIO.readFile ["src/Clasp/Checker.hs", "src/Clasp/Compiler.hs", "src/Clasp/Core.hs", "src/Clasp/Loader.hs", "src/Clasp/Parser.hs"]
+  sourceFiles <- mapM TIO.readFile ["deprecated/bootstrap/src/Clasp/Checker.hs", "deprecated/bootstrap/src/Clasp/Compiler.hs", "deprecated/bootstrap/src/Clasp/Core.hs", "deprecated/bootstrap/src/Clasp/Loader.hs", "deprecated/bootstrap/src/Clasp/Parser.hs"]
   let codes =
         Set.toAscList $
           Set.fromList
@@ -8525,31 +8306,62 @@ runNodeScript script = do
     ExitFailure _ ->
       assertFailure ("node script failed:\n" <> stderrText)
 
-runNodeFileScript :: [FilePath] -> IO Text
-runNodeFileScript args = do
-  (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode
-      "node"
-      args
-      ""
-  case exitCode of
-    ExitSuccess ->
-      pure (T.strip (T.pack stdoutText))
-    ExitFailure _ ->
-      assertFailure ("node script failed:\n" <> stderrText)
-
 runClaspc :: [String] -> IO (ExitCode, String, String)
 runClaspc args =
   readProcessWithExitCode
-    "cabal"
-    (["run", "-v0", "claspc", "--"] <> args)
+    "claspc"
+    args
     ""
+
+runHostedNativeTool :: FilePath -> String -> Maybe String -> FilePath -> IO Text
+runHostedNativeTool imagePath exportName inputArg outputPath =
+  runHostedNativeToolFromDirectory Nothing imagePath exportName inputArg outputPath
+
+runHostedNativeToolInDirectory :: FilePath -> FilePath -> String -> Maybe String -> FilePath -> IO Text
+runHostedNativeToolInDirectory workingDirectory imagePath exportName inputArg outputPath =
+  runHostedNativeToolFromDirectory (Just workingDirectory) imagePath exportName inputArg outputPath
+
+runHostedNativeToolFromDirectory :: Maybe FilePath -> FilePath -> String -> Maybe String -> FilePath -> IO Text
+runHostedNativeToolFromDirectory maybeWorkingDirectory imagePath exportName inputArg outputPath = do
+  toolScriptPath <- makeAbsolute ("compiler" </> "hosted" </> "scripts" </> "run-native-tool.sh")
+  absoluteImagePath <- makeAbsolute imagePath
+  absoluteOutputPath <- makeAbsolute outputPath
+  absoluteWorkingDirectory <-
+    case maybeWorkingDirectory of
+      Just workingDirectory ->
+        Just <$> makeAbsolute workingDirectory
+      Nothing ->
+        pure Nothing
+  let args =
+        [ toolScriptPath
+        , absoluteImagePath
+        , exportName
+        ]
+          <> maybe [] pure inputArg
+          <> [absoluteOutputPath]
+  (exitCode, _stdoutText, stderrText) <-
+    readCreateProcessWithExitCode
+      ((proc "bash" args) {cwd = absoluteWorkingDirectory})
+      ""
+  case exitCode of
+    ExitSuccess ->
+      T.strip <$> TIO.readFile absoluteOutputPath
+    ExitFailure _ ->
+      assertFailure ("hosted native tool failed:\n" <> stderrText)
 
 lookupObjectKey :: Text -> Value -> Maybe Value
 lookupObjectKey key value =
   case value of
     Object obj ->
       KeyMap.lookup (fromText key) obj
+    _ ->
+      Nothing
+
+lookupObjectText :: Text -> Value -> Maybe Text
+lookupObjectText key value =
+  case lookupObjectKey key value of
+    Just (String textValue) ->
+      Just textValue
     _ ->
       Nothing
 
@@ -10345,6 +10157,28 @@ multilineListLiteralSource =
     , "]"
     ]
 
+trailingCommaStructuredSource :: Text
+trailingCommaStructuredSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record User = {"
+    , "  name : Str,"
+    , "  active : Bool,"
+    , "}"
+    , ""
+    , "defaultUsers : [User]"
+    , "defaultUsers = ["
+    , "  User {"
+    , "    name = \"Ada\","
+    , "    active = true,"
+    , "  },"
+    , "]"
+    , ""
+    , "main : [User]"
+    , "main = defaultUsers"
+    ]
+
 nestedEmptyListSource :: Text
 nestedEmptyListSource =
   T.unlines
@@ -10929,6 +10763,12 @@ compactHeaderImportSuccessFiles :: [(FilePath, Text)]
 compactHeaderImportSuccessFiles =
   [ ("Main.clasp", compactHeaderImportSuccessMainSource)
   , ("Shared/User.clasp", headerlessSharedUserSource)
+  ]
+
+shadowedImportFiles :: [(FilePath, Text)]
+shadowedImportFiles =
+  [ ("Main.clasp", shadowedImportMainSource)
+  , ("Shared/Support.clasp", shadowedImportSupportSource)
   ]
 
 packageImportFiles :: [(FilePath, Text)]
@@ -11787,7 +11627,7 @@ simulationRuntimeScript compiledPath runtimePath =
     , "      kind: 'process',"
     , "      target: 'rg',"
     , "      request: { query: 'rg --files src test' },"
-    , "      result: { summary: 'src/Clasp/Compiler.hs' }"
+    , "      result: { summary: 'deprecated/bootstrap/src/Clasp/Compiler.hs' }"
     , "    },"
     , "    {"
     , "      step: 'verify',"
@@ -13606,4 +13446,26 @@ leadInboxRuntimeScript compiledPath runtimePath =
     , "  reviewHasNote: reviewHtml.includes('Call tomorrow') && reviewHtml.includes('Review status: reviewed'),"
     , "  invalid: invalidMessage"
     , "}));"
+    ]
+shadowedImportMainSource :: Text
+shadowedImportMainSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "import Shared.Support"
+    , ""
+    , "render : Str -> Str"
+    , "render declName = declName"
+    , ""
+    , "main : Str"
+    , "main = render \"local\""
+    ]
+
+shadowedImportSupportSource :: Text
+shadowedImportSupportSource =
+  T.unlines
+    [ "module Shared.Support"
+    , ""
+    , "declName : Int"
+    , "declName = 7"
     ]

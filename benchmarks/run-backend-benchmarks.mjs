@@ -17,7 +17,7 @@ const compileWorkloads = [
   },
   {
     id: "hosted-compiler",
-    input: "compiler/hosted/Main.clasp"
+    input: "src/Main.clasp"
   }
 ];
 

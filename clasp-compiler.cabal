@@ -26,7 +26,7 @@ common common-options
 
 library
   import:           common-options
-  hs-source-dirs:   src
+  hs-source-dirs:   deprecated/bootstrap/src
   exposed-modules:
       Clasp.Air
       Clasp.Checker

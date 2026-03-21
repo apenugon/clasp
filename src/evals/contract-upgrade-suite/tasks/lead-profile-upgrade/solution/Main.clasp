@@ -1,0 +1,56 @@
+module Main
+
+import Shared.Lead
+
+policy LeadOps = public permits {
+  process "node"
+}
+
+toolserver LeadTools = "mcp" "stdio://lead-tools" with LeadOps
+
+tool lookupLeadPlaybook = LeadTools "lookup_lead_playbook" LeadPlaybookLookup -> LeadPlaybook
+
+segmentForPriority : LeadPriority -> Str
+segmentForPriority priority = match priority {
+  Low -> "startup",
+  Medium -> "growth",
+  High -> "enterprise"
+}
+
+planForPriority : LeadPriority -> Str
+planForPriority priority = match priority {
+  Low -> "self-serve",
+  Medium -> "guided",
+  High -> "concierge"
+}
+
+ownerTeamForPriority : LeadPriority -> Str
+ownerTeamForPriority priority = match priority {
+  Low -> "velocity",
+  Medium -> "mid-market",
+  High -> "field"
+}
+
+summarizeLead : LeadIntake -> LeadProfile
+summarizeLead intake = LeadProfile {
+  company = intake.company,
+  segment = segmentForPriority intake.priority,
+  plan = planForPriority intake.priority,
+  ownerTeam = ownerTeamForPriority intake.priority
+}
+
+playbookRequest : LeadProfile -> LeadPlaybookLookup
+playbookRequest profile = LeadPlaybookLookup {
+  segment = profile.segment,
+  ownerTeam = profile.ownerTeam
+}
+
+workflow LeadFollowUpFlow = { state : LeadFollowUpState }
+
+summarizeLeadRoute : LeadIntake -> LeadProfile
+summarizeLeadRoute intake = summarizeLead intake
+
+route summarizeLeadApi = POST "/api/lead/summary" LeadIntake -> LeadProfile summarizeLeadRoute
+
+main : Str
+main = (playbookRequest (summarizeLead (LeadIntake { company = "Northwind", priority = High }))).segment

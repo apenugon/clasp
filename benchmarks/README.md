@@ -358,8 +358,8 @@ node benchmarks/run-backend-benchmarks.mjs
 
 The backend benchmark writes a machine-readable JSON report under `benchmarks/results/backend/`. It currently measures:
 
-- compile time for `claspc compile` versus `claspc native` on `examples/compiler-parser.clasp` and `compiler/hosted/Main.clasp`
-- runtime throughput for compiler-text and boundary-transport workloads using `bun` versus the Rust native runtime bundle in `runtime/native/clasp_runtime.rs`
+- compile time for `claspc compile` versus `claspc native` on `examples/compiler-parser.clasp` and `src/Main.clasp`
+- runtime throughput for compiler-text and boundary-transport workloads using `bun` versus the Rust native runtime bundle in `runtime/clasp_runtime.rs`
 
 For faster local smoke checks, reduce the sample counts and runtime iterations:
 

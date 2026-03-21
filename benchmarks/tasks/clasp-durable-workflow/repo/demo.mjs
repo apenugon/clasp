@@ -9,7 +9,7 @@ async function loadWorkerRuntime() {
     throw new Error("CLASP_PROJECT_ROOT is required");
   }
 
-  return import(pathToFileURL(path.join(projectRoot, "runtime/bun/worker.mjs")).href);
+  return import(pathToFileURL(path.join(projectRoot, "deprecated/runtime/worker.mjs")).href);
 }
 
 function patchTargetCompiledModule(sourceCompiledModule, targetCompiledModule) {

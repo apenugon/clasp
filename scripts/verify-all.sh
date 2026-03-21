@@ -4,6 +4,7 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 nix_config_features='experimental-features = nix-command flakes'
 readonly_nix_cache_root="/tmp/clasp-nix-cache"
+verify_label="${CLASP_VERIFY_LABEL:-verify-all}"
 verify_lock_file="${CLASP_VERIFY_LOCK_FILE:-}"
 verify_lock_owner=0
 full_verify_commands=$'
@@ -11,7 +12,7 @@ bash scripts/test-verify-all.sh
 bash scripts/test-swarm-control.sh
 cabal test
 bash scripts/test-native-runtime.sh
-bash compiler/hosted/scripts/verify.sh
+bash src/scripts/verify.sh
 bash examples/lead-app-ts/scripts/verify.sh
 node benchmarks/run-benchmark.mjs list >/dev/null
 bash benchmarks/test-task-prep.sh
@@ -145,7 +146,7 @@ if nix develop -c bash -lc "
 fi
 
 if grep -Eq 'readonly database|daemon-socket/socket' "$nix_failure_log"; then
-  printf 'verify-all: falling back to sandbox verification because Nix is unavailable in this environment\n' >&2
+  printf '%s: falling back to sandbox verification because Nix is unavailable in this environment\n' "$verify_label" >&2
   run_command_block "${CLASP_VERIFY_FALLBACK_COMMANDS:-$fallback_verify_commands}"
   exit 0
 fi

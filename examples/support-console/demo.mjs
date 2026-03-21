@@ -4,7 +4,7 @@ import {
   createProviderRuntime,
   installCompiledModule,
   requestPayloadJson
-} from "../../runtime/bun/server.mjs";
+} from "../../deprecated/runtime/server.mjs";
 
 function route(contract, name) {
   const found = contract.routes.find((candidate) => candidate.name === name);

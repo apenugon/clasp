@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 
-import { createWorkerRuntime } from "../../runtime/bun/worker.mjs";
-import { installCompiledModule } from "../../runtime/bun/server.mjs";
+import { createWorkerRuntime } from "../../deprecated/runtime/worker.mjs";
+import { installCompiledModule } from "../../deprecated/runtime/server.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 export async function runLeadWorkflowDemo(compiledModule, options = {}) {

@@ -9,8 +9,8 @@ mkdir -p "$workspace_root/build" "$workspace_root/state"
 nix develop "$project_root" --command bash -lc "
   set -euo pipefail
   cd \"$project_root\"
-  cabal run claspc -- compile \"$workspace_root/Main.clasp\" -o \"$workspace_root/build/Main.js\" --compiler=bootstrap
-  cabal run claspc -- compile \"$workspace_root/Main.next.clasp\" -o \"$workspace_root/build/Main.next.js\" --compiler=bootstrap
+  claspc compile \"$workspace_root/Main.clasp\" -o \"$workspace_root/build/Main.js\" --compiler=bootstrap
+  claspc compile \"$workspace_root/Main.next.clasp\" -o \"$workspace_root/build/Main.next.js\" --compiler=bootstrap
 "
 
 node "$workspace_root/test/durable-workflow.test.mjs" \

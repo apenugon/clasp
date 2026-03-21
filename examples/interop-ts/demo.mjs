@@ -1,4 +1,4 @@
-import { bindingContractFor, installCompiledModule } from "../../runtime/bun/server.mjs";
+import { bindingContractFor, installCompiledModule } from "../../deprecated/runtime/server.mjs";
 import { pathToFileURL } from "node:url";
 
 const compiledPath = process.argv[2];

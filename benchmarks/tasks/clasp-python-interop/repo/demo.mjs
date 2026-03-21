@@ -15,7 +15,7 @@ if (!projectRoot) {
 
 const compiledModule = await import(pathToFileURL(compiledPath).href);
 const runtimeModule = await import(
-  pathToFileURL(path.join(projectRoot, "runtime/bun/python.mjs")).href
+  pathToFileURL(path.join(projectRoot, "src/runtime/python.mjs")).href
 );
 const { createPythonInteropRuntime } = runtimeModule;
 const runtime = createPythonInteropRuntime(compiledModule);

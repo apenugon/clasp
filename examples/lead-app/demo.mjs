@@ -3,7 +3,7 @@ import {
   bindingContractFor,
   installCompiledModule,
   requestPayloadJson
-} from "../../runtime/bun/server.mjs";
+} from "../../deprecated/runtime/server.mjs";
 import { createLeadDemoBindings } from "./bindings.mjs";
 
 export async function runLeadDemo(compiledModule, options = {}) {

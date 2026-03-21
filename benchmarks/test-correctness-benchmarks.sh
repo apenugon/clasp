@@ -17,12 +17,7 @@ verify_clasp_workflow_correctness() {
     --workspace "$workspace" \
     --allow-bootstrap-recovery true >/dev/null
   cp "$solution_root/Main.clasp" "$workspace/Main.clasp"
-  node "$project_root/benchmarks/run-benchmark.mjs" verify \
-    "$task_id" \
-    --workspace "$workspace" \
-    --harness scenario \
-    --model deterministic \
-    --allow-bootstrap-recovery true >/dev/null
+  bash "$project_root/benchmarks/verify-clasp-backend-check.sh" "$workspace"
 }
 
 verify_storage_backed_change() {

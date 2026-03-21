@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 
 import { createLeadDemoBindings } from "./bindings.mjs";
-import { installCompiledModule, serveCompiledModule } from "../../runtime/bun/server.mjs";
+import { installCompiledModule, serveCompiledModule } from "../../deprecated/runtime/server.mjs";
 
 function formBody(fields) {
   return new URLSearchParams(fields).toString();

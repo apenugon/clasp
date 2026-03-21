@@ -116,8 +116,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 82404,
-      "sha256": "47eeea731f7054877052e546da5c3e463e68209bf7120ff5f6b4f4754c827efe"
+      "size": 82933,
+      "sha256": "85dab02adeaf75a1f7da640e0a52bb8640d8130709e4eec6028fdefd729c78a5"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -161,8 +161,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-interop-boundary/repo/scripts/verify.sh",
-      "size": 1222,
-      "sha256": "4d787905a0582a0ef068f5d37357bdd8293755c4f11418c9e34fc7077af800a0"
+      "size": 1196,
+      "sha256": "24da6de51f3e54480e9ce739a7c8c28d82fcd16a61cc8709737a5e2e6630ee29"
     },
     {
       "path": "benchmarks/tasks/clasp-interop-boundary/repo/support/inspectLead.d.ts",
@@ -221,8 +221,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-npm-interop/repo/scripts/verify.sh",
-      "size": 708,
-      "sha256": "6b0efae98e9f80ea0864ac2766b1fd1146bf5869c17d1d51d2271aba00c490b5"
+      "size": 682,
+      "sha256": "00dc45deca223ecf6ddaed177ed65d09456244fddf7fb65bae411d12f723e564"
     },
     {
       "path": "benchmarks/tasks/clasp-npm-interop/repo/support/formatLead.d.ts",
@@ -276,8 +276,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-python-interop/repo/scripts/verify.sh",
-      "size": 887,
-      "sha256": "0703dd5051012f65c284efd2c6e6800526e2df2f999ed82f0e7e094ca9efd160"
+      "size": 861,
+      "sha256": "fda111dd599af6ae474599834c676dd56d5b9b19a9480e5803e581bbfe0162eb"
     },
     {
       "path": "benchmarks/tasks/clasp-python-interop/solution/Main.clasp",
@@ -311,8 +311,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-rust-interop/repo/scripts/verify.sh",
-      "size": 1198,
-      "sha256": "d3cf7fe6fb884970308ef25c49ad355fa02de3a8637f5f38c4052803d6216ef2"
+      "size": 1172,
+      "sha256": "44166f7f7ff823b605cafc94f5b8a5fe7f81632d8c21e56ce2139e9f8eca69c2"
     },
     {
       "path": "benchmarks/tasks/clasp-rust-interop/solution/Main.clasp",

@@ -17,13 +17,7 @@ verify_clasp_solution() {
     --workspace "$workspace" \
     --allow-bootstrap-recovery true >/dev/null
   cp -R "$solution_root/." "$workspace/"
-
-  node "$project_root/benchmarks/run-benchmark.mjs" verify \
-    "$task_id" \
-    --workspace "$workspace" \
-    --harness scenario \
-    --model deterministic \
-    --allow-bootstrap-recovery true >/dev/null
+  bash "$project_root/benchmarks/verify-clasp-backend-check.sh" "$workspace"
 }
 
 verify_typescript_solution() {

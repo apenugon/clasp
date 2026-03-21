@@ -14,7 +14,7 @@ if (!projectRoot) {
 
 const compiledModule = await import(pathToFileURL(compiledPath).href);
 const runtimeModule = await import(
-  pathToFileURL(path.join(projectRoot, "runtime/bun/server.mjs")).href
+  pathToFileURL(path.join(projectRoot, "deprecated/runtime/server.mjs")).href
 );
 const { bindingContractFor, installCompiledModule } = runtimeModule;
 
