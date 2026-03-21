@@ -19,6 +19,7 @@ type HostedPolicyDeclAst = HostedPolicyDeclAst Str [Str] [HostedPolicyPermission
 type HostedAgentRoleDeclAst = HostedAgentRoleDeclAst Str Str Str Str Str
 type HostedAgentDeclAst = HostedAgentDeclAst Str Str
 type HostedWorkflowDeclAst = HostedWorkflowDeclAst Str Str HostedTypeAst
+type HostedRouteDeclAst = HostedRouteDeclAst Str Str Str Str Str Str Str
 type HostedHookDeclAst = HostedHookDeclAst Str Str Str Str Str
 type HostedToolServerDeclAst = HostedToolServerDeclAst Str Str Str Str
 type HostedToolDeclAst = HostedToolDeclAst Str Str Str Str Str
@@ -27,8 +28,8 @@ type HostedMergeGateDeclAst = HostedMergeGateDeclAst Str [Str]
 type HostedPatternAst = HostedPatternAst Str [Str]
 type HostedMatchBranchAst = HostedMatchBranchAst HostedPatternAst HostedExprAst
 type HostedDeclAst = HostedDeclAst Str HostedAnnotationAst [Str] HostedExprAst
-type HostedModuleAst = HostedModuleAst Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedForeignDeclAst] [HostedDeclAst] [HostedGuideDeclAst] [HostedPolicyDeclAst] [HostedAgentRoleDeclAst] [HostedAgentDeclAst] [HostedWorkflowDeclAst] [HostedHookDeclAst] [HostedToolServerDeclAst] [HostedToolDeclAst] [HostedVerifierDeclAst] [HostedMergeGateDeclAst] Str
-type ParserState = ParserState Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedForeignDeclAst] [HostedDeclAst] [HostedGuideDeclAst] [HostedPolicyDeclAst] [HostedAgentRoleDeclAst] [HostedAgentDeclAst] [HostedWorkflowDeclAst] [HostedHookDeclAst] [HostedToolServerDeclAst] [HostedToolDeclAst] [HostedVerifierDeclAst] [HostedMergeGateDeclAst] HostedAnnotationAst Str
+type HostedModuleAst = HostedModuleAst Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedForeignDeclAst] [HostedDeclAst] [HostedGuideDeclAst] [HostedPolicyDeclAst] [HostedAgentRoleDeclAst] [HostedAgentDeclAst] [HostedWorkflowDeclAst] [HostedRouteDeclAst] [HostedHookDeclAst] [HostedToolServerDeclAst] [HostedToolDeclAst] [HostedVerifierDeclAst] [HostedMergeGateDeclAst] Str
+type ParserState = ParserState Str [Str] [HostedTypeDeclAst] [HostedRecordDeclAst] [HostedForeignDeclAst] [HostedDeclAst] [HostedGuideDeclAst] [HostedPolicyDeclAst] [HostedAgentRoleDeclAst] [HostedAgentDeclAst] [HostedWorkflowDeclAst] [HostedRouteDeclAst] [HostedHookDeclAst] [HostedToolServerDeclAst] [HostedToolDeclAst] [HostedVerifierDeclAst] [HostedMergeGateDeclAst] HostedAnnotationAst Str
 
 type SplitTailState = WaitingForHead | CapturingTail Str
 type ParserTextResult = ParsedText Str | MissingText Str
@@ -316,6 +317,51 @@ workflowDeclStateTypeAst decl = match decl {
     stateType
 }
 
+hostedRouteDeclAst : Str -> Str -> Str -> Str -> Str -> Str -> Str -> HostedRouteDeclAst
+hostedRouteDeclAst name identity method path requestType responseType handlerName = HostedRouteDeclAst name identity method path requestType responseType handlerName
+
+routeDeclName : HostedRouteDeclAst -> Str
+routeDeclName decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    name
+}
+
+routeDeclIdentity : HostedRouteDeclAst -> Str
+routeDeclIdentity decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    identity
+}
+
+routeDeclMethod : HostedRouteDeclAst -> Str
+routeDeclMethod decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    method
+}
+
+routeDeclPath : HostedRouteDeclAst -> Str
+routeDeclPath decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    path
+}
+
+routeDeclRequestType : HostedRouteDeclAst -> Str
+routeDeclRequestType decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    requestType
+}
+
+routeDeclResponseType : HostedRouteDeclAst -> Str
+routeDeclResponseType decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    responseType
+}
+
+routeDeclHandlerName : HostedRouteDeclAst -> Str
+routeDeclHandlerName decl = match decl {
+  HostedRouteDeclAst name identity method path requestType responseType handlerName ->
+    handlerName
+}
+
 hostedHookDeclAst : Str -> Str -> Str -> Str -> Str -> HostedHookDeclAst
 hostedHookDeclAst name triggerEvent requestType responseType handlerName = HostedHookDeclAst name triggerEvent requestType responseType handlerName
 
@@ -575,219 +621,231 @@ renderConstructorSummaries decl = {
   rendered
 }
 
-hostedModuleAst : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> Str -> HostedModuleAst
-hostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary = HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary
+hostedModuleAst : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> Str -> HostedModuleAst
+hostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary = HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary
 
 moduleNameOf : HostedModuleAst -> Str
 moduleNameOf modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     moduleName
 }
 
 moduleImports : HostedModuleAst -> [Str]
 moduleImports modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     imports
 }
 
 moduleTypeDeclarations : HostedModuleAst -> [HostedTypeDeclAst]
 moduleTypeDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     typeDeclarations
 }
 
 moduleRecordDeclarations : HostedModuleAst -> [HostedRecordDeclAst]
 moduleRecordDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     recordDeclarations
 }
 
 moduleForeignDeclarations : HostedModuleAst -> [HostedForeignDeclAst]
 moduleForeignDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     foreignDeclarations
 }
 
 moduleDeclarations : HostedModuleAst -> [HostedDeclAst]
 moduleDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     declarations
 }
 
 moduleGuideDeclarations : HostedModuleAst -> [HostedGuideDeclAst]
 moduleGuideDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     guideDeclarations
 }
 
 modulePolicyDeclarations : HostedModuleAst -> [HostedPolicyDeclAst]
 modulePolicyDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     policyDeclarations
 }
 
 moduleAgentRoleDeclarations : HostedModuleAst -> [HostedAgentRoleDeclAst]
 moduleAgentRoleDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     agentRoleDeclarations
 }
 
 moduleAgentDeclarations : HostedModuleAst -> [HostedAgentDeclAst]
 moduleAgentDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     agentDeclarations
 }
 
 moduleWorkflowDeclarations : HostedModuleAst -> [HostedWorkflowDeclAst]
 moduleWorkflowDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     workflowDeclarations
+}
+
+moduleRouteDeclarations : HostedModuleAst -> [HostedRouteDeclAst]
+moduleRouteDeclarations modl = match modl {
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+    routeDeclarations
 }
 
 moduleHookDeclarations : HostedModuleAst -> [HostedHookDeclAst]
 moduleHookDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     hookDeclarations
 }
 
 moduleToolServerDeclarations : HostedModuleAst -> [HostedToolServerDeclAst]
 moduleToolServerDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     toolServerDeclarations
 }
 
 moduleToolDeclarations : HostedModuleAst -> [HostedToolDeclAst]
 moduleToolDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     toolDeclarations
 }
 
 moduleVerifierDeclarations : HostedModuleAst -> [HostedVerifierDeclAst]
 moduleVerifierDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     verifierDeclarations
 }
 
 moduleMergeGateDeclarations : HostedModuleAst -> [HostedMergeGateDeclAst]
 moduleMergeGateDeclarations modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     mergeGateDeclarations
 }
 
 moduleMainExprSummary : HostedModuleAst -> Str
 moduleMainExprSummary modl = match modl {
-  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
+  HostedModuleAst moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations mainExprSummary ->
     mainExprSummary
 }
 
-parserState : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> HostedAnnotationAst -> Str -> ParserState
-parserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary = ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary
+parserState : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> HostedAnnotationAst -> Str -> ParserState
+parserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary = ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary
 
 stateModuleName : ParserState -> Str
 stateModuleName state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     moduleName
 }
 
 stateImports : ParserState -> [Str]
 stateImports state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     imports
 }
 
 stateTypeDeclarations : ParserState -> [HostedTypeDeclAst]
 stateTypeDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     typeDeclarations
 }
 
 stateRecordDeclarations : ParserState -> [HostedRecordDeclAst]
 stateRecordDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     recordDeclarations
 }
 
 stateForeignDeclarations : ParserState -> [HostedForeignDeclAst]
 stateForeignDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     foreignDeclarations
 }
 
 stateDeclarations : ParserState -> [HostedDeclAst]
 stateDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     declarations
 }
 
 stateGuideDeclarations : ParserState -> [HostedGuideDeclAst]
 stateGuideDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     guideDeclarations
 }
 
 statePolicyDeclarations : ParserState -> [HostedPolicyDeclAst]
 statePolicyDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     policyDeclarations
 }
 
 stateAgentRoleDeclarations : ParserState -> [HostedAgentRoleDeclAst]
 stateAgentRoleDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     agentRoleDeclarations
 }
 
 stateAgentDeclarations : ParserState -> [HostedAgentDeclAst]
 stateAgentDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     agentDeclarations
 }
 
 stateWorkflowDeclarations : ParserState -> [HostedWorkflowDeclAst]
 stateWorkflowDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     workflowDeclarations
+}
+
+stateRouteDeclarations : ParserState -> [HostedRouteDeclAst]
+stateRouteDeclarations state = match state {
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+    routeDeclarations
 }
 
 stateHookDeclarations : ParserState -> [HostedHookDeclAst]
 stateHookDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     hookDeclarations
 }
 
 stateToolServerDeclarations : ParserState -> [HostedToolServerDeclAst]
 stateToolServerDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     toolServerDeclarations
 }
 
 stateToolDeclarations : ParserState -> [HostedToolDeclAst]
 stateToolDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     toolDeclarations
 }
 
 stateVerifierDeclarations : ParserState -> [HostedVerifierDeclAst]
 stateVerifierDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     verifierDeclarations
 }
 
 stateMergeGateDeclarations : ParserState -> [HostedMergeGateDeclAst]
 stateMergeGateDeclarations state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     mergeGateDeclarations
 }
 
 statePendingAnnotation : ParserState -> HostedAnnotationAst
 statePendingAnnotation state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     pendingAnnotation
 }
 
 stateMainExprSummary : ParserState -> Str
 stateMainExprSummary state = match state {
-  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
+  ParserState moduleName imports typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations pendingAnnotation mainExprSummary ->
     mainExprSummary
 }
 
@@ -830,6 +888,9 @@ appendAgentDecl values value = append values [value]
 
 appendWorkflowDecl : [HostedWorkflowDeclAst] -> HostedWorkflowDeclAst -> [HostedWorkflowDeclAst]
 appendWorkflowDecl values value = append values [value]
+
+appendRouteDecl : [HostedRouteDeclAst] -> HostedRouteDeclAst -> [HostedRouteDeclAst]
+appendRouteDecl values value = append values [value]
 
 appendHookDecl : [HostedHookDeclAst] -> HostedHookDeclAst -> [HostedHookDeclAst]
 appendHookDecl values value = append values [value]
@@ -1660,6 +1721,34 @@ parseWorkflowDecl rawValue = {
     },
     Err missingBody ->
       hostedWorkflowDeclAst value (textConcat ["workflow:", value]) (HostedTypeName "")
+  }
+}
+
+parseRouteDecl : Str -> HostedRouteDeclAst
+parseRouteDecl rawValue = {
+  let value = trimSpaces rawValue;
+  match textSplitFirst value " = " {
+    Ok payload -> {
+      let name = trimSpaces (firstSegment payload);
+      let bodyParts = splitWords (remainingSegments payload);
+      let method = firstText bodyParts;
+      match parseQuotedPrefix (textJoin " " (remainingTexts bodyParts)) {
+        ParsedQuotedPrefix path trailing ->
+          match textSplitFirst trailing " -> " {
+            Ok arrowPayload -> {
+              let requestType = trimSpaces (firstSegment arrowPayload);
+              let responseParts = splitWords (remainingSegments arrowPayload);
+              hostedRouteDeclAst name (textConcat ["route:", name]) method path requestType (firstText responseParts) (firstText (remainingTexts responseParts))
+            },
+            Err missingArrow ->
+              hostedRouteDeclAst name (textConcat ["route:", name]) method path "" "" ""
+          },
+        MissingQuotedPrefix missingPath ->
+          hostedRouteDeclAst name (textConcat ["route:", name]) method "" "" "" ""
+      }
+    },
+    Err missingBody ->
+      hostedRouteDeclAst value (textConcat ["route:", value]) "" "" "" "" ""
   }
 }
 
@@ -2761,23 +2850,23 @@ declarationParams lhs = match textSplitFirst lhs " " {
 }
 
 appendDefinition : ParserState -> Str -> Str -> ParserState
-appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs))) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs))) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendTypeDefinition : ParserState -> Str -> ParserState
-appendTypeDefinition state body = parserState (stateModuleName state) (stateImports state) (appendTypeDecl (stateTypeDeclarations state) (parseTypeDecl body)) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
+appendTypeDefinition state body = parserState (stateModuleName state) (stateImports state) (appendTypeDecl (stateTypeDeclarations state) (parseTypeDecl body)) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
 
 appendRecordDefinition : ParserState -> Str -> ParserState
-appendRecordDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (appendRecordDecl (stateRecordDeclarations state) (parseRecordDecl body)) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
+appendRecordDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (appendRecordDecl (stateRecordDeclarations state) (parseRecordDecl body)) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
 
 appendForeignDefinition : ParserState -> Str -> ParserState
-appendForeignDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (appendForeignDecl (stateForeignDeclarations state) (parseForeignDecl body)) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendForeignDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (appendForeignDecl (stateForeignDeclarations state) (parseForeignDecl body)) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendForeignSignatureDefinition : ParserState -> Str -> ParserState
 appendForeignSignatureDefinition state body = match textSplitFirst body " = " {
   Ok signaturePayload ->
     match parseQuotedPrefix (remainingSegments signaturePayload) {
       ParsedQuotedPrefix signature trailing ->
-        parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (applyForeignSignatureList (stateForeignDeclarations state) (trimSpaces (firstSegment signaturePayload)) signature) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+        parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (applyForeignSignatureList (stateForeignDeclarations state) (trimSpaces (firstSegment signaturePayload)) signature) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
       MissingQuotedPrefix missingSignature ->
         state
     },
@@ -2786,49 +2875,52 @@ appendForeignSignatureDefinition state body = match textSplitFirst body " = " {
 }
 
 appendGuideDefinition : ParserState -> Str -> ParserState
-appendGuideDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (appendGuideDecl (stateGuideDeclarations state) (parseGuideDecl body)) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendGuideDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (appendGuideDecl (stateGuideDeclarations state) (parseGuideDecl body)) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendPolicyDefinition : ParserState -> Str -> ParserState
-appendPolicyDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (appendPolicyDecl (statePolicyDeclarations state) (parsePolicyDecl body)) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendPolicyDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (appendPolicyDecl (statePolicyDeclarations state) (parsePolicyDecl body)) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendRoleDefinition : ParserState -> Str -> ParserState
-appendRoleDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (appendAgentRoleDecl (stateAgentRoleDeclarations state) (parseRoleDecl body)) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendRoleDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (appendAgentRoleDecl (stateAgentRoleDeclarations state) (parseRoleDecl body)) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendAgentDefinition : ParserState -> Str -> ParserState
-appendAgentDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (appendAgentDecl (stateAgentDeclarations state) (parseAgentDecl body)) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendAgentDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (appendAgentDecl (stateAgentDeclarations state) (parseAgentDecl body)) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendWorkflowDefinition : ParserState -> Str -> ParserState
-appendWorkflowDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (appendWorkflowDecl (stateWorkflowDeclarations state) (parseWorkflowDecl body)) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendWorkflowDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (appendWorkflowDecl (stateWorkflowDeclarations state) (parseWorkflowDecl body)) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+
+appendRouteDefinition : ParserState -> Str -> ParserState
+appendRouteDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (appendRouteDecl (stateRouteDeclarations state) (parseRouteDecl body)) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendHookDefinition : ParserState -> Str -> ParserState
-appendHookDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (appendHookDecl (stateHookDeclarations state) (parseHookDecl body)) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendHookDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (appendHookDecl (stateHookDeclarations state) (parseHookDecl body)) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendToolServerDefinition : ParserState -> Str -> ParserState
-appendToolServerDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (appendToolServerDecl (stateToolServerDeclarations state) (parseToolServerDecl body)) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendToolServerDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (appendToolServerDecl (stateToolServerDeclarations state) (parseToolServerDecl body)) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendToolDefinition : ParserState -> Str -> ParserState
-appendToolDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (appendToolDecl (stateToolDeclarations state) (parseToolDecl body)) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendToolDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (appendToolDecl (stateToolDeclarations state) (parseToolDecl body)) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendVerifierDefinition : ParserState -> Str -> ParserState
-appendVerifierDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (appendVerifierDecl (stateVerifierDeclarations state) (parseVerifierDecl body)) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendVerifierDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (appendVerifierDecl (stateVerifierDeclarations state) (parseVerifierDecl body)) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendMergeGateDefinition : ParserState -> Str -> ParserState
-appendMergeGateDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (appendMergeGateDecl (stateMergeGateDeclarations state) (parseMergeGateDecl body)) missingAnnotation (stateMainExprSummary state)
+appendMergeGateDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (appendMergeGateDecl (stateMergeGateDeclarations state) (parseMergeGateDecl body)) missingAnnotation (stateMainExprSummary state)
 
 appendMainDefinition : ParserState -> Str -> ParserState
 appendMainDefinition state body = {
   let expr = parseExpr body;
-  parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst "main" (statePendingAnnotation state) [] expr)) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (expressionSummary expr)
+  parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst "main" (statePendingAnnotation state) [] expr)) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (expressionSummary expr)
 }
 
 stepParser : ParserState -> Str -> ParserState
 stepParser state line = match textPrefix line "module " {
   Ok moduleName ->
-    parserState moduleName (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+    parserState moduleName (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
   Err moduleMiss ->
     match textPrefix line "import " {
       Ok importName ->
-        parserState (stateModuleName state) (appendRenderedText (stateImports state) importName) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+        parserState (stateModuleName state) (appendRenderedText (stateImports state) importName) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
       Err importMiss ->
         match textPrefix line "type " {
           Ok typeBody ->
@@ -2854,56 +2946,61 @@ stepParser state line = match textPrefix line "module " {
                               Ok agentBody ->
                                 appendAgentDefinition state agentBody,
                               Err notAgent ->
-                                match textPrefix line "workflow " {
-                                  Ok workflowBody ->
-                                    appendWorkflowDefinition state workflowBody,
-                                  Err notWorkflow ->
-                                    match textPrefix line "hook " {
-                                      Ok hookBody ->
-                                        appendHookDefinition state hookBody,
-                                      Err notHook ->
-                                        match textPrefix line "toolserver " {
-                                          Ok toolServerBody ->
-                                            appendToolServerDefinition state toolServerBody,
-                                          Err notToolServer ->
-                                            match textPrefix line "tool " {
-                                              Ok toolBody ->
-                                                appendToolDefinition state toolBody,
-                                              Err notTool ->
-                                                match textPrefix line "verifier " {
-                                                  Ok verifierBody ->
-                                                    appendVerifierDefinition state verifierBody,
-                                                  Err notVerifier ->
-                                                    match textPrefix line "mergegate " {
-                                                      Ok mergeGateBody ->
-                                                        appendMergeGateDefinition state mergeGateBody,
-                                                      Err notMergeGate ->
-                                                        match textPrefix line "foreign " {
-                                                          Ok foreignBody ->
-                                                            appendForeignDefinition state foreignBody,
-                                                          Err notForeign ->
-                                                            match textPrefix line "hosted foreign-signature " {
-                                                              Ok signatureBody ->
-                                                                appendForeignSignatureDefinition state signatureBody,
-                                                              Err notHostedSignature ->
-                                                                {
-                                                                  let words = splitWords line;
-                                                                  match splitTokensAt ":" words {
-                                                                    FoundTokenSplit lhsTokens rhsTokens ->
-                                                                      if firstText (remainingTexts lhsTokens) == "" then parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (presentAnnotation (parseHostedType (textJoin " " rhsTokens))) (stateMainExprSummary state) else match splitTokensAt "=" words {
-                                                                        FoundTokenSplit definitionLhsTokens definitionRhsTokens ->
-                                                                          if firstText definitionLhsTokens == "main" then appendMainDefinition state (textJoin " " definitionRhsTokens) else appendDefinition state (textJoin " " definitionLhsTokens) (textJoin " " definitionRhsTokens),
+                                match textPrefix line "route " {
+                                  Ok routeBody ->
+                                    appendRouteDefinition state routeBody,
+                                  Err notRoute ->
+                                    match textPrefix line "workflow " {
+                                      Ok workflowBody ->
+                                        appendWorkflowDefinition state workflowBody,
+                                      Err notWorkflow ->
+                                        match textPrefix line "hook " {
+                                          Ok hookBody ->
+                                            appendHookDefinition state hookBody,
+                                          Err notHook ->
+                                            match textPrefix line "toolserver " {
+                                              Ok toolServerBody ->
+                                                appendToolServerDefinition state toolServerBody,
+                                              Err notToolServer ->
+                                                match textPrefix line "tool " {
+                                                  Ok toolBody ->
+                                                    appendToolDefinition state toolBody,
+                                                  Err notTool ->
+                                                    match textPrefix line "verifier " {
+                                                      Ok verifierBody ->
+                                                        appendVerifierDefinition state verifierBody,
+                                                      Err notVerifier ->
+                                                        match textPrefix line "mergegate " {
+                                                          Ok mergeGateBody ->
+                                                            appendMergeGateDefinition state mergeGateBody,
+                                                          Err notMergeGate ->
+                                                            match textPrefix line "foreign " {
+                                                              Ok foreignBody ->
+                                                                appendForeignDefinition state foreignBody,
+                                                              Err notForeign ->
+                                                                match textPrefix line "hosted foreign-signature " {
+                                                                  Ok signatureBody ->
+                                                                    appendForeignSignatureDefinition state signatureBody,
+                                                                  Err notHostedSignature ->
+                                                                    {
+                                                                      let words = splitWords line;
+                                                                      match splitTokensAt ":" words {
+                                                                        FoundTokenSplit lhsTokens rhsTokens ->
+                                                                          if firstText (remainingTexts lhsTokens) == "" then parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (presentAnnotation (parseHostedType (textJoin " " rhsTokens))) (stateMainExprSummary state) else match splitTokensAt "=" words {
+                                                                            FoundTokenSplit definitionLhsTokens definitionRhsTokens ->
+                                                                              if firstText definitionLhsTokens == "main" then appendMainDefinition state (textJoin " " definitionRhsTokens) else appendDefinition state (textJoin " " definitionLhsTokens) (textJoin " " definitionRhsTokens),
+                                                                            MissingTokenSplit ->
+                                                                              state
+                                                                          },
                                                                         MissingTokenSplit ->
-                                                                          state
-                                                                      },
-                                                                    MissingTokenSplit ->
-                                                                      match splitTokensAt "=" words {
-                                                                        FoundTokenSplit definitionLhsTokens definitionRhsTokens ->
-                                                                          if firstText definitionLhsTokens == "main" then appendMainDefinition state (textJoin " " definitionRhsTokens) else appendDefinition state (textJoin " " definitionLhsTokens) (textJoin " " definitionRhsTokens),
-                                                                        MissingTokenSplit ->
-                                                                          state
+                                                                          match splitTokensAt "=" words {
+                                                                            FoundTokenSplit definitionLhsTokens definitionRhsTokens ->
+                                                                              if firstText definitionLhsTokens == "main" then appendMainDefinition state (textJoin " " definitionRhsTokens) else appendDefinition state (textJoin " " definitionLhsTokens) (textJoin " " definitionRhsTokens),
+                                                                            MissingTokenSplit ->
+                                                                              state
+                                                                          }
                                                                       }
-                                                                  }
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -2924,12 +3021,12 @@ stepParser state line = match textPrefix line "module " {
 
 parseModuleAst : Str -> HostedModuleAst
 parseModuleAst source = {
-  let mut state = parserState "Main" [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] missingAnnotation "<missing>";
+  let mut state = parserState "Main" [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] missingAnnotation "<missing>";
   for line in logicalLines source {
     state = stepParser state line;
     state
   };
-  hostedModuleAst (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (stateMainExprSummary state)
+  hostedModuleAst (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (stateMainExprSummary state)
 }
 
 declNames : HostedModuleAst -> [Str]

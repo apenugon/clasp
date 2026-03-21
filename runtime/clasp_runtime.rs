@@ -185,6 +185,9 @@ pub struct ClaspRtNativeModuleImage {
     generation: usize,
     runtime_bindings: Vec<ClaspRtNativeRuntimeBinding>,
     runtime_binding_indexes: HashMap<String, usize>,
+    route_boundaries: Vec<ClaspRtNativeRouteBoundary>,
+    record_schemas: HashMap<String, ClaspRtRecordSchema>,
+    variant_schemas: HashMap<String, ClaspRtVariantSchema>,
     exports: Vec<*mut ClaspRtString>,
     entrypoint_symbols: Vec<*mut ClaspRtString>,
     entrypoints: Vec<ClaspRtNativeEntrypointFn>,
@@ -235,6 +238,7 @@ enum ClaspRtInterpretedCompareOp {
 #[derive(Clone)]
 enum ClaspRtInterpretedIntrinsic {
     ListAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    ViewAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     Encode(Box<ClaspRtInterpretedExpr>),
 }
 
@@ -269,6 +273,48 @@ struct ClaspRtInterpretedRecordField {
 struct ClaspRtNativeRuntimeBinding {
     name: String,
     runtime_name: String,
+}
+
+#[derive(Clone)]
+enum ClaspRtSchemaType {
+    Int,
+    Bool,
+    Str,
+    List(Box<ClaspRtSchemaType>),
+    Named(String),
+}
+
+#[derive(Clone)]
+struct ClaspRtRecordFieldSchema {
+    name: String,
+    typ: ClaspRtSchemaType,
+}
+
+#[derive(Clone)]
+struct ClaspRtRecordSchema {
+    fields: Vec<ClaspRtRecordFieldSchema>,
+}
+
+#[derive(Clone)]
+struct ClaspRtVariantConstructorSchema {
+    name: String,
+    payloads: Vec<ClaspRtSchemaType>,
+}
+
+#[derive(Clone)]
+struct ClaspRtVariantSchema {
+    constructors: HashMap<String, ClaspRtVariantConstructorSchema>,
+}
+
+#[derive(Clone)]
+struct ClaspRtNativeRouteBoundary {
+    name: String,
+    method: String,
+    path: String,
+    request_type: String,
+    response_type: String,
+    response_kind: String,
+    handler: String,
 }
 
 impl ClaspRtNativeModuleImage {
@@ -641,7 +687,7 @@ impl ClaspRtRuntime {
         let Some(export_index) = unsafe { image.as_ref() }.and_then(|image_ref| image_ref.export_index(export_name)) else {
             return false;
         };
-        unsafe { (*image).entrypoints[export_index] = entrypoint };
+        unsafe { (&mut (*image).entrypoints)[export_index] = entrypoint };
         true
     }
 
@@ -701,7 +747,7 @@ impl ClaspRtRuntime {
         let Some(export_index) = image_ref.export_index(export_name) else {
             return false;
         };
-        let symbol = unsafe { (*image).entrypoint_symbols[export_index] };
+        let symbol = unsafe { (&(*image).entrypoint_symbols)[export_index] };
         let Some(resolve_symbol) = resolve_symbol else {
             return false;
         };
@@ -712,7 +758,7 @@ impl ClaspRtRuntime {
         if entrypoint.is_none() {
             return false;
         }
-        unsafe { (*image).entrypoints[export_index] = entrypoint };
+        unsafe { (&mut (*image).entrypoints)[export_index] = entrypoint };
         true
     }
 
@@ -810,7 +856,7 @@ impl ClaspRtRuntime {
         let Some(export_index) = image_ref.export_index(export_name) else {
             return None;
         };
-        unsafe { (*image).entrypoints[export_index] }
+        unsafe { (&(*image).entrypoints)[export_index] }
     }
 
     fn resolve_native_entrypoint_generation(
@@ -829,7 +875,7 @@ impl ClaspRtRuntime {
         let Some(export_index) = image_ref.export_index(export_name) else {
             return None;
         };
-        unsafe { (*image).entrypoints[export_index] }
+        unsafe { (&(*image).entrypoints)[export_index] }
     }
 
     fn resolve_native_snapshot(&self, module_name: *mut ClaspRtString) -> ClaspRtNativeSnapshotFn {
@@ -846,6 +892,23 @@ impl ClaspRtRuntime {
         };
         let image = self.module_slice()[module_index];
         unsafe { (*image).handoff }
+    }
+
+    fn find_latest_route(
+        &self,
+        module_name: *mut ClaspRtString,
+        method: &str,
+        path: &str,
+    ) -> Option<(*mut ClaspRtNativeModuleImage, usize)> {
+        let module_index = self.find_latest_active_module_index(module_name)?;
+        let image = self.module_slice()[module_index];
+        let route_index = unsafe {
+            (*image)
+                .route_boundaries
+                .iter()
+                .position(|route| route.method == method && route.path == path)
+        }?;
+        Some((image, route_index))
     }
 
     fn store_native_module_state_snapshot(
@@ -1124,6 +1187,10 @@ unsafe fn encode_runtime_value_json(value: *mut ClaspRtHeader) -> Option<Vec<u8>
     }
 }
 
+pub unsafe fn clasp_rt_runtime_value_to_json_string(value: *mut ClaspRtHeader) -> Option<String> {
+    encode_runtime_value_json(value).and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
 unsafe fn interpret_native_codec_decl(
     decl_name: &str,
     args: &[*mut ClaspRtHeader],
@@ -1340,7 +1407,16 @@ fn interpret_native_expr(
         ClaspRtInterpretedExpr::Local(name) => {
             let value = read_env_value(env, name);
             if value.is_null() {
-                interpret_native_decl(runtime, image, name, &[], depth + 1)
+                let runtime_value = if let Some(binding) = unsafe { (*image).runtime_binding(name) } {
+                    interpret_runtime_binding(binding, &[])
+                } else {
+                    null_mut()
+                };
+                if runtime_value.is_null() {
+                    interpret_native_decl(runtime, image, name, &[], depth + 1)
+                } else {
+                    runtime_value
+                }
             } else {
                 value
             }
@@ -1689,6 +1765,34 @@ fn interpret_native_expr(
                 None => null_mut(),
             }
         }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ViewAppend(left, right)) => {
+            let left_value = interpret_native_expr(runtime, image, left, env, depth + 1);
+            if left_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return left_value;
+            }
+            let right_value = interpret_native_expr(runtime, image, right, env, depth + 1);
+            if right_value.is_null() {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return right_value;
+            }
+            let appended = unsafe { clasp_rt_view_append(left_value, right_value) };
+            unsafe {
+                release_header(runtime, left_value);
+                release_header(runtime, right_value);
+            }
+            appended
+        }
         ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::Encode(value_expr)) => {
             let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
             if value.is_null() {
@@ -1729,12 +1833,23 @@ fn interpret_runtime_binding(
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("viewText", 1) => unsafe { clasp_rt_view_text(args[0] as *mut ClaspRtString) },
+        ("viewElement", 2) => unsafe { clasp_rt_view_element(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewStyled", 2) => unsafe { clasp_rt_view_styled(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewLink", 2) => unsafe { clasp_rt_view_link(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewForm", 3) => unsafe { clasp_rt_view_form(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2]) },
+        ("viewInput", 3) => unsafe { clasp_rt_view_input(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) },
+        ("viewSubmit", 1) => unsafe { clasp_rt_view_submit(args[0] as *mut ClaspRtString) },
+        ("page", 2) => unsafe { clasp_rt_page(args[0] as *mut ClaspRtString, args[1]) },
+        ("redirect", 1) => unsafe { clasp_rt_redirect(args[0] as *mut ClaspRtString) },
+        ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
         ("pathJoin", 1) => unsafe {
             list_like_string_items(args[0])
                 .map(|parts| build_runtime_string(&join_string_bytes(&parts, b"/")) as *mut ClaspRtHeader)
                 .unwrap_or(null_mut())
         },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         _ => null_mut(),
     }
@@ -2086,6 +2201,33 @@ unsafe fn build_runtime_record_value(
     }))
 }
 
+pub unsafe fn clasp_rt_build_string_header(value: &str) -> *mut ClaspRtHeader {
+    build_runtime_string(value.as_bytes()) as *mut ClaspRtHeader
+}
+
+pub unsafe fn clasp_rt_build_int_header(value: i64) -> *mut ClaspRtHeader {
+    build_runtime_int(value) as *mut ClaspRtHeader
+}
+
+pub unsafe fn clasp_rt_build_bool_header(value: bool) -> *mut ClaspRtHeader {
+    build_runtime_bool(value) as *mut ClaspRtHeader
+}
+
+pub unsafe fn clasp_rt_build_list_header(items: Vec<*mut ClaspRtHeader>) -> *mut ClaspRtHeader {
+    build_runtime_list_value(items) as *mut ClaspRtHeader
+}
+
+pub unsafe fn clasp_rt_build_variant_header(tag: &str, items: Vec<*mut ClaspRtHeader>) -> *mut ClaspRtHeader {
+    build_runtime_variant_value(tag, items) as *mut ClaspRtHeader
+}
+
+pub unsafe fn clasp_rt_build_record_header(
+    record_name: &str,
+    fields: Vec<(String, *mut ClaspRtHeader)>,
+) -> *mut ClaspRtHeader {
+    build_runtime_record_value(record_name, fields) as *mut ClaspRtHeader
+}
+
 unsafe fn retain_header(header: *mut ClaspRtHeader) {
     if !header.is_null() {
         (*header).retain_count = (*header).retain_count.saturating_add(1);
@@ -2374,6 +2516,15 @@ fn json_root_object(bytes: &[u8]) -> Option<JsonSlice> {
     Some(JsonSlice { start, end })
 }
 
+fn json_root_value(bytes: &[u8]) -> Option<JsonSlice> {
+    let start = skip_json_ws(bytes, 0);
+    let end = skip_json_value(bytes, start)?;
+    if skip_json_ws(bytes, end) != bytes.len() {
+        return None;
+    }
+    Some(JsonSlice { start, end })
+}
+
 fn json_decode_string(bytes: &[u8], string_slice: JsonSlice) -> Option<Vec<u8>> {
     if bytes.get(string_slice.start) != Some(&b'"')
         || string_slice.end <= string_slice.start + 1
@@ -2544,6 +2695,234 @@ fn json_array_contains_string(bytes: &[u8], array_slice: JsonSlice, expected: &s
     false
 }
 
+fn parse_schema_type_text(value: &str) -> Option<ClaspRtSchemaType> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value == "Int" {
+        return Some(ClaspRtSchemaType::Int);
+    }
+    if value == "Bool" {
+        return Some(ClaspRtSchemaType::Bool);
+    }
+    if value == "Str" {
+        return Some(ClaspRtSchemaType::Str);
+    }
+    if value.starts_with('[') && value.ends_with(']') {
+        let inner = &value[1..value.len() - 1];
+        return parse_schema_type_text(inner).map(|item| ClaspRtSchemaType::List(Box::new(item)));
+    }
+    Some(ClaspRtSchemaType::Named(value.to_owned()))
+}
+
+fn load_record_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, ClaspRtRecordSchema>> {
+    let record_layouts = json_object_lookup(bytes, abi, "recordLayouts")?;
+    let mut schemas = HashMap::new();
+    for index in 0..json_array_length(bytes, record_layouts) {
+        let layout = json_array_item(bytes, record_layouts, index)?;
+        let name = json_string_owned(bytes, json_object_lookup(bytes, layout, "name")?)?;
+        let fields_value = json_object_lookup(bytes, layout, "fields")?;
+        let mut fields = Vec::with_capacity(json_array_length(bytes, fields_value));
+        for field_index in 0..json_array_length(bytes, fields_value) {
+            let field = json_array_item(bytes, fields_value, field_index)?;
+            let field_name = json_string_owned(bytes, json_object_lookup(bytes, field, "name")?)?;
+            let field_type = json_string_owned(bytes, json_object_lookup(bytes, field, "type")?)?;
+            let field_typ = parse_schema_type_text(&field_type)?;
+            fields.push(ClaspRtRecordFieldSchema { name: field_name, typ: field_typ });
+        }
+        schemas.insert(name, ClaspRtRecordSchema { fields });
+    }
+    Some(schemas)
+}
+
+fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, ClaspRtVariantSchema>> {
+    let variant_layouts = json_object_lookup(bytes, abi, "variantLayouts")?;
+    let mut schemas = HashMap::new();
+    for index in 0..json_array_length(bytes, variant_layouts) {
+        let layout = json_array_item(bytes, variant_layouts, index)?;
+        let type_name = json_string_owned(bytes, json_object_lookup(bytes, layout, "name")?)?;
+        let constructors_value = json_object_lookup(bytes, layout, "constructors")?;
+        let mut constructors = HashMap::new();
+        for constructor_index in 0..json_array_length(bytes, constructors_value) {
+            let constructor = json_array_item(bytes, constructors_value, constructor_index)?;
+            let constructor_name = json_string_owned(bytes, json_object_lookup(bytes, constructor, "name")?)?;
+            let payloads_value = json_object_lookup(bytes, constructor, "payloads")?;
+            let mut payloads = Vec::with_capacity(json_array_length(bytes, payloads_value));
+            for payload_index in 0..json_array_length(bytes, payloads_value) {
+                let payload = json_array_item(bytes, payloads_value, payload_index)?;
+                let payload_type = json_string_owned(bytes, json_object_lookup(bytes, payload, "type")?)?;
+                payloads.push(parse_schema_type_text(&payload_type)?);
+            }
+            constructors.insert(
+                constructor_name.clone(),
+                ClaspRtVariantConstructorSchema {
+                    name: constructor_name,
+                    payloads,
+                },
+            );
+        }
+        schemas.insert(type_name, ClaspRtVariantSchema { constructors });
+    }
+    Some(schemas)
+}
+
+fn load_route_boundaries(bytes: &[u8], runtime: JsonSlice) -> Option<Vec<ClaspRtNativeRouteBoundary>> {
+    let boundaries = json_object_lookup(bytes, runtime, "boundaries")?;
+    let mut routes = Vec::new();
+    for index in 0..json_array_length(bytes, boundaries) {
+        let boundary = json_array_item(bytes, boundaries, index)?;
+        let kind = json_string_owned(bytes, json_object_lookup(bytes, boundary, "kind")?)?;
+        if kind != "route" {
+            continue;
+        }
+        let name = json_string_owned(bytes, json_object_lookup(bytes, boundary, "name")?)?;
+        let method = json_string_owned(bytes, json_object_lookup(bytes, boundary, "method")?)?;
+        let path = json_string_owned(bytes, json_object_lookup(bytes, boundary, "path")?)?;
+        let request_type = json_string_owned(bytes, json_object_lookup(bytes, boundary, "request")?)?;
+        let response_type = json_string_owned(bytes, json_object_lookup(bytes, boundary, "response")?)?;
+        let response_kind = json_string_owned(bytes, json_object_lookup(bytes, boundary, "responseKind")?)?;
+        let handler = json_object_lookup(bytes, boundary, "handler")
+            .and_then(|value| json_string_owned(bytes, value))
+            .unwrap_or_default();
+        routes.push(ClaspRtNativeRouteBoundary {
+            name,
+            method,
+            path,
+            request_type,
+            response_type,
+            response_kind,
+            handler,
+        });
+    }
+    Some(routes)
+}
+
+unsafe fn release_owned_headers(values: Vec<*mut ClaspRtHeader>) {
+    for value in values {
+        release_header(null_mut(), value);
+    }
+}
+
+unsafe fn release_owned_named_headers(values: Vec<(String, *mut ClaspRtHeader)>) {
+    for (_, value) in values {
+        release_header(null_mut(), value);
+    }
+}
+
+unsafe fn decode_named_json_to_runtime(
+    image: &ClaspRtNativeModuleImage,
+    name: &str,
+    bytes: &[u8],
+    value_slice: JsonSlice,
+) -> Option<*mut ClaspRtHeader> {
+    match name {
+        "Int" => json_i64_value(bytes, value_slice).map(|raw| clasp_rt_build_int_header(raw)),
+        "Bool" => json_bool_value(bytes, value_slice).map(|raw| clasp_rt_build_bool_header(raw)),
+        "Str" => {
+            let decoded = json_string_value(bytes, value_slice);
+            if decoded.is_null() {
+                None
+            } else {
+                Some(decoded as *mut ClaspRtHeader)
+            }
+        }
+        other => {
+            if let Some(record_schema) = image.record_schemas.get(other) {
+                if bytes.get(value_slice.start) != Some(&b'{') {
+                    return None;
+                }
+                let mut fields = Vec::with_capacity(record_schema.fields.len());
+                for field in &record_schema.fields {
+                    let Some(field_slice) = json_object_lookup(bytes, value_slice, &field.name) else {
+                        release_owned_named_headers(fields);
+                        return None;
+                    };
+                    let Some(field_value) = decode_json_to_runtime_value(image, &field.typ, bytes, field_slice) else {
+                        release_owned_named_headers(fields);
+                        return None;
+                    };
+                    fields.push((field.name.clone(), field_value));
+                }
+                return Some(clasp_rt_build_record_header(other, fields));
+            }
+
+            if let Some(variant_schema) = image.variant_schemas.get(other) {
+                if bytes.get(value_slice.start) == Some(&b'"') {
+                    let tag = json_string_owned(bytes, value_slice)?;
+                    let constructor = variant_schema.constructors.get(&tag)?;
+                    if !constructor.payloads.is_empty() {
+                        return None;
+                    }
+                    return Some(clasp_rt_build_variant_header(&constructor.name, Vec::new()));
+                }
+
+                if bytes.get(value_slice.start) != Some(&b'{') {
+                    return None;
+                }
+                let tag = json_string_owned(bytes, json_object_lookup(bytes, value_slice, "$tag")?)?;
+                let constructor = variant_schema.constructors.get(&tag)?;
+                let mut payloads = Vec::with_capacity(constructor.payloads.len());
+                for (index, payload_type) in constructor.payloads.iter().enumerate() {
+                    let payload_key = format!("${index}");
+                    let Some(payload_slice) = json_object_lookup(bytes, value_slice, &payload_key) else {
+                        release_owned_headers(payloads);
+                        return None;
+                    };
+                    let Some(payload_value) = decode_json_to_runtime_value(image, payload_type, bytes, payload_slice) else {
+                        release_owned_headers(payloads);
+                        return None;
+                    };
+                    payloads.push(payload_value);
+                }
+                return Some(clasp_rt_build_variant_header(&constructor.name, payloads));
+            }
+
+            None
+        }
+    }
+}
+
+unsafe fn decode_json_to_runtime_value(
+    image: &ClaspRtNativeModuleImage,
+    typ: &ClaspRtSchemaType,
+    bytes: &[u8],
+    value_slice: JsonSlice,
+) -> Option<*mut ClaspRtHeader> {
+    match typ {
+        ClaspRtSchemaType::Int => json_i64_value(bytes, value_slice).map(|raw| clasp_rt_build_int_header(raw)),
+        ClaspRtSchemaType::Bool => json_bool_value(bytes, value_slice).map(|raw| clasp_rt_build_bool_header(raw)),
+        ClaspRtSchemaType::Str => {
+            let decoded = json_string_value(bytes, value_slice);
+            if decoded.is_null() {
+                None
+            } else {
+                Some(decoded as *mut ClaspRtHeader)
+            }
+        }
+        ClaspRtSchemaType::List(item_type) => {
+            if bytes.get(value_slice.start) != Some(&b'[') {
+                return None;
+            }
+            let item_count = json_array_length(bytes, value_slice);
+            let mut decoded_items = Vec::with_capacity(item_count);
+            for index in 0..item_count {
+                let Some(item_slice) = json_array_item(bytes, value_slice, index) else {
+                    release_owned_headers(decoded_items);
+                    return None;
+                };
+                let Some(decoded_item) = decode_json_to_runtime_value(image, item_type, bytes, item_slice) else {
+                    release_owned_headers(decoded_items);
+                    return None;
+                };
+                decoded_items.push(decoded_item);
+            }
+            Some(clasp_rt_build_list_header(decoded_items))
+        }
+        ClaspRtSchemaType::Named(name) => decode_named_json_to_runtime(image, name, bytes, value_slice),
+    }
+}
+
 unsafe fn invalid_native_image_result() -> *mut ClaspRtResultString {
     clasp_rt_result_err_string(clasp_rt_string_from_utf8(b"invalid_native_image\0".as_ptr() as *const c_char))
 }
@@ -2554,6 +2933,10 @@ unsafe fn missing_native_dispatch_result() -> *mut ClaspRtResultString {
 
 unsafe fn missing_native_entrypoint_result() -> *mut ClaspRtResultString {
     clasp_rt_result_err_string(clasp_rt_string_from_utf8(b"missing_native_entrypoint\0".as_ptr() as *const c_char))
+}
+
+unsafe fn native_route_error_result(message: &str) -> *mut ClaspRtResultString {
+    clasp_rt_result_err_string(build_runtime_string(message.as_bytes()))
 }
 
 unsafe fn json_string_value(bytes: &[u8], string_slice: JsonSlice) -> *mut ClaspRtString {
@@ -2928,6 +3311,16 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
             let right_slice = json_object_lookup(bytes, expr_slice, "right")?;
             return Some(ClaspRtInterpretedExpr::Intrinsic(
                 ClaspRtInterpretedIntrinsic::ListAppend(
+                    Box::new(parse_interpreted_expr_json(bytes, left_slice)?),
+                    Box::new(parse_interpreted_expr_json(bytes, right_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "view.append") {
+            let left_slice = json_object_lookup(bytes, expr_slice, "left")?;
+            let right_slice = json_object_lookup(bytes, expr_slice, "right")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ViewAppend(
                     Box::new(parse_interpreted_expr_json(bytes, left_slice)?),
                     Box::new(parse_interpreted_expr_json(bytes, right_slice)?),
                 ),
@@ -3441,6 +3834,9 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
     let Some(module_name) = json_object_lookup(bytes, root, "module") else {
         return null_mut();
     };
+    let Some(abi) = json_object_lookup(bytes, root, "abi") else {
+        return null_mut();
+    };
     let Some(runtime) = json_object_lookup(bytes, root, "runtime") else {
         return null_mut();
     };
@@ -3502,6 +3898,9 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         generation: 0,
         runtime_bindings: Vec::new(),
         runtime_binding_indexes: HashMap::new(),
+        route_boundaries: Vec::new(),
+        record_schemas: HashMap::new(),
+        variant_schemas: HashMap::new(),
         exports: Vec::new(),
         entrypoint_symbols: vec![null_mut(); json_array_length(bytes, exports)],
         entrypoints: vec![None; json_array_length(bytes, exports)],
@@ -3531,6 +3930,24 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         }
         loaded.accepted_previous_fingerprints.push(fingerprint);
     }
+
+    let Some(record_schemas) = load_record_schemas(bytes, abi) else {
+        drop(loaded);
+        return null_mut();
+    };
+    loaded.record_schemas = record_schemas;
+
+    let Some(variant_schemas) = load_variant_schemas(bytes, abi) else {
+        drop(loaded);
+        return null_mut();
+    };
+    loaded.variant_schemas = variant_schemas;
+
+    let Some(route_boundaries) = load_route_boundaries(bytes, runtime) else {
+        drop(loaded);
+        return null_mut();
+    };
+    loaded.route_boundaries = route_boundaries;
 
     for index in 0..json_array_length(bytes, runtime_bindings) {
         let Some(binding_value) = json_array_item(bytes, runtime_bindings, index) else {
@@ -3740,7 +4157,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_entrypoint_symbol(
     let Some(index) = image.as_ref().and_then(|image_ref| image_ref.export_index(export_name)) else {
         return missing_native_entrypoint_result();
     };
-    let symbol = (*image).entrypoint_symbols[index];
+    let symbol = (&(*image).entrypoint_symbols)[index];
     if symbol.is_null() {
         missing_native_entrypoint_result()
     } else {
@@ -4055,9 +4472,306 @@ pub unsafe extern "C" fn clasp_rt_call_native_dispatch_generation(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_call_native_route_json(
+    runtime: *mut ClaspRtRuntime,
+    module_name: *mut ClaspRtString,
+    method: *mut ClaspRtString,
+    path: *mut ClaspRtString,
+    request_json: *mut ClaspRtJson,
+) -> *mut ClaspRtResultString {
+    let Some(runtime_ref) = runtime.as_ref() else {
+        return null_mut();
+    };
+    if module_name.is_null() || method.is_null() || path.is_null() || request_json.is_null() {
+        return native_route_error_result("invalid_route_call");
+    }
+
+    let Some(method_text) = String::from_utf8(string_bytes(method).to_vec()).ok() else {
+        return native_route_error_result("invalid_route_method");
+    };
+    let Some(path_text) = String::from_utf8(string_bytes(path).to_vec()).ok() else {
+        return native_route_error_result("invalid_route_path");
+    };
+
+    let Some((image, route_index)) = runtime_ref.find_latest_route(module_name, &method_text, &path_text) else {
+        return native_route_error_result("missing_route");
+    };
+    let route = &(&(*image).route_boundaries)[route_index];
+    if route.handler.is_empty() {
+        return native_route_error_result("route_handler_missing");
+    }
+
+    let request_bytes = string_bytes(request_json as *mut ClaspRtString);
+    let Some(request_value) = json_root_value(request_bytes) else {
+        return native_route_error_result("invalid_route_request_json");
+    };
+    let Some(request_type) = parse_schema_type_text(&route.request_type) else {
+        return native_route_error_result("invalid_route_request_type");
+    };
+    let Some(request_header) = decode_json_to_runtime_value(&*image, &request_type, request_bytes, request_value) else {
+        return native_route_error_result("invalid_route_request_payload");
+    };
+
+    let handler_name = build_runtime_string(route.handler.as_bytes());
+    if handler_name.is_null() {
+        release_header(runtime, request_header);
+        return native_route_error_result("invalid_route_handler");
+    }
+
+    let mut dispatch_args = [request_header];
+    let dispatch_value = clasp_rt_call_native_dispatch(
+        runtime,
+        module_name,
+        handler_name,
+        dispatch_args.as_mut_ptr(),
+        1,
+    );
+
+    release_header(runtime, handler_name as *mut ClaspRtHeader);
+    release_header(runtime, request_header);
+
+    if dispatch_value.is_null() {
+        return native_route_error_result("route_dispatch_failed");
+    }
+
+    let encoded = clasp_rt_runtime_value_to_json_string(dispatch_value);
+    release_header(runtime, dispatch_value);
+
+    match encoded {
+        Some(body) => clasp_rt_result_ok_string(build_runtime_string(body.as_bytes())),
+        None => native_route_error_result("route_response_encode_failed"),
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_text_concat(parts: *mut ClaspRtStringList) -> *mut ClaspRtString {
     let items = string_list_items_mut(parts);
     build_runtime_string(&join_string_bytes(items, &[]))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_argv() -> *mut ClaspRtStringList {
+    let values: Vec<String> = env::args().skip(1).collect();
+    let list = build_runtime_string_list(values.len());
+    for (index, value) in values.iter().enumerate() {
+        *string_list_items_mut(list).get_unchecked_mut(index) = build_runtime_string(value.as_bytes());
+    }
+    list
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_text(value: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if value.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "ViewText",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("text")),
+            (
+                "text".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(value))),
+            ),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_page(
+    title: *mut ClaspRtString,
+    body: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if title.is_null() || body.is_null() {
+        return null_mut();
+    }
+    retain_header(body);
+    clasp_rt_build_record_header(
+        "Page",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("page")),
+            (
+                "title".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(title))),
+            ),
+            ("body".to_owned(), body),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_redirect(location: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if location.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "Redirect",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("redirect")),
+            (
+                "location".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(location))),
+            ),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_append(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if left.is_null() || right.is_null() {
+        return null_mut();
+    }
+    retain_header(left);
+    retain_header(right);
+    clasp_rt_build_record_header(
+        "ViewAppend",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("append")),
+            ("left".to_owned(), left),
+            ("right".to_owned(), right),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_element(
+    tag: *mut ClaspRtString,
+    child: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if tag.is_null() || child.is_null() {
+        return null_mut();
+    }
+    retain_header(child);
+    clasp_rt_build_record_header(
+        "ViewElement",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("element")),
+            (
+                "tag".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(tag))),
+            ),
+            ("child".to_owned(), child),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_styled(
+    style_ref: *mut ClaspRtString,
+    child: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if style_ref.is_null() || child.is_null() {
+        return null_mut();
+    }
+    retain_header(child);
+    clasp_rt_build_record_header(
+        "ViewStyled",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("styled")),
+            (
+                "styleRef".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(style_ref))),
+            ),
+            ("child".to_owned(), child),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_link(
+    href: *mut ClaspRtString,
+    child: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if href.is_null() || child.is_null() {
+        return null_mut();
+    }
+    retain_header(child);
+    clasp_rt_build_record_header(
+        "ViewLink",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("link")),
+            (
+                "href".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(href))),
+            ),
+            ("child".to_owned(), child),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_form(
+    method: *mut ClaspRtString,
+    action: *mut ClaspRtString,
+    child: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if method.is_null() || action.is_null() || child.is_null() {
+        return null_mut();
+    }
+    retain_header(child);
+    clasp_rt_build_record_header(
+        "ViewForm",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("form")),
+            (
+                "method".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(method))),
+            ),
+            (
+                "action".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(action))),
+            ),
+            ("child".to_owned(), child),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_input(
+    field_name: *mut ClaspRtString,
+    input_kind: *mut ClaspRtString,
+    value: *mut ClaspRtString,
+) -> *mut ClaspRtHeader {
+    if field_name.is_null() || input_kind.is_null() || value.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "ViewInput",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("input")),
+            (
+                "fieldName".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(field_name))),
+            ),
+            (
+                "inputKind".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(input_kind))),
+            ),
+            (
+                "value".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(value))),
+            ),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_view_submit(label: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if label.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "ViewSubmit",
+        vec![
+            ("kind".to_owned(), clasp_rt_build_string_header("submit")),
+            (
+                "label".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(label))),
+            ),
+        ],
+    )
 }
 
 #[no_mangle]
@@ -4189,6 +4903,18 @@ pub unsafe extern "C" fn clasp_rt_path_basename(path: *mut ClaspRtString) -> *mu
 pub unsafe extern "C" fn clasp_rt_file_exists(path: *mut ClaspRtString) -> bool {
     let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
     std::path::Path::new(&path_string).exists()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_write_file(
+    path: *mut ClaspRtString,
+    contents: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    match std::fs::write(&path_string, string_bytes(contents)) {
+        Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
+        Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
 }
 
 #[no_mangle]

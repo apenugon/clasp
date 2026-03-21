@@ -84,8 +84,8 @@ Current implementation highlights:
 - foreign runtime bindings
 - typed HTTP routes
 - generated JSON decode/encode validation for supported boundary types
-- JavaScript emission
-- Bun-backed demo runtime for route serving
+- frontend JavaScript emission
+- native runtime substrate, with legacy JS backend shims kept under `deprecated/runtime/` during server-native parity work
 
 Long-term direction that matters for agents:
 
@@ -177,9 +177,9 @@ If that does not hold up across more tasks and more harnesses, the project shoul
 - `src/runtime/`: compiler-packaged JS helper assets for client, React Native, Expo, and Python interop
 - `deprecated/bootstrap/src/Clasp/`: legacy Haskell bootstrap compiler
 - `deprecated/runtime/`: legacy JS backend server and worker shims pending full native replacement
-- `runtime/`: native runtime substrate and native tool runner
+- `runtime/`: native runtime substrate plus the Rust-native `claspc` and native tool runners
 - `examples/`: small example programs and demo app
-- `app/Main.hs`: current `claspc` CLI shim while the self-hosted/native takeover is still in progress
+- `app/Main.hs`: deprecated bootstrap CLI shim kept only for legacy recovery paths
 
 ## Quick Start
 

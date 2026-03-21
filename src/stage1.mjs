@@ -113,98 +113,12 @@ function $claspMaybeRecordTrace(options = null, kind, name, action) {
     collector.record(Object.freeze({ kind, name, action, status: "ok" }));
   }
 }
-
-function $claspPolicyAllows(kind, target, entries) {
-  if (!Array.isArray(entries)) {
-    return false;
-  }
-  if (kind === "file") {
-    return entries.some((entry) => typeof entry === "string" && typeof target === "string" && (target === entry || target.startsWith(entry + "/")));
-  }
-  return entries.some((entry) => entry === target);
-}
-
-function $claspCreatePolicyRuntime(config) {
-  const permissions = Object.freeze({
-    file: Object.freeze(Array.isArray(config.file) ? config.file : []),
-    network: Object.freeze(Array.isArray(config.network) ? config.network : []),
-    process: Object.freeze(Array.isArray(config.process) ? config.process : []),
-    secret: Object.freeze(Array.isArray(config.secret) ? config.secret : [])
-  });
-  return Object.freeze({
-    name: config.name,
-    id: config.id,
-    allowedClassifications: Object.freeze(Array.isArray(config.allowedClassifications) ? config.allowedClassifications : []),
-    permissions,
-    allows(kind, target) { return $claspPolicyAllows(kind, target, permissions[kind] ?? []); },
-    allowsFile(target) { return this.allows("file", target); },
-    allowsNetwork(target) { return this.allows("network", target); },
-    allowsProcess(target) { return this.allows("process", target); },
-    allowsSecret(target) { return this.allows("secret", target); },
-    decide(kind, target, context = null) {
-      return Object.freeze({
-        kind,
-        target,
-        allowed: this.allows(kind, target),
-        actor: context && context.actor && typeof context.actor.id === "string" ? context.actor.id : null
-      });
-    },
-    decideFile(target, context = null) { return this.decide("file", target, context); },
-    decideNetwork(target, context = null) { return this.decide("network", target, context); },
-    decideProcess(target, context = null) { return this.decide("process", target, context); },
-    decideSecret(target, context = null) { return this.decide("secret", target, context); },
-    assertFile(target, context = null) { const decision = this.decideFile(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies file access to ${String(target)}`); } return decision; },
-    assertNetwork(target, context = null) { const decision = this.decideNetwork(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies network access to ${String(target)}`); } return decision; },
-    assertProcess(target, context = null) { const decision = this.decideProcess(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies process access to ${String(target)}`); } return decision; },
-    assertSecret(target, context = null) { const decision = this.decideSecret(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies secret access to ${String(target)}`); } return decision; }
-  });
-}
-
-function $claspResolveGuideInstructions(guideName, guideMap, seen = []) {
-  if (typeof guideName !== "string" || guideName === "") {
-    return Object.freeze({});
-  }
-  if (seen.includes(guideName)) {
-    return Object.freeze({});
-  }
-  const guide = guideMap[guideName] ?? null;
-  if (!guide) {
-    return Object.freeze({});
-  }
-  const parentEntries = typeof guide.extends === "string" && guide.extends !== ""
-    ? $claspResolveGuideInstructions(guide.extends, guideMap, [...seen, guideName])
-    : {};
-  return Object.freeze({ ...parentEntries, ...(guide.entries ?? {}) });
-}
-
 export const hello = "Hello from Clasp";
 export function id(value) { return value; }
 export const main = id(hello);
 const __claspExports = Object.freeze({ hello: hello, id: id, main: main });
 
 export const __claspSchemas = Object.freeze({  });
-
-export const __claspGuides = Object.freeze([]);
-
-const $claspGuideMap = Object.freeze(Object.fromEntries(__claspGuides.map((guide) => [guide.name, guide])));
-
-export const __claspPolicies = Object.freeze([]);
-const $claspPolicyMap = Object.freeze({});
-
-export const __claspAgentRoles = Object.freeze([]);
-const $claspAgentRoleMap = Object.freeze({});
-
-export const __claspAgents = Object.freeze([]);
-
-export const __claspToolServers = Object.freeze([]);
-const $claspToolServerMap = Object.freeze({});
-
-export const __claspTools = Object.freeze([]);
-export const __claspToolCallContracts = Object.freeze([]);
-const $claspToolCallContractMap = Object.freeze({});
-
-export const __claspVerifiers = Object.freeze([]);
-const $claspVerifierMap = Object.freeze({});
 
 export const __claspTraceCollector = Object.freeze({
   version: 1,
@@ -221,6 +135,5 @@ export const __claspBindings = Object.freeze({
   version: 1,
   module: __claspModule,
   schemas: __claspSchemas,
-  toolCallContracts: __claspToolCallContracts,
   traces: __claspTraceCollector
 });

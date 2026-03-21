@@ -9,5 +9,5 @@ path = "clasp_runtime.rs"
 crate-type = ["staticlib", "rlib"]
 
 [[bin]]
-name = "clasp-native-tool"
-path = "clasp_native_tool.rs"
+name = "claspc"
+path = "claspc.rs"

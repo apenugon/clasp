@@ -2,28 +2,19 @@
 set -euo pipefail
 
 project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-cache_root="${XDG_CACHE_HOME:-${TMPDIR:-/tmp}}/clasp-hosted-native"
-manifest_path="$project_root/runtime/Cargo.toml"
-runtime_source="$project_root/runtime/clasp_runtime.rs"
-tool_source="$project_root/runtime/clasp_native_tool.rs"
-tool_bin="$cache_root/clasp-native-tool"
+claspc_bin="${CLASPC_BIN:-}"
 
-mkdir -p "$cache_root"
-
-needs_rebuild=0
-if [[ ! -x "$tool_bin" ]]; then
-  needs_rebuild=1
-elif [[ "$manifest_path" -nt "$tool_bin" || "$runtime_source" -nt "$tool_bin" || "$tool_source" -nt "$tool_bin" ]]; then
-  needs_rebuild=1
+if [[ -z "$claspc_bin" ]]; then
+  if command -v claspc >/dev/null 2>&1; then
+    claspc_bin="$(command -v claspc)"
+  elif [[ -x "$project_root/runtime/target/debug/claspc" ]]; then
+    claspc_bin="$project_root/runtime/target/debug/claspc"
+  elif [[ -x "$project_root/runtime/target/release/claspc" ]]; then
+    claspc_bin="$project_root/runtime/target/release/claspc"
+  else
+    printf '%s\n' "missing native claspc binary; set CLASPC_BIN or build claspc first" >&2
+    exit 1
+  fi
 fi
 
-if [[ "$needs_rebuild" -eq 1 ]]; then
-  cargo build \
-    --quiet \
-    --manifest-path "$manifest_path" \
-    --release \
-    --bin clasp-native-tool
-  cp "$project_root/runtime/target/release/clasp-native-tool" "$tool_bin"
-fi
-
-exec "$tool_bin" "$@"
+exec "$claspc_bin" exec-image "$@"

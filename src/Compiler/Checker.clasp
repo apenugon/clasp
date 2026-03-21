@@ -1118,6 +1118,33 @@ textPrefixBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinType
 textSplitFirstBuiltinType : TypeText
 textSplitFirstBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinTypeName))
 
+textViewBuiltinType : TypeText
+textViewBuiltinType = TFunction TStr (TNamed "View")
+
+elementBuiltinType : TypeText
+elementBuiltinType = TFunction TStr (TFunction (TNamed "View") (TNamed "View"))
+
+styledBuiltinType : TypeText
+styledBuiltinType = TFunction TStr (TFunction (TNamed "View") (TNamed "View"))
+
+linkBuiltinType : TypeText
+linkBuiltinType = TFunction TStr (TFunction (TNamed "View") (TNamed "View"))
+
+formBuiltinType : TypeText
+formBuiltinType = TFunction TStr (TFunction TStr (TFunction (TNamed "View") (TNamed "View")))
+
+inputBuiltinType : TypeText
+inputBuiltinType = TFunction TStr (TFunction TStr (TFunction TStr (TNamed "View")))
+
+submitBuiltinType : TypeText
+submitBuiltinType = TFunction TStr (TNamed "View")
+
+pageBuiltinType : TypeText
+pageBuiltinType = TFunction TStr (TFunction (TNamed "View") (TNamed "Page"))
+
+redirectBuiltinType : TypeText
+redirectBuiltinType = TFunction TStr (TNamed "Redirect")
+
 pathJoinBuiltinType : TypeText
 pathJoinBuiltinType = TFunction (TList TStr) TStr
 
@@ -1133,6 +1160,12 @@ fileExistsBuiltinType = TFunction TStr TBool
 readFileBuiltinType : TypeText
 readFileBuiltinType = TFunction TStr (TNamed resultBuiltinTypeName)
 
+argvBuiltinType : TypeText
+argvBuiltinType = TList TStr
+
+writeFileBuiltinType : TypeText
+writeFileBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinTypeName))
+
 builtinResultTypeDecl : HostedTypeDeclAst
 builtinResultTypeDecl = hostedTypeDeclAst resultBuiltinTypeName [hostedConstructorDeclAst resultOkConstructorName [HostedTypeName "Str"], hostedConstructorDeclAst resultErrConstructorName [HostedTypeName "Str"]]
 
@@ -1140,7 +1173,7 @@ effectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]
 effectiveModuleTypeDecls modl = append [builtinResultTypeDecl] (moduleTypeDeclarations modl)
 
 baseEnv : [TypeBinding]
-baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType]
+baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "writeFile" writeFileBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {

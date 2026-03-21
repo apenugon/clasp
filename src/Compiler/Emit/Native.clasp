@@ -492,6 +492,21 @@ collectModuleRuntimeCodecTypes modl = {
     collected = appendUniqueRuntimeCodecType collected (typeFromHostedTypeAst (workflowDeclStateTypeAst workflowDecl));
     collected
   };
+  for routeDecl in moduleRouteDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (routeDeclRequestType routeDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (routeDeclResponseType routeDecl));
+    collected
+  };
+  for hookDecl in moduleHookDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (hookDeclRequestType hookDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (hookDeclResponseType hookDecl));
+    collected
+  };
+  for toolDecl in moduleToolDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (toolDeclRequestType toolDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (toolDeclResponseType toolDecl));
+    collected
+  };
   for decl in moduleDeclarations modl {
     let declCodecTypes = if hasLowerParams decl then collectRuntimeCodecTypesFromExpr typeDecls recordDecls env (lowerFunctionLocalEnv decl) (lowerFunctionFnContext decl) (declBody decl) else collectRuntimeCodecTypesFromExpr typeDecls recordDecls env emptyTypeBindings OutsideFunction (declBody decl);
     collected = appendUniqueRuntimeCodecTypes collected declCodecTypes;
@@ -514,7 +529,7 @@ appendUniqueTextValues existing additions = {
 }
 
 builtinRuntimeBindingName : Str -> Bool
-builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else false
+builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "text" then true else if name == "element" then true else if name == "styled" then true else if name == "link" then true else if name == "form" then true else if name == "input" then true else if name == "submit" then true else if name == "page" then true else if name == "redirect" then true else if name == "argv" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "writeFile" then true else false
 
 collectRuntimeBindingNamesFromExprList : [HostedExprAst] -> [Str]
 collectRuntimeBindingNamesFromExprList exprs = {
@@ -549,7 +564,7 @@ collectRuntimeBindingNamesFromBranches branches = {
 collectRuntimeBindingNamesFromExpr : HostedExprAst -> [Str]
 collectRuntimeBindingNamesFromExpr expr = match expr {
   HostedName name ->
-    [],
+    if builtinRuntimeBindingName name then [name] else [],
   HostedString value ->
     [],
   HostedInt value ->
@@ -704,10 +719,10 @@ emitRuntimeBindingImage name runtimeName bindingType =
   ]
 
 emitBuiltinRuntimeBindingImage : Str -> Str
-emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result" else jsonObject []
+emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result" else if name == "text" then emitRuntimeBindingImage "text" "viewText" "Str -> View" else if name == "element" then emitRuntimeBindingImage "element" "viewElement" "Str -> View -> View" else if name == "styled" then emitRuntimeBindingImage "styled" "viewStyled" "Str -> View -> View" else if name == "link" then emitRuntimeBindingImage "link" "viewLink" "Str -> View -> View" else if name == "form" then emitRuntimeBindingImage "form" "viewForm" "Str -> Str -> View -> View" else if name == "input" then emitRuntimeBindingImage "input" "viewInput" "Str -> Str -> Str -> View" else if name == "submit" then emitRuntimeBindingImage "submit" "viewSubmit" "Str -> View" else if name == "page" then emitRuntimeBindingImage "page" "page" "Str -> View -> Page" else if name == "redirect" then emitRuntimeBindingImage "redirect" "redirect" "Str -> Redirect" else if name == "argv" then emitRuntimeBindingImage "argv" "argv" "[Str]" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result" else if name == "writeFile" then emitRuntimeBindingImage "writeFile" "writeFile" "Str -> Str -> Result" else jsonObject []
 
 emitBuiltinRuntimeBindingText : Str -> Str
-emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result}" else ""
+emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result}" else ""
 
 emitNativeRuntimeBindingImage : HostedForeignDeclAst -> Str
 emitNativeRuntimeBindingImage foreignDecl =
@@ -720,7 +735,7 @@ emitNativeRuntimeBindingText foreignDecl =
 emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingImages bindingNames = {
   let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile"] {
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "page", "redirect", "argv", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingImage builtinName);
       rendered
@@ -734,7 +749,7 @@ emitNativeBuiltinRuntimeBindingImages bindingNames = {
 emitNativeBuiltinRuntimeBindingTexts : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingTexts bindingNames = {
   let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile"] {
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "page", "redirect", "argv", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingText builtinName);
       rendered
@@ -902,6 +917,437 @@ emitHostedWorkflowBoundaryTexts moduleName modl = {
   };
   rendered
 }
+
+routeBoundaryKind : Str -> Str
+routeBoundaryKind responseType = if responseType == "Page" then "page" else if responseType == "Redirect" then "redirect" else "json"
+
+routeUsesServiceTransport : HostedRouteDeclAst -> Bool
+routeUsesServiceTransport routeDecl = routeBoundaryKind (routeDeclResponseType routeDecl) == "json"
+
+emitHostedRouteBoundaryImage : HostedRouteDeclAst -> Str
+emitHostedRouteBoundaryImage routeDecl =
+  jsonObject [
+    jsonFieldText "kind" "route",
+    jsonFieldText "name" (routeDeclName routeDecl),
+    jsonFieldText "id" (routeDeclIdentity routeDecl),
+    jsonFieldText "method" (routeDeclMethod routeDecl),
+    jsonFieldText "path" (routeDeclPath routeDecl),
+    jsonFieldText "request" (routeDeclRequestType routeDecl),
+    jsonFieldText "response" (routeDeclResponseType routeDecl),
+    jsonFieldText "handler" (routeDeclHandlerName routeDecl),
+    jsonFieldText "responseKind" (routeBoundaryKind (routeDeclResponseType routeDecl)),
+    jsonFieldText "encode" (textConcat ["$encode_", routeDeclResponseType routeDecl]),
+    jsonFieldText "decode" (textConcat ["$decode_", routeDeclRequestType routeDecl])
+  ]
+
+emitHostedRouteBoundaryImages : HostedModuleAst -> [Str]
+emitHostedRouteBoundaryImages modl = {
+  let mut rendered = [];
+  for routeDecl in moduleRouteDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedRouteBoundaryImage routeDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedRouteBoundaryText : HostedRouteDeclAst -> Str
+emitHostedRouteBoundaryText routeDecl =
+  textConcat [
+    "route ",
+    routeDeclName routeDecl,
+    "{id=",
+    routeDeclIdentity routeDecl,
+    ", method=",
+    routeDeclMethod routeDecl,
+    ", path=",
+    encode (routeDeclPath routeDecl),
+    ", request=",
+    routeDeclRequestType routeDecl,
+    ", response=",
+    routeDeclResponseType routeDecl,
+    ", response_kind=",
+    routeBoundaryKind (routeDeclResponseType routeDecl),
+    ", encode=$encode_",
+    routeDeclResponseType routeDecl,
+    ", decode=$decode_",
+    routeDeclRequestType routeDecl,
+    "}"
+  ]
+
+emitHostedRouteBoundaryTexts : HostedModuleAst -> [Str]
+emitHostedRouteBoundaryTexts modl = {
+  let mut rendered = [];
+  for routeDecl in moduleRouteDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedRouteBoundaryText routeDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedHookBoundaryImage : HostedHookDeclAst -> Str
+emitHostedHookBoundaryImage hookDecl =
+  jsonObject [
+    jsonFieldText "kind" "hook",
+    jsonFieldText "name" (hookDeclName hookDecl),
+    jsonFieldText "id" (textConcat ["hook:", hookDeclName hookDecl]),
+    jsonFieldText "event" (hookDeclEvent hookDecl),
+    jsonFieldText "request" (hookDeclRequestType hookDecl),
+    jsonFieldText "response" (hookDeclResponseType hookDecl),
+    jsonFieldText "handler" (hookDeclHandlerName hookDecl),
+    jsonFieldText "encode" (textConcat ["$encode_", hookDeclResponseType hookDecl]),
+    jsonFieldText "decode" (textConcat ["$decode_", hookDeclRequestType hookDecl])
+  ]
+
+emitHostedHookBoundaryImages : HostedModuleAst -> [Str]
+emitHostedHookBoundaryImages modl = {
+  let mut rendered = [];
+  for hookDecl in moduleHookDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedHookBoundaryImage hookDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedHookBoundaryText : HostedHookDeclAst -> Str
+emitHostedHookBoundaryText hookDecl =
+  textConcat [
+    "hook ",
+    hookDeclName hookDecl,
+    "{id=hook:",
+    hookDeclName hookDecl,
+    ", event=",
+    encode (hookDeclEvent hookDecl),
+    ", request=",
+    hookDeclRequestType hookDecl,
+    ", response=",
+    hookDeclResponseType hookDecl,
+    ", handler=",
+    hookDeclHandlerName hookDecl,
+    ", encode=$encode_",
+    hookDeclResponseType hookDecl,
+    ", decode=$decode_",
+    hookDeclRequestType hookDecl,
+    "}"
+  ]
+
+emitHostedHookBoundaryTexts : HostedModuleAst -> [Str]
+emitHostedHookBoundaryTexts modl = {
+  let mut rendered = [];
+  for hookDecl in moduleHookDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedHookBoundaryText hookDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolServerBoundaryImage : HostedToolServerDeclAst -> Str
+emitHostedToolServerBoundaryImage toolServerDecl =
+  jsonObject [
+    jsonFieldText "kind" "toolserver",
+    jsonFieldText "name" (toolServerDeclName toolServerDecl),
+    jsonFieldText "id" (textConcat ["toolserver:", toolServerDeclName toolServerDecl]),
+    jsonFieldText "protocol" (toolServerDeclProtocol toolServerDecl),
+    jsonFieldText "location" (toolServerDeclLocation toolServerDecl),
+    jsonFieldText "policy" (toolServerDeclPolicyName toolServerDecl)
+  ]
+
+emitHostedToolServerBoundaryImages : HostedModuleAst -> [Str]
+emitHostedToolServerBoundaryImages modl = {
+  let mut rendered = [];
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolServerBoundaryImage toolServerDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolServerBoundaryText : HostedToolServerDeclAst -> Str
+emitHostedToolServerBoundaryText toolServerDecl =
+  textConcat [
+    "toolserver ",
+    toolServerDeclName toolServerDecl,
+    "{id=toolserver:",
+    toolServerDeclName toolServerDecl,
+    ", protocol=",
+    toolServerDeclProtocol toolServerDecl,
+    ", location=",
+    encode (toolServerDeclLocation toolServerDecl),
+    ", policy=",
+    toolServerDeclPolicyName toolServerDecl,
+    "}"
+  ]
+
+emitHostedToolServerBoundaryTexts : HostedModuleAst -> [Str]
+emitHostedToolServerBoundaryTexts modl = {
+  let mut rendered = [];
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolServerBoundaryText toolServerDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolBoundaryImage : HostedToolDeclAst -> Str
+emitHostedToolBoundaryImage toolDecl =
+  jsonObject [
+    jsonFieldText "kind" "tool",
+    jsonFieldText "name" (toolDeclName toolDecl),
+    jsonFieldText "id" (textConcat ["tool:", toolDeclName toolDecl]),
+    jsonFieldText "server" (toolDeclServerName toolDecl),
+    jsonFieldText "operation" (toolDeclOperation toolDecl),
+    jsonFieldText "request" (toolDeclRequestType toolDecl),
+    jsonFieldText "response" (toolDeclResponseType toolDecl),
+    jsonFieldText "encode" (textConcat ["$encode_", toolDeclResponseType toolDecl]),
+    jsonFieldText "decode" (textConcat ["$decode_", toolDeclRequestType toolDecl])
+  ]
+
+emitHostedToolBoundaryImages : HostedModuleAst -> [Str]
+emitHostedToolBoundaryImages modl = {
+  let mut rendered = [];
+  for toolDecl in moduleToolDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolBoundaryImage toolDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolBoundaryText : HostedToolDeclAst -> Str
+emitHostedToolBoundaryText toolDecl =
+  textConcat [
+    "tool ",
+    toolDeclName toolDecl,
+    "{id=tool:",
+    toolDeclName toolDecl,
+    ", server=",
+    toolDeclServerName toolDecl,
+    ", operation=",
+    encode (toolDeclOperation toolDecl),
+    ", request=",
+    toolDeclRequestType toolDecl,
+    ", response=",
+    toolDeclResponseType toolDecl,
+    ", encode=$encode_",
+    toolDeclResponseType toolDecl,
+    ", decode=$decode_",
+    toolDeclRequestType toolDecl,
+    "}"
+  ]
+
+emitHostedToolBoundaryTexts : HostedModuleAst -> [Str]
+emitHostedToolBoundaryTexts modl = {
+  let mut rendered = [];
+  for toolDecl in moduleToolDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolBoundaryText toolDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedBoundaryImages : Str -> HostedModuleAst -> [Str]
+emitHostedBoundaryImages moduleName modl =
+  append
+    (append
+      (append
+        (append (emitHostedRouteBoundaryImages modl) (emitHostedHookBoundaryImages modl))
+        (emitHostedToolServerBoundaryImages modl))
+      (emitHostedToolBoundaryImages modl))
+    (emitHostedWorkflowBoundaryImages moduleName modl)
+
+emitHostedBoundaryTexts : Str -> HostedModuleAst -> [Str]
+emitHostedBoundaryTexts moduleName modl =
+  append
+    (append
+      (append
+        (append (emitHostedRouteBoundaryTexts modl) (emitHostedHookBoundaryTexts modl))
+        (emitHostedToolServerBoundaryTexts modl))
+      (emitHostedToolBoundaryTexts modl))
+    (emitHostedWorkflowBoundaryTexts moduleName modl)
+
+emitHostedRouteServiceTransportImage : HostedRouteDeclAst -> Str
+emitHostedRouteServiceTransportImage routeDecl =
+  jsonObject [
+    jsonFieldText "kind" "route",
+    jsonFieldText "name" (routeDeclName routeDecl),
+    jsonFieldText "id" (routeDeclIdentity routeDecl),
+    jsonFieldText "mode" "request_response",
+    jsonFieldText "request" (routeDeclRequestType routeDecl),
+    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", routeDeclRequestType routeDecl]),
+    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", routeDeclRequestType routeDecl]),
+    jsonFieldText "response" (routeDeclResponseType routeDecl),
+    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", routeDeclResponseType routeDecl]),
+    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", routeDeclResponseType routeDecl]),
+    jsonFieldText "framing" "length_prefixed"
+  ]
+
+emitHostedRouteServiceTransportImages : HostedModuleAst -> [Str]
+emitHostedRouteServiceTransportImages modl = {
+  let mut rendered = [];
+  for routeDecl in moduleRouteDeclarations modl {
+    rendered = if routeUsesServiceTransport routeDecl then appendNativeRenderedText rendered (emitHostedRouteServiceTransportImage routeDecl) else rendered;
+    rendered
+  };
+  rendered
+}
+
+emitHostedRouteServiceTransportText : HostedRouteDeclAst -> Str
+emitHostedRouteServiceTransportText routeDecl =
+  textConcat [
+    "route ",
+    routeDeclName routeDecl,
+    "{id=",
+    routeDeclIdentity routeDecl,
+    ", mode=request_response, request=",
+    routeDeclRequestType routeDecl,
+    ", request_encode=$encode_binary_",
+    routeDeclRequestType routeDecl,
+    ", request_decode=$decode_binary_",
+    routeDeclRequestType routeDecl,
+    ", response=",
+    routeDeclResponseType routeDecl,
+    ", response_encode=$encode_binary_",
+    routeDeclResponseType routeDecl,
+    ", response_decode=$decode_binary_",
+    routeDeclResponseType routeDecl,
+    ", framing=length_prefixed}"
+  ]
+
+emitHostedRouteServiceTransportTexts : HostedModuleAst -> [Str]
+emitHostedRouteServiceTransportTexts modl = {
+  let mut rendered = [];
+  for routeDecl in moduleRouteDeclarations modl {
+    rendered = if routeUsesServiceTransport routeDecl then appendNativeRenderedText rendered (emitHostedRouteServiceTransportText routeDecl) else rendered;
+    rendered
+  };
+  rendered
+}
+
+emitHostedHookServiceTransportImage : HostedHookDeclAst -> Str
+emitHostedHookServiceTransportImage hookDecl =
+  jsonObject [
+    jsonFieldText "kind" "hook",
+    jsonFieldText "name" (hookDeclName hookDecl),
+    jsonFieldText "id" (textConcat ["hook:", hookDeclName hookDecl]),
+    jsonFieldText "mode" "event",
+    jsonFieldText "request" (hookDeclRequestType hookDecl),
+    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", hookDeclRequestType hookDecl]),
+    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", hookDeclRequestType hookDecl]),
+    jsonFieldText "response" (hookDeclResponseType hookDecl),
+    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", hookDeclResponseType hookDecl]),
+    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", hookDeclResponseType hookDecl]),
+    jsonFieldText "framing" "length_prefixed"
+  ]
+
+emitHostedHookServiceTransportImages : HostedModuleAst -> [Str]
+emitHostedHookServiceTransportImages modl = {
+  let mut rendered = [];
+  for hookDecl in moduleHookDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedHookServiceTransportImage hookDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedHookServiceTransportText : HostedHookDeclAst -> Str
+emitHostedHookServiceTransportText hookDecl =
+  textConcat [
+    "hook ",
+    hookDeclName hookDecl,
+    "{id=hook:",
+    hookDeclName hookDecl,
+    ", mode=event, request=",
+    hookDeclRequestType hookDecl,
+    ", request_encode=$encode_binary_",
+    hookDeclRequestType hookDecl,
+    ", request_decode=$decode_binary_",
+    hookDeclRequestType hookDecl,
+    ", response=",
+    hookDeclResponseType hookDecl,
+    ", response_encode=$encode_binary_",
+    hookDeclResponseType hookDecl,
+    ", response_decode=$decode_binary_",
+    hookDeclResponseType hookDecl,
+    ", framing=length_prefixed}"
+  ]
+
+emitHostedHookServiceTransportTexts : HostedModuleAst -> [Str]
+emitHostedHookServiceTransportTexts modl = {
+  let mut rendered = [];
+  for hookDecl in moduleHookDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedHookServiceTransportText hookDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolServiceTransportImage : HostedToolDeclAst -> Str
+emitHostedToolServiceTransportImage toolDecl =
+  jsonObject [
+    jsonFieldText "kind" "tool",
+    jsonFieldText "name" (toolDeclName toolDecl),
+    jsonFieldText "id" (textConcat ["tool:", toolDeclName toolDecl]),
+    jsonFieldText "mode" "rpc",
+    jsonFieldText "request" (toolDeclRequestType toolDecl),
+    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", toolDeclRequestType toolDecl]),
+    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", toolDeclRequestType toolDecl]),
+    jsonFieldText "response" (toolDeclResponseType toolDecl),
+    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", toolDeclResponseType toolDecl]),
+    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", toolDeclResponseType toolDecl]),
+    jsonFieldText "framing" "length_prefixed"
+  ]
+
+emitHostedToolServiceTransportImages : HostedModuleAst -> [Str]
+emitHostedToolServiceTransportImages modl = {
+  let mut rendered = [];
+  for toolDecl in moduleToolDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolServiceTransportImage toolDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedToolServiceTransportText : HostedToolDeclAst -> Str
+emitHostedToolServiceTransportText toolDecl =
+  textConcat [
+    "tool ",
+    toolDeclName toolDecl,
+    "{id=tool:",
+    toolDeclName toolDecl,
+    ", mode=rpc, request=",
+    toolDeclRequestType toolDecl,
+    ", request_encode=$encode_binary_",
+    toolDeclRequestType toolDecl,
+    ", request_decode=$decode_binary_",
+    toolDeclRequestType toolDecl,
+    ", response=",
+    toolDeclResponseType toolDecl,
+    ", response_encode=$encode_binary_",
+    toolDeclResponseType toolDecl,
+    ", response_decode=$decode_binary_",
+    toolDeclResponseType toolDecl,
+    ", framing=length_prefixed}"
+  ]
+
+emitHostedToolServiceTransportTexts : HostedModuleAst -> [Str]
+emitHostedToolServiceTransportTexts modl = {
+  let mut rendered = [];
+  for toolDecl in moduleToolDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitHostedToolServiceTransportText toolDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostedServiceTransportImages : HostedModuleAst -> [Str]
+emitHostedServiceTransportImages modl =
+  append
+    (append (emitHostedRouteServiceTransportImages modl) (emitHostedHookServiceTransportImages modl))
+    (emitHostedToolServiceTransportImages modl)
+
+emitHostedServiceTransportTexts : HostedModuleAst -> [Str]
+emitHostedServiceTransportTexts modl =
+  append
+    (append (emitHostedRouteServiceTransportTexts modl) (emitHostedHookServiceTransportTexts modl))
+    (emitHostedToolServiceTransportTexts modl)
 
 firstWorkflowDecl : HostedModuleAst -> HostedWorkflowDeclAst
 firstWorkflowDecl modl = {
@@ -1561,8 +2007,8 @@ nativeRuntimeLines modl = {
   lines = appendNativeRenderedText lines (textConcat ["  bindings [", textJoin ", " runtimeBindings, "]"]);
   lines = appendNativeRenderedText lines (textConcat ["  json_codecs [", textJoin ", " (emitNativeJsonCodecTextsFromTypes codecTypes), "]"]);
   lines = appendNativeRenderedText lines (textConcat ["  binary_codecs [", textJoin ", " (emitNativeBinaryCodecTextsFromTypes codecTypes), "]"]);
-  lines = appendNativeRenderedText lines (textConcat ["  boundaries [", textJoin ", " (emitHostedWorkflowBoundaryTexts moduleName modl), "]"]);
-  lines = appendNativeRenderedText lines "  service_transports []";
+  lines = appendNativeRenderedText lines (textConcat ["  boundaries [", textJoin ", " (emitHostedBoundaryTexts moduleName modl), "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["  service_transports [", textJoin ", " (emitHostedServiceTransportTexts modl), "]"]);
   lines = appendNativeRenderedText lines "}";
   lines
 }
@@ -1656,6 +2102,8 @@ emitNativeExprJson expr = match expr {
     jsonObject [jsonFieldText "kind" "list", jsonFieldArray "items" (emitNativeJsonExprList values)],
   LowerListAppend left right ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.append", jsonFieldRaw "left" (emitNativeExprJson left), jsonFieldRaw "right" (emitNativeExprJson right)],
+  LowerViewAppend left right ->
+    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "view.append", jsonFieldRaw "left" (emitNativeExprJson left), jsonFieldRaw "right" (emitNativeExprJson right)],
   LowerEncode value ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "encode", jsonFieldRaw "value" (emitNativeExprJson value)],
   LowerIf condition thenBranch elseBranch ->
@@ -1824,8 +2272,8 @@ emitNativeRuntimeImage modl = {
     jsonFieldArray "bindings" runtimeBindingImages,
     jsonFieldArray "jsonCodecs" (emitNativeJsonCodecImagesFromTypes codecTypes),
     jsonFieldArray "binaryCodecs" (emitNativeBinaryCodecImagesFromTypes codecTypes),
-    jsonFieldArray "boundaries" (emitHostedWorkflowBoundaryImages moduleName modl),
-    jsonFieldArray "serviceTransports" []
+    jsonFieldArray "boundaries" (emitHostedBoundaryImages moduleName modl),
+    jsonFieldArray "serviceTransports" (emitHostedServiceTransportImages modl)
   ]
 }
 

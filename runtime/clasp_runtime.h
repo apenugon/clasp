@@ -224,6 +224,13 @@ ClaspRtHeader *clasp_rt_call_native_dispatch_generation(
   ClaspRtHeader **args,
   size_t arg_count
 );
+ClaspRtResultString *clasp_rt_call_native_route_json(
+  ClaspRtRuntime *runtime,
+  ClaspRtString *module_name,
+  ClaspRtString *method,
+  ClaspRtString *path,
+  ClaspRtJson *request_json
+);
 ClaspRtNativeSnapshotFn clasp_rt_resolve_native_snapshot(
   ClaspRtRuntime *runtime,
   ClaspRtString *module_name
@@ -251,6 +258,17 @@ ClaspRtJson *clasp_rt_native_module_generation_state_snapshot(
 );
 
 ClaspRtString *clasp_rt_text_concat(ClaspRtStringList *parts);
+ClaspRtStringList *clasp_rt_argv(void);
+ClaspRtHeader *clasp_rt_view_text(ClaspRtString *value);
+ClaspRtHeader *clasp_rt_view_append(ClaspRtHeader *left, ClaspRtHeader *right);
+ClaspRtHeader *clasp_rt_view_element(ClaspRtString *tag, ClaspRtHeader *child);
+ClaspRtHeader *clasp_rt_view_styled(ClaspRtString *style_ref, ClaspRtHeader *child);
+ClaspRtHeader *clasp_rt_view_link(ClaspRtString *href, ClaspRtHeader *child);
+ClaspRtHeader *clasp_rt_view_form(ClaspRtString *method, ClaspRtString *action, ClaspRtHeader *child);
+ClaspRtHeader *clasp_rt_view_input(ClaspRtString *field_name, ClaspRtString *input_kind, ClaspRtString *value);
+ClaspRtHeader *clasp_rt_view_submit(ClaspRtString *label);
+ClaspRtHeader *clasp_rt_page(ClaspRtString *title, ClaspRtHeader *body);
+ClaspRtHeader *clasp_rt_redirect(ClaspRtString *location);
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);
 ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);
 ClaspRtStringList *clasp_rt_text_chars(ClaspRtString *value);
@@ -262,5 +280,6 @@ ClaspRtString *clasp_rt_path_dirname(ClaspRtString *path);
 ClaspRtString *clasp_rt_path_basename(ClaspRtString *path);
 bool clasp_rt_file_exists(ClaspRtString *path);
 ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path);
+ClaspRtResultString *clasp_rt_write_file(ClaspRtString *path, ClaspRtString *contents);
 
 #endif

@@ -3,7 +3,7 @@ module Compiler.Lower
 import Compiler.Ast
 import Compiler.Checker
 
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerViewAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
 type LowerRecordFieldText = LowerRecordFieldText Str LowerExprText
 type LowerMatchBranchText = LowerMatchBranchText Str [Str] LowerExprText
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str [Str] LowerExprText
@@ -144,7 +144,22 @@ lowerAppendExpr typeDecls recordDecls env localEnv fnContext args = {
   } else if expressionSummary right == "" then {
     LowerInvoke "append" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
   } else if expressionSummary extra == "" then {
-    LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right)
+    match inferredExprType typeDecls recordDecls env localEnv fnContext left {
+      TNamed label ->
+        if label == "View" then LowerViewAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right) else LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TInt ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TStr ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TBool ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TList itemType ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TFunction inputType resultType ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right),
+      TUnknown label ->
+        LowerListAppend (lowerExpr typeDecls recordDecls env localEnv fnContext left) (lowerExpr typeDecls recordDecls env localEnv fnContext right)
+    }
   } else {
     LowerInvoke "append" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
   }
@@ -309,6 +324,8 @@ renderLowerExpr expr = match expr {
     textConcat ["list:[", textJoin ", " (renderLowerExprs values), "]"],
   LowerListAppend left right ->
     textConcat ["list.append(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
+  LowerViewAppend left right ->
+    textConcat ["view.append(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
   LowerEncode value ->
     textConcat ["encode(", renderLowerExpr value, ")"],
   LowerInvoke callee args ->

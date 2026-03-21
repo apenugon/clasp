@@ -27,8 +27,8 @@
           claspc-bootstrap =
             pkgs.haskell.lib.dontCheck
               (pkgs.haskellPackages.callCabal2nix "clasp-compiler" ./. { });
-          claspc-native-tool = pkgs.rustPlatform.buildRustPackage {
-            pname = "claspc-native-tool";
+          claspc = pkgs.rustPlatform.buildRustPackage {
+            pname = "claspc";
             version = "0.1.0";
             src = ./.;
             cargoRoot = "runtime";
@@ -38,13 +38,13 @@
             };
             cargoBuildFlags = [
               "--bin"
-              "clasp-native-tool"
+              "claspc"
             ];
           };
         in
         {
-          default = claspc-bootstrap;
-          claspc = claspc-bootstrap;
+          default = claspc;
+          claspc = claspc;
           claspc-bootstrap =
             pkgs.symlinkJoin {
               name = "claspc-bootstrap";
@@ -55,7 +55,6 @@
                 fi
               '';
             };
-          claspc-native-tool = claspc-native-tool;
         });
 
       apps = forAllSystems ({ pkgs, system }: {
@@ -66,10 +65,6 @@
         claspc = {
           type = "app";
           program = "${self.packages.${system}.claspc}/bin/claspc";
-        };
-        claspc-native-tool = {
-          type = "app";
-          program = "${self.packages.${system}.claspc-native-tool}/bin/clasp-native-tool";
         };
       });
 
@@ -87,7 +82,6 @@
           ] ++ [
             self.packages.${system}.claspc
             self.packages.${system}.claspc-bootstrap
-            self.packages.${system}.claspc-native-tool
           ];
         };
       });

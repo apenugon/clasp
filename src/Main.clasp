@@ -154,7 +154,7 @@ explainEntrypoint : Str
 explainEntrypoint = textJoin "\n\n" [checkedModuleSummary, loweredSummary]
 
 compileEntrypoint : Str
-compileEntrypoint = emitModule parsedSampleModule loweredSampleDecls
+compileEntrypoint = emitFrontendModule parsedSampleModule loweredSampleDecls
 
 nativeEntrypoint : Str
 nativeEntrypoint = emitNativeModule parsedSampleModule loweredSampleDecls
@@ -167,6 +167,22 @@ sourceModule source = parseModuleAst source
 
 sourceLoweredDecls : Str -> [LowerDeclText]
 sourceLoweredDecls source = lowerModule (sourceModule source)
+
+frontendOnlyCompileError : Str
+frontendOnlyCompileError = "// compiler-selfhost frontend-only compile error: backend declarations must use nativeSourceText or nativeProjectText."
+
+backendDeclarationKeyword : Str -> Bool
+backendDeclarationKeyword keyword = if keyword == "route" then true else if keyword == "guide" then true else if keyword == "policy" then true else if keyword == "role" then true else if keyword == "agent" then true else if keyword == "workflow" then true else if keyword == "hook" then true else if keyword == "toolserver" then true else if keyword == "tool" then true else if keyword == "verifier" then true else if keyword == "mergegate" then true else false
+
+sourceDeclaresBackendSurface : Str -> Bool
+sourceDeclaresBackendSurface source = {
+  for line in textSplit source "\n" {
+    let trimmed = trimSpaces line;
+    let keyword = firstText (splitWords trimmed);
+    if backendDeclarationKeyword keyword then return true else false
+  };
+  false
+}
 
 projectBundleSeparator : Str
 projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n"
@@ -277,6 +293,7 @@ mergeProjectModules entry importedModules = {
   let mut agentRoleDeclarations = [];
   let mut agentDeclarations = [];
   let mut workflowDeclarations = [];
+  let mut routeDeclarations = [];
   let mut hookDeclarations = [];
   let mut toolServerDeclarations = [];
   let mut toolDeclarations = [];
@@ -292,6 +309,7 @@ mergeProjectModules entry importedModules = {
     agentRoleDeclarations = append agentRoleDeclarations (moduleAgentRoleDeclarations modl);
     agentDeclarations = append agentDeclarations (moduleAgentDeclarations modl);
     workflowDeclarations = append workflowDeclarations (moduleWorkflowDeclarations modl);
+    routeDeclarations = append routeDeclarations (moduleRouteDeclarations modl);
     hookDeclarations = append hookDeclarations (moduleHookDeclarations modl);
     toolServerDeclarations = append toolServerDeclarations (moduleToolServerDeclarations modl);
     toolDeclarations = append toolDeclarations (moduleToolDeclarations modl);
@@ -299,7 +317,7 @@ mergeProjectModules entry importedModules = {
     mergeGateDeclarations = append mergeGateDeclarations (moduleMergeGateDeclarations modl);
     declarations
   };
-  hostedModuleAst (moduleNameOf entry) [] typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
+  hostedModuleAst (moduleNameOf entry) [] typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
 }
 
 resolveProjectBundle : Str -> HostedProjectBundleResult
@@ -346,7 +364,7 @@ explainSourceText : Str -> Str
 explainSourceText source = renderModuleSummary (sourceModule source)
 
 compileSourceText : Str -> Str
-compileSourceText source = emitModule (sourceModule source) (sourceLoweredDecls source)
+compileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else emitFrontendModule (sourceModule source) (sourceLoweredDecls source)
 
 nativeSourceText : Str -> Str
 nativeSourceText source = emitNativeModule (sourceModule source) (sourceLoweredDecls source)
@@ -390,9 +408,9 @@ explainProjectText : Str -> Str
 explainProjectText bundle = checkProjectText bundle
 
 compileProjectText : Str -> Str
-compileProjectText bundle = match resolveProjectBundle bundle {
+compileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else match resolveProjectBundle bundle {
   HostedProjectBundleOk modl ->
-    emitModule modl (lowerModule modl),
+    emitFrontendModule modl (lowerModule modl),
   HostedProjectBundleError message ->
     textConcat ["// compiler-selfhost project error: ", message]
 }
@@ -449,24 +467,24 @@ snapshot = HostedCompilerSnapshot {
   secondaryParsedDeclNames = declNames parsedSecondaryModule,
   secondaryCheckedModule = renderModuleSummary parsedSecondaryModule,
   secondaryLoweredModule = renderLowerModuleSummary loweredSecondaryDecls,
-  secondaryEmittedModule = emitModule parsedSecondaryModule loweredSecondaryDecls,
+  secondaryEmittedModule = emitFrontendModule parsedSecondaryModule loweredSecondaryDecls,
   tertiaryParsedModuleName = moduleNameOf parsedTertiaryModule,
   tertiaryParsedDeclNames = declNames parsedTertiaryModule,
   tertiaryCheckedModule = renderModuleSummary parsedTertiaryModule,
   tertiaryLoweredModule = renderLowerModuleSummary loweredTertiaryDecls,
-  tertiaryEmittedModule = emitModule parsedTertiaryModule loweredTertiaryDecls,
+  tertiaryEmittedModule = emitFrontendModule parsedTertiaryModule loweredTertiaryDecls,
   quaternaryParsedModuleName = moduleNameOf parsedQuaternaryModule,
   quaternaryParsedDeclNames = declNames parsedQuaternaryModule,
   quaternaryCheckedModule = renderModuleSummary parsedQuaternaryModule,
   quaternaryLoweredModule = renderLowerModuleSummary loweredQuaternaryDecls,
-  quaternaryEmittedModule = emitModule parsedQuaternaryModule loweredQuaternaryDecls,
+  quaternaryEmittedModule = emitFrontendModule parsedQuaternaryModule loweredQuaternaryDecls,
   quinaryParsedModuleName = moduleNameOf parsedQuinaryModule,
   quinaryParsedRecordNames = recordDeclNames parsedQuinaryModule,
   quinaryParsedRecordFieldTypes = renderRecordFieldTypeSummaries (firstRecordDecl parsedQuinaryModule),
   quinaryParsedDeclNames = declNames parsedQuinaryModule,
   quinaryCheckedModule = renderModuleSummary parsedQuinaryModule,
   quinaryLoweredModule = renderLowerModuleSummary loweredQuinaryDecls,
-  quinaryEmittedModule = emitModule parsedQuinaryModule loweredQuinaryDecls,
+  quinaryEmittedModule = emitFrontendModule parsedQuinaryModule loweredQuinaryDecls,
   senaryParsedModuleName = moduleNameOf parsedSenaryModule,
   senaryParsedTypeNames = typeDeclNames parsedSenaryModule,
   senaryParsedConstructorSummaries = renderConstructorSummaries (firstTypeDecl parsedSenaryModule),
@@ -474,12 +492,12 @@ snapshot = HostedCompilerSnapshot {
   senaryParsedDeclNames = declNames parsedSenaryModule,
   senaryCheckedModule = renderModuleSummary parsedSenaryModule,
   senaryLoweredModule = renderLowerModuleSummary loweredSenaryDecls,
-  senaryEmittedModule = emitModule parsedSenaryModule loweredSenaryDecls,
+  senaryEmittedModule = emitFrontendModule parsedSenaryModule loweredSenaryDecls,
   septenaryParsedModuleName = moduleNameOf parsedSeptenaryModule,
   septenaryParsedDeclNames = declNames parsedSeptenaryModule,
   septenaryCheckedModule = renderModuleSummary parsedSeptenaryModule,
   septenaryLoweredModule = renderLowerModuleSummary loweredSeptenaryDecls,
-  septenaryEmittedModule = emitModule parsedSeptenaryModule loweredSeptenaryDecls
+  septenaryEmittedModule = emitFrontendModule parsedSeptenaryModule loweredSeptenaryDecls
 }
 
 snapshotJson : Str

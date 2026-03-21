@@ -69,6 +69,8 @@ exprNeedsBuiltinPrelude expr = match expr {
     exprsNeedBuiltinPrelude values,
   LowerListAppend left right ->
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerViewAppend left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
   LowerEncode value ->
     exprNeedsBuiltinPrelude value,
   LowerInvoke callee args ->
@@ -142,6 +144,8 @@ emitExprContainsReturn expr = match expr {
   LowerArray values ->
     hasReturnInExprs values,
   LowerListAppend left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerViewAppend left right ->
     if emitExprContainsReturn left then true else emitExprContainsReturn right,
   LowerEncode value ->
     emitExprContainsReturn value,
@@ -237,6 +241,8 @@ emitExpr expr = match expr {
     textConcat ["[", textJoin ", " (emitExprs values), "]"],
   LowerListAppend left right ->
     textConcat ["(", emitExpr left, ").concat(", emitExpr right, ")"],
+  LowerViewAppend left right ->
+    textConcat ["Object.freeze({ $kind: \"append\", left: ", emitExpr left, ", right: ", emitExpr right, " })"],
   LowerEncode value ->
     textConcat ["JSON.stringify(", emitExpr value, ")"],
   LowerIf condition thenBranch elseBranch ->
@@ -854,8 +860,7 @@ emitSelfHostedRuntimePrelude = {
   let core = [ "function $claspSnapshotValue(value) {", "  if (typeof globalThis.structuredClone === \"function\") {", "    return globalThis.structuredClone(value);", "  }", "  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}" ];
   let prompts = [ "", "function $claspPromptMessage(role, content) {", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([Object.freeze({", "      role: $claspExpectString(role, \"prompt.role\"),", "      content: $claspExpectString(content, \"prompt.content\")", "    })])", "  });", "}", "", "function $claspExpectPrompt(value, path = \"value\") {", "  const objectValue = $claspExpectObject(value, path);", "  if (objectValue.$kind !== \"prompt\") {", "    throw new Error(`${path} expected a Prompt value`);", "  }", "  const messages = $claspExpectArray(objectValue.messages, `${path}.messages`).map((message, index) => {", "    const messagePath = `${path}.messages[${index}]`;", "    const messageObject = $claspExpectObject(message, messagePath);", "    return Object.freeze({", "      role: $claspExpectString(messageObject.role, `${messagePath}.role`),", "      content: $claspExpectString(messageObject.content, `${messagePath}.content`)", "    });", "  });", "  return Object.freeze({ $kind: \"prompt\", messages: Object.freeze(messages) });", "}", "", "function systemPrompt(content) { return $claspPromptMessage(\"system\", content); }", "function assistantPrompt(content) { return $claspPromptMessage(\"assistant\", content); }", "function userPrompt(content) { return $claspPromptMessage(\"user\", content); }", "", "function appendPrompt(left, right) {", "  const leftPrompt = $claspExpectPrompt(left, \"left\");", "  const rightPrompt = $claspExpectPrompt(right, \"right\");", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([...leftPrompt.messages, ...rightPrompt.messages].map((message) => Object.freeze({ role: message.role, content: message.content })))", "  });", "}", "", "function promptText(value) {", "  const prompt = $claspExpectPrompt(value, \"value\");", "  return prompt.messages.map((message) => `${message.role}: ${message.content}`).join(\"\\n\\n\");", "}" ];
   let traces = [ "", "function $claspCreateTraceCollector(seed = []) {", "  const entries = Array.isArray(seed) ? seed.map((entry) => $claspSnapshotValue(entry)) : [];", "  return Object.freeze({", "    kind: \"clasp-trace-collector\",", "    version: 1,", "    record(entry) {", "      const snapshot = $claspSnapshotValue(entry);", "      entries.push(snapshot);", "      return snapshot;", "    },", "    entries() {", "      return $claspSnapshotValue(entries);", "    },", "    clear() {", "      entries.length = 0;", "      return this.entries();", "    }", "  });", "}", "", "function $claspMaybeRecordTrace(options = null, kind, name, action) {", "  const collector = options && typeof options === \"object\" && options.collector && typeof options.collector.record === \"function\"", "    ? options.collector", "    : null;", "  if (collector) {", "    collector.record(Object.freeze({ kind, name, action, status: \"ok\" }));", "  }", "}" ];
-  let policies = [ "", "function $claspPolicyAllows(kind, target, entries) {", "  if (!Array.isArray(entries)) {", "    return false;", "  }", "  if (kind === \"file\") {", "    return entries.some((entry) => typeof entry === \"string\" && typeof target === \"string\" && (target === entry || target.startsWith(entry + \"/\")));", "  }", "  return entries.some((entry) => entry === target);", "}", "", "function $claspCreatePolicyRuntime(config) {", "  const permissions = Object.freeze({", "    file: Object.freeze(Array.isArray(config.file) ? config.file : []),", "    network: Object.freeze(Array.isArray(config.network) ? config.network : []),", "    process: Object.freeze(Array.isArray(config.process) ? config.process : []),", "    secret: Object.freeze(Array.isArray(config.secret) ? config.secret : [])", "  });", "  return Object.freeze({", "    name: config.name,", "    id: config.id,", "    allowedClassifications: Object.freeze(Array.isArray(config.allowedClassifications) ? config.allowedClassifications : []),", "    permissions,", "    allows(kind, target) { return $claspPolicyAllows(kind, target, permissions[kind] ?? []); },", "    allowsFile(target) { return this.allows(\"file\", target); },", "    allowsNetwork(target) { return this.allows(\"network\", target); },", "    allowsProcess(target) { return this.allows(\"process\", target); },", "    allowsSecret(target) { return this.allows(\"secret\", target); },", "    decide(kind, target, context = null) {", "      return Object.freeze({", "        kind,", "        target,", "        allowed: this.allows(kind, target),", "        actor: context && context.actor && typeof context.actor.id === \"string\" ? context.actor.id : null", "      });", "    },", "    decideFile(target, context = null) { return this.decide(\"file\", target, context); },", "    decideNetwork(target, context = null) { return this.decide(\"network\", target, context); },", "    decideProcess(target, context = null) { return this.decide(\"process\", target, context); },", "    decideSecret(target, context = null) { return this.decide(\"secret\", target, context); },", "    assertFile(target, context = null) { const decision = this.decideFile(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies file access to ${String(target)}`); } return decision; },", "    assertNetwork(target, context = null) { const decision = this.decideNetwork(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies network access to ${String(target)}`); } return decision; },", "    assertProcess(target, context = null) { const decision = this.decideProcess(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies process access to ${String(target)}`); } return decision; },", "    assertSecret(target, context = null) { const decision = this.decideSecret(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies secret access to ${String(target)}`); } return decision; }", "  });", "}", "", "function $claspResolveGuideInstructions(guideName, guideMap, seen = []) {", "  if (typeof guideName !== \"string\" || guideName === \"\") {", "    return Object.freeze({});", "  }", "  if (seen.includes(guideName)) {", "    return Object.freeze({});", "  }", "  const guide = guideMap[guideName] ?? null;", "  if (!guide) {", "    return Object.freeze({});", "  }", "  const parentEntries = typeof guide.extends === \"string\" && guide.extends !== \"\"", "    ? $claspResolveGuideInstructions(guide.extends, guideMap, [...seen, guideName])", "    : {};", "  return Object.freeze({ ...parentEntries, ...(guide.entries ?? {}) });", "}", "" ];
-  append core (append prompts (append traces policies))
+  append core (append prompts traces)
 }
 
 emitPolicies : [HostedPolicyDeclAst] -> [Str]
@@ -950,8 +955,8 @@ emitMergeGates mergeGates = if hasMergeGateDeclarations mergeGates then {
   append rendered ["]);", ""]
 } else []
 
-emitTraceAndBindings : HostedModuleAst -> [Str]
-emitTraceAndBindings modl =
+emitFrontendModuleBindings : HostedModuleAst -> [Str]
+emitFrontendModuleBindings modl =
   [
     "export const __claspTraceCollector = Object.freeze({",
     "  version: 1,",
@@ -968,14 +973,13 @@ emitTraceAndBindings modl =
     "  version: 1,",
     "  module: __claspModule,",
     "  schemas: __claspSchemas,",
-    "  toolCallContracts: __claspToolCallContracts,",
     "  traces: __claspTraceCollector",
     "});",
     ""
   ]
 
-emitModule : HostedModuleAst -> [LowerDeclText] -> Str
-emitModule modl decls = {
+emitFrontendModule : HostedModuleAst -> [LowerDeclText] -> Str
+emitFrontendModule modl decls = {
   let mut rendered = ["// Generated by compiler-selfhost"];
   let foreignDecls = moduleForeignDeclarations modl;
   rendered = append rendered (emitPackageForeignImports foreignDecls);
@@ -997,16 +1001,6 @@ emitModule modl decls = {
   };
   rendered = append rendered (emitExportsRegistry modl);
   rendered = append rendered (emitSchemas (moduleRecordDeclarations modl));
-  rendered = append rendered (emitGuides (moduleGuideDeclarations modl));
-  rendered = append rendered emitGuideHelpers;
-  rendered = append rendered (emitPolicies (modulePolicyDeclarations modl));
-  rendered = append rendered (emitAgentRoles (moduleAgentRoleDeclarations modl));
-  rendered = append rendered (emitAgents (moduleAgentDeclarations modl));
-  rendered = append rendered (emitHooks (moduleHookDeclarations modl));
-  rendered = append rendered (emitToolServers (moduleToolServerDeclarations modl));
-  rendered = append rendered (emitTools (moduleToolDeclarations modl));
-  rendered = append rendered (emitVerifiers (moduleVerifierDeclarations modl));
-  rendered = append rendered (emitMergeGates (moduleMergeGateDeclarations modl));
-  rendered = append rendered (emitTraceAndBindings modl);
+  rendered = append rendered (emitFrontendModuleBindings modl);
   textJoin "\n" rendered
 }

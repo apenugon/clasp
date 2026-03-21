@@ -4137,15 +4137,15 @@ nativeTests =
               assertBool "expected native runtime textChars binding" ("textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" `T.isInfixOf` nativeIr)
               assertBool "expected textChars call in emitted native function" ("function charsSummary(value) = call(local(textChars), [local(value)])" `T.isInfixOf` nativeIr)
     , testCase "native runtime bundle files declare the compiler/backend runtime surface" $ do
-        headerExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.h")
-        sourceExists <- doesFileExist ("runtime" </> "native" </> "clasp_runtime.rs")
-        harnessExists <- doesFileExist ("runtime" </> "native" </> "test_native_image.c")
+        headerExists <- doesFileExist ("runtime" </> "clasp_runtime.h")
+        sourceExists <- doesFileExist ("runtime" </> "clasp_runtime.rs")
+        harnessExists <- doesFileExist ("runtime" </> "test_native_image.c")
         assertBool "expected native runtime header to exist" headerExists
         assertBool "expected native runtime source to exist" sourceExists
         assertBool "expected native runtime smoke harness to exist" harnessExists
-        header <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.h")
-        source <- TIO.readFile ("runtime" </> "native" </> "clasp_runtime.rs")
-        harness <- TIO.readFile ("runtime" </> "native" </> "test_native_image.c")
+        header <- TIO.readFile ("runtime" </> "clasp_runtime.h")
+        source <- TIO.readFile ("runtime" </> "clasp_runtime.rs")
+        harness <- TIO.readFile ("runtime" </> "test_native_image.c")
         assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime shutdown export" ("void clasp_rt_shutdown(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
@@ -4398,7 +4398,7 @@ compileTests =
                 ]
             assertEqual
               "expected compiler stdlib runtime output"
-              "{\"main\":\"src/Clasp :: Checker.hs\",\"chars\":[\"a\",\"b\",\"c\"],\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
+              "{\"main\":\"src/Clasp :: Checker.hs\",\"chars\":[\"a\",\"b\",\"c\"],\"split\":[\"alpha\",\"beta\"],\"prefixOk\":\"deprecated/bootstrap/src/Clasp/Parser.hs\",\"prefixMiss\":\"examples/hello.clasp\",\"splitOnce\":\"left\\nright\",\"splitOnceMiss\":\"plain-text\",\"existsOk\":true,\"existsMissing\":false,\"readOk\":\"ok.txt::ready\",\"readMissing\":\"missing\"}"
               runtimeOutput
     , testCase "native evaluates the compiler renderers example end-to-end on the hosted Clasp path" $ do
         let compiledPath = "dist/compiler-renderers.native.ir"
@@ -6000,6 +6000,51 @@ compileTests =
               assertFailure ("expected hosted native compile runner without a bootstrap oracle to succeed:\n" <> stderrText)
           compiledJs <- TIO.readFile resultPath
           assertBool "expected hosted compile output" ("export const main = \"hello\";" `T.isInfixOf` compiledJs)
+    , testCase "hosted native tool runner rejects route-style backend source from frontend JS compile" $
+        withProjectFiles "hosted-native-tool-runner-route-needs-native" [("Main.clasp", T.unlines ["module Main", "", "route inboxRoute = GET \"/inbox\" Empty -> Page inbox"])] $ \root -> do
+          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          let resultPath = root </> "result.mjs"
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "bash"
+              [ "src/scripts/run-native-tool.sh"
+              , stage1Path
+              , "compileSourceText"
+              , root </> "Main.clasp"
+              , resultPath
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native frontend compile guard to return a JS error stub:\n" <> stderrText)
+          compiledJs <- TIO.readFile resultPath
+          assertBool "expected frontend-only compile error" ("frontend-only compile error" `T.isInfixOf` compiledJs)
+          assertBool "expected native entrypoint hint" ("nativeSourceText or nativeProjectText" `T.isInfixOf` compiledJs)
+    , testCase "hosted native tool runner rejects backend workflow projects from frontend JS compile" $
+        withProjectFiles "hosted-native-tool-runner-project-needs-native" [] $ \root -> do
+          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          workflowEntryPath <- makeAbsolute ("examples" </> "durable-workflow" </> "Main.clasp")
+          let resultPath = root </> "result.mjs"
+          (exitCode, _stdoutText, stderrText) <-
+            readProcessWithExitCode
+              "bash"
+              [ "src/scripts/run-native-tool.sh"
+              , stage1Path
+              , "compileProjectText"
+              , "--project-entry=" <> workflowEntryPath
+              , resultPath
+              ]
+              ""
+          case exitCode of
+            ExitSuccess ->
+              pure ()
+            ExitFailure _ ->
+              assertFailure ("expected hosted native project frontend compile guard to return a JS error stub:\n" <> stderrText)
+          compiledJs <- TIO.readFile resultPath
+          assertBool "expected frontend-only project compile error" ("frontend-only compile error" `T.isInfixOf` compiledJs)
+          assertBool "expected native project entrypoint hint" ("nativeSourceText or nativeProjectText" `T.isInfixOf` compiledJs)
     , testCase "hosted native tool runner handles examples/hello.clasp end to end" $ do
         stage1Path <- makeAbsolute "src/stage1.native.image.json"
         helloExampleSource <- readExampleSource "hello.clasp"
@@ -8323,7 +8368,7 @@ runHostedNativeToolInDirectory workingDirectory imagePath exportName inputArg ou
 
 runHostedNativeToolFromDirectory :: Maybe FilePath -> FilePath -> String -> Maybe String -> FilePath -> IO Text
 runHostedNativeToolFromDirectory maybeWorkingDirectory imagePath exportName inputArg outputPath = do
-  toolScriptPath <- makeAbsolute ("compiler" </> "hosted" </> "scripts" </> "run-native-tool.sh")
+  toolScriptPath <- makeAbsolute ("src" </> "scripts" </> "run-native-tool.sh")
   absoluteImagePath <- makeAbsolute imagePath
   absoluteOutputPath <- makeAbsolute outputPath
   absoluteWorkingDirectory <-
