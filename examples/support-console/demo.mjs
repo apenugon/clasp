@@ -1,178 +1,49 @@
-import { pathToFileURL } from "node:url";
-import {
-  bindingContractFor,
-  createProviderRuntime,
-  installCompiledModule,
-  requestPayloadJson
-} from "../../deprecated/runtime/server.mjs";
+import { compileNativeBinary, runRoute, withNativeServer, fetchText } from "../native-demo.mjs";
 
-function route(contract, name) {
-  const found = contract.routes.find((candidate) => candidate.name === name);
-
-  if (!found) {
-    throw new Error(`Missing route ${name}`);
-  }
-
-  return found;
-}
-
-export async function runSupportConsoleDemo(compiledModule) {
-  const providerCalls = [];
-  const storageCalls = [];
-  const providerOnlyRuntime = createProviderRuntime(compiledModule, {
-    providers: {
-      provider: {
-        replyPreview(draft) {
-          providerCalls.push({
-            source: "provider-runtime",
-            keys: Object.keys(draft).sort(),
-            contactEmail: Object.prototype.hasOwnProperty.call(draft, "contactEmail")
-          });
-          return {
-            customerId: draft.customerId,
-            suggestedReply: `Thanks for the update. ${draft.summary} We will send the next renewal step today.`,
-            escalationNeeded: draft.summary.toLowerCase().includes("blocked")
-          };
-        }
-      }
-    }
-  });
-  const providerOnlyPreview = await providerOnlyRuntime.call("generateReplyPreview", {
-    customerId: "cust-42",
-    summary: "Renewal is blocked on legal review."
-  });
-  let providerDeniedStorage = null;
+export async function runSupportConsoleDemo(binaryPath) {
+  const compiled = compileNativeBinary(
+    "examples/support-console/Main.clasp",
+    binaryPath,
+    "support-console-demo"
+  );
 
   try {
-    await providerOnlyRuntime.call("publishCustomer", {
-      id: "cust-42",
-      company: "Northwind Studio",
-      contactEmail: "ops@northwind.example",
-      plan: "enterprise",
-      renewalRisk: "high"
-    });
-  } catch (error) {
-    providerDeniedStorage = error instanceof Error ? error.message : String(error);
-  }
+    const customer = JSON.parse(runRoute(compiled.binaryPath, "GET", "/support/customer"));
+    const customerPage = JSON.parse(
+      runRoute(compiled.binaryPath, "GET", "/support/customer/page")
+    );
 
-  installCompiledModule(compiledModule, {
-    generateReplyPreview(draft) {
-      providerCalls.push({
-        source: "app-runtime",
-        keys: Object.keys(draft).sort(),
-        contactEmail: Object.prototype.hasOwnProperty.call(draft, "contactEmail")
-      });
-      return {
-        customerId: draft.customerId,
-        suggestedReply: `Thanks for the update. ${draft.summary} We will send the next renewal step today.`,
-        escalationNeeded: draft.summary.toLowerCase().includes("blocked")
-      };
-    },
-    publishCustomer(customer) {
-      storageCalls.push({
-        keys: Object.keys(customer).sort(),
-        contactEmail: customer.contactEmail,
-        plan: customer.plan
-      });
-      return customer;
-    }
-  });
-
-  const contract = bindingContractFor(compiledModule);
-  const storageBinding = contract.storage?.bindings?.find(
-    (binding) => binding.name === "publishCustomer"
-  );
-  const storageTable = contract.storage?.tables?.find(
-    (table) => table.schemaType === "SupportCustomer"
-  );
-  const dashboardRoute = route(contract, "supportDashboardRoute");
-  const customerRoute = route(contract, "supportCustomerRoute");
-  const customerPageRoute = route(contract, "supportCustomerPageRoute");
-  const previewRoute = route(contract, "previewReplyRoute");
-
-  const dashboardHtml = dashboardRoute.encodeResponse(await dashboardRoute.handler({}));
-  const customer = await customerRoute.handler({});
-  const customerPageHtml = customerPageRoute.encodeResponse(await customerPageRoute.handler({}));
-  const previewPayload = previewRoute.decodeRequest(
-    await requestPayloadJson(
-      previewRoute,
-      new Request("https://app.example.test/support/preview", {
+    return await withNativeServer(compiled.binaryPath, "/support", async ({ baseUrl }) => {
+      const dashboard = await fetchText(baseUrl, "/support");
+      const preview = await fetchText(baseUrl, "/support/preview", {
         method: "POST",
         headers: {
-          "content-type": "application/x-www-form-urlencoded"
+          "content-type": "application/x-www-form-urlencoded",
         },
-        body: "customerId=cust-42&summary=Renewal+is+blocked+on+legal+review."
-      })
-    )
-  );
-  const previewTicket = compiledModule.previewTicket(previewPayload);
-  const previewHtml = previewRoute.encodeResponse(await previewRoute.handler(previewPayload));
+        body: "customerId=cust-42&summary=Renewal+is+blocked+on+legal+review.",
+      });
 
-  let invalid = null;
-
-  try {
-    previewRoute.decodeRequest(
-      await requestPayloadJson(
-        previewRoute,
-        new Request("https://app.example.test/support/preview", {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded"
-          },
-          body: "customerId=cust-42"
-        })
-      )
-    );
-  } catch (error) {
-    invalid = error instanceof Error ? error.message : String(error);
+      return {
+        status: "ok",
+        implementation: "clasp-native",
+        example: "support-console",
+        customerCompany: customer.company,
+        customerEmail: customer.contactEmail,
+        customerPageHasExport: customerPage.title === "Customer export",
+        dashboardHasPreviewForm: dashboard.text.includes('"/support/preview"'),
+        previewPageHasReply: preview.text.includes("Thanks for the update."),
+      };
+    });
+  } finally {
+    compiled.cleanup();
   }
-
-  return {
-    routeCount: contract.routes.length,
-    routeNames: contract.routes.map((candidate) => candidate.name),
-    hostBindingNames: contract.hostBindings.map((binding) => binding.name),
-    hostBindingRuntimeNames: contract.hostBindings.map((binding) => binding.runtimeName),
-    storageBindingNames: contract.storage?.bindings?.map((binding) => binding.name) ?? [],
-    storageTableNames: contract.storage?.tables?.map((table) => table.name) ?? [],
-    storageParamSemanticType:
-      storageBinding?.params?.[0]?.storageType?.semanticType ?? null,
-    storagePrimaryKeyKinds:
-      storageTable?.columns?.find((column) => column.name === "id")?.constraints?.map(
-        (constraint) => constraint.kind
-      ) ?? [],
-    dashboardHasPreviewForm:
-      dashboardHtml.includes('action="/support/preview"') &&
-      dashboardHtml.includes("Conversation summary") &&
-      dashboardHtml.includes("support"),
-    dashboardHasCustomerLink: dashboardHtml.includes('href="/support/customer/page"'),
-    customerCompany: customer.company,
-    customerEmail: customer.contactEmail,
-    customerPageHasExport:
-      customerPageHtml.includes("Northwind Studio") &&
-      customerPageHtml.includes("ops@northwind.example") &&
-      customerPageHtml.includes("enterprise"),
-    previewReply: previewTicket.suggestedReply,
-    previewEscalationNeeded: previewTicket.escalationNeeded,
-    previewPageHasReply:
-      previewHtml.includes("Thanks for the update.") &&
-      previewHtml.includes("Back to dashboard"),
-    providerOnlyPreviewKeys: Object.keys(providerOnlyPreview).sort(),
-    providerOnlyDeniedStorage: providerDeniedStorage,
-    providerOnlyBindings: providerOnlyRuntime.bindings.map((binding) => binding.name),
-    providerObservedDraft: providerCalls[providerCalls.length - 1] ?? null,
-    storageObservedCustomer: storageCalls[0] ?? null,
-    invalid
-  };
 }
 
 async function runCli() {
-  const compiledPath = process.argv[2] ?? "./Main.js";
-  const compiledUrl = new URL(compiledPath, pathToFileURL(`${process.cwd()}/`));
-  const compiledModule = await import(compiledUrl.href);
-  const summary = await runSupportConsoleDemo(compiledModule);
+  const summary = await runSupportConsoleDemo(process.argv[2]);
   console.log(JSON.stringify(summary));
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (import.meta.url === new URL(process.argv[1], "file:").href) {
   await runCli();
 }

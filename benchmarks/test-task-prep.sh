@@ -229,7 +229,10 @@ check_product_only_clasp_solution() {
 
   run_clasp_backend_static_verify "$workspace"
 
-  assert_files_match "$workspace/server.mjs" "$task_root/server.mjs"
+  if [[ -e "$workspace/server.mjs" ]]; then
+    echo "expected $workspace/server.mjs to be omitted from native benchmark workspaces" >&2
+    exit 1
+  fi
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
 }
 
@@ -390,10 +393,16 @@ check_nested_clasp_benchmark_prep
 check_fixture_seed_override
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
-assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'import { createServer } from "../server.mjs";'
-assert_contains "$clasp_workspace/server.mjs" "compiled.__claspAdaptHostBindings({"
-assert_contains "$clasp_workspace/server.mjs" 'segment: toWireSegment(summary.segment) ?? toWireSegment(intake.segment) ?? "startup"'
-assert_contains "$clasp_workspace/server.mjs" "const segment = toWireSegment(lead.segment);"
+assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'const binaryPath = process.env.CLASP_BENCH_BINARY;'
+assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'withNativeServer(binaryPath'
+if [[ -e "$clasp_workspace/server.mjs" ]]; then
+  echo "expected clasp-lead-segment workspace to omit server.mjs" >&2
+  exit 1
+fi
+if [[ -e "$clasp_workspace/runtime/server.mjs" ]]; then
+  echo "expected clasp-lead-segment workspace to omit runtime/server.mjs" >&2
+  exit 1
+fi
 assert_not_contains "$clasp_workspace/Shared/Lead.clasp" "LeadSegment"
 
 ts_workspace="$workspace_root/ts-lead-segment"
@@ -410,7 +419,12 @@ if [[ -f "$ts_persistence_workspace/src/server/store.ts" ]]; then
 fi
 
 clasp_rejection_workspace="$workspace_root/clasp-lead-rejection"
-assert_contains "$clasp_rejection_workspace/test/rejection.test.mjs" 'import { installRuntime, serveCompiledModule } from "../runtime/server.mjs";'
+assert_contains "$clasp_rejection_workspace/test/rejection.test.mjs" 'const binaryPath = process.env.CLASP_BENCH_BINARY;'
+assert_contains "$clasp_rejection_workspace/test/rejection.test.mjs" 'CLASP_MOCK_LEAD_SUMMARY_PRIORITY'
+if [[ -e "$clasp_rejection_workspace/runtime/server.mjs" ]]; then
+  echo "expected clasp-lead-rejection workspace to omit runtime/server.mjs" >&2
+  exit 1
+fi
 assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "type Priority"
 assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "priorityHint"
 assert_not_contains "$clasp_rejection_workspace/app/Shared/Lead.clasp" "priority :"

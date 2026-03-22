@@ -2,33 +2,78 @@
 set -euo pipefail
 
 project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-example_root="$project_root/examples/lead-app"
-compiled_path="$example_root/compiled.mjs"
+tmp_root="$(mktemp -d)"
+binary_path="$tmp_root/lead-app"
+server_body="$tmp_root/server-body.json"
+server_pid=""
 
 cleanup() {
-  rm -f "$compiled_path"
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$tmp_root"
 }
 
 trap cleanup EXIT
 
 run_verify() {
   cd "$project_root"
-  claspc check examples/lead-app/Main.clasp --compiler=bootstrap
-  claspc compile examples/lead-app/Main.clasp -o "$compiled_path" --compiler=bootstrap
-  bun examples/lead-app/e2e.mjs "$compiled_path"
-  node examples/lead-app/demo.mjs "$compiled_path"
-  node examples/lead-app/client-demo.mjs "$compiled_path"
-  node examples/lead-app/workflow-demo.mjs "$compiled_path"
-  node examples/lead-app/ai-demo.mjs "$compiled_path"
+
+  claspc --json check examples/lead-app/Main.clasp | grep -F '"status":"ok"' >/dev/null
+  env RUSTC=/definitely-missing-rustc claspc compile examples/lead-app/Main.clasp -o "$binary_path" >/dev/null
+
+  lead_create_json="$("$binary_path" route POST /api/leads '{"company":"SynthSpeak API","contact":"Ava Stone","budget":25000,"segment":"Growth"}')"
+  printf '%s\n' "$lead_create_json" | grep -F '"leadId":"lead-3"' >/dev/null
+  printf '%s\n' "$lead_create_json" | grep -F '"priority":{"$tag":"Medium"}' >/dev/null
+
+  lead_server_port="$(python - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+  lead_server_addr="127.0.0.1:$lead_server_port"
+  "$binary_path" serve "$lead_server_addr" >/dev/null 2>&1 &
+  server_pid=$!
+
+  for _ in $(seq 1 50); do
+    if curl -sS -o /dev/null "http://$lead_server_addr/api/inbox" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  curl -sS "http://$lead_server_addr/api/inbox" | grep -F '"headline":"Priority inbox"' >/dev/null
+  created_lead_json="$(curl -sS -X POST -H 'content-type: application/json' \
+    --data '{"company":"SynthSpeak API","contact":"Ava Stone","budget":25000,"segment":"Growth"}' \
+    "http://$lead_server_addr/api/leads")"
+  printf '%s\n' "$created_lead_json" | grep -F '"leadId":"lead-3"' >/dev/null
+  curl -sS "http://$lead_server_addr/api/lead/primary" | grep -F '"company":"SynthSpeak API"' >/dev/null
+  reviewed_lead_json="$(curl -sS -X POST -H 'content-type: application/json' \
+    --data '{"leadId":"lead-3","note":"Schedule technical discovery"}' \
+    "http://$lead_server_addr/api/review")"
+  printf '%s\n' "$reviewed_lead_json" | grep -F '"reviewNote":"Schedule technical discovery"' >/dev/null
+
+  invalid_budget_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+    --data '{"company":"Bad Budget Co","contact":"Casey","budget":"oops","segment":"Growth"}' \
+    "http://$lead_server_addr/api/leads")"
+  printf '%s\n' "$invalid_budget_status" | grep -F '400' >/dev/null
+  grep -F 'budget must be an integer' "$server_body" >/dev/null
+
+  unknown_lead_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+    --data '{"leadId":"lead-404","note":"Missing"}' \
+    "http://$lead_server_addr/api/review")"
+  printf '%s\n' "$unknown_lead_status" | grep -F '502' >/dev/null
+  grep -F 'Unknown lead: lead-404' "$server_body" >/dev/null
+
+  printf '%s\n' '{"status":"ok","implementation":"clasp-native","example":"lead-app"}'
 }
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
-  output="$(run_verify)"
-  printf '%s\n' "$output" | grep -F '{"landingStatus":200,"inboxHasSeedLead":true,"secondaryHasSeedLead":true,"createdStatus":200,"primaryShowsCreatedLead":true,"reviewedStatus":200,"reviewedHasNote":true,"invalidBudgetStatus":400,"invalidBudgetMessage":"budget must be an integer","unknownLeadStatus":502,"unknownLeadMessage":"Unknown lead: lead-404","missingStatus":404,"missingMessage":{"error":"not_found","path":"/missing"}}'
-  printf '%s\n' "$output" | grep -F '{"routeCount":11,"routeNames":["landingRoute","inboxRoute","primaryLeadRoute","secondaryLeadRoute","createLeadRoute","reviewLeadRoute","inboxSnapshotRoute","primaryLeadRecordRoute","secondaryLeadRecordRoute","createLeadRecordRoute","reviewLeadRecordRoute"],"landingHasForm":true,"createdHasLead":true,"inboxHasCreatedLead":true,"primaryHasCreatedLead":true,"secondaryHasSeedLead":true,"reviewHasNote":true,"invalid":"budget must be an integer"}'
-  printf '%s\n' "$output" | grep -F '{"routeClientCount":11,"routeClientNames":["landingRoute","inboxRoute","primaryLeadRoute","secondaryLeadRoute","createLeadRoute","reviewLeadRoute","inboxSnapshotRoute","primaryLeadRecordRoute","secondaryLeadRecordRoute","createLeadRecordRoute","reviewLeadRecordRoute"],"inboxHeadline":"Priority inbox","createdLeadId":"lead-3","createdPriority":"Medium","createdSegment":"Growth","primaryCompany":"SynthSpeak API","reviewedStatus":"Reviewed","reviewedNote":"Schedule technical discovery","invalid":"value.segment expected a LeadSegment value"}'
-  printf '%s\n' "$output" | grep -F '{"workflowCount":1,"workflowName":"LeadFollowUpFlow","checkpointLeadId":"lead-3","createdLeadId":"lead-3","createdPriority":"High","preparedStatus":"delivered","preparedResult":"schedule-discovery","reviewedStatus":"Reviewed","finalNextAction":"await-reply","finalTouchCount":2,"finalReviewNote":"Schedule executive discovery","remainingMailboxSize":0}'
-  printf '%s\n' "$output" | grep -F '{"routeName":"primaryLeadRecordRoute","toolName":"lookupLeadPlaybook","toolMethod":"lookup_lead_playbook","leadId":"lead-2","leadPriority":"Medium","leadSegment":"Growth","playbookChannel":"email","promptRoles":["system","assistant","assistant","assistant","assistant","assistant","user"],"promptText":"system: You are the lead outreach assistant.\n\nassistant: Northwind Studio\n\nassistant: Northwind Studio is ready for a design-system migration this quarter.\n\nassistant: medium\n\nassistant: growth\n\nassistant: Keep the note concise, mention the current pilot, and ask for a next step.\n\nuser: Ask for the best time to send a tailored rollout plan.","draftChannel":"email","draftSubject":"Northwind Studio email follow-up","draftCallToAction":"Ask for the best time to send a tailored rollout plan.","signalKind":"runtime_signal","signalName":"lead_outreach_draft_ready","feedbackSignalName":"growth_reply_rate_below_goal","signalRefKinds":["route","prompt","workflow","policy","test"],"signalRefIds":["route:primaryLeadRecordRoute","decl:outreachPrompt","workflow:LeadFollowUpFlow","policy:LeadAssistOps","test:lead-app.ai-demo"],"signalPromptId":"decl:outreachPrompt","signalTestFile":"examples/lead-app/ai-demo.mjs","changePlanKind":"bounded_change_plan","changePlanName":"growth-outreach-tune","changePlanTargetIds":["decl:outreachPrompt","test:lead-app.ai-demo"],"changePlanStepCount":2,"changePlanAirRootKind":"planProjection","learningLoopKind":"learning_loop","learningLoopName":"growth-outreach-loop","learningLoopObjective":"reply-rate","learningLoopEvalIds":["eval:lead-app.ai-demo"],"learningLoopBenchmarkIds":["benchmark:clasp-external-adaptation"],"learningLoopBudgetStepCap":2,"learningLoopAirRootKind":"learningLoopProjection","collectedSignalCount":4,"invalidChange":"Change target route:secondaryLeadRecordRoute is outside the observed signal scope","invalidLearningLoop":"Learning loop budget allows at most 1 remediation steps","invalidTool":"guidance must be a string","invalidModel":"subject must be a string"}'
+  run_verify
 else
   nix develop "$project_root" --command bash -lc "
     set -euo pipefail

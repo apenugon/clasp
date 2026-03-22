@@ -1,262 +1,175 @@
 import assert from "node:assert/strict";
-import net from "node:net";
-import { createServer } from "../server.mjs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-function toWirePriority(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
-    return value.$tag.toLowerCase();
-  }
-
-  return undefined;
+async function request(port, routePath, init = {}) {
+  return fetch(`http://127.0.0.1:${port}${routePath}`, init);
 }
 
-function toWireSegment(value) {
-  if (typeof value === "string") {
-    return value;
-  }
+const projectRoot = process.env.CLASP_PROJECT_ROOT;
+const binaryPath = process.env.CLASP_BENCH_BINARY;
 
-  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
-    return value.$tag.toLowerCase();
-  }
-
-  return undefined;
+if (!projectRoot || !binaryPath) {
+  throw new Error("CLASP_PROJECT_ROOT and CLASP_BENCH_BINARY are required");
 }
 
-function formBody(fields) {
-  return new URLSearchParams(fields).toString();
+const {
+  collectTexts,
+  firstFormAction,
+  formBody,
+  formFieldNames,
+  withNativeServer,
+} = await import(pathToFileURL(path.join(projectRoot, "benchmarks/native-http-test.mjs")).href);
+
+function decodePage(responseText) {
+  return JSON.parse(responseText);
 }
 
-async function request(port, path, init = {}) {
-  return fetch(`http://127.0.0.1:${port}${path}`, init);
-}
-
-async function allocatePort() {
-  return await new Promise((resolve, reject) => {
-    const socket = net.createServer();
-
-    socket.once("error", reject);
-    socket.listen(0, "127.0.0.1", () => {
-      const address = socket.address();
-
-      if (!address || typeof address === "string") {
-        socket.close(() => reject(new Error("failed to allocate an ephemeral port")));
-        return;
-      }
-
-      const { port } = address;
-      socket.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve(port);
-      });
-    });
-  });
-}
-
-async function withServer(binding, callback) {
-  const port = await allocatePort();
-  const server = createServer(
-    {
-      mockLeadSummaryModel: binding
-    },
-    { port }
-  );
-
-  try {
-    await callback(port);
-  } finally {
-    server.stop(true);
-  }
-}
-
-await withServer((lead) => {
-  const priority =
-    toWirePriority(lead.priority) ??
-    (lead.budget >= 50000 ? "high" : lead.budget >= 20000 ? "medium" : "low");
-
-  return JSON.stringify({
-    summary: `${lead.company} led by ${lead.contact} fits the ${priority} priority pipeline.`,
-    priority,
-    segment: toWireSegment(lead.segment),
-    followUpRequired: lead.budget >= 20000
-  });
-}, async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const landing = await request(port, "/");
-  const landingHtml = await landing.text();
+  const landingPage = decodePage(await landing.text());
   assert.equal(landing.status, 200);
-  assert.match(landingHtml, /<form method="POST" action="\/leads">/);
-  assert.match(landingHtml, /name="segment"/);
+  assert.equal(landingPage.kind, "page");
+  assert.equal(landingPage.title, "Lead inbox");
+  assert.equal(firstFormAction(landingPage.body), "/leads");
+  assert.deepEqual(formFieldNames(landingPage.body), ["company", "contact", "budget"]);
 
   const created = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
       budget: "75000",
-      segment: "enterprise"
-    })
+      segment: "enterprise",
+    }),
   });
-  const createdHtml = await created.text();
+  const createdPage = decodePage(await created.text());
   assert.equal(created.status, 200);
-  assert.match(createdHtml, /Priority: high/);
-  assert.match(createdHtml, /Segment: enterprise/);
+  assert.ok(collectTexts(createdPage.body).includes("Priority: high"));
+  assert.ok(collectTexts(createdPage.body).includes("Segment: enterprise"));
 
   const inbox = await request(port, "/inbox");
-  const inboxHtml = await inbox.text();
+  const inboxPage = decodePage(await inbox.text());
   assert.equal(inbox.status, 200);
-  assert.match(inboxHtml, /SynthSpeak \(high, enterprise\)/);
+  assert.ok(collectTexts(inboxPage.body).includes("SynthSpeak (high, enterprise)"));
 
   const primaryLead = await request(port, "/lead/primary");
-  const primaryLeadHtml = await primaryLead.text();
+  const primaryLeadPage = decodePage(await primaryLead.text());
   assert.equal(primaryLead.status, 200);
-  assert.match(primaryLeadHtml, /Segment: enterprise/);
+  assert.ok(collectTexts(primaryLeadPage.body).includes("Segment: enterprise"));
 
   const reviewed = await request(port, "/review", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       leadId: "lead-3",
-      note: "Ready for product demo next week."
-    })
+      note: "Ready for product demo next week.",
+    }),
   });
-  const reviewedHtml = await reviewed.text();
+  const reviewedPage = decodePage(await reviewed.text());
   assert.equal(reviewed.status, 200);
-  assert.match(reviewedHtml, /Review status: reviewed/);
-  assert.match(reviewedHtml, /Ready for product demo next week\./);
+  assert.ok(collectTexts(reviewedPage.body).includes("Review status: reviewed"));
+  assert.ok(collectTexts(reviewedPage.body).includes("Ready for product demo next week."));
 });
 
-await withServer((lead) =>
-  JSON.stringify({
-    summary: `${lead.company} led by ${lead.contact}`,
-    priority: "medium",
-    segment: toWireSegment(lead.segment),
-    followUpRequired: lead.budget >= 20000
-  }),
-async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const response = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
       budget: "not-a-number",
-      segment: "startup"
-    })
+      segment: "startup",
+    }),
   });
 
   assert.equal(response.status, 400);
   assert.equal(await response.text(), "budget must be an integer");
 });
 
-await withServer((lead) =>
-  JSON.stringify({
-    summary: `${lead.company} led by ${lead.contact}`,
-    priority: "medium",
-    segment: toWireSegment(lead.segment),
-    followUpRequired: lead.budget >= 20000
-  }),
-async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const response = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
-      budget: "75000"
-    })
+      budget: "75000",
+    }),
   });
 
   assert.equal(response.status, 400);
   assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
 });
 
-await withServer((lead) =>
-  JSON.stringify({
-    summary: `${lead.company} led by ${lead.contact}`,
-    priority: "medium",
-    segment: toWireSegment(lead.segment),
-    followUpRequired: lead.budget >= 20000
-  }),
-async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const response = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
       budget: "75000",
-      segment: "global-5000"
-    })
+      segment: "global-5000",
+    }),
   });
 
   assert.equal(response.status, 400);
   assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
 });
 
-await withServer(() =>
-  JSON.stringify({
-    summary: "SynthSpeak led by Ava",
-    priority: "urgent",
-    segment: "enterprise",
-    followUpRequired: true
-  }),
-async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const response = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
       budget: "75000",
-      segment: "enterprise"
-    })
+      segment: "enterprise",
+    }),
   });
 
   assert.equal(response.status, 502);
   assert.equal(await response.text(), "priority must be one of: low, medium, high");
+}, {
+  env: {
+    CLASP_MOCK_LEAD_SUMMARY_PRIORITY: "Urgent",
+  },
 });
 
-await withServer(() =>
-  JSON.stringify({
-    summary: "SynthSpeak led by Ava",
-    priority: "high",
-    segment: "global-5000",
-    followUpRequired: true
-  }),
-async (port) => {
+await withNativeServer(binaryPath, async ({ port }) => {
   const response = await request(port, "/leads", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
     },
     body: formBody({
       company: "SynthSpeak",
       contact: "Ava",
       budget: "75000",
-      segment: "enterprise"
-    })
+      segment: "enterprise",
+    }),
   });
 
   assert.equal(response.status, 502);
   assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+}, {
+  env: {
+    CLASP_MOCK_LEAD_SUMMARY_SEGMENT: "Global5000",
+  },
 });

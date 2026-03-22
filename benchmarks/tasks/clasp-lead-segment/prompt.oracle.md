@@ -13,9 +13,9 @@ Implement lead segments end to end.
 
 - This task is intentionally local to the workspace.
 - The exact app-owned edit surface for this Clasp variant is `Shared/Lead.clasp`.
-- `test/lead-app.test.mjs`, `server.mjs`, and the runtime wrapper are verification and host scaffolding, not the intended product edit surface for this task.
+- `test/lead-app.test.mjs` is verification scaffolding around the packaged native binary, not the intended product edit surface for this task.
 - Do not inspect the parent repo unless `bash scripts/verify.sh` exposes a benchmark harness or language-runtime bug rather than an app bug.
-- The intended app-level fix is to express the constraint in the shared schema and thread it through the existing server-rendered flow.
+- The intended app-level fix is to express the constraint in the shared schema and thread it through the existing native-served route flow.
 
 ## Requirements
 

@@ -17,10 +17,16 @@ cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
 
-grep -F 'cabal test' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
-grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash
@@ -42,6 +48,7 @@ mkdir -p "$writable_cache_root"
 fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"
 
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
@@ -52,6 +59,7 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 
 rm -f "$fallback_capture" "$env_capture" "$lock_capture"
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 XDG_CACHE_HOME="$writable_cache_root" \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
@@ -63,6 +71,7 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
@@ -72,12 +81,29 @@ grep -F 'verify-fast: falling back to sandbox verification because Nix is unavai
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-selfhost.sh" >/dev/null 2>"$stderr_capture"
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 grep -F 'verify-selfhost: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
+
+parallel_capture_one="$test_root/parallel-one.txt"
+parallel_capture_two="$test_root/parallel-two.txt"
+sequential_capture="$test_root/sequential.txt"
+parallel_commands=$'sleep 1\nprintf parallel-one > '"$parallel_capture_one"$'\nprintf parallel-two > '"$parallel_capture_two"
+sequential_commands=$'printf sequential-ok > '"$sequential_capture"
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_JOBS=2 \
+CLASP_VERIFY_PARALLEL_COMMANDS="$parallel_commands" \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS="$sequential_commands" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+
+[[ "$(< "$parallel_capture_one")" == "parallel-one" ]]
+[[ "$(< "$parallel_capture_two")" == "parallel-two" ]]
+[[ "$(< "$sequential_capture")" == "sequential-ok" ]]
 
 git_test_root="$test_root/git-repo"
 mkdir -p "$git_test_root/scripts"
@@ -95,6 +121,7 @@ chmod_restore_needed=1
 trap 'if [[ "${chmod_restore_needed:-0}" == "1" && -d "$git_test_root/.git" ]]; then chmod u+w "$git_test_root/.git" >/dev/null 2>&1 || true; fi; rm -rf "${test_root:-}"' EXIT
 rm -f "$fallback_capture" "$env_capture" "$lock_capture"
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 XDG_CACHE_HOME="$writable_cache_root" \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
@@ -109,6 +136,7 @@ chmod_restore_needed=0
 
 rm -f "$writable_nested_capture"
 PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
 CLASP_VERIFY_IN_PROGRESS=1 \
 CLASP_VERIFY_ACTIVE_ROOT="$test_root" \
 CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
@@ -118,6 +146,7 @@ CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
 
 rm -f "$fallback_capture"
 if PATH="$test_root/bin:$PATH" \
+  IN_NIX_SHELL= \
   CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
   CLASP_TEST_NIX_MESSAGE='error: unexpected nix failure' \
   CLASP_VERIFY_FALLBACK_COMMANDS=$'printf should-not-run > fallback.txt' \

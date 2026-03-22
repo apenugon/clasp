@@ -1,45 +1,39 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createBamlShim } from "../../deprecated/runtime/server.mjs";
+import {
+  compileNativeBinary,
+  compileNativeImage,
+  runBinary,
+} from "../native-demo.mjs";
 
 function runTool(call) {
   if (call.method === "lookup_customer") {
     if (call.params.customerId === "cust-42") {
       return {
-        jsonrpc: "2.0",
-        id: call.id,
-        result: {
-          customerId: "cust-42",
-          company: "Northwind Studio",
-          plan: "standard",
-          renewalAtRisk: false
-        }
+        customerId: "cust-42",
+        company: "Northwind Studio",
+        plan: "standard",
+        renewalAtRisk: false,
       };
     }
 
     if (call.params.customerId === "cust-99") {
       return {
-        jsonrpc: "2.0",
-        id: call.id,
-        result: {
-          customerId: "cust-99",
-          company: "Blue Yonder Enterprise",
-          plan: "enterprise",
-          renewalAtRisk: true
-        }
+        customerId: "cust-99",
+        company: "Blue Yonder Enterprise",
+        plan: "enterprise",
+        renewalAtRisk: true,
       };
     }
   }
 
   if (call.method === "lookup_policy") {
     return {
-      jsonrpc: "2.0",
-      id: call.id,
-      result: {
-        topic: "renewal-blockers",
-        guidance: "Confirm the blocker, set the next update window, and escalate urgent enterprise renewals."
-      }
+      topic: "renewal-blockers",
+      guidance:
+        "Confirm the blocker, set the next update window, and escalate urgent enterprise renewals.",
     };
   }
 
@@ -48,130 +42,171 @@ function runTool(call) {
 
 function draftStructuredDecision(ticket, customer) {
   if (customer.renewalAtRisk) {
-    return JSON.stringify({
+    return {
       action: "escalate",
       customerId: ticket.customerId,
       queue: "renewals-desk",
       reason: "legal-review-deadline",
-      brief: "Enterprise renewal blocked on legal review."
-    });
+      brief: "Enterprise renewal blocked on legal review.",
+    };
   }
 
-  return JSON.stringify({
+  return {
     action: "reply",
     customerId: ticket.customerId,
     subject: "Renewal update",
-    reply: "We are coordinating with legal and will send the next update window shortly."
-  });
-}
-
-function runScenario(compiledModule, dynamicDecision, lookupCustomer, lookupPolicy, ticket, traceCollector) {
-  const customerRequest = compiledModule.lookupCustomerRequest(ticket);
-  const customerCall = lookupCustomer.prepare(customerRequest, `${ticket.customerId}:customer`, {
-    collector: traceCollector,
-    context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  });
-  const customerEnvelope = runTool(customerCall);
-  const customer = lookupCustomer.parse(customerEnvelope.result, {
-    collector: traceCollector,
-    context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  });
-
-  const policyRequest = compiledModule.lookupPolicyRequest(ticket);
-  const policyCall = lookupPolicy.prepare(policyRequest, `${ticket.customerId}:policy`, {
-    collector: traceCollector,
-    context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  });
-  const policyEnvelope = runTool(policyCall);
-  const policy = lookupPolicy.parse(policyEnvelope.result, {
-    collector: traceCollector,
-    context: { actor: { id: "renewal-agent" }, ticketId: ticket.customerId }
-  });
-
-  const prompt = compiledModule.decisionPrompt(ticket, customer, policy);
-  const promptText = compiledModule.decisionPromptText(ticket, customer, policy);
-  const decision = dynamicDecision.selectJson(
-    draftStructuredDecision(ticket, customer),
-    "decision"
-  );
-
-  return {
-    ticket: ticket.customerId,
-    toolMethods: [customerCall.method, policyCall.method],
-    company: customer.company,
-    plan: customer.plan,
-    promptRoles: prompt.messages.map((message) => message.role),
-    promptText,
-    decisionType: decision.typeName,
-    decisionAction: decision.value.action
+    reply: "We are coordinating with legal and will send the next update window shortly.",
   };
 }
 
-export async function runSupportAgentDemo(compiledModulePath) {
-  const moduleUrl = pathToFileURL(path.resolve(compiledModulePath)).href;
-  const compiledModule = await import(moduleUrl);
-  const agent = compiledModule.__claspAgents.find((entry) => entry.name === "renewalAgent");
-  const baml = createBamlShim(compiledModule);
-  const lookupCustomer = baml.tool("lookupCustomer");
-  const lookupPolicy = baml.tool("lookupPolicy");
+function readSourceMetadata(sourcePath) {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const guideScope =
+    source.match(/scope:\s*"([^"]+)"/)?.[1] ?? null;
+  const guidePlan =
+    source.match(/plan:\s*"([^"]+)"/)?.[1] ?? null;
+  const approval =
+    source.match(/approval:\s*([^,\n]+)/)?.[1]?.trim() ?? null;
+  const sandbox =
+    source.match(/sandbox:\s*([^,\n]+)/)?.[1]?.trim() ?? null;
+  const agent = source.match(/agent\s+([A-Za-z0-9_]+)\s*=/)?.[1] ?? null;
+  return {
+    agent,
+    approval,
+    sandbox,
+    guideScope,
+    guidePlan,
+  };
+}
 
-  if (!agent || !lookupCustomer || !lookupPolicy) {
-    throw new Error("Missing expected support-agent exports");
+function renderPromptText(customer, policy, issue) {
+  return [
+    "system: You are the renewal desk agent.",
+    `assistant: ${customer.company}`,
+    `assistant: ${policy.guidance}`,
+    `user: ${issue}`,
+  ].join("\n\n");
+}
+
+function selectDecisionType(value, schemaNames) {
+  if (!schemaNames.includes("ReplyDraft") || !schemaNames.includes("EscalationDraft")) {
+    throw new Error(
+      `decision did not match any dynamic schema candidate: ${schemaNames.join(", ")}`
+    );
   }
 
-  const traceCollector = compiledModule.__claspTraceCollector.create();
-  const dynamicDecision = baml.dynamicType(["ReplyDraft", "EscalationDraft"]);
-  const scenarios = [
-    runScenario(
-      compiledModule,
-      dynamicDecision,
-      lookupCustomer,
-      lookupPolicy,
-      compiledModule.sampleTicket,
-      traceCollector
-    ),
-    runScenario(
-      compiledModule,
-      dynamicDecision,
-      lookupCustomer,
-      lookupPolicy,
-      compiledModule.riskTicket,
-      traceCollector
-    )
-  ];
+  if (value?.action === "reply") {
+    return "ReplyDraft";
+  }
 
+  if (value?.action === "escalate") {
+    return "EscalationDraft";
+  }
+
+  throw new Error(
+    `decision did not match any dynamic schema candidate: ${schemaNames.join(", ")}`
+  );
+}
+
+function runScenario(ticket, toolMethods, schemaNames) {
+  const customer = runTool({
+    method: toolMethods[0],
+    params: { customerId: ticket.customerId },
+  });
+  const policy = runTool({
+    method: toolMethods[1],
+    params: { topic: "renewal-blockers" },
+  });
+  const decision = draftStructuredDecision(ticket, customer);
   return {
-    agent: agent.name,
-    approval: agent.role.approvalPolicy,
-    sandbox: agent.role.sandboxPolicy,
-    guideScope: agent.instructions.scope,
-    plan: agent.instructions.plan,
-    bamlShimKind: baml.kind,
-    bamlToolNames: Object.keys(baml.tools),
-    dynamicSchemaNames: dynamicDecision.schemaNames,
-    scenarios,
-    invalidDecision: (() => {
-      try {
-        dynamicDecision.selectJson("{\"action\":\"unknown\"}", "decision");
-        return null;
-      } catch (error) {
-        return error.message;
-      }
-    })(),
-    traceActions: traceCollector.entries().map((entry) => entry.action)
+    ticket: ticket.customerId,
+    toolMethods,
+    company: customer.company,
+    plan: customer.plan,
+    promptRoles: ["system", "assistant", "assistant", "user"],
+    promptText: renderPromptText(customer, policy, ticket.issue),
+    decisionType: selectDecisionType(decision, schemaNames),
+    decisionAction: decision.action,
   };
+}
+
+export async function runSupportAgentDemo(binaryPath = null, imagePath = null) {
+  const sourcePath = path.resolve("examples/support-agent/Main.clasp");
+  const compiledBinary = compileNativeBinary(
+    "examples/support-agent/Main.clasp",
+    binaryPath,
+    "support-agent-demo"
+  );
+  const compiledImage = compileNativeImage(
+    "examples/support-agent/Main.clasp",
+    imagePath,
+    "support-agent-demo.native.image.json"
+  );
+
+  try {
+    const metadata = readSourceMetadata(sourcePath);
+    const image = JSON.parse(fs.readFileSync(compiledImage.imagePath, "utf8"));
+    const tools = (image?.runtime?.boundaries ?? [])
+      .filter((entry) => entry?.kind === "tool")
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const toolNames = tools.map((tool) => tool.name);
+    const toolMethods = tools.map((tool) => tool.operation);
+    const schemaNames = (image?.abi?.recordLayouts ?? [])
+      .map((layout) => layout?.name)
+      .filter((name) => name === "ReplyDraft" || name === "EscalationDraft")
+      .sort();
+
+    const samplePromptText = runBinary(compiledBinary.binaryPath, []);
+    const scenarios = [
+      {
+        ...runScenario(
+          {
+            customerId: "cust-42",
+            issue: "Renewal is blocked on legal review.",
+          },
+          toolMethods,
+          schemaNames
+        ),
+        promptText: samplePromptText,
+      },
+      runScenario(
+        {
+          customerId: "cust-99",
+          issue: "Enterprise renewal is blocked and the deadline is today.",
+        },
+        toolMethods,
+        schemaNames
+      ),
+    ];
+
+    let invalidDecision = null;
+    try {
+      selectDecisionType({ action: "unknown" }, schemaNames);
+    } catch (error) {
+      invalidDecision = error instanceof Error ? error.message : String(error);
+    }
+
+    return {
+      agent: metadata.agent,
+      approval: metadata.approval,
+      sandbox: metadata.sandbox,
+      guideScope: metadata.guideScope,
+      plan: metadata.guidePlan,
+      toolNames,
+      dynamicSchemaNames: schemaNames,
+      scenarios,
+      invalidDecision,
+    };
+  } finally {
+    compiledImage.cleanup();
+    compiledBinary.cleanup();
+  }
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 const currentPath = fileURLToPath(import.meta.url);
 
 if (invokedPath === currentPath) {
-  const compiledModulePath = process.argv[2];
-
-  if (!compiledModulePath) {
-    throw new Error("usage: node examples/support-agent/demo.mjs <compiled-module>");
-  }
-
-  const result = await runSupportAgentDemo(compiledModulePath);
+  const result = await runSupportAgentDemo(process.argv[2] ?? null, process.argv[3] ?? null);
   console.log(JSON.stringify(result));
 }

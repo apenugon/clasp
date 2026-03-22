@@ -761,6 +761,30 @@ The stronger long-term shape is:
 
 That gives agents something stable to query and transform, and avoids treating string literals as the main representation of important runtime contracts.
 
+The deeper abstraction here is not just "HTTP route." It is a typed interaction boundary.
+
+`Clasp` should treat `route`, `tool`, `signal`, `query`, and `event` as one family of compiler-known interaction surfaces with different runtime laws:
+
+- `route`: synchronous request/response boundary
+- `tool`: capability-bearing callable boundary
+- `signal`: asynchronous workflow or process input
+- `query`: read-only state inspection boundary
+- `event`: emitted observation or stream boundary
+
+That unifies human-facing, service-facing, and agent-facing entrypoints under one semantic model without pretending that they all execute the same way.
+
+The important distinction is not whether the caller is a browser, another service, an operator, a scheduler, or another agent. The important distinction is what authority, state-transition, replay, and trace rules govern the interaction.
+
+If `Clasp` makes that family explicit, the compiler can reason uniformly about:
+
+- who can call what
+- what schema each interaction accepts and returns
+- what effects and capabilities are allowed
+- what policies and proofs apply
+- what state transitions are legal
+- what replay and audit artifacts must exist
+- what downstream surfaces are affected by a change
+
 ### Protocols and methods without class-heavy OOP
 
 `Clasp` should not copy the parts of traditional OOP that make whole-system reasoning harder:
@@ -1135,6 +1159,9 @@ Useful graph node kinds should include:
 - type
 - schema
 - route
+- query
+- signal
+- event
 - workflow
 - prompt
 - model client

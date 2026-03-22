@@ -73,6 +73,8 @@ exprNeedsBuiltinPrelude expr = match expr {
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
   LowerEncode value ->
     exprNeedsBuiltinPrelude value,
+  LowerDecode targetType value ->
+    exprNeedsBuiltinPrelude value,
   LowerInvoke callee args ->
     if jsBuiltinPreludeName callee then true else exprsNeedBuiltinPrelude args,
   LowerConstructor constructorName args ->
@@ -148,6 +150,8 @@ emitExprContainsReturn expr = match expr {
   LowerViewAppend left right ->
     if emitExprContainsReturn left then true else emitExprContainsReturn right,
   LowerEncode value ->
+    emitExprContainsReturn value,
+  LowerDecode targetType value ->
     emitExprContainsReturn value,
   LowerInvoke callee args ->
     hasReturnInExprs args,
@@ -245,6 +249,8 @@ emitExpr expr = match expr {
     textConcat ["Object.freeze({ $kind: \"append\", left: ", emitExpr left, ", right: ", emitExpr right, " })"],
   LowerEncode value ->
     textConcat ["JSON.stringify(", emitExpr value, ")"],
+  LowerDecode targetType value ->
+    textConcat ["JSON.parse(", emitExpr value, ")"],
   LowerIf condition thenBranch elseBranch ->
     textJoin "\n" ["(() => {", textConcat ["  if (", emitExpr condition, ") {"], textConcat ["    return ", emitExpr thenBranch, ";"], "  }", textConcat ["  return ", emitExpr elseBranch, ";"], "})()"],
   LowerEqual left right ->

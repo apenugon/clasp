@@ -1,118 +1,133 @@
 import { pathToFileURL } from "node:url";
-import { installCompiledModule } from "../../deprecated/runtime/server.mjs";
-import { createReactNativeBridge } from "../../src/runtime/react.mjs";
-import { createLeadDemoBindings } from "./bindings.mjs";
 
-export async function renderLeadMobileDemo(compiledModule, options = {}) {
-  installCompiledModule(compiledModule, createLeadDemoBindings(options.seedLeads));
+import { compileNativeBinary, withNativeServer, fetchText } from "../native-demo.mjs";
 
-  const bridge = createReactNativeBridge(compiledModule, {
-    platform: options.platform
-  });
-  const landingRoute = findRoute(compiledModule, "landingRoute");
-  const createLeadRoute = findRoute(compiledModule, "createLeadRoute");
-  const reviewLeadRoute = findRoute(compiledModule, "reviewLeadRoute");
-
-  const landingPage = await landingRoute.handler({});
-  const createLead = createLeadRoute.decodeRequest(
-    JSON.stringify({
-      company: "SynthSpeak Mobile",
-      contact: "Taylor Rivera",
-      budget: 42000,
-      segment: "growth"
-    })
-  );
-  const createdPage = await createLeadRoute.handler(createLead);
-  const reviewLead = reviewLeadRoute.decodeRequest(
-    JSON.stringify({
-      leadId: "lead-3",
-      note: "Ready for field pilot"
-    })
-  );
-  const reviewedPage = await reviewLeadRoute.handler(reviewLead);
-  const landingModel = bridge.renderPageModel(landingPage);
-  const createdModel = bridge.renderPageModel(createdPage);
-  const reviewedModel = bridge.renderPageModel(reviewedPage);
-
-  return {
-    platform: bridge.platform,
-    landingTitle: landingModel.title,
-    landingFormAction: firstFormAction(landingModel.body),
-    landingFieldNames: formFieldNames(landingModel.body),
-    createdTexts: collectTexts(createdModel.body),
-    reviewedTexts: collectTexts(reviewedModel.body)
-  };
-}
-
-function findRoute(compiledModule, name) {
-  const route = compiledModule.__claspRoutes?.find(
-    (candidate) => candidate.name === name
-  );
-
-  if (!route) {
-    throw new Error(`Missing route ${name}`);
-  }
-
-  return route;
-}
-
-function firstFormAction(view) {
-  for (const node of walk(view)) {
-    if (node.kind === "form") {
-      return node.action ?? null;
-    }
-  }
-
-  return null;
-}
-
-function formFieldNames(view) {
-  const fields = [];
-
-  for (const node of walk(view)) {
-    if (node.kind === "input" && node.inputKind !== "hidden") {
-      fields.push(node.fieldName ?? "");
-    }
-  }
-
-  return fields;
+function decodePageResponse(response) {
+  return JSON.parse(response.text);
 }
 
 function collectTexts(view) {
   const texts = [];
 
-  for (const node of walk(view)) {
+  function walk(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
     if (node.kind === "text") {
       texts.push(node.text ?? "");
     }
-  }
-
-  return texts;
-}
-
-function* walk(view) {
-  if (!view || typeof view !== "object") {
-    return;
-  }
-
-  yield view;
-
-  if (Array.isArray(view.children)) {
-    for (const child of view.children) {
-      yield* walk(child);
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+    if (node.child) {
+      walk(node.child);
     }
   }
 
-  if (view.child) {
-    yield* walk(view.child);
+  walk(view);
+  return texts;
+}
+
+function firstFormAction(view) {
+  let found = null;
+
+  function walk(node) {
+    if (!node || typeof node !== "object" || found !== null) {
+      return;
+    }
+    if (node.kind === "form") {
+      found = node.action ?? null;
+      return;
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+    if (node.child) {
+      walk(node.child);
+    }
+  }
+
+  walk(view);
+  return found;
+}
+
+function formFieldNames(view) {
+  const fields = [];
+
+  function walk(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    if (node.kind === "input" && node.inputKind !== "hidden") {
+      fields.push(node.fieldName ?? "");
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+    if (node.child) {
+      walk(node.child);
+    }
+  }
+
+  walk(view);
+  return fields;
+}
+
+export async function renderLeadMobileDemo(binaryPath = null) {
+  const compiled = compileNativeBinary(
+    "examples/lead-app/Main.clasp",
+    binaryPath,
+    "lead-app-mobile-demo"
+  );
+
+  try {
+    return await withNativeServer(compiled.binaryPath, "/", async ({ baseUrl }) => {
+      const landing = decodePageResponse(await fetchText(baseUrl, "/"));
+      const created = decodePageResponse(
+        await fetchText(baseUrl, "/leads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            company: "SynthSpeak Mobile",
+            contact: "Taylor Rivera",
+            budget: 42000,
+            segment: "Growth",
+          }),
+        })
+      );
+      const reviewed = decodePageResponse(
+        await fetchText(baseUrl, "/review", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            leadId: "lead-3",
+            note: "Ready for field pilot",
+          }),
+        })
+      );
+
+      return {
+        platform: "native-page-json",
+        landingTitle: landing.title,
+        landingFormAction: firstFormAction(landing.body),
+        landingFieldNames: formFieldNames(landing.body),
+        createdTexts: collectTexts(created.body),
+        reviewedTexts: collectTexts(reviewed.body),
+      };
+    });
+  } finally {
+    compiled.cleanup();
   }
 }
 
 async function runCli() {
-  const compiledPath = process.argv[2] ?? "./Main.js";
-  const compiledUrl = new URL(compiledPath, pathToFileURL(`${process.cwd()}/`));
-  const compiledModule = await import(compiledUrl.href);
-  const summary = await renderLeadMobileDemo(compiledModule);
+  const summary = await renderLeadMobileDemo(process.argv[2] ?? null);
   console.log(JSON.stringify(summary, null, 2));
 }
 

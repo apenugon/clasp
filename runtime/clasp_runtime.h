@@ -267,8 +267,22 @@ ClaspRtHeader *clasp_rt_view_link(ClaspRtString *href, ClaspRtHeader *child);
 ClaspRtHeader *clasp_rt_view_form(ClaspRtString *method, ClaspRtString *action, ClaspRtHeader *child);
 ClaspRtHeader *clasp_rt_view_input(ClaspRtString *field_name, ClaspRtString *input_kind, ClaspRtString *value);
 ClaspRtHeader *clasp_rt_view_submit(ClaspRtString *label);
+ClaspRtHeader *clasp_rt_system_prompt(ClaspRtString *content);
+ClaspRtHeader *clasp_rt_assistant_prompt(ClaspRtString *content);
+ClaspRtHeader *clasp_rt_user_prompt(ClaspRtString *content);
+ClaspRtHeader *clasp_rt_append_prompt(ClaspRtHeader *left, ClaspRtHeader *right);
+ClaspRtString *clasp_rt_prompt_text(ClaspRtHeader *prompt);
 ClaspRtHeader *clasp_rt_page(ClaspRtString *title, ClaspRtHeader *body);
 ClaspRtHeader *clasp_rt_redirect(ClaspRtString *location);
+ClaspRtHeader *clasp_rt_principal(ClaspRtString *id);
+ClaspRtHeader *clasp_rt_tenant(ClaspRtString *id);
+ClaspRtHeader *clasp_rt_resource_identity(ClaspRtString *resource_type, ClaspRtString *resource_id);
+ClaspRtHeader *clasp_rt_auth_session(
+  ClaspRtString *session_id,
+  ClaspRtHeader *principal,
+  ClaspRtHeader *tenant,
+  ClaspRtHeader *resource
+);
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);
 ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);
 ClaspRtStringList *clasp_rt_text_chars(ClaspRtString *value);

@@ -13,8 +13,8 @@ trap cleanup EXIT
 
 run_verify() {
   cd "$project_root"
-  claspc check examples/interop-ts/Main.clasp --compiler=bootstrap
-  claspc compile examples/interop-ts/Main.clasp -o examples/interop-ts/compiled.mjs --compiler=bootstrap
+  claspc check examples/interop-ts/Main.clasp
+  claspc compile examples/interop-ts/Main.clasp -o examples/interop-ts/compiled.mjs
   node examples/interop-ts/demo.mjs "$compiled_path"
 }
 

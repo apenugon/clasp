@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -510,6 +511,7 @@ async function runCommand(taskId, args) {
 
 async function prepareWorkspace(task, workspace, env) {
   await mkdir(path.dirname(workspace), { recursive: true });
+  await rm(workspace, { recursive: true, force: true });
   await cp(path.join(task.dir, task.repo), workspace, {
     recursive: true,
     force: true
@@ -539,8 +541,11 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     : null;
 
   await mkdir(prepRoot, { recursive: true });
-  await runClaspCompilerCommand("context", entryPath, contextPath, env);
-  await runClaspCompilerCommand("air", entryPath, airPath, env);
+  const nativeImage = await renderClaspNativeImage(entryPath, prepRoot, env);
+  const context = synthesizeClaspContext(entryPath, nativeImage);
+  const air = synthesizeClaspAir(entryPath, nativeImage);
+  await writeFile(contextPath, JSON.stringify(context, null, 2) + "\n", "utf8");
+  await writeFile(airPath, JSON.stringify(air, null, 2) + "\n", "utf8");
 
   const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
   await writeFile(uiPath, JSON.stringify(uiGraph, null, 2) + "\n", "utf8");
@@ -550,8 +555,6 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     await writeFile(explainPath, explanation, "utf8");
   }
 
-  const context = JSON.parse(await readFile(contextPath, "utf8"));
-  const air = JSON.parse(await readFile(airPath, "utf8"));
   const guidePath = path.join(workspace, "LANGUAGE_GUIDE.md");
   const guide = renderClaspLanguageGuide({
     workspace,
@@ -600,7 +603,7 @@ async function runClaspCompilerCommandCapture(command, inputPath, outputPath, en
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `claspc --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} --compiler=bootstrap >/dev/null`
+    `claspc --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
   ].join(" && ");
   return runProcessCapture(
     ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
@@ -621,6 +624,11 @@ async function renderClaspUiGraph(entryPath, prepRoot, env) {
       }
 
       throw new Error(`failed to generate Clasp compile artifact for ${entryPath}`);
+    }
+
+    const compiledBytes = await readFile(tempModulePath);
+    if (looksLikeNativeBinary(compiledBytes)) {
+      return [];
     }
 
     const compiledModule = await import(`${pathToFileURL(tempModulePath).href}?t=${Date.now()}`);
@@ -644,13 +652,112 @@ async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `claspc ${command} ${shellQuote(inputPath)} --compiler=bootstrap`
+    `claspc ${command} ${shellQuote(inputPath)}`
   ].join(" && ");
   return runProcessCapture(
     ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
     env.CLASP_PROJECT_ROOT,
     env
   );
+}
+
+async function renderClaspNativeImage(entryPath, prepRoot, env) {
+  const imagePath = path.join(prepRoot, ".benchmark-prep.native.image.json");
+  const result = await runClaspCompilerCommandCapture("native-image", entryPath, imagePath, env);
+
+  if (result.exitCode !== 0) {
+    throw new Error(`failed to generate Clasp native-image artifact for ${entryPath}`);
+  }
+
+  return JSON.parse(await readFile(imagePath, "utf8"));
+}
+
+function synthesizeClaspContext(entryPath, nativeImage) {
+  const routeNodes = (nativeImage.runtime?.boundaries ?? [])
+    .filter((boundary) => boundary.kind === "route")
+    .map((boundary) => ({
+      id: boundary.id ?? `route:${boundary.name}`,
+      kind: "route",
+      file: entryPath,
+      attrs: [
+        { name: "name", value: boundary.name ?? "unknown" },
+        { name: "method", value: boundary.method ?? "UNKNOWN" },
+        { name: "path", value: boundary.path ?? "/" },
+        { name: "requestType", value: boundary.request ?? "Unknown" },
+        { name: "responseType", value: boundary.response ?? "Unknown" },
+      ],
+    }));
+  const foreignNodes = (nativeImage.runtime?.bindings ?? [])
+    .filter((binding) => isHostBindingName(binding.name))
+    .map((binding) => ({
+      id: `foreign:${binding.name}`,
+      kind: "foreign",
+      file: entryPath,
+      attrs: [
+        { name: "name", value: binding.name ?? "unknown" },
+        { name: "type", value: binding.type ?? "Unknown" },
+      ],
+    }));
+  const schemaNodes = [
+    ...((nativeImage.abi?.recordLayouts ?? []).map((layout) => ({
+      id: `schema:${layout.name}`,
+      kind: "schema",
+      file: entryPath,
+      attrs: [
+        { name: "name", value: layout.name ?? "Unknown" },
+        { name: "kind", value: "record" },
+      ],
+    }))),
+    ...((nativeImage.abi?.variantLayouts ?? []).map((layout) => ({
+      id: `schema:${layout.name}`,
+      kind: "schema",
+      file: entryPath,
+      attrs: [
+        { name: "name", value: layout.name ?? "Unknown" },
+        { name: "kind", value: "variant" },
+      ],
+    }))),
+  ];
+
+  return {
+    format: "clasp-benchmark-context-v1",
+    entry: entryPath,
+    nodes: [...routeNodes, ...foreignNodes, ...schemaNodes],
+  };
+}
+
+function synthesizeClaspAir(entryPath, nativeImage) {
+  const declNodes = (nativeImage.decls ?? []).map((decl) => ({
+    id: `decl:${decl.name}`,
+    kind: "decl",
+    file: entryPath,
+    attrs: [
+      { name: "name", value: decl.name ?? "unknown" },
+      { name: "kind", value: decl.kind ?? "unknown" },
+    ],
+  }));
+  const recordNodes = (nativeImage.abi?.recordLayouts ?? []).map((layout) => ({
+    id: `record:${layout.name}`,
+    kind: "record",
+    file: entryPath,
+    attrs: [
+      { name: "name", value: layout.name ?? "Unknown" },
+    ],
+  }));
+  const variantNodes = (nativeImage.abi?.variantLayouts ?? []).map((layout) => ({
+    id: `variant:${layout.name}`,
+    kind: "variant",
+    file: entryPath,
+    attrs: [
+      { name: "name", value: layout.name ?? "Unknown" },
+    ],
+  }));
+
+  return {
+    format: "clasp-benchmark-air-v1",
+    entry: entryPath,
+    nodes: [...declNodes, ...recordNodes, ...variantNodes],
+  };
 }
 
 function renderClaspLanguageGuide({
@@ -663,7 +770,7 @@ function renderClaspLanguageGuide({
   air,
   uiGraph
 }) {
-  const sourceFiles = collectArtifactSourceFiles(workspace, context, air);
+  const sourceFiles = collectWorkspaceClaspSourceFiles(workspace);
   const routes = collectContextRoutes(context);
   const foreignDecls = collectContextForeignDecls(context);
   const artifactPaths = [
@@ -748,45 +855,37 @@ function renderClaspLanguageGuide({
     "## Acceptance loop",
     "",
     "- Use `bash scripts/verify.sh` for the final check.",
-    "- Let `verify.sh` regenerate `build/Main.js`.",
-    "- Prefer the Clasp schema and route files before touching runtime glue."
+    "- Let `verify.sh` regenerate the packaged native binary.",
+    "- Prefer the Clasp schema and route files before touching benchmark harness glue."
   );
 
   return lines.join("\n") + "\n";
 }
 
-function collectArtifactSourceFiles(workspace, ...artifacts) {
-  const sourceFiles = new Set();
+function collectWorkspaceClaspSourceFiles(workspace) {
+  const sourceFiles = [];
 
-  for (const artifact of artifacts) {
-    for (const filePath of collectArtifactFilePaths(artifact)) {
-      if (!filePath.endsWith(".clasp")) {
-        continue;
-      }
-      if (filePath.startsWith("<")) {
+  function walk(currentPath) {
+    const entries = readdirSync(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "benchmark-prep" || entry.name === "build" || entry.name === "dist") {
         continue;
       }
 
-      sourceFiles.add(path.relative(workspace, filePath));
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.endsWith(".clasp")) {
+        sourceFiles.push(path.relative(workspace, entryPath));
+      }
     }
   }
 
-  return [...sourceFiles].sort((left, right) => left.localeCompare(right));
-}
-
-function collectArtifactFilePaths(value) {
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectArtifactFilePaths(entry));
-  }
-
-  if (value && typeof value === "object") {
-    const current = typeof value.file === "string" ? [value.file] : [];
-    return current.concat(
-      Object.values(value).flatMap((entry) => collectArtifactFilePaths(entry))
-    );
-  }
-
-  return [];
+  walk(workspace);
+  return sourceFiles.sort((left, right) => left.localeCompare(right));
 }
 
 function collectContextRoutes(context) {
@@ -813,6 +912,34 @@ function collectContextForeignDecls(context) {
         type: String(attrs.type ?? "Unknown")
       };
     });
+}
+
+function isHostBindingName(name) {
+  return typeof name === "string" &&
+    !["text", "element", "styled", "link", "form", "input", "submit", "page", "redirect"].includes(name);
+}
+
+function looksLikeNativeBinary(contents) {
+  if (!contents || contents.length < 4) {
+    return false;
+  }
+
+  const prefix = contents.subarray(0, 4);
+  if (
+    (prefix[0] === 0x7f && prefix[1] === 0x45 && prefix[2] === 0x4c && prefix[3] === 0x46) ||
+    (prefix[0] === 0xcf && prefix[1] === 0xfa && prefix[2] === 0xed && prefix[3] === 0xfe) ||
+    (prefix[0] === 0xfe && prefix[1] === 0xed && prefix[2] === 0xfa && prefix[3] === 0xcf)
+  ) {
+    return true;
+  }
+
+  for (const byte of contents.subarray(0, 32)) {
+    if (byte === 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function attrsToRecord(attrs) {

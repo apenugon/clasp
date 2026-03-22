@@ -1,6 +1,6 @@
 # Clasp Workspace Guide
 
-This workspace is a small Clasp app with one host adapter.
+This workspace is a small Clasp app verified through a native runtime harness.
 
 ## Where the real app logic lives
 
@@ -13,21 +13,18 @@ This workspace is a small Clasp app with one host adapter.
   - `decode` points for host/model JSON
   - route declarations
 
-Start there before touching any JavaScript.
+Start there before touching the verification harness.
 
-## What the JavaScript files are
+## What the verification files are
 
-- `build/Main.js`
-  - generated output
-  - never edit this directly
-- `runtime/server.mjs`
-  - shared runtime adapter
-  - treat this as last resort
-- `server.mjs`
-  - thin host binding layer for seeded data and mock model/storage functions
-  - only edit this if the host-side JSON shape or seeded labels must change
+- `test/lead-app.test.mjs`
+  - packaged-native acceptance scaffolding
+  - validates HTTP behavior against the generated binary
+- `scripts/verify.sh`
+  - compiles the workspace to a native binary
+  - runs the acceptance test with `CLASP_BENCH_BINARY`
 
-For a task like `segment`, the intended first edit is in `Shared/Lead.clasp`, then `Main.clasp`, and only then `server.mjs` if the host bindings must carry the new field.
+For a task like `segment`, the intended first edit is in `Shared/Lead.clasp`, then `Main.clasp`. The test harness should stay unchanged unless there is a real native-runtime bug.
 
 ## Useful Clasp patterns in this workspace
 
@@ -49,13 +46,13 @@ From the workspace root, these commands emit compiler-owned artifacts for this a
 ```sh
 workspace_root="$(pwd)"
 nix develop "$CLASP_PROJECT_ROOT" --command bash -lc \
-  "cd \"$CLASP_PROJECT_ROOT\" && claspc context \"$workspace_root/Main.clasp\" --compiler=bootstrap"
+  "cd \"$CLASP_PROJECT_ROOT\" && claspc context \"$workspace_root/Main.clasp\""
 ```
 
 ```sh
 workspace_root="$(pwd)"
 nix develop "$CLASP_PROJECT_ROOT" --command bash -lc \
-  "cd \"$CLASP_PROJECT_ROOT\" && claspc air \"$workspace_root/Main.clasp\" --compiler=bootstrap"
+  "cd \"$CLASP_PROJECT_ROOT\" && claspc air \"$workspace_root/Main.clasp\""
 ```
 
 That writes:
@@ -63,10 +60,10 @@ That writes:
 - `Main.context.json`
 - `Main.air.json`
 
-Use those to inspect typed routes, boundary declarations, and graph structure before reading generated JS.
+Use those to inspect typed routes, boundary declarations, and graph structure before debugging native route behavior.
 
 ## Acceptance loop
 
 - Use `bash scripts/verify.sh` for the final check.
-- Let `verify.sh` regenerate `build/Main.js`.
-- If acceptance fails, prefer fixing the Clasp schema or route surface before debugging the runtime adapter.
+- Let `verify.sh` regenerate the packaged native binary.
+- If acceptance fails, prefer fixing the Clasp schema or route surface before debugging the native runtime.

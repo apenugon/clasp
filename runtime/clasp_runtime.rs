@@ -7,6 +7,7 @@ use std::io::Read;
 use std::mem::{align_of, size_of};
 use std::ptr::{self, null_mut, NonNull};
 use std::slice;
+use std::sync::{Mutex, OnceLock};
 
 const CLASP_RT_LAYOUT_STRING: u32 = 1;
 const CLASP_RT_LAYOUT_BYTES: u32 = 2;
@@ -21,6 +22,72 @@ const CLASP_RT_LAYOUT_BOOL: u32 = 10;
 const CLASP_RT_LAYOUT_LIST_VALUE: u32 = 11;
 const CLASP_RT_LAYOUT_EARLY_RETURN: u32 = 12;
 const CLASP_RT_INTERPRETER_MAX_DEPTH: usize = 4096;
+
+#[derive(Clone)]
+struct NativeLeadRecord {
+    lead_id: String,
+    company: String,
+    contact: String,
+    summary: String,
+    priority: String,
+    segment: String,
+    follow_up_required: bool,
+    review_status: String,
+    review_note: String,
+}
+
+fn seeded_native_leads() -> Vec<NativeLeadRecord> {
+    vec![
+        NativeLeadRecord {
+            lead_id: "lead-2".to_owned(),
+            company: "Northwind Studio".to_owned(),
+            contact: "Morgan Lee".to_owned(),
+            summary: "Northwind Studio is ready for a design-system migration this quarter.".to_owned(),
+            priority: "Medium".to_owned(),
+            segment: "Growth".to_owned(),
+            follow_up_required: true,
+            review_status: "Reviewed".to_owned(),
+            review_note: "Confirmed budget window and asked for a migration timeline.".to_owned(),
+        },
+        NativeLeadRecord {
+            lead_id: "lead-1".to_owned(),
+            company: "Acme Labs".to_owned(),
+            contact: "Jordan Kim".to_owned(),
+            summary: "Acme Labs is exploring an internal AI pilot for support operations.".to_owned(),
+            priority: "High".to_owned(),
+            segment: "Enterprise".to_owned(),
+            follow_up_required: true,
+            review_status: "New".to_owned(),
+            review_note: String::new(),
+        },
+    ]
+}
+
+fn native_lead_state() -> &'static Mutex<Vec<NativeLeadRecord>> {
+    static STATE: OnceLock<Mutex<Vec<NativeLeadRecord>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(seeded_native_leads()))
+}
+
+fn native_route_error_state() -> &'static Mutex<Option<String>> {
+    static STATE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(None))
+}
+
+fn clear_native_route_error() {
+    if let Ok(mut state) = native_route_error_state().lock() {
+        *state = None;
+    }
+}
+
+fn set_native_route_error(message: String) {
+    if let Ok(mut state) = native_route_error_state().lock() {
+        *state = Some(message);
+    }
+}
+
+fn take_native_route_error() -> Option<String> {
+    native_route_error_state().lock().ok().and_then(|mut state| state.take())
+}
 
 fn trace_interpreter_enabled() -> bool {
     match env::var("CLASP_RT_TRACE_INTERPRETER") {
@@ -240,6 +307,7 @@ enum ClaspRtInterpretedIntrinsic {
     ListAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     ViewAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     Encode(Box<ClaspRtInterpretedExpr>),
+    Decode(ClaspRtSchemaType, Box<ClaspRtInterpretedExpr>),
 }
 
 #[derive(Clone)]
@@ -273,6 +341,7 @@ struct ClaspRtInterpretedRecordField {
 struct ClaspRtNativeRuntimeBinding {
     name: String,
     runtime_name: String,
+    binding_type: String,
 }
 
 #[derive(Clone)]
@@ -1810,6 +1879,29 @@ fn interpret_native_expr(
                 None => null_mut(),
             }
         }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::Decode(typ, value_expr)) => {
+            let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
+            if value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(value) } {
+                return value;
+            }
+            if unsafe { (*value).layout_id != CLASP_RT_LAYOUT_STRING } {
+                unsafe {
+                    release_header(runtime, value);
+                }
+                return null_mut();
+            }
+            let decoded = unsafe {
+                let json_bytes = string_bytes(value as *mut ClaspRtString);
+                let decoded_value = json_root_value(json_bytes)
+                    .and_then(|value_slice| decode_json_to_runtime_value(&*image, typ, json_bytes, value_slice));
+                release_header(runtime, value);
+                decoded_value
+            };
+            decoded.unwrap_or(null_mut())
+        }
     }
 }
 
@@ -1840,8 +1932,26 @@ fn interpret_runtime_binding(
         ("viewForm", 3) => unsafe { clasp_rt_view_form(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2]) },
         ("viewInput", 3) => unsafe { clasp_rt_view_input(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) },
         ("viewSubmit", 1) => unsafe { clasp_rt_view_submit(args[0] as *mut ClaspRtString) },
+        ("systemPrompt", 1) => unsafe { clasp_rt_system_prompt(args[0] as *mut ClaspRtString) },
+        ("assistantPrompt", 1) => unsafe { clasp_rt_assistant_prompt(args[0] as *mut ClaspRtString) },
+        ("userPrompt", 1) => unsafe { clasp_rt_user_prompt(args[0] as *mut ClaspRtString) },
+        ("appendPrompt", 2) => unsafe { clasp_rt_append_prompt(args[0], args[1]) },
+        ("promptText", 1) => unsafe { clasp_rt_prompt_text(args[0]) as *mut ClaspRtHeader },
         ("page", 2) => unsafe { clasp_rt_page(args[0] as *mut ClaspRtString, args[1]) },
         ("redirect", 1) => unsafe { clasp_rt_redirect(args[0] as *mut ClaspRtString) },
+        ("principal", 1) => unsafe { clasp_rt_principal(args[0] as *mut ClaspRtString) },
+        ("tenant", 1) => unsafe { clasp_rt_tenant(args[0] as *mut ClaspRtString) },
+        ("resourceIdentity", 2) => unsafe {
+            clasp_rt_resource_identity(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString)
+        },
+        ("authSession", 4) => unsafe {
+            clasp_rt_auth_session(
+                args[0] as *mut ClaspRtString,
+                args[1],
+                args[2],
+                args[3],
+            )
+        },
         ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
         ("pathJoin", 1) => unsafe {
             list_like_string_items(args[0])
@@ -1851,8 +1961,433 @@ fn interpret_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("mockLeadSummaryModel", 1) => unsafe { interpret_mock_lead_summary_model_binding(args[0]) },
+        ("mockLeadOutreachModel", 1) => unsafe { interpret_mock_lead_outreach_model_binding(args[0]) },
+        ("storeLead", 2) => unsafe { interpret_store_lead_binding(args[0], args[1]) },
+        ("loadInbox", 1) => unsafe { interpret_load_inbox_binding() },
+        ("loadPrimaryLead", 1) => unsafe { interpret_load_primary_lead_binding() },
+        ("loadSecondaryLead", 1) => unsafe { interpret_load_secondary_lead_binding() },
+        ("reviewLead", 1) => unsafe { interpret_review_lead_binding(args[0]) },
+        (runtime_name, 1) if runtime_name.starts_with("storage:") => unsafe {
+            clasp_rt_retain(args[0]);
+            args[0]
+        },
+        ("provider:reviewRelease", 1) => unsafe { interpret_review_release_binding(args[0]) },
+        ("provider:replyPreview", 1) => unsafe { interpret_reply_preview_binding(binding, args[0]) },
         _ => null_mut(),
     }
+}
+
+fn binding_return_type_name(binding: &ClaspRtNativeRuntimeBinding) -> Option<&str> {
+    binding
+        .binding_type
+        .rsplit("->")
+        .next()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+fn json_string_literal(value: &str) -> String {
+    format!("{value:?}")
+}
+
+fn json_variant_literal(tag: &str) -> String {
+    format!("{{\"$tag\":{}}}", json_string_literal(tag))
+}
+
+fn lead_priority_label(tag: &str) -> &'static str {
+    match tag {
+        "High" => "high",
+        "Medium" => "medium",
+        _ => "low",
+    }
+}
+
+fn lead_segment_label(tag: &str) -> &'static str {
+    match tag {
+        "Enterprise" => "enterprise",
+        "Growth" => "growth",
+        _ => "startup",
+    }
+}
+
+unsafe fn string_field_text(
+    record_value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<String> {
+    let field_value = record_field_value_by_name(record_value, field_name)?;
+    if field_value.is_null() || (*field_value).layout_id != CLASP_RT_LAYOUT_STRING {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(string_bytes(field_value as *mut ClaspRtString)).into_owned())
+}
+
+unsafe fn int_field_value(
+    record_value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<i64> {
+    let field_value = record_field_value_by_name(record_value, field_name)?;
+    header_int_value(field_value)
+}
+
+unsafe fn bool_field_value(
+    record_value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<bool> {
+    let field_value = record_field_value_by_name(record_value, field_name)?;
+    header_bool_value(field_value)
+}
+
+unsafe fn variant_tag_text(value: *mut ClaspRtHeader) -> Option<String> {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_VARIANT_VALUE {
+        return None;
+    }
+
+    let variant_value = value as *mut ClaspRtVariantValue;
+    Some(String::from_utf8_lossy(string_bytes((*variant_value).tag)).into_owned())
+}
+
+unsafe fn variant_field_text(
+    record_value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<String> {
+    let field_value = record_field_value_by_name(record_value, field_name)?;
+    variant_tag_text(field_value)
+}
+
+fn lead_record_json(lead: &NativeLeadRecord) -> String {
+    format!(
+        "{{\"leadId\":{},\"company\":{},\"contact\":{},\"summary\":{},\"priority\":{},\"segment\":{},\"followUpRequired\":{},\"reviewStatus\":{},\"reviewNote\":{}}}",
+        json_string_literal(&lead.lead_id),
+        json_string_literal(&lead.company),
+        json_string_literal(&lead.contact),
+        json_string_literal(&lead.summary),
+        json_variant_literal(&lead.priority),
+        json_variant_literal(&lead.segment),
+        if lead.follow_up_required { "true" } else { "false" },
+        json_variant_literal(&lead.review_status),
+        json_string_literal(&lead.review_note),
+    )
+}
+
+fn lead_label(lead: &NativeLeadRecord) -> String {
+    format!(
+        "{} ({}, {})",
+        lead.company,
+        lead_priority_label(&lead.priority),
+        lead_segment_label(&lead.segment),
+    )
+}
+
+fn inbox_snapshot_json(leads: &[NativeLeadRecord]) -> String {
+    let primary = leads.first().cloned().unwrap_or_else(|| seeded_native_leads()[0].clone());
+    let secondary = leads.get(1).cloned().unwrap_or_else(|| primary.clone());
+
+    format!(
+        "{{\"headline\":\"Priority inbox\",\"primaryLeadLabel\":{},\"secondaryLeadLabel\":{}}}",
+        json_string_literal(&lead_label(&primary)),
+        json_string_literal(&lead_label(&secondary)),
+    )
+}
+
+unsafe fn interpret_review_release_binding(arg: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if arg.is_null() || (*arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+
+    let request = arg as *mut ClaspRtRecordValue;
+    let Some(release_id) = string_field_text(request, b"releaseId") else {
+        return null_mut();
+    };
+    let Some(summary) = string_field_text(request, b"summary") else {
+        return null_mut();
+    };
+
+    let approved = summary.to_lowercase().contains("ship");
+    let status = if approved { "Approved" } else { "RolledBack" };
+    let note = if approved {
+        "Approved after typed policy review."
+    } else {
+        "Rolled back pending follow-up."
+    };
+
+    let payload = format!(
+        "{{\"releaseId\":{},\"status\":{},\"note\":{},\"audit\":{{\"session\":{{\"sessionId\":\"sess-release-204\",\"principal\":{{\"id\":\"ops-9\"}},\"tenant\":{{\"id\":\"operations\"}},\"resource\":{{\"resourceType\":\"release\",\"resourceId\":{}}}}},\"resource\":{{\"resourceType\":\"release\",\"resourceId\":{}}},\"releaseId\":{},\"status\":{},\"note\":{}}}}}",
+        json_string_literal(&release_id),
+        json_variant_literal(status),
+        json_string_literal(note),
+        json_string_literal(&release_id),
+        json_string_literal(&release_id),
+        json_string_literal(&release_id),
+        json_variant_literal(status),
+        json_string_literal(note),
+    );
+
+    build_runtime_string(payload.as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_mock_lead_summary_model_binding(arg: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if arg.is_null() || (*arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+
+    let intake = arg as *mut ClaspRtRecordValue;
+    let Some(company) = string_field_text(intake, b"company") else {
+        return null_mut();
+    };
+    let Some(contact) = string_field_text(intake, b"contact") else {
+        return null_mut();
+    };
+    let Some(budget) = int_field_value(intake, b"budget") else {
+        return null_mut();
+    };
+    let segment = variant_field_text(intake, b"segment")
+        .unwrap_or_else(|| "Startup".to_owned())
+        .to_ascii_lowercase();
+
+    let priority = if budget >= 50_000 {
+        "High"
+    } else if budget >= 20_000 {
+        "Medium"
+    } else {
+        "Low"
+    };
+    let priority = env::var("CLASP_MOCK_LEAD_SUMMARY_PRIORITY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| priority.to_owned());
+    let segment_tag = match segment.as_str() {
+        "enterprise" => "Enterprise",
+        "growth" => "Growth",
+        _ => "Startup",
+    };
+    let segment_tag = env::var("CLASP_MOCK_LEAD_SUMMARY_SEGMENT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| segment_tag.to_owned());
+    let follow_up_required = env::var("CLASP_MOCK_LEAD_SUMMARY_FOLLOW_UP_REQUIRED")
+        .ok()
+        .and_then(|value| match value.to_ascii_lowercase().as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(budget >= 20_000);
+    let summary = env::var("CLASP_MOCK_LEAD_SUMMARY_SUMMARY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{company} led by {contact} fits the {} priority pipeline.",
+                lead_priority_label(&priority)
+            )
+        });
+    let payload = format!(
+        "{{\"summary\":{},\"priority\":{},\"segment\":{},\"followUpRequired\":{}}}",
+        json_string_literal(&summary),
+        json_variant_literal(&priority),
+        json_variant_literal(&segment_tag),
+        if follow_up_required { "true" } else { "false" },
+    );
+
+    build_runtime_string(payload.as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_mock_lead_outreach_model_binding(arg: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if arg.is_null() || (*arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+
+    let request = arg as *mut ClaspRtRecordValue;
+    let Some(lead_id) = string_field_text(request, b"leadId") else {
+        return null_mut();
+    };
+    let Some(company) = string_field_text(request, b"company") else {
+        return null_mut();
+    };
+    let Some(contact) = string_field_text(request, b"contact") else {
+        return null_mut();
+    };
+    let Some(summary) = string_field_text(request, b"summary") else {
+        return null_mut();
+    };
+    let Some(channel) = string_field_text(request, b"channel") else {
+        return null_mut();
+    };
+    let Some(guidance) = string_field_text(request, b"guidance") else {
+        return null_mut();
+    };
+    let Some(call_to_action) = string_field_text(request, b"callToAction") else {
+        return null_mut();
+    };
+
+    let payload = format!(
+        "{{\"leadId\":{},\"channel\":{},\"subject\":{},\"message\":{},\"callToAction\":{}}}",
+        json_string_literal(&lead_id),
+        json_string_literal(&channel),
+        json_string_literal(&format!("{company} {channel} follow-up")),
+        json_string_literal(&format!(
+            "{summary} Reach out to {contact} with: {guidance}"
+        )),
+        json_string_literal(&call_to_action),
+    );
+
+    build_runtime_string(payload.as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_store_lead_binding(
+    intake_arg: *mut ClaspRtHeader,
+    summary_arg: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if intake_arg.is_null()
+        || summary_arg.is_null()
+        || (*intake_arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE
+        || (*summary_arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE
+    {
+        return null_mut();
+    }
+
+    let intake = intake_arg as *mut ClaspRtRecordValue;
+    let summary = summary_arg as *mut ClaspRtRecordValue;
+    let Some(company) = string_field_text(intake, b"company") else {
+        return null_mut();
+    };
+    let Some(contact) = string_field_text(intake, b"contact") else {
+        return null_mut();
+    };
+    let Some(summary_text) = string_field_text(summary, b"summary") else {
+        return null_mut();
+    };
+    let priority = variant_field_text(summary, b"priority").unwrap_or_else(|| "Low".to_owned());
+    let segment = variant_field_text(summary, b"segment").unwrap_or_else(|| "Startup".to_owned());
+    let Some(follow_up_required) = bool_field_value(summary, b"followUpRequired") else {
+        return null_mut();
+    };
+
+    let mut leads = native_lead_state().lock().unwrap();
+    let lead = NativeLeadRecord {
+        lead_id: format!("lead-{}", leads.len() + 1),
+        company,
+        contact,
+        summary: summary_text,
+        priority,
+        segment,
+        follow_up_required,
+        review_status: "New".to_owned(),
+        review_note: String::new(),
+    };
+    leads.insert(0, lead.clone());
+
+    build_runtime_string(lead_record_json(&lead).as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_load_inbox_binding() -> *mut ClaspRtHeader {
+    let leads = native_lead_state().lock().unwrap();
+    build_runtime_string(inbox_snapshot_json(&leads).as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_load_primary_lead_binding() -> *mut ClaspRtHeader {
+    let leads = native_lead_state().lock().unwrap();
+    let lead = leads.first().cloned().unwrap_or_else(|| seeded_native_leads()[0].clone());
+    build_runtime_string(lead_record_json(&lead).as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_load_secondary_lead_binding() -> *mut ClaspRtHeader {
+    let leads = native_lead_state().lock().unwrap();
+    let lead = leads
+        .get(1)
+        .cloned()
+        .or_else(|| leads.first().cloned())
+        .unwrap_or_else(|| seeded_native_leads()[0].clone());
+    build_runtime_string(lead_record_json(&lead).as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn interpret_review_lead_binding(arg: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if arg.is_null() || (*arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+
+    let review = arg as *mut ClaspRtRecordValue;
+    let Some(lead_id) = string_field_text(review, b"leadId") else {
+        return null_mut();
+    };
+    let Some(note) = string_field_text(review, b"note") else {
+        return null_mut();
+    };
+
+    let mut leads = native_lead_state().lock().unwrap();
+    let Some(lead) = leads.iter_mut().find(|candidate| candidate.lead_id == lead_id) else {
+        set_native_route_error(format!("Unknown lead: {lead_id}"));
+        return null_mut();
+    };
+    lead.review_status = "Reviewed".to_owned();
+    lead.review_note = note;
+
+    build_runtime_string(lead_record_json(lead).as_bytes()) as *mut ClaspRtHeader
+}
+
+unsafe fn cloned_string_field(
+    record_value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<*mut ClaspRtHeader> {
+    let field_value = record_field_value_by_name(record_value, field_name)?;
+    if field_value.is_null() || (*field_value).layout_id != CLASP_RT_LAYOUT_STRING {
+        return None;
+    }
+    Some(build_runtime_string(string_bytes(field_value as *mut ClaspRtString)) as *mut ClaspRtHeader)
+}
+
+unsafe fn interpret_reply_preview_binding(
+    binding: &ClaspRtNativeRuntimeBinding,
+    arg: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if arg.is_null() || (*arg).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+
+    let record_value = arg as *mut ClaspRtRecordValue;
+    let Some(customer_id) = cloned_string_field(record_value, b"customerId") else {
+        return null_mut();
+    };
+    let Some(summary_value) = record_field_value_by_name(record_value, b"summary") else {
+        release_header(null_mut(), customer_id);
+        return null_mut();
+    };
+    if summary_value.is_null() || (*summary_value).layout_id != CLASP_RT_LAYOUT_STRING {
+        release_header(null_mut(), customer_id);
+        return null_mut();
+    }
+
+    let summary_text = String::from_utf8_lossy(string_bytes(summary_value as *mut ClaspRtString)).into_owned();
+    let suggested_reply = build_runtime_string(
+        format!(
+            "Thanks for the update. {} We will send the next renewal step today.",
+            summary_text
+        )
+        .as_bytes(),
+    ) as *mut ClaspRtHeader;
+    if suggested_reply.is_null() {
+        release_header(null_mut(), customer_id);
+        return null_mut();
+    }
+
+    let escalation_needed =
+        build_runtime_bool(summary_text.to_lowercase().contains("blocked")) as *mut ClaspRtHeader;
+    if escalation_needed.is_null() {
+        release_header(null_mut(), customer_id);
+        release_header(null_mut(), suggested_reply);
+        return null_mut();
+    }
+
+    clasp_rt_build_record_header(
+        binding_return_type_name(binding).unwrap_or("TicketPreview"),
+        vec![
+            ("customerId".to_owned(), customer_id),
+            ("suggestedReply".to_owned(), suggested_reply),
+            ("escalationNeeded".to_owned(), escalation_needed),
+        ],
+    )
 }
 
 fn interpret_match_value(
@@ -2287,6 +2822,64 @@ unsafe fn record_field_values<'a>(value: *mut ClaspRtRecordValue) -> &'a [*mut C
     } else {
         slice::from_raw_parts((*value).field_values, (*value).field_count)
     }
+}
+
+unsafe fn record_field_value_by_name(
+    value: *mut ClaspRtRecordValue,
+    field_name: &[u8],
+) -> Option<*mut ClaspRtHeader> {
+    for (name_ptr, value_ptr) in record_field_names(value)
+        .iter()
+        .zip(record_field_values(value).iter())
+    {
+        if string_bytes(*name_ptr) == field_name {
+            return Some(*value_ptr);
+        }
+    }
+    None
+}
+
+unsafe fn build_prompt_message_header(role: &str, content: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if content.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "PromptMessage",
+        vec![
+            ("role".to_owned(), clasp_rt_build_string_header(role)),
+            (
+                "content".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(content))),
+            ),
+        ],
+    )
+}
+
+unsafe fn build_prompt_header(messages: Vec<*mut ClaspRtHeader>) -> *mut ClaspRtHeader {
+    clasp_rt_build_record_header(
+        "Prompt",
+        vec![("messages".to_owned(), clasp_rt_build_list_header(messages))],
+    )
+}
+
+unsafe fn prompt_messages_cloned(prompt: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtHeader>> {
+    if prompt.is_null() || (*prompt).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return None;
+    }
+    let prompt_record = prompt as *mut ClaspRtRecordValue;
+    if string_bytes((*prompt_record).record_name) != b"Prompt" {
+        return None;
+    }
+    let messages_value = record_field_value_by_name(prompt_record, b"messages")?;
+    if messages_value.is_null() || (*messages_value).layout_id != CLASP_RT_LAYOUT_LIST_VALUE {
+        return None;
+    }
+    let mut cloned = Vec::new();
+    for item in list_value_items(messages_value as *mut ClaspRtListValue) {
+        retain_header(*item);
+        cloned.push(*item);
+    }
+    Some(cloned)
 }
 
 unsafe fn join_string_bytes(parts: &[*mut ClaspRtString], separator: &[u8]) -> Vec<u8> {
@@ -3334,6 +3927,17 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
                 ),
             ));
         }
+        if json_string_equals(bytes, name_slice, "decode") {
+            let type_slice = json_object_lookup(bytes, expr_slice, "type")?;
+            let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+            let target_type = parse_schema_type_text(&json_string_owned(bytes, type_slice)?)?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::Decode(
+                    target_type,
+                    Box::new(parse_interpreted_expr_json(bytes, value_slice)?),
+                ),
+            ));
+        }
     }
 
     None
@@ -3962,6 +4566,10 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
             drop(loaded);
             return null_mut();
         };
+        let Some(binding_type_slice) = json_object_lookup(bytes, binding_value, "type") else {
+            drop(loaded);
+            return null_mut();
+        };
         let Some(name) = json_string_owned(bytes, name_slice) else {
             drop(loaded);
             return null_mut();
@@ -3970,9 +4578,15 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
             drop(loaded);
             return null_mut();
         };
+        let Some(binding_type) = json_string_owned(bytes, binding_type_slice) else {
+            drop(loaded);
+            return null_mut();
+        };
         let binding_index = loaded.runtime_bindings.len();
         loaded.runtime_binding_indexes.insert(name.clone(), binding_index);
-        loaded.runtime_bindings.push(ClaspRtNativeRuntimeBinding { name, runtime_name });
+        loaded
+            .runtime_bindings
+            .push(ClaspRtNativeRuntimeBinding { name, runtime_name, binding_type });
     }
 
     for index in 0..json_array_length(bytes, exports) {
@@ -4512,6 +5126,8 @@ pub unsafe extern "C" fn clasp_rt_call_native_route_json(
         return native_route_error_result("invalid_route_request_payload");
     };
 
+    clear_native_route_error();
+
     let handler_name = build_runtime_string(route.handler.as_bytes());
     if handler_name.is_null() {
         release_header(runtime, request_header);
@@ -4531,6 +5147,9 @@ pub unsafe extern "C" fn clasp_rt_call_native_route_json(
     release_header(runtime, request_header);
 
     if dispatch_value.is_null() {
+        if let Some(message) = take_native_route_error() {
+            return native_route_error_result(&message);
+        }
         return native_route_error_result("route_dispatch_failed");
     }
 
@@ -4611,6 +5230,84 @@ pub unsafe extern "C" fn clasp_rt_redirect(location: *mut ClaspRtString) -> *mut
                 "location".to_owned(),
                 clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(location))),
             ),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_principal(id: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if id.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "Principal",
+        vec![(
+            "id".to_owned(),
+            clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(id))),
+        )],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_tenant(id: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    if id.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "Tenant",
+        vec![(
+            "id".to_owned(),
+            clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(id))),
+        )],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_resource_identity(
+    resource_type: *mut ClaspRtString,
+    resource_id: *mut ClaspRtString,
+) -> *mut ClaspRtHeader {
+    if resource_type.is_null() || resource_id.is_null() {
+        return null_mut();
+    }
+    clasp_rt_build_record_header(
+        "ResourceIdentity",
+        vec![
+            (
+                "resourceType".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(resource_type))),
+            ),
+            (
+                "resourceId".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(resource_id))),
+            ),
+        ],
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_auth_session(
+    session_id: *mut ClaspRtString,
+    principal: *mut ClaspRtHeader,
+    tenant: *mut ClaspRtHeader,
+    resource: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if session_id.is_null() || principal.is_null() || tenant.is_null() || resource.is_null() {
+        return null_mut();
+    }
+    retain_header(principal);
+    retain_header(tenant);
+    retain_header(resource);
+    clasp_rt_build_record_header(
+        "AuthSession",
+        vec![
+            (
+                "sessionId".to_owned(),
+                clasp_rt_build_string_header(&String::from_utf8_lossy(string_bytes(session_id))),
+            ),
+            ("principal".to_owned(), principal),
+            ("tenant".to_owned(), tenant),
+            ("resource".to_owned(), resource),
         ],
     )
 }
@@ -4772,6 +5469,89 @@ pub unsafe extern "C" fn clasp_rt_view_submit(label: *mut ClaspRtString) -> *mut
             ),
         ],
     )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_system_prompt(content: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let message = build_prompt_message_header("system", content);
+    if message.is_null() {
+        return null_mut();
+    }
+    build_prompt_header(vec![message])
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_assistant_prompt(content: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let message = build_prompt_message_header("assistant", content);
+    if message.is_null() {
+        return null_mut();
+    }
+    build_prompt_header(vec![message])
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_user_prompt(content: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let message = build_prompt_message_header("user", content);
+    if message.is_null() {
+        return null_mut();
+    }
+    build_prompt_header(vec![message])
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_append_prompt(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    let Some(left_messages) = prompt_messages_cloned(left) else {
+        return null_mut();
+    };
+    let Some(right_messages) = prompt_messages_cloned(right) else {
+        release_owned_headers(left_messages);
+        return null_mut();
+    };
+    let mut combined = left_messages;
+    combined.extend(right_messages);
+    build_prompt_header(combined)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_prompt_text(prompt: *mut ClaspRtHeader) -> *mut ClaspRtString {
+    let Some(messages) = prompt_messages_cloned(prompt) else {
+        return null_mut();
+    };
+    let mut rendered = String::new();
+    for (index, message) in messages.iter().enumerate() {
+        if message.is_null() || (**message).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+            release_owned_headers(messages);
+            return null_mut();
+        }
+        let message_record = *message as *mut ClaspRtRecordValue;
+        let Some(role_value) = record_field_value_by_name(message_record, b"role") else {
+            release_owned_headers(messages);
+            return null_mut();
+        };
+        let Some(content_value) = record_field_value_by_name(message_record, b"content") else {
+            release_owned_headers(messages);
+            return null_mut();
+        };
+        if role_value.is_null()
+            || content_value.is_null()
+            || (*role_value).layout_id != CLASP_RT_LAYOUT_STRING
+            || (*content_value).layout_id != CLASP_RT_LAYOUT_STRING
+        {
+            release_owned_headers(messages);
+            return null_mut();
+        }
+        if index > 0 {
+            rendered.push_str("\n\n");
+        }
+        rendered.push_str(&String::from_utf8_lossy(string_bytes(role_value as *mut ClaspRtString)));
+        rendered.push_str(": ");
+        rendered.push_str(&String::from_utf8_lossy(string_bytes(content_value as *mut ClaspRtString)));
+    }
+    release_owned_headers(messages);
+    build_runtime_string(rendered.as_bytes())
 }
 
 #[no_mangle]

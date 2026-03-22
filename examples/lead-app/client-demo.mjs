@@ -1,73 +1,16 @@
 import { pathToFileURL } from "node:url";
-import { createRouteClientRuntime } from "../../src/runtime/client.mjs";
+
 import {
-  bindingContractFor,
-  installCompiledModule,
-  requestPayloadJson,
-  responseForRouteResult
-} from "../../deprecated/runtime/server.mjs";
-import { createLeadDemoBindings } from "./bindings.mjs";
+  compileNativeBinary,
+  compileNativeImage,
+  withNativeServer,
+  fetchText,
+} from "../native-demo.mjs";
 
-export async function runLeadClientDemo(compiledModule, options = {}) {
-  installCompiledModule(compiledModule, createLeadDemoBindings(options.seedLeads));
-
-  const contract = bindingContractFor(compiledModule);
-  const runtime = createRouteClientRuntime({
-    baseUrl: "https://app.example.test",
-    fetch: async (url, init = {}) => handleFetch(contract, url, init)
-  });
-  const routeClient = (name) => {
-    const found = contract.routeClients.find((candidate) => candidate.name === name);
-
-    if (!found) {
-      throw new Error(`Missing route client ${name}`);
-    }
-
-    return found;
-  };
-
-  const inboxClient = routeClient("inboxSnapshotRoute");
-  const primaryClient = routeClient("primaryLeadRecordRoute");
-  const createClient = routeClient("createLeadRecordRoute");
-  const reviewClient = routeClient("reviewLeadRecordRoute");
-
-  const inbox = await runtime.call(inboxClient, {});
-  const created = await runtime.call(createClient, {
-    company: "SynthSpeak API",
-    contact: "Dana Scott",
-    budget: 36000,
-    segment: compiledModule.Growth
-  });
-  const primary = await runtime.call(primaryClient, {});
-  const reviewed = await runtime.call(reviewClient, {
-    leadId: created.leadId,
-    note: "Schedule technical discovery"
-  });
-
-  let invalid = null;
-
-  try {
-    await runtime.call(createClient, {
-      company: "Broken Co",
-      contact: "Dana Scott",
-      budget: 1000,
-      segment: "invalid"
-    });
-  } catch (error) {
-    invalid = error instanceof Error ? error.message : String(error);
-  }
-
+function decodeJsonResponse(response) {
   return {
-    routeClientCount: contract.routeClients.length,
-    routeClientNames: contract.routeClients.map((candidate) => candidate.name),
-    inboxHeadline: inbox.headline,
-    createdLeadId: created.leadId,
-    createdPriority: normalizeTag(created.priority),
-    createdSegment: normalizeTag(created.segment),
-    primaryCompany: primary.company,
-    reviewedStatus: normalizeTag(reviewed.reviewStatus),
-    reviewedNote: reviewed.reviewNote,
-    invalid
+    status: response.status,
+    body: JSON.parse(response.text),
   };
 }
 
@@ -75,43 +18,87 @@ function normalizeTag(value) {
   return value?.$tag ?? value;
 }
 
-async function handleFetch(contract, url, init = {}) {
-  const request = new Request(url, init);
-  const pathname = new URL(url).pathname;
-  const route = contract.routes.find(
-    (candidate) =>
-      candidate.method === request.method && candidate.path === pathname
+function apiRouteNames(image) {
+  return (image?.runtime?.boundaries ?? [])
+    .filter((boundary) => boundary?.kind === "route" && typeof boundary.path === "string")
+    .filter((boundary) => boundary.path.startsWith("/api/"))
+    .map((boundary) => boundary.name)
+    .sort();
+}
+
+export async function runLeadClientDemo(binaryPath = null, imagePath = null) {
+  const compiledBinary = compileNativeBinary(
+    "examples/lead-app/Main.clasp",
+    binaryPath,
+    "lead-app-client-demo"
+  );
+  const compiledImage = compileNativeImage(
+    "examples/lead-app/Main.clasp",
+    imagePath,
+    "lead-app-client-demo.native.image.json"
   );
 
-  if (!route) {
-    return new Response(JSON.stringify({ error: "not_found", path: pathname }), {
-      status: 404,
-      headers: { "content-type": "application/json" }
-    });
-  }
-
   try {
-    const payload = route.decodeRequest(await requestPayloadJson(route, request));
-    const result = await route.handler(payload);
-    return responseForRouteResult(route, result);
-  } catch (error) {
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : String(error)
-      }),
-      {
-        status: 400,
-        headers: { "content-type": "application/json" }
-      }
-    );
+    const image = JSON.parse(await import("node:fs/promises").then((fs) => fs.readFile(compiledImage.imagePath, "utf8")));
+    return await withNativeServer(compiledBinary.binaryPath, "/api/inbox", async ({ baseUrl }) => {
+      const inbox = decodeJsonResponse(await fetchText(baseUrl, "/api/inbox"));
+      const created = decodeJsonResponse(
+        await fetchText(baseUrl, "/api/leads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            company: "SynthSpeak API",
+            contact: "Dana Scott",
+            budget: 36000,
+            segment: "Growth",
+          }),
+        })
+      );
+      const primary = decodeJsonResponse(await fetchText(baseUrl, "/api/lead/primary"));
+      const reviewed = decodeJsonResponse(
+        await fetchText(baseUrl, "/api/review", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            leadId: created.body.leadId,
+            note: "Schedule technical discovery",
+          }),
+        })
+      );
+      const invalid = decodeJsonResponse(
+        await fetchText(baseUrl, "/api/leads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            company: "Broken Co",
+            contact: "Dana Scott",
+            budget: 1000,
+            segment: "invalid",
+          }),
+        })
+      );
+
+      return {
+        routeClientCount: apiRouteNames(image).length,
+        routeClientNames: apiRouteNames(image),
+        inboxHeadline: inbox.body.headline,
+        createdLeadId: created.body.leadId,
+        createdPriority: normalizeTag(created.body.priority),
+        createdSegment: normalizeTag(created.body.segment),
+        primaryCompany: primary.body.company,
+        reviewedStatus: normalizeTag(reviewed.body.reviewStatus),
+        reviewedNote: reviewed.body.reviewNote,
+        invalid: invalid.body.error ?? null,
+      };
+    });
+  } finally {
+    compiledImage.cleanup();
+    compiledBinary.cleanup();
   }
 }
 
 async function runCli() {
-  const compiledPath = process.argv[2] ?? "./Main.js";
-  const compiledUrl = new URL(compiledPath, pathToFileURL(`${process.cwd()}/`));
-  const compiledModule = await import(compiledUrl.href);
-  const summary = await runLeadClientDemo(compiledModule);
+  const summary = await runLeadClientDemo(process.argv[2] ?? null, process.argv[3] ?? null);
   console.log(JSON.stringify(summary));
 }
 

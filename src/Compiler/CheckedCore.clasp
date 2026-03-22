@@ -494,7 +494,7 @@ checkedCoreArtifactResult modl = match inferModuleBindings modl {
     CheckedCoreArtifactError message,
   InferredModule env -> {
     let typeDecls = effectiveModuleTypeDecls modl;
-    let recordDecls = moduleRecordDeclarations modl;
+    let recordDecls = effectiveModuleRecordDecls modl;
     match checkedCoreDecls typeDecls recordDecls env (moduleDeclarations modl) {
       CheckedCoreDeclListBuilt artifacts ->
         CheckedCoreArtifactOk artifacts,

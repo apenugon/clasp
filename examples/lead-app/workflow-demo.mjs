@@ -1,140 +1,84 @@
 import { pathToFileURL } from "node:url";
 
-import { createWorkerRuntime } from "../../deprecated/runtime/worker.mjs";
-import { installCompiledModule } from "../../deprecated/runtime/server.mjs";
-import { createLeadDemoBindings } from "./bindings.mjs";
+import {
+  compileNativeBinary,
+  compileNativeImage,
+  withNativeServer,
+  fetchText,
+} from "../native-demo.mjs";
 
-export async function runLeadWorkflowDemo(compiledModule, options = {}) {
-  installCompiledModule(compiledModule, createLeadDemoBindings(options.seedLeads));
-
-  const createLeadRoute = findRoute(compiledModule, "createLeadRecordRoute");
-  const reviewLeadRoute = findRoute(compiledModule, "reviewLeadRecordRoute");
-  const created = await createLeadRoute.handler(
-    createLeadRoute.decodeRequest(
-      JSON.stringify({
-        company: "SynthSpeak Workflow",
-        contact: "Riley Chen",
-        budget: 90000,
-        segment: "enterprise"
-      })
-    )
-  );
-  const runtime = createWorkerRuntime(compiledModule);
-  const workflow = runtime.workflow("LeadFollowUpFlow");
-  const checkpoint = workflow.checkpoint({
-    leadId: created.leadId,
-    company: created.company,
-    priority: created.priority,
-    segment: created.segment,
-    reviewStatus: created.reviewStatus,
-    reviewNote: created.reviewNote,
-    nextAction: "score-intake",
-    touchCount: 0
-  });
-  const queued = workflow.start(checkpoint, {
-    mailbox: [
-      {
-        id: "followup-1",
-        payload: {
-          type: "prepare-outreach"
-        }
-      }
-    ]
-  });
-  const prepared = workflow.processNext(queued, reduceFollowUp, { now: 1000 });
-  const reviewed = await reviewLeadRoute.handler(
-    reviewLeadRoute.decodeRequest(
-      JSON.stringify({
-        leadId: created.leadId,
-        note: "Schedule executive discovery"
-      })
-    )
-  );
-  const completed = workflow.deliver(
-    prepared.run,
-    {
-      id: "review-1",
-      payload: {
-        type: "review-complete",
-        reviewStatus: reviewed.reviewStatus,
-        reviewNote: reviewed.reviewNote
-      }
-    },
-    reduceFollowUp,
-    { now: 1001 }
-  );
-
-  return {
-    workflowCount: runtime.contract.module.compatibility.workflowCount,
-    workflowName: workflow.name,
-    checkpointLeadId: workflow.resume(checkpoint).leadId,
-    createdLeadId: created.leadId,
-    createdPriority: normalizeTag(created.priority),
-    preparedStatus: prepared.status,
-    preparedResult: prepared.delivery?.result ?? null,
-    reviewedStatus: normalizeTag(reviewed.reviewStatus),
-    finalNextAction: completed.run.state.nextAction,
-    finalTouchCount: completed.run.state.touchCount,
-    finalReviewNote: completed.run.state.reviewNote,
-    remainingMailboxSize: completed.run.mailbox.length
-  };
-}
-
-function findRoute(compiledModule, name) {
-  const route = compiledModule.__claspRoutes?.find(
-    (candidate) => candidate.name === name
-  );
-
-  if (!route) {
-    throw new Error(`Missing route ${name}`);
-  }
-
-  return route;
-}
-
-function reduceFollowUp(state, payload) {
-  if (payload?.type === "prepare-outreach") {
-    return {
-      state: {
-        ...state,
-        nextAction:
-          normalizeTag(state.priority) === "High"
-            ? "schedule-discovery"
-            : "send-nurture",
-        touchCount: state.touchCount + 1
-      },
-      result: "schedule-discovery"
-    };
-  }
-
-  if (payload?.type === "review-complete") {
-    return {
-      state: {
-        ...state,
-        reviewStatus: payload.reviewStatus,
-        reviewNote: payload.reviewNote,
-        nextAction: "await-reply",
-        touchCount: state.touchCount + 1
-      },
-      result: "await-reply"
-    };
-  }
-
-  return {
-    state,
-    result: "ignored"
-  };
+function decodeJsonResponse(response) {
+  return JSON.parse(response.text);
 }
 
 function normalizeTag(value) {
   return value?.$tag ?? value;
 }
 
+export async function runLeadWorkflowDemo(binaryPath = null, imagePath = null) {
+  const compiledBinary = compileNativeBinary(
+    "examples/lead-app/Main.clasp",
+    binaryPath,
+    "lead-app-workflow-demo"
+  );
+  const compiledImage = compileNativeImage(
+    "examples/lead-app/Main.clasp",
+    imagePath,
+    "lead-app-workflow-demo.native.image.json"
+  );
+
+  try {
+    const image = JSON.parse(await import("node:fs/promises").then((fs) => fs.readFile(compiledImage.imagePath, "utf8")));
+    const workflow = (image?.runtime?.boundaries ?? []).find(
+      (boundary) => boundary?.kind === "workflow" && boundary.name === "LeadFollowUpFlow"
+    );
+
+    return await withNativeServer(compiledBinary.binaryPath, "/api/inbox", async ({ baseUrl }) => {
+      const created = decodeJsonResponse(
+        await fetchText(baseUrl, "/api/leads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            company: "SynthSpeak Workflow",
+            contact: "Riley Chen",
+            budget: 90000,
+            segment: "Enterprise",
+          }),
+        })
+      );
+      const reviewed = decodeJsonResponse(
+        await fetchText(baseUrl, "/api/review", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            leadId: created.leadId,
+            note: "Schedule executive discovery",
+          }),
+        })
+      );
+
+      return {
+        workflowCount: (image?.runtime?.boundaries ?? []).filter(
+          (boundary) => boundary?.kind === "workflow"
+        ).length,
+        workflowName: workflow?.name ?? null,
+        checkpointCodec: workflow?.checkpoint ?? null,
+        restoreCodec: workflow?.restore ?? null,
+        handoffSymbol: workflow?.handoff ?? null,
+        createdLeadId: created.leadId,
+        createdPriority: normalizeTag(created.priority),
+        reviewedStatus: normalizeTag(reviewed.reviewStatus),
+        reviewedNote: reviewed.reviewNote,
+      };
+    });
+  } finally {
+    compiledImage.cleanup();
+    compiledBinary.cleanup();
+  }
+}
+
 async function runCli() {
-  const compiledPath = process.argv[2] ?? "./Main.js";
-  const compiledUrl = new URL(compiledPath, pathToFileURL(`${process.cwd()}/`));
-  const compiledModule = await import(compiledUrl.href);
-  const summary = await runLeadWorkflowDemo(compiledModule);
+  const summary = await runLeadWorkflowDemo(process.argv[2] ?? null, process.argv[3] ?? null);
   console.log(JSON.stringify(summary));
 }
 

@@ -24,9 +24,6 @@
     {
       packages = forAllSystems ({ pkgs, system }:
         let
-          claspc-bootstrap =
-            pkgs.haskell.lib.dontCheck
-              (pkgs.haskellPackages.callCabal2nix "clasp-compiler" ./. { });
           claspc = pkgs.rustPlatform.buildRustPackage {
             pname = "claspc";
             version = "0.1.0";
@@ -45,16 +42,6 @@
         {
           default = claspc;
           claspc = claspc;
-          claspc-bootstrap =
-            pkgs.symlinkJoin {
-              name = "claspc-bootstrap";
-              paths = [ claspc-bootstrap ];
-              postBuild = ''
-                if [ -e "$out/bin/claspc" ]; then
-                  mv "$out/bin/claspc" "$out/bin/claspc-bootstrap"
-                fi
-              '';
-            };
         });
 
       apps = forAllSystems ({ pkgs, system }: {
@@ -72,16 +59,13 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             bun
-            cabal-install
             cargo
             git
-            haskellPackages.ghc
             nodejs_22
             python3
             rustc
           ] ++ [
             self.packages.${system}.claspc
-            self.packages.${system}.claspc-bootstrap
           ];
         };
       });

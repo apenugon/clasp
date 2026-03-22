@@ -3,7 +3,7 @@ module Compiler.Lower
 import Compiler.Ast
 import Compiler.Checker
 
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerViewAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerViewAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerDecode TypeText LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
 type LowerRecordFieldText = LowerRecordFieldText Str LowerExprText
 type LowerMatchBranchText = LowerMatchBranchText Str [Str] LowerExprText
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str [Str] LowerExprText
@@ -178,6 +178,27 @@ lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args = {
   }
 }
 
+lowerDecodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText
+lowerDecodeExpr typeDecls recordDecls env localEnv fnContext args = {
+  let targetExpr = firstHostedExpr args;
+  let rawExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary targetExpr == "" then {
+    LowerInvoke "decode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary rawExpr == "" then {
+    LowerInvoke "decode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary extraExpr == "" then {
+    match decodeTargetTypeFromExpr targetExpr {
+      DecodeTargetType targetType ->
+        LowerDecode targetType (lowerExpr typeDecls recordDecls env localEnv fnContext rawExpr),
+      DecodeTargetTypeError message ->
+        LowerInvoke "decode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+    }
+  } else {
+    LowerInvoke "decode" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  }
+}
+
 lowerExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> LowerExprText
 lowerExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
   HostedName name ->
@@ -191,7 +212,7 @@ lowerExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
   HostedList values ->
     LowerArray (lowerExprs typeDecls recordDecls env localEnv fnContext values),
   HostedCall callee args ->
-    if callee == "append" then lowerAppendExpr typeDecls recordDecls env localEnv fnContext args else if callee == "encode" then lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args else LowerInvoke callee (lowerExprs typeDecls recordDecls env localEnv fnContext args),
+    if callee == "append" then lowerAppendExpr typeDecls recordDecls env localEnv fnContext args else if callee == "decode" then lowerDecodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == "encode" then lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args else LowerInvoke callee (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedConstructor constructorName args ->
     LowerConstructor constructorName (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedMatch subject branches ->
@@ -258,7 +279,7 @@ lowerDecl typeDecls recordDecls env decl = if hasLowerParams decl then LowerFn (
 lowerModule : HostedModuleAst -> [LowerDeclText]
 lowerModule modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
-  let recordDecls = moduleRecordDeclarations modl;
+  let recordDecls = effectiveModuleRecordDecls modl;
   let env = lowerModuleEnv modl typeDecls;
   let mut lowered = [];
   for decl in moduleDeclarations modl {
@@ -328,6 +349,8 @@ renderLowerExpr expr = match expr {
     textConcat ["view.append(", renderLowerExpr left, ", ", renderLowerExpr right, ")"],
   LowerEncode value ->
     textConcat ["encode(", renderLowerExpr value, ")"],
+  LowerDecode targetType value ->
+    textConcat ["decode(", renderType targetType, ", ", renderLowerExpr value, ")"],
   LowerInvoke callee args ->
     textConcat ["call ", callee, "(", textJoin ", " (renderLowerExprs args), ")"],
   LowerConstructor constructorName args ->

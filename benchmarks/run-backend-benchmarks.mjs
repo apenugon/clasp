@@ -208,26 +208,18 @@ async function runCompileBenchmark(workload, samples, warmupRuns) {
   const jsOutput = path.join(distRoot, `${workload.id}.js`);
   const nativeOutput = path.join(distRoot, `${workload.id}.native.ir`);
   const jsCommand = [
-    "cabal",
-    "run",
     "claspc",
-    "--",
     "compile",
     inputPath,
     "-o",
-    jsOutput,
-    "--compiler=bootstrap"
+    jsOutput
   ];
   const nativeCommand = [
-    "cabal",
-    "run",
     "claspc",
-    "--",
     "native",
     inputPath,
     "-o",
-    nativeOutput,
-    "--compiler=bootstrap"
+    nativeOutput
   ];
 
   const jsBun = await benchmarkCommand(jsCommand, samples, warmupRuns, async () => {

@@ -46,24 +46,12 @@ This directory has two kinds of examples:
 
 ## Useful Commands
 
-The default repo verification path now stays on the hosted compiler and non-Clasp benchmark surfaces. Commands below that pass `--compiler=bootstrap` are explicit recovery-only workflows.
+Backend examples now verify on the active native `claspc` path. The commands below avoid bootstrap/Bun for the server-side flow.
 
-Check an example in explicit bootstrap recovery mode:
-
-```sh
-claspc check examples/support-console/Main.clasp --compiler=bootstrap
-```
-
-Emit AIR in explicit bootstrap recovery mode:
+Check a native backend example:
 
 ```sh
-claspc air examples/support-console/Main.clasp --compiler=bootstrap
-```
-
-Render the expanded human-readable explain output in explicit bootstrap recovery mode:
-
-```sh
-claspc explain examples/support-console/Main.clasp --compiler=bootstrap
+claspc check examples/support-console/Main.clasp
 ```
 
 Verify the `npm`/`TypeScript` interop example:
@@ -90,22 +78,16 @@ Verify the support-agent example:
 bash examples/support-agent/scripts/verify.sh
 ```
 
-Verify the support-console example:
+Verify the support-console example on the native backend path:
 
 ```sh
 bash examples/support-console/scripts/verify.sh
 ```
 
-Verify the release-gate example:
+Verify the release-gate example on the native backend path:
 
 ```sh
 bash examples/release-gate/scripts/verify.sh
-```
-
-Emit the context graph in explicit bootstrap recovery mode:
-
-```sh
-claspc context examples/release-gate/Main.clasp --compiler=bootstrap
 ```
 
 Run the control-plane demo after compiling `Main.clasp` into `dist/` with explicit bootstrap recovery mode:
@@ -125,10 +107,10 @@ claspc compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflo
 node examples/durable-workflow/demo.mjs dist/durable-workflow/Main.js dist/durable-workflow/Main.next.js
 ```
 
-Run the browser demo:
+Verify the lead app on the native backend path:
 
 ```sh
-bun examples/lead-app/server.mjs
+bash examples/lead-app/scripts/verify.sh
 ```
 
 Project the same app into a mobile-friendly model after compiling `Main.clasp` to `Main.js`:

@@ -117,15 +117,11 @@ function parseOptions(args) {
 
 async function compileSchemaModel() {
   await runCommand([
-    "cabal",
-    "run",
     "claspc",
-    "--",
     "compile",
     schemaSourcePath,
     "-o",
-    compiledSchemaPath,
-    "--compiler=bootstrap"
+    compiledSchemaPath
   ]);
 }
 

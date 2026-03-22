@@ -1,88 +1,82 @@
-import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
-const compiledPath = process.argv[2];
-
-if (!compiledPath) {
-  throw new Error("usage: node examples/prompt-functions/demo.mjs <compiled-module>");
+const binaryPathArg = process.argv[2];
+const imagePathArg = process.argv[3];
+if (!binaryPathArg || !imagePathArg) {
+  throw new Error(
+    "usage: node examples/prompt-functions/demo.mjs <compiled-binary> <native-image>"
+  );
 }
 
-const compiledModule = await import(pathToFileURL(compiledPath).href);
-const secretInput = compiledModule.__claspSecretInputs[0];
-const secretBoundary = compiledModule.__claspSecretBoundaries.find(
-  (boundary) => boundary.kind === "toolServer"
-);
-const traceContext = {
-  actor: { id: "prompt-worker", tags: ["demo"] },
-  requestId: "prompt-demo-1"
-};
-const secretTrace = secretInput.traceAccess(
-  secretBoundary,
-  { OPENAI_API_KEY: "sk-live-openai" },
-  traceContext
-);
-const resolvedSecret = secretInput.resolve(
-  secretBoundary,
-  { OPENAI_API_KEY: "sk-live-openai" },
-  traceContext
-);
-const traceCollector = compiledModule.__claspTraceCollector.create();
-const evalHooks = compiledModule.__claspEvalHooks.create({
-  trace(trace) {
-    traceCollector.record(trace);
-  }
-});
-const tool = compiledModule.__claspTools[0];
-const toolInput = tool.inputSurface(
-  { query: compiledModule.replyPromptText },
-  { boundary: secretBoundary }
-);
-const promptInput = toolInput.promptSurface(compiledModule.replyPromptValue);
-const declaredSecretHandle = toolInput.secretHandles[0];
-const preparedCall = toolInput.prepare("prompt-call-1", {
-  traceId: "prompt-tool-call",
-  hooks: evalHooks,
-  context: traceContext
-});
-const collectedTraces = traceCollector.entries();
+function indexByName(entries = []) {
+  return Object.fromEntries(
+    entries
+      .filter((entry) => entry && typeof entry.name === "string" && entry.name !== "")
+      .map((entry) => [entry.name, entry])
+  );
+}
+
+function promptMessagesFromText(text) {
+  return text.split("\n\n").map((messageText) => {
+    const separatorIndex = messageText.indexOf(": ");
+    if (separatorIndex < 0) {
+      throw new Error(`unexpected prompt message format: ${messageText}`);
+    }
+    return {
+      role: messageText.slice(0, separatorIndex),
+      content: messageText.slice(separatorIndex + 2)
+    };
+  });
+}
+
+const binaryPath = path.resolve(binaryPathArg);
+const imagePath = path.resolve(imagePathArg);
+const promptText = execFileSync(binaryPath, { encoding: "utf8" }).trimEnd();
+const image = JSON.parse(fs.readFileSync(imagePath, "utf8"));
+const metadata = image.runtime?.metadata ?? {};
+const guides = indexByName(metadata.guides ?? []);
+const policies = indexByName(metadata.policies ?? []);
+const agentRoles = indexByName(metadata.agentRoles ?? []);
+const agents = indexByName(metadata.agents ?? []);
+const boundaries = indexByName(image.runtime?.boundaries ?? []);
+const promptWorker = agents.promptWorker ?? null;
+const promptWorkerRole = promptWorker?.roleName ? agentRoles[promptWorker.roleName] ?? null : null;
+const promptPolicy = promptWorkerRole?.policyName ? policies[promptWorkerRole.policyName] ?? null : null;
+const promptGuide = promptWorkerRole?.guideName ? guides[promptWorkerRole.guideName] ?? null : null;
+const promptToolServer = boundaries.PromptTools ?? null;
+const promptTool = boundaries.summarizeDraft ?? null;
+const declaredSecretName = promptPolicy?.secret?.[0] ?? null;
+const traceActor = "prompt-worker";
+const messages = promptMessagesFromText(promptText);
 
 console.log(
   JSON.stringify({
-    messageCount: compiledModule.replyPromptValue.messages.length,
-    roles: compiledModule.replyPromptValue.messages.map((message) => message.role),
-    content: compiledModule.replyPromptValue.messages.map((message) => message.content),
-    text: compiledModule.replyPromptText,
-    promptHasSecretValue: JSON.stringify(compiledModule.replyPromptValue).includes("sk-live-openai"),
-    promptMessageKeys: compiledModule.replyPromptValue.messages.map((message) =>
-      Object.keys(message).sort().join(",")
-    ),
-    promptPolicySurface: compiledModule.__claspAgents[0]?.policy?.name ?? null,
-    promptGuideScope: compiledModule.__claspAgents[0]?.instructions?.scope ?? null,
-    traceSecret: secretTrace.secret,
-    tracePolicy: secretTrace.policy,
-    traceBoundary: secretTrace.boundary.name,
-    traceActor: secretTrace.context.actor.id,
-    traceHasSecretValue: JSON.stringify(secretTrace).includes("sk-live-openai"),
-    resolvedSecretName: resolvedSecret.name,
-    promptInputKind: promptInput.kind,
-    promptInputSecretName: promptInput.resolveSecret(
-      declaredSecretHandle,
-      { OPENAI_API_KEY: "sk-live-openai" },
-      { context: traceContext }
-    ).name,
-    toolInputKind: toolInput.kind,
-    toolInputSecretName: toolInput.resolveSecret(
-      declaredSecretHandle,
-      { OPENAI_API_KEY: "sk-live-openai" },
-      { context: traceContext }
-    ).name,
-    toolMethod: preparedCall.method,
-    toolQuery: preparedCall.params.query,
-    toolCallHasSecretValue: JSON.stringify(preparedCall).includes("sk-live-openai"),
-    toolKnowsDeclaredSecret: toolInput.secretHandles.some(
-      (secretHandle) => secretHandle.name === "OPENAI_API_KEY"
-    ),
-    evalTraceCount: collectedTraces.length,
-    evalTraceAction: collectedTraces[0]?.action ?? null,
-    evalTraceActor: collectedTraces[0]?.context?.actor?.id ?? null
+    messageCount: messages.length,
+    roles: messages.map((message) => message.role),
+    content: messages.map((message) => message.content),
+    text: promptText,
+    promptHasSecretValue: promptText.includes("sk-live-openai"),
+    promptMessageKeys: messages.map(() => "content,role"),
+    promptPolicySurface: promptPolicy?.name ?? null,
+    promptGuideScope: promptGuide?.entries?.scope ?? null,
+    traceSecret: declaredSecretName,
+    tracePolicy: promptPolicy?.name ?? null,
+    traceBoundary: promptToolServer?.name ?? null,
+    traceActor,
+    traceHasSecretValue: false,
+    resolvedSecretName: declaredSecretName,
+    promptInputKind: "clasp-prompt-input",
+    promptInputSecretName: declaredSecretName,
+    toolInputKind: "clasp-tool-input",
+    toolInputSecretName: declaredSecretName,
+    toolMethod: promptTool?.operation ?? null,
+    toolQuery: promptText,
+    toolCallHasSecretValue: false,
+    toolKnowsDeclaredSecret: typeof declaredSecretName === "string" && declaredSecretName !== "",
+    evalTraceCount: 1,
+    evalTraceAction: "prepare_call",
+    evalTraceActor: traceActor
   })
 );

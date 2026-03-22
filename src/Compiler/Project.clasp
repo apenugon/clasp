@@ -1,0 +1,254 @@
+module Compiler.Project
+
+import Compiler.Ast
+
+type HostedProjectModuleLookupResult = FoundHostedProjectModule HostedModuleAst | MissingHostedProjectModule Str
+type HostedProjectModulesResult = HostedProjectModules [HostedModuleAst] | HostedProjectModulesError Str
+type HostedProjectBundleResult = HostedProjectBundleOk HostedModuleAst | HostedProjectBundleError Str
+
+sourceModule : Str -> HostedModuleAst
+sourceModule source = synthesizeModuleProjections (parseModuleAst source)
+
+lookupRecordDeclByName : [HostedRecordDeclAst] -> Str -> HostedRecordDeclAst
+lookupRecordDeclByName recordDeclarations targetName = {
+  for recordDecl in recordDeclarations {
+    if recordDeclName recordDecl == targetName then {
+      return recordDecl
+    } else {
+      recordDecl
+    }
+  };
+  hostedRecordDeclAst targetName []
+}
+
+projectRecordFields : HostedRecordDeclAst -> [HostedProjectionFieldDeclAst] -> [HostedRecordFieldDeclAst]
+projectRecordFields sourceRecord projectionFields = {
+  let mut projectedFields = [];
+  for projectionField in projectionFields {
+    let targetName = projectionFieldDeclName projectionField;
+    for recordField in recordDeclFields sourceRecord {
+      if recordFieldDeclName recordField == targetName then {
+        projectedFields = append projectedFields [recordField];
+        projectedFields
+      } else {
+        projectedFields
+      }
+    };
+    projectedFields
+  };
+  projectedFields
+}
+
+synthesizeProjectionRecordDecl : [HostedRecordDeclAst] -> HostedProjectionDeclAst -> HostedRecordDeclAst
+synthesizeProjectionRecordDecl recordDeclarations projectionDecl = {
+  let sourceRecord = lookupRecordDeclByName recordDeclarations (projectionDeclSourceRecordName projectionDecl);
+  hostedRecordDeclAst (projectionDeclName projectionDecl) (projectRecordFields sourceRecord (projectionDeclFields projectionDecl))
+}
+
+appendProjectionRecordDecls : [HostedRecordDeclAst] -> [HostedProjectionDeclAst] -> [HostedRecordDeclAst]
+appendProjectionRecordDecls recordDeclarations projectionDeclarations = {
+  let mut allRecordDeclarations = recordDeclarations;
+  for projectionDecl in projectionDeclarations {
+    allRecordDeclarations = append allRecordDeclarations [synthesizeProjectionRecordDecl allRecordDeclarations projectionDecl];
+    allRecordDeclarations
+  };
+  allRecordDeclarations
+}
+
+synthesizeModuleProjections : HostedModuleAst -> HostedModuleAst
+synthesizeModuleProjections modl = {
+  let projectionDeclarations = moduleProjectionDeclarations modl;
+  let recordDeclarations = appendProjectionRecordDecls (moduleRecordDeclarations modl) projectionDeclarations;
+  hostedModuleAst (moduleNameOf modl) (moduleImports modl) (moduleTypeDeclarations modl) recordDeclarations (moduleForeignDeclarations modl) (moduleDeclarations modl) (moduleGuideDeclarations modl) (modulePolicyDeclarations modl) projectionDeclarations (moduleAgentRoleDeclarations modl) (moduleAgentDeclarations modl) (moduleWorkflowDeclarations modl) (moduleRouteDeclarations modl) (moduleHookDeclarations modl) (moduleToolServerDeclarations modl) (moduleToolDeclarations modl) (moduleVerifierDeclarations modl) (moduleMergeGateDeclarations modl) (moduleMainExprSummary modl)
+}
+
+frontendOnlyCompileError : Str
+frontendOnlyCompileError = "// compiler-selfhost frontend-only compile error: backend declarations must use nativeSourceText or nativeProjectText."
+
+backendDeclarationKeyword : Str -> Bool
+backendDeclarationKeyword keyword = if keyword == "route" then true else if keyword == "guide" then true else if keyword == "policy" then true else if keyword == "role" then true else if keyword == "agent" then true else if keyword == "workflow" then true else if keyword == "hook" then true else if keyword == "toolserver" then true else if keyword == "tool" then true else if keyword == "verifier" then true else if keyword == "mergegate" then true else false
+
+sourceDeclaresBackendSurface : Str -> Bool
+sourceDeclaresBackendSurface source = {
+  for line in textSplit source "\n" {
+    let trimmed = trimSpaces line;
+    let keyword = firstText (splitWords trimmed);
+    if backendDeclarationKeyword keyword then return true else false
+  };
+  false
+}
+
+projectBundleSeparator : Str
+projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n"
+
+parseProjectModules : Str -> [HostedModuleAst]
+parseProjectModules bundle = {
+  let mut modules = [];
+  for source in textSplit bundle projectBundleSeparator {
+    let trimmed = trimSpaces source;
+    if trimmed == "" then {
+      modules
+    } else {
+      modules = append modules [parseModuleAst trimmed];
+      modules
+    }
+  };
+  modules
+}
+
+lookupProjectModule : [HostedModuleAst] -> Str -> HostedProjectModuleLookupResult
+lookupProjectModule modules targetName = {
+  for modl in modules {
+    if moduleNameOf modl == targetName then {
+      return FoundHostedProjectModule modl
+    } else {
+      MissingHostedProjectModule targetName
+    }
+  };
+  MissingHostedProjectModule targetName
+}
+
+containsProjectModule : [HostedModuleAst] -> Str -> Bool
+containsProjectModule modules targetName = {
+  for modl in modules {
+    if moduleNameOf modl == targetName then return true else false
+  };
+  false
+}
+
+appendUniqueProjectModules : [HostedModuleAst] -> [HostedModuleAst] -> [HostedModuleAst]
+appendUniqueProjectModules modules additions = {
+  let mut combined = modules;
+  for modl in additions {
+    let name = moduleNameOf modl;
+    if containsProjectModule combined name then {
+      combined
+    } else {
+      combined = append combined [modl];
+      combined
+    }
+  };
+  combined
+}
+
+collectProjectImportNames : [HostedModuleAst] -> [Str]
+collectProjectImportNames modules = {
+  let mut importedNames = [];
+  for modl in modules {
+    for importName in moduleImports modl {
+      if containsText importedNames importName then {
+        importedNames
+      } else {
+        importedNames = append importedNames [importName];
+        importedNames
+      }
+    };
+    importedNames
+  };
+  importedNames
+}
+
+collectProjectImports : [HostedModuleAst] -> [Str] -> [Str] -> HostedProjectModulesResult
+collectProjectImports modules seen dependencyNames = {
+  let dependencyName = firstText dependencyNames;
+  let remainingDependencyNames = remainingTexts dependencyNames;
+  if dependencyName == "" then {
+    HostedProjectModules []
+  } else if containsText seen dependencyName then {
+    collectProjectImports modules seen remainingDependencyNames
+  } else {
+    match lookupProjectModule modules dependencyName {
+      FoundHostedProjectModule imported ->
+        match collectProjectImports modules (append seen [dependencyName]) (moduleImports imported) {
+          HostedProjectModules nestedImports ->
+            match collectProjectImports modules (append seen [dependencyName]) remainingDependencyNames {
+              HostedProjectModules remainingImports ->
+                HostedProjectModules (appendUniqueProjectModules (appendUniqueProjectModules nestedImports [imported]) remainingImports),
+              HostedProjectModulesError message ->
+                HostedProjectModulesError message
+            },
+          HostedProjectModulesError message ->
+            HostedProjectModulesError message
+        },
+      MissingHostedProjectModule missing ->
+        HostedProjectModulesError (textConcat ["Missing imported module `", missing, "`."])
+    }
+  }
+}
+
+mergeProjectModules : HostedModuleAst -> [HostedModuleAst] -> HostedModuleAst
+mergeProjectModules entry importedModules = {
+  let mut typeDeclarations = [];
+  let mut recordDeclarations = [];
+  let mut foreignDeclarations = [];
+  let mut declarations = [];
+  let mut guideDeclarations = [];
+  let mut policyDeclarations = [];
+  let mut projectionDeclarations = [];
+  let mut agentRoleDeclarations = [];
+  let mut agentDeclarations = [];
+  let mut workflowDeclarations = [];
+  let mut routeDeclarations = [];
+  let mut hookDeclarations = [];
+  let mut toolServerDeclarations = [];
+  let mut toolDeclarations = [];
+  let mut verifierDeclarations = [];
+  let mut mergeGateDeclarations = [];
+  for modl in append importedModules [entry] {
+    typeDeclarations = append typeDeclarations (moduleTypeDeclarations modl);
+    recordDeclarations = append recordDeclarations (moduleRecordDeclarations modl);
+    foreignDeclarations = append foreignDeclarations (moduleForeignDeclarations modl);
+    declarations = append declarations (moduleDeclarations modl);
+    guideDeclarations = append guideDeclarations (moduleGuideDeclarations modl);
+    policyDeclarations = append policyDeclarations (modulePolicyDeclarations modl);
+    projectionDeclarations = append projectionDeclarations (moduleProjectionDeclarations modl);
+    agentRoleDeclarations = append agentRoleDeclarations (moduleAgentRoleDeclarations modl);
+    agentDeclarations = append agentDeclarations (moduleAgentDeclarations modl);
+    workflowDeclarations = append workflowDeclarations (moduleWorkflowDeclarations modl);
+    routeDeclarations = append routeDeclarations (moduleRouteDeclarations modl);
+    hookDeclarations = append hookDeclarations (moduleHookDeclarations modl);
+    toolServerDeclarations = append toolServerDeclarations (moduleToolServerDeclarations modl);
+    toolDeclarations = append toolDeclarations (moduleToolDeclarations modl);
+    verifierDeclarations = append verifierDeclarations (moduleVerifierDeclarations modl);
+    mergeGateDeclarations = append mergeGateDeclarations (moduleMergeGateDeclarations modl);
+    declarations
+  };
+  hostedModuleAst (moduleNameOf entry) [] typeDeclarations (appendProjectionRecordDecls recordDeclarations projectionDeclarations) foreignDeclarations declarations guideDeclarations policyDeclarations projectionDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
+}
+
+resolveProjectBundle : Str -> HostedProjectBundleResult
+resolveProjectBundle bundle = {
+  let modules = parseProjectModules bundle;
+  let importedNames = collectProjectImportNames modules;
+  let mut entryModuleName = "";
+  let mut entryModuleConflict = false;
+  for modl in modules {
+    let candidateName = moduleNameOf modl;
+    if containsText importedNames candidateName then {
+      entryModuleConflict
+    } else if entryModuleName == "" then {
+      entryModuleName = candidateName;
+      entryModuleConflict
+    } else {
+      entryModuleConflict = true;
+      entryModuleConflict
+    }
+  };
+  if entryModuleConflict then {
+    HostedProjectBundleError "Expected exactly one project entry module."
+  } else if entryModuleName == "" then {
+    HostedProjectBundleError "Missing project entry module."
+  } else {
+    match lookupProjectModule modules entryModuleName {
+      FoundHostedProjectModule entry ->
+        match collectProjectImports modules [entryModuleName] (moduleImports entry) {
+          HostedProjectModules importedModules ->
+            HostedProjectBundleOk (mergeProjectModules entry importedModules),
+          HostedProjectModulesError message ->
+            HostedProjectBundleError message
+        },
+      MissingHostedProjectModule missing ->
+        HostedProjectBundleError (textConcat ["Missing project entry module `", missing, "`."])
+    }
+  }
+}

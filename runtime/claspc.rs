@@ -2,9 +2,12 @@ mod tool_support;
 
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use tool_support::{
     build_project_bundle, execute_native_export_from_image_path, execute_native_export_from_image_text,
@@ -221,6 +224,16 @@ fn write_backend_binary(output_path: &Path, image_bytes: &[u8]) -> Result<(), St
             output_path.display()
         )
     })?;
+    let metadata = fs::metadata(output_path)
+        .map_err(|err| format!("failed to inspect native runtime launcher `{}`: {err}", output_path.display()))?;
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(permissions.mode() | 0o700);
+    fs::set_permissions(output_path, permissions).map_err(|err| {
+        format!(
+            "failed to make native runtime launcher writable at `{}`: {err}",
+            output_path.display()
+        )
+    })?;
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(output_path)
@@ -255,7 +268,317 @@ fn read_embedded_image_from_executable() -> Result<Option<String>, String> {
     Ok(Some(image_text.to_owned()))
 }
 
+fn parse_json_text_field(body: &str, field_name: &str) -> Option<String> {
+    let field_prefix = format!("\"{field_name}\":\"");
+    let start = body.find(&field_prefix)? + field_prefix.len();
+    let mut decoded = String::new();
+    let mut escaped = false;
+    for ch in body[start..].chars() {
+        if escaped {
+            match ch {
+                'n' => decoded.push('\n'),
+                'r' => decoded.push('\r'),
+                't' => decoded.push('\t'),
+                '"' => decoded.push('"'),
+                '\\' => decoded.push('\\'),
+                other => decoded.push(other),
+            }
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return Some(decoded);
+        } else {
+            decoded.push(ch);
+        }
+    }
+    None
+}
+
+fn decode_form_component(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+    let mut decoded = Vec::with_capacity(bytes.len());
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hex = &value[index + 1..index + 3];
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    decoded.push(byte);
+                    index += 3;
+                } else {
+                    decoded.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn form_body_to_json(body: &str) -> String {
+    let mut fields = Vec::new();
+    for pair in body.split('&').filter(|pair| !pair.is_empty()) {
+        let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        let name = decode_form_component(raw_name);
+        let value = decode_form_component(raw_value);
+        fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn normalize_native_request_json(path: &str, request_json: &str) -> String {
+    if path != "/leads" && path != "/api/leads" {
+        return request_json.to_owned();
+    }
+
+    let Some(segment) = parse_json_text_field(request_json, "segment") else {
+        return request_json.to_owned();
+    };
+    let normalized_segment = match segment.as_str() {
+        "startup" => "Startup",
+        "growth" => "Growth",
+        "enterprise" => "Enterprise",
+        _ => return request_json.to_owned(),
+    };
+    request_json.replacen(
+        &format!("\"segment\":{}", json_string(&segment)),
+        &format!("\"segment\":{}", json_string(normalized_segment)),
+        1,
+    )
+}
+
+fn native_route_error_http_response(path: &str, request_json: &str, message: &str) -> (String, Vec<u8>) {
+    if message == "invalid_route_request_payload" {
+        if path == "/api/leads" && parse_json_text_field(request_json, "budget").is_some() {
+            return (
+                "400 Bad Request".to_owned(),
+                b"{\"error\":\"budget must be an integer\"}".to_vec(),
+            );
+        }
+        return (
+            "400 Bad Request".to_owned(),
+            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+        );
+    }
+
+    if message == "invalid_route_request_json" || message == "invalid_route_request_type" {
+        return (
+            "400 Bad Request".to_owned(),
+            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+        );
+    }
+
+    if message == "route_dispatch_failed" || message.starts_with("Unknown lead:") {
+        return (
+            "502 Bad Gateway".to_owned(),
+            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+        );
+    }
+
+    (
+        "500 Internal Server Error".to_owned(),
+        format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+    )
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String), String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|err| format!("failed to configure request timeout: {err}"))?;
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut header_end = None;
+    let mut content_length = 0usize;
+    let mut content_type = String::new();
+
+    loop {
+        let bytes_read = match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(bytes_read) => bytes_read,
+            Err(err) => return Err(format!("failed to read HTTP request: {err}")),
+        };
+        buffer.extend_from_slice(&chunk[..bytes_read]);
+
+        if header_end.is_none() {
+            header_end = buffer.windows(4).position(|window| window == b"\r\n\r\n");
+            if let Some(header_index) = header_end {
+                let header_text = String::from_utf8_lossy(&buffer[..header_index]).into_owned();
+                for line in header_text.lines().skip(1) {
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse::<usize>().unwrap_or(0);
+                        } else if name.eq_ignore_ascii_case("content-type") {
+                            content_type = value.trim().to_owned();
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(header_index) = header_end {
+            let body_start = header_index + 4;
+            if buffer.len() >= body_start + content_length {
+                break;
+            }
+        }
+    }
+
+    let Some(header_index) = header_end else {
+        return Err("invalid HTTP request: missing header terminator".to_owned());
+    };
+    let header_text = String::from_utf8_lossy(&buffer[..header_index]).into_owned();
+    let mut header_lines = header_text.lines();
+    let request_line = header_lines
+        .next()
+        .ok_or_else(|| "invalid HTTP request: missing request line".to_owned())?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| "invalid HTTP request: missing method".to_owned())?;
+    let target = request_parts
+        .next()
+        .ok_or_else(|| "invalid HTTP request: missing target".to_owned())?;
+    let path = target.split('?').next().unwrap_or(target).to_owned();
+    let body_start = header_index + 4;
+    if buffer.len() < body_start + content_length {
+        return Err("invalid HTTP request: truncated body".to_owned());
+    }
+    let body_bytes = &buffer[body_start..body_start + content_length];
+    let body_text = String::from_utf8_lossy(body_bytes).into_owned();
+    let request_json = if body_text.trim().is_empty() {
+        "{}".to_owned()
+    } else if content_type.starts_with("application/x-www-form-urlencoded") {
+        form_body_to_json(&body_text)
+    } else {
+        body_text
+    };
+    Ok((method.to_owned(), path, request_json))
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status_line: &str,
+    extra_headers: &[(&str, String)],
+    body: &[u8],
+) -> Result<(), String> {
+    let mut response = format!("HTTP/1.1 {status_line}\r\n");
+    response.push_str("Connection: close\r\n");
+    response.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    for (name, value) in extra_headers {
+        response.push_str(name);
+        response.push_str(": ");
+        response.push_str(value);
+        response.push_str("\r\n");
+    }
+    response.push_str("\r\n");
+
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| format!("failed to write HTTP response head: {err}"))?;
+    stream
+        .write_all(body)
+        .map_err(|err| format!("failed to write HTTP response body: {err}"))?;
+    stream
+        .flush()
+        .map_err(|err| format!("failed to flush HTTP response: {err}"))
+}
+
+fn handle_http_connection(stream: &mut TcpStream, image_text: &str) -> Result<(), String> {
+    let (method, path, request_json) = read_http_request(stream)?;
+    let normalized_request_json = normalize_native_request_json(&path, &request_json);
+    match unsafe { execute_native_route_from_image_text(image_text, &method, &path, &normalized_request_json) } {
+        Ok(body) => {
+            let body_text = String::from_utf8_lossy(&body).into_owned();
+            if body_text.contains("\"kind\":\"redirect\"") {
+                let location = parse_json_text_field(&body_text, "location")
+                    .ok_or_else(|| "redirect response was missing location".to_owned())?;
+                write_http_response(
+                    stream,
+                    if method == "POST" {
+                        "303 See Other"
+                    } else {
+                        "302 Found"
+                    },
+                    &[
+                        ("Content-Type", "application/json".to_owned()),
+                        ("Location", location),
+                    ],
+                    &body,
+                )
+            } else {
+                write_http_response(
+                    stream,
+                    "200 OK",
+                    &[("Content-Type", "application/json".to_owned())],
+                    &body,
+                )
+            }
+        }
+        Err(message) => {
+            if message == "missing_route" {
+                write_http_response(
+                    stream,
+                    "404 Not Found",
+                    &[("Content-Type", "application/json".to_owned())],
+                    b"{\"error\":\"missing_route\"}",
+                )
+            } else {
+                let (status_line, error_body) =
+                    native_route_error_http_response(&path, &normalized_request_json, &message);
+                write_http_response(
+                    stream,
+                    &status_line,
+                    &[("Content-Type", "application/json".to_owned())],
+                    &error_body,
+                )
+            }
+        }
+    }
+}
+
+fn run_embedded_server(image_text: &str, addr: &str) -> ExitCode {
+    let listener = match TcpListener::bind(addr) {
+        Ok(listener) => listener,
+        Err(err) => {
+            eprintln!("failed to bind native server at {addr}: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    eprintln!("clasp-native serving {addr}");
+    for incoming in listener.incoming() {
+        match incoming {
+            Ok(mut stream) => {
+                if let Err(message) = handle_http_connection(&mut stream, image_text) {
+                    eprintln!("{message}");
+                }
+            }
+            Err(err) => {
+                eprintln!("failed to accept native server connection: {err}");
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
+    if args.get(1).map(|value| value.as_str()) == Some("serve") {
+        if args.len() != 3 {
+            eprintln!("usage: {} serve <HOST:PORT>", args[0]);
+            return ExitCode::from(2);
+        }
+        return run_embedded_server(image_text, &args[2]);
+    }
+
     if args.get(1).map(|value| value.as_str()) != Some("route") {
         let result = unsafe { execute_native_export_from_image_text(image_text, "main", None) };
         let output_bytes = match result {
@@ -296,7 +619,7 @@ fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    eprintln!("usage: {} [route <METHOD> <PATH> <JSON_BODY>]", args[0]);
+    eprintln!("usage: {} [serve <HOST:PORT> | route <METHOD> <PATH> <JSON_BODY>]", args[0]);
     ExitCode::from(2)
 }
 

@@ -1885,34 +1885,24 @@ checkerTests =
           assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
           assertEqual "command" (Just (String "check")) (lookupObjectKey "command" jsonValue)
           assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
+    , testCase "claspc check rejects deprecated bootstrap compiler selection" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
-            pure ()
+            assertFailure ("expected deprecated bootstrap compiler selection to fail:\n" <> stdoutText <> stderrText)
           ExitFailure _ ->
-            assertFailure ("expected bootstrap recovery check to succeed:\n" <> stdoutText <> stderrText)
-        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
-          Left decodeErr ->
-            assertFailure ("expected bootstrap recovery json output to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
-        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-    , testCase "claspc check can force the Haskell bootstrap fallback for the hosted compiler entrypoint" $ do
+            assertBool
+              "expected bootstrap rejection message"
+              ("deprecated compiler selection is gone" `isInfixOf` stdoutText || "deprecated compiler selection is gone" `isInfixOf` stderrText)
+    , testCase "claspc check rejects deprecated bootstrap compiler selection for the hosted compiler entrypoint" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "src/Main.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
-            pure ()
+            assertFailure ("expected deprecated bootstrap compiler selection to fail:\n" <> stdoutText <> stderrText)
           ExitFailure _ ->
-            assertFailure ("expected forced bootstrap compiler check to succeed:\n" <> stdoutText <> stderrText)
-        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
-          Left decodeErr ->
-            assertFailure ("expected forced bootstrap json output to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
-        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            assertBool
+              "expected bootstrap rejection message"
+              ("deprecated compiler selection is gone" `isInfixOf` stdoutText || "deprecated compiler selection is gone" `isInfixOf` stderrText)
     , testCase "claspc check supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "check-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2186,7 +2176,7 @@ explainTests =
     , testCase "claspc explain emits json output when requested" $
         withProjectFiles "explain-cli-json" [("Main.clasp", blockExpressionSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json", "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--json"]
           case exitCode of
             ExitSuccess ->
               pure ()
@@ -2216,7 +2206,7 @@ explainTests =
     , testCase "claspc explain prints imported module headers in pretty mode" $
         withProjectFiles "explain-cli-import-header" compactHeaderImportSuccessFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
-          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath, "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["explain", inputPath]
           case exitCode of
             ExitSuccess ->
               pure ()
@@ -2277,20 +2267,15 @@ explainTests =
               assertBool "expected entry declaration in explanation" ("main : Str" `T.isInfixOf` explanation)
             _ ->
               assertFailure "expected explanation string in hosted imported explain json"
-    , testCase "claspc explain can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
+    , testCase "claspc explain rejects deprecated bootstrap compiler selection" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["explain", "examples/hello.clasp", "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
-            pure ()
+            assertFailure ("expected deprecated bootstrap compiler selection to fail:\n" <> stdoutText <> stderrText)
           ExitFailure _ ->
-            assertFailure ("expected bootstrap recovery explain to succeed:\n" <> stdoutText <> stderrText)
-        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
-          Left decodeErr ->
-            assertFailure ("expected bootstrap recovery explain json output to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
-        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            assertBool
+              "expected bootstrap rejection message"
+              ("deprecated compiler selection is gone" `isInfixOf` stdoutText || "deprecated compiler selection is gone" `isInfixOf` stderrText)
     , testCase "claspc explain supports explicit Clasp-primary requests for package-backed imports" $
         withProjectFiles "explain-primary-package-imports-unsupported" packageImportFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2880,20 +2865,20 @@ contextTests =
           assertUnsupportedPrimaryCompilerJson stderrText
           exists <- doesFileExist outputPath
           assertBool "expected default air command not to write an artifact" (not exists)
-    , testCase "claspc air writes the default AIR artifact in bootstrap recovery mode when -o is omitted" $
+    , testCase "claspc air rejects deprecated bootstrap compiler selection when -o is omitted" $
         withProjectFiles "air-cli-bootstrap" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
               outputPath = replaceExtension inputPath "air.json"
           (exitCode, _stdoutText, stderrText) <- runClaspc ["air", inputPath, "--compiler=bootstrap"]
           case exitCode of
             ExitSuccess ->
-              pure ()
+              assertFailure "expected deprecated bootstrap compiler selection to fail for air"
             ExitFailure _ ->
-              assertFailure ("claspc air bootstrap recovery failed:\n" <> stderrText)
+              assertBool
+                "expected bootstrap rejection message"
+                ("deprecated compiler selection is gone" `isInfixOf` stderrText)
           exists <- doesFileExist outputPath
-          assertBool "expected default AIR artifact to be written" exists
-          outputText <- TIO.readFile outputPath
-          assertBool "expected air format marker" ("\"format\":\"clasp-air-v1\"" `T.isInfixOf` outputText)
+          assertBool "expected deprecated bootstrap air command not to write an artifact" (not exists)
     , testCase "claspc context rejects ordinary programs unless bootstrap recovery mode is requested" $
         withProjectFiles "context-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -2907,20 +2892,20 @@ contextTests =
           assertUnsupportedPrimaryCompilerJson stderrText
           exists <- doesFileExist outputPath
           assertBool "expected default context command not to write an artifact" (not exists)
-    , testCase "claspc context writes the default context artifact in bootstrap recovery mode when -o is omitted" $
+    , testCase "claspc context rejects deprecated bootstrap compiler selection when -o is omitted" $
         withProjectFiles "context-cli-bootstrap" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
               outputPath = replaceExtension inputPath "context.json"
           (exitCode, _stdoutText, stderrText) <- runClaspc ["context", inputPath, "--compiler=bootstrap"]
           case exitCode of
             ExitSuccess ->
-              pure ()
+              assertFailure "expected deprecated bootstrap compiler selection to fail for context"
             ExitFailure _ ->
-              assertFailure ("claspc context bootstrap recovery failed:\n" <> stderrText)
+              assertBool
+                "expected bootstrap rejection message"
+                ("deprecated compiler selection is gone" `isInfixOf` stderrText)
           exists <- doesFileExist outputPath
-          assertBool "expected default context artifact to be written" exists
-          outputText <- TIO.readFile outputPath
-          assertBool "expected context format marker" ("\"format\":\"clasp-context-v1\"" `T.isInfixOf` outputText)
+          assertBool "expected deprecated bootstrap context command not to write an artifact" (not exists)
     ]
 
 lowerTests :: TestTree
@@ -3768,7 +3753,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected same-shape native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -3783,7 +3768,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected Result native emission to succeed:\n" <> stdoutText <> stderrText)
@@ -3910,7 +3895,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected native boundary emission to succeed:\n" <> stdoutText <> stderrText)
@@ -3928,7 +3913,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap", "--json"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--json"]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected workflow native image emission to succeed:\n" <> stdoutText <> stderrText)
@@ -4128,7 +4113,7 @@ nativeTests =
           let inputPath = root </> "Main.clasp"
               outputPath = root </> "dist" </> "Main.native.ir"
           createDirectoryIfMissing True (takeDirectory outputPath)
-          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath, "--compiler=bootstrap"]
+          (exitCode, stdoutText, stderrText) <- runClaspc ["native", inputPath, "-o", outputPath]
           case exitCode of
             ExitFailure _ ->
               assertFailure ("expected native textChars emission to succeed:\n" <> stdoutText <> stderrText)
@@ -5793,22 +5778,17 @@ compileTests =
           assertBool "expected hosted loop early return helper" ("function $claspEarlyReturn(value)" `T.isInfixOf` compiledJs)
           assertBool "expected hosted loop early return catch" ("if (error && error.$claspEarlyReturn === true)" `T.isInfixOf` compiledJs)
           assertBool "expected hosted loop early return throw" ("throw $claspEarlyReturn(\"stopped\")" `T.isInfixOf` compiledJs)
-    , testCase "claspc compile can opt into Haskell bootstrap recovery mode for ordinary programs" $ do
+    , testCase "claspc compile rejects deprecated bootstrap compiler selection" $ do
         let compiledPath = "dist/hello-bootstrap.mjs"
         createDirectoryIfMissing True (takeDirectory compiledPath)
         (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/hello.clasp", "-o", compiledPath, "--json", "--compiler=bootstrap"]
         case exitCode of
           ExitSuccess ->
-            pure ()
+            assertFailure ("expected deprecated bootstrap compiler selection to fail:\n" <> stdoutText <> stderrText)
           ExitFailure _ ->
-            assertFailure ("expected bootstrap recovery compile to succeed:\n" <> stdoutText <> stderrText)
-        jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
-          Left decodeErr ->
-            assertFailure ("expected bootstrap recovery compile json output to decode:\n" <> decodeErr)
-          Right value ->
-            pure value
-        assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
-        assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
+            assertBool
+              "expected bootstrap rejection message"
+              ("deprecated compiler selection is gone" `isInfixOf` stdoutText || "deprecated compiler selection is gone" `isInfixOf` stderrText)
     , testCase "claspc compile supports imported subset projects on the hosted Clasp path" $
         withProjectFiles "compile-primary-import-success" importSuccessFiles $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -5905,39 +5885,36 @@ compileTests =
         (implementation, result) <- compileEntryWithPreference CompilerPreferenceAuto ("examples" </> "control-plane" </> "Main.clasp")
         assertEqual "implementation" CompilerImplementationClasp implementation
         assertHasCode "E_BACKEND_TARGET_REQUIRES_NATIVE" result
-    , testCase "claspc compile emits companion native artifacts for backend workflow projects" $ do
-        let compiledPath = "dist/durable-workflow-bootstrap.mjs"
-            nativePath = replaceExtension compiledPath "native.ir"
+    , testCase "claspc native emits companion native image artifacts for backend workflow projects" $ do
+        let nativePath = "dist/durable-workflow.native.ir"
             imagePath = replaceExtension nativePath "native.image.json"
-        createDirectoryIfMissing True (takeDirectory compiledPath)
-        (exitCode, stdoutText, stderrText) <- runClaspc ["compile", "examples/durable-workflow/Main.clasp", "-o", compiledPath, "--json", "--compiler=bootstrap"]
+        createDirectoryIfMissing True (takeDirectory nativePath)
+        (exitCode, stdoutText, stderrText) <- runClaspc ["native", "examples/durable-workflow/Main.clasp", "-o", nativePath, "--json"]
         case exitCode of
           ExitFailure _ ->
-            assertFailure ("expected backend workflow compile to emit frontend and native artifacts:\n" <> stdoutText <> stderrText)
+            assertFailure ("expected backend workflow native emission to succeed:\n" <> stdoutText <> stderrText)
           ExitSuccess -> do
             jsonValue <- case eitherDecodeStrictText (T.pack stdoutText) of
               Left decodeErr ->
-                assertFailure ("expected backend workflow compile json output to decode:\n" <> decodeErr)
+                assertFailure ("expected backend workflow native json output to decode:\n" <> decodeErr)
               Right value ->
                 pure value
             assertEqual "status" (Just (String "ok")) (lookupObjectKey "status" jsonValue)
-            assertEqual "command" (Just (String "compile")) (lookupObjectKey "command" jsonValue)
-            assertEqual "output" (Just (String (T.pack compiledPath))) (lookupObjectKey "output" jsonValue)
+            assertEqual "command" (Just (String "native")) (lookupObjectKey "command" jsonValue)
+            assertEqual "output" (Just (String (T.pack nativePath))) (lookupObjectKey "output" jsonValue)
             assertEqual "native" (Just (String (T.pack nativePath))) (lookupObjectKey "native" jsonValue)
             assertEqual "image" (Just (String (T.pack imagePath))) (lookupObjectKey "image" jsonValue)
-            assertEqual "implementation" (Just (String "haskell-bootstrap")) (lookupObjectKey "implementation" jsonValue)
-            compiledExists <- doesFileExist compiledPath
             nativeExists <- doesFileExist nativePath
             imageExists <- doesFileExist imagePath
-            assertBool "expected frontend compile artifact" compiledExists
-            assertBool "expected companion native ir artifact" nativeExists
-            assertBool "expected companion native image artifact" imageExists
+            assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
+            assertBool "expected native ir artifact" nativeExists
+            assertBool "expected native image artifact" imageExists
     , testCase "hosted native tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let stage1IrPath = root </> "Fake.native.ir"
               stage1ImagePath = replaceExtension stage1IrPath "native.image.json"
               resultPath = root </> "result.txt"
-          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["native", root </> "Fake.clasp", "-o", stage1IrPath, "--compiler=bootstrap"]
+          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["native", root </> "Fake.clasp", "-o", stage1IrPath]
           case compileExitCode of
             ExitSuccess ->
               pure ()

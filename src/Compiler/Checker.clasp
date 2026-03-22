@@ -18,6 +18,7 @@ type InferModuleResult = InferredModule [TypeBinding] | InferModuleError Str
 type InferModulePassResult = InferModulePassResult [TypeBinding] Bool
 type ApplyCallResult = ApplyCallOk TypeText | ApplyCallError Str
 type BuiltinCallInferResult = BuiltinCallInferred TypeText | BuiltinCallNotHandled | BuiltinCallError Str
+type DecodeTargetTypeResult = DecodeTargetType TypeText | DecodeTargetTypeError Str
 type ListInferState = WaitingForItem | SeenItemType TypeText | SeenListError Str
 type BindParamsState = BindingParams [TypeBinding] TypeText | BindingParamError Str
 type MatchBranchState = WaitingForBranch [Str] | SeenBranchType [Str] TypeText | SeenMatchError Str
@@ -455,9 +456,101 @@ inferEncodeBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
   }
 }
 
+decodeTargetTypeFromExpr : HostedExprAst -> DecodeTargetTypeResult
+decodeTargetTypeFromExpr expr = match expr {
+  HostedName name ->
+    DecodeTargetType (typeFromHostedTypeAst (HostedTypeName name)),
+  HostedList values -> {
+    let itemExpr = firstHostedExpr values;
+    let extraExpr = firstHostedExpr (remainingHostedExprs values);
+    if expressionSummary itemExpr == "" then {
+      DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+    } else if expressionSummary extraExpr == "" then {
+      match decodeTargetTypeFromExpr itemExpr {
+        DecodeTargetType itemType ->
+          DecodeTargetType (TList itemType),
+        DecodeTargetTypeError message ->
+          DecodeTargetTypeError message
+      }
+    } else {
+      DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+    }
+  },
+  HostedString value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedInt value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedBool value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedCall callee args ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedConstructor constructorName args -> {
+    let extraExpr = firstHostedExpr args;
+    if expressionSummary extraExpr == "" then DecodeTargetType (typeFromHostedTypeAst (HostedTypeName constructorName)) else DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+  },
+  HostedMatch subject branches ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedRecord recordName fields ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedFieldAccess subject fieldName ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLet binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedMutableLet binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedAssign binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedFor binder iterable loopBody body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedReturn value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedIf condition thenBranch elseBranch ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedNotEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLessThan left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLessThanOrEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedGreaterThan left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedGreaterThanOrEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+}
+
+inferDecodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let targetExpr = firstHostedExpr args;
+  let rawExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary targetExpr == "" then {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  } else if expressionSummary rawExpr == "" then {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match decodeTargetTypeFromExpr targetExpr {
+      DecodeTargetTypeError message ->
+        BuiltinCallError message,
+      DecodeTargetType targetType ->
+        match inferExpr typeDecls recordDecls env localEnv fnContext rawExpr {
+          InferExprError message ->
+            BuiltinCallError message,
+          InferredExpr rawType ->
+            if sameType rawType TStr then BuiltinCallInferred targetType else BuiltinCallError (typeMismatchMessage (expressionSummary rawExpr) TStr rawType)
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  }
+}
+
 inferBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedExprAst] -> BuiltinCallInferResult
 inferBuiltinCall typeDecls recordDecls env localEnv fnContext callee args = if callee == "append" then {
   inferAppendBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == "decode" then {
+  inferDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args
 } else if callee == "encode" then {
   inferEncodeBuiltinCall typeDecls recordDecls env localEnv fnContext args
 } else {
@@ -1139,6 +1232,21 @@ inputBuiltinType = TFunction TStr (TFunction TStr (TFunction TStr (TNamed "View"
 submitBuiltinType : TypeText
 submitBuiltinType = TFunction TStr (TNamed "View")
 
+systemPromptBuiltinType : TypeText
+systemPromptBuiltinType = TFunction TStr (TNamed "Prompt")
+
+assistantPromptBuiltinType : TypeText
+assistantPromptBuiltinType = TFunction TStr (TNamed "Prompt")
+
+userPromptBuiltinType : TypeText
+userPromptBuiltinType = TFunction TStr (TNamed "Prompt")
+
+appendPromptBuiltinType : TypeText
+appendPromptBuiltinType = TFunction (TNamed "Prompt") (TFunction (TNamed "Prompt") (TNamed "Prompt"))
+
+promptTextBuiltinType : TypeText
+promptTextBuiltinType = TFunction (TNamed "Prompt") TStr
+
 pageBuiltinType : TypeText
 pageBuiltinType = TFunction TStr (TFunction (TNamed "View") (TNamed "Page"))
 
@@ -1169,16 +1277,61 @@ writeFileBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinTypeN
 builtinResultTypeDecl : HostedTypeDeclAst
 builtinResultTypeDecl = hostedTypeDeclAst resultBuiltinTypeName [hostedConstructorDeclAst resultOkConstructorName [HostedTypeName "Str"], hostedConstructorDeclAst resultErrConstructorName [HostedTypeName "Str"]]
 
+principalBuiltinRecordDecl : HostedRecordDeclAst
+principalBuiltinRecordDecl =
+  hostedRecordDeclAst "Principal" [hostedRecordFieldDeclAst "id" (HostedTypeName "Str")]
+
+tenantBuiltinRecordDecl : HostedRecordDeclAst
+tenantBuiltinRecordDecl =
+  hostedRecordDeclAst "Tenant" [hostedRecordFieldDeclAst "id" (HostedTypeName "Str")]
+
+resourceIdentityBuiltinRecordDecl : HostedRecordDeclAst
+resourceIdentityBuiltinRecordDecl =
+  hostedRecordDeclAst
+    "ResourceIdentity"
+    [ hostedRecordFieldDeclAst "resourceType" (HostedTypeName "Str")
+    , hostedRecordFieldDeclAst "resourceId" (HostedTypeName "Str")
+    ]
+
+authSessionBuiltinRecordDecl : HostedRecordDeclAst
+authSessionBuiltinRecordDecl =
+  hostedRecordDeclAst
+    "AuthSession"
+    [ hostedRecordFieldDeclAst "sessionId" (HostedTypeName "Str")
+    , hostedRecordFieldDeclAst "principal" (HostedTypeName "Principal")
+    , hostedRecordFieldDeclAst "tenant" (HostedTypeName "Tenant")
+    , hostedRecordFieldDeclAst "resource" (HostedTypeName "ResourceIdentity")
+    ]
+
+effectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]
+effectiveModuleRecordDecls modl =
+  append
+    [principalBuiltinRecordDecl, tenantBuiltinRecordDecl, resourceIdentityBuiltinRecordDecl, authSessionBuiltinRecordDecl]
+    (moduleRecordDeclarations modl)
+
 effectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]
 effectiveModuleTypeDecls modl = append [builtinResultTypeDecl] (moduleTypeDeclarations modl)
 
+principalBuiltinType : TypeText
+principalBuiltinType = TFunction TStr (TNamed "Principal")
+
+tenantBuiltinType : TypeText
+tenantBuiltinType = TFunction TStr (TNamed "Tenant")
+
+resourceIdentityBuiltinType : TypeText
+resourceIdentityBuiltinType = TFunction TStr (TFunction TStr (TNamed "ResourceIdentity"))
+
+authSessionBuiltinType : TypeText
+authSessionBuiltinType =
+  TFunction TStr (TFunction (TNamed "Principal") (TFunction (TNamed "Tenant") (TFunction (TNamed "ResourceIdentity") (TNamed "AuthSession"))))
+
 baseEnv : [TypeBinding]
-baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "writeFile" writeFileBuiltinType]
+baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "writeFile" writeFileBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
-  let recordDecls = moduleRecordDeclarations modl;
+  let recordDecls = effectiveModuleRecordDecls modl;
   let initialEnv = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (collectAnnotatedBindings modl)));
   let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls initialEnv (moduleDeclarations modl);
   let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);

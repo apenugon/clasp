@@ -15,19 +15,18 @@ cleanup() {
 trap cleanup EXIT
 
 ir_path="$test_root/durable-workflow.native.ir"
-image_path="${ir_path%.*}.native.image.json"
+image_path="${ir_path%.*}.image.json"
 harness_path="$test_root/test-native-image"
 hello_ir_path="$test_root/hello.native.ir"
-hello_image_path="${hello_ir_path%.*}.native.image.json"
+hello_image_path="${hello_ir_path%.*}.image.json"
 hello_structured_image_path="$test_root/hello.structured.native.image.json"
 parser_ir_path="$test_root/compiler-parser.native.ir"
-parser_image_path="${parser_ir_path%.*}.native.image.json"
+parser_image_path="${parser_ir_path%.*}.image.json"
 parser_structured_image_path="$test_root/compiler-parser.structured.native.image.json"
-hosted_ir_path="$test_root/compiler-hosted.native.ir"
-hosted_image_path="${hosted_ir_path%.*}.native.image.json"
+hosted_image_path="$project_root/src/stage1.native.image.json"
 hosted_structured_image_path="$test_root/compiler-hosted.structured.native.image.json"
 hosted_durable_ir_path="$test_root/durable-workflow-hosted.native.ir"
-hosted_durable_image_path="${hosted_durable_ir_path%.*}.native.image.json"
+hosted_durable_image_path="${hosted_durable_ir_path%.*}.image.json"
 hosted_migrating_upgrade_path="$test_root/durable-workflow-hosted-upgrade.native.image.json"
 hosted_incompatible_upgrade_path="$test_root/durable-workflow-hosted-incompatible.native.image.json"
 interpreter_harness_path="$test_root/test-native-interpreter"
@@ -44,7 +43,7 @@ project_entry_path="$project_entry_dir/Main.clasp"
 route_project_dir="$test_root/route-project"
 route_project_path="$route_project_dir/Main.clasp"
 route_ir_path="$test_root/route.native.ir"
-route_image_path="${route_ir_path%.*}.native.image.json"
+route_image_path="${route_ir_path%.*}.image.json"
 
 mkdir -p "$project_entry_dir"
 cat >"$project_entry_path" <<'EOF'
@@ -81,12 +80,16 @@ EOF
 
 (
   cd "$project_root"
-  claspc native examples/durable-workflow/Main.clasp -o "$ir_path" --compiler=bootstrap --json >/dev/null
-  claspc native examples/hello.clasp -o "$hello_ir_path" --compiler=bootstrap --json >/dev/null
-  claspc native examples/compiler-parser.clasp -o "$parser_ir_path" --compiler=bootstrap --json >/dev/null
-  claspc native src/Main.clasp -o "$hosted_ir_path" --compiler=clasp --json >/dev/null
-  claspc native examples/durable-workflow/Main.clasp -o "$hosted_durable_ir_path" --compiler=clasp --json >/dev/null
-  claspc native "$route_project_path" -o "$route_ir_path" --compiler=clasp --json >/dev/null
+  claspc native examples/durable-workflow/Main.clasp -o "$ir_path" --json >/dev/null
+  claspc native-image examples/durable-workflow/Main.clasp -o "$image_path" --json >/dev/null
+  claspc native examples/hello.clasp -o "$hello_ir_path" --json >/dev/null
+  claspc native-image examples/hello.clasp -o "$hello_image_path" --json >/dev/null
+  claspc native examples/compiler-parser.clasp -o "$parser_ir_path" --json >/dev/null
+  claspc native-image examples/compiler-parser.clasp -o "$parser_image_path" --json >/dev/null
+  claspc native examples/durable-workflow/Main.clasp -o "$hosted_durable_ir_path" --json >/dev/null
+  claspc native-image examples/durable-workflow/Main.clasp -o "$hosted_durable_image_path" --json >/dev/null
+  claspc native "$route_project_path" -o "$route_ir_path" --json >/dev/null
+  claspc native-image "$route_project_path" -o "$route_image_path" --json >/dev/null
 )
 
 [[ -f "$ir_path" ]]
@@ -95,7 +98,6 @@ EOF
 [[ -f "$hello_image_path" ]]
 [[ -f "$parser_ir_path" ]]
 [[ -f "$parser_image_path" ]]
-[[ -f "$hosted_ir_path" ]]
 [[ -f "$hosted_image_path" ]]
 [[ -f "$hosted_durable_ir_path" ]]
 [[ -f "$hosted_durable_image_path" ]]

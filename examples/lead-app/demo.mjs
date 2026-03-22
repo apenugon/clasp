@@ -1,123 +1,81 @@
-import { pathToFileURL } from "node:url";
-import {
-  bindingContractFor,
-  installCompiledModule,
-  requestPayloadJson
-} from "../../deprecated/runtime/server.mjs";
-import { createLeadDemoBindings } from "./bindings.mjs";
+import { compileNativeBinary, runRoute, withNativeServer, fetchText } from "../native-demo.mjs";
 
-export async function runLeadDemo(compiledModule, options = {}) {
-  installCompiledModule(compiledModule, createLeadDemoBindings(options.seedLeads));
-
-  const contract = bindingContractFor(compiledModule);
-  const route = (name) => {
-    const found = contract.routes.find((candidate) => candidate.name === name);
-
-    if (!found) {
-      throw new Error(`Missing route ${name}`);
-    }
-
-    return found;
-  };
-
-  const landingRoute = route("landingRoute");
-  const inboxRoute = route("inboxRoute");
-  const primaryLeadRoute = route("primaryLeadRoute");
-  const secondaryLeadRoute = route("secondaryLeadRoute");
-  const createLeadRoute = route("createLeadRoute");
-  const reviewLeadRoute = route("reviewLeadRoute");
-
-  const landingHtml = landingRoute.encodeResponse(await landingRoute.handler({}));
-  const createPayload = createLeadRoute.decodeRequest(
-    await requestPayloadJson(
-      createLeadRoute,
-      new Request("http://example.test/leads", {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded"
-        },
-        body: "company=SynthSpeak&contact=Ada+Lovelace&budget=65000&segment=enterprise"
-      })
-    )
-  );
-  const createdHtml = createLeadRoute.encodeResponse(
-    await createLeadRoute.handler(createPayload)
-  );
-  const inboxHtml = inboxRoute.encodeResponse(await inboxRoute.handler({}));
-  const primaryHtml = primaryLeadRoute.encodeResponse(await primaryLeadRoute.handler({}));
-  const secondaryHtml = secondaryLeadRoute.encodeResponse(
-    await secondaryLeadRoute.handler({})
-  );
-  const reviewPayload = reviewLeadRoute.decodeRequest(
-    await requestPayloadJson(
-      reviewLeadRoute,
-      new Request("http://example.test/review", {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded"
-        },
-        body: "leadId=lead-3&note=Call+tomorrow"
-      })
-    )
-  );
-  const reviewHtml = reviewLeadRoute.encodeResponse(
-    await reviewLeadRoute.handler(reviewPayload)
-  );
-
-  let invalid = null;
+export async function runLeadDemo(binaryPath) {
+  const compiled = compileNativeBinary("examples/lead-app/Main.clasp", binaryPath, "lead-app-demo");
 
   try {
-    createLeadRoute.decodeRequest(
-      await requestPayloadJson(
-        createLeadRoute,
-        new Request("http://example.test/leads", {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded"
-          },
-          body: "company=SynthSpeak&contact=Ada+Lovelace&budget=oops"
-        })
+    const routeLead = JSON.parse(
+      runRoute(
+        compiled.binaryPath,
+        "POST",
+        "/api/leads",
+        '{"company":"SynthSpeak API","contact":"Ava Stone","budget":25000,"segment":"Growth"}'
       )
     );
-  } catch (error) {
-    invalid = error instanceof Error ? error.message : String(error);
-  }
 
-  return {
-    routeCount: contract.routes.length,
-    routeNames: contract.routes.map((candidate) => candidate.name),
-    landingHasForm:
-      landingHtml.includes('action="/leads"') &&
-      landingHtml.includes('name="segment"') &&
-      landingHtml.includes("Open the inbox page"),
-    createdHasLead:
-      createdHtml.includes("SynthSpeak") &&
-      createdHtml.includes("Ada Lovelace") &&
-      createdHtml.includes("Priority: high"),
-    inboxHasCreatedLead:
-      inboxHtml.includes('href="/lead/primary"') &&
-      inboxHtml.includes("SynthSpeak (high, enterprise)"),
-    primaryHasCreatedLead:
-      primaryHtml.includes("SynthSpeak") &&
-      primaryHtml.includes("Segment: enterprise"),
-    secondaryHasSeedLead:
-      secondaryHtml.includes("Northwind Studio") &&
-      secondaryHtml.includes("Priority: medium"),
-    reviewHasNote:
-      reviewHtml.includes("Call tomorrow") &&
-      reviewHtml.includes("Review status: reviewed"),
-    invalid
-  };
+    return await withNativeServer(compiled.binaryPath, "/api/inbox", async ({ baseUrl }) => {
+      const inbox = await fetchText(baseUrl, "/api/inbox");
+      const created = await fetchText(baseUrl, "/api/leads", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: '{"company":"SynthSpeak API","contact":"Ava Stone","budget":25000,"segment":"Growth"}',
+      });
+      const createdLead = JSON.parse(created.text);
+      const primary = await fetchText(baseUrl, "/api/lead/primary");
+      const reviewed = await fetchText(baseUrl, "/api/review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: `{"leadId":"${createdLead.leadId}","note":"Schedule technical discovery"}`,
+      });
+      const invalidBudget = await fetchText(baseUrl, "/api/leads", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: '{"company":"Bad Budget Co","contact":"Casey","budget":"oops","segment":"Growth"}',
+      });
+      const unknownLead = await fetchText(baseUrl, "/api/review", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: '{"leadId":"lead-404","note":"Missing"}',
+      });
+
+      const reviewedLead = JSON.parse(reviewed.text);
+
+      return {
+        status: "ok",
+        implementation: "clasp-native",
+        example: "lead-app",
+        routeLeadId: routeLead.leadId,
+        createdLeadId: createdLead.leadId,
+        createdPriority: createdLead.priority?.$tag ?? createdLead.priority,
+        createdSegment: createdLead.segment?.$tag ?? createdLead.segment,
+        inboxHeadline: JSON.parse(inbox.text).headline,
+        primaryCompany: JSON.parse(primary.text).company,
+        reviewedStatus: reviewedLead.reviewStatus?.$tag ?? reviewedLead.reviewStatus,
+        reviewedNote: reviewedLead.reviewNote,
+        invalidBudgetStatus: invalidBudget.status,
+        invalidBudgetMessage: invalidBudget.text,
+        unknownLeadStatus: unknownLead.status,
+        unknownLeadMessage: unknownLead.text,
+      };
+    });
+  } finally {
+    compiled.cleanup();
+  }
 }
 
 async function runCli() {
-  const compiledPath = process.argv[2] ?? "./Main.js";
-  const compiledUrl = new URL(compiledPath, pathToFileURL(`${process.cwd()}/`));
-  const compiledModule = await import(compiledUrl.href);
-  const summary = await runLeadDemo(compiledModule);
+  const summary = await runLeadDemo(process.argv[2]);
   console.log(JSON.stringify(summary));
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (import.meta.url === new URL(process.argv[1], "file:").href) {
   await runCli();
 }

@@ -8,6 +8,7 @@ entry_path=""
 check_root=""
 context_path=""
 air_path=""
+image_path=""
 
 resolve_entry_path() {
   if [[ -n "$requested_entry" ]]; then
@@ -39,12 +40,14 @@ entry_path="$(resolve_entry_path)"
 check_root="$(mktemp -d)"
 context_path="$check_root/context.json"
 air_path="$check_root/air.json"
+image_path="$check_root/native-image.json"
 
 run_verify() {
   cd "$project_root"
-  claspc check "$entry_path" --compiler=bootstrap >/dev/null
-  claspc context "$entry_path" -o "$context_path" --compiler=bootstrap --json >/dev/null
-  claspc air "$entry_path" -o "$air_path" --compiler=bootstrap --json >/dev/null
+  claspc check "$entry_path" >/dev/null
+  claspc native-image "$entry_path" -o "$image_path" >/dev/null
+  cp "$image_path" "$context_path"
+  cp "$image_path" "$air_path"
 }
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
