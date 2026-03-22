@@ -99,11 +99,16 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `pathDirname : Str -> Str`
 - `pathBasename : Str -> Str`
 - `fileExists : Str -> Bool`
+- `timeUnixMs : Int`
+- `envVar : Str -> Result`
 - `readFile : Str -> Result`
+- `writeFile : Str -> Str -> Result`
+- `appendFile : Str -> Str -> Result`
+- `mkdirAll : Str -> Result`
 - `sqliteOpen : Str -> SqliteConnection`
 - `sqliteOpenReadonly : Str -> SqliteConnection`
 
-The text and path helpers are emitted with default JavaScript behavior. The file helpers remain host/runtime bindings so compiler code can read from the surrounding environment without baking filesystem access into every target runtime. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
+The text and path helpers are emitted with default JavaScript behavior. The filesystem, environment, and time helpers remain host/runtime bindings so compiler code and native control-plane code can interact with the surrounding machine without baking host access into every target runtime. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
 
 ## Design Constraints
 

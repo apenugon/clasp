@@ -1614,6 +1614,21 @@ checkerTests =
                 assertEqual "loadSummary type" (TFunction [TStr] TStr) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected loadSummary declaration"
+    , testCase "typechecks native swarm kernel helpers" $
+        case checkSource "swarm-kernel" swarmKernelSource of
+          Left err ->
+            assertFailure ("expected swarm kernel source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
+            assertBool "expected envVar builtin" ("envVar" `elem` foreignNames)
+            assertBool "expected appendFile builtin" ("appendFile" `elem` foreignNames)
+            assertBool "expected mkdirAll builtin" ("mkdirAll" `elem` foreignNames)
+            assertBool "expected timeUnixMs builtin" ("timeUnixMs" `elem` foreignNames)
+            case find ((== "appendBootstrapEvent") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "appendBootstrapEvent type" (TFunction [TStr] (TNamed "Result")) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected appendBootstrapEvent declaration"
     , testCase "typechecks generic records, ADTs, and annotated functions" $
         case checkSource "generic" genericTypeSource of
           Left err ->
@@ -3810,6 +3825,32 @@ nativeTests =
                 assertEqual "readFile symbol" "clasp_rt_read_file" (nativeRuntimeBindingSymbol binding)
               Nothing ->
                 assertFailure "expected readFile runtime binding"
+    , testCase "native runtime exposes swarm kernel bindings" $
+        case nativeSource "swarm-kernel" swarmKernelSource of
+          Left err ->
+            assertFailure ("expected swarm kernel native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let runtime = nativeModuleRuntime nativeMod
+            case findRuntimeBinding "timeUnixMs" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "timeUnixMs symbol" "clasp_rt_time_unix_ms" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected timeUnixMs runtime binding"
+            case findRuntimeBinding "envVar" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "envVar symbol" "clasp_rt_env_var" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected envVar runtime binding"
+            case findRuntimeBinding "appendFile" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "appendFile symbol" "clasp_rt_append_file" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected appendFile runtime binding"
+            case findRuntimeBinding "mkdirAll" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "mkdirAll symbol" "clasp_rt_mkdir_all" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected mkdirAll runtime binding"
     , testCase "native lowering preserves list append as a dedicated intrinsic" $
         case nativeSource "list-append" listAppendSource of
           Left err ->
@@ -8700,6 +8741,38 @@ compilerStdlibSource =
     , ""
     , "main : Str"
     , "main = textJoin \" :: \" [pathDirname joinedPath, pathBasename joinedPath]"
+    ]
+
+swarmKernelSource :: Text
+swarmKernelSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SwarmEvent = { kind : Str, taskId : Str, actor : Str, detail : Str, atMs : Int }"
+    , ""
+    , "actorName : Str"
+    , "actorName = match envVar \"CLASP_SWARM_ACTOR\" {"
+    , "  Ok value -> value,"
+    , "  Err message -> \"manager\""
+    , "}"
+    , ""
+    , "bootstrapEvent : SwarmEvent"
+    , "bootstrapEvent = SwarmEvent {"
+    , "  kind = \"task_created\","
+    , "  taskId = \"bootstrap\","
+    , "  actor = actorName,"
+    , "  detail = \"Initialize swarm kernel state.\","
+    , "  atMs = timeUnixMs"
+    , "}"
+    , ""
+    , "appendBootstrapEvent : Str -> Result"
+    , "appendBootstrapEvent root = match mkdirAll root {"
+    , "  Ok created -> appendFile (pathJoin [root, \"events.jsonl\"]) (textConcat [encode bootstrapEvent, \"\\n\"]),"
+    , "  Err message -> Err message"
+    , "}"
+    , ""
+    , "main : Result"
+    , "main = appendBootstrapEvent \"swarm-state\""
     ]
 
 textCharsNativeSource :: Text

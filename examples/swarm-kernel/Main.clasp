@@ -1,0 +1,38 @@
+module Main
+
+record SwarmEvent = { kind : Str, taskId : Str, actor : Str, detail : Str, atMs : Int }
+
+swarmRoot : Str
+swarmRoot = if textJoin "" argv == "" then "swarm-state" else pathJoin argv
+
+eventLogPath : Str
+eventLogPath = pathJoin [swarmRoot, "events.jsonl"]
+
+actorName : Str
+actorName = match envVar "CLASP_SWARM_ACTOR" {
+  Ok value -> value,
+  Err message -> "manager"
+}
+
+bootstrapEvent : SwarmEvent
+bootstrapEvent = SwarmEvent {
+  kind = "task_created",
+  taskId = "bootstrap",
+  actor = actorName,
+  detail = "Initialize swarm kernel state.",
+  atMs = timeUnixMs
+}
+
+appendBootstrapEvent : Result
+appendBootstrapEvent = appendFile eventLogPath (textConcat [encode bootstrapEvent, "\n"])
+
+main : Str
+main = match mkdirAll swarmRoot {
+  Ok created ->
+    match appendBootstrapEvent {
+      Ok written -> written,
+      Err message -> message
+    },
+  Err message ->
+    message
+}

@@ -230,7 +230,7 @@ exprUsesBuiltinResultRuntime expr = match expr {
   HostedList values ->
     exprListUsesBuiltinResultRuntime values,
   HostedCall callee args ->
-    if callee == "textPrefix" then true else if callee == "textSplitFirst" then true else if callee == "readFile" then true else exprListUsesBuiltinResultRuntime args,
+    if callee == "textPrefix" then true else if callee == "textSplitFirst" then true else if callee == "readFile" then true else if callee == "writeFile" then true else if callee == "appendFile" then true else if callee == "mkdirAll" then true else if callee == "envVar" then true else exprListUsesBuiltinResultRuntime args,
   HostedConstructor constructorName args ->
     exprListUsesBuiltinResultRuntime args,
   HostedMatch subject branches ->
@@ -533,7 +533,7 @@ appendUniqueTextValues existing additions = {
 }
 
 builtinRuntimeBindingName : Str -> Bool
-builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "text" then true else if name == "element" then true else if name == "styled" then true else if name == "link" then true else if name == "form" then true else if name == "input" then true else if name == "submit" then true else if name == "systemPrompt" then true else if name == "assistantPrompt" then true else if name == "userPrompt" then true else if name == "appendPrompt" then true else if name == "promptText" then true else if name == "page" then true else if name == "redirect" then true else if name == "principal" then true else if name == "tenant" then true else if name == "resourceIdentity" then true else if name == "authSession" then true else if name == "argv" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "writeFile" then true else false
+builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "text" then true else if name == "element" then true else if name == "styled" then true else if name == "link" then true else if name == "form" then true else if name == "input" then true else if name == "submit" then true else if name == "systemPrompt" then true else if name == "assistantPrompt" then true else if name == "userPrompt" then true else if name == "appendPrompt" then true else if name == "promptText" then true else if name == "page" then true else if name == "redirect" then true else if name == "principal" then true else if name == "tenant" then true else if name == "resourceIdentity" then true else if name == "authSession" then true else if name == "argv" then true else if name == "timeUnixMs" then true else if name == "envVar" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "writeFile" then true else if name == "appendFile" then true else if name == "mkdirAll" then true else false
 
 collectRuntimeBindingNamesFromExprList : [HostedExprAst] -> [Str]
 collectRuntimeBindingNamesFromExprList exprs = {
@@ -723,10 +723,10 @@ emitRuntimeBindingImage name runtimeName bindingType =
   ]
 
 emitBuiltinRuntimeBindingImage : Str -> Str
-emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result" else if name == "text" then emitRuntimeBindingImage "text" "viewText" "Str -> View" else if name == "element" then emitRuntimeBindingImage "element" "viewElement" "Str -> View -> View" else if name == "styled" then emitRuntimeBindingImage "styled" "viewStyled" "Str -> View -> View" else if name == "link" then emitRuntimeBindingImage "link" "viewLink" "Str -> View -> View" else if name == "form" then emitRuntimeBindingImage "form" "viewForm" "Str -> Str -> View -> View" else if name == "input" then emitRuntimeBindingImage "input" "viewInput" "Str -> Str -> Str -> View" else if name == "submit" then emitRuntimeBindingImage "submit" "viewSubmit" "Str -> View" else if name == "systemPrompt" then emitRuntimeBindingImage "systemPrompt" "systemPrompt" "Str -> Prompt" else if name == "assistantPrompt" then emitRuntimeBindingImage "assistantPrompt" "assistantPrompt" "Str -> Prompt" else if name == "userPrompt" then emitRuntimeBindingImage "userPrompt" "userPrompt" "Str -> Prompt" else if name == "appendPrompt" then emitRuntimeBindingImage "appendPrompt" "appendPrompt" "Prompt -> Prompt -> Prompt" else if name == "promptText" then emitRuntimeBindingImage "promptText" "promptText" "Prompt -> Str" else if name == "page" then emitRuntimeBindingImage "page" "page" "Str -> View -> Page" else if name == "redirect" then emitRuntimeBindingImage "redirect" "redirect" "Str -> Redirect" else if name == "principal" then emitRuntimeBindingImage "principal" "principal" "Str -> Principal" else if name == "tenant" then emitRuntimeBindingImage "tenant" "tenant" "Str -> Tenant" else if name == "resourceIdentity" then emitRuntimeBindingImage "resourceIdentity" "resourceIdentity" "Str -> Str -> ResourceIdentity" else if name == "authSession" then emitRuntimeBindingImage "authSession" "authSession" "Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession" else if name == "argv" then emitRuntimeBindingImage "argv" "argv" "[Str]" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result" else if name == "writeFile" then emitRuntimeBindingImage "writeFile" "writeFile" "Str -> Str -> Result" else jsonObject []
+emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result" else if name == "text" then emitRuntimeBindingImage "text" "viewText" "Str -> View" else if name == "element" then emitRuntimeBindingImage "element" "viewElement" "Str -> View -> View" else if name == "styled" then emitRuntimeBindingImage "styled" "viewStyled" "Str -> View -> View" else if name == "link" then emitRuntimeBindingImage "link" "viewLink" "Str -> View -> View" else if name == "form" then emitRuntimeBindingImage "form" "viewForm" "Str -> Str -> View -> View" else if name == "input" then emitRuntimeBindingImage "input" "viewInput" "Str -> Str -> Str -> View" else if name == "submit" then emitRuntimeBindingImage "submit" "viewSubmit" "Str -> View" else if name == "systemPrompt" then emitRuntimeBindingImage "systemPrompt" "systemPrompt" "Str -> Prompt" else if name == "assistantPrompt" then emitRuntimeBindingImage "assistantPrompt" "assistantPrompt" "Str -> Prompt" else if name == "userPrompt" then emitRuntimeBindingImage "userPrompt" "userPrompt" "Str -> Prompt" else if name == "appendPrompt" then emitRuntimeBindingImage "appendPrompt" "appendPrompt" "Prompt -> Prompt -> Prompt" else if name == "promptText" then emitRuntimeBindingImage "promptText" "promptText" "Prompt -> Str" else if name == "page" then emitRuntimeBindingImage "page" "page" "Str -> View -> Page" else if name == "redirect" then emitRuntimeBindingImage "redirect" "redirect" "Str -> Redirect" else if name == "principal" then emitRuntimeBindingImage "principal" "principal" "Str -> Principal" else if name == "tenant" then emitRuntimeBindingImage "tenant" "tenant" "Str -> Tenant" else if name == "resourceIdentity" then emitRuntimeBindingImage "resourceIdentity" "resourceIdentity" "Str -> Str -> ResourceIdentity" else if name == "authSession" then emitRuntimeBindingImage "authSession" "authSession" "Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession" else if name == "argv" then emitRuntimeBindingImage "argv" "argv" "[Str]" else if name == "timeUnixMs" then emitRuntimeBindingImage "timeUnixMs" "timeUnixMs" "Int" else if name == "envVar" then emitRuntimeBindingImage "envVar" "envVar" "Str -> Result" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result" else if name == "writeFile" then emitRuntimeBindingImage "writeFile" "writeFile" "Str -> Str -> Result" else if name == "appendFile" then emitRuntimeBindingImage "appendFile" "appendFile" "Str -> Str -> Result" else if name == "mkdirAll" then emitRuntimeBindingImage "mkdirAll" "mkdirAll" "Str -> Result" else jsonObject []
 
 emitBuiltinRuntimeBindingText : Str -> Str
-emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "systemPrompt" then "systemPrompt{runtime=systemPrompt, symbol=clasp_rt_system_prompt, type=Str -> Prompt}" else if name == "assistantPrompt" then "assistantPrompt{runtime=assistantPrompt, symbol=clasp_rt_assistant_prompt, type=Str -> Prompt}" else if name == "userPrompt" then "userPrompt{runtime=userPrompt, symbol=clasp_rt_user_prompt, type=Str -> Prompt}" else if name == "appendPrompt" then "appendPrompt{runtime=appendPrompt, symbol=clasp_rt_append_prompt, type=Prompt -> Prompt -> Prompt}" else if name == "promptText" then "promptText{runtime=promptText, symbol=clasp_rt_prompt_text, type=Prompt -> Str}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "principal" then "principal{runtime=principal, symbol=clasp_rt_principal, type=Str -> Principal}" else if name == "tenant" then "tenant{runtime=tenant, symbol=clasp_rt_tenant, type=Str -> Tenant}" else if name == "resourceIdentity" then "resourceIdentity{runtime=resourceIdentity, symbol=clasp_rt_resource_identity, type=Str -> Str -> ResourceIdentity}" else if name == "authSession" then "authSession{runtime=authSession, symbol=clasp_rt_auth_session, type=Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result}" else ""
+emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "systemPrompt" then "systemPrompt{runtime=systemPrompt, symbol=clasp_rt_system_prompt, type=Str -> Prompt}" else if name == "assistantPrompt" then "assistantPrompt{runtime=assistantPrompt, symbol=clasp_rt_assistant_prompt, type=Str -> Prompt}" else if name == "userPrompt" then "userPrompt{runtime=userPrompt, symbol=clasp_rt_user_prompt, type=Str -> Prompt}" else if name == "appendPrompt" then "appendPrompt{runtime=appendPrompt, symbol=clasp_rt_append_prompt, type=Prompt -> Prompt -> Prompt}" else if name == "promptText" then "promptText{runtime=promptText, symbol=clasp_rt_prompt_text, type=Prompt -> Str}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "principal" then "principal{runtime=principal, symbol=clasp_rt_principal, type=Str -> Principal}" else if name == "tenant" then "tenant{runtime=tenant, symbol=clasp_rt_tenant, type=Str -> Tenant}" else if name == "resourceIdentity" then "resourceIdentity{runtime=resourceIdentity, symbol=clasp_rt_resource_identity, type=Str -> Str -> ResourceIdentity}" else if name == "authSession" then "authSession{runtime=authSession, symbol=clasp_rt_auth_session, type=Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "timeUnixMs" then "timeUnixMs{runtime=timeUnixMs, symbol=clasp_rt_time_unix_ms, type=Int}" else if name == "envVar" then "envVar{runtime=envVar, symbol=clasp_rt_env_var, type=Str -> Result}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result}" else if name == "appendFile" then "appendFile{runtime=appendFile, symbol=clasp_rt_append_file, type=Str -> Str -> Result}" else if name == "mkdirAll" then "mkdirAll{runtime=mkdirAll, symbol=clasp_rt_mkdir_all, type=Str -> Result}" else ""
 
 emitNativeRuntimeBindingImage : HostedForeignDeclAst -> Str
 emitNativeRuntimeBindingImage foreignDecl =
@@ -739,7 +739,7 @@ emitNativeRuntimeBindingText foreignDecl =
 emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingImages bindingNames = {
   let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile"] {
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingImage builtinName);
       rendered
@@ -753,7 +753,7 @@ emitNativeBuiltinRuntimeBindingImages bindingNames = {
 emitNativeBuiltinRuntimeBindingTexts : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingTexts bindingNames = {
   let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile"] {
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingText builtinName);
       rendered
@@ -1756,8 +1756,9 @@ emitHostedVariantObjectLayoutImages modl = {
 emitNativeCompatibilitySurfaceImage : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeCompatibilitySurfaceImage modl decls = {
   let moduleName = moduleNameOf modl;
-  let exports = collectNativeExportNames modl decls;
-  let entrypoints = append (emitNativeConstructorEntrypointJsons moduleName modl) (emitNativeEntrypointJsons moduleName decls);
+  let ignored = decls;
+  let exports = collectNativeExportNamesFromModule modl;
+  let entrypoints = append (emitNativeConstructorEntrypointJsons moduleName modl) (emitNativeEntrypointJsonsFromModule moduleName modl);
   jsonObject [
     jsonFieldText "module" moduleName,
     jsonFieldArray "exports" (emitNativeJsonStringList exports),
@@ -1852,8 +1853,31 @@ emitNativeConstructorEntrypoints moduleName modl = {
   rendered
 }
 
-collectNativeExportNames : HostedModuleAst -> [LowerDeclText] -> [Str]
-collectNativeExportNames modl decls = {
+hostedDeclName : HostedDeclAst -> Str
+hostedDeclName decl = declName decl
+
+hostedDeclArity : HostedDeclAst -> Str
+hostedDeclArity decl = renderNativeArity (declParams decl)
+
+emitNativeEntrypointJsonFromDeclAst : Str -> HostedDeclAst -> Str
+emitNativeEntrypointJsonFromDeclAst moduleName decl =
+  if hasLowerParams decl then
+    jsonObject [jsonFieldText "name" (declName decl), jsonFieldText "symbol" (nativeEntrypointSymbol moduleName (declName decl)), jsonFieldText "kind" "function", jsonFieldRaw "arity" (hostedDeclArity decl)]
+  else
+    jsonObject [jsonFieldText "name" (declName decl), jsonFieldText "symbol" (nativeEntrypointSymbol moduleName (declName decl)), jsonFieldText "kind" "global", jsonFieldRaw "arity" "0"]
+
+emitNativeEntrypointJsonsFromModule : Str -> HostedModuleAst -> [Str]
+emitNativeEntrypointJsonsFromModule moduleName modl = {
+  let mut rendered = [];
+  for decl in moduleDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitNativeEntrypointJsonFromDeclAst moduleName decl);
+    rendered
+  };
+  rendered
+}
+
+collectNativeExportNamesFromModule : HostedModuleAst -> [Str]
+collectNativeExportNamesFromModule modl = {
   let mut names = [];
   for typeDecl in nativeEmittedTypeDecls modl {
     for constructorDecl in typeDeclConstructors typeDecl {
@@ -1862,11 +1886,17 @@ collectNativeExportNames modl decls = {
     };
     names
   };
-  for decl in decls {
-    names = appendNativeRenderedText names (nativeDeclName decl);
+  for decl in moduleDeclarations modl {
+    names = appendNativeRenderedText names (hostedDeclName decl);
     names
   };
   names
+}
+
+collectNativeExportNames : HostedModuleAst -> [LowerDeclText] -> [Str]
+collectNativeExportNames modl decls = {
+  let ignored = decls;
+  collectNativeExportNamesFromModule modl
 }
 
 nativeDeclName : LowerDeclText -> Str
@@ -2409,21 +2439,73 @@ emitNativeCompatibilityImage modl decls = {
   ]
 }
 
+emitNativeModuleImageModuleName : HostedModuleAst -> Str
+emitNativeModuleImageModuleName modl = moduleNameOf modl
+
+emitNativeModuleImageExports : HostedModuleAst -> [LowerDeclText] -> Str
+emitNativeModuleImageExports modl decls = {
+  let ignored = decls;
+  jsonArray (emitNativeJsonStringList (collectNativeExportNamesFromModule modl))
+}
+
+emitNativeModuleImageEntrypoints : HostedModuleAst -> [LowerDeclText] -> Str
+emitNativeModuleImageEntrypoints modl decls = {
+  let ignored = decls;
+  let moduleName = moduleNameOf modl;
+  jsonArray (append (emitNativeConstructorEntrypointJsons moduleName modl) (emitNativeEntrypointJsonsFromModule moduleName modl))
+}
+
+emitNativeModuleImageDecls : HostedModuleAst -> [LowerDeclText] -> Str
+emitNativeModuleImageDecls modl decls =
+  jsonArray (append (emitNativeConstructorDeclJsons modl) (emitNativeDeclJsons decls))
+
+emitNativeModuleImageConstructorDecls : HostedModuleAst -> Str
+emitNativeModuleImageConstructorDecls modl = jsonArray (emitNativeConstructorDeclJsons modl)
+
+collectHostedDeclNames : HostedModuleAst -> [Str]
+collectHostedDeclNames modl = {
+  let mut names = [];
+  for decl in moduleDeclarations modl {
+    names = appendNativeRenderedText names (declName decl);
+    names
+  };
+  names
+}
+
+emitNativeModuleImageDeclNames : HostedModuleAst -> Str
+emitNativeModuleImageDeclNames modl = textJoin "\n" (collectHostedDeclNames modl)
+
+emitNativeDeclJsonsForNamedDecls : HostedModuleAst -> [Str] -> [Str]
+emitNativeDeclJsonsForNamedDecls modl selectedNames = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = effectiveModuleRecordDecls modl;
+  let env = lowerModuleEnv modl typeDecls;
+  let mut rendered = [];
+  for decl in moduleDeclarations modl {
+    if containsText selectedNames (declName decl) then {
+      rendered = appendNativeRenderedText rendered (emitNativeDeclJson (lowerDecl typeDecls recordDecls env decl));
+      rendered
+    } else {
+      rendered
+    }
+  };
+  rendered
+}
+
+emitNativeModuleImageNamedDecls : HostedModuleAst -> [Str] -> Str
+emitNativeModuleImageNamedDecls modl selectedNames = jsonArray (emitNativeDeclJsonsForNamedDecls modl selectedNames)
+
 emitNativeModuleImage : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeModuleImage modl decls = {
-  let moduleName = moduleNameOf modl;
-  let exports = collectNativeExportNames modl decls;
-  let entrypoints = append (emitNativeConstructorEntrypointJsons moduleName modl) (emitNativeEntrypointJsons moduleName decls);
-  let declsJson = append (emitNativeConstructorDeclJsons modl) (emitNativeDeclJsons decls);
   jsonObject [
     jsonFieldText "format" "clasp-native-image-v1",
     jsonFieldText "irFormat" "clasp-native-ir-v1",
-    jsonFieldText "module" moduleName,
-    jsonFieldArray "exports" (emitNativeJsonStringList exports),
-    jsonFieldArray "entrypoints" entrypoints,
+    jsonFieldText "module" (emitNativeModuleImageModuleName modl),
+    jsonFieldRaw "exports" (emitNativeModuleImageExports modl decls),
+    jsonFieldRaw "entrypoints" (emitNativeModuleImageEntrypoints modl decls),
     jsonFieldRaw "abi" (emitNativeAbiImage modl),
     jsonFieldRaw "runtime" (emitNativeRuntimeImage modl),
     jsonFieldRaw "compatibility" (emitNativeCompatibilityImage modl decls),
-    jsonFieldArray "decls" declsJson
+    jsonFieldRaw "decls" (emitNativeModuleImageDecls modl decls)
   ]
 }

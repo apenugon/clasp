@@ -293,7 +293,11 @@ ClaspRtString *clasp_rt_path_join(ClaspRtStringList *parts);
 ClaspRtString *clasp_rt_path_dirname(ClaspRtString *path);
 ClaspRtString *clasp_rt_path_basename(ClaspRtString *path);
 bool clasp_rt_file_exists(ClaspRtString *path);
+ClaspRtHeader *clasp_rt_time_unix_ms(void);
+ClaspRtResultString *clasp_rt_env_var(ClaspRtString *name);
 ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path);
 ClaspRtResultString *clasp_rt_write_file(ClaspRtString *path, ClaspRtString *contents);
+ClaspRtResultString *clasp_rt_append_file(ClaspRtString *path, ClaspRtString *contents);
+ClaspRtResultString *clasp_rt_mkdir_all(ClaspRtString *path);
 
 #endif

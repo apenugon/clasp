@@ -2,12 +2,13 @@ use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::{c_char, CStr};
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::mem::{align_of, size_of};
 use std::ptr::{self, null_mut, NonNull};
 use std::slice;
 use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLASP_RT_LAYOUT_STRING: u32 = 1;
 const CLASP_RT_LAYOUT_BYTES: u32 = 2;
@@ -1953,6 +1954,8 @@ fn interpret_runtime_binding(
             )
         },
         ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
+        ("timeUnixMs", 0) => unsafe { clasp_rt_time_unix_ms() },
+        ("envVar", 1) => unsafe { clasp_rt_env_var(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("pathJoin", 1) => unsafe {
             list_like_string_items(args[0])
                 .map(|parts| build_runtime_string(&join_string_bytes(&parts, b"/")) as *mut ClaspRtHeader)
@@ -1960,6 +1963,8 @@ fn interpret_runtime_binding(
         },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("mockLeadSummaryModel", 1) => unsafe { interpret_mock_lead_summary_model_binding(args[0]) },
         ("mockLeadOutreachModel", 1) => unsafe { interpret_mock_lead_outreach_model_binding(args[0]) },
@@ -5179,6 +5184,14 @@ pub unsafe extern "C" fn clasp_rt_argv() -> *mut ClaspRtStringList {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_time_unix_ms() -> *mut ClaspRtHeader {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => clasp_rt_build_int_header(duration.as_millis() as i64),
+        Err(_) => clasp_rt_build_int_header(0),
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_view_text(value: *mut ClaspRtString) -> *mut ClaspRtHeader {
     if value.is_null() {
         return null_mut();
@@ -5691,9 +5704,45 @@ pub unsafe extern "C" fn clasp_rt_write_file(
     contents: *mut ClaspRtString,
 ) -> *mut ClaspRtResultString {
     let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
-    match std::fs::write(&path_string, string_bytes(contents)) {
+    match fs::write(&path_string, string_bytes(contents)) {
         Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
         Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_append_file(
+    path: *mut ClaspRtString,
+    contents: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    let mut file = match OpenOptions::new().create(true).append(true).open(&path_string) {
+        Ok(file) => file,
+        Err(_) => return clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    };
+
+    match file.write_all(string_bytes(contents)) {
+        Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
+        Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_mkdir_all(path: *mut ClaspRtString) -> *mut ClaspRtResultString {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    match fs::create_dir_all(&path_string) {
+        Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
+        Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_env_var(name: *mut ClaspRtString) -> *mut ClaspRtResultString {
+    let name_string = String::from_utf8_lossy(string_bytes(name)).into_owned();
+    match env::var(&name_string) {
+        Ok(value) => clasp_rt_result_ok_string(build_runtime_string(value.as_bytes())),
+        Err(env::VarError::NotPresent) => clasp_rt_result_err_string(build_runtime_string(b"missing")),
+        Err(env::VarError::NotUnicode(_)) => clasp_rt_result_err_string(build_runtime_string(b"invalid")),
     }
 }
 

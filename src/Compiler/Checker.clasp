@@ -1271,8 +1271,20 @@ readFileBuiltinType = TFunction TStr (TNamed resultBuiltinTypeName)
 argvBuiltinType : TypeText
 argvBuiltinType = TList TStr
 
+timeUnixMsBuiltinType : TypeText
+timeUnixMsBuiltinType = TInt
+
+envVarBuiltinType : TypeText
+envVarBuiltinType = TFunction TStr (TNamed resultBuiltinTypeName)
+
 writeFileBuiltinType : TypeText
 writeFileBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinTypeName))
+
+appendFileBuiltinType : TypeText
+appendFileBuiltinType = TFunction TStr (TFunction TStr (TNamed resultBuiltinTypeName))
+
+mkdirAllBuiltinType : TypeText
+mkdirAllBuiltinType = TFunction TStr (TNamed resultBuiltinTypeName)
 
 builtinResultTypeDecl : HostedTypeDeclAst
 builtinResultTypeDecl = hostedTypeDeclAst resultBuiltinTypeName [hostedConstructorDeclAst resultOkConstructorName [HostedTypeName "Str"], hostedConstructorDeclAst resultErrConstructorName [HostedTypeName "Str"]]
@@ -1326,7 +1338,7 @@ authSessionBuiltinType =
   TFunction TStr (TFunction (TNamed "Principal") (TFunction (TNamed "Tenant") (TFunction (TNamed "ResourceIdentity") (TNamed "AuthSession"))))
 
 baseEnv : [TypeBinding]
-baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "writeFile" writeFileBuiltinType]
+baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "timeUnixMs" timeUnixMsBuiltinType, TypeBinding "envVar" envVarBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "writeFile" writeFileBuiltinType, TypeBinding "appendFile" appendFileBuiltinType, TypeBinding "mkdirAll" mkdirAllBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {

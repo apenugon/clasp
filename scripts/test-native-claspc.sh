@@ -33,6 +33,15 @@ cli_project_dir="$test_root/cli-project"
 cli_project_path="$cli_project_dir/Main.clasp"
 cli_binary="$test_root/cli-app"
 cli_output_path="$test_root/argv.txt"
+imported_cli_project_dir="$test_root/imported-cli-project"
+imported_cli_project_path="$imported_cli_project_dir/Main.clasp"
+imported_cli_binary="$test_root/imported-cli-app"
+imported_cli_output_path="$test_root/imported-output.txt"
+imported_cli_serial_image="$test_root/imported-cli-serial.native.image.json"
+imported_cli_parallel_image="$test_root/imported-cli-parallel.native.image.json"
+swarm_kernel_binary="$test_root/swarm-kernel"
+swarm_state_root="$test_root/swarm/state"
+swarm_event_log="$swarm_state_root/events.jsonl"
 support_console_binary="$test_root/support-console-app"
 release_gate_binary="$test_root/release-gate-app"
 lead_app_binary="$test_root/lead-app"
@@ -80,6 +89,36 @@ main = match writeFile "$(printf '%s' "$cli_output_path")" argsText {
   Ok written -> argsText,
   Err message -> message
 }
+EOF
+
+mkdir -p "$imported_cli_project_dir/Shared"
+cat >"$imported_cli_project_path" <<EOF
+module Main
+import Shared.User
+import Shared.Render
+
+main : Str
+main = match writeFile "$(printf '%s' "$imported_cli_output_path")" (renderUser primaryUser) {
+  Ok written -> renderUser primaryUser,
+  Err message -> message
+}
+EOF
+
+cat >"$imported_cli_project_dir/Shared/User.clasp" <<'EOF'
+module Shared.User
+
+record User = { name : Str, role : Str }
+
+primaryUser : User
+primaryUser = User { name = "Ada", role = "planner" }
+EOF
+
+cat >"$imported_cli_project_dir/Shared/Render.clasp" <<'EOF'
+module Shared.Render
+import Shared.User
+
+renderUser : User -> Str
+renderUser user = textJoin ":" [user.name, user.role]
 EOF
 
 (
@@ -153,6 +192,25 @@ env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$cli_project_path" -o
 [[ -x "$cli_binary" ]]
 "$cli_binary" alpha beta | grep -F 'alpha,beta' >/dev/null
 grep -F 'alpha,beta' "$cli_output_path" >/dev/null
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$imported_cli_project_path" -o "$imported_cli_binary"
+[[ -x "$imported_cli_binary" ]]
+"$imported_cli_binary" | grep -F 'Ada:planner' >/dev/null
+grep -F 'Ada:planner' "$imported_cli_output_path" >/dev/null
+CLASP_NATIVE_BUNDLE_JOBS=1 CLASP_NATIVE_IMAGE_SECTION_JOBS=1 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_serial_image"
+CLASP_NATIVE_BUNDLE_JOBS=4 CLASP_NATIVE_IMAGE_SECTION_JOBS=4 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_parallel_image"
+cmp -s "$imported_cli_serial_image" "$imported_cli_parallel_image"
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-kernel/Main.clasp" -o "$swarm_kernel_binary"
+[[ -x "$swarm_kernel_binary" ]]
+swarm_result_path="$(CLASP_SWARM_ACTOR=planner "$swarm_kernel_binary" "$swarm_state_root")"
+[[ "$swarm_result_path" == "$swarm_event_log" ]]
+[[ -f "$swarm_event_log" ]]
+grep -F '"kind":"task_created"' "$swarm_event_log" >/dev/null
+grep -F '"taskId":"bootstrap"' "$swarm_event_log" >/dev/null
+grep -F '"actor":"planner"' "$swarm_event_log" >/dev/null
+grep -F '"detail":"Initialize swarm kernel state."' "$swarm_event_log" >/dev/null
+grep -E '"atMs":[0-9]+' "$swarm_event_log" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/support-console/Main.clasp" -o "$support_console_binary"
 [[ -x "$support_console_binary" ]]

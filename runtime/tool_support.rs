@@ -1,9 +1,12 @@
+use std::collections::{HashMap, HashSet};
+use std::env;
 use std::ffi::CString;
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::slice;
+use std::thread;
 
 use clasp_runtime::{
     clasp_rt_activate_native_module_image, clasp_rt_call_native_dispatch, clasp_rt_call_native_route_json,
@@ -32,13 +35,24 @@ const BACKEND_DECLARATION_KEYWORDS: &[&str] = &[
 
 const NATIVE_RUNTIME_ONLY_SYMBOLS: &[&str] = &[
     "argv",
+    "timeUnixMs",
+    "envVar",
     "writeFile",
+    "appendFile",
+    "mkdirAll",
     "readFile",
     "fileExists",
     "pathJoin",
     "pathDirname",
     "pathBasename",
 ];
+
+#[derive(Clone)]
+struct ProjectModuleInfo {
+    canonical_path: PathBuf,
+    bundled_source: String,
+    import_paths: Vec<PathBuf>,
+}
 
 unsafe fn string_bytes(value: *mut ClaspRtString) -> &'static [u8] {
     if value.is_null() || (*value).byte_length == 0 || (*value).bytes.is_null() {
@@ -161,42 +175,150 @@ fn module_import_path(root: &Path, import_name: &str) -> PathBuf {
     root.join(relative).with_extension("clasp")
 }
 
-fn push_project_module(
-    root: &Path,
-    path: &Path,
-    seen: &mut Vec<PathBuf>,
-    bundled_sources: &mut Vec<String>,
-) -> Result<(), String> {
-    let canonical_path = fs::canonicalize(path)
-        .map_err(|err| format!("failed to resolve project module `{}`: {err}", path.display()))?;
-    if seen.iter().any(|existing| existing == &canonical_path) {
-        return Ok(());
-    }
+fn default_bundle_jobs() -> usize {
+    env::var("CLASP_NATIVE_BUNDLE_JOBS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(|value| value.get())
+                .unwrap_or(4)
+                .min(8)
+        })
+}
 
+fn load_project_module(root: &Path, path: PathBuf) -> Result<ProjectModuleInfo, String> {
+    let canonical_path = fs::canonicalize(&path)
+        .map_err(|err| format!("failed to resolve project module `{}`: {err}", path.display()))?;
     let source = fs::read_to_string(&canonical_path)
         .map_err(|err| format!("failed to read project module `{}`: {err}", canonical_path.display()))?;
     let bundled_source = augment_source_with_hosted_metadata(&canonical_path, &source)?;
-    seen.push(canonical_path);
-    bundled_sources.push(bundled_source);
+    let import_paths = parse_imports(&source)
+        .into_iter()
+        .map(|import_name| {
+            let import_path = module_import_path(root, &import_name);
+            fs::canonicalize(&import_path).map_err(|err| {
+                format!(
+                    "failed to resolve imported module `{}` from `{}`: {err}",
+                    import_name,
+                    canonical_path.display()
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ProjectModuleInfo {
+        canonical_path,
+        bundled_source,
+        import_paths,
+    })
+}
 
-    for import_name in parse_imports(&source) {
-        let import_path = module_import_path(root, &import_name);
-        push_project_module(root, &import_path, seen, bundled_sources)?;
+fn load_project_module_wave(
+    root: &Path,
+    pending: &[PathBuf],
+    max_jobs: usize,
+) -> Result<Vec<ProjectModuleInfo>, String> {
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if max_jobs <= 1 || pending.len() == 1 {
+        return pending
+            .iter()
+            .cloned()
+            .map(|path| load_project_module(root, path))
+            .collect();
+    }
+
+    let mut infos = Vec::new();
+    for chunk in pending.chunks(max_jobs) {
+        let mut handles = Vec::new();
+        for path in chunk {
+            let worker_root = root.to_path_buf();
+            let worker_path = path.clone();
+            handles.push(thread::spawn(move || load_project_module(&worker_root, worker_path)));
+        }
+        for handle in handles {
+            let info = handle
+                .join()
+                .map_err(|_| "parallel project module worker panicked".to_owned())??;
+            infos.push(info);
+        }
+    }
+    Ok(infos)
+}
+
+fn append_project_bundle_module(
+    module_path: &Path,
+    module_infos: &HashMap<PathBuf, ProjectModuleInfo>,
+    seen: &mut HashSet<PathBuf>,
+    bundled_sources: &mut Vec<String>,
+) -> Result<(), String> {
+    let canonical_path = module_path.to_path_buf();
+    if seen.contains(&canonical_path) {
+        return Ok(());
+    }
+
+    let Some(info) = module_infos.get(&canonical_path) else {
+        return Err(format!(
+            "internal error: missing bundled project module `{}`",
+            canonical_path.display()
+        ));
+    };
+
+    seen.insert(canonical_path.clone());
+    bundled_sources.push(info.bundled_source.clone());
+    for import_path in &info.import_paths {
+        append_project_bundle_module(import_path, module_infos, seen, bundled_sources)?;
     }
 
     Ok(())
 }
 
-pub fn build_project_bundle(entry_path: &str) -> Result<String, String> {
+fn build_project_bundle_with_jobs(entry_path: &str, max_jobs: usize) -> Result<String, String> {
     let entry = PathBuf::from(entry_path);
     let root = entry
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let mut seen = Vec::new();
-    let mut bundled_sources = Vec::new();
-    push_project_module(&root, &entry, &mut seen, &mut bundled_sources)?;
-    Ok(bundled_sources.join(PROJECT_BUNDLE_SEPARATOR))
+    let mut module_infos = HashMap::new();
+    let mut discovered = HashSet::new();
+    let mut pending = vec![entry.clone()];
+
+    while !pending.is_empty() {
+        let infos = load_project_module_wave(&root, &pending, max_jobs)?;
+        let mut next_pending = Vec::new();
+
+        for info in infos {
+            let canonical_path = info.canonical_path.clone();
+            discovered.insert(canonical_path.clone());
+            for import_path in &info.import_paths {
+                if discovered.contains(import_path)
+                    || module_infos.contains_key(import_path)
+                    || next_pending.iter().any(|candidate| candidate == import_path)
+                {
+                    continue;
+                }
+                next_pending.push(import_path.clone());
+            }
+            module_infos.insert(canonical_path, info);
+        }
+
+        next_pending.sort();
+        pending = next_pending;
+    }
+
+    let entry_canonical = fs::canonicalize(&entry)
+        .map_err(|err| format!("failed to resolve project entry module `{}`: {err}", entry.display()))?;
+    let mut ordered_sources = Vec::new();
+    let mut seen = HashSet::new();
+    append_project_bundle_module(&entry_canonical, &module_infos, &mut seen, &mut ordered_sources)?;
+    Ok(ordered_sources.join(PROJECT_BUNDLE_SEPARATOR))
+}
+
+pub fn build_project_bundle(entry_path: &str) -> Result<String, String> {
+    build_project_bundle_with_jobs(entry_path, default_bundle_jobs())
 }
 
 pub fn project_declares_backend_surface(source: &str) -> bool {
@@ -218,6 +340,18 @@ pub unsafe fn execute_native_export_from_image_path(
     export_name: &str,
     source_text: Option<&str>,
 ) -> Result<Vec<u8>, String> {
+    let source_args = match source_text {
+        Some(value) => vec![value.to_owned()],
+        None => Vec::new(),
+    };
+    execute_native_export_from_image_path_args(image_path_text, export_name, &source_args)
+}
+
+pub unsafe fn execute_native_export_from_image_path_args(
+    image_path_text: &str,
+    export_name: &str,
+    source_args: &[String],
+) -> Result<Vec<u8>, String> {
     let mut runtime: ClaspRtRuntime = mem::zeroed();
     let mut image_path: *mut ClaspRtString = null_mut();
     let mut image_read_result: *mut ClaspRtResultString = null_mut();
@@ -226,9 +360,8 @@ pub unsafe fn execute_native_export_from_image_path(
     let mut loaded_image: *mut ClaspRtNativeModuleImage = null_mut();
     let mut module_name: *mut ClaspRtString = null_mut();
     let mut target_export: *mut ClaspRtString = null_mut();
-    let mut owned_dispatch_arg: *mut ClaspRtHeader = null_mut();
-    let mut dispatch_args: [*mut ClaspRtHeader; 1] = [null_mut()];
-    let mut dispatch_arg_count = 0usize;
+    let mut dispatch_arg_cstrings: Vec<CString> = Vec::new();
+    let mut owned_dispatch_args: Vec<*mut ClaspRtHeader> = Vec::new();
     let mut dispatch_value: *mut ClaspRtHeader = null_mut();
 
     clasp_rt_init(&mut runtime);
@@ -268,25 +401,25 @@ pub unsafe fn execute_native_export_from_image_path(
             CString::new(export_name).map_err(|_| "export name contains interior NUL byte".to_owned())?;
         target_export = clasp_rt_string_from_utf8(export_c.as_ptr());
 
-        if let Some(source_text) = source_text {
+        for source_text in source_args {
             let source_text_c =
-                CString::new(source_text).map_err(|_| "source input contains interior NUL byte".to_owned())?;
-            owned_dispatch_arg = clasp_rt_string_from_utf8(source_text_c.as_ptr()) as *mut ClaspRtHeader;
-            dispatch_args[0] = owned_dispatch_arg;
-            dispatch_arg_count = 1;
+                CString::new(source_text.as_str()).map_err(|_| "source input contains interior NUL byte".to_owned())?;
+            let dispatch_arg = clasp_rt_string_from_utf8(source_text_c.as_ptr()) as *mut ClaspRtHeader;
+            dispatch_arg_cstrings.push(source_text_c);
+            owned_dispatch_args.push(dispatch_arg);
         }
 
-        let args_ptr = if dispatch_arg_count == 0 {
+        let args_ptr = if owned_dispatch_args.is_empty() {
             null_mut()
         } else {
-            dispatch_args.as_mut_ptr()
+            owned_dispatch_args.as_mut_ptr()
         };
         dispatch_value = clasp_rt_call_native_dispatch(
             &mut runtime,
             module_name,
             target_export,
             args_ptr,
-            dispatch_arg_count,
+            owned_dispatch_args.len(),
         );
         if dispatch_value.is_null() {
             return Err("runtime failed to execute native compiler export".to_owned());
@@ -296,7 +429,9 @@ pub unsafe fn execute_native_export_from_image_path(
     })();
 
     release(&mut runtime, dispatch_value);
-    release(&mut runtime, owned_dispatch_arg);
+    for dispatch_arg in owned_dispatch_args {
+        release(&mut runtime, dispatch_arg);
+    }
     release(&mut runtime, target_export as *mut ClaspRtHeader);
     clasp_rt_native_module_image_free(&mut runtime, loaded_image);
     release(&mut runtime, module_name as *mut ClaspRtHeader);
@@ -476,4 +611,84 @@ pub unsafe fn execute_native_route_from_image_text(
     clasp_rt_shutdown(&mut runtime);
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_project_bundle_with_jobs, PROJECT_BUNDLE_SEPARATOR};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("clasp-tool-support-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn build_project_bundle_preserves_import_preorder() {
+        let root = unique_test_root("bundle-order");
+        fs::create_dir_all(root.join("Shared/Nested")).expect("create test module tree");
+        fs::write(
+            root.join("Main.clasp"),
+            "module Main\nimport Shared.User\nimport Shared.Note\nmain : Str\nmain = greeting\n",
+        )
+        .expect("write Main");
+        fs::write(
+            root.join("Shared/User.clasp"),
+            "module Shared.User\nimport Shared.Nested.Helper\ngreeting : Str\ngreeting = helper\n",
+        )
+        .expect("write Shared.User");
+        fs::write(
+            root.join("Shared/Nested/Helper.clasp"),
+            "module Shared.Nested.Helper\nhelper : Str\nhelper = \"ok\"\n",
+        )
+        .expect("write Shared.Nested.Helper");
+        fs::write(
+            root.join("Shared/Note.clasp"),
+            "module Shared.Note\nnote : Str\nnote = \"note\"\n",
+        )
+        .expect("write Shared.Note");
+
+        let bundle =
+            build_project_bundle_with_jobs(root.join("Main.clasp").to_str().expect("utf8 path"), 4).expect("build bundle");
+        let parts: Vec<&str> = bundle.split(PROJECT_BUNDLE_SEPARATOR).collect();
+
+        assert_eq!(parts.len(), 4);
+        assert!(parts[0].contains("module Main"));
+        assert!(parts[1].contains("module Shared.User"));
+        assert!(parts[2].contains("module Shared.Nested.Helper"));
+        assert!(parts[3].contains("module Shared.Note"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_project_bundle_matches_serial_output() {
+        let root = unique_test_root("bundle-deterministic");
+        fs::create_dir_all(root.join("Shared")).expect("create shared dir");
+        fs::write(
+            root.join("Main.clasp"),
+            "module Main with Shared.User\nmain : Str\nmain = greeting\n",
+        )
+        .expect("write Main");
+        fs::write(
+            root.join("Shared/User.clasp"),
+            "module Shared.User\ngreeting : Str\ngreeting = \"hi\"\n",
+        )
+        .expect("write Shared.User");
+
+        let entry = root.join("Main.clasp");
+        let serial =
+            build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 1).expect("build serial bundle");
+        let parallel =
+            build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("build parallel bundle");
+
+        assert_eq!(serial, parallel);
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
