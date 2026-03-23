@@ -35,12 +35,16 @@ fallbackLowerEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]
 fallbackLowerEnv modl typeDecls = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (collectAnnotatedBindings modl)))
 
 lowerModuleEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]
-lowerModuleEnv modl typeDecls = match inferModuleBindings modl {
-  InferredModule env ->
-    env,
-  InferModuleError message ->
+lowerModuleEnv modl typeDecls =
+  if moduleDeclarationsFullyAnnotated modl then
     fallbackLowerEnv modl typeDecls
-}
+  else
+    match inferModuleBindings modl {
+      InferredModule env ->
+        env,
+      InferModuleError message ->
+        fallbackLowerEnv modl typeDecls
+    }
 
 unknownLowerType : TypeText
 unknownLowerType = TUnknown "<lower>"

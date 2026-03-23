@@ -39,6 +39,8 @@ imported_cli_binary="$test_root/imported-cli-app"
 imported_cli_output_path="$test_root/imported-output.txt"
 imported_cli_serial_image="$test_root/imported-cli-serial.native.image.json"
 imported_cli_parallel_image="$test_root/imported-cli-parallel.native.image.json"
+imported_cli_monolithic_image="$test_root/imported-cli-monolithic.native.image.json"
+imported_cli_whole_monolithic_image="$test_root/imported-cli-whole-monolithic.native.image.json"
 swarm_kernel_binary="$test_root/swarm-kernel"
 swarm_state_root="$test_root/swarm/state"
 swarm_event_log="$swarm_state_root/events.jsonl"
@@ -199,7 +201,11 @@ env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$imported_cli_project
 grep -F 'Ada:planner' "$imported_cli_output_path" >/dev/null
 CLASP_NATIVE_BUNDLE_JOBS=1 CLASP_NATIVE_IMAGE_SECTION_JOBS=1 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_serial_image"
 CLASP_NATIVE_BUNDLE_JOBS=4 CLASP_NATIVE_IMAGE_SECTION_JOBS=4 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_parallel_image"
+CLASP_NATIVE_BUNDLE_JOBS=4 CLASP_NATIVE_IMAGE_SECTION_JOBS=4 CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=1 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_monolithic_image"
+CLASP_NATIVE_BUNDLE_JOBS=4 CLASP_NATIVE_IMAGE_SECTION_JOBS=4 CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD=1 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_whole_monolithic_image"
 cmp -s "$imported_cli_serial_image" "$imported_cli_parallel_image"
+cmp -s "$imported_cli_serial_image" "$imported_cli_monolithic_image"
+cmp -s "$imported_cli_serial_image" "$imported_cli_whole_monolithic_image"
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-kernel/Main.clasp" -o "$swarm_kernel_binary"
 [[ -x "$swarm_kernel_binary" ]]

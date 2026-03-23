@@ -4,6 +4,7 @@ import Compiler.Ast
 
 type HostedProjectModuleLookupResult = FoundHostedProjectModule HostedModuleAst | MissingHostedProjectModule Str
 type HostedProjectModulesResult = HostedProjectModules [HostedModuleAst] | HostedProjectModulesError Str
+type HostedResolvedProjectResult = HostedResolvedProjectOk HostedModuleAst [HostedModuleAst] | HostedResolvedProjectError Str
 type HostedProjectBundleResult = HostedProjectBundleOk HostedModuleAst | HostedProjectBundleError Str
 
 sourceModule : Str -> HostedModuleAst
@@ -216,8 +217,11 @@ mergeProjectModules entry importedModules = {
   hostedModuleAst (moduleNameOf entry) [] typeDeclarations (appendProjectionRecordDecls recordDeclarations projectionDeclarations) foreignDeclarations declarations guideDeclarations policyDeclarations projectionDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
 }
 
-resolveProjectBundle : Str -> HostedProjectBundleResult
-resolveProjectBundle bundle = {
+orderedProjectModules : HostedModuleAst -> [HostedModuleAst] -> [HostedModuleAst]
+orderedProjectModules entry importedModules = append importedModules [entry]
+
+resolveProjectModules : Str -> HostedResolvedProjectResult
+resolveProjectModules bundle = {
   let modules = parseProjectModules bundle;
   let importedNames = collectProjectImportNames modules;
   let mut entryModuleName = "";
@@ -235,20 +239,28 @@ resolveProjectBundle bundle = {
     }
   };
   if entryModuleConflict then {
-    HostedProjectBundleError "Expected exactly one project entry module."
+    HostedResolvedProjectError "Expected exactly one project entry module."
   } else if entryModuleName == "" then {
-    HostedProjectBundleError "Missing project entry module."
+    HostedResolvedProjectError "Missing project entry module."
   } else {
     match lookupProjectModule modules entryModuleName {
       FoundHostedProjectModule entry ->
         match collectProjectImports modules [entryModuleName] (moduleImports entry) {
           HostedProjectModules importedModules ->
-            HostedProjectBundleOk (mergeProjectModules entry importedModules),
+            HostedResolvedProjectOk (mergeProjectModules entry importedModules) (orderedProjectModules entry importedModules),
           HostedProjectModulesError message ->
-            HostedProjectBundleError message
+            HostedResolvedProjectError message
         },
       MissingHostedProjectModule missing ->
-        HostedProjectBundleError (textConcat ["Missing project entry module `", missing, "`."])
+        HostedResolvedProjectError (textConcat ["Missing project entry module `", missing, "`."])
     }
   }
+}
+
+resolveProjectBundle : Str -> HostedProjectBundleResult
+resolveProjectBundle bundle = match resolveProjectModules bundle {
+  HostedResolvedProjectOk mergedModule sourceModules ->
+    HostedProjectBundleOk mergedModule,
+  HostedResolvedProjectError message ->
+    HostedProjectBundleError message
 }

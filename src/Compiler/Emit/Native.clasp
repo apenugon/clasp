@@ -2475,13 +2475,111 @@ collectHostedDeclNames modl = {
 emitNativeModuleImageDeclNames : HostedModuleAst -> Str
 emitNativeModuleImageDeclNames modl = textJoin "\n" (collectHostedDeclNames modl)
 
-emitNativeDeclJsonsForNamedDecls : HostedModuleAst -> [Str] -> [Str]
-emitNativeDeclJsonsForNamedDecls modl selectedNames = {
-  let typeDecls = effectiveModuleTypeDecls modl;
-  let recordDecls = effectiveModuleRecordDecls modl;
-  let env = lowerModuleEnv modl typeDecls;
+emitNativeTypeDeclFingerprintText : HostedTypeDeclAst -> Str
+emitNativeTypeDeclFingerprintText typeDecl = {
+  let mut constructorTexts = [];
+  for constructorDecl in typeDeclConstructors typeDecl {
+    let payloadTexts = emitNativeJsonStringList (renderHostedTypeList (constructorDeclPayloadTypes constructorDecl));
+    constructorTexts = appendNativeRenderedText constructorTexts (textConcat [constructorDeclName constructorDecl, "(", textJoin "," payloadTexts, ")"]);
+    constructorTexts
+  };
+  textConcat [typeDeclName typeDecl, "=", textJoin "|" constructorTexts]
+}
+
+emitNativeRecordFieldFingerprintText : HostedRecordFieldDeclAst -> Str
+emitNativeRecordFieldFingerprintText field = textConcat [recordFieldDeclName field, ":", renderType (typeFromHostedTypeAst (recordFieldDeclType field))]
+
+emitNativeRecordDeclFingerprintText : HostedRecordDeclAst -> Str
+emitNativeRecordDeclFingerprintText recordDecl = {
+  let mut fieldTexts = [];
+  for field in recordDeclFields recordDecl {
+    fieldTexts = appendNativeRenderedText fieldTexts (emitNativeRecordFieldFingerprintText field);
+    fieldTexts
+  };
+  textConcat [recordDeclName recordDecl, "{", textJoin "," fieldTexts, "}"]
+}
+
+emitNativeForeignDeclFingerprintText : HostedForeignDeclAst -> Str
+emitNativeForeignDeclFingerprintText foreignDecl = textConcat [foreignDeclName foreignDecl, ":", renderType (typeFromHostedTypeAst (foreignDeclTypeAst foreignDecl))]
+
+emitNativeTypeBindingFingerprintText : TypeBinding -> Str
+emitNativeTypeBindingFingerprintText binding = match binding {
+  TypeBinding name bindingType ->
+    textConcat [name, ":", renderType bindingType]
+}
+
+emitNativeProjectDeclContextFingerprint : HostedModuleAst -> Str
+emitNativeProjectDeclContextFingerprint modl = {
+  let mut fingerprintParts = [];
+  if moduleDeclarationsFullyAnnotated modl then {
+    for binding in collectAnnotatedBindings modl {
+      fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeTypeBindingFingerprintText binding);
+      fingerprintParts
+    };
+    fingerprintParts
+  } else {
+    fingerprintParts = appendNativeRenderedText fingerprintParts (renderModuleSummary modl);
+    fingerprintParts
+  };
+  for typeDecl in effectiveModuleTypeDecls modl {
+    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeTypeDeclFingerprintText typeDecl);
+    fingerprintParts
+  };
+  for recordDecl in effectiveModuleRecordDecls modl {
+    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeRecordDeclFingerprintText recordDecl);
+    fingerprintParts
+  };
+  for foreignDecl in moduleForeignDeclarations modl {
+    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeForeignDeclFingerprintText foreignDecl);
+    fingerprintParts
+  };
+  textFingerprint64Hex (textJoin "\n" fingerprintParts)
+}
+
+nativeImageDeclPlanFieldSeparator : Str
+nativeImageDeclPlanFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --\n"
+
+nativeImageDeclModuleSeparator : Str
+nativeImageDeclModuleSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE --\n"
+
+nativeImageDeclModuleFieldSeparator : Str
+nativeImageDeclModuleFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --\n"
+
+emitNativeDeclModulePlanEntryText : HostedModuleAst -> Str
+emitNativeDeclModulePlanEntryText sourceModule =
+  textJoin
+    nativeImageDeclModuleFieldSeparator
+    [
+      moduleNameOf sourceModule,
+      emitNativeModuleImageDeclNames sourceModule
+    ]
+
+emitNativeDeclModulePlanEntriesText : [HostedModuleAst] -> Str
+emitNativeDeclModulePlanEntriesText sourceModules = {
+  let mut entries = [];
+  for sourceModule in sourceModules {
+    entries = appendNativeRenderedText entries (emitNativeDeclModulePlanEntryText sourceModule);
+    entries
+  };
+  textJoin nativeImageDeclModuleSeparator entries
+}
+
+emitNativeProjectDeclModulePlanText : HostedModuleAst -> [HostedModuleAst] -> Str
+emitNativeProjectDeclModulePlanText mergedModule sourceModules =
+  textJoin
+    nativeImageDeclPlanFieldSeparator
+    [
+      emitNativeProjectDeclContextFingerprint mergedModule,
+      emitNativeDeclModulePlanEntriesText sourceModules
+    ]
+
+emitNativeDeclJsonsFromDeclarations : HostedModuleAst -> [HostedDeclAst] -> [Str] -> [Str]
+emitNativeDeclJsonsFromDeclarations mergedModule declarations selectedNames = {
+  let typeDecls = effectiveModuleTypeDecls mergedModule;
+  let recordDecls = effectiveModuleRecordDecls mergedModule;
+  let env = lowerModuleEnv mergedModule typeDecls;
   let mut rendered = [];
-  for decl in moduleDeclarations modl {
+  for decl in declarations {
     if containsText selectedNames (declName decl) then {
       rendered = appendNativeRenderedText rendered (emitNativeDeclJson (lowerDecl typeDecls recordDecls env decl));
       rendered
@@ -2492,8 +2590,32 @@ emitNativeDeclJsonsForNamedDecls modl selectedNames = {
   rendered
 }
 
+emitNativeDeclJsonsForNamedDecls : HostedModuleAst -> [Str] -> [Str]
+emitNativeDeclJsonsForNamedDecls modl selectedNames = emitNativeDeclJsonsFromDeclarations modl (moduleDeclarations modl) selectedNames
+
 emitNativeModuleImageNamedDecls : HostedModuleAst -> [Str] -> Str
 emitNativeModuleImageNamedDecls modl selectedNames = jsonArray (emitNativeDeclJsonsForNamedDecls modl selectedNames)
+
+emitNativeSourceModuleImageDecls : HostedModuleAst -> HostedModuleAst -> Str
+emitNativeSourceModuleImageDecls mergedModule sourceModule = jsonArray (emitNativeDeclJsonsFromDeclarations mergedModule (moduleDeclarations sourceModule) (collectHostedDeclNames sourceModule))
+
+nativeImagePlanFieldSeparator : Str
+nativeImagePlanFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n"
+
+emitNativeModuleImagePlanText : HostedModuleAst -> Str
+emitNativeModuleImagePlanText modl =
+  textJoin
+    nativeImagePlanFieldSeparator
+    [
+      emitNativeModuleImageModuleName modl,
+      emitNativeModuleImageExports modl [],
+      emitNativeModuleImageEntrypoints modl [],
+      emitNativeAbiImage modl,
+      emitNativeRuntimeImage modl,
+      emitNativeCompatibilityImage modl [],
+      emitNativeModuleImageConstructorDecls modl,
+      emitNativeModuleImageDeclNames modl
+    ]
 
 emitNativeModuleImage : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeModuleImage modl decls = {

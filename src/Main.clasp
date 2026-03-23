@@ -79,6 +79,14 @@ nativeImageProjectText bundle = match resolveProjectBundle bundle {
     jsonObject [jsonFieldText "format" "clasp-native-image-v1", jsonFieldText "error" message]
 }
 
+nativeImageProjectPlanText : Str -> Str
+nativeImageProjectPlanText bundle = match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    emitNativeModuleImagePlanText modl,
+  HostedProjectBundleError message ->
+    textConcat ["ERROR:", message]
+}
+
 nativeImageProjectModuleText : Str -> Str
 nativeImageProjectModuleText bundle = match resolveProjectBundle bundle {
   HostedProjectBundleOk modl ->
@@ -149,6 +157,27 @@ nativeImageProjectDeclNamesText bundle = match resolveProjectBundle bundle {
     emitNativeModuleImageDeclNames modl,
   HostedProjectBundleError message ->
     textConcat ["ERROR:", message]
+}
+
+nativeImageProjectDeclModulePlanText : Str -> Str
+nativeImageProjectDeclModulePlanText bundle = match resolveProjectModules bundle {
+  HostedResolvedProjectOk mergedModule sourceModules ->
+    emitNativeProjectDeclModulePlanText mergedModule sourceModules,
+  HostedResolvedProjectError message ->
+    textConcat ["ERROR:", message]
+}
+
+nativeImageProjectModuleDeclsText : Str -> Str -> Str
+nativeImageProjectModuleDeclsText bundle moduleName = match resolveProjectModules bundle {
+  HostedResolvedProjectOk mergedModule sourceModules ->
+    match lookupProjectModule sourceModules moduleName {
+      FoundHostedProjectModule sourceModule ->
+        emitNativeSourceModuleImageDecls mergedModule sourceModule,
+      MissingHostedProjectModule missing ->
+        jsonArray [encode (textConcat ["ERROR:", missing])]
+    },
+  HostedResolvedProjectError message ->
+    jsonArray [encode (textConcat ["ERROR:", message])]
 }
 
 nativeImageProjectNamedDeclsText : Str -> Str -> Str

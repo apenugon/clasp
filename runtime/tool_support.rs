@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::slice;
 use std::thread;
+use std::time::UNIX_EPOCH;
 
 use clasp_runtime::{
     clasp_rt_activate_native_module_image, clasp_rt_call_native_dispatch, clasp_rt_call_native_route_json,
@@ -18,6 +19,10 @@ use clasp_runtime::{
 };
 
 pub const PROJECT_BUNDLE_SEPARATOR: &str = "\n-- CLASP_PROJECT_MODULE --\n";
+const PROJECT_BUNDLE_CACHE_VERSION: &str = "bundle-cache-v1";
+
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const BACKEND_DECLARATION_KEYWORDS: &[&str] = &[
     "route",
@@ -50,8 +55,22 @@ const NATIVE_RUNTIME_ONLY_SYMBOLS: &[&str] = &[
 #[derive(Clone)]
 struct ProjectModuleInfo {
     canonical_path: PathBuf,
+    module_name: String,
+    source_fingerprint: String,
     bundled_source: String,
     import_paths: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectBundleModule {
+    pub module_name: String,
+    pub source_fingerprint: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectBundleBuild {
+    pub bundle: String,
+    pub modules: Vec<ProjectBundleModule>,
 }
 
 unsafe fn string_bytes(value: *mut ClaspRtString) -> &'static [u8] {
@@ -114,6 +133,29 @@ fn parse_imports(source: &str) -> Vec<String> {
     }
 
     imports
+}
+
+fn parse_module_name(source: &str) -> Result<String, String> {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(module_body) = trimmed.strip_prefix("module ") {
+            let header = module_body
+                .split_once(" with ")
+                .map(|(name, _)| name)
+                .unwrap_or(module_body)
+                .trim();
+            let module_name = header.split_whitespace().next().unwrap_or("").trim();
+            if module_name.is_empty() {
+                return Err("project module header was missing a module name".to_owned());
+            }
+            return Ok(module_name.to_owned());
+        }
+        break;
+    }
+    Err("project module was missing a `module` header".to_owned())
 }
 
 fn hosted_foreign_signature_line(module_path: &Path, line: &str) -> Result<Option<String>, String> {
@@ -194,6 +236,8 @@ fn load_project_module(root: &Path, path: PathBuf) -> Result<ProjectModuleInfo, 
     let source = fs::read_to_string(&canonical_path)
         .map_err(|err| format!("failed to read project module `{}`: {err}", canonical_path.display()))?;
     let bundled_source = augment_source_with_hosted_metadata(&canonical_path, &source)?;
+    let module_name = parse_module_name(&source)
+        .map_err(|message| format!("{message} in `{}`", canonical_path.display()))?;
     let import_paths = parse_imports(&source)
         .into_iter()
         .map(|import_name| {
@@ -209,6 +253,8 @@ fn load_project_module(root: &Path, path: PathBuf) -> Result<ProjectModuleInfo, 
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ProjectModuleInfo {
         canonical_path,
+        module_name,
+        source_fingerprint: stable_fingerprint_text(&bundled_source),
         bundled_source,
         import_paths,
     })
@@ -254,6 +300,7 @@ fn append_project_bundle_module(
     module_infos: &HashMap<PathBuf, ProjectModuleInfo>,
     seen: &mut HashSet<PathBuf>,
     bundled_sources: &mut Vec<String>,
+    bundled_modules: &mut Vec<ProjectBundleModule>,
 ) -> Result<(), String> {
     let canonical_path = module_path.to_path_buf();
     if seen.contains(&canonical_path) {
@@ -269,15 +316,150 @@ fn append_project_bundle_module(
 
     seen.insert(canonical_path.clone());
     bundled_sources.push(info.bundled_source.clone());
+    bundled_modules.push(ProjectBundleModule {
+        module_name: info.module_name.clone(),
+        source_fingerprint: info.source_fingerprint.clone(),
+    });
     for import_path in &info.import_paths {
-        append_project_bundle_module(import_path, module_infos, seen, bundled_sources)?;
+        append_project_bundle_module(import_path, module_infos, seen, bundled_sources, bundled_modules)?;
     }
 
     Ok(())
 }
 
-fn build_project_bundle_with_jobs(entry_path: &str, max_jobs: usize) -> Result<String, String> {
+fn stable_fingerprint_bytes(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn stable_fingerprint_text(text: &str) -> String {
+    stable_fingerprint_bytes(text.as_bytes())
+}
+
+fn runtime_cache_root() -> PathBuf {
+    if let Ok(value) = env::var("XDG_CACHE_HOME") {
+        PathBuf::from(value).join("claspc-native")
+    } else {
+        env::temp_dir().join("claspc-native")
+    }
+}
+
+fn project_bundle_cache_dir() -> PathBuf {
+    runtime_cache_root().join(PROJECT_BUNDLE_CACHE_VERSION)
+}
+
+fn project_bundle_cache_key(entry_path: &Path) -> String {
+    stable_fingerprint_text(&entry_path.to_string_lossy())
+}
+
+fn project_module_cache_signature(module_path: &Path) -> Result<String, String> {
+    let metadata = fs::metadata(module_path)
+        .map_err(|err| format!("failed to read project module metadata `{}`: {err}", module_path.display()))?;
+    let modified = metadata
+        .modified()
+        .map_err(|err| format!("failed to read project module modification time `{}`: {err}", module_path.display()))?
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    Ok(format!("{}\t{}", metadata.len(), modified))
+}
+
+fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<String>, String> {
+    let cache_dir = project_bundle_cache_dir();
+    let cache_key = project_bundle_cache_key(entry_path);
+    let manifest_path = cache_dir.join(format!("{cache_key}.manifest"));
+    let bundle_path = cache_dir.join(format!("{cache_key}.bundle"));
+    if !manifest_path.exists() || !bundle_path.exists() {
+        return Ok(None);
+    }
+
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|err| format!("failed to read cached project bundle manifest `{}`: {err}", manifest_path.display()))?;
+    for line in manifest.lines().filter(|line| !line.trim().is_empty()) {
+        let mut parts = line.splitn(3, '\t');
+        let Some(expected_len) = parts.next() else {
+            return Ok(None);
+        };
+        let Some(expected_modified) = parts.next() else {
+            return Ok(None);
+        };
+        let Some(path_text) = parts.next() else {
+            return Ok(None);
+        };
+        let module_path = PathBuf::from(path_text);
+        let current_signature = match project_module_cache_signature(&module_path) {
+            Ok(signature) => signature,
+            Err(_) => return Ok(None),
+        };
+        let expected_signature = format!("{expected_len}\t{expected_modified}");
+        if current_signature != expected_signature {
+            return Ok(None);
+        }
+    }
+
+    fs::read_to_string(&bundle_path)
+        .map(Some)
+        .map_err(|err| format!("failed to read cached project bundle `{}`: {err}", bundle_path.display()))
+}
+
+fn write_cached_project_bundle(
+    entry_path: &Path,
+    module_infos: &HashMap<PathBuf, ProjectModuleInfo>,
+    bundle: &str,
+) -> Result<(), String> {
+    let cache_dir = project_bundle_cache_dir();
+    fs::create_dir_all(&cache_dir)
+        .map_err(|err| format!("failed to create project bundle cache `{}`: {err}", cache_dir.display()))?;
+    let cache_key = project_bundle_cache_key(entry_path);
+    let manifest_path = cache_dir.join(format!("{cache_key}.manifest"));
+    let bundle_path = cache_dir.join(format!("{cache_key}.bundle"));
+
+    let mut module_paths: Vec<PathBuf> = module_infos.keys().cloned().collect();
+    module_paths.sort();
+    let mut manifest_lines = Vec::new();
+    for module_path in module_paths {
+        let signature = project_module_cache_signature(&module_path)?;
+        manifest_lines.push(format!("{signature}\t{}", module_path.to_string_lossy()));
+    }
+
+    fs::write(&manifest_path, manifest_lines.join("\n")).map_err(|err| {
+        format!(
+            "failed to write project bundle cache manifest `{}`: {err}",
+            manifest_path.display()
+        )
+    })?;
+    fs::write(&bundle_path, bundle)
+        .map_err(|err| format!("failed to write project bundle cache `{}`: {err}", bundle_path.display()))
+}
+
+fn cached_project_bundle_modules(bundle: &str) -> Result<Vec<ProjectBundleModule>, String> {
+    bundle
+        .split(PROJECT_BUNDLE_SEPARATOR)
+        .filter(|source| !source.trim().is_empty())
+        .map(|source| {
+            let module_name = parse_module_name(source)?;
+            Ok(ProjectBundleModule {
+                module_name,
+                source_fingerprint: stable_fingerprint_text(source),
+            })
+        })
+        .collect()
+}
+
+fn build_project_bundle_with_jobs_detail(entry_path: &str, max_jobs: usize) -> Result<ProjectBundleBuild, String> {
     let entry = PathBuf::from(entry_path);
+    let entry_canonical = fs::canonicalize(&entry)
+        .map_err(|err| format!("failed to resolve project entry module `{}`: {err}", entry.display()))?;
+    if let Some(bundle) = read_cached_project_bundle(&entry_canonical)? {
+        return Ok(ProjectBundleBuild {
+            modules: cached_project_bundle_modules(&bundle)?,
+            bundle,
+        });
+    }
     let root = entry
         .parent()
         .map(Path::to_path_buf)
@@ -309,12 +491,30 @@ fn build_project_bundle_with_jobs(entry_path: &str, max_jobs: usize) -> Result<S
         pending = next_pending;
     }
 
-    let entry_canonical = fs::canonicalize(&entry)
-        .map_err(|err| format!("failed to resolve project entry module `{}`: {err}", entry.display()))?;
     let mut ordered_sources = Vec::new();
+    let mut ordered_modules = Vec::new();
     let mut seen = HashSet::new();
-    append_project_bundle_module(&entry_canonical, &module_infos, &mut seen, &mut ordered_sources)?;
-    Ok(ordered_sources.join(PROJECT_BUNDLE_SEPARATOR))
+    append_project_bundle_module(
+        &entry_canonical,
+        &module_infos,
+        &mut seen,
+        &mut ordered_sources,
+        &mut ordered_modules,
+    )?;
+    let bundle = ordered_sources.join(PROJECT_BUNDLE_SEPARATOR);
+    let _ = write_cached_project_bundle(&entry_canonical, &module_infos, &bundle);
+    Ok(ProjectBundleBuild {
+        bundle,
+        modules: ordered_modules,
+    })
+}
+
+fn build_project_bundle_with_jobs(entry_path: &str, max_jobs: usize) -> Result<String, String> {
+    build_project_bundle_with_jobs_detail(entry_path, max_jobs).map(|build| build.bundle)
+}
+
+pub fn build_project_bundle_build(entry_path: &str) -> Result<ProjectBundleBuild, String> {
+    build_project_bundle_with_jobs_detail(entry_path, default_bundle_jobs())
 }
 
 pub fn build_project_bundle(entry_path: &str) -> Result<String, String> {
@@ -615,7 +815,9 @@ pub unsafe fn execute_native_route_from_image_text(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_project_bundle_with_jobs, PROJECT_BUNDLE_SEPARATOR};
+    use super::{
+        build_project_bundle_with_jobs, project_bundle_cache_dir, project_bundle_cache_key, PROJECT_BUNDLE_SEPARATOR,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -689,6 +891,49 @@ mod tests {
 
         assert_eq!(serial, parallel);
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_project_bundle_reuses_cached_bundle_when_sources_are_unchanged() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let root = unique_test_root("bundle-cache");
+        let cache_root = unique_test_root("bundle-cache-store");
+        fs::create_dir_all(root.join("Shared")).expect("create shared dir");
+        fs::create_dir_all(&cache_root).expect("create cache dir");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        fs::write(
+            root.join("Main.clasp"),
+            "module Main\nimport Shared.User\nmain : Str\nmain = greeting\n",
+        )
+        .expect("write Main");
+        fs::write(
+            root.join("Shared/User.clasp"),
+            "module Shared.User\ngreeting : Str\ngreeting = \"hi\"\n",
+        )
+        .expect("write Shared.User");
+
+        let entry = root.join("Main.clasp");
+        let _ = build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("build cached bundle");
+
+        let entry_canonical = fs::canonicalize(&entry).expect("canonical entry");
+        let cache_key = project_bundle_cache_key(&entry_canonical);
+        let bundle_path = project_bundle_cache_dir().join(format!("{cache_key}.bundle"));
+        fs::write(
+            &bundle_path,
+            format!(
+                "module Main\nimport Shared.User\nmain : Str\nmain = greeting\n{PROJECT_BUNDLE_SEPARATOR}module Shared.User\ngreeting : Str\ngreeting = \"cached\"\n"
+            ),
+        )
+        .expect("overwrite cached bundle");
+
+        let cached =
+            build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("reuse cached bundle");
+        assert!(cached.contains("greeting = \"cached\""));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
         let _ = fs::remove_dir_all(root);
     }
 }

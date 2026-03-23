@@ -1154,6 +1154,20 @@ collectAnnotatedBindings modl = {
   bindings
 }
 
+moduleDeclarationsFullyAnnotated : HostedModuleAst -> Bool
+moduleDeclarationsFullyAnnotated modl = {
+  let mut fullyAnnotated = true;
+  for decl in moduleDeclarations modl {
+    if hasAnnotationAst (declAnnotation decl) then {
+      fullyAnnotated
+    } else {
+      fullyAnnotated = false;
+      fullyAnnotated
+    }
+  };
+  fullyAnnotated
+}
+
 collectForeignBindings : HostedModuleAst -> [TypeBinding]
 collectForeignBindings modl = {
   let mut bindings = emptyTypeBindings;

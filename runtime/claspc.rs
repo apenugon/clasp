@@ -11,9 +11,9 @@ use std::thread;
 use std::time::Duration;
 
 use tool_support::{
-    build_project_bundle, execute_native_export_from_image_path, execute_native_export_from_image_path_args,
-    execute_native_export_from_image_text,
-    execute_native_route_from_image_text, project_declares_backend_surface,
+    build_project_bundle, build_project_bundle_build, execute_native_export_from_image_path,
+    execute_native_export_from_image_path_args, execute_native_export_from_image_text,
+    execute_native_route_from_image_text, project_declares_backend_surface, ProjectBundleBuild,
 };
 
 const STAGE1_NATIVE_IMAGE: &str = include_str!("../src/stage1.native.image.json");
@@ -54,17 +54,30 @@ fn json_string(value: &str) -> String {
     format!("{value:?}")
 }
 
-const NATIVE_IMAGE_BASE_SECTION_EXPORTS: [(&str, &str); 5] = [
+const NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT: &str = "nativeImageProjectDeclsText";
+const NATIVE_IMAGE_MONOLITHIC_EXPORT: &str = "nativeImageProjectText";
+const NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT: &str = "nativeImageProjectConstructorDeclsText";
+const NATIVE_IMAGE_DECL_MODULE_PLAN_EXPORT: &str = "nativeImageProjectDeclModulePlanText";
+const NATIVE_IMAGE_MODULE_DECLS_EXPORT: &str = "nativeImageProjectModuleDeclsText";
+const NATIVE_IMAGE_DECL_NAMES_EXPORT: &str = "nativeImageProjectDeclNamesText";
+const NATIVE_IMAGE_NAMED_DECLS_EXPORT: &str = "nativeImageProjectNamedDeclsText";
+const NATIVE_IMAGE_PLAN_EXPORT: &str = "nativeImageProjectPlanText";
+const NATIVE_IMAGE_PLAN_FIELD_SEPARATOR: &str = "\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n";
+const NATIVE_IMAGE_DECL_PLAN_FIELD_SEPARATOR: &str = "\n-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --\n";
+const NATIVE_IMAGE_DECL_MODULE_SEPARATOR: &str = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE --\n";
+const NATIVE_IMAGE_DECL_MODULE_FIELD_SEPARATOR: &str = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --\n";
+const NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS: [(&str, &str); 7] = [
     ("exports", "nativeImageProjectExportsText"),
     ("entrypoints", "nativeImageProjectEntrypointsText"),
     ("abi", "nativeImageProjectAbiText"),
     ("runtime", "nativeImageProjectRuntimeText"),
     ("compatibility", "nativeImageProjectCompatibilityText"),
+    ("constructor_decls", NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT),
+    ("decl_names", NATIVE_IMAGE_DECL_NAMES_EXPORT),
 ];
-const NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT: &str = "nativeImageProjectDeclsText";
-const NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT: &str = "nativeImageProjectConstructorDeclsText";
-const NATIVE_IMAGE_DECL_NAMES_EXPORT: &str = "nativeImageProjectDeclNamesText";
-const NATIVE_IMAGE_NAMED_DECLS_EXPORT: &str = "nativeImageProjectNamedDeclsText";
+const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v1";
+const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v1";
+const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 128;
 
 struct NativeImageSections {
     module_name: String,
@@ -74,6 +87,27 @@ struct NativeImageSections {
     runtime: String,
     compatibility: String,
     decls: String,
+}
+
+struct NativeImageProjectPlan {
+    module_name: String,
+    exports: String,
+    entrypoints: String,
+    abi: String,
+    runtime: String,
+    compatibility: String,
+    constructor_decls: String,
+    decl_names: String,
+}
+
+struct NativeImageDeclModulePlan {
+    context_fingerprint: String,
+    modules: Vec<NativeImageDeclModuleEntry>,
+}
+
+struct NativeImageDeclModuleEntry {
+    module_name: String,
+    decl_names_text: String,
 }
 
 fn print_json_error(message: &str) {
@@ -98,6 +132,19 @@ fn default_native_image_jobs() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or_else(|| thread::available_parallelism().map(|value| value.get()).unwrap_or(4).min(6))
+}
+
+fn monolithic_decl_threshold() -> usize {
+    env::var("CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD)
+}
+
+fn monolithic_bundle_bytes_threshold() -> Option<usize> {
+    env::var("CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
 }
 
 fn parse_command(name: &str) -> Option<Command> {
@@ -190,6 +237,84 @@ fn execute_project_export_args(
     Ok(String::from_utf8_lossy(&output_bytes).into_owned())
 }
 
+fn parse_native_image_project_plan(plan_text: &str) -> Result<NativeImageProjectPlan, String> {
+    if let Some(message) = plan_text.strip_prefix("ERROR:") {
+        return Err(message.to_owned());
+    }
+
+    let fields: Vec<&str> = plan_text.split(NATIVE_IMAGE_PLAN_FIELD_SEPARATOR).collect();
+    if fields.len() != 8 {
+        return Err(format!(
+            "native image plan returned {} fields; expected 8",
+            fields.len()
+        ));
+    }
+
+    Ok(NativeImageProjectPlan {
+        module_name: fields[0].to_owned(),
+        exports: fields[1].to_owned(),
+        entrypoints: fields[2].to_owned(),
+        abi: fields[3].to_owned(),
+        runtime: fields[4].to_owned(),
+        compatibility: fields[5].to_owned(),
+        constructor_decls: fields[6].to_owned(),
+        decl_names: fields[7].to_owned(),
+    })
+}
+
+fn parse_native_image_decl_module_plan(plan_text: &str) -> Result<NativeImageDeclModulePlan, String> {
+    if let Some(message) = plan_text.strip_prefix("ERROR:") {
+        return Err(message.to_owned());
+    }
+
+    let fields: Vec<&str> = plan_text.split(NATIVE_IMAGE_DECL_PLAN_FIELD_SEPARATOR).collect();
+    if fields.len() != 2 {
+        return Err(format!(
+            "native image decl module plan returned {} fields; expected 2",
+            fields.len()
+        ));
+    }
+
+    let modules = if fields[1].trim().is_empty() {
+        Vec::new()
+    } else {
+        let mut parsed_modules = Vec::new();
+        for module_text in fields[1].split(NATIVE_IMAGE_DECL_MODULE_SEPARATOR) {
+            if module_text.trim().is_empty() {
+                continue;
+            }
+            let module_fields: Vec<&str> = module_text.split(NATIVE_IMAGE_DECL_MODULE_FIELD_SEPARATOR).collect();
+            if module_fields.len() != 2 {
+                return Err(format!(
+                    "native image decl module entry returned {} fields; expected 2",
+                    module_fields.len()
+                ));
+            }
+            parsed_modules.push(NativeImageDeclModuleEntry {
+                module_name: module_fields[0].to_owned(),
+                decl_names_text: module_fields[1].to_owned(),
+            });
+        }
+        parsed_modules
+    };
+
+    Ok(NativeImageDeclModulePlan {
+        context_fingerprint: fields[0].to_owned(),
+        modules,
+    })
+}
+
+fn project_bundle_module_source_fingerprint<'a>(
+    bundle_build: &'a ProjectBundleBuild,
+    module_name: &str,
+) -> Option<&'a str> {
+    bundle_build
+        .modules
+        .iter()
+        .find(|module| module.module_name == module_name)
+        .map(|module| module.source_fingerprint.as_str())
+}
+
 fn json_array_inner(array_text: &str) -> Result<&str, String> {
     let trimmed = array_text.trim();
     if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
@@ -207,6 +332,19 @@ fn merge_json_arrays(parts: &[String]) -> Result<String, String> {
         }
     }
     Ok(format!("[{}]", merged.join(", ")))
+}
+
+fn stable_fingerprint_parts(parts: &[&[u8]]) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for part in parts {
+        for byte in *part {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn split_decl_name_chunks(decl_names: &[String], max_jobs: usize) -> Vec<String> {
@@ -228,28 +366,31 @@ fn should_fallback_to_monolithic_decls(error: &str) -> bool {
 fn execute_parallel_decl_section_export(
     image_path: &str,
     bundle: &str,
+    constructor_decls: &str,
+    decl_names_text: &str,
     max_jobs: usize,
 ) -> Result<String, String> {
-    let decl_names_text = match execute_project_export(image_path, NATIVE_IMAGE_DECL_NAMES_EXPORT, bundle) {
-        Ok(value) => value,
-        Err(message) if should_fallback_to_monolithic_decls(&message) => {
-            return execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT, bundle);
-        }
-        Err(message) => return Err(message),
-    };
-    if let Some(message) = decl_names_text.strip_prefix("ERROR:") {
-        return Err(message.to_owned());
+    if decl_names_text.starts_with("ERROR:") {
+        return Err(decl_names_text.trim_start_matches("ERROR:").to_owned());
     }
 
-    let mut decl_sections =
-        vec![execute_project_export(image_path, NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT, bundle)?];
+    let mut decl_sections = vec![constructor_decls.to_owned()];
     let decl_names: Vec<String> = decl_names_text
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect();
+
+    if decl_names.len() >= monolithic_decl_threshold() {
+        return execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT, bundle);
+    }
+
     let decl_name_chunks = split_decl_name_chunks(&decl_names, max_jobs);
+
+    if decl_name_chunks.is_empty() {
+        return merge_json_arrays(&decl_sections);
+    }
 
     if max_jobs <= 1 || decl_name_chunks.len() <= 1 {
         for chunk in decl_name_chunks {
@@ -293,6 +434,214 @@ fn execute_parallel_decl_section_export(
     merge_json_arrays(&decl_sections)
 }
 
+fn execute_parallel_decl_section_export_with_fallback(
+    image_path: &str,
+    bundle: &str,
+    max_jobs: usize,
+) -> Result<String, String> {
+    let decl_names_text = match execute_project_export(image_path, NATIVE_IMAGE_DECL_NAMES_EXPORT, bundle) {
+        Ok(value) => value,
+        Err(message) if should_fallback_to_monolithic_decls(&message) => {
+            return execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT, bundle);
+        }
+        Err(message) => return Err(message),
+    };
+    let constructor_decls = execute_project_export(image_path, NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT, bundle)?;
+    execute_parallel_decl_section_export(image_path, bundle, &constructor_decls, &decl_names_text, max_jobs)
+}
+
+fn execute_project_module_decls_export(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+) -> Result<String, String> {
+    execute_project_export_args(
+        image_path,
+        NATIVE_IMAGE_MODULE_DECLS_EXPORT,
+        &[bundle.to_owned(), module_name.to_owned()],
+    )
+}
+
+fn execute_parallel_module_decl_section_export(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    constructor_decls: &str,
+    decl_plan: &NativeImageDeclModulePlan,
+    max_jobs: usize,
+) -> Result<String, String> {
+    let mut decl_sections = vec![constructor_decls.to_owned()];
+    if decl_plan.modules.is_empty() {
+        return merge_json_arrays(&decl_sections);
+    }
+
+    for chunk in decl_plan.modules.chunks(max_jobs.max(1)) {
+        let mut group_results: Vec<Option<String>> = chunk.iter().map(|_| None).collect();
+        let mut handles = Vec::new();
+
+        for (index, module_entry) in chunk.iter().enumerate() {
+            if module_entry.decl_names_text.trim().is_empty() {
+                group_results[index] = Some("[]".to_owned());
+                continue;
+            }
+
+            let Some(module_source_fingerprint) =
+                project_bundle_module_source_fingerprint(bundle_build, &module_entry.module_name)
+            else {
+                return Err(format!(
+                    "internal error: missing source fingerprint for project module `{}`",
+                    module_entry.module_name
+                ));
+            };
+
+            if let Some(cached) = read_cached_native_image_decl_module(
+                image_path,
+                &decl_plan.context_fingerprint,
+                &module_entry.module_name,
+                module_source_fingerprint,
+            ) {
+                group_results[index] = Some(cached);
+                continue;
+            }
+
+            if max_jobs <= 1 || chunk.len() <= 1 {
+                let decl_text =
+                    execute_project_module_decls_export(image_path, &bundle_build.bundle, &module_entry.module_name)?;
+                write_cached_native_image_decl_module(
+                    image_path,
+                    &decl_plan.context_fingerprint,
+                    &module_entry.module_name,
+                    module_source_fingerprint,
+                    &decl_text,
+                );
+                group_results[index] = Some(decl_text);
+                continue;
+            }
+
+            let worker_image_path = image_path.to_owned();
+            let worker_bundle = bundle_build.bundle.clone();
+            let worker_module_name = module_entry.module_name.clone();
+            let worker_context_fingerprint = decl_plan.context_fingerprint.clone();
+            let worker_source_fingerprint = module_source_fingerprint.to_owned();
+            handles.push((
+                index,
+                worker_module_name.clone(),
+                worker_source_fingerprint.clone(),
+                thread::Builder::new()
+                    .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
+                    .spawn(move || {
+                        execute_project_module_decls_export(
+                            &worker_image_path,
+                            &worker_bundle,
+                            &worker_module_name,
+                        )
+                        .map(|decl_text| {
+                            (
+                                worker_context_fingerprint,
+                                worker_module_name,
+                                worker_source_fingerprint,
+                                decl_text,
+                            )
+                        })
+                    })
+                    .map_err(|err| format!("failed to spawn native image module decl worker: {err}"))?,
+            ));
+        }
+
+        for (index, _, _, handle) in handles {
+            let (context_fingerprint, module_name, source_fingerprint, decl_text) = handle
+                .join()
+                .map_err(|_| "parallel native image module decl worker panicked".to_owned())??;
+            write_cached_native_image_decl_module(
+                image_path,
+                &context_fingerprint,
+                &module_name,
+                &source_fingerprint,
+                &decl_text,
+            );
+            group_results[index] = Some(decl_text);
+        }
+
+        for decl_text in group_results {
+            decl_sections.push(decl_text.unwrap_or_else(|| "[]".to_owned()));
+        }
+    }
+
+    merge_json_arrays(&decl_sections)
+}
+
+fn execute_parallel_native_image_plan_fallback(
+    image_path: &str,
+    bundle: &str,
+    max_jobs: usize,
+) -> Result<NativeImageProjectPlan, String> {
+    let module_name = execute_project_export(image_path, "nativeImageProjectModuleText", bundle)?;
+    if let Some(message) = module_name.strip_prefix("ERROR:") {
+        return Err(message.to_owned());
+    }
+
+    let mut plan = NativeImageProjectPlan {
+        module_name,
+        exports: String::new(),
+        entrypoints: String::new(),
+        abi: String::new(),
+        runtime: String::new(),
+        compatibility: String::new(),
+        constructor_decls: String::new(),
+        decl_names: String::new(),
+    };
+    let mut outputs = Vec::new();
+
+    if max_jobs <= 1 {
+        for (field_name, export_name) in NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS {
+            outputs.push((
+                field_name.to_owned(),
+                execute_project_export(image_path, export_name, bundle)?,
+            ));
+        }
+    } else {
+        for chunk in NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS.chunks(max_jobs) {
+            let mut handles = Vec::new();
+            for (field_name, export_name) in chunk {
+                let worker_image_path = image_path.to_owned();
+                let worker_bundle = bundle.to_owned();
+                let worker_field_name = (*field_name).to_owned();
+                let worker_export_name = (*export_name).to_owned();
+                handles.push(
+                    thread::Builder::new()
+                        .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
+                        .spawn(move || {
+                            execute_project_export(&worker_image_path, &worker_export_name, &worker_bundle)
+                                .map(|value| (worker_field_name, value))
+                        })
+                        .map_err(|err| format!("failed to spawn native image fallback worker: {err}"))?,
+                );
+            }
+            for handle in handles {
+                outputs.push(
+                    handle
+                        .join()
+                        .map_err(|_| "parallel native image fallback worker panicked".to_owned())??,
+                );
+            }
+        }
+    }
+
+    for (field_name, value) in outputs {
+        match field_name.as_str() {
+            "exports" => plan.exports = value,
+            "entrypoints" => plan.entrypoints = value,
+            "abi" => plan.abi = value,
+            "runtime" => plan.runtime = value,
+            "compatibility" => plan.compatibility = value,
+            "constructor_decls" => plan.constructor_decls = value,
+            "decl_names" => plan.decl_names = value,
+            _ => return Err(format!("internal error: unknown native image fallback field `{field_name}`")),
+        }
+    }
+
+    Ok(plan)
+}
+
 fn assemble_native_image_text(sections: &NativeImageSections) -> String {
     format!(
         "{{\"format\":\"clasp-native-image-v1\",\"irFormat\":\"clasp-native-ir-v1\",\"module\":{},\"exports\":{},\"entrypoints\":{},\"abi\":{},\"runtime\":{},\"compatibility\":{},\"decls\":{}}}",
@@ -306,79 +655,104 @@ fn assemble_native_image_text(sections: &NativeImageSections) -> String {
     )
 }
 
-fn execute_parallel_native_image_export(image_path: &str, bundle: &str) -> Result<Vec<u8>, String> {
-    let module_name = execute_project_export(image_path, "nativeImageProjectModuleText", bundle)?;
-    if let Some(message) = module_name.strip_prefix("ERROR:") {
-        return Err(message.to_owned());
+fn execute_parallel_native_image_export(image_path: &str, bundle_build: &ProjectBundleBuild) -> Result<Vec<u8>, String> {
+    if let Some(cached) = read_cached_native_image(image_path, &bundle_build.bundle) {
+        return Ok(cached);
+    }
+
+    if let Some(threshold) = monolithic_bundle_bytes_threshold() {
+        if bundle_build.bundle.len() >= threshold {
+            let image_bytes =
+                execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle)?.into_bytes();
+            write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+            return Ok(image_bytes);
+        }
     }
 
     let max_jobs = default_native_image_jobs();
-    let mut section_outputs = Vec::new();
-
-    if max_jobs <= 1 {
-        for (section_name, export_name) in NATIVE_IMAGE_BASE_SECTION_EXPORTS {
-            section_outputs.push((
-                section_name.to_owned(),
-                execute_project_export(image_path, export_name, bundle)?,
-            ));
+    let plan = match execute_project_export(image_path, NATIVE_IMAGE_PLAN_EXPORT, &bundle_build.bundle) {
+        Ok(plan_text) => parse_native_image_project_plan(&plan_text)?,
+        Err(message) if should_fallback_to_monolithic_decls(&message) => {
+            execute_parallel_native_image_plan_fallback(image_path, &bundle_build.bundle, max_jobs)?
         }
-    } else {
-        for chunk in NATIVE_IMAGE_BASE_SECTION_EXPORTS.chunks(max_jobs) {
-            let mut handles = Vec::new();
-            for (section_name, export_name) in chunk {
-                let worker_image_path = image_path.to_owned();
-                let worker_bundle = bundle.to_owned();
-                let worker_section_name = (*section_name).to_owned();
-                let worker_export_name = (*export_name).to_owned();
-                handles.push(
-                    thread::Builder::new()
-                        .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
-                        .spawn(move || {
-                            execute_project_export(&worker_image_path, &worker_export_name, &worker_bundle)
-                                .map(|value| (worker_section_name, value))
-                        })
-                        .map_err(|err| format!("failed to spawn native image section worker: {err}"))?,
-                );
-            }
-            for handle in handles {
-                section_outputs.push(
-                    handle
-                        .join()
-                        .map_err(|_| "parallel native image section worker panicked".to_owned())??,
-                );
-            }
-        }
-    }
-
-    let mut sections = NativeImageSections {
-        module_name,
-        exports: String::new(),
-        entrypoints: String::new(),
-        abi: String::new(),
-        runtime: String::new(),
-        compatibility: String::new(),
-        decls: String::new(),
+        Err(message) => return Err(message),
     };
 
-    for (section_name, value) in section_outputs {
-        match section_name.as_str() {
-            "exports" => sections.exports = value,
-            "entrypoints" => sections.entrypoints = value,
-            "abi" => sections.abi = value,
-            "runtime" => sections.runtime = value,
-            "compatibility" => sections.compatibility = value,
-            _ => return Err(format!("internal error: unknown native image section `{section_name}`")),
+    let decls = match execute_project_export(image_path, NATIVE_IMAGE_DECL_MODULE_PLAN_EXPORT, &bundle_build.bundle) {
+        Ok(module_plan_text) => {
+            let module_plan = parse_native_image_decl_module_plan(&module_plan_text)?;
+            match execute_parallel_module_decl_section_export(
+                image_path,
+                bundle_build,
+                &plan.constructor_decls,
+                &module_plan,
+                max_jobs,
+            ) {
+                Ok(value) => value,
+                Err(message) if should_fallback_to_monolithic_decls(&message) => {
+                    execute_parallel_decl_section_export_with_fallback(
+                        image_path,
+                        &bundle_build.bundle,
+                        max_jobs,
+                    )?
+                }
+                Err(message) => return Err(message),
+            }
         }
-    }
+        Err(message) if should_fallback_to_monolithic_decls(&message) => {
+            match execute_parallel_decl_section_export(
+                image_path,
+                &bundle_build.bundle,
+                &plan.constructor_decls,
+                &plan.decl_names,
+                max_jobs,
+            ) {
+                Ok(value) => value,
+                Err(message) if should_fallback_to_monolithic_decls(&message) => {
+                    execute_parallel_decl_section_export_with_fallback(
+                        image_path,
+                        &bundle_build.bundle,
+                        max_jobs,
+                    )?
+                }
+                Err(message) => return Err(message),
+            }
+        }
+        Err(message) => return Err(message),
+    };
 
-    sections.decls = execute_parallel_decl_section_export(image_path, bundle, max_jobs)?;
+    let sections = NativeImageSections {
+        module_name: plan.module_name,
+        exports: plan.exports,
+        entrypoints: plan.entrypoints,
+        abi: plan.abi,
+        runtime: plan.runtime,
+        compatibility: plan.compatibility,
+        decls,
+    };
 
-    Ok(assemble_native_image_text(&sections).into_bytes())
+    let image_bytes = assemble_native_image_text(&sections).into_bytes();
+    write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+    Ok(image_bytes)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_json_arrays, split_decl_name_chunks};
+    use super::{
+        merge_json_arrays, native_image_cache_dir, read_cached_native_image, split_decl_name_chunks,
+        write_cached_native_image,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
 
     #[test]
     fn split_decl_name_chunks_preserves_decl_order() {
@@ -413,6 +787,30 @@ mod tests {
             r#"[{"kind":"ctor","name":"Keep"}, {"kind":"decl","name":"main"},{"kind":"decl","name":"render"}]"#
         );
     }
+
+    #[test]
+    fn native_image_cache_roundtrips_for_same_image_and_bundle() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-image-cache");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+        write_cached_native_image(
+            image_path.to_str().expect("utf8 path"),
+            "bundle-text",
+            b"cached-image-output",
+        );
+
+        let cached = read_cached_native_image(image_path.to_str().expect("utf8 path"), "bundle-text")
+            .expect("cached native image");
+        assert_eq!(cached, b"cached-image-output");
+        assert!(native_image_cache_dir().exists());
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
 }
 
 fn cache_root() -> PathBuf {
@@ -421,6 +819,87 @@ fn cache_root() -> PathBuf {
     } else {
         env::temp_dir().join("claspc-native")
     }
+}
+
+fn native_image_cache_dir() -> PathBuf {
+    cache_root().join(NATIVE_IMAGE_CACHE_VERSION)
+}
+
+fn native_image_decl_module_cache_dir() -> PathBuf {
+    cache_root().join(NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION)
+}
+
+fn native_image_cache_path(image_path: &str, bundle: &str) -> Option<PathBuf> {
+    let image_bytes = fs::read(image_path).ok()?;
+    let cache_key = stable_fingerprint_parts(&[&image_bytes, bundle.as_bytes()]);
+    Some(native_image_cache_dir().join(format!("{cache_key}.json")))
+}
+
+fn native_image_decl_module_cache_path(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+) -> Option<PathBuf> {
+    let image_bytes = fs::read(image_path).ok()?;
+    let cache_key = stable_fingerprint_parts(&[
+        &image_bytes,
+        context_fingerprint.as_bytes(),
+        module_name.as_bytes(),
+        module_source_fingerprint.as_bytes(),
+    ]);
+    Some(native_image_decl_module_cache_dir().join(format!("{cache_key}.json")))
+}
+
+fn read_cached_native_image(image_path: &str, bundle: &str) -> Option<Vec<u8>> {
+    let cache_path = native_image_cache_path(image_path, bundle)?;
+    fs::read(cache_path).ok()
+}
+
+fn read_cached_native_image_decl_module(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+) -> Option<String> {
+    let cache_path = native_image_decl_module_cache_path(
+        image_path,
+        context_fingerprint,
+        module_name,
+        module_source_fingerprint,
+    )?;
+    fs::read_to_string(cache_path).ok()
+}
+
+fn write_cached_native_image(image_path: &str, bundle: &str, image_bytes: &[u8]) {
+    let Some(cache_path) = native_image_cache_path(image_path, bundle) else {
+        return;
+    };
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(cache_path, image_bytes);
+}
+
+fn write_cached_native_image_decl_module(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    decl_text: &str,
+) {
+    let Some(cache_path) = native_image_decl_module_cache_path(
+        image_path,
+        context_fingerprint,
+        module_name,
+        module_source_fingerprint,
+    ) else {
+        return;
+    };
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(cache_path, decl_text);
 }
 
 fn stage1_image_path() -> Result<PathBuf, String> {
@@ -443,11 +922,11 @@ fn stage1_image_path() -> Result<PathBuf, String> {
     Ok(stage1_path)
 }
 
-fn bundle_path(entry_path: &Path) -> Result<String, String> {
+fn bundle_build(entry_path: &Path) -> Result<ProjectBundleBuild, String> {
     let entry_text = entry_path
         .to_str()
         .ok_or_else(|| format!("entry path `{}` is not valid UTF-8", entry_path.display()))?;
-    build_project_bundle(entry_text)
+    build_project_bundle_build(entry_text)
 }
 
 fn replace_extension(path: &Path, extension: &str) -> PathBuf {
@@ -946,16 +1425,16 @@ fn run_explain(options: &CliOptions, stage1_path: &Path, bundle: &str) -> ExitCo
 fn run_build(
     options: &CliOptions,
     stage1_path: &Path,
-    bundle: &str,
+    bundle_build: &ProjectBundleBuild,
     export_name: &str,
     default_extension: &str,
     target_name: &str,
 ) -> ExitCode {
     let stage1_path_text = stage1_path.to_string_lossy();
     let result = if export_name == "nativeImageProjectText" {
-        execute_parallel_native_image_export(&stage1_path_text, bundle)
+        execute_parallel_native_image_export(&stage1_path_text, bundle_build)
     } else {
-        unsafe { execute_native_export_from_image_path(&stage1_path_text, export_name, Some(bundle)) }
+        unsafe { execute_native_export_from_image_path(&stage1_path_text, export_name, Some(&bundle_build.bundle)) }
     };
     let output_bytes = match result {
         Ok(output_bytes) => output_bytes,
@@ -1012,9 +1491,20 @@ fn run_exec_image(args: &[String]) -> ExitCode {
 
     let result = unsafe {
         if export_name == "nativeImageProjectText" {
-            match source_text.as_deref() {
-                Some(bundle) => execute_parallel_native_image_export(image_path, bundle),
-                None => execute_native_export_from_image_path(image_path, export_name, None),
+            match args.get(4).map(|value| value.as_str()) {
+                Some(argument) if argument.starts_with("--project-entry=") => {
+                    match argument.strip_prefix("--project-entry=") {
+                        Some(project_entry_path) => match build_project_bundle_build(project_entry_path) {
+                            Ok(bundle_build) => execute_parallel_native_image_export(image_path, &bundle_build),
+                            Err(message) => Err(message),
+                        },
+                        None => Err("invalid project entry argument".to_owned()),
+                    }
+                }
+                _ => match source_text.as_deref() {
+                    Some(bundle) => execute_native_export_from_image_path(image_path, export_name, Some(bundle)),
+                    None => execute_native_export_from_image_path(image_path, export_name, None),
+                },
             }
         } else {
             execute_native_export_from_image_path(image_path, export_name, source_text.as_deref())
@@ -1066,10 +1556,11 @@ fn main() -> ExitCode {
         Err(message) => return fail(&message, options.json),
     };
 
-    let bundle = match bundle_path(&options.input_path) {
-        Ok(bundle) => bundle,
+    let bundle_build = match bundle_build(&options.input_path) {
+        Ok(bundle_build) => bundle_build,
         Err(message) => return fail(&message, options.json),
     };
+    let bundle = &bundle_build.bundle;
 
     match options.command {
         Command::Check => run_check(&options, &stage1_path, &bundle),
@@ -1077,7 +1568,7 @@ fn main() -> ExitCode {
         Command::Compile => {
             if project_declares_backend_surface(&bundle) {
                 let stage1_path_text = stage1_path.to_string_lossy();
-                let result = execute_parallel_native_image_export(&stage1_path_text, &bundle);
+                let result = execute_parallel_native_image_export(&stage1_path_text, &bundle_build);
                 let output_bytes = match result {
                     Ok(output_bytes) => output_bytes,
                     Err(message) => return fail(&message, options.json),
@@ -1103,7 +1594,7 @@ fn main() -> ExitCode {
                 run_build(
                     &options,
                     &stage1_path,
-                    &bundle,
+                    &bundle_build,
                     "compileProjectText",
                     "js",
                     "frontend-js",
@@ -1113,7 +1604,7 @@ fn main() -> ExitCode {
         Command::Native => run_build(
             &options,
             &stage1_path,
-            &bundle,
+            &bundle_build,
             "nativeProjectText",
             "native.ir",
             "native-ir",
@@ -1121,7 +1612,7 @@ fn main() -> ExitCode {
         Command::NativeImage => run_build(
             &options,
             &stage1_path,
-            &bundle,
+            &bundle_build,
             "nativeImageProjectText",
             "native.image.json",
             "native-image",

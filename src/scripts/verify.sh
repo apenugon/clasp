@@ -7,16 +7,25 @@ stage1_native_path="$compiler_root/stage1.native.image.json"
 stage1_verify_ir_path="$compiler_root/stage1.verify.ir"
 stage1_verify_native_path="$compiler_root/stage1.verify.native.image.json"
 verify_root="$compiler_root/native-verify"
+verify_cache_root="$compiler_root/native-verify-cache"
 
 cleanup() {
   rm -rf "$verify_root"
+  rm -rf "$verify_cache_root"
   rm -f "$stage1_verify_ir_path" "$stage1_verify_native_path"
 }
 
 trap cleanup EXIT
 
 run_native_export() {
-  bash "$project_root/src/scripts/run-native-tool.sh" "$@"
+  if [[ -x "$project_root/runtime/target/debug/claspc" ]]; then
+    CLASPC_BIN="$project_root/runtime/target/debug/claspc" \
+      XDG_CACHE_HOME="$verify_cache_root/xdg" \
+      bash "$project_root/src/scripts/run-native-tool.sh" "$@"
+  else
+    XDG_CACHE_HOME="$verify_cache_root/xdg" \
+      bash "$project_root/src/scripts/run-native-tool.sh" "$@"
+  fi
 }
 
 default_parallel_jobs() {
@@ -131,6 +140,25 @@ run_parallel_commands() {
   rm -rf "$temp_root"
 }
 
+assert_json_equal() {
+  local left_path="$1"
+  local right_path="$2"
+
+  python - "$left_path" "$right_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as left_file:
+    left_value = json.load(left_file)
+with open(sys.argv[2], "r", encoding="utf-8") as right_file:
+    right_value = json.load(right_file)
+
+if left_value != right_value:
+    print(f"selfhost-native-verify: JSON mismatch between {sys.argv[1]} and {sys.argv[2]}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 run_verify() {
   local parallel_jobs="${CLASP_NATIVE_VERIFY_JOBS:-$(default_parallel_jobs)}"
   local project_entry_arg="--project-entry=$project_root/src/Main.clasp"
@@ -141,7 +169,7 @@ run_verify() {
   append_parallel_command rebuild_commands run_native_export "$stage1_native_path" nativeProjectText "$project_entry_arg" "$stage1_verify_ir_path"
   append_parallel_command rebuild_commands run_native_export "$stage1_native_path" nativeImageProjectText "$project_entry_arg" "$stage1_verify_native_path"
   run_parallel_commands "$rebuild_commands" "$parallel_jobs"
-  cmp -s "$stage1_native_path" "$stage1_verify_native_path"
+  assert_json_equal "$stage1_native_path" "$stage1_verify_native_path"
   mkdir -p "$verify_root"
 
   append_parallel_command export_commands run_native_export "$stage1_native_path" main "$verify_root/promoted.snapshot.json"
@@ -173,12 +201,12 @@ run_verify() {
   cmp -s "$verify_root/promoted.explain.txt" "$verify_root/rebuilt.explain.txt"
   cmp -s "$verify_root/promoted.compile.mjs" "$verify_root/rebuilt.compile.mjs"
   cmp -s "$verify_root/promoted.native.ir" "$verify_root/rebuilt.native.ir"
-  cmp -s "$verify_root/promoted.native.image.json" "$verify_root/rebuilt.native.image.json"
+  assert_json_equal "$verify_root/promoted.native.image.json" "$verify_root/rebuilt.native.image.json"
   cmp -s "$verify_root/promoted.source.check.txt" "$verify_root/rebuilt.source.check.txt"
   cmp -s "$verify_root/promoted.source.check-core.json" "$verify_root/rebuilt.source.check-core.json"
   cmp -s "$verify_root/promoted.source.compile.mjs" "$verify_root/rebuilt.source.compile.mjs"
   cmp -s "$verify_root/promoted.source.native.ir" "$verify_root/rebuilt.source.native.ir"
-  cmp -s "$verify_root/promoted.source.native.image.json" "$verify_root/rebuilt.source.native.image.json"
+  assert_json_equal "$verify_root/promoted.source.native.image.json" "$verify_root/rebuilt.source.native.image.json"
 
   printf '%s\n' '{"nativeSeedMatchesPromoted":true,"nativeCheckMatchesPromoted":true,"nativeExplainMatchesPromoted":true,"nativeCompileMatchesPromoted":true,"nativeIrMatchesPromoted":true,"nativeImageMatchesPromoted":true,"nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageMatchesPromoted":true}'
 }
