@@ -1,0 +1,112 @@
+{
+  "id": "lead-digest-upgrade",
+  "title": "Upgrade the lead summary flow to a LeadDigest contract",
+  "overview": "The lead follow-up slice needs a typed contract upgrade that should propagate through the API, workflow state, and downstream lookup request.",
+  "requirements": [
+    "Introduce a new record type named `LeadDigest` with this exact schema: `company : Str`, `priorityLabel : Str`, `owner : Str`, `needsFollowUp : Bool`.",
+    "Update the downstream playbook lookup request so it carries `owner : Str` and `needsFollowUp : Bool` instead of a single status string.",
+    "Update the workflow state so it stores `digest : LeadDigest`.",
+    "Update the lead summary API route so it returns `LeadDigest`.",
+    "Keep the program compiling.",
+    "Keep `main` working. After the change, `main` should evaluate to `\"senior-ae\"`."
+  ],
+  "fileHints": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "oracleHints": [
+    "Exact edit surfaces: `Main.clasp`, `Shared/Lead.clasp`.",
+    "Relevant declarations: `LeadSummary`, `LeadPlaybookLookup`, `LeadFollowUpState`, `summarizeLeadApi`, `lookupLeadPlaybook`, `main`."
+  ],
+  "expectedMain": "senior-ae",
+  "semanticFocus": {
+    "schemaNames": [
+      "LeadIntake",
+      "LeadSummary",
+      "LeadPlaybookLookup",
+      "LeadPlaybook",
+      "LeadFollowUpState"
+    ],
+    "routeNames": [
+      "summarizeLeadApi"
+    ],
+    "toolNames": [
+      "lookupLeadPlaybook"
+    ],
+    "workflowNames": [
+      "LeadFollowUpFlow"
+    ],
+    "declNames": [
+      "summarizeLead",
+      "playbookRequest",
+      "main"
+    ]
+  },
+  "assertions": {
+    "schemas": {
+      "present": [
+        {
+          "name": "LeadDigest",
+          "fields": [
+            { "name": "company", "type": "Str" },
+            { "name": "needsFollowUp", "type": "Bool" },
+            { "name": "owner", "type": "Str" },
+            { "name": "priorityLabel", "type": "Str" }
+          ]
+        },
+        {
+          "name": "LeadFollowUpState",
+          "fields": [
+            { "name": "digest", "type": "LeadDigest" }
+          ]
+        }
+      ],
+      "absent": [
+        "LeadSummary"
+      ]
+    },
+    "tool": {
+      "name": "lookupLeadPlaybook",
+      "requestType": "LeadPlaybookLookup",
+      "responseType": "LeadPlaybook",
+      "requestFields": [
+        { "name": "needsFollowUp", "type": "Bool" },
+        { "name": "owner", "type": "Str" }
+      ]
+    },
+    "route": {
+      "name": "summarizeLeadApi",
+      "responseType": "LeadDigest"
+    },
+    "workflow": {
+      "name": "LeadFollowUpFlow",
+      "stateType": "LeadFollowUpState",
+      "stateField": "digest",
+      "stateFieldType": "LeadDigest"
+    },
+    "context": {
+      "requiredNodes": [
+        "schema:LeadDigest",
+        "route:summarizeLeadApi",
+        "tool:lookupLeadPlaybook"
+      ],
+      "absentNodes": [
+        "schema:LeadSummary"
+      ],
+      "routeResponseEdge": {
+        "routeId": "route:summarizeLeadApi",
+        "schemaId": "schema:LeadDigest"
+      }
+    },
+    "air": {
+      "requiredRoots": [
+        "record:LeadDigest",
+        "route:summarizeLeadApi",
+        "tool:lookupLeadPlaybook"
+      ],
+      "absentRoots": [
+        "record:LeadSummary"
+      ]
+    }
+  }
+}

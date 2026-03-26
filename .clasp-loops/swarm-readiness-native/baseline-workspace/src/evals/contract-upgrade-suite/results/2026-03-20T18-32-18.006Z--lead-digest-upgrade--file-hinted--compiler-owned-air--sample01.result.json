@@ -1,0 +1,46 @@
+{
+  "taskId": "lead-digest-upgrade",
+  "title": "Upgrade the lead summary flow to a LeadDigest contract",
+  "mode": "file-hinted",
+  "assistance": "compiler-owned-air",
+  "sampleIndex": 1,
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T18:37:38.307Z",
+  "finishedAt": "2026-03-20T18:38:28.345Z",
+  "durationMs": 50038,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--file-hinted--compiler-owned-air--sample01.prompt.md",
+  "promptBytes": 3077,
+  "codexExitCode": 0,
+  "codexTimedOut": false,
+  "tokenUsage": {
+    "prompt": 114318,
+    "completion": 2434,
+    "retry": 0,
+    "debug": 0,
+    "total": 116752
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 114318,
+    "cachedInputTokens": 103936,
+    "outputTokens": 2434,
+    "uncachedInputTokens": 10382,
+    "uncachedTotal": 12816
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-file-hinted-compiler-owned-air-IQHKtl\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+  },
+  "verifyAttempts": 2,
+  "repairLoops": 1,
+  "timeToGreenMs": 44723,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

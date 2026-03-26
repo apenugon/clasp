@@ -1,0 +1,30 @@
+module Shared.Lead
+
+type LeadPriority = Low | Medium | High
+
+record Empty = {}
+
+record LeadIntake = {
+  company : Str,
+  priority : LeadPriority
+}
+
+record LeadChannelDigest = {
+  company : Str,
+  sourceChannel : Str,
+  campaignTag : Str,
+  owner : Str
+}
+
+record LeadPlaybookLookup = {
+  sourceChannel : Str,
+  campaignTag : Str
+}
+
+record LeadPlaybook = {
+  guidance : Str
+}
+
+record LeadFollowUpState = {
+  digest : LeadChannelDigest
+}

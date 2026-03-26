@@ -1,0 +1,400 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer } from "../dist/server/main.js";
+
+const require = createRequire(import.meta.url);
+
+function toWireSegment(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && typeof value.$tag === "string") {
+    return value.$tag.toLowerCase();
+  }
+
+  return undefined;
+}
+
+function formBody(fields) {
+  return new URLSearchParams(fields).toString();
+}
+
+async function request(port, path, init = {}) {
+  return fetch(`http://127.0.0.1:${port}${path}`, init);
+}
+
+async function allocatePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createServer();
+
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+
+      if (!address || typeof address === "string") {
+        socket.close(() => reject(new Error("failed to allocate an ephemeral port")));
+        return;
+      }
+
+      const { port } = address;
+      socket.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(port);
+      });
+    });
+  });
+}
+
+async function withServer(binding, callback, options = {}) {
+  const port = await allocatePort();
+  const server = createServer(
+    {
+      mockLeadSummaryModel: binding
+    },
+    {
+      databasePath: options.databasePath ?? ":memory:",
+      port
+    }
+  );
+
+  try {
+    await callback(port);
+  } finally {
+    server.stop(true);
+  }
+}
+
+async function withPersistentDatabase(callback) {
+  const directory = await mkdtemp(join(tmpdir(), "lead-app-ts-"));
+  const databasePath = join(directory, "lead-app.sqlite");
+
+  try {
+    await callback(databasePath);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+}
+
+function openDatabase(databasePath) {
+  if (typeof Bun !== "undefined") {
+    const { Database } = require("bun:sqlite");
+    return new Database(databasePath);
+  }
+
+  const { DatabaseSync } = require("node:sqlite");
+  return new DatabaseSync(databasePath);
+}
+
+function seedIncompatibleDatabase(databasePath) {
+  const database = openDatabase(databasePath);
+
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      INSERT OR REPLACE INTO app_meta (key, value)
+      VALUES ('schema_version', '999');
+    `);
+  } finally {
+    database.close();
+  }
+}
+
+await withServer((lead) => {
+  const priority =
+    lead.budget >= 50000 ? "high" : lead.budget >= 20000 ? "medium" : "low";
+
+  return JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact} fits the ${priority} priority pipeline.`,
+    priority,
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
+  });
+}, async (port) => {
+  const landing = await request(port, "/");
+  const landingHtml = await landing.text();
+  assert.equal(landing.status, 200);
+  assert.match(landingHtml, /<form method="POST" action="\/leads">/);
+  assert.match(landingHtml, /name="segment"/);
+
+  const created = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "enterprise"
+    })
+  });
+  const createdHtml = await created.text();
+  assert.equal(created.status, 200);
+  assert.match(createdHtml, /Priority: high/);
+  assert.match(createdHtml, /Segment: enterprise/);
+
+  const inbox = await request(port, "/inbox");
+  const inboxHtml = await inbox.text();
+  assert.equal(inbox.status, 200);
+  assert.match(inboxHtml, /href="\/lead\/primary"/);
+  assert.match(inboxHtml, /SynthSpeak \(high, enterprise\)/);
+
+  const secondaryLead = await request(port, "/lead/secondary");
+  const secondaryLeadHtml = await secondaryLead.text();
+  assert.equal(secondaryLead.status, 200);
+  assert.match(secondaryLeadHtml, /Northwind Studio/);
+  assert.match(secondaryLeadHtml, /Priority: medium/);
+
+  const primaryLead = await request(port, "/lead/primary");
+  const primaryLeadHtml = await primaryLead.text();
+  assert.equal(primaryLead.status, 200);
+  assert.match(primaryLeadHtml, /Segment: enterprise/);
+
+  const reviewed = await request(port, "/review", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      leadId: "lead-3",
+      note: "Ready for product demo next week."
+    })
+  });
+  const reviewedHtml = await reviewed.text();
+  assert.equal(reviewed.status, 200);
+  assert.match(reviewedHtml, /Review status: reviewed/);
+  assert.match(reviewedHtml, /Ready for product demo next week\./);
+
+  const unknownLead = await request(port, "/review", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      leadId: "lead-404",
+      note: "Missing lead"
+    })
+  });
+  assert.equal(unknownLead.status, 502);
+  assert.equal(await unknownLead.text(), "Unknown lead: lead-404");
+
+  const missing = await request(port, "/missing");
+  assert.equal(missing.status, 404);
+  assert.equal(await missing.text(), "not_found");
+});
+
+await withServer((lead) =>
+  JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact}`,
+    priority: "medium",
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "not-a-number",
+      segment: "startup"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "budget must be an integer");
+});
+
+await withServer(() =>
+  JSON.stringify({
+    summary: "SynthSpeak led by Ava",
+    priority: "urgent",
+    segment: "enterprise",
+    followUpRequired: true
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "enterprise"
+    })
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(await response.text(), "priority must be one of: low, medium, high");
+});
+
+await withServer((lead) =>
+  JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact}`,
+    priority: "medium",
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withServer((lead) =>
+  JSON.stringify({
+    summary: `${lead.company} led by ${lead.contact}`,
+    priority: "medium",
+    segment: toWireSegment(lead.segment),
+    followUpRequired: lead.budget >= 20000
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "global-5000"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withServer(() =>
+  JSON.stringify({
+    summary: "SynthSpeak led by Ava",
+    priority: "high",
+    segment: "global-5000",
+    followUpRequired: true
+  }),
+async (port) => {
+  const response = await request(port, "/leads", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody({
+      company: "SynthSpeak",
+      contact: "Ava",
+      budget: "75000",
+      segment: "enterprise"
+    })
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(await response.text(), "segment must be one of: startup, growth, enterprise");
+});
+
+await withPersistentDatabase(async (databasePath) => {
+  const binding = (lead) =>
+    JSON.stringify({
+      summary: `${lead.company} led by ${lead.contact} fits the persisted pipeline.`,
+      priority: "high",
+      segment: toWireSegment(lead.segment),
+      followUpRequired: true
+    });
+
+  await withServer(binding, async (port) => {
+    const created = await request(port, "/leads", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: formBody({
+        company: "Persisted Co",
+        contact: "Riley",
+        budget: "90000",
+        segment: "enterprise"
+      })
+    });
+
+    assert.equal(created.status, 200);
+
+    const reviewed = await request(port, "/review", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: formBody({
+        leadId: "lead-3",
+        note: "Stored in sqlite."
+      })
+    });
+
+    assert.equal(reviewed.status, 200);
+  }, { databasePath });
+
+  await withServer(binding, async (port) => {
+    const inbox = await request(port, "/inbox");
+    const inboxHtml = await inbox.text();
+    assert.equal(inbox.status, 200);
+    assert.match(inboxHtml, /Persisted Co \(high, enterprise\)/);
+
+    const primaryLead = await request(port, "/lead/primary");
+    const primaryLeadHtml = await primaryLead.text();
+    assert.equal(primaryLead.status, 200);
+    assert.match(primaryLeadHtml, /Persisted Co/);
+    assert.match(primaryLeadHtml, /Stored in sqlite\./);
+    assert.match(primaryLeadHtml, /Review status: reviewed/);
+  }, { databasePath });
+});
+
+await withPersistentDatabase(async (databasePath) => {
+  seedIncompatibleDatabase(databasePath);
+
+  assert.throws(
+    () =>
+      createServer(
+        {
+          mockLeadSummaryModel() {
+            return JSON.stringify({
+              summary: "ignored",
+              priority: "medium",
+              segment: "growth",
+              followUpRequired: false
+            });
+          }
+        },
+        {
+          databasePath,
+          port: 4600 + Math.floor(Math.random() * 300)
+        }
+      ),
+    /lead app schema version 999 is incompatible with expected version 1/
+  );
+});

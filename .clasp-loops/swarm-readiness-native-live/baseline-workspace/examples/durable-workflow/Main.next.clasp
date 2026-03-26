@@ -1,0 +1,7 @@
+module Main
+
+record Counter = { count : Int }
+
+workflow CounterFlow = { state : Counter }
+
+main = "workflow-demo-v2"

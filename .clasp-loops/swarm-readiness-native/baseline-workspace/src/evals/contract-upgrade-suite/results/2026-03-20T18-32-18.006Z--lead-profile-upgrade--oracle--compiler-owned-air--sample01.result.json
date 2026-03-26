@@ -1,0 +1,46 @@
+{
+  "taskId": "lead-profile-upgrade",
+  "title": "Upgrade the lead summary flow to a LeadProfile contract",
+  "mode": "oracle",
+  "assistance": "compiler-owned-air",
+  "sampleIndex": 1,
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T18:45:10.685Z",
+  "finishedAt": "2026-03-20T18:45:48.653Z",
+  "durationMs": 37968,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--oracle--compiler-owned-air--sample01.prompt.md",
+  "promptBytes": 3208,
+  "codexExitCode": 0,
+  "codexTimedOut": false,
+  "tokenUsage": {
+    "prompt": 65086,
+    "completion": 1827,
+    "retry": 0,
+    "debug": 0,
+    "total": 66913
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 65086,
+    "cachedInputTokens": 61568,
+    "outputTokens": 1827,
+    "uncachedInputTokens": 3518,
+    "uncachedTotal": 5345
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-oracle-compiler-owned-air-551Tgf\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+  },
+  "verifyAttempts": 1,
+  "repairLoops": 0,
+  "timeToGreenMs": 33117,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

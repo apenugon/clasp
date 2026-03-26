@@ -1,0 +1,59 @@
+keepNoCheckedCoreParamArtifact : CheckedCoreParamArtifact -> Bool
+emptyCheckedCoreParamArtifacts : [CheckedCoreParamArtifact]
+keepNoCheckedCorePatternBinderArtifact : CheckedCorePatternBinderArtifact -> Bool
+emptyCheckedCorePatternBinderArtifacts : [CheckedCorePatternBinderArtifact]
+keepNoCheckedCoreExprArtifact : CheckedCoreExprArtifact -> Bool
+emptyCheckedCoreExprArtifacts : [CheckedCoreExprArtifact]
+keepNoCheckedCoreRecordFieldArtifact : CheckedCoreRecordFieldArtifact -> Bool
+emptyCheckedCoreRecordFieldArtifacts : [CheckedCoreRecordFieldArtifact]
+keepNoCheckedCoreMatchBranchArtifact : CheckedCoreMatchBranchArtifact -> Bool
+emptyCheckedCoreMatchBranchArtifacts : [CheckedCoreMatchBranchArtifact]
+keepNoCheckedCoreDeclArtifact : CheckedCoreDeclArtifact -> Bool
+emptyCheckedCoreDeclArtifacts : [CheckedCoreDeclArtifact]
+keepNoCheckedCoreRenderedText : Str -> Bool
+emptyCheckedCoreRenderedTexts : [Str]
+appendCheckedCoreExprArtifact : [CheckedCoreExprArtifact] -> CheckedCoreExprArtifact -> [CheckedCoreExprArtifact]
+appendCheckedCoreRecordFieldArtifact : [CheckedCoreRecordFieldArtifact] -> CheckedCoreRecordFieldArtifact -> [CheckedCoreRecordFieldArtifact]
+appendCheckedCoreMatchBranchArtifact : [CheckedCoreMatchBranchArtifact] -> CheckedCoreMatchBranchArtifact -> [CheckedCoreMatchBranchArtifact]
+appendCheckedCoreDeclArtifact : [CheckedCoreDeclArtifact] -> CheckedCoreDeclArtifact -> [CheckedCoreDeclArtifact]
+checkedCoreNameType : [TypeBinding] -> [TypeBinding] -> Str -> TypeText
+checkedCoreExtendLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+checkedCoreExtendLoopLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+checkedCoreFunctionLocalEnv : HostedDeclAst -> [TypeBinding]
+checkedCoreFunctionContext : HostedDeclAst -> ReturnContext
+checkedCoreParamArtifacts : HostedDeclAst -> [CheckedCoreParamArtifact]
+checkedCoreParamArtifactsFromBindings : [TypeBinding] -> [CheckedCoreParamArtifact]
+checkedCorePatternBinderArtifacts : [TypeBinding] -> [CheckedCorePatternBinderArtifact]
+checkedCoreExprList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> CheckedCoreExprListBuildResult
+checkedCoreRecordFieldList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> CheckedCoreRecordFieldListBuildResult
+checkedCoreMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> CheckedCoreMatchBranchBuildResult
+checkedCoreMatchBranchList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> [HostedMatchBranchAst] -> CheckedCoreMatchBranchListBuildResult
+checkedCoreCallArtifact : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> Str -> [HostedExprAst] -> CheckedCoreExprBuildResult
+checkedCoreExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> CheckedCoreExprBuildResult
+checkedCoreExprWithType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> TypeText -> CheckedCoreExprBuildResult
+checkedCoreDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> CheckedCoreDeclBuildResult
+checkedCoreDecls : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> CheckedCoreDeclListBuildResult
+checkedCoreArtifactResult : HostedModuleAst -> CheckedCoreArtifactResult
+renderTaggedObject0 : Str -> Str
+renderTaggedObject1 : Str -> Str -> Str
+renderTaggedObject2 : Str -> Str -> Str -> Str
+renderTaggedObject3 : Str -> Str -> Str -> Str -> Str
+renderTaggedObject4 : Str -> Str -> Str -> Str -> Str -> Str
+renderTaggedObject5 : Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderCheckedCoreTypeJsonList : [TypeText] -> [Str]
+renderCheckedCoreTypeJson : TypeText -> Str
+renderCheckedCoreParamJson : CheckedCoreParamArtifact -> Str
+renderCheckedCoreParamJsonList : [CheckedCoreParamArtifact] -> [Str]
+renderCheckedCorePatternBinderJson : CheckedCorePatternBinderArtifact -> Str
+renderCheckedCorePatternBinderJsonList : [CheckedCorePatternBinderArtifact] -> [Str]
+renderCheckedCorePatternJson : CheckedCorePatternArtifact -> Str
+renderCheckedCoreRecordFieldJson : CheckedCoreRecordFieldArtifact -> Str
+renderCheckedCoreRecordFieldJsonList : [CheckedCoreRecordFieldArtifact] -> [Str]
+renderCheckedCoreMatchBranchJson : CheckedCoreMatchBranchArtifact -> Str
+renderCheckedCoreMatchBranchJsonList : [CheckedCoreMatchBranchArtifact] -> [Str]
+renderCheckedCoreExprJsonList : [CheckedCoreExprArtifact] -> [Str]
+renderCheckedCoreExprJson : CheckedCoreExprArtifact -> Str
+renderCheckedCoreDeclJson : CheckedCoreDeclArtifact -> Str
+renderCheckedCoreDeclJsonList : [CheckedCoreDeclArtifact] -> [Str]
+renderCheckedCoreArtifactResultJson : CheckedCoreArtifactResult -> Str
+checkedCoreSourceJson : Str -> Str

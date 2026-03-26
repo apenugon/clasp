@@ -1,0 +1,10 @@
+module SmokeParserHarness
+
+import Compiler.Checker
+import Compiler.Project
+
+checkSourceText : Str -> Str
+checkSourceText source = renderModuleSummary (sourceModule source)
+
+main : Str
+main = "smoke"

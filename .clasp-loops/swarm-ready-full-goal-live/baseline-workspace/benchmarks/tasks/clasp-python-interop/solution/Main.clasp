@@ -1,0 +1,18 @@
+module Main
+
+record WorkerBoot = { workerId : Str }
+record HookAck = { accepted : Bool, workerLabel : Str }
+record LeadRequest = { company : Str, budget : Int }
+record LeadSummary = { summary : Str, accepted : Bool }
+
+bootstrapWorker : WorkerBoot -> HookAck
+bootstrapWorker req = HookAck { accepted = true, workerLabel = req.workerId }
+
+summarizeLead : LeadRequest -> LeadSummary
+summarizeLead req = LeadSummary { summary = req.company, accepted = req.budget >= 40 }
+
+hook workerStart = "worker.start" WorkerBoot -> HookAck bootstrapWorker
+route summarizeRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
+
+main : Str
+main = "ok"

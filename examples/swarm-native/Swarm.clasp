@@ -1,0 +1,83 @@
+module Swarm
+
+record SwarmCommandResult = { exitCode : Int, stdout : Str, stderr : Str }
+
+runJson : Str -> [Str] -> Result Str
+runJson cwd args = match runCommandJson cwd (prepend "@swarm" args) {
+  Ok raw -> {
+    let result = decode SwarmCommandResult raw;
+    if result.exitCode == 0 then
+      Ok result.stdout
+    else if result.stderr == "" then
+      Err result.stdout
+    else
+      Err result.stderr
+  },
+  Err message ->
+    Err message
+}
+
+bootstrap : Str -> Str -> Str -> Result Str
+bootstrap root taskId actor = runJson "." ["bootstrap", root, taskId, "--actor", actor]
+
+lease : Str -> Str -> Str -> Result Str
+lease root taskId actor = runJson "." ["lease", root, taskId, "--actor", actor]
+
+complete : Str -> Str -> Str -> Result Str
+complete root taskId actor = runJson "." ["complete", root, taskId, "--actor", actor]
+
+status : Str -> Str -> Result Str
+status root taskId = runJson "." ["status", root, taskId]
+
+summary : Str -> Result Str
+summary root = runJson "." ["summary", root]
+
+ready : Str -> Str -> Result Str
+ready root objectiveId = runJson "." ["ready", root, objectiveId]
+
+managerNext : Str -> Str -> Result Str
+managerNext root objectiveId = runJson "." ["manager", "next", root, objectiveId]
+
+objectiveCreate : Str -> Str -> Str -> Int -> Int -> Result Str
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  runJson "." ["objective", "create", root, objectiveId, "--detail", detail, "--max-tasks", encode maxTasks, "--max-runs", encode maxRuns]
+
+objectiveStatus : Str -> Str -> Result Str
+objectiveStatus root objectiveId = runJson "." ["objective", "status", root, objectiveId]
+
+taskCreate : Str -> Str -> Str -> Str -> Int -> Int -> Result Str
+taskCreate root objectiveId taskId detail maxRuns leaseTimeoutMs =
+  runJson "." ["task", "create", root, objectiveId, taskId, "--detail", detail, "--max-runs", encode maxRuns, "--lease-timeout-ms", encode leaseTimeoutMs]
+
+policySet : Str -> Str -> Str -> [Str] -> [Str] -> Result Str
+policySet root taskId mergegateName requiredApprovals requiredVerifiers = {
+  let approvalArgs = fold appendApprovalArgs [] requiredApprovals;
+  let verifierArgs = fold appendVerifierArgs [] requiredVerifiers;
+  runJson "." (append ["policy", "set", root, taskId, mergegateName] (append approvalArgs verifierArgs))
+}
+
+appendApprovalArgs : [Str] -> Str -> [Str]
+appendApprovalArgs args approval = append args ["--require-approval", approval]
+
+appendVerifierArgs : [Str] -> Str -> [Str]
+appendVerifierArgs args verifier = append args ["--require-verifier", verifier]
+
+toolRun : Str -> Str -> Str -> Str -> [Str] -> Result Str
+toolRun root taskId actor cwd command = runJson cwd (append ["tool", root, taskId, "--actor", actor, "--cwd", cwd, "--"] command)
+
+verifierRun : Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str
+verifierRun root taskId actor verifierName cwd command =
+  runJson cwd (append ["verifier", "run", root, taskId, verifierName, "--actor", actor, "--cwd", cwd, "--"] command)
+
+approve : Str -> Str -> Str -> Str -> Result Str
+approve root taskId actor approvalName = runJson "." ["approve", root, taskId, approvalName, "--actor", actor]
+
+mergegateDecide : Str -> Str -> Str -> [Str] -> Result Str
+mergegateDecide root taskId mergegateName verifiers =
+  runJson "." (append ["mergegate", "decide", root, taskId, mergegateName] verifiers)
+
+runs : Str -> Str -> Result Str
+runs root taskId = runJson "." ["runs", root, taskId]
+
+artifacts : Str -> Str -> Result Str
+artifacts root taskId = runJson "." ["artifacts", root, taskId]

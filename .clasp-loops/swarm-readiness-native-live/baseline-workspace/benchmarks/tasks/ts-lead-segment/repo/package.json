@@ -1,0 +1,14 @@
+{
+  "name": "ts-lead-segment-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "start": "bun run src/server/dev.ts",
+    "test": "npm run clean && npm run build && bun test/lead-app.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

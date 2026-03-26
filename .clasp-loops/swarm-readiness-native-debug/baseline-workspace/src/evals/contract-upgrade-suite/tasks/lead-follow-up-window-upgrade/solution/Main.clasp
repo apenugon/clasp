@@ -1,0 +1,56 @@
+module Main
+
+import Shared.Lead
+
+policy LeadOps = public permits {
+  process "node"
+}
+
+toolserver LeadTools = "mcp" "stdio://lead-tools" with LeadOps
+
+tool lookupLeadPlaybook = LeadTools "lookup_lead_playbook" LeadPlaybookLookup -> LeadPlaybook
+
+priorityLabel : LeadPriority -> Str
+priorityLabel priority = match priority {
+  Low -> "low",
+  Medium -> "medium",
+  High -> "high"
+}
+
+followUpWindowDays : LeadPriority -> Int
+followUpWindowDays priority = match priority {
+  Low -> 14,
+  Medium -> 7,
+  High -> 3
+}
+
+escalationOwner : LeadPriority -> Str
+escalationOwner priority = match priority {
+  Low -> "self-serve",
+  Medium -> "account-exec",
+  High -> "sales-manager"
+}
+
+summarizeLead : LeadIntake -> LeadFollowUpDigest
+summarizeLead intake = LeadFollowUpDigest {
+  company = intake.company,
+  priorityLabel = priorityLabel intake.priority,
+  followUpWindowDays = followUpWindowDays intake.priority,
+  escalationOwner = escalationOwner intake.priority
+}
+
+playbookRequest : LeadFollowUpDigest -> LeadPlaybookLookup
+playbookRequest digest = LeadPlaybookLookup {
+  followUpWindowDays = digest.followUpWindowDays,
+  escalationOwner = digest.escalationOwner
+}
+
+workflow LeadFollowUpFlow = { state : LeadFollowUpState }
+
+summarizeLeadRoute : LeadIntake -> LeadFollowUpDigest
+summarizeLeadRoute intake = summarizeLead intake
+
+route summarizeLeadApi = POST "/api/lead/summary" LeadIntake -> LeadFollowUpDigest summarizeLeadRoute
+
+main : Str
+main = (playbookRequest (summarizeLead (LeadIntake { company = "Northwind", priority = High }))).escalationOwner

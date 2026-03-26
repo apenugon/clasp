@@ -1,0 +1,44 @@
+module Main
+
+record TicketDraft = {
+  customerId : Str,
+  summary : Str
+}
+
+record PromptToolRequest = { query : Str }
+record PromptToolResponse = { summary : Str }
+
+sampleDraft : TicketDraft
+sampleDraft = TicketDraft {
+  customerId = "cust-42",
+  summary = "Renewal is blocked on legal review."
+}
+
+replyPrompt : TicketDraft -> Prompt
+replyPrompt draft = appendPrompt (appendPrompt (systemPrompt "You are a support agent.") (assistantPrompt "Draft a concise reply.")) (userPrompt draft.summary)
+
+replyPromptValue : Prompt
+replyPromptValue = replyPrompt sampleDraft
+
+replyPromptText : Str
+replyPromptText = promptText replyPromptValue
+
+guide PromptDemo = {
+  scope: "Keep secret values out of prompt payloads, traces, and tool calls."
+}
+
+policy PromptSecrets = public permits {
+  process "node",
+  secret "OPENAI_API_KEY"
+}
+
+role PromptWorkerRole = guide: PromptDemo, policy: PromptSecrets, approval: on_request, sandbox: workspace_write
+
+agent promptWorker = PromptWorkerRole
+
+toolserver PromptTools = "mcp" "stdio://prompt-tools" with PromptSecrets
+
+tool summarizeDraft = PromptTools "summarize_draft" PromptToolRequest -> PromptToolResponse
+
+main : Str
+main = replyPromptText

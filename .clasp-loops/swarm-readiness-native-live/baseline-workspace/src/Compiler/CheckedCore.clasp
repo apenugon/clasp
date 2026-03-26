@@ -1,0 +1,773 @@
+module Compiler.CheckedCore
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Json
+
+type CheckedCoreArtifactResult = CheckedCoreArtifactOk [CheckedCoreDeclArtifact] | CheckedCoreArtifactError Str
+type CheckedCoreDeclArtifact = CheckedCoreDeclArtifact Str TypeText [CheckedCoreParamArtifact] CheckedCoreExprArtifact
+type CheckedCoreParamArtifact = CheckedCoreParamArtifact Str TypeText
+type CheckedCoreExprArtifact = CheckedCoreVarArtifact TypeText Str | CheckedCoreIntArtifact Str | CheckedCoreStringArtifact Str | CheckedCoreBoolArtifact Bool | CheckedCoreListArtifact TypeText [CheckedCoreExprArtifact] | CheckedCoreIfArtifact TypeText CheckedCoreExprArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreReturnArtifact TypeText CheckedCoreExprArtifact | CheckedCoreEqualArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreNotEqualArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreLessThanArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreLessThanOrEqualArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreGreaterThanArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreGreaterThanOrEqualArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreLetArtifact TypeText Str CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreMutableLetArtifact TypeText Str CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreAssignArtifact TypeText Str CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreForArtifact TypeText Str CheckedCoreExprArtifact CheckedCoreExprArtifact CheckedCoreExprArtifact | CheckedCoreCallArtifact TypeText Str TypeText [CheckedCoreExprArtifact] | CheckedCoreMatchArtifact TypeText CheckedCoreExprArtifact [CheckedCoreMatchBranchArtifact] | CheckedCoreRecordArtifact TypeText Str [CheckedCoreRecordFieldArtifact] | CheckedCoreFieldAccessArtifact TypeText CheckedCoreExprArtifact Str
+type CheckedCoreRecordFieldArtifact = CheckedCoreRecordFieldArtifact Str CheckedCoreExprArtifact
+type CheckedCoreMatchBranchArtifact = CheckedCoreMatchBranchArtifact CheckedCorePatternArtifact CheckedCoreExprArtifact
+type CheckedCorePatternArtifact = CheckedCoreConstructorPatternArtifact Str [CheckedCorePatternBinderArtifact]
+type CheckedCorePatternBinderArtifact = CheckedCorePatternBinderArtifact Str TypeText
+
+type CheckedCoreExprBuildResult = CheckedCoreExprBuilt CheckedCoreExprArtifact | CheckedCoreExprBuildError Str
+type CheckedCoreExprListBuildResult = CheckedCoreExprListBuilt [CheckedCoreExprArtifact] | CheckedCoreExprListBuildError Str
+type CheckedCoreRecordFieldListBuildResult = CheckedCoreRecordFieldListBuilt [CheckedCoreRecordFieldArtifact] | CheckedCoreRecordFieldListBuildError Str
+type CheckedCoreMatchBranchListBuildResult = CheckedCoreMatchBranchListBuilt [CheckedCoreMatchBranchArtifact] | CheckedCoreMatchBranchListBuildError Str
+type CheckedCoreDeclBuildResult = CheckedCoreDeclBuilt CheckedCoreDeclArtifact | CheckedCoreDeclBuildError Str
+type CheckedCoreDeclListBuildResult = CheckedCoreDeclListBuilt [CheckedCoreDeclArtifact] | CheckedCoreDeclListBuildError Str
+type CheckedCoreMatchBranchBuildResult = CheckedCoreMatchBranchBuilt CheckedCoreMatchBranchArtifact | CheckedCoreMatchBranchBuildError Str
+
+keepNoCheckedCoreParamArtifact : CheckedCoreParamArtifact -> Bool
+keepNoCheckedCoreParamArtifact value = false
+
+emptyCheckedCoreParamArtifacts : [CheckedCoreParamArtifact]
+emptyCheckedCoreParamArtifacts = filter keepNoCheckedCoreParamArtifact [CheckedCoreParamArtifact "" (TUnknown "")]
+
+keepNoCheckedCorePatternBinderArtifact : CheckedCorePatternBinderArtifact -> Bool
+keepNoCheckedCorePatternBinderArtifact value = false
+
+emptyCheckedCorePatternBinderArtifacts : [CheckedCorePatternBinderArtifact]
+emptyCheckedCorePatternBinderArtifacts = filter keepNoCheckedCorePatternBinderArtifact [CheckedCorePatternBinderArtifact "" (TUnknown "")]
+
+keepNoCheckedCoreExprArtifact : CheckedCoreExprArtifact -> Bool
+keepNoCheckedCoreExprArtifact value = false
+
+emptyCheckedCoreExprArtifacts : [CheckedCoreExprArtifact]
+emptyCheckedCoreExprArtifacts = filter keepNoCheckedCoreExprArtifact [CheckedCoreStringArtifact ""]
+
+keepNoCheckedCoreRecordFieldArtifact : CheckedCoreRecordFieldArtifact -> Bool
+keepNoCheckedCoreRecordFieldArtifact value = false
+
+emptyCheckedCoreRecordFieldArtifacts : [CheckedCoreRecordFieldArtifact]
+emptyCheckedCoreRecordFieldArtifacts = filter keepNoCheckedCoreRecordFieldArtifact [CheckedCoreRecordFieldArtifact "" (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreMatchBranchArtifact : CheckedCoreMatchBranchArtifact -> Bool
+keepNoCheckedCoreMatchBranchArtifact value = false
+
+emptyCheckedCoreMatchBranchArtifacts : [CheckedCoreMatchBranchArtifact]
+emptyCheckedCoreMatchBranchArtifacts = filter keepNoCheckedCoreMatchBranchArtifact [CheckedCoreMatchBranchArtifact (CheckedCoreConstructorPatternArtifact "" emptyCheckedCorePatternBinderArtifacts) (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreDeclArtifact : CheckedCoreDeclArtifact -> Bool
+keepNoCheckedCoreDeclArtifact value = false
+
+emptyCheckedCoreDeclArtifacts : [CheckedCoreDeclArtifact]
+emptyCheckedCoreDeclArtifacts = filter keepNoCheckedCoreDeclArtifact [CheckedCoreDeclArtifact "" (TUnknown "") emptyCheckedCoreParamArtifacts (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreRenderedText : Str -> Bool
+keepNoCheckedCoreRenderedText value = false
+
+emptyCheckedCoreRenderedTexts : [Str]
+emptyCheckedCoreRenderedTexts = filter keepNoCheckedCoreRenderedText [""]
+
+appendCheckedCoreExprArtifact : [CheckedCoreExprArtifact] -> CheckedCoreExprArtifact -> [CheckedCoreExprArtifact]
+appendCheckedCoreExprArtifact values value = append values [value]
+
+appendCheckedCoreRecordFieldArtifact : [CheckedCoreRecordFieldArtifact] -> CheckedCoreRecordFieldArtifact -> [CheckedCoreRecordFieldArtifact]
+appendCheckedCoreRecordFieldArtifact values value = append values [value]
+
+appendCheckedCoreMatchBranchArtifact : [CheckedCoreMatchBranchArtifact] -> CheckedCoreMatchBranchArtifact -> [CheckedCoreMatchBranchArtifact]
+appendCheckedCoreMatchBranchArtifact values value = append values [value]
+
+appendCheckedCoreDeclArtifact : [CheckedCoreDeclArtifact] -> CheckedCoreDeclArtifact -> [CheckedCoreDeclArtifact]
+appendCheckedCoreDeclArtifact values value = append values [value]
+
+checkedCoreNameType : [TypeBinding] -> [TypeBinding] -> Str -> TypeText
+checkedCoreNameType env localEnv name = match lookupTypeBinding (append localEnv env) name {
+  FoundType bindingType ->
+    bindingType,
+  MissingType missing ->
+    TUnknown missing
+}
+
+checkedCoreExtendLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+checkedCoreExtendLocalEnv typeDecls recordDecls env localEnv fnContext binder value = match inferExpr typeDecls recordDecls env localEnv fnContext value {
+  InferredExpr valueType ->
+    appendTypeBinding localEnv (TypeBinding binder valueType),
+  InferExprError message ->
+    localEnv
+}
+
+checkedCoreExtendLoopLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]
+checkedCoreExtendLoopLocalEnv typeDecls recordDecls env localEnv fnContext binder iterable = match inferExpr typeDecls recordDecls env localEnv fnContext iterable {
+  InferredExpr iterableType ->
+    match iterableType {
+      TList itemType ->
+        appendTypeBinding localEnv (TypeBinding binder itemType),
+      TStr ->
+        appendTypeBinding localEnv (TypeBinding binder TStr),
+      TInt ->
+        localEnv,
+      TBool ->
+        localEnv,
+      TFunction inputType resultType ->
+        localEnv,
+      TNamed label ->
+        localEnv,
+      TApply label args ->
+        localEnv,
+      TVar label ->
+        localEnv,
+      TUnknown label ->
+        localEnv
+    },
+  InferExprError message ->
+    localEnv
+}
+
+checkedCoreFunctionLocalEnv : HostedDeclAst -> [TypeBinding]
+checkedCoreFunctionLocalEnv decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
+  match bindFunctionParams decl declaredType {
+    BindingParams localEnv expectedBodyType ->
+      localEnv,
+    BindingParamError message ->
+      emptyTypeBindings
+  }
+} else {
+  emptyTypeBindings
+}
+
+checkedCoreFunctionContext : HostedDeclAst -> ReturnContext
+checkedCoreFunctionContext decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
+  match bindFunctionParams decl declaredType {
+    BindingParams localEnv expectedBodyType ->
+      InsideFunction expectedBodyType,
+    BindingParamError message ->
+      OutsideFunction
+  }
+} else {
+  OutsideFunction
+}
+
+checkedCoreParamArtifacts : HostedDeclAst -> [CheckedCoreParamArtifact]
+checkedCoreParamArtifacts decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
+  match bindFunctionParams decl declaredType {
+    BindingParams localEnv expectedBodyType ->
+      checkedCoreParamArtifactsFromBindings localEnv,
+    BindingParamError message ->
+      emptyCheckedCoreParamArtifacts
+  }
+} else {
+  emptyCheckedCoreParamArtifacts
+}
+
+checkedCoreParamArtifactsFromBindings : [TypeBinding] -> [CheckedCoreParamArtifact]
+checkedCoreParamArtifactsFromBindings bindings = {
+  let mut params = emptyCheckedCoreParamArtifacts;
+  for binding in bindings {
+    params = match binding {
+      TypeBinding name bindingType ->
+        append params [CheckedCoreParamArtifact name bindingType]
+    };
+    params
+  };
+  params
+}
+
+checkedCorePatternBinderArtifacts : [TypeBinding] -> [CheckedCorePatternBinderArtifact]
+checkedCorePatternBinderArtifacts bindings = {
+  let mut binders = emptyCheckedCorePatternBinderArtifacts;
+  for binding in bindings {
+    binders = match binding {
+      TypeBinding name bindingType ->
+        append binders [CheckedCorePatternBinderArtifact name bindingType]
+    };
+    binders
+  };
+  binders
+}
+
+checkedCoreExprList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> CheckedCoreExprListBuildResult
+checkedCoreExprList typeDecls recordDecls env localEnv fnContext values = {
+  let mut state = CheckedCoreExprListBuilt emptyCheckedCoreExprArtifacts;
+  for value in values {
+    state = match state {
+      CheckedCoreExprListBuildError message ->
+        CheckedCoreExprListBuildError message,
+      CheckedCoreExprListBuilt artifacts ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext value {
+          CheckedCoreExprBuilt artifact ->
+            CheckedCoreExprListBuilt (appendCheckedCoreExprArtifact artifacts artifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprListBuildError message
+        }
+    };
+    state
+  };
+  state
+}
+
+checkedCoreRecordFieldList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> CheckedCoreRecordFieldListBuildResult
+checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields = {
+  let mut state = CheckedCoreRecordFieldListBuilt emptyCheckedCoreRecordFieldArtifacts;
+  for field in fields {
+    state = match state {
+      CheckedCoreRecordFieldListBuildError message ->
+        CheckedCoreRecordFieldListBuildError message,
+      CheckedCoreRecordFieldListBuilt artifacts ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue field) {
+          CheckedCoreExprBuilt artifact ->
+            CheckedCoreRecordFieldListBuilt (appendCheckedCoreRecordFieldArtifact artifacts (CheckedCoreRecordFieldArtifact (recordExprFieldName field) artifact)),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreRecordFieldListBuildError message
+        }
+    };
+    state
+  };
+  state
+}
+
+checkedCoreMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> CheckedCoreMatchBranchBuildResult
+checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch = {
+  let pattern = branchPatternAst branch;
+  match bindPattern typeDecl subjectType pattern {
+    PatternBindError message ->
+      CheckedCoreMatchBranchBuildError message,
+    BoundPattern bindings ->
+      match checkedCoreExpr typeDecls recordDecls env (append bindings localEnv) fnContext (branchBodyExpr branch) {
+        CheckedCoreExprBuilt bodyArtifact ->
+          CheckedCoreMatchBranchBuilt (CheckedCoreMatchBranchArtifact (CheckedCoreConstructorPatternArtifact (patternConstructorName pattern) (checkedCorePatternBinderArtifacts bindings)) bodyArtifact),
+        CheckedCoreExprBuildError message ->
+          CheckedCoreMatchBranchBuildError message
+      }
+  }
+}
+
+checkedCoreMatchBranchList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> [HostedMatchBranchAst] -> CheckedCoreMatchBranchListBuildResult
+checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches = {
+  let mut state = CheckedCoreMatchBranchListBuilt emptyCheckedCoreMatchBranchArtifacts;
+  for branch in branches {
+    state = match state {
+      CheckedCoreMatchBranchListBuildError message ->
+        CheckedCoreMatchBranchListBuildError message,
+      CheckedCoreMatchBranchListBuilt artifacts ->
+        match checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
+          CheckedCoreMatchBranchBuilt artifact ->
+            CheckedCoreMatchBranchListBuilt (appendCheckedCoreMatchBranchArtifact artifacts artifact),
+          CheckedCoreMatchBranchBuildError message ->
+            CheckedCoreMatchBranchListBuildError message
+        }
+    };
+    state
+  };
+  state
+}
+
+checkedCoreCallArtifact : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> Str -> [HostedExprAst] -> CheckedCoreExprBuildResult
+checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext resultType callee args = match checkedCoreExprList typeDecls recordDecls env localEnv fnContext args {
+  CheckedCoreExprListBuilt argArtifacts ->
+    CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) argArtifacts),
+  CheckedCoreExprListBuildError message ->
+    CheckedCoreExprBuildError message
+}
+
+checkedCoreExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> CheckedCoreExprBuildResult
+checkedCoreExpr typeDecls recordDecls env localEnv fnContext expr = match inferExpr typeDecls recordDecls env localEnv fnContext expr {
+  InferExprError message ->
+    CheckedCoreExprBuildError message,
+  InferredExpr exprType ->
+    checkedCoreExprWithType typeDecls recordDecls env localEnv fnContext expr exprType
+}
+
+checkedCoreExprWithType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> TypeText -> CheckedCoreExprBuildResult
+checkedCoreExprWithType typeDecls recordDecls env localEnv fnContext expr exprType = match expr {
+  HostedName name ->
+    CheckedCoreExprBuilt (CheckedCoreVarArtifact exprType name),
+  HostedString value ->
+    CheckedCoreExprBuilt (CheckedCoreStringArtifact value),
+  HostedInt value ->
+    CheckedCoreExprBuilt (CheckedCoreIntArtifact value),
+  HostedBool value ->
+    CheckedCoreExprBuilt (CheckedCoreBoolArtifact value),
+  HostedList values ->
+    match checkedCoreExprList typeDecls recordDecls env localEnv fnContext values {
+      CheckedCoreExprListBuilt artifacts ->
+        CheckedCoreExprBuilt (CheckedCoreListArtifact exprType artifacts),
+      CheckedCoreExprListBuildError message ->
+        CheckedCoreExprBuildError message
+    },
+  HostedCall callee args ->
+    checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext exprType callee args,
+  HostedConstructor constructorName args ->
+    checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext exprType constructorName args,
+  HostedMatch subject branches ->
+    match inferExpr typeDecls recordDecls env localEnv fnContext subject {
+      InferExprError message ->
+        CheckedCoreExprBuildError message,
+      InferredExpr subjectType ->
+        match subjectType {
+          TNamed typeName ->
+            match lookupTypeDecl typeDecls typeName {
+              MissingTypeDecl missing ->
+                CheckedCoreExprBuildError (textConcat ["Unknown match type `", missing, "`."]),
+              FoundTypeDecl typeDecl ->
+                match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subject {
+                  CheckedCoreExprBuildError message ->
+                    CheckedCoreExprBuildError message,
+                  CheckedCoreExprBuilt subjectArtifact ->
+                    match checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches {
+                      CheckedCoreMatchBranchListBuilt branchArtifacts ->
+                        CheckedCoreExprBuilt (CheckedCoreMatchArtifact exprType subjectArtifact branchArtifacts),
+                      CheckedCoreMatchBranchListBuildError message ->
+                        CheckedCoreExprBuildError message
+                    }
+                }
+            },
+          TApply typeName args ->
+            match lookupTypeDecl typeDecls typeName {
+              MissingTypeDecl missing ->
+                CheckedCoreExprBuildError (textConcat ["Unknown match type `", missing, "`."]),
+              FoundTypeDecl typeDecl ->
+                match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subject {
+                  CheckedCoreExprBuildError message ->
+                    CheckedCoreExprBuildError message,
+                  CheckedCoreExprBuilt subjectArtifact ->
+                    match checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches {
+                      CheckedCoreMatchBranchListBuilt branchArtifacts ->
+                        CheckedCoreExprBuilt (CheckedCoreMatchArtifact exprType subjectArtifact branchArtifacts),
+                      CheckedCoreMatchBranchListBuildError message ->
+                        CheckedCoreExprBuildError message
+                    }
+                }
+            },
+          TInt ->
+            CheckedCoreExprBuildError "`match` requires a named type.",
+          TStr ->
+            CheckedCoreExprBuildError "`match` requires a named type.",
+          TBool ->
+            CheckedCoreExprBuildError "`match` requires a named type.",
+          TList itemType ->
+            CheckedCoreExprBuildError "`match` requires a named type.",
+          TFunction inputType resultType ->
+            CheckedCoreExprBuildError "`match` requires a named type.",
+          TVar label ->
+            CheckedCoreExprBuildError "`match` requires a known type.",
+          TUnknown label ->
+            CheckedCoreExprBuildError "`match` requires a known type."
+        }
+    },
+  HostedRecord recordName fields ->
+    match checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields {
+      CheckedCoreRecordFieldListBuilt fieldArtifacts ->
+        CheckedCoreExprBuilt (CheckedCoreRecordArtifact exprType recordName fieldArtifacts),
+      CheckedCoreRecordFieldListBuildError message ->
+        CheckedCoreExprBuildError message
+    },
+  HostedFieldAccess subject fieldName ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subject {
+      CheckedCoreExprBuilt subjectArtifact ->
+        CheckedCoreExprBuilt (CheckedCoreFieldAccessArtifact exprType subjectArtifact fieldName),
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message
+    },
+  HostedLet binder value body ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext value {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt valueArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env (checkedCoreExtendLocalEnv typeDecls recordDecls env localEnv fnContext binder value) fnContext body {
+          CheckedCoreExprBuilt bodyArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreLetArtifact exprType binder valueArtifact bodyArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedMutableLet binder value body ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext value {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt valueArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env (checkedCoreExtendLocalEnv typeDecls recordDecls env localEnv fnContext binder value) fnContext body {
+          CheckedCoreExprBuilt bodyArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreMutableLetArtifact exprType binder valueArtifact bodyArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedAssign binder value body ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext value {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt valueArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext body {
+          CheckedCoreExprBuilt bodyArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreAssignArtifact exprType binder valueArtifact bodyArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedFor binder iterable loopBody body ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext iterable {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt iterableArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env (checkedCoreExtendLoopLocalEnv typeDecls recordDecls env localEnv fnContext binder iterable) fnContext loopBody {
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message,
+          CheckedCoreExprBuilt loopBodyArtifact ->
+            match checkedCoreExpr typeDecls recordDecls env localEnv fnContext body {
+              CheckedCoreExprBuilt bodyArtifact ->
+                CheckedCoreExprBuilt (CheckedCoreForArtifact exprType binder iterableArtifact loopBodyArtifact bodyArtifact),
+              CheckedCoreExprBuildError message ->
+                CheckedCoreExprBuildError message
+            }
+        }
+    },
+  HostedReturn value ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext value {
+      CheckedCoreExprBuilt valueArtifact ->
+        CheckedCoreExprBuilt (CheckedCoreReturnArtifact exprType valueArtifact),
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message
+    },
+  HostedIf condition thenBranch elseBranch ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext condition {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt conditionArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext thenBranch {
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message,
+          CheckedCoreExprBuilt thenArtifact ->
+            match checkedCoreExpr typeDecls recordDecls env localEnv fnContext elseBranch {
+              CheckedCoreExprBuilt elseArtifact ->
+                CheckedCoreExprBuilt (CheckedCoreIfArtifact exprType conditionArtifact thenArtifact elseArtifact),
+              CheckedCoreExprBuildError message ->
+                CheckedCoreExprBuildError message
+            }
+        }
+    },
+  HostedEqual left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreEqualArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedNotEqual left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreNotEqualArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedLessThan left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreLessThanArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedLessThanOrEqual left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreLessThanOrEqualArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedGreaterThan left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreGreaterThanArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    },
+  HostedGreaterThanOrEqual left right ->
+    match checkedCoreExpr typeDecls recordDecls env localEnv fnContext left {
+      CheckedCoreExprBuildError message ->
+        CheckedCoreExprBuildError message,
+      CheckedCoreExprBuilt leftArtifact ->
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext right {
+          CheckedCoreExprBuilt rightArtifact ->
+            CheckedCoreExprBuilt (CheckedCoreGreaterThanOrEqualArtifact leftArtifact rightArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreExprBuildError message
+        }
+    }
+}
+
+checkedCoreDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> CheckedCoreDeclBuildResult
+checkedCoreDecl typeDecls recordDecls env decl = match inferDecl typeDecls recordDecls env decl {
+  InferDeclError message ->
+    CheckedCoreDeclBuildError message,
+  InferredDecl binding ->
+    match binding {
+      TypeBinding bindingName bindingType ->
+        match checkedCoreExpr typeDecls recordDecls env (checkedCoreFunctionLocalEnv decl) (checkedCoreFunctionContext decl) (declBody decl) {
+          CheckedCoreExprBuilt bodyArtifact ->
+            CheckedCoreDeclBuilt (CheckedCoreDeclArtifact (declName decl) bindingType (checkedCoreParamArtifacts decl) bodyArtifact),
+          CheckedCoreExprBuildError message ->
+            CheckedCoreDeclBuildError message
+        }
+    }
+}
+
+checkedCoreDecls : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> CheckedCoreDeclListBuildResult
+checkedCoreDecls typeDecls recordDecls env decls = {
+  let mut state = CheckedCoreDeclListBuilt emptyCheckedCoreDeclArtifacts;
+  for decl in decls {
+    state = match state {
+      CheckedCoreDeclListBuildError message ->
+        CheckedCoreDeclListBuildError message,
+      CheckedCoreDeclListBuilt artifacts ->
+        match checkedCoreDecl typeDecls recordDecls env decl {
+          CheckedCoreDeclBuilt artifact ->
+            CheckedCoreDeclListBuilt (appendCheckedCoreDeclArtifact artifacts artifact),
+          CheckedCoreDeclBuildError message ->
+            CheckedCoreDeclListBuildError message
+        }
+    };
+    state
+  };
+  state
+}
+
+checkedCoreArtifactResult : HostedModuleAst -> CheckedCoreArtifactResult
+checkedCoreArtifactResult modl = match inferModuleBindings modl {
+  InferModuleError message ->
+    CheckedCoreArtifactError message,
+  InferredModule env -> {
+    let typeDecls = effectiveModuleTypeDecls modl;
+    let recordDecls = effectiveModuleRecordDecls modl;
+    match checkedCoreDecls typeDecls recordDecls env (moduleDeclarations modl) {
+      CheckedCoreDeclListBuilt artifacts ->
+        CheckedCoreArtifactOk artifacts,
+      CheckedCoreDeclListBuildError message ->
+        CheckedCoreArtifactError message
+    }
+  }
+}
+
+renderTaggedObject0 : Str -> Str
+renderTaggedObject0 tag = jsonObject [jsonFieldText "$tag" tag]
+
+renderTaggedObject1 : Str -> Str -> Str
+renderTaggedObject1 tag value0 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0]
+
+renderTaggedObject2 : Str -> Str -> Str -> Str
+renderTaggedObject2 tag value0 value1 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0, jsonFieldRaw "$1" value1]
+
+renderTaggedObject3 : Str -> Str -> Str -> Str -> Str
+renderTaggedObject3 tag value0 value1 value2 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0, jsonFieldRaw "$1" value1, jsonFieldRaw "$2" value2]
+
+renderTaggedObject4 : Str -> Str -> Str -> Str -> Str -> Str
+renderTaggedObject4 tag value0 value1 value2 value3 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0, jsonFieldRaw "$1" value1, jsonFieldRaw "$2" value2, jsonFieldRaw "$3" value3]
+
+renderTaggedObject5 : Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderTaggedObject5 tag value0 value1 value2 value3 value4 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0, jsonFieldRaw "$1" value1, jsonFieldRaw "$2" value2, jsonFieldRaw "$3" value3, jsonFieldRaw "$4" value4]
+
+renderCheckedCoreTypeJsonList : [TypeText] -> [Str]
+renderCheckedCoreTypeJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreTypeJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCoreTypeJson : TypeText -> Str
+renderCheckedCoreTypeJson value = match value {
+  TInt ->
+    renderTaggedObject0 "TInt",
+  TStr ->
+    renderTaggedObject0 "TStr",
+  TBool ->
+    renderTaggedObject0 "TBool",
+  TList itemType ->
+    renderTaggedObject1 "TList" (renderCheckedCoreTypeJson itemType),
+  TFunction inputType resultType ->
+    renderTaggedObject2 "TFunction" (renderCheckedCoreTypeJson inputType) (renderCheckedCoreTypeJson resultType),
+  TNamed label ->
+    renderTaggedObject1 "TNamed" (encode label),
+  TApply label args ->
+    renderTaggedObject2 "TApply" (encode label) (renderJsonArray (renderCheckedCoreTypeJsonList args)),
+  TVar label ->
+    renderTaggedObject1 "TVar" (encode label),
+  TUnknown label ->
+    renderTaggedObject1 "TUnknown" (encode label)
+}
+
+renderCheckedCoreParamJson : CheckedCoreParamArtifact -> Str
+renderCheckedCoreParamJson param = match param {
+  CheckedCoreParamArtifact name paramType ->
+    renderTaggedObject2 "CheckedCoreParamArtifact" (encode name) (renderCheckedCoreTypeJson paramType)
+}
+
+renderCheckedCoreParamJsonList : [CheckedCoreParamArtifact] -> [Str]
+renderCheckedCoreParamJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreParamJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCorePatternBinderJson : CheckedCorePatternBinderArtifact -> Str
+renderCheckedCorePatternBinderJson binder = match binder {
+  CheckedCorePatternBinderArtifact name binderType ->
+    renderTaggedObject2 "CheckedCorePatternBinderArtifact" (encode name) (renderCheckedCoreTypeJson binderType)
+}
+
+renderCheckedCorePatternBinderJsonList : [CheckedCorePatternBinderArtifact] -> [Str]
+renderCheckedCorePatternBinderJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCorePatternBinderJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCorePatternJson : CheckedCorePatternArtifact -> Str
+renderCheckedCorePatternJson pattern = match pattern {
+  CheckedCoreConstructorPatternArtifact constructorName binders ->
+    renderTaggedObject2 "CheckedCoreConstructorPatternArtifact" (encode constructorName) (renderJsonArray (renderCheckedCorePatternBinderJsonList binders))
+}
+
+renderCheckedCoreRecordFieldJson : CheckedCoreRecordFieldArtifact -> Str
+renderCheckedCoreRecordFieldJson field = match field {
+  CheckedCoreRecordFieldArtifact name value ->
+    renderTaggedObject2 "CheckedCoreRecordFieldArtifact" (encode name) (renderCheckedCoreExprJson value)
+}
+
+renderCheckedCoreRecordFieldJsonList : [CheckedCoreRecordFieldArtifact] -> [Str]
+renderCheckedCoreRecordFieldJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreRecordFieldJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCoreMatchBranchJson : CheckedCoreMatchBranchArtifact -> Str
+renderCheckedCoreMatchBranchJson branch = match branch {
+  CheckedCoreMatchBranchArtifact pattern body ->
+    renderTaggedObject2 "CheckedCoreMatchBranchArtifact" (renderCheckedCorePatternJson pattern) (renderCheckedCoreExprJson body)
+}
+
+renderCheckedCoreMatchBranchJsonList : [CheckedCoreMatchBranchArtifact] -> [Str]
+renderCheckedCoreMatchBranchJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreMatchBranchJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCoreExprJsonList : [CheckedCoreExprArtifact] -> [Str]
+renderCheckedCoreExprJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreExprJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCoreExprJson : CheckedCoreExprArtifact -> Str
+renderCheckedCoreExprJson expr = match expr {
+  CheckedCoreVarArtifact exprType name ->
+    renderTaggedObject2 "CheckedCoreVarArtifact" (renderCheckedCoreTypeJson exprType) (encode name),
+  CheckedCoreIntArtifact value ->
+    renderTaggedObject1 "CheckedCoreIntArtifact" (encode value),
+  CheckedCoreStringArtifact value ->
+    renderTaggedObject1 "CheckedCoreStringArtifact" (encode value),
+  CheckedCoreBoolArtifact value ->
+    renderTaggedObject1 "CheckedCoreBoolArtifact" (if value then "true" else "false"),
+  CheckedCoreListArtifact exprType values ->
+    renderTaggedObject2 "CheckedCoreListArtifact" (renderCheckedCoreTypeJson exprType) (renderJsonArray (renderCheckedCoreExprJsonList values)),
+  CheckedCoreIfArtifact exprType condition thenBranch elseBranch ->
+    renderTaggedObject4 "CheckedCoreIfArtifact" (renderCheckedCoreTypeJson exprType) (renderCheckedCoreExprJson condition) (renderCheckedCoreExprJson thenBranch) (renderCheckedCoreExprJson elseBranch),
+  CheckedCoreReturnArtifact exprType value ->
+    renderTaggedObject2 "CheckedCoreReturnArtifact" (renderCheckedCoreTypeJson exprType) (renderCheckedCoreExprJson value),
+  CheckedCoreEqualArtifact left right ->
+    renderTaggedObject2 "CheckedCoreEqualArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreNotEqualArtifact left right ->
+    renderTaggedObject2 "CheckedCoreNotEqualArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreLessThanArtifact left right ->
+    renderTaggedObject2 "CheckedCoreLessThanArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreLessThanOrEqualArtifact left right ->
+    renderTaggedObject2 "CheckedCoreLessThanOrEqualArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreGreaterThanArtifact left right ->
+    renderTaggedObject2 "CheckedCoreGreaterThanArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreGreaterThanOrEqualArtifact left right ->
+    renderTaggedObject2 "CheckedCoreGreaterThanOrEqualArtifact" (renderCheckedCoreExprJson left) (renderCheckedCoreExprJson right),
+  CheckedCoreLetArtifact exprType binder value body ->
+    renderTaggedObject4 "CheckedCoreLetArtifact" (renderCheckedCoreTypeJson exprType) (encode binder) (renderCheckedCoreExprJson value) (renderCheckedCoreExprJson body),
+  CheckedCoreMutableLetArtifact exprType binder value body ->
+    renderTaggedObject4 "CheckedCoreMutableLetArtifact" (renderCheckedCoreTypeJson exprType) (encode binder) (renderCheckedCoreExprJson value) (renderCheckedCoreExprJson body),
+  CheckedCoreAssignArtifact exprType binder value body ->
+    renderTaggedObject4 "CheckedCoreAssignArtifact" (renderCheckedCoreTypeJson exprType) (encode binder) (renderCheckedCoreExprJson value) (renderCheckedCoreExprJson body),
+  CheckedCoreForArtifact exprType binder iterable loopBody body ->
+    renderTaggedObject5 "CheckedCoreForArtifact" (renderCheckedCoreTypeJson exprType) (encode binder) (renderCheckedCoreExprJson iterable) (renderCheckedCoreExprJson loopBody) (renderCheckedCoreExprJson body),
+  CheckedCoreCallArtifact exprType calleeName calleeType args ->
+    renderTaggedObject4 "CheckedCoreCallArtifact" (renderCheckedCoreTypeJson exprType) (encode calleeName) (renderCheckedCoreTypeJson calleeType) (renderJsonArray (renderCheckedCoreExprJsonList args)),
+  CheckedCoreMatchArtifact exprType subject branches ->
+    renderTaggedObject3 "CheckedCoreMatchArtifact" (renderCheckedCoreTypeJson exprType) (renderCheckedCoreExprJson subject) (renderJsonArray (renderCheckedCoreMatchBranchJsonList branches)),
+  CheckedCoreRecordArtifact exprType recordName fields ->
+    renderTaggedObject3 "CheckedCoreRecordArtifact" (renderCheckedCoreTypeJson exprType) (encode recordName) (renderJsonArray (renderCheckedCoreRecordFieldJsonList fields)),
+  CheckedCoreFieldAccessArtifact exprType subject fieldName ->
+    renderTaggedObject3 "CheckedCoreFieldAccessArtifact" (renderCheckedCoreTypeJson exprType) (renderCheckedCoreExprJson subject) (encode fieldName)
+}
+
+renderCheckedCoreDeclJson : CheckedCoreDeclArtifact -> Str
+renderCheckedCoreDeclJson decl = match decl {
+  CheckedCoreDeclArtifact name declType params body ->
+    renderTaggedObject4 "CheckedCoreDeclArtifact" (encode name) (renderCheckedCoreTypeJson declType) (renderJsonArray (renderCheckedCoreParamJsonList params)) (renderCheckedCoreExprJson body)
+}
+
+renderCheckedCoreDeclJsonList : [CheckedCoreDeclArtifact] -> [Str]
+renderCheckedCoreDeclJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreDeclJson value];
+    rendered
+  };
+  rendered
+}
+
+renderCheckedCoreArtifactResultJson : CheckedCoreArtifactResult -> Str
+renderCheckedCoreArtifactResultJson result = match result {
+  CheckedCoreArtifactOk decls ->
+    renderTaggedObject1 "CheckedCoreArtifactOk" (renderJsonArray (renderCheckedCoreDeclJsonList decls)),
+  CheckedCoreArtifactError message ->
+    renderTaggedObject1 "CheckedCoreArtifactError" (encode message)
+}
+
+checkedCoreSourceJson : Str -> Str
+checkedCoreSourceJson source = renderCheckedCoreArtifactResultJson (checkedCoreArtifactResult (parseModuleAst source))

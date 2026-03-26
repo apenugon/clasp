@@ -1,0 +1,12 @@
+{
+  "id": "ts-lead-segment",
+  "title": "Add lead segment across the clickable TypeScript inbox app",
+  "suite": "clickable-lead-inbox",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [
+    ["npm", "install"]
+  ],
+  "verify": ["bash", "scripts/verify.sh"]
+}

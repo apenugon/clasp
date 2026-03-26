@@ -1,0 +1,71 @@
+module Compiler.Driver.Frontend
+
+import Compiler.Checker
+import Compiler.CheckedCore
+import Compiler.Emit.JavaScript
+import Compiler.Lower
+import Compiler.Project
+
+frontendDriverSourceLoweredDecls : Str -> [LowerDeclText]
+frontendDriverSourceLoweredDecls source = lowerModule (sourceModule source)
+
+frontendDriverProjectBundleHasSeparator : Str -> Bool
+frontendDriverProjectBundleHasSeparator bundle = if firstText (remainingTexts (textSplit bundle projectBundleSeparator)) == "" then false else true
+
+frontendDriverProjectBundleIsSingleSourceModule : Str -> Bool
+frontendDriverProjectBundleIsSingleSourceModule bundle = if frontendDriverProjectBundleHasSeparator bundle then false else true
+
+frontendDriverProjectBundleSourceModule : Str -> HostedModuleAst
+frontendDriverProjectBundleSourceModule bundle = sourceModule bundle
+
+frontendDriverCheckSourceText : Str -> Str
+frontendDriverCheckSourceText source = renderModuleSummary (sourceModule source)
+
+frontendDriverExplainSourceText : Str -> Str
+frontendDriverExplainSourceText source = renderModuleSummary (sourceModule source)
+
+frontendDriverCompileSourceText : Str -> Str
+frontendDriverCompileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else emitFrontendModule (sourceModule source) (frontendDriverSourceLoweredDecls source)
+
+frontendDriverCheckCoreSourceText : Str -> Str
+frontendDriverCheckCoreSourceText source = checkedCoreSourceJson source
+
+frontendDriverCheckProjectText : Str -> Str
+frontendDriverCheckProjectText bundle = if frontendDriverProjectBundleIsSingleSourceModule bundle then renderModuleSummary (frontendDriverProjectBundleSourceModule bundle) else match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    renderModuleSummary modl,
+  HostedProjectBundleError message ->
+    message
+}
+
+frontendDriverCheckProjectModuleSummaryText : Str -> Str -> Str
+frontendDriverCheckProjectModuleSummaryText bundle importedSummaryText = if frontendDriverProjectBundleIsSingleSourceModule bundle then renderModuleSummaryWithImportedBindings importedSummaryText (frontendDriverProjectBundleSourceModule bundle) else match resolveProjectModules bundle {
+  HostedResolvedProjectOk mergedModule sourceModules ->
+    match lookupProjectModule sourceModules (moduleNameOf mergedModule) {
+      FoundHostedProjectModule entryModule ->
+        renderModuleSummaryWithImportedBindings importedSummaryText (projectCheckScopeModule entryModule (projectImportedModules sourceModules (moduleNameOf mergedModule))),
+      MissingHostedProjectModule missing ->
+        textConcat ["ERROR:Missing project entry module `", missing, "`."]
+    },
+  HostedResolvedProjectError message ->
+    textConcat ["ERROR:", message]
+}
+
+frontendDriverExplainProjectText : Str -> Str
+frontendDriverExplainProjectText bundle = frontendDriverCheckProjectText bundle
+
+frontendDriverCompileProjectText : Str -> Str
+frontendDriverCompileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else if frontendDriverProjectBundleIsSingleSourceModule bundle then emitFrontendModule (frontendDriverProjectBundleSourceModule bundle) (lowerModule (frontendDriverProjectBundleSourceModule bundle)) else match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    emitFrontendModule modl (lowerModule modl),
+  HostedProjectBundleError message ->
+    textConcat ["// compiler-selfhost project error: ", message]
+}
+
+frontendDriverCheckCoreProjectText : Str -> Str
+frontendDriverCheckCoreProjectText bundle = if frontendDriverProjectBundleIsSingleSourceModule bundle then renderCheckedCoreArtifactResultJson (checkedCoreArtifactResult (frontendDriverProjectBundleSourceModule bundle)) else match resolveProjectBundle bundle {
+  HostedProjectBundleOk modl ->
+    renderCheckedCoreArtifactResultJson (checkedCoreArtifactResult modl),
+  HostedProjectBundleError message ->
+    renderCheckedCoreArtifactResultJson (CheckedCoreArtifactError message)
+}

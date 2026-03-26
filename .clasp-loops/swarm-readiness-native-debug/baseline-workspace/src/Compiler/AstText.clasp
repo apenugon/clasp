@@ -1,0 +1,391 @@
+module Compiler.AstText
+
+type AstTextSplitTailState = AstTextWaitingForHead | AstTextCapturingTail Str
+type AstTextNestDepth = AstTextZeroDepth | AstTextDeeperDepth AstTextNestDepth
+type AstTextOpenGroupState = AstTextOpenGroupState AstTextNestDepth AstTextNestDepth AstTextNestDepth Bool Bool
+
+astTextAppendChar : Str -> Str -> Str
+astTextAppendChar value char = textConcat [value, char]
+
+astTextTextFromReversedChars : [Str] -> Str
+astTextTextFromReversedChars chars = textJoin "" (reverse chars)
+
+astTextAppendText : [Str] -> Str -> [Str]
+astTextAppendText values value = append values [value]
+
+astTextKeepNoText : Str -> Bool
+astTextKeepNoText value = false
+
+astTextEmptyTexts : [Str]
+astTextEmptyTexts = filter astTextKeepNoText [""]
+
+astTextIsLayoutWhitespaceChar : Str -> Bool
+astTextIsLayoutWhitespaceChar value = if value == " " then true else if value == "\n" then true else if value == "\t" then true else if value == "\r" then true else false
+
+astTextTrimSpaces : Str -> Str
+astTextTrimSpaces value = {
+  let mut started = false;
+  let mut result = "";
+  let mut pendingSpaces = "";
+  for char in textChars value {
+    if started then {
+      if astTextIsLayoutWhitespaceChar char then {
+        pendingSpaces = astTextAppendChar pendingSpaces char;
+        pendingSpaces
+      } else {
+        result = textConcat [result, pendingSpaces, char];
+        pendingSpaces = "";
+        started = true;
+        result
+      }
+    } else if astTextIsLayoutWhitespaceChar char then {
+      result
+    } else {
+      result = astTextAppendChar result char;
+      started = true;
+      result
+    }
+  };
+  result
+}
+
+astTextNormalizeLayoutText : Str -> Str
+astTextNormalizeLayoutText value = {
+  let mut inString = false;
+  let mut escapeNext = false;
+  let mut pendingSpace = "";
+  let mut result = "";
+  for char in textChars value {
+    if inString then {
+      result = astTextAppendChar result char;
+      if escapeNext then {
+        escapeNext = false;
+        result
+      } else if char == "\\" then {
+        escapeNext = true;
+        result
+      } else if char == "\"" then {
+        inString = false;
+        result
+      } else {
+        result
+      }
+    } else if char == "\"" then {
+      result = textConcat [result, pendingSpace, char];
+      pendingSpace = "";
+      inString = true;
+      result
+    } else if astTextIsLayoutWhitespaceChar char then {
+      if result == "" then {
+        result
+      } else {
+        pendingSpace = " ";
+        result
+      }
+    } else {
+      result = textConcat [result, pendingSpace, char];
+      pendingSpace = "";
+      result
+    }
+  };
+  result
+}
+
+astTextFirstSegment : Str -> Str
+astTextFirstSegment value = {
+  for segment in textSplit value "\n" {
+    return segment
+  };
+  ""
+}
+
+astTextRemainingSegments : Str -> Str
+astTextRemainingSegments value = {
+  let mut state = AstTextWaitingForHead;
+  for segment in textSplit value "\n" {
+    state = match state {
+      AstTextWaitingForHead ->
+        AstTextCapturingTail "",
+      AstTextCapturingTail current ->
+        AstTextCapturingTail (textConcat [current, segment])
+    };
+    state
+  };
+  match state {
+    AstTextWaitingForHead ->
+      "",
+    AstTextCapturingTail current ->
+      current
+  }
+}
+
+astTextIncreaseDepth : AstTextNestDepth -> AstTextNestDepth
+astTextIncreaseDepth depth = AstTextDeeperDepth depth
+
+astTextDecreaseDepth : AstTextNestDepth -> AstTextNestDepth
+astTextDecreaseDepth depth = match depth {
+  AstTextZeroDepth ->
+    AstTextZeroDepth,
+  AstTextDeeperDepth inner ->
+    inner
+}
+
+astTextIsZeroDepth : AstTextNestDepth -> Bool
+astTextIsZeroDepth depth = match depth {
+  AstTextZeroDepth ->
+    true,
+  AstTextDeeperDepth inner ->
+    false
+}
+
+astTextIsTopLevel : AstTextNestDepth -> AstTextNestDepth -> AstTextNestDepth -> Bool
+astTextIsTopLevel parenDepth bracketDepth braceDepth = if astTextIsZeroDepth parenDepth then if astTextIsZeroDepth bracketDepth then astTextIsZeroDepth braceDepth else false else false
+
+astTextSplitTopLevel : Str -> Str -> [Str]
+astTextSplitTopLevel value separator = {
+  let mut parts = astTextEmptyTexts;
+  let mut current = "";
+  let mut parenDepth = AstTextZeroDepth;
+  let mut bracketDepth = AstTextZeroDepth;
+  let mut braceDepth = AstTextZeroDepth;
+  let mut inString = false;
+  let mut escapeNext = false;
+  for char in textChars value {
+    if inString then {
+      if escapeNext then {
+        current = astTextAppendChar current char;
+        escapeNext = false;
+        parts
+      } else if char == "\\" then {
+        current = astTextAppendChar current char;
+        escapeNext = true;
+        parts
+      } else if char == "\"" then {
+        current = astTextAppendChar current char;
+        inString = false;
+        parts
+      } else {
+        current = astTextAppendChar current char;
+        parts
+      }
+    } else if char == "\"" then {
+      current = astTextAppendChar current char;
+      inString = true;
+      parts
+    } else if char == "(" then {
+      current = astTextAppendChar current char;
+      parenDepth = astTextIncreaseDepth parenDepth;
+      parts
+    } else if char == ")" then {
+      current = astTextAppendChar current char;
+      parenDepth = astTextDecreaseDepth parenDepth;
+      parts
+    } else if char == "[" then {
+      current = astTextAppendChar current char;
+      bracketDepth = astTextIncreaseDepth bracketDepth;
+      parts
+    } else if char == "]" then {
+      current = astTextAppendChar current char;
+      bracketDepth = astTextDecreaseDepth bracketDepth;
+      parts
+    } else if char == "{" then {
+      current = astTextAppendChar current char;
+      braceDepth = astTextIncreaseDepth braceDepth;
+      parts
+    } else if char == "}" then {
+      current = astTextAppendChar current char;
+      braceDepth = astTextDecreaseDepth braceDepth;
+      parts
+    } else if char == separator then {
+      if astTextIsTopLevel parenDepth bracketDepth braceDepth then {
+        let trimmedCurrent = astTextTrimSpaces current;
+        if trimmedCurrent == "" then parts else {
+          parts = astTextAppendText parts trimmedCurrent;
+          current = "";
+          parts
+        }
+      } else {
+        current = astTextAppendChar current char;
+        parts
+      }
+    } else {
+      current = astTextAppendChar current char;
+      parts
+    }
+  };
+  let trimmedCurrent = astTextTrimSpaces current;
+  if trimmedCurrent == "" then parts else astTextAppendText parts trimmedCurrent
+}
+
+astTextSplitWords : Str -> [Str]
+astTextSplitWords value = if value == "" then astTextEmptyTexts else astTextSplitTopLevel (astTextNormalizeLayoutText value) " "
+
+astTextFirstCharText : Str -> Str
+astTextFirstCharText value = {
+  for char in textChars value {
+    return char
+  };
+  ""
+}
+
+astTextLastCharText : Str -> Str
+astTextLastCharText value = {
+  let mut last = "";
+  for char in textChars value {
+    last = char;
+    last
+  };
+  last
+}
+
+astTextIsUppercaseChar : Str -> Bool
+astTextIsUppercaseChar value = if value == "A" then true else if value == "B" then true else if value == "C" then true else if value == "D" then true else if value == "E" then true else if value == "F" then true else if value == "G" then true else if value == "H" then true else if value == "I" then true else if value == "J" then true else if value == "K" then true else if value == "L" then true else if value == "M" then true else if value == "N" then true else if value == "O" then true else if value == "P" then true else if value == "Q" then true else if value == "R" then true else if value == "S" then true else if value == "T" then true else if value == "U" then true else if value == "V" then true else if value == "W" then true else if value == "X" then true else if value == "Y" then true else if value == "Z" then true else false
+
+astTextStartsWithUppercase : Str -> Bool
+astTextStartsWithUppercase value = astTextIsUppercaseChar (astTextFirstCharText (astTextTrimSpaces value))
+
+astTextStripToken : Str -> Str -> Str
+astTextStripToken value token = textJoin "" (textSplit value token)
+
+astTextStripDigits : Str -> Str
+astTextStripDigits value = astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken (astTextStripToken value "0") "1") "2") "3") "4") "5") "6") "7") "8") "9"
+
+astTextIsIntLiteral : Str -> Bool
+astTextIsIntLiteral value = if value == "" then false else astTextStripDigits value == ""
+
+astTextStartsWithIndent : Str -> Bool
+astTextStartsWithIndent value = {
+  let first = astTextFirstCharText value;
+  if first == " " then true else first == "\t"
+}
+
+astTextAppendLogicalLine : [Str] -> Str -> [Str]
+astTextAppendLogicalLine values value = {
+  let trimmed = astTextTrimSpaces value;
+  if trimmed == "" then values else astTextAppendText values value
+}
+
+astTextOpenGroupState : AstTextNestDepth -> AstTextNestDepth -> AstTextNestDepth -> Bool -> Bool -> AstTextOpenGroupState
+astTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext = AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext
+
+astTextEmptyOpenGroupState : AstTextOpenGroupState
+astTextEmptyOpenGroupState = astTextOpenGroupState AstTextZeroDepth AstTextZeroDepth AstTextZeroDepth false false
+
+astTextOpenGroupParenDepth : AstTextOpenGroupState -> AstTextNestDepth
+astTextOpenGroupParenDepth state = match state {
+  AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    parenDepth
+}
+
+astTextOpenGroupBracketDepth : AstTextOpenGroupState -> AstTextNestDepth
+astTextOpenGroupBracketDepth state = match state {
+  AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    bracketDepth
+}
+
+astTextOpenGroupBraceDepth : AstTextOpenGroupState -> AstTextNestDepth
+astTextOpenGroupBraceDepth state = match state {
+  AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    braceDepth
+}
+
+astTextOpenGroupInString : AstTextOpenGroupState -> Bool
+astTextOpenGroupInString state = match state {
+  AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    inString
+}
+
+astTextOpenGroupEscapeNext : AstTextOpenGroupState -> Bool
+astTextOpenGroupEscapeNext state = match state {
+  AstTextOpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    escapeNext
+}
+
+astTextOpenGroupHasOpenGroup : AstTextOpenGroupState -> Bool
+astTextOpenGroupHasOpenGroup state = if astTextIsTopLevel (astTextOpenGroupParenDepth state) (astTextOpenGroupBracketDepth state) (astTextOpenGroupBraceDepth state) then false else true
+
+astTextStepOpenGroupState : AstTextOpenGroupState -> Str -> AstTextOpenGroupState
+astTextStepOpenGroupState state char = {
+  let parenDepth = astTextOpenGroupParenDepth state;
+  let bracketDepth = astTextOpenGroupBracketDepth state;
+  let braceDepth = astTextOpenGroupBraceDepth state;
+  let inString = astTextOpenGroupInString state;
+  let escapeNext = astTextOpenGroupEscapeNext state;
+  if inString then {
+    if escapeNext then {
+      astTextOpenGroupState parenDepth bracketDepth braceDepth inString false
+    } else if char == "\\" then {
+      astTextOpenGroupState parenDepth bracketDepth braceDepth inString true
+    } else if char == "\"" then {
+      astTextOpenGroupState parenDepth bracketDepth braceDepth false false
+    } else {
+      state
+    }
+  } else if char == "\"" then {
+    astTextOpenGroupState parenDepth bracketDepth braceDepth true false
+  } else if char == "(" then {
+    astTextOpenGroupState (astTextIncreaseDepth parenDepth) bracketDepth braceDepth false false
+  } else if char == ")" then {
+    astTextOpenGroupState (astTextDecreaseDepth parenDepth) bracketDepth braceDepth false false
+  } else if char == "[" then {
+    astTextOpenGroupState parenDepth (astTextIncreaseDepth bracketDepth) braceDepth false false
+  } else if char == "]" then {
+    astTextOpenGroupState parenDepth (astTextDecreaseDepth bracketDepth) braceDepth false false
+  } else if char == "{" then {
+    astTextOpenGroupState parenDepth bracketDepth (astTextIncreaseDepth braceDepth) false false
+  } else if char == "}" then {
+    astTextOpenGroupState parenDepth bracketDepth (astTextDecreaseDepth braceDepth) false false
+  } else {
+    state
+  }
+}
+
+astTextScanOpenGroupState : AstTextOpenGroupState -> Str -> AstTextOpenGroupState
+astTextScanOpenGroupState initialState value = {
+  let mut state = initialState;
+  for char in textChars value {
+    state = astTextStepOpenGroupState state char;
+    state
+  };
+  state
+}
+
+astTextHasOpenGroup : Str -> Bool
+astTextHasOpenGroup value = astTextOpenGroupHasOpenGroup (astTextScanOpenGroupState astTextEmptyOpenGroupState value)
+
+astTextLogicalLines : Str -> [Str]
+astTextLogicalLines source = {
+  let mut current = "";
+  let mut currentGroupState = astTextEmptyOpenGroupState;
+  let mut lines = astTextEmptyTexts;
+  for line in textSplit source "\n" {
+    let trimmed = astTextTrimSpaces line;
+    if trimmed == "" then {
+      if current == "" then {
+        lines
+      } else {
+        lines = astTextAppendLogicalLine lines current;
+        current = "";
+        lines
+      }
+    } else if current == "" then {
+      current = line;
+      currentGroupState = astTextScanOpenGroupState astTextEmptyOpenGroupState line;
+      lines
+    } else if astTextStartsWithIndent line then {
+      current = textConcat [current, " ", trimmed];
+      currentGroupState = astTextScanOpenGroupState (astTextScanOpenGroupState currentGroupState " ") trimmed;
+      lines
+    } else if astTextOpenGroupHasOpenGroup currentGroupState then {
+      current = textConcat [current, " ", trimmed];
+      currentGroupState = astTextScanOpenGroupState (astTextScanOpenGroupState currentGroupState " ") trimmed;
+      lines
+    } else {
+      lines = astTextAppendLogicalLine lines current;
+      current = line;
+      currentGroupState = astTextScanOpenGroupState astTextEmptyOpenGroupState line;
+      lines
+    }
+  };
+  astTextAppendLogicalLine lines current
+}

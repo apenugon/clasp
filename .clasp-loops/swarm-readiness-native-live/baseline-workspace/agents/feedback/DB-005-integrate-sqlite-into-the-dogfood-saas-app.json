@@ -1,0 +1,36 @@
+{
+  "task_id": "DB-005-integrate-sqlite-into-the-dogfood-saas-app",
+  "summary": "`examples/lead-app-ts` is the dogfood SaaS surface for this slice. A small store module was enough, but benchmark prep had an implicit assumption that only `main.ts` and `lead.ts` ever needed copying, which broke once persistence support added a helper module.",
+  "ergonomics": [
+    "The existing lead app routes were already isolated enough that swapping storage behind them stayed local.",
+    "Bun-based app tests are convenient for the route flow, but Bun cannot import `node:sqlite`, so the store needed a runtime adapter instead of a straightforward Node-only import.",
+    "Full verification is valuable here because it caught the benchmark prep assumption immediately."
+  ],
+  "follow_ups": [
+    "Add an explicit app-level SQLite verify script or README note for the persisted database path so the persistence surface is easier to discover outside tests.",
+    "If more SQLite-backed app work is coming, centralize the Bun/Node SQLite adapter instead of keeping it local to the lead app.",
+    "Add real schema migration steps once the lead app schema changes beyond version 1 instead of only compatibility rejection."
+  ],
+  "warnings": [
+    "`benchmarks/test-task-prep.sh` mirrors example files into older task workspaces; if you add new support files under `examples/lead-app-ts/src/server`, update that copy list or verification will fail silently later in the pipeline.",
+    "Do not import `node:sqlite` directly in Bun-tested app code. Bun test rejects it even though Node 22 supports it.",
+    "`createServer` now owns the SQLite handle lifecycle; callers need to stop the server to release the DB cleanly."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/examples/lead-app-ts/src/server/main.ts",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/examples/lead-app-ts/src/server/store.ts",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/examples/lead-app-ts/src/server/runtime-modules.d.ts",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/examples/lead-app-ts/src/server/dev.ts",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/examples/lead-app-ts/test/lead-app.test.mjs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-005-integrate-sqlite-into-the-dogfood-saas-app/benchmarks/test-task-prep.sh"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cd examples/lead-app-ts && npm test'",
+    "bash benchmarks/test-task-prep.sh",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The app now depends on SQLite support from the active runtime; the store bridges Bun via `bun:sqlite` and Node via `node:sqlite`, so future runtime API drift in either experimental surface would need adapter updates.",
+    "Schema handling is intentionally narrow: only version `1` is accepted and there is no forward migration path yet beyond rejecting incompatible on-disk databases."
+  ]
+}

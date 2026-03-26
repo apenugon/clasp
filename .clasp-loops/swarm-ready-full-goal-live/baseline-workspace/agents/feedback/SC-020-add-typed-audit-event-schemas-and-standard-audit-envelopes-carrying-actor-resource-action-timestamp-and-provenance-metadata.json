@@ -1,0 +1,32 @@
+{
+  "task_id": "SC-020-add-typed-audit-event-schemas-and-standard-audit-envelopes-carrying-actor-resource-action-timestamp-and-provenance-metadata",
+  "summary": "This slice was small once constrained to checker-owned builtins plus one end-to-end schema/runtime regression; trying to retrofit every existing runtime audit object would have turned it into a larger trust-runtime refactor.",
+  "ergonomics": [
+    "Checker-owned builtin record declarations make adding new schema primitives straightforward because they automatically flow into lowering and schema export surfaces.",
+    "The existing auth identity regression was a good anchor for extending into audit schemas without adding a brand new fixture.",
+    "Clasp source formatting for long constructor calls is still a little brittle; multiline application with leading parentheses failed parse expectations and had to be collapsed onto one line."
+  ],
+  "follow_ups": [
+    "Standardize workflow, policy, secret, and simulation audit payloads onto the new audit schema family so runtime-produced audit records share one contract.",
+    "Add a first-class helper for deriving an audit actor from `AuthSession` or policy context to reduce manual `auditActor` construction in user code.",
+    "Consider a typed event wrapper on top of `StandardAuditEnvelope` if future tasks need envelope-plus-payload conventions across boundary logs."
+  ],
+  "warnings": [
+    "Do not name a user record `StandardAuditEnvelope`, `AuditActor`, `AuditAction`, or `AuditProvenance` now that they are compiler-known schemas.",
+    "Targeted `cabal test` outside `nix develop` fails in this workspace because `ghc` is not on the host path; use the nix shell for focused verification.",
+    "The parser did not accept the initial multiline `auditEnvelope` call style used in the fixture; keep these constructor applications on one line unless parser support changes."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/04-schemas/SC-020-add-typed-audit-event-schemas-and-standard-audit-envelopes-carrying-actor-resource-action-timestamp-and-provenance-metadata/src/Clasp/Checker.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/04-schemas/SC-020-add-typed-audit-event-schemas-and-standard-audit-envelopes-carrying-actor-resource-action-timestamp-and-provenance-metadata/test/Main.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/04-schemas/SC-020-add-typed-audit-event-schemas-and-standard-audit-envelopes-carrying-actor-resource-action-timestamp-and-provenance-metadata/docs/clasp-spec-v0.md"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cabal test clasp-compiler-test --test-options=\"--pattern=auth\"'",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "Generated workflow/policy/runtime audit entries still use ad hoc JS object shapes rather than automatically materializing the new `StandardAuditEnvelope` contract.",
+    "`StandardAuditEnvelope` avoids colliding with existing user-defined `AuditEnvelope` records, but that also means there is not yet a single canonical bare `AuditEnvelope` type name in the language surface."
+  ]
+}

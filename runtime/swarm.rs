@@ -2108,6 +2108,23 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
         }));
     };
     let tasks = objective_tasks(connection, objective_id)?;
+    if tasks.is_empty() {
+        return Ok(json!({
+            "objectiveId": objective.objective_id.clone(),
+            "status": "empty",
+            "action": "plan-tasks",
+            "taskCount": 0,
+            "suggestedCommand": [
+                "claspc",
+                "swarm",
+                "task",
+                "create",
+                "<state-root>",
+                objective.objective_id.clone(),
+                "<task-id>"
+            ],
+        }));
+    }
     let at_ms = now_ms();
     for task in &tasks {
         let spec = load_task_spec(connection, &task.task_id)?;
@@ -3007,34 +3024,24 @@ fn fail(message: &str, json_mode: bool) -> ExitCode {
     ExitCode::from(1)
 }
 
-fn handle_event_command(
-    json_mode: bool,
+fn execute_event_command(
     root: &Path,
     task_id: &str,
     actor: &str,
     kind: &str,
     explicit_detail: &Option<String>,
-) -> ExitCode {
-    let (paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
+) -> Result<Value, String> {
+    let (paths, mut connection) = open_swarm_connection(root)?;
     if kind == "lease_acquired" {
-        let Some(task) = (match load_task_state(&connection, task_id) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        }) else {
-            return fail(&format!("unknown swarm task `{task_id}`"), json_mode);
+        let Some(task) = load_task_state(&connection, task_id)? else {
+            return Err(format!("unknown swarm task `{task_id}`"));
         };
-        let (ready, lease_expired, blocked, _, _) = match task_ready_state(&connection, &task, now_ms()) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        };
+        let (ready, lease_expired, blocked, _, _) = task_ready_state(&connection, &task, now_ms())?;
         if !ready {
-            return fail(&format!("swarm task `{task_id}` is not ready: {}", blocked.join("; ")), json_mode);
+            return Err(format!("swarm task `{task_id}` is not ready: {}", blocked.join("; ")));
         }
         if (task.status == "leased" || task.status == "active") && !lease_expired {
-            return fail(&format!("swarm task `{task_id}` already has an active lease"), json_mode);
+            return Err(format!("swarm task `{task_id}` already has an active lease"));
         }
     }
     let detail = explicit_detail
@@ -3048,19 +3055,29 @@ fn handle_event_command(
         at_ms: now_ms(),
         payload_json: "{}".to_owned(),
     };
-    let task = match append_event(&mut connection, &event) {
-        Ok(task) => task,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let rendered_task = match task_record_json(&connection, &task) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    print_output(&swarm_event_output(&paths, &event, rendered_task), json_mode);
-    ExitCode::SUCCESS
+    let task = append_event(&mut connection, &event)?;
+    let rendered_task = task_record_json(&connection, &task)?;
+    Ok(swarm_event_output(&paths, &event, rendered_task))
 }
 
-fn handle_query_command(json_mode: bool, command: SwarmCommand) -> ExitCode {
+fn handle_event_command(
+    json_mode: bool,
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    kind: &str,
+    explicit_detail: &Option<String>,
+) -> ExitCode {
+    match execute_event_command(root, task_id, actor, kind, explicit_detail) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
+}
+
+fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
     let root = match &command {
         SwarmCommand::Status { root, .. }
         | SwarmCommand::History { root, .. }
@@ -3076,72 +3093,51 @@ fn handle_query_command(json_mode: bool, command: SwarmCommand) -> ExitCode {
         | SwarmCommand::ManagerNext { root, .. } => root,
         _ => unreachable!(),
     };
-    let (_paths, connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let value = match command {
-        SwarmCommand::Status { task_id, .. } => {
-            match load_task_state(&connection, &task_id) {
-                Ok(Some(task)) => match task_record_json(&connection, &task) {
-                    Ok(value) => value,
-                    Err(message) => return fail(&message, json_mode),
-                },
-                Ok(None) => match task_record_json(&connection, &empty_task_state(&task_id, 0)) {
-                    Ok(value) => value,
-                    Err(message) => return fail(&message, json_mode),
-                },
-                Err(message) => return fail(&message, json_mode),
-            }
-        }
-        SwarmCommand::History { task_id, .. } => match history_json(&connection, &task_id) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Tasks { .. } => match tasks_json(&connection) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::ObjectiveStatus { objective_id, .. } => match objective_status_json(&connection, &objective_id) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Objectives { .. } => match objectives_json(&connection) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Ready { objective_id, .. } => match ready_json(&connection, objective_id.as_deref()) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Summary { .. } => match summary_json(&connection) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Tail { task_id, limit, .. } => match tail_json(&connection, task_id.as_deref(), limit) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Runs { task_id, .. } => match runs_json(&connection, task_id.as_deref()) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Artifacts { task_id, .. } => match artifacts_json(&connection, task_id.as_deref()) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::Approvals { task_id, .. } => match approvals_json(&connection, task_id.as_deref()) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
-        SwarmCommand::ManagerNext { objective_id, .. } => match manager_next_json(&connection, &objective_id) {
-            Ok(value) => value,
-            Err(message) => return fail(&message, json_mode),
-        },
+    let (_paths, connection) = open_swarm_connection(root)?;
+    match command {
+        SwarmCommand::Status { task_id, .. } =>
+            match load_task_state(&connection, &task_id)? {
+                Some(task) => task_record_json(&connection, &task),
+                None => task_record_json(&connection, &empty_task_state(&task_id, 0)),
+            },
+        SwarmCommand::History { task_id, .. } => history_json(&connection, &task_id),
+        SwarmCommand::Tasks { .. } => tasks_json(&connection),
+        SwarmCommand::ObjectiveStatus { objective_id, .. } => objective_status_json(&connection, &objective_id),
+        SwarmCommand::Objectives { .. } => objectives_json(&connection),
+        SwarmCommand::Ready { objective_id, .. } => ready_json(&connection, objective_id.as_deref()),
+        SwarmCommand::Summary { .. } => summary_json(&connection),
+        SwarmCommand::Tail { task_id, limit, .. } => tail_json(&connection, task_id.as_deref(), limit),
+        SwarmCommand::Runs { task_id, .. } => runs_json(&connection, task_id.as_deref()),
+        SwarmCommand::Artifacts { task_id, .. } => artifacts_json(&connection, task_id.as_deref()),
+        SwarmCommand::Approvals { task_id, .. } => approvals_json(&connection, task_id.as_deref()),
+        SwarmCommand::ManagerNext { objective_id, .. } => manager_next_json(&connection, &objective_id),
         _ => unreachable!(),
-    };
-    print_output(&value, json_mode);
-    ExitCode::SUCCESS
+    }
+}
+
+fn handle_query_command(json_mode: bool, command: SwarmCommand) -> ExitCode {
+    match execute_query_command(command) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
+}
+
+fn execute_approve_command(
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    approval_name: &str,
+    explicit_detail: &Option<String>,
+) -> Result<Value, String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
+    let detail = explicit_detail
+        .clone()
+        .unwrap_or_else(|| format!("Approve `{approval_name}` for {task_id}."));
+    let approval = insert_approval(&mut connection, task_id, actor, approval_name, &detail)?;
+    Ok(approval_json(&approval))
 }
 
 fn handle_approve_command(
@@ -3152,19 +3148,29 @@ fn handle_approve_command(
     approval_name: &str,
     explicit_detail: &Option<String>,
 ) -> ExitCode {
-    let (_paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let detail = explicit_detail
-        .clone()
-        .unwrap_or_else(|| format!("Approve `{approval_name}` for {task_id}."));
-    let approval = match insert_approval(&mut connection, task_id, actor, approval_name, &detail) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    print_output(&approval_json(&approval), json_mode);
-    ExitCode::SUCCESS
+    match execute_approve_command(root, task_id, actor, approval_name, explicit_detail) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
+}
+
+fn execute_objective_create(
+    root: &Path,
+    objective_id: &str,
+    detail: &str,
+    max_tasks: i64,
+    max_runs: i64,
+    deadline_at_ms: i64,
+) -> Result<Value, String> {
+    let (_paths, connection) = open_swarm_connection(root)?;
+    if let Ok(Some(_)) = load_objective(&connection, objective_id) {
+        return Err(format!("swarm objective `{objective_id}` already exists"));
+    }
+    let objective = insert_objective(&connection, objective_id, detail, max_tasks, max_runs, deadline_at_ms)?;
+    objective_json(&connection, &objective)
 }
 
 fn handle_objective_create(
@@ -3176,23 +3182,44 @@ fn handle_objective_create(
     max_runs: i64,
     deadline_at_ms: i64,
 ) -> ExitCode {
-    let (_paths, connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    if let Ok(Some(_)) = load_objective(&connection, objective_id) {
-        return fail(&format!("swarm objective `{objective_id}` already exists"), json_mode);
+    match execute_objective_create(root, objective_id, detail, max_tasks, max_runs, deadline_at_ms) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
     }
-    let objective = match insert_objective(&connection, objective_id, detail, max_tasks, max_runs, deadline_at_ms) {
+}
+
+fn execute_task_create(
+    root: &Path,
+    objective_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    deadline_at_ms: i64,
+    lease_timeout_ms: i64,
+) -> Result<Value, String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
+    let _spec = match insert_task_spec(
+        &mut connection,
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        deadline_at_ms,
+        lease_timeout_ms,
+    ) {
         Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
+        Err(message) => return Err(message),
     };
-    let rendered = match objective_json(&connection, &objective) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
+    let task = match load_task_state(&connection, task_id)? {
+        Some(value) => value,
+        None => empty_task_state(task_id, 0),
     };
-    print_output(&rendered, json_mode);
-    ExitCode::SUCCESS
+    task_record_json(&connection, &task)
 }
 
 fn handle_task_create(
@@ -3206,52 +3233,24 @@ fn handle_task_create(
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
 ) -> ExitCode {
-    let (_paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let _spec = match insert_task_spec(
-        &mut connection,
-        objective_id,
-        task_id,
-        detail,
-        dependencies,
-        max_runs,
-        deadline_at_ms,
-        lease_timeout_ms,
-    ) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let task = match load_task_state(&connection, task_id) {
-        Ok(Some(value)) => value,
-        Ok(None) => empty_task_state(task_id, 0),
-        Err(message) => return fail(&message, json_mode),
-    };
-    let rendered = match task_record_json(&connection, &task) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    print_output(&rendered, json_mode);
-    ExitCode::SUCCESS
+    match execute_task_create(root, objective_id, task_id, detail, dependencies, max_runs, deadline_at_ms, lease_timeout_ms) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
 }
 
-fn handle_policy_set(
-    json_mode: bool,
+fn execute_policy_set(
     root: &Path,
     task_id: &str,
     mergegate_name: &str,
     required_approvals: &[String],
     required_verifiers: &[String],
-) -> ExitCode {
-    let (_paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let policy = match store_merge_policy(&connection, task_id, mergegate_name, required_approvals, required_verifiers) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
+) -> Result<Value, String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
+    let policy = store_merge_policy(&connection, task_id, mergegate_name, required_approvals, required_verifiers)?;
     let _ = record_swarm_event(
         &mut connection,
         "merge_policy_set",
@@ -3264,16 +3263,42 @@ fn handle_policy_set(
             "requiredVerifiers": required_verifiers,
         }),
     );
-    let rendered = json!({
+    Ok(json!({
         "taskId": policy.task_id,
         "mergegateName": policy.mergegate_name,
         "requiredApprovals": decode_string_list(&policy.required_approvals_json),
         "requiredVerifiers": decode_string_list(&policy.required_verifiers_json),
         "createdAtMs": policy.created_at_ms,
         "updatedAtMs": policy.updated_at_ms,
-    });
-    print_output(&rendered, json_mode);
-    ExitCode::SUCCESS
+    }))
+}
+
+fn handle_policy_set(
+    json_mode: bool,
+    root: &Path,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+) -> ExitCode {
+    match execute_policy_set(root, task_id, mergegate_name, required_approvals, required_verifiers) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
+}
+
+fn execute_tool_run(
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    cwd: &Path,
+    command: &[String],
+) -> Result<SwarmRunRecord, String> {
+    let (paths, mut connection) = open_swarm_connection(root)?;
+    run_native_command(&mut connection, &paths, task_id, actor, "tool", &command[0], cwd, command)
 }
 
 fn handle_tool_run(
@@ -3284,20 +3309,38 @@ fn handle_tool_run(
     cwd: &Path,
     command: &[String],
 ) -> ExitCode {
-    let (paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let run = match run_native_command(&mut connection, &paths, task_id, actor, "tool", &command[0], cwd, command) {
-        Ok(run) => run,
-        Err(message) => return fail(&message, json_mode),
-    };
-    print_output(&run_json(&run), json_mode);
-    if run.exit_code == 0 {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(run.exit_code as u8)
+    match execute_tool_run(root, task_id, actor, cwd, command) {
+        Ok(run) => {
+            print_output(&run_json(&run), json_mode);
+            if run.exit_code == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(run.exit_code as u8)
+            }
+        }
+        Err(message) => fail(&message, json_mode),
     }
+}
+
+fn execute_verifier_run(
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    verifier_name: &str,
+    cwd: &Path,
+    command: &[String],
+) -> Result<SwarmRunRecord, String> {
+    let (paths, mut connection) = open_swarm_connection(root)?;
+    run_native_command(
+        &mut connection,
+        &paths,
+        task_id,
+        actor,
+        "verifier",
+        verifier_name,
+        cwd,
+        command,
+    )
 }
 
 fn handle_verifier_run(
@@ -3309,43 +3352,27 @@ fn handle_verifier_run(
     cwd: &Path,
     command: &[String],
 ) -> ExitCode {
-    let (paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
-    let run = match run_native_command(
-        &mut connection,
-        &paths,
-        task_id,
-        actor,
-        "verifier",
-        verifier_name,
-        cwd,
-        command,
-    ) {
-        Ok(run) => run,
-        Err(message) => return fail(&message, json_mode),
-    };
-    print_output(&run_json(&run), json_mode);
-    if run.exit_code == 0 {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(run.exit_code as u8)
+    match execute_verifier_run(root, task_id, actor, verifier_name, cwd, command) {
+        Ok(run) => {
+            print_output(&run_json(&run), json_mode);
+            if run.exit_code == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(run.exit_code as u8)
+            }
+        }
+        Err(message) => fail(&message, json_mode),
     }
 }
 
-fn handle_mergegate_decide(
-    json_mode: bool,
+fn execute_mergegate_decide(
     root: &Path,
     task_id: &str,
     actor: &str,
     mergegate_name: &str,
     verifier_names: &[String],
-) -> ExitCode {
-    let (_paths, mut connection) = match open_swarm_connection(root) {
-        Ok(value) => value,
-        Err(message) => return fail(&message, json_mode),
-    };
+) -> Result<(ExitCode, Value), String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
     let mut verifier_states = Vec::new();
     let mut missing = false;
     let mut failed = false;
@@ -3374,7 +3401,7 @@ fn handle_mergegate_decide(
                     "exitCode": Value::Null,
                 }));
             }
-            Err(message) => return fail(&message, json_mode),
+            Err(message) => return Err(message),
         }
     }
     let verdict = if failed {
@@ -3398,12 +3425,129 @@ fn handle_mergegate_decide(
         &format!("Mergegate `{mergegate_name}` decided {verdict}."),
         decision.clone(),
     );
-    print_output(&decision, json_mode);
-    match verdict {
-        "pass" => ExitCode::SUCCESS,
-        "pending" => ExitCode::from(2),
-        _ => ExitCode::from(1),
+    Ok((
+        match verdict {
+            "pass" => ExitCode::SUCCESS,
+            "pending" => ExitCode::from(2),
+            _ => ExitCode::from(1),
+        },
+        decision,
+    ))
+}
+
+fn handle_mergegate_decide(
+    json_mode: bool,
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    mergegate_name: &str,
+    verifier_names: &[String],
+) -> ExitCode {
+    match execute_mergegate_decide(root, task_id, actor, mergegate_name, verifier_names) {
+        Ok((exit_code, value)) => {
+            print_output(&value, json_mode);
+            exit_code
+        }
+        Err(message) => fail(&message, json_mode),
     }
+}
+
+fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
+    match command {
+        SwarmCommand::Start { root, task_id, actor, detail }
+        | SwarmCommand::Bootstrap { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_created", &detail)?))
+        }
+        SwarmCommand::Lease { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "lease_acquired", &detail)?))
+        }
+        SwarmCommand::Release { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "lease_released", &detail)?))
+        }
+        SwarmCommand::Heartbeat { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "worker_heartbeat", &detail)?))
+        }
+        SwarmCommand::Complete { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_completed", &detail)?))
+        }
+        SwarmCommand::Fail { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_failed", &detail)?))
+        }
+        SwarmCommand::Retry { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_requeued", &detail)?))
+        }
+        SwarmCommand::Stop { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_stopped", &detail)?))
+        }
+        SwarmCommand::Resume { root, task_id, actor, detail } => {
+            Ok((ExitCode::SUCCESS, execute_event_command(&root, &task_id, &actor, "task_resumed", &detail)?))
+        }
+        SwarmCommand::Approve { root, task_id, actor, approval_name, detail } => {
+            Ok((ExitCode::SUCCESS, execute_approve_command(&root, &task_id, &actor, &approval_name, &detail)?))
+        }
+        SwarmCommand::ObjectiveCreate { root, objective_id, detail, max_tasks, max_runs, deadline_at_ms } => {
+            Ok((ExitCode::SUCCESS, execute_objective_create(&root, &objective_id, &detail, max_tasks, max_runs, deadline_at_ms)?))
+        }
+        SwarmCommand::TaskCreate {
+            root,
+            objective_id,
+            task_id,
+            detail,
+            dependencies,
+            max_runs,
+            deadline_at_ms,
+            lease_timeout_ms,
+        } => Ok((
+            ExitCode::SUCCESS,
+            execute_task_create(&root, &objective_id, &task_id, &detail, &dependencies, max_runs, deadline_at_ms, lease_timeout_ms)?,
+        )),
+        SwarmCommand::PolicySet { root, task_id, mergegate_name, required_approvals, required_verifiers } => Ok((
+            ExitCode::SUCCESS,
+            execute_policy_set(&root, &task_id, &mergegate_name, &required_approvals, &required_verifiers)?,
+        )),
+        SwarmCommand::Status { .. }
+        | SwarmCommand::History { .. }
+        | SwarmCommand::Tasks { .. }
+        | SwarmCommand::Summary { .. }
+        | SwarmCommand::Tail { .. }
+        | SwarmCommand::Runs { .. }
+        | SwarmCommand::ObjectiveStatus { .. }
+        | SwarmCommand::Objectives { .. }
+        | SwarmCommand::Ready { .. }
+        | SwarmCommand::Approvals { .. }
+        | SwarmCommand::Artifacts { .. }
+        | SwarmCommand::ManagerNext { .. } => Ok((ExitCode::SUCCESS, execute_query_command(command)?)),
+        SwarmCommand::ToolRun { root, task_id, actor, cwd, command } => {
+            let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command)?;
+            let exit_code = if run.exit_code == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(run.exit_code as u8)
+            };
+            Ok((exit_code, run_json(&run)))
+        }
+        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, command } => {
+            let run = execute_verifier_run(&root, &task_id, &actor, &verifier_name, &cwd, &command)?;
+            let exit_code = if run.exit_code == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(run.exit_code as u8)
+            };
+            Ok((exit_code, run_json(&run)))
+        }
+        SwarmCommand::MergegateDecide { root, task_id, actor, mergegate_name, verifier_names } => {
+            execute_mergegate_decide(&root, &task_id, &actor, &mergegate_name, &verifier_names)
+        }
+    }
+}
+
+pub fn run_swarm_json_command(args: &[String]) -> Result<(i32, String), String> {
+    let mut cli_args = vec!["claspc".to_owned(), "--json".to_owned(), "swarm".to_owned()];
+    cli_args.extend(args.iter().cloned());
+    let (_, command) = parse_swarm_command(&cli_args)?
+        .ok_or_else(|| "missing swarm subcommand".to_owned())?;
+    let (exit_code, value) = execute_command(command)?;
+    Ok((if exit_code == ExitCode::SUCCESS { 0 } else if exit_code == ExitCode::from(2) { 2 } else { 1 }, value.to_string()))
 }
 
 pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
@@ -3420,100 +3564,26 @@ pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
             swarm_usage(args.first().map(String::as_str).unwrap_or("claspc"));
         }
     };
-
-    let exit_code = match command {
-        SwarmCommand::Start { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_created", &detail)
+    match execute_command(command) {
+        Ok((exit_code, value)) => {
+            print_output(&value, json_mode);
+            Some(exit_code)
         }
-        SwarmCommand::Bootstrap { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_created", &detail)
+        Err(message) => {
+            if json_mode {
+                println!("{}", json!({ "status": "error", "error": message }));
+                Some(ExitCode::from(1))
+            } else {
+                eprintln!("{message}");
+                Some(ExitCode::from(1))
+            }
         }
-        SwarmCommand::Lease { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "lease_acquired", &detail)
-        }
-        SwarmCommand::Release { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "lease_released", &detail)
-        }
-        SwarmCommand::Heartbeat { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "worker_heartbeat", &detail)
-        }
-        SwarmCommand::Complete { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_completed", &detail)
-        }
-        SwarmCommand::Fail { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_failed", &detail)
-        }
-        SwarmCommand::Retry { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_requeued", &detail)
-        }
-        SwarmCommand::Stop { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_stopped", &detail)
-        }
-        SwarmCommand::Resume { root, task_id, actor, detail } => {
-            handle_event_command(json_mode, &root, &task_id, &actor, "task_resumed", &detail)
-        }
-        SwarmCommand::Approve { root, task_id, actor, approval_name, detail } => {
-            handle_approve_command(json_mode, &root, &task_id, &actor, &approval_name, &detail)
-        }
-        SwarmCommand::ObjectiveCreate { root, objective_id, detail, max_tasks, max_runs, deadline_at_ms } => {
-            handle_objective_create(json_mode, &root, &objective_id, &detail, max_tasks, max_runs, deadline_at_ms)
-        }
-        SwarmCommand::TaskCreate {
-            root,
-            objective_id,
-            task_id,
-            detail,
-            dependencies,
-            max_runs,
-            deadline_at_ms,
-            lease_timeout_ms,
-        } => handle_task_create(
-            json_mode,
-            &root,
-            &objective_id,
-            &task_id,
-            &detail,
-            &dependencies,
-            max_runs,
-            deadline_at_ms,
-            lease_timeout_ms,
-        ),
-        SwarmCommand::PolicySet { root, task_id, mergegate_name, required_approvals, required_verifiers } => handle_policy_set(
-            json_mode,
-            &root,
-            &task_id,
-            &mergegate_name,
-            &required_approvals,
-            &required_verifiers,
-        ),
-        SwarmCommand::Status { .. }
-        | SwarmCommand::History { .. }
-        | SwarmCommand::Tasks { .. }
-        | SwarmCommand::Summary { .. }
-        | SwarmCommand::Tail { .. }
-        | SwarmCommand::Runs { .. }
-        | SwarmCommand::ObjectiveStatus { .. }
-        | SwarmCommand::Objectives { .. }
-        | SwarmCommand::Ready { .. }
-        | SwarmCommand::Approvals { .. }
-        | SwarmCommand::Artifacts { .. }
-        | SwarmCommand::ManagerNext { .. } => handle_query_command(json_mode, command),
-        SwarmCommand::ToolRun { root, task_id, actor, cwd, command } => {
-            handle_tool_run(json_mode, &root, &task_id, &actor, &cwd, &command)
-        }
-        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, command } => {
-            handle_verifier_run(json_mode, &root, &task_id, &actor, &verifier_name, &cwd, &command)
-        }
-        SwarmCommand::MergegateDecide { root, task_id, actor, mergegate_name, verifier_names } => {
-            handle_mergegate_decide(json_mode, &root, &task_id, &actor, &mergegate_name, &verifier_names)
-        }
-    };
-    Some(exit_code)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{maybe_run_swarm, render_swarm_text, runtime_paths};
+    use super::{maybe_run_swarm, render_swarm_text, run_swarm_json_command, runtime_paths};
     use std::process::ExitCode;
     use rusqlite::Connection;
     use serde_json::json;
@@ -3558,6 +3628,59 @@ mod tests {
         assert_eq!(lease_actor, "manager");
         assert_eq!(heartbeat_seen, 1);
         assert_eq!(attempts, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn run_swarm_json_command_supports_ordinary_program_calls() {
+        let root = unique_root("direct-json");
+        let root_text = root.to_string_lossy().to_string();
+
+        let objective = run_swarm_json_command(&vec![
+            "objective".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "--detail".to_owned(),
+            "Direct Clasp orchestration.".to_owned(),
+        ])
+        .expect("objective create");
+        assert_eq!(objective.0, 0);
+        assert!(objective.1.contains("\"objectiveId\":\"loop\""));
+
+        let task = run_swarm_json_command(&vec![
+            "task".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "repair".to_owned(),
+            "--detail".to_owned(),
+            "Repair runtime.".to_owned(),
+        ])
+        .expect("task create");
+        assert_eq!(task.0, 0);
+        assert!(task.1.contains("\"taskId\":\"repair\""));
+
+        let lease = run_swarm_json_command(&vec![
+            "lease".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "--actor".to_owned(),
+            "worker-1".to_owned(),
+        ])
+        .expect("lease");
+        assert_eq!(lease.0, 0);
+        assert!(lease.1.contains("\"kind\":\"lease_acquired\""));
+
+        let status = run_swarm_json_command(&vec![
+            "status".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+        ])
+        .expect("status");
+        assert_eq!(status.0, 0);
+        assert!(status.1.contains("\"leaseActor\":\"worker-1\""));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -4046,6 +4169,45 @@ mod tests {
     }
 
     #[test]
+    fn swarm_manager_next_keeps_empty_objectives_actionable() {
+        let root = unique_root("empty-objective");
+        let root_text = root.to_string_lossy().to_string();
+
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "objective".to_owned(),
+                "create".to_owned(),
+                root_text,
+                "loop".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let manager_next = super::manager_next_json(&connection, "loop").expect("manager next");
+        assert_eq!(manager_next.get("status").and_then(|value| value.as_str()), Some("empty"));
+        assert_eq!(manager_next.get("action").and_then(|value| value.as_str()), Some("plan-tasks"));
+        assert_eq!(manager_next.get("taskCount").and_then(|value| value.as_i64()), Some(0));
+        assert_eq!(
+            manager_next.get("suggestedCommand"),
+            Some(&json!([
+                "claspc",
+                "swarm",
+                "task",
+                "create",
+                "<state-root>",
+                "loop",
+                "<task-id>"
+            ]))
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn swarm_summary_projects_dict_backed_fields_for_sqlite_state() {
         let root = unique_root("summary");
         let root_text = root.to_string_lossy().to_string();
@@ -4233,5 +4395,15 @@ mod tests {
         }));
         assert!(recover_text.contains("action: recover-lease"));
         assert!(recover_text.contains("command: claspc swarm lease <state-root> repair"));
+
+        let empty_text = render_swarm_text(&json!({
+            "objectiveId": "loop",
+            "status": "empty",
+            "action": "plan-tasks",
+            "taskCount": 0,
+            "suggestedCommand": ["claspc", "swarm", "task", "create", "<state-root>", "loop", "<task-id>"]
+        }));
+        assert!(empty_text.contains("action: plan-tasks"));
+        assert!(empty_text.contains("command: claspc swarm task create <state-root> loop <task-id>"));
     }
 }

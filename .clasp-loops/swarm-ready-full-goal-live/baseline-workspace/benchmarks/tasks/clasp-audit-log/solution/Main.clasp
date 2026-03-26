@@ -1,0 +1,114 @@
+module Main
+
+record SearchRequest = { query : Str }
+record SearchResponse = { summary : Str }
+record WorkflowState = { status : Str }
+record AuditEnvelope = { releaseId : Str, status : Str }
+record Empty = {}
+
+record AuditEvent = {
+  kind : Str,
+  boundary : Str,
+  operation : Str,
+  retentionDays : Int,
+  redactedFields : [Str],
+  rootCause : Str,
+  tracePath : [Str]
+}
+
+record AuditSnapshot = {
+  typedEventKinds : [Str],
+  routeEvent : AuditEvent,
+  toolEvent : AuditEvent,
+  workflowEvent : AuditEvent,
+  secretEvent : AuditEvent,
+  missingSecretBlame : Str
+}
+
+guide AuditGuide = {
+  scope: "Publish typed audit snapshots with redaction, retention, and root-cause traceability."
+}
+
+policy AuditPolicy = public permits {
+  process "node",
+  secret "OPENAI_API_KEY",
+  secret "SEARCH_API_TOKEN"
+}
+
+role AuditWorkerRole = guide: AuditGuide, policy: AuditPolicy, approval: on_request, sandbox: workspace_write
+
+agent auditWorker = AuditWorkerRole
+
+toolserver SearchTools = "mcp" "stdio://search-tools" with AuditPolicy
+
+tool summarizeDraft = SearchTools "summarize_draft" SearchRequest -> SearchResponse
+
+workflow ApprovalFlow = { state : WorkflowState }
+
+auditEnvelope : Empty -> AuditEnvelope
+auditEnvelope req = AuditEnvelope {
+  releaseId = "rel-204",
+  status = "approved"
+}
+
+route releaseAuditRoute = GET "/release/audit" Empty -> AuditEnvelope auditEnvelope
+
+routeEvent : AuditEvent
+routeEvent = AuditEvent {
+  kind = "TypedRouteAudit",
+  boundary = "releaseAuditRoute",
+  operation = "GET /release/audit",
+  retentionDays = 30,
+  redactedFields = ["authorization", "session.token"],
+  rootCause = "route releaseAuditRoute -> policy AuditPolicy",
+  tracePath = ["route releaseAuditRoute", "policy AuditPolicy", "tenant operations"]
+}
+
+toolEvent : AuditEvent
+toolEvent = AuditEvent {
+  kind = "TypedToolAudit",
+  boundary = "SearchTools",
+  operation = "summarize_draft",
+  retentionDays = 30,
+  redactedFields = ["customerEmail", "searchToken"],
+  rootCause = "tool summarizeDraft -> toolserver SearchTools -> policy AuditPolicy",
+  tracePath = ["tool summarizeDraft", "toolserver SearchTools", "policy AuditPolicy"]
+}
+
+workflowEvent : AuditEvent
+workflowEvent = AuditEvent {
+  kind = "TypedWorkflowAudit",
+  boundary = "ApprovalFlow",
+  operation = "transition approved",
+  retentionDays = 365,
+  redactedFields = ["rollbackReason"],
+  rootCause = "workflow ApprovalFlow -> route releaseAuditRoute",
+  tracePath = ["workflow ApprovalFlow", "route releaseAuditRoute", "release rel-204"]
+}
+
+secretEvent : AuditEvent
+secretEvent = AuditEvent {
+  kind = "TypedSecretAudit",
+  boundary = "OPENAI_API_KEY",
+  operation = "resolve",
+  retentionDays = 730,
+  redactedFields = ["OPENAI_API_KEY"],
+  rootCause = "policy AuditPolicy secret OPENAI_API_KEY -> tool summarizeDraft",
+  tracePath = ["policy AuditPolicy", "secret OPENAI_API_KEY", "tool summarizeDraft"]
+}
+
+auditSnapshot : AuditSnapshot
+auditSnapshot = AuditSnapshot {
+  typedEventKinds = ["TypedRouteAudit", "TypedToolAudit", "TypedWorkflowAudit", "TypedSecretAudit"],
+  routeEvent = routeEvent,
+  toolEvent = toolEvent,
+  workflowEvent = workflowEvent,
+  secretEvent = secretEvent,
+  missingSecretBlame = "Missing secret SEARCH_API_TOKEN for toolServer SearchTools under policy AuditPolicy"
+}
+
+auditSnapshotJson : Str
+auditSnapshotJson = encode auditSnapshot
+
+main : Str
+main = auditSnapshotJson

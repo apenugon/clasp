@@ -1,0 +1,35 @@
+{
+  "task_id": "BM-018-add-boundary-transport-benchmarks-comparing-json-and-generated-binary-projections-on-the-same-schema-model",
+  "summary": "The smallest coherent slice was a separate benchmark runner instead of forcing the existing Bun-vs-native backend runner to absorb a second comparison axis. Using a dedicated compiled schema fixture kept the benchmark honest and easy to regression-test.",
+  "ergonomics": [
+    "The generated `__claspSchemas` contract already exposes enough helpers (`fromHost`/`toHost` plus binary codecs) to build a transport benchmark without touching compiler code.",
+    "`scripts/verify-all.sh` already had a clean benchmark-test seam, so adding one more end-to-end shell check was straightforward.",
+    "The field-name surface in `.clasp` files is easy to trip over with reserved words like `route`; benchmark fixture schemas need conservative identifier choices."
+  ],
+  "follow_ups": [
+    "If BM-019 or later wants a stronger publication story, fold this JSON-vs-binary report into a shared benchmark result schema or summary command instead of leaving it as a standalone JSON artifact.",
+    "Consider separating compile/setup time from measured transport execution in the output format explicitly, since the runner currently compiles once up front and then measures only projection loops.",
+    "If native generated binary codecs become benchmark-ready, mirror this benchmark through the native path so transport comparisons cover both backends."
+  ],
+  "warnings": [
+    "Do not use reserved declaration words like `route` as record field names in benchmark schema fixtures; the parser rejects them.",
+    "Running the new benchmark outside `nix develop` can fail on missing `ghc`/`cabal` toolchain, just like the other compiler-backed benchmark commands.",
+    "The benchmark test writes JSON files under `benchmarks/results/backend/`; that is expected during verification and not part of the source change itself."
+  ],
+  "files_touched": [
+    "benchmarks/backend/boundary-transport-schema.clasp",
+    "benchmarks/run-boundary-transport-benchmarks.mjs",
+    "benchmarks/test-boundary-transport-benchmarks.sh",
+    "benchmarks/README.md",
+    "scripts/verify-all.sh"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cd \"$PWD\" && bash benchmarks/test-boundary-transport-benchmarks.sh'",
+    "nix develop -c bash -lc 'cd \"$PWD\" && bash benchmarks/test-backend-benchmarks.sh'",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The new BM-018 benchmark compares JSON and generated binary projections in the compiled JS runtime only; it does not add a mirrored native-runtime transport comparison.",
+    "The benchmark recompiles the schema model on each run for reproducibility, so command startup cost includes one compiler invocation before measurement begins."
+  ]
+}

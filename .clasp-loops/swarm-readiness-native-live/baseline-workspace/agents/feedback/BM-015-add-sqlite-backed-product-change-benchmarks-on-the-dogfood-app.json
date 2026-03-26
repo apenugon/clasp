@@ -1,0 +1,37 @@
+{
+  "task_id": "BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app",
+  "summary": "The persisted dogfood benchmark already existed as a task snapshot; the missing piece was making it behave like the rest of the benchmark program, with explicit prompt modes, a stable family alias, and regression checks that exercise oracle-mode verification instead of only the default path.",
+  "ergonomics": [
+    "`benchmarks/run-benchmark.mjs` already had prompt-variant fallback support, so adding mode-specific persistence prompts was low-friction once the task shape was understood.",
+    "`benchmarks/test-task-prep.sh` is the right place to lock prompt-selection and mutation-surface expectations, but it is long enough that finding the right extension point takes a few passes.",
+    "The existing `benchmarks/test-persistence-benchmarks.sh` made it easy to add a scenario-level oracle-mode check without touching app code."
+  ],
+  "follow_ups": [
+    "Add a mirrored Clasp SQLite-backed dogfood benchmark so persisted app changes can participate in the same public comparison rollups as the stateless app tasks.",
+    "Consider a dedicated repeated-run alias or scorecard bucket for persisted dogfood benchmarks if more SQLite-backed app tasks are added.",
+    "If more single-task benchmark families land, factor the prompt-mode assertions in `benchmarks/test-task-prep.sh` into a helper to avoid copy-paste growth."
+  ],
+  "warnings": [
+    "`ts-lead-persistence` previously fell back to `prompt.md` for every mode, so benchmark runs could silently claim oracle/file-hinted coverage without task-specific prompt text unless these variant files exist.",
+    "`oracle-check` result selection in `benchmarks/test-task-prep.sh` assumes the latest result for that harness belongs to the just-run task; keep the cleanup in place if more oracle checks are added nearby.",
+    "`bash scripts/verify-all.sh` is expensive and emits a lot of dirty-tree warnings from the harness path; that noise can hide benchmark regressions if you are not watching for nonzero exits."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/run-benchmark.mjs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/README.md",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/test-task-prep.sh",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/test-persistence-benchmarks.sh",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/tasks/ts-lead-persistence/prompt.raw.md",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/tasks/ts-lead-persistence/prompt.file-hinted.md",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/10-benchmarks/BM-015-add-sqlite-backed-product-change-benchmarks-on-the-dogfood-app/benchmarks/tasks/ts-lead-persistence/prompt.oracle.md"
+  ],
+  "tests_run": [
+    "bash benchmarks/test-task-prep.sh",
+    "bash benchmarks/test-persistence-benchmarks.sh",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The SQLite-backed benchmark family is still TypeScript-only; there is no mirrored Clasp persistence task for cross-language comparison yet.",
+    "This slice adds benchmark-mode and verification coverage around the persisted dogfood task, but it does not introduce a second persisted product-change task beyond `ts-lead-persistence` itself."
+  ]
+}

@@ -1,0 +1,6 @@
+module SelfHostEmitSmoke
+
+import Compiler.Emit.NativeJson
+import Compiler.Emit.NativeSurface
+
+main = nativeEntrypointSymbol "A.B" "main"

@@ -1,0 +1,16 @@
+module Main
+
+record Counter = { count : Int }
+
+nonNegative : Counter -> Bool
+nonNegative counter = counter.count >= 0
+
+belowLimit : Counter -> Bool
+belowLimit counter = counter.count < 5
+
+withinLimit : Counter -> Bool
+withinLimit counter = counter.count <= 5
+
+workflow CounterFlow = { state : Counter }
+
+main = "workflow-correctness-benchmark"

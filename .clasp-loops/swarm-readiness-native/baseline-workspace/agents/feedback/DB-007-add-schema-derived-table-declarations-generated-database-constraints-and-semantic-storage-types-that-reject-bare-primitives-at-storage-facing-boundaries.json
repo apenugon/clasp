@@ -1,0 +1,37 @@
+{
+  "task_id": "DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries",
+  "summary": "The narrowest stable slice was to enforce `storage:*` typing in the checker and derive storage contracts from existing generated host-binding/schema metadata in `runtime/bun/server.mjs`, instead of adding new source syntax.",
+  "ergonomics": [
+    "Existing host binding manifests already carried enough type/schema info to derive storage metadata without touching the parser or lowering pipeline.",
+    "The test suite structure made it easy to add one checker regression, one runtime regression, and one scenario assertion in support-console.",
+    "`cabal test --test-options` is picky here; `--pattern storage` worked, while some `-p=` forms were rejected by the test runner wrapper."
+  ],
+  "follow_ups": [
+    "Emit a first-class compiler-owned `__claspStorage` export so storage metadata is available without runtime reconstruction.",
+    "Add schema-level enum value metadata if later tasks want generated `CHECK (... IN ...)` constraints for enum-backed columns.",
+    "Introduce explicit migration helpers that consume the derived table declarations instead of leaving them as contract metadata only."
+  ],
+  "warnings": [
+    "`storage:*` enforcement is strict: bare `Str`/`Int`/`Bool` anywhere in the storage boundary type now fails with `E_STORAGE_BOUNDARY_TYPE`, including inside lists.",
+    "The support-console verification string now includes storage contract fields; future changes to storage metadata shape will need the example test and verify script updated together.",
+    "`bash scripts/verify-all.sh` emits a lot of dirty-tree and Node module-type warnings that are noisy but non-fatal; the actual pass/fail signal is the command exit code."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/src/Clasp/Checker.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/runtime/bun/server.mjs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/test/Main.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/examples/support-console/demo.mjs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/examples/support-console/scripts/verify.sh",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-007-add-schema-derived-table-declarations-generated-database-constraints-and-semantic-storage-types-that-reject-bare-primitives-at-storage-facing-boundaries/docs/clasp-spec-v0.md"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cabal test clasp-compiler-test --test-options=\"--pattern storage\"'",
+    "nix develop -c bash -lc 'cabal test clasp-compiler-test --test-options=\"--pattern support-console\"'",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "Storage table derivation currently covers record/list/enum/primitive schema shapes via runtime metadata only; there is no emitted dedicated compiler-side `__claspStorage` artifact yet.",
+    "Generated constraints are intentionally conservative: `NOT NULL`, first-field `id` primary key, boolean domain checks, and JSON validity for nested record/list storage columns.",
+    "Table naming is deterministic snake_case from schema type names, but pluralization and migration-oriented naming customization are still absent."
+  ]
+}

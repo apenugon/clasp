@@ -1,0 +1,32 @@
+{
+  "task_id": "DB-010-add-policy-aware-queries-mutations-and-proof-gated-row-or-field-access-for-protected-storage-models-without-falling-back-to-bare-primitive-storage-facing-types",
+  "summary": "The smallest viable DB-010 slice was checker enforcement for sqlite query boundaries plus richer Bun contract metadata derived from existing schema projection helpers; the compiler already carried enough projection/classification data to avoid broader refactors.",
+  "ergonomics": [
+    "The emitted schema objects already had `projection()` and field helper metadata, which made it straightforward to derive row/field proof information in `runtime/bun/server.mjs` without touching codegen.",
+    "Checker rules for storage/sqlite surfaces are localized enough that extending mutation-style enforcement to queries was a one-function change.",
+    "The test suite is broad and reliable, but targeting a single Tasty case through `cabal test --test-options` is awkward because shell quoting/pattern parsing is easy to get wrong."
+  ],
+  "follow_ups": [
+    "Unify the storage/sqlite proof metadata shape into an explicit shared contract helper so future runtimes do not reimplement it ad hoc.",
+    "Add direct assertions for protected `storage:*` bindings too; this task covered sqlite query/mutation end to end, but storage bindings now benefit from the same enriched contract shape indirectly.",
+    "Consider documenting the Bun contract proof fields if external tooling is expected to consume them."
+  ],
+  "warnings": [
+    "Do not assume sqlite queries were already boundary-checked because mutations were; before this change `sqlite:queryOne`/`sqlite:queryAll` still accepted bare primitives.",
+    "When writing sqlite runtime tests that pass record params, SQL placeholders must match every named field the runtime sends or Node sqlite throws `Unknown named parameter` errors that look unrelated to the contract change.",
+    "`bash scripts/verify-all.sh` is noisy from repo-dirty warnings and benchmark artifact generation; absence of clean logs does not mean the verification failed, so rely on the final exit status."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-010-add-policy-aware-queries-mutations-and-proof-gated-row-or-field-access-for-protected-storage-models-without-falling-back-to-bare-primitive-storage-facing-types/src/Clasp/Checker.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-010-add-policy-aware-queries-mutations-and-proof-gated-row-or-field-access-for-protected-storage-models-without-falling-back-to-bare-primitive-storage-facing-types/runtime/bun/server.mjs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/14-sqlite/DB-010-add-policy-aware-queries-mutations-and-proof-gated-row-or-field-access-for-protected-storage-models-without-falling-back-to-bare-primitive-storage-facing-types/test/Main.hs"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cabal test'",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The new proof metadata is emitted on Bun storage/sqlite contract descriptions only; if another runtime starts deriving its own storage contract shape, it will need to mirror the same row/field proof structure.",
+    "`bash scripts/verify-all.sh` still emits existing dirty-tree and Node `MODULE_TYPELESS_PACKAGE_JSON` warnings during benchmark/example verification, but it completed successfully."
+  ]
+}

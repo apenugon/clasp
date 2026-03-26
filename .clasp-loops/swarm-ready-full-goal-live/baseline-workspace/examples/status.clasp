@@ -1,0 +1,12 @@
+module Main
+
+type Status = Idle | Busy Str
+
+describe : Status -> Str
+describe status = match status {
+  Idle -> "idle",
+  Busy note -> note
+}
+
+main : Str
+main = describe (Busy "loading")

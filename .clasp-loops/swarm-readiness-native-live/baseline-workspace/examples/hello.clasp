@@ -1,0 +1,8 @@
+module Main
+
+hello = "Hello from Clasp"
+
+id : Str -> Str
+id v = v
+
+main = id hello

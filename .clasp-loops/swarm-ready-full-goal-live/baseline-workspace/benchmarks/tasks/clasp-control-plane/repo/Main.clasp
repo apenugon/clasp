@@ -1,0 +1,38 @@
+module Main
+
+record WorkerBoot = { workerId : Str }
+record HookAck = { accepted : Bool }
+record SearchRequest = { query : Str }
+record SearchResponse = { summary : Str }
+
+bootstrapWorker : WorkerBoot -> HookAck
+bootstrapWorker req = HookAck { accepted = true }
+
+guide Repo = {
+  scope: "Stay inside the current checkout."
+}
+
+guide Builder extends Repo = {
+  taskQueue: "Inspect the repo first, then run the merge gate."
+}
+
+policy RepoControl = public permits {
+  file "/workspace",
+  network "api.openai.com",
+  process "rg"
+}
+
+role BuilderRole = guide: Builder, policy: RepoControl, approval: never, sandbox: read_only
+
+agent builder = BuilderRole
+
+hook workerStart = "worker.start" WorkerBoot -> HookAck bootstrapWorker
+
+toolserver RepoTools = "mcp" "stdio://repo-tools" with RepoControl
+
+tool searchRepo = RepoTools "search_repo" SearchRequest -> SearchResponse
+
+verifier repoChecks = searchRepo
+mergegate trunk = repoChecks
+
+main = "ok"

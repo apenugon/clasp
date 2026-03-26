@@ -1,0 +1,13 @@
+{
+  "id": "ts-shared-priority",
+  "title": "Add priority across shared types, server logic, and client rendering",
+  "suite": "fullstack-feature",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [
+    ["npm", "install"]
+  ],
+  "verify": ["npm", "test"]
+}
+

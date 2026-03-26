@@ -1,3 +1,5 @@
+mod swarm;
+
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::HashMap;
 use std::env;
@@ -1179,6 +1181,14 @@ fn append_json_string_literal(out: &mut Vec<u8>, bytes: &[u8]) {
         }
     }
     out.push(b'"');
+}
+
+fn json_error_message(message: &str) -> String {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"{\"status\":\"error\",\"error\":");
+    append_json_string_literal(&mut payload, message.as_bytes());
+    payload.push(b'}');
+    String::from_utf8(payload).unwrap_or_else(|_| "{\"status\":\"error\",\"error\":\"invalid_utf8\"}".to_owned())
 }
 
 unsafe fn encode_runtime_value_json(value: *mut ClaspRtHeader) -> Option<Vec<u8>> {
@@ -7043,6 +7053,26 @@ pub unsafe extern "C" fn clasp_rt_run_command_json(
         .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
         .collect();
 
+    let mut render_payload = |exit_code: i32, stdout: &[u8], stderr: &[u8]| {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"{\"exitCode\":");
+        payload.extend_from_slice(exit_code.to_string().as_bytes());
+        payload.extend_from_slice(b",\"stdout\":");
+        append_json_string_literal(&mut payload, stdout);
+        payload.extend_from_slice(b",\"stderr\":");
+        append_json_string_literal(&mut payload, stderr);
+        payload.push(b'}');
+        clasp_rt_result_ok_string(build_runtime_string(&payload))
+    };
+
+    if command_values[0] == "@swarm" {
+        let (exit_code, stdout) = match swarm::run_swarm_json_command(&command_values[1..]) {
+            Ok(value) => value,
+            Err(message) => (2, json_error_message(&message)),
+        };
+        return render_payload(exit_code, stdout.as_bytes(), b"");
+    }
+
     let output = match ProcessCommand::new(&command_values[0])
         .args(&command_values[1..])
         .current_dir(&cwd_string)
@@ -7053,16 +7083,7 @@ pub unsafe extern "C" fn clasp_rt_run_command_json(
             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
         }
     };
-
-    let mut payload = Vec::new();
-    payload.extend_from_slice(b"{\"exitCode\":");
-    payload.extend_from_slice(output.status.code().unwrap_or(-1).to_string().as_bytes());
-    payload.extend_from_slice(b",\"stdout\":");
-    append_json_string_literal(&mut payload, &output.stdout);
-    payload.extend_from_slice(b",\"stderr\":");
-    append_json_string_literal(&mut payload, &output.stderr);
-    payload.push(b'}');
-    clasp_rt_result_ok_string(build_runtime_string(&payload))
+    render_payload(output.status.code().unwrap_or(-1), &output.stdout, &output.stderr)
 }
 
 #[cfg(test)]
@@ -7160,6 +7181,39 @@ mod tests {
             release_header(null_mut(), command);
             release_header(null_mut(), result as *mut ClaspRtHeader);
             let _ = std::fs::remove_file(script_path);
+        }
+    }
+
+    #[test]
+    fn run_command_json_dispatches_swarm_commands_without_shelling_out() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let root = cwd_dir.join(format!("clasp-run-command-json-swarm-{}", std::process::id()));
+            let root_text = root.display().to_string();
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"@swarm") as *mut ClaspRtHeader,
+                build_runtime_string(b"objective") as *mut ClaspRtHeader,
+                build_runtime_string(b"create") as *mut ClaspRtHeader,
+                build_runtime_string(root_text.as_bytes()) as *mut ClaspRtHeader,
+                build_runtime_string(b"loop") as *mut ClaspRtHeader,
+                build_runtime_string(b"--detail") as *mut ClaspRtHeader,
+                build_runtime_string(b"Direct runtime dispatch.") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_command_json(cwd, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(0));
+            assert_eq!(parsed["stdout"]["objectiveId"].as_str(), Some("loop"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            let _ = std::fs::remove_dir_all(root);
         }
     }
 

@@ -1,0 +1,209 @@
+keepNoTypeBinding : TypeBinding -> Bool
+emptyTypeBindings : [TypeBinding]
+keepNoTypeText : TypeText -> Bool
+emptyTypeTexts : [TypeText]
+keepNoTypeSubstitution : TypeSubstitution -> Bool
+emptyTypeSubstitutions : [TypeSubstitution]
+appendTypeBinding : [TypeBinding] -> TypeBinding -> [TypeBinding]
+appendCheckerRenderedText : [Str] -> Str -> [Str]
+firstHostedExpr : [HostedExprAst] -> HostedExprAst
+remainingHostedExprs : [HostedExprAst] -> [HostedExprAst]
+renderAtomicType : TypeText -> Str
+renderTypeTextArgs : [TypeText] -> [Str]
+renderType : TypeText -> Str
+firstTypeText : [TypeText] -> TypeText
+remainingTypeTexts : [TypeText] -> [TypeText]
+hasTypeTexts : [TypeText] -> Bool
+lookupTypeSubstitution : [TypeSubstitution] -> Str -> LookupResult
+appendTypeSubstitution : [TypeSubstitution] -> TypeSubstitution -> [TypeSubstitution]
+applyTypeSubstitutions : TypeText -> [TypeSubstitution] -> TypeText
+applyTypeSubstitutionList : [TypeText] -> [TypeSubstitution] -> [TypeText]
+bindingTypeText : TypeBinding -> TypeText
+bindingNameText : TypeBinding -> Str
+parseRenderedTypeBinding : Str -> TypeBinding
+parseRenderedTypeBindings : Str -> [TypeBinding]
+typeContainsUnknown : Str -> TypeText -> Bool
+typeListContainsUnknown : Str -> [TypeText] -> Bool
+instantiateGenericUnknownName : Str -> Str -> Str
+instantiateGenericTypeList : Str -> [TypeText] -> [TypeText]
+instantiateGenericType : Str -> TypeText -> TypeText
+lookupTypeBindingInstantiated : [TypeBinding] -> Str -> Str -> LookupResult
+lookupTypeBindingLayersInstantiated : [TypeBinding] -> [TypeBinding] -> Str -> Str -> LookupResult
+collectTypeUnknownLabels : TypeText -> [Str]
+collectTypeUnknownLabelsList : [TypeText] -> [Str]
+appendUniqueText : [Str] -> Str -> [Str]
+appendUniqueTextList : [Str] -> [Str] -> [Str]
+collectBindingUnknownLabels : [TypeBinding] -> [Str]
+collectReturnContextUnknownLabels : ReturnContext -> [Str]
+generalizeUnknownTypeExcept : [Str] -> TypeText -> TypeText
+generalizeUnknownTypeExceptList : [Str] -> [TypeText] -> [TypeText]
+generalizeBindingType : [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> TypeText
+typeContainsVar : Str -> TypeText -> Bool
+typeListContainsVar : Str -> [TypeText] -> Bool
+typeHasGenericVars : TypeText -> Bool
+typeListHasGenericVars : [TypeText] -> Bool
+typeIsFunction : TypeText -> Bool
+unifyTypeVar : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+unifyUnknownType : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+unifyTypeLists : [TypeText] -> [TypeText] -> [TypeSubstitution] -> TypeUnifyResult
+unifyTypes : TypeText -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+sameTypeList : [TypeText] -> [TypeText] -> Bool
+sameType : TypeText -> TypeText -> Bool
+typeFromHostedTypeAst : HostedTypeAst -> TypeText
+typeFromHostedTypes : [HostedTypeAst] -> [TypeText]
+remainingHostedTypes : [HostedTypeAst] -> [HostedTypeAst]
+buildFunctionType : [HostedTypeAst] -> TypeText -> TypeText
+typeMismatchMessage : Str -> TypeText -> TypeText -> Str
+lookupTypeBinding : [TypeBinding] -> Str -> LookupResult
+lookupTypeBindingLayers : [TypeBinding] -> [TypeBinding] -> Str -> LookupResult
+lookupTypeDecl : [HostedTypeDeclAst] -> Str -> TypeDeclLookupResult
+lookupRecordDecl : [HostedRecordDeclAst] -> Str -> RecordLookupResult
+lookupRecordField : [HostedRecordFieldDeclAst] -> Str -> RecordFieldLookupResult
+lookupRecordExprField : [HostedRecordFieldExprAst] -> Str -> RecordExprFieldLookupResult
+lookupTypeConstructor : HostedTypeDeclAst -> Str -> TypeConstructorLookupResult
+lookupConstructorDecl : [HostedTypeDeclAst] -> Str -> ConstructorLookupResult
+typeParamSubstitutions : [Str] -> [TypeText] -> [TypeSubstitution]
+instantiateTypeFromSubstitutions : TypeText -> [TypeSubstitution] -> TypeText
+typeDeclResultType : HostedTypeDeclAst -> TypeText
+recordDeclResultType : HostedRecordDeclAst -> TypeText
+typeParamTypes : [Str] -> [TypeText]
+containsText : [Str] -> Str -> Bool
+findMissingBranchName : HostedTypeDeclAst -> [Str] -> Str
+bindPatternArgs : Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult
+bindPattern : HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult
+typeDeclInstantiations : HostedTypeDeclAst -> TypeText -> [TypeSubstitution]
+recordDeclInstantiations : HostedRecordDeclAst -> TypeText -> [TypeSubstitution]
+applyFunctionArgumentType : Str -> TypeText -> TypeText -> [TypeSubstitution] -> ApplyCallResult
+inferRecordLiteralSubstitutions : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> RecordSubstitutionResult
+stepRecordLiteralSubstitution : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> RecordSubstitutionFoldState -> HostedRecordFieldDeclAst -> RecordSubstitutionFoldState
+inferRecordLiteralFieldSubstitution : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> [TypeSubstitution] -> HostedRecordFieldDeclAst -> RecordSubstitutionFoldState
+hasDeclParams : HostedDeclAst -> Bool
+inferAppendBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferPrependBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferReverseBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferLengthBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferMapBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferFilterBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferAnyBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferAllBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferFoldBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferEncodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+decodeTargetTypeFromExpr : HostedExprAst -> DecodeTargetTypeResult
+inferDecodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedExprAst] -> BuiltinCallInferResult
+inferExprAgainst : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> HostedExprAst -> InferExprResult
+inferExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> InferExprResult
+inferLetExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferAssignExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferForExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferReturnExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> InferExprResult
+inferIfExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> HostedExprAst -> InferExprResult
+supportsHostedEquality : TypeText -> Bool
+inferEqualityExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferIntegerComparisonExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> Str -> InferExprResult
+inferListExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> InferExprResult
+inferRecordFieldValue : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> HostedRecordFieldDeclAst -> [HostedRecordFieldExprAst] -> InferExprResult
+findUnknownRecordLiteralField : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+inferRecordExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedRecordFieldExprAst] -> InferExprResult
+findRecordUpdateFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> [TypeSubstitution] -> Str
+inferRecordUpdateBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferFieldAccessExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> Str -> InferExprResult
+inferConstructorExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedExprAst] -> InferExprResult
+inferMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> InferMatchBranchResult
+inferMatchExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> [HostedMatchBranchAst] -> InferExprResult
+applyCallType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> TypeText -> [HostedExprAst] -> InferExprResult
+applyCallArg : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> ApplyCallResult -> HostedExprAst -> ApplyCallResult
+generalizeUnknownTypeList : [TypeText] -> [TypeText]
+generalizeUnknownType : TypeText -> TypeText
+genericTypeVarLabels : [Str]
+inferUnannotatedFunctionParamBindings : HostedDeclAst -> [TypeBinding]
+buildInferredFunctionType : [Str] -> [TypeBinding] -> TypeText -> TypeText
+inferDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+validateDeclaredType : Str -> TypeText -> TypeText -> InferDeclResult
+inferValueDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+bindFunctionParams : HostedDeclAst -> TypeText -> BindParamsState
+inferFunctionDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferModulePassResult : [TypeBinding] -> Bool -> InferModulePassResult
+inferModulePassEnv : InferModulePassResult -> [TypeBinding]
+inferModulePassProgress : InferModulePassResult -> Bool
+runInferModulePass : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> InferModulePassResult
+resolveInferModuleBindings : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> [TypeBinding]
+findInferModuleFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> Str
+collectAnnotatedBindings : HostedModuleAst -> [TypeBinding]
+moduleDeclarationsFullyAnnotated : HostedModuleAst -> Bool
+collectForeignBindings : HostedModuleAst -> [TypeBinding]
+collectConstructorBindings : [HostedTypeDeclAst] -> [TypeBinding]
+stringBuiltinType : TypeText
+resultBuiltinTypeName : Str
+resultOkConstructorName : Str
+resultErrConstructorName : Str
+resultStringBuiltinType : TypeText
+prependBuiltinType : TypeText
+reverseBuiltinType : TypeText
+mapBuiltinType : TypeText
+filterBuiltinType : TypeText
+anyBuiltinType : TypeText
+allBuiltinType : TypeText
+foldBuiltinType : TypeText
+textConcatBuiltinType : TypeText
+textJoinBuiltinType : TypeText
+textSplitBuiltinType : TypeText
+textCharsBuiltinType : TypeText
+textFingerprint64HexBuiltinType : TypeText
+textPrefixBuiltinType : TypeText
+textSplitFirstBuiltinType : TypeText
+dictBuiltinType : TypeText
+dictEmptyBuiltinType : TypeText
+dictSetBuiltinType : TypeText
+dictGetBuiltinType : TypeText
+dictHasBuiltinType : TypeText
+dictRemoveBuiltinType : TypeText
+dictKeysBuiltinType : TypeText
+dictValuesBuiltinType : TypeText
+textViewBuiltinType : TypeText
+elementBuiltinType : TypeText
+styledBuiltinType : TypeText
+linkBuiltinType : TypeText
+formBuiltinType : TypeText
+inputBuiltinType : TypeText
+submitBuiltinType : TypeText
+systemPromptBuiltinType : TypeText
+assistantPromptBuiltinType : TypeText
+userPromptBuiltinType : TypeText
+appendPromptBuiltinType : TypeText
+promptTextBuiltinType : TypeText
+pageBuiltinType : TypeText
+redirectBuiltinType : TypeText
+pathJoinBuiltinType : TypeText
+pathDirnameBuiltinType : TypeText
+pathBasenameBuiltinType : TypeText
+fileExistsBuiltinType : TypeText
+readFileBuiltinType : TypeText
+runCommandJsonBuiltinType : TypeText
+argvBuiltinType : TypeText
+timeUnixMsBuiltinType : TypeText
+envVarBuiltinType : TypeText
+writeFileBuiltinType : TypeText
+appendFileBuiltinType : TypeText
+mkdirAllBuiltinType : TypeText
+builtinResultTypeDecl : HostedTypeDeclAst
+principalBuiltinRecordDecl : HostedRecordDeclAst
+tenantBuiltinRecordDecl : HostedRecordDeclAst
+resourceIdentityBuiltinRecordDecl : HostedRecordDeclAst
+authSessionBuiltinRecordDecl : HostedRecordDeclAst
+effectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]
+effectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]
+principalBuiltinType : TypeText
+tenantBuiltinType : TypeText
+resourceIdentityBuiltinType : TypeText
+authSessionBuiltinType : TypeText
+baseEnv : [TypeBinding]
+inferModuleBindings : HostedModuleAst -> InferModuleResult
+inferModuleBindingsWithImportedBindings : [TypeBinding] -> HostedModuleAst -> InferModuleResult
+renderModuleSummaryFromEnv : [TypeBinding] -> HostedModuleAst -> Str
+renderDeclSummary : [TypeBinding] -> HostedDeclAst -> Str
+renderModuleSummary : HostedModuleAst -> Str
+renderModuleSummaryWithImportedBindings : Str -> HostedModuleAst -> Str
+checkedTypeForDecl : HostedModuleAst -> Str -> TypeText
+mismatchDiagnosticForModule : HostedModuleAst -> Str

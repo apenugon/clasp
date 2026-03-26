@@ -1,0 +1,46 @@
+{
+  "taskId": "lead-digest-upgrade",
+  "title": "Upgrade the lead summary flow to a LeadDigest contract",
+  "mode": "oracle",
+  "assistance": "raw-text",
+  "sampleIndex": 1,
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T18:38:28.472Z",
+  "finishedAt": "2026-03-20T18:39:23.035Z",
+  "durationMs": 54563,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--oracle--raw-text--sample01.prompt.md",
+  "promptBytes": 1444,
+  "codexExitCode": 0,
+  "codexTimedOut": false,
+  "tokenUsage": {
+    "prompt": 124287,
+    "completion": 2382,
+    "retry": 0,
+    "debug": 0,
+    "total": 126669
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 124287,
+    "cachedInputTokens": 113920,
+    "outputTokens": 2382,
+    "uncachedInputTokens": 10367,
+    "uncachedTotal": 12749
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-oracle-raw-text-kC8SwK\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+  },
+  "verifyAttempts": 2,
+  "repairLoops": 1,
+  "timeToGreenMs": 49277,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

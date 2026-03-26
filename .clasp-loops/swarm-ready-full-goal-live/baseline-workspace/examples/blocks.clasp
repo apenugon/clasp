@@ -1,0 +1,29 @@
+module Main
+
+type Decision = KeepGoing | ExitNow
+
+pickLast : [Str] -> Str
+pickLast names = {
+  let mut current = "nobody";
+  for name in names {
+    current = name;
+    current
+  };
+  current
+}
+
+choose : Decision -> Str -> Str
+choose decision name = {
+  let alias = name;
+  match decision {
+    ExitNow -> return alias,
+    KeepGoing -> "fallback"
+  }
+}
+
+main : Str
+main = {
+  let last = pickLast ["Ada", "Grace", "Linus"];
+  let label = choose ExitNow last;
+  label
+}

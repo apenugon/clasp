@@ -1,0 +1,10 @@
+{
+  "id": "ts-lead-rejection",
+  "title": "Reject invalid priority values at a TypeScript trust boundary",
+  "suite": "trust-boundary",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [["npm", "install"]],
+  "verify": ["bash", "scripts/verify.sh"]
+}

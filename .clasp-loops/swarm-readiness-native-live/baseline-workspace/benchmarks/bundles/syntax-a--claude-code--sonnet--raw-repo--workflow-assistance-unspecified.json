@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "bundleType": "clasp-benchmark-fairness-bundle",
+  "bundleId": "1e837c64446782ce",
+  "taskSelection": "syntax-form",
+  "taskIds": [
+    "clasp-syntax-compact",
+    "clasp-syntax-verbose"
+  ],
+  "harness": "claude-code",
+  "model": "sonnet",
+  "mode": "raw-repo",
+  "workflowAssistance": "unspecified",
+  "sampleCount": 2,
+  "seriesLabel": "syntax-a",
+  "seed": "syntax-a:claude-code:sonnet:raw-repo:clasp-syntax-compact,clasp-syntax-verbose",
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "seed": "syntax-a:claude-code:sonnet:raw-repo:clasp-syntax-compact,clasp-syntax-verbose:sample:1",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-syntax-verbose"
+        },
+        {
+          "position": 2,
+          "taskId": "clasp-syntax-compact"
+        }
+      ]
+    },
+    {
+      "sampleIndex": 2,
+      "seed": "syntax-a:claude-code:sonnet:raw-repo:clasp-syntax-compact,clasp-syntax-verbose:sample:2",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-syntax-compact"
+        },
+        {
+          "position": 2,
+          "taskId": "clasp-syntax-verbose"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "size": 1860,
+      "sha256": "260a1c2a3081bca90b1b77dbe751cb6c70a499bc3edf28891a0750adcb84a740"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "size": 26246,
+      "sha256": "71c3e0f6a6a3b4e9f31179c4e492f626656e79435224823d8526eea1244a9ae1"
+    },
+    {
+      "path": "benchmarks/result-schema.json",
+      "size": 4518,
+      "sha256": "50c1c47a9cf37e9be989372f65982c5edf511d799c481e8f01ae4ca9211d5a68"
+    },
+    {
+      "path": "benchmarks/run-benchmark.mjs",
+      "size": 86969,
+      "sha256": "4ac556b3ed061bc70858cb956e6097a9e5d4962c7c04cd2c47e5e019c47073c8"
+    },
+    {
+      "path": "benchmarks/run-claude-harness.sh",
+      "size": 859,
+      "sha256": "e7b53379ac072655eb30c8ae57854c6a3102e3667e4135f412ad8951dde83757"
+    },
+    {
+      "path": "benchmarks/run-claude-series.sh",
+      "size": 2800,
+      "sha256": "f0b5f125d05df8fed8a05ad802511d7abb68855918b685f50511a650c360b59d"
+    },
+    {
+      "path": "benchmarks/run-codex-harness.sh",
+      "size": 951,
+      "sha256": "33ed94155c28ada2162ec6332be2c230ea08176b6cb6de56dd8efc08d1657b26"
+    },
+    {
+      "path": "benchmarks/run-codex-series.sh",
+      "size": 2809,
+      "sha256": "5e2cb322aff3d89b42a0b314b385c9ba062b4dce24ae6b4784358636e8821164"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/prompt.md",
+      "size": 620,
+      "sha256": "964a7f62f7053469542ea8934d09127da526db718b3675abee344f7eb5aa72e7"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/repo/AGENTS.md",
+      "size": 273,
+      "sha256": "94bc1991de3ead76fec2644d5999a78d3c04201a05529ac2b12272fc9686c588"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/repo/Main.clasp",
+      "size": 251,
+      "sha256": "af1f9fbf3aa7b8e0981dfd3b04bfac8e24ad1c680c4b875fca09184994c21fb9"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/repo/scripts/verify.sh",
+      "size": 404,
+      "sha256": "fff480ef8c1c6236207f3a5613a1a5571122899df1f95181f674fa1087828e52"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/repo/test/authoring.test.mjs",
+      "size": 144,
+      "sha256": "30db9bda9894a03ad8348d8d591bb3a3b827e51af7cabea1fde37b3ea1269e27"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-compact/task.json",
+      "size": 332,
+      "sha256": "b85f0460fe04bfeb4f7b8eea3447f275f7459537caa7d9a4e83f757f6881eec0"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-syntax-verbose/task.json",
+      "size": 380,
+      "sha256": "5b6b94bd82372f43dccee1c14378af60b508e834e4ec0e3e96388ec283bdcd64"
+    }
+  ]
+}

@@ -75,7 +75,11 @@ feedback_loop_task_file="$test_root/feedback-loop-task.md"
 feedback_loop_state_root="$test_root/feedback-loop-state"
 feedback_loop_workspace_root="$test_root/feedback-loop-workspace"
 feedback_loop_workspace="$feedback_loop_workspace_root/workspace.txt"
+feedback_loop_first_verifier_path="$feedback_loop_state_root/verifier-1.json"
 feedback_loop_feedback_path="$feedback_loop_state_root/feedback.json"
+feedback_loop_fail_state_root="$test_root/feedback-loop-fail-state"
+feedback_loop_fail_workspace_root="$test_root/feedback-loop-fail-workspace"
+feedback_loop_fail_feedback_path="$feedback_loop_fail_state_root/feedback.json"
 swarm_kernel_binary="$test_root/swarm-kernel"
 swarm_state_root="$test_root/swarm/state"
 swarm_event_log="$swarm_state_root/events.jsonl"
@@ -83,6 +87,8 @@ swarm_loop_state_root="$test_root/swarm-loop/state"
 swarm_loop_event_log="$swarm_loop_state_root/events.jsonl"
 swarm_sqlite_state_root="$test_root/swarm-sqlite/state"
 swarm_sqlite_db="$swarm_sqlite_state_root/swarm.db"
+swarm_native_binary="$test_root/swarm-native"
+swarm_native_state_root="$test_root/swarm-native/state"
 support_console_binary="$test_root/support-console-app"
 release_gate_binary="$test_root/release-gate-app"
 lead_app_binary="$test_root/lead-app"
@@ -278,6 +284,7 @@ main = let { name, role } = promote (User { name = "Ada", role = "planner" }) in
 EOF
 
 mkdir -p "$feedback_loop_workspace_root"
+mkdir -p "$feedback_loop_fail_workspace_root"
 cat >"$feedback_loop_task_file" <<'EOF'
 Make the feedback loop converge after verifier feedback.
 EOF
@@ -483,7 +490,40 @@ feedback_loop_output="$(
 )"
 printf '%s\n' "$feedback_loop_output" | grep -Fx 'pass:2' >/dev/null
 grep -Fx 'fixed-after-feedback' "$feedback_loop_workspace" >/dev/null
-grep -F '"verdict":"fail"' "$feedback_loop_feedback_path" >/dev/null
+grep -F '"verdict":"fail"' "$feedback_loop_first_verifier_path" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_feedback_path" >/dev/null
+feedback_loop_status_output="$(
+  CLASP_LOOP_COMMAND=status \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$feedback_loop_state_root"
+)"
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"attempt":2' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"completed":true' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"builderRuns":2' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"verifierRuns":2' >/dev/null
+printf '%s\n' "$feedback_loop_status_output" | grep -F '"final":true' >/dev/null
+
+feedback_loop_fail_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$feedback_loop_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$feedback_loop_task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$feedback_loop_fail_workspace_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$feedback_loop_fail_state_root"
+)"
+printf '%s\n' "$feedback_loop_fail_output" | grep -Fx 'fail:1' >/dev/null
+grep -Fx 'first-attempt' "$feedback_loop_fail_workspace_root/workspace.txt" >/dev/null
+grep -F '"verdict":"fail"' "$feedback_loop_fail_feedback_path" >/dev/null
+feedback_loop_fail_status_output="$(
+  CLASP_LOOP_COMMAND=status \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$feedback_loop_fail_state_root"
+)"
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"attempt":1' >/dev/null
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"verdict":"fail"' >/dev/null
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"healthy":false' >/dev/null
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"needsAttention":true' >/dev/null
+printf '%s\n' "$feedback_loop_fail_status_output" | grep -F '"final":true' >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-kernel/Main.clasp" -o "$swarm_kernel_binary"
 [[ -x "$swarm_kernel_binary" ]]
@@ -681,6 +721,18 @@ printf '%s\n' "$swarm_sqlite_approvals_output" | grep -F '"actor":"manager"' >/d
 swarm_sqlite_objective_output="$("$claspc_bin" --json swarm objective create "$swarm_sqlite_state_root" appbench --detail 'Beat appbench' --max-tasks 2 --max-runs 3)"
 printf '%s\n' "$swarm_sqlite_objective_output" | grep -F '"objectiveId":"appbench"' >/dev/null
 printf '%s\n' "$swarm_sqlite_objective_output" | grep -F '"maxTasks":2' >/dev/null
+swarm_sqlite_empty_objective_output="$("$claspc_bin" --json swarm objective create "$swarm_sqlite_state_root" empty-loop --detail 'Plan work from scratch')"
+printf '%s\n' "$swarm_sqlite_empty_objective_output" | grep -F '"objectiveId":"empty-loop"' >/dev/null
+swarm_sqlite_empty_manager_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" empty-loop)"
+printf '%s\n' "$swarm_sqlite_empty_manager_output" | grep -F '"status":"empty"' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_output" | grep -F '"action":"plan-tasks"' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_output" | grep -F '"taskCount":0' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_output" | grep -F '"suggestedCommand":["claspc","swarm","task","create","<state-root>","empty-loop","<task-id>"]' >/dev/null
+swarm_sqlite_empty_manager_text="$("$claspc_bin" swarm manager next "$swarm_sqlite_state_root" empty-loop)"
+printf '%s\n' "$swarm_sqlite_empty_manager_text" | grep -F 'objective empty-loop' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_text" | grep -F 'status: empty' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_text" | grep -F 'action: plan-tasks' >/dev/null
+printf '%s\n' "$swarm_sqlite_empty_manager_text" | grep -F 'command: claspc swarm task create <state-root> empty-loop <task-id>' >/dev/null
 swarm_sqlite_recovery_objective_output="$("$claspc_bin" --json swarm objective create "$swarm_sqlite_state_root" recovery-loop --detail 'Recover expired leases')"
 printf '%s\n' "$swarm_sqlite_recovery_objective_output" | grep -F '"objectiveId":"recovery-loop"' >/dev/null
 swarm_sqlite_recovery_task_output="$("$claspc_bin" --json swarm task create "$swarm_sqlite_state_root" recovery-loop expired-lease --detail 'Recover stale worker lease' --lease-timeout-ms 1)"
@@ -771,6 +823,18 @@ printf '%s\n' "$swarm_sqlite_runs_output" | grep -F '"name":"native-smoke"' >/de
 swarm_sqlite_artifacts_output="$("$claspc_bin" --json swarm artifacts "$swarm_sqlite_state_root" repair)"
 printf '%s\n' "$swarm_sqlite_artifacts_output" | grep -F '"kind":"stdout"' >/dev/null
 printf '%s\n' "$swarm_sqlite_artifacts_output" | grep -F '"kind":"stderr"' >/dev/null
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
+[[ -x "$swarm_native_binary" ]]
+swarm_native_output="$(CLASP_SWARM_CWD="$project_root" CLASP_SWARM_ACTOR=manager "$swarm_native_binary" "$swarm_native_state_root")"
+printf '%s\n' "$swarm_native_output" | grep -F '"objective":"ordinary-loop"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"task":"repair-runtime"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":"{\"taskId\":\"repair-runtime\",\"mergegateName\":\"trunk\",\"verdict\":\"pass\"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":"{\"taskId\":\"repair-runtime\",\"status\":\"completed\"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":"{\"objectiveId\":\"ordinary-loop\",\"status\":\"completed\",\"action\":\"objective-complete\"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"artifacts":"[{' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F 'ordinary-tool-ok' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F 'ordinary-verifier-ok' >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/support-console/Main.clasp" -o "$support_console_binary"
 [[ -x "$support_console_binary" ]]

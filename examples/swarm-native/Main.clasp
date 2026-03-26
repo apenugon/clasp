@@ -1,0 +1,76 @@
+module Main
+import Swarm
+
+record NativeSwarmReport = {
+  objective : Str,
+  task : Str,
+  objectiveCreate : Str,
+  taskCreate : Str,
+  policy : Str,
+  ready : Str,
+  managerBefore : Str,
+  lease : Str,
+  toolRun : Str,
+  complete : Str,
+  verifierRun : Str,
+  approval : Str,
+  mergeDecision : Str,
+  taskStatus : Str,
+  objectiveStatus : Str,
+  runs : Str,
+  artifacts : Str,
+  summary : Str,
+  managerAfter : Str
+}
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "swarm-native-state" else pathJoin argv
+
+objectiveId : Str
+objectiveId = "ordinary-loop"
+
+taskId : Str
+taskId = "repair-runtime"
+
+actorName : Str
+actorName = match envVar "CLASP_SWARM_ACTOR" {
+  Ok value -> value,
+  Err message -> "manager"
+}
+
+workspaceCwd : Str
+workspaceCwd = match envVar "CLASP_SWARM_CWD" {
+  Ok value -> value,
+  Err message -> "."
+}
+
+unwrapOrCrash : Result Str -> Str
+unwrapOrCrash value = match value {
+  Ok output ->
+    output,
+  Err message ->
+    textConcat ["error:", message]
+}
+
+main : Str
+main = encode (NativeSwarmReport {
+  objective = objectiveId,
+  task = taskId,
+  objectiveCreate = unwrapOrCrash (objectiveCreate stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6),
+  taskCreate = unwrapOrCrash (taskCreate stateRoot objectiveId taskId "Repair the runtime using direct Clasp orchestration." 3 60000),
+  policy = unwrapOrCrash (policySet stateRoot taskId "trunk" ["merge-ready"] ["native-smoke"]),
+  ready = unwrapOrCrash (ready stateRoot objectiveId),
+  managerBefore = unwrapOrCrash (managerNext stateRoot objectiveId),
+  lease = unwrapOrCrash (lease stateRoot taskId actorName),
+  toolRun = unwrapOrCrash (toolRun stateRoot taskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"]),
+  complete = unwrapOrCrash (complete stateRoot taskId actorName),
+  verifierRun = unwrapOrCrash (verifierRun stateRoot taskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"]),
+  approval = unwrapOrCrash (approve stateRoot taskId actorName "merge-ready"),
+  mergeDecision = unwrapOrCrash (mergegateDecide stateRoot taskId "trunk" ["native-smoke"]),
+  taskStatus = unwrapOrCrash (status stateRoot taskId),
+  objectiveStatus = unwrapOrCrash (objectiveStatus stateRoot objectiveId),
+  runs = unwrapOrCrash (runs stateRoot taskId),
+  artifacts = unwrapOrCrash (artifacts stateRoot taskId),
+  summary = unwrapOrCrash (summary stateRoot),
+  managerAfter = unwrapOrCrash (managerNext stateRoot objectiveId)
+})

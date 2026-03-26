@@ -1,0 +1,13 @@
+{
+  "id": "ts-agent-escalation",
+  "title": "Add escalation support and informative validation to a typed agent boundary",
+  "suite": "llm-boundary",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [
+    ["npm", "install"]
+  ],
+  "verify": ["npm", "test"]
+}
+

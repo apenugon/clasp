@@ -1,0 +1,13 @@
+stateRoot : Str
+emptyTexts : [Str]
+feedbackPath : Str
+builderCommand : [Str]
+verifierCommand : [Str]
+maxAttempts : Int
+builderReportPath : Int -> Str
+verifierReportPath : Int -> Str
+runProcess : Str -> [Str] -> ProcessResult
+readVerifierReport : Int -> VerifierReport
+incrementAttempt : Int -> Int
+runAttempt : Int -> Str
+main : Str

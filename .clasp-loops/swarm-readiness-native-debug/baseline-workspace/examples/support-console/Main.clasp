@@ -1,0 +1,77 @@
+module Main
+
+import Shared.Customer
+
+foreign generateReplyPreview : TicketDraft -> TicketPreview = "provider:replyPreview"
+foreign publishCustomer : SupportCustomer -> SupportCustomer = "storage:publishCustomer"
+
+currentCustomer : SupportCustomer
+currentCustomer = SupportCustomer {
+  id = "cust-42",
+  company = "Northwind Studio",
+  contactEmail = "ops@northwind.example",
+  plan = "enterprise",
+  renewalRisk = "high"
+}
+
+supportSession : AuthSession
+supportSession = authSession "sess-support-42" (principal "agent-7") (tenant "support") (resourceIdentity "customer" "cust-42")
+
+supportTenantId : AuthSession -> Str
+supportTenantId session = session.tenant.id
+
+previewTicket : TicketDraft -> TicketPreview
+previewTicket draft = generateReplyPreview draft
+
+publishedCustomer : Empty -> SupportCustomer
+publishedCustomer req = publishCustomer currentCustomer
+
+dashboard : Empty -> Page
+dashboard req = page "Support console" (styled "support_shell" dashboardBody)
+
+headlineView : View
+headlineView = element "h1" (text "Support console")
+
+introView : View
+introView = element "p" (text "Model-assisted reply previews with policy-approved customer sharing.")
+
+tenantView : View
+tenantView = element "p" (text (supportTenantId supportSession))
+
+previewForm : View
+previewForm = form "POST" "/support/preview" (element "section" (append (input "customerId" "hidden" "cust-42") (append (element "label" (append (text "Conversation summary") (input "summary" "text" "Renewal is blocked on legal review."))) (submit "Preview reply"))))
+
+previewSection : View
+previewSection = element "section" (append (element "h2" (text "Reply preview")) previewForm)
+
+dashboardLinks : View
+dashboardLinks = element "section" (append (element "p" (link "/support/customer/page" (text "Open the customer export preview"))) (element "p" (text "Raw SupportCustomer route: /support/customer")))
+
+dashboardContent : View
+dashboardContent = append headlineView (append introView (append tenantView (append previewSection dashboardLinks)))
+
+dashboardBody : View
+dashboardBody = element "main" dashboardContent
+
+previewResultPage : TicketDraft -> Page
+previewResultPage draft = renderPreviewPage (previewTicket draft)
+
+renderPreviewPage : TicketPreview -> Page
+renderPreviewPage preview = page "Reply preview" (styled "support_shell" (previewBody preview))
+
+previewBody : TicketPreview -> View
+previewBody preview = element "main" (append (element "h1" (text currentCustomer.company)) (append (element "p" (text currentCustomer.contactEmail)) (append (element "p" (text currentCustomer.renewalRisk)) (append (element "p" (text preview.suggestedReply)) (element "p" (link "/support" (text "Back to dashboard")))))))
+
+customerExportPage : Empty -> Page
+customerExportPage req = renderCustomerExportPage (publishedCustomer req)
+
+renderCustomerExportPage : SupportCustomer -> Page
+renderCustomerExportPage customer = page "Customer export" (styled "support_shell" (customerExportBody customer))
+
+customerExportBody : SupportCustomer -> View
+customerExportBody customer = element "main" (append (element "h1" (text customer.company)) (append (element "p" (text customer.contactEmail)) (append (element "p" (text customer.plan)) (append (element "p" (text customer.renewalRisk)) (element "p" (link "/support" (text "Back to dashboard")))))))
+
+route supportDashboardRoute = GET "/support" Empty -> Page dashboard
+route supportCustomerRoute = GET "/support/customer" Empty -> SupportCustomer publishedCustomer
+route supportCustomerPageRoute = GET "/support/customer/page" Empty -> Page customerExportPage
+route previewReplyRoute = POST "/support/preview" TicketDraft -> Page previewResultPage

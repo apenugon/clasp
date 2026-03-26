@@ -1,0 +1,10 @@
+module Main
+
+import Shared.Lead
+
+foreign mockLeadSummaryModel : LeadRequest -> Str = "mockLeadSummaryModel"
+
+summarizeLead : LeadRequest -> LeadSummary
+summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)
+
+route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead

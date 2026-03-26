@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "bundleType": "clasp-benchmark-fairness-bundle",
+  "bundleId": "2c64131bbc50ce22",
+  "taskSelection": "interop-boundary",
+  "taskIds": [
+    "clasp-interop-boundary",
+    "ts-interop-boundary"
+  ],
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "mode": "raw-repo",
+  "workflowAssistance": "unspecified",
+  "sampleCount": 2,
+  "seriesLabel": "interop-boundary-a",
+  "seed": "interop-boundary-a:codex:gpt-5.4:raw-repo:clasp-interop-boundary,ts-interop-boundary",
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "seed": "interop-boundary-a:codex:gpt-5.4:raw-repo:clasp-interop-boundary,ts-interop-boundary:sample:1",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "clasp-interop-boundary"
+        },
+        {
+          "position": 2,
+          "taskId": "ts-interop-boundary"
+        }
+      ]
+    },
+    {
+      "sampleIndex": 2,
+      "seed": "interop-boundary-a:codex:gpt-5.4:raw-repo:clasp-interop-boundary,ts-interop-boundary:sample:2",
+      "runOrder": [
+        {
+          "position": 1,
+          "taskId": "ts-interop-boundary"
+        },
+        {
+          "position": 2,
+          "taskId": "clasp-interop-boundary"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "size": 1860,
+      "sha256": "260a1c2a3081bca90b1b77dbe751cb6c70a499bc3edf28891a0750adcb84a740"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "size": 26246,
+      "sha256": "71c3e0f6a6a3b4e9f31179c4e492f626656e79435224823d8526eea1244a9ae1"
+    },
+    {
+      "path": "benchmarks/result-schema.json",
+      "size": 4518,
+      "sha256": "50c1c47a9cf37e9be989372f65982c5edf511d799c481e8f01ae4ca9211d5a68"
+    },
+    {
+      "path": "benchmarks/run-benchmark.mjs",
+      "size": 86969,
+      "sha256": "4ac556b3ed061bc70858cb956e6097a9e5d4962c7c04cd2c47e5e019c47073c8"
+    },
+    {
+      "path": "benchmarks/run-claude-harness.sh",
+      "size": 859,
+      "sha256": "e7b53379ac072655eb30c8ae57854c6a3102e3667e4135f412ad8951dde83757"
+    },
+    {
+      "path": "benchmarks/run-claude-series.sh",
+      "size": 2800,
+      "sha256": "f0b5f125d05df8fed8a05ad802511d7abb68855918b685f50511a650c360b59d"
+    },
+    {
+      "path": "benchmarks/run-codex-harness.sh",
+      "size": 951,
+      "sha256": "33ed94155c28ada2162ec6332be2c230ea08176b6cb6de56dd8efc08d1657b26"
+    },
+    {
+      "path": "benchmarks/run-codex-series.sh",
+      "size": 2809,
+      "sha256": "5e2cb322aff3d89b42a0b314b385c9ba062b4dce24ae6b4784358636e8821164"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/prompt.md",
+      "size": 1085,
+      "sha256": "7b499c4cab2740649d15ba595b7bbd66be67c8e053334e4c8fe973672c6a1d4b"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/AGENTS.md",
+      "size": 747,
+      "sha256": "badaa5e6f0a634cea05fda0b34cbe8ad8e19fedaeb37eb635a35d0d7c51218db"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/demo.mjs",
+      "size": 1371,
+      "sha256": "45d5e08257c07d3eae970f7aaec72a3c33cb3c4e92badfb2308ddcb0d4000625"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/Main.clasp",
+      "size": 376,
+      "sha256": "377413167f0fae17ac67d886ffb4beb929930ebe9a90496b06ffd246e82b5308"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/scripts/verify.sh",
+      "size": 1196,
+      "sha256": "24da6de51f3e54480e9ce739a7c8c28d82fcd16a61cc8709737a5e2e6630ee29"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/support/inspectLead.d.ts",
+      "size": 88,
+      "sha256": "91b5badf93476c8bd4b8ba47f082c5de37c9cb332393676a41aff195fee0daab"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/repo/support/inspectLead.mjs",
+      "size": 359,
+      "sha256": "cf8f5b5047d5c55503d6e5028730e2946828bab60b0ac683f91fbccb2275b613"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/solution/Main.clasp",
+      "size": 468,
+      "sha256": "803bb2f3f17f571b1752a82856e03033822011ee3461f220480d59e303e712cb"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-interop-boundary/task.json",
+      "size": 339,
+      "sha256": "6713b2fb22a83f513156641f2b8e85d311ebf02555b30424bbaf8cb89c6b2348"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/prompt.md",
+      "size": 982,
+      "sha256": "71af1bde627d85e1b33c0cfd344b1fbda4bec8a5291de3d1243216b0ee7280ed"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/AGENTS.md",
+      "size": 738,
+      "sha256": "7e555ba926e76739d7411e12802814a0f0e14d71119194f449d35503409873d6"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/src/main.mjs",
+      "size": 131,
+      "sha256": "1d44a66b7abb5c6d63e0192214393b40513185e50bd2718ade86a00dc4798f91"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/support/inspectLead.d.ts",
+      "size": 88,
+      "sha256": "91b5badf93476c8bd4b8ba47f082c5de37c9cb332393676a41aff195fee0daab"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/support/inspectLead.mjs",
+      "size": 359,
+      "sha256": "cf8f5b5047d5c55503d6e5028730e2946828bab60b0ac683f91fbccb2275b613"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/repo/test/interop-boundary.test.mjs",
+      "size": 370,
+      "sha256": "7dc41447d2b4bdd47bf5460a945020c1817e905aaf07906a76ba7d3afbbcff04"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/solution/src/main.mjs",
+      "size": 1767,
+      "sha256": "b83288b2cd9cb6797c752567a1e8088057fd50a2900edebcf0c7dcf0708ae328"
+    },
+    {
+      "path": "benchmarks/tasks/ts-interop-boundary/task.json",
+      "size": 316,
+      "sha256": "260017f01090bf2764d0328b3334524e23243b901645753ef5d28f3b8cd64ba5"
+    }
+  ]
+}

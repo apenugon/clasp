@@ -1,0 +1,11 @@
+{
+  "id": "clasp-python-interop",
+  "title": "Restore compiler-managed Python worker and service interop in Clasp",
+  "suite": "foreign-package-interop",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

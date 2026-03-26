@@ -1,0 +1,1615 @@
+{
+  "suite": "contract-upgrade-suite",
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "runId": "2026-03-20T18-32-18.006Z",
+  "tasks": [
+    "lead-digest-upgrade",
+    "lead-profile-upgrade",
+    "lead-follow-up-window-upgrade",
+    "lead-channel-digest-upgrade"
+  ],
+  "modes": [
+    "raw-repo",
+    "file-hinted",
+    "oracle"
+  ],
+  "assistances": [
+    "raw-text",
+    "compiler-owned-air"
+  ],
+  "sampleCount": 1,
+  "runCount": 24,
+  "pairComparisons": [
+    {
+      "key": "lead-digest-upgrade::raw-repo::1",
+      "taskId": "lead-digest-upgrade",
+      "mode": "raw-repo",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "raw-repo",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:32:18.087Z",
+        "finishedAt": "2026-03-20T18:33:37.654Z",
+        "durationMs": 79567,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--raw-repo--raw-text--sample01.prompt.md",
+        "promptBytes": 1295,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 115499,
+          "completion": 3404,
+          "retry": 0,
+          "debug": 0,
+          "total": 118903
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 115499,
+          "cachedInputTokens": 97792,
+          "outputTokens": 3404,
+          "uncachedInputTokens": 17707,
+          "uncachedTotal": 21111
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-raw-repo-raw-text-GCWvLS\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 74081,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "raw-repo",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:33:37.781Z",
+        "finishedAt": "2026-03-20T18:36:14.715Z",
+        "durationMs": 156934,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--raw-repo--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3066,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 164989,
+          "completion": 6059,
+          "retry": 0,
+          "debug": 0,
+          "total": 171048
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 164989,
+          "cachedInputTokens": 157952,
+          "outputTokens": 6059,
+          "uncachedInputTokens": 7037,
+          "uncachedTotal": 13096
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-raw-repo-compiler-owned-air-mbgQ89\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 138788,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 77367,
+        "totalTokens": 52145,
+        "uncachedTokens": -8015,
+        "verifyAttempts": 1,
+        "repairLoops": 1,
+        "timeToGreenMs": 64707,
+        "durationPct": -97.2,
+        "totalTokensPct": -43.9,
+        "uncachedTokensPct": 38,
+        "timeToGreenPct": -87.3
+      }
+    },
+    {
+      "key": "lead-digest-upgrade::file-hinted::1",
+      "taskId": "lead-digest-upgrade",
+      "mode": "file-hinted",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "file-hinted",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:36:14.841Z",
+        "finishedAt": "2026-03-20T18:37:38.180Z",
+        "durationMs": 83339,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--file-hinted--raw-text--sample01.prompt.md",
+        "promptBytes": 1306,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 185401,
+          "completion": 3212,
+          "retry": 0,
+          "debug": 0,
+          "total": 188613
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 185401,
+          "cachedInputTokens": 163712,
+          "outputTokens": 3212,
+          "uncachedInputTokens": 21689,
+          "uncachedTotal": 24901
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-file-hinted-raw-text-8qDTIQ\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 74578,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "file-hinted",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:37:38.307Z",
+        "finishedAt": "2026-03-20T18:38:28.345Z",
+        "durationMs": 50038,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--file-hinted--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3077,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 114318,
+          "completion": 2434,
+          "retry": 0,
+          "debug": 0,
+          "total": 116752
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 114318,
+          "cachedInputTokens": 103936,
+          "outputTokens": 2434,
+          "uncachedInputTokens": 10382,
+          "uncachedTotal": 12816
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-file-hinted-compiler-owned-air-IQHKtl\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 44723,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": -33301,
+        "totalTokens": -71861,
+        "uncachedTokens": -12085,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -29855,
+        "durationPct": 40,
+        "totalTokensPct": 38.1,
+        "uncachedTokensPct": 48.5,
+        "timeToGreenPct": 40
+      }
+    },
+    {
+      "key": "lead-digest-upgrade::oracle::1",
+      "taskId": "lead-digest-upgrade",
+      "mode": "oracle",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "oracle",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:38:28.472Z",
+        "finishedAt": "2026-03-20T18:39:23.035Z",
+        "durationMs": 54563,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--oracle--raw-text--sample01.prompt.md",
+        "promptBytes": 1444,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 124287,
+          "completion": 2382,
+          "retry": 0,
+          "debug": 0,
+          "total": 126669
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 124287,
+          "cachedInputTokens": 113920,
+          "outputTokens": 2382,
+          "uncachedInputTokens": 10367,
+          "uncachedTotal": 12749
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-oracle-raw-text-kC8SwK\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 49277,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadDigest contract",
+        "mode": "oracle",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:39:23.158Z",
+        "finishedAt": "2026-03-20T18:40:09.535Z",
+        "durationMs": 46377,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-digest-upgrade--oracle--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3215,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 105419,
+          "completion": 2025,
+          "retry": 0,
+          "debug": 0,
+          "total": 107444
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 105419,
+          "cachedInputTokens": 101632,
+          "outputTokens": 2025,
+          "uncachedInputTokens": 3787,
+          "uncachedTotal": 5812
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-oracle-compiler-owned-air-GE3q4O\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 41536,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": -8186,
+        "totalTokens": -19225,
+        "uncachedTokens": -6937,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -7741,
+        "durationPct": 15,
+        "totalTokensPct": 15.2,
+        "uncachedTokensPct": 54.4,
+        "timeToGreenPct": 15.7
+      }
+    },
+    {
+      "key": "lead-profile-upgrade::raw-repo::1",
+      "taskId": "lead-profile-upgrade",
+      "mode": "raw-repo",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "raw-repo",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:40:09.665Z",
+        "finishedAt": "2026-03-20T18:41:02.396Z",
+        "durationMs": 52731,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--raw-repo--raw-text--sample01.prompt.md",
+        "promptBytes": 1297,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 91076,
+          "completion": 2242,
+          "retry": 0,
+          "debug": 0,
+          "total": 93318
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 91076,
+          "cachedInputTokens": 83328,
+          "outputTokens": 2242,
+          "uncachedInputTokens": 7748,
+          "uncachedTotal": 9990
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-raw-repo-raw-text-UyKIvB\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 47438,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "raw-repo",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:41:02.521Z",
+        "finishedAt": "2026-03-20T18:41:55.354Z",
+        "durationMs": 52833,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--raw-repo--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3059,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 79582,
+          "completion": 2494,
+          "retry": 0,
+          "debug": 0,
+          "total": 82076
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 79582,
+          "cachedInputTokens": 67328,
+          "outputTokens": 2494,
+          "uncachedInputTokens": 12254,
+          "uncachedTotal": 14748
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-raw-repo-compiler-owned-air-BrCv7e\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 46491,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 102,
+        "totalTokens": -11242,
+        "uncachedTokens": 4758,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -947,
+        "durationPct": -0.2,
+        "totalTokensPct": 12,
+        "uncachedTokensPct": -47.6,
+        "timeToGreenPct": 2
+      }
+    },
+    {
+      "key": "lead-profile-upgrade::file-hinted::1",
+      "taskId": "lead-profile-upgrade",
+      "mode": "file-hinted",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "file-hinted",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:41:55.478Z",
+        "finishedAt": "2026-03-20T18:42:51.706Z",
+        "durationMs": 56228,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--file-hinted--raw-text--sample01.prompt.md",
+        "promptBytes": 1308,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 90535,
+          "completion": 2481,
+          "retry": 0,
+          "debug": 0,
+          "total": 93016
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 90535,
+          "cachedInputTokens": 81408,
+          "outputTokens": 2481,
+          "uncachedInputTokens": 9127,
+          "uncachedTotal": 11608
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-file-hinted-raw-text-M3cP4l\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 49760,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "file-hinted",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:42:51.835Z",
+        "finishedAt": "2026-03-20T18:44:01.779Z",
+        "durationMs": 69944,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--file-hinted--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3070,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 126179,
+          "completion": 3024,
+          "retry": 0,
+          "debug": 0,
+          "total": 129203
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 126179,
+          "cachedInputTokens": 115840,
+          "outputTokens": 3024,
+          "uncachedInputTokens": 10339,
+          "uncachedTotal": 13363
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-file-hinted-compiler-owned-air-AK1Hmv\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 65671,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 13716,
+        "totalTokens": 36187,
+        "uncachedTokens": 1755,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": 15911,
+        "durationPct": -24.4,
+        "totalTokensPct": -38.9,
+        "uncachedTokensPct": -15.1,
+        "timeToGreenPct": -32
+      }
+    },
+    {
+      "key": "lead-profile-upgrade::oracle::1",
+      "taskId": "lead-profile-upgrade",
+      "mode": "oracle",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "oracle",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:44:01.907Z",
+        "finishedAt": "2026-03-20T18:45:10.561Z",
+        "durationMs": 68654,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--oracle--raw-text--sample01.prompt.md",
+        "promptBytes": 1446,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 98076,
+          "completion": 3072,
+          "retry": 0,
+          "debug": 0,
+          "total": 101148
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 98076,
+          "cachedInputTokens": 93440,
+          "outputTokens": 3072,
+          "uncachedInputTokens": 4636,
+          "uncachedTotal": 7708
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-oracle-raw-text-P0euZ5\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 62927,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-profile-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadProfile contract",
+        "mode": "oracle",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:45:10.685Z",
+        "finishedAt": "2026-03-20T18:45:48.653Z",
+        "durationMs": 37968,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--oracle--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3208,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 65086,
+          "completion": 1827,
+          "retry": 0,
+          "debug": 0,
+          "total": 66913
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 65086,
+          "cachedInputTokens": 61568,
+          "outputTokens": 1827,
+          "uncachedInputTokens": 3518,
+          "uncachedTotal": 5345
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-oracle-compiler-owned-air-551Tgf\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 33117,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": -30686,
+        "totalTokens": -34235,
+        "uncachedTokens": -2363,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -29810,
+        "durationPct": 44.7,
+        "totalTokensPct": 33.8,
+        "uncachedTokensPct": 30.7,
+        "timeToGreenPct": 47.4
+      }
+    },
+    {
+      "key": "lead-follow-up-window-upgrade::raw-repo::1",
+      "taskId": "lead-follow-up-window-upgrade",
+      "mode": "raw-repo",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "raw-repo",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:45:48.779Z",
+        "finishedAt": "2026-03-20T18:46:37.876Z",
+        "durationMs": 49097,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--raw-repo--raw-text--sample01.prompt.md",
+        "promptBytes": 1373,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 103385,
+          "completion": 2180,
+          "retry": 0,
+          "debug": 0,
+          "total": 105565
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 103385,
+          "cachedInputTokens": 97408,
+          "outputTokens": 2180,
+          "uncachedInputTokens": 5977,
+          "uncachedTotal": 8157
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-raw-repo-raw-text-HQM37b\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 43671,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "raw-repo",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:46:37.998Z",
+        "finishedAt": "2026-03-20T18:47:42.669Z",
+        "durationMs": 64671,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--raw-repo--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3204,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 151005,
+          "completion": 2794,
+          "retry": 0,
+          "debug": 0,
+          "total": 153799
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 151005,
+          "cachedInputTokens": 144128,
+          "outputTokens": 2794,
+          "uncachedInputTokens": 6877,
+          "uncachedTotal": 9671
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-raw-repo-compiler-owned-air-QiFxqr\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 56232,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 15574,
+        "totalTokens": 48234,
+        "uncachedTokens": 1514,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": 12561,
+        "durationPct": -31.7,
+        "totalTokensPct": -45.7,
+        "uncachedTokensPct": -18.6,
+        "timeToGreenPct": -28.8
+      }
+    },
+    {
+      "key": "lead-follow-up-window-upgrade::file-hinted::1",
+      "taskId": "lead-follow-up-window-upgrade",
+      "mode": "file-hinted",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "file-hinted",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:47:42.795Z",
+        "finishedAt": "2026-03-20T18:48:32.422Z",
+        "durationMs": 49627,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--file-hinted--raw-text--sample01.prompt.md",
+        "promptBytes": 1384,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 77102,
+          "completion": 2164,
+          "retry": 0,
+          "debug": 0,
+          "total": 79266
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 77102,
+          "cachedInputTokens": 73344,
+          "outputTokens": 2164,
+          "uncachedInputTokens": 3758,
+          "uncachedTotal": 5922
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-file-hinted-raw-text-l5uRvT\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 45044,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "file-hinted",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:48:32.551Z",
+        "finishedAt": "2026-03-20T18:49:25.132Z",
+        "durationMs": 52581,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--file-hinted--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3215,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 68123,
+          "completion": 2165,
+          "retry": 0,
+          "debug": 0,
+          "total": 70288
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 68123,
+          "cachedInputTokens": 63360,
+          "outputTokens": 2165,
+          "uncachedInputTokens": 4763,
+          "uncachedTotal": 6928
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-file-hinted-compiler-owned-air-3RN46g\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 43787,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 2954,
+        "totalTokens": -8978,
+        "uncachedTokens": 1006,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -1257,
+        "durationPct": -6,
+        "totalTokensPct": 11.3,
+        "uncachedTokensPct": -17,
+        "timeToGreenPct": 2.8
+      }
+    },
+    {
+      "key": "lead-follow-up-window-upgrade::oracle::1",
+      "taskId": "lead-follow-up-window-upgrade",
+      "mode": "oracle",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "oracle",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:49:25.256Z",
+        "finishedAt": "2026-03-20T18:50:44.792Z",
+        "durationMs": 79536,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--oracle--raw-text--sample01.prompt.md",
+        "promptBytes": 1522,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 96525,
+          "completion": 3658,
+          "retry": 0,
+          "debug": 0,
+          "total": 100183
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 96525,
+          "cachedInputTokens": 87296,
+          "outputTokens": 3658,
+          "uncachedInputTokens": 9229,
+          "uncachedTotal": 12887
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-oracle-raw-text-9igDE9\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 74231,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-follow-up-window-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadFollowUpDigest contract",
+        "mode": "oracle",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:50:44.919Z",
+        "finishedAt": "2026-03-20T18:51:42.742Z",
+        "durationMs": 57823,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-follow-up-window-upgrade--oracle--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3353,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 81402,
+          "completion": 2485,
+          "retry": 0,
+          "debug": 0,
+          "total": 83887
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 81402,
+          "cachedInputTokens": 77440,
+          "outputTokens": 2485,
+          "uncachedInputTokens": 3962,
+          "uncachedTotal": 6447
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-follow-up-window-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-follow-up-window-upgrade-oracle-compiler-owned-air-RMX09z\",\n  \"main\": \"sales-manager\",\n  \"routeResponseType\": \"LeadFollowUpDigest\",\n  \"toolRequestFields\": [\n    \"escalationOwner\",\n    \"followUpWindowDays\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadFollowUpDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"escalationOwner\",\n    \"followUpWindowDays\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 52341,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": -21713,
+        "totalTokens": -16296,
+        "uncachedTokens": -6440,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": -21890,
+        "durationPct": 27.3,
+        "totalTokensPct": 16.3,
+        "uncachedTokensPct": 50,
+        "timeToGreenPct": 29.5
+      }
+    },
+    {
+      "key": "lead-channel-digest-upgrade::raw-repo::1",
+      "taskId": "lead-channel-digest-upgrade",
+      "mode": "raw-repo",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "raw-repo",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:51:42.865Z",
+        "finishedAt": "2026-03-20T18:52:48.344Z",
+        "durationMs": 65479,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--raw-repo--raw-text--sample01.prompt.md",
+        "promptBytes": 1339,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 111637,
+          "completion": 3016,
+          "retry": 0,
+          "debug": 0,
+          "total": 114653
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 111637,
+          "cachedInputTokens": 102016,
+          "outputTokens": 3016,
+          "uncachedInputTokens": 9621,
+          "uncachedTotal": 12637
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-raw-repo-raw-text-6Svuxa\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 60631,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "raw-repo",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:52:48.467Z",
+        "finishedAt": "2026-03-20T18:54:14.791Z",
+        "durationMs": 86324,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--raw-repo--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3140,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 154471,
+          "completion": 3450,
+          "retry": 0,
+          "debug": 0,
+          "total": 157921
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 154471,
+          "cachedInputTokens": 147712,
+          "outputTokens": 3450,
+          "uncachedInputTokens": 6759,
+          "uncachedTotal": 10209
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-raw-repo-compiler-owned-air-kI9Rqu\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 77314,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 20845,
+        "totalTokens": 43268,
+        "uncachedTokens": -2428,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": 16683,
+        "durationPct": -31.8,
+        "totalTokensPct": -37.7,
+        "uncachedTokensPct": 19.2,
+        "timeToGreenPct": -27.5
+      }
+    },
+    {
+      "key": "lead-channel-digest-upgrade::file-hinted::1",
+      "taskId": "lead-channel-digest-upgrade",
+      "mode": "file-hinted",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "file-hinted",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:54:14.917Z",
+        "finishedAt": "2026-03-20T18:55:54.388Z",
+        "durationMs": 99471,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--file-hinted--raw-text--sample01.prompt.md",
+        "promptBytes": 1350,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 99291,
+          "completion": 4080,
+          "retry": 0,
+          "debug": 0,
+          "total": 103371
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 99291,
+          "cachedInputTokens": 94976,
+          "outputTokens": 4080,
+          "uncachedInputTokens": 4315,
+          "uncachedTotal": 8395
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-file-hinted-raw-text-Y9iG5x\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 92082,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "file-hinted",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:55:54.510Z",
+        "finishedAt": "2026-03-20T18:57:16.992Z",
+        "durationMs": 82482,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--file-hinted--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3151,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 177717,
+          "completion": 3079,
+          "retry": 0,
+          "debug": 0,
+          "total": 180796
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 177717,
+          "cachedInputTokens": 169216,
+          "outputTokens": 3079,
+          "uncachedInputTokens": 8501,
+          "uncachedTotal": 11580
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-file-hinted-compiler-owned-air-WrBknj\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 3,
+        "repairLoops": 2,
+        "timeToGreenMs": 73339,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": -16989,
+        "totalTokens": 77425,
+        "uncachedTokens": 3185,
+        "verifyAttempts": 2,
+        "repairLoops": 2,
+        "timeToGreenMs": -18743,
+        "durationPct": 17.1,
+        "totalTokensPct": -74.9,
+        "uncachedTokensPct": -37.9,
+        "timeToGreenPct": 20.4
+      }
+    },
+    {
+      "key": "lead-channel-digest-upgrade::oracle::1",
+      "taskId": "lead-channel-digest-upgrade",
+      "mode": "oracle",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "oracle",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:57:17.116Z",
+        "finishedAt": "2026-03-20T18:58:25.664Z",
+        "durationMs": 68548,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--oracle--raw-text--sample01.prompt.md",
+        "promptBytes": 1488,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 92446,
+          "completion": 2972,
+          "retry": 0,
+          "debug": 0,
+          "total": 95418
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 92446,
+          "cachedInputTokens": 79104,
+          "outputTokens": 2972,
+          "uncachedInputTokens": 13342,
+          "uncachedTotal": 16314
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-oracle-raw-text-sVEMcq\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 1,
+        "repairLoops": 0,
+        "timeToGreenMs": 61296,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-channel-digest-upgrade",
+        "title": "Upgrade the lead summary flow to a LeadChannelDigest contract",
+        "mode": "oracle",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:58:25.784Z",
+        "finishedAt": "2026-03-20T19:00:35.699Z",
+        "durationMs": 129915,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-channel-digest-upgrade--oracle--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 3289,
+        "codexExitCode": 0,
+        "codexTimedOut": false,
+        "tokenUsage": {
+          "prompt": 209160,
+          "completion": 5519,
+          "retry": 0,
+          "debug": 0,
+          "total": 214679
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 209160,
+          "cachedInputTokens": 202240,
+          "outputTokens": 5519,
+          "uncachedInputTokens": 6920,
+          "uncachedTotal": 12439
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-channel-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-channel-digest-upgrade-oracle-compiler-owned-air-Vf5lsv\",\n  \"main\": \"inbound-high\",\n  \"routeResponseType\": \"LeadChannelDigest\",\n  \"toolRequestFields\": [\n    \"campaignTag\",\n    \"sourceChannel\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadChannelDigest\",\n  \"primaryFields\": [\n    \"campaignTag\",\n    \"company\",\n    \"owner\",\n    \"sourceChannel\"\n  ]\n}"
+        },
+        "verifyAttempts": 3,
+        "repairLoops": 2,
+        "timeToGreenMs": 124609,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 61367,
+        "totalTokens": 119261,
+        "uncachedTokens": -3875,
+        "verifyAttempts": 2,
+        "repairLoops": 2,
+        "timeToGreenMs": 63313,
+        "durationPct": -89.5,
+        "totalTokensPct": -125,
+        "uncachedTokensPct": 23.8,
+        "timeToGreenPct": -103.3
+      }
+    }
+  ],
+  "aggregates": {
+    "byAssistance": {
+      "raw-text": {
+        "runCount": 12,
+        "passCount": 12,
+        "passRate": 1,
+        "avgDurationMs": 67237,
+        "medianDurationMs": 67014,
+        "avgTotalTokens": 110010,
+        "medianTotalTokens": 102260,
+        "avgUncachedTokens": 12698,
+        "medianUncachedTokens": 12123,
+        "avgTimeToGreenMs": 61251,
+        "medianTimeToGreenMs": 60964,
+        "avgVerifyAttempts": 1.17,
+        "avgRepairLoops": 0.17
+      },
+      "compiler-owned-air": {
+        "runCount": 12,
+        "passCount": 12,
+        "passRate": 1,
+        "avgDurationMs": 73991,
+        "medianDurationMs": 61247,
+        "avgTotalTokens": 127901,
+        "medianTotalTokens": 122978,
+        "avgUncachedTokens": 10205,
+        "medianUncachedTokens": 10895,
+        "avgTimeToGreenMs": 66496,
+        "medianTimeToGreenMs": 54287,
+        "avgVerifyAttempts": 1.58,
+        "avgRepairLoops": 0.58
+      }
+    },
+    "byMode": {
+      "raw-repo": {
+        "raw-text": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 61719,
+          "medianDurationMs": 59105,
+          "avgTotalTokens": 108110,
+          "medianTotalTokens": 110109,
+          "avgUncachedTokens": 12974,
+          "medianUncachedTokens": 11314,
+          "avgTimeToGreenMs": 56455,
+          "medianTimeToGreenMs": 54035,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        },
+        "compiler-owned-air": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 90191,
+          "medianDurationMs": 75498,
+          "avgTotalTokens": 141211,
+          "medianTotalTokens": 155860,
+          "avgUncachedTokens": 11931,
+          "medianUncachedTokens": 11653,
+          "avgTimeToGreenMs": 79706,
+          "medianTimeToGreenMs": 66773,
+          "avgVerifyAttempts": 1.25,
+          "avgRepairLoops": 0.25
+        }
+      },
+      "file-hinted": {
+        "raw-text": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 72166,
+          "medianDurationMs": 69784,
+          "avgTotalTokens": 116067,
+          "medianTotalTokens": 98194,
+          "avgUncachedTokens": 12707,
+          "medianUncachedTokens": 10002,
+          "avgTimeToGreenMs": 65366,
+          "medianTimeToGreenMs": 62169,
+          "avgVerifyAttempts": 1.25,
+          "avgRepairLoops": 0.25
+        },
+        "compiler-owned-air": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 63761,
+          "medianDurationMs": 61263,
+          "avgTotalTokens": 124260,
+          "medianTotalTokens": 122978,
+          "avgUncachedTokens": 11172,
+          "medianUncachedTokens": 12198,
+          "avgTimeToGreenMs": 56880,
+          "medianTimeToGreenMs": 55197,
+          "avgVerifyAttempts": 1.75,
+          "avgRepairLoops": 0.75
+        }
+      },
+      "oracle": {
+        "raw-text": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 67825,
+          "medianDurationMs": 68601,
+          "avgTotalTokens": 105855,
+          "medianTotalTokens": 100666,
+          "avgUncachedTokens": 12415,
+          "medianUncachedTokens": 12818,
+          "avgTimeToGreenMs": 61933,
+          "medianTimeToGreenMs": 62112,
+          "avgVerifyAttempts": 1.25,
+          "avgRepairLoops": 0.25
+        },
+        "compiler-owned-air": {
+          "runCount": 4,
+          "passCount": 4,
+          "passRate": 1,
+          "avgDurationMs": 68021,
+          "medianDurationMs": 52100,
+          "avgTotalTokens": 118231,
+          "medianTotalTokens": 95666,
+          "avgUncachedTokens": 7511,
+          "medianUncachedTokens": 6130,
+          "avgTimeToGreenMs": 62901,
+          "medianTimeToGreenMs": 46939,
+          "avgVerifyAttempts": 1.75,
+          "avgRepairLoops": 0.75
+        }
+      }
+    },
+    "byTask": {
+      "lead-digest-upgrade": {
+        "raw-text": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 72490,
+          "medianDurationMs": 79567,
+          "avgTotalTokens": 144728,
+          "medianTotalTokens": 126669,
+          "avgUncachedTokens": 19587,
+          "medianUncachedTokens": 21111,
+          "avgTimeToGreenMs": 65979,
+          "medianTimeToGreenMs": 74081,
+          "avgVerifyAttempts": 1.67,
+          "avgRepairLoops": 0.67
+        },
+        "compiler-owned-air": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 84450,
+          "medianDurationMs": 50038,
+          "avgTotalTokens": 131748,
+          "medianTotalTokens": 116752,
+          "avgUncachedTokens": 10575,
+          "medianUncachedTokens": 12816,
+          "avgTimeToGreenMs": 75016,
+          "medianTimeToGreenMs": 44723,
+          "avgVerifyAttempts": 2,
+          "avgRepairLoops": 1
+        }
+      },
+      "lead-profile-upgrade": {
+        "raw-text": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 59204,
+          "medianDurationMs": 56228,
+          "avgTotalTokens": 95827,
+          "medianTotalTokens": 93318,
+          "avgUncachedTokens": 9769,
+          "medianUncachedTokens": 9990,
+          "avgTimeToGreenMs": 53375,
+          "medianTimeToGreenMs": 49760,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        },
+        "compiler-owned-air": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 53582,
+          "medianDurationMs": 52833,
+          "avgTotalTokens": 92731,
+          "medianTotalTokens": 82076,
+          "avgUncachedTokens": 11152,
+          "medianUncachedTokens": 13363,
+          "avgTimeToGreenMs": 48426,
+          "medianTimeToGreenMs": 46491,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        }
+      },
+      "lead-follow-up-window-upgrade": {
+        "raw-text": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 59420,
+          "medianDurationMs": 49627,
+          "avgTotalTokens": 95005,
+          "medianTotalTokens": 100183,
+          "avgUncachedTokens": 8989,
+          "medianUncachedTokens": 8157,
+          "avgTimeToGreenMs": 54315,
+          "medianTimeToGreenMs": 45044,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        },
+        "compiler-owned-air": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 58358,
+          "medianDurationMs": 57823,
+          "avgTotalTokens": 102658,
+          "medianTotalTokens": 83887,
+          "avgUncachedTokens": 7682,
+          "medianUncachedTokens": 6928,
+          "avgTimeToGreenMs": 50787,
+          "medianTimeToGreenMs": 52341,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        }
+      },
+      "lead-channel-digest-upgrade": {
+        "raw-text": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 77833,
+          "medianDurationMs": 68548,
+          "avgTotalTokens": 104481,
+          "medianTotalTokens": 103371,
+          "avgUncachedTokens": 12449,
+          "medianUncachedTokens": 12637,
+          "avgTimeToGreenMs": 71336,
+          "medianTimeToGreenMs": 61296,
+          "avgVerifyAttempts": 1,
+          "avgRepairLoops": 0
+        },
+        "compiler-owned-air": {
+          "runCount": 3,
+          "passCount": 3,
+          "passRate": 1,
+          "avgDurationMs": 99574,
+          "medianDurationMs": 86324,
+          "avgTotalTokens": 184465,
+          "medianTotalTokens": 180796,
+          "avgUncachedTokens": 11409,
+          "medianUncachedTokens": 11580,
+          "avgTimeToGreenMs": 91754,
+          "medianTimeToGreenMs": 77314,
+          "avgVerifyAttempts": 2.33,
+          "avgRepairLoops": 1.33
+        }
+      }
+    },
+    "compilerOwnedAirWins": {
+      "pairCount": 12,
+      "duration": 5,
+      "totalTokens": 6,
+      "uncachedTokens": 7,
+      "timeToGreen": 7
+    }
+  }
+}

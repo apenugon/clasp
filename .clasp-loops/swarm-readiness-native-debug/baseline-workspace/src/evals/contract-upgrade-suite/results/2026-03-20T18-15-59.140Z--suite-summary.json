@@ -1,0 +1,238 @@
+{
+  "suite": "contract-upgrade-suite",
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "runId": "2026-03-20T18-15-59.140Z",
+  "tasks": [
+    "lead-digest-upgrade"
+  ],
+  "modes": [
+    "raw-repo"
+  ],
+  "assistances": [
+    "raw-text",
+    "compiler-owned-air"
+  ],
+  "sampleCount": 1,
+  "runCount": 2,
+  "pairComparisons": [
+    {
+      "key": "lead-digest-upgrade::raw-repo::1",
+      "taskId": "lead-digest-upgrade",
+      "mode": "raw-repo",
+      "sampleIndex": 1,
+      "rawText": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Rename LeadSummary to LeadDigest and propagate the new contract",
+        "mode": "raw-repo",
+        "assistance": "raw-text",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:15:59.223Z",
+        "finishedAt": "2026-03-20T18:16:53.674Z",
+        "durationMs": 54451,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-15-59.140Z--lead-digest-upgrade--raw-repo--raw-text--sample01.prompt.md",
+        "promptBytes": 1201,
+        "codexExitCode": 0,
+        "tokenUsage": {
+          "prompt": 103665,
+          "completion": 2162,
+          "retry": 0,
+          "debug": 0,
+          "total": 105827
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 103665,
+          "cachedInputTokens": 99968,
+          "outputTokens": 2162,
+          "uncachedInputTokens": 3697,
+          "uncachedTotal": 5859
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-raw-repo-raw-text-xOVNuz\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 48365,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "compilerOwnedAir": {
+        "taskId": "lead-digest-upgrade",
+        "title": "Rename LeadSummary to LeadDigest and propagate the new contract",
+        "mode": "raw-repo",
+        "assistance": "compiler-owned-air",
+        "sampleIndex": 1,
+        "harness": "codex",
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "startedAt": "2026-03-20T18:16:53.798Z",
+        "finishedAt": "2026-03-20T18:18:13.220Z",
+        "durationMs": 79422,
+        "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-15-59.140Z--lead-digest-upgrade--raw-repo--compiler-owned-air--sample01.prompt.md",
+        "promptBytes": 2972,
+        "codexExitCode": 0,
+        "tokenUsage": {
+          "prompt": 166601,
+          "completion": 3262,
+          "retry": 0,
+          "debug": 0,
+          "total": 169863
+        },
+        "harnessUsage": {
+          "provider": "codex",
+          "inputTokens": 166601,
+          "cachedInputTokens": 154752,
+          "outputTokens": 3262,
+          "uncachedInputTokens": 11849,
+          "uncachedTotal": 15111
+        },
+        "verification": {
+          "passed": true,
+          "exitCode": 0,
+          "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-raw-repo-compiler-owned-air-iRKE57\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+        },
+        "verifyAttempts": 2,
+        "repairLoops": 1,
+        "timeToGreenMs": 74107,
+        "changedFiles": [
+          "Main.clasp",
+          "Shared/Lead.clasp"
+        ],
+        "changedFileCount": 2,
+        "workspace": null
+      },
+      "deltas": {
+        "durationMs": 24971,
+        "totalTokens": 64036,
+        "uncachedTokens": 9252,
+        "verifyAttempts": 0,
+        "repairLoops": 0,
+        "timeToGreenMs": 25742,
+        "durationPct": -45.9,
+        "totalTokensPct": -60.5,
+        "uncachedTokensPct": -157.9,
+        "timeToGreenPct": -53.2
+      }
+    }
+  ],
+  "aggregates": {
+    "byAssistance": {
+      "raw-text": {
+        "runCount": 1,
+        "passCount": 1,
+        "passRate": 1,
+        "avgDurationMs": 54451,
+        "medianDurationMs": 54451,
+        "avgTotalTokens": 105827,
+        "medianTotalTokens": 105827,
+        "avgUncachedTokens": 5859,
+        "medianUncachedTokens": 5859,
+        "avgTimeToGreenMs": 48365,
+        "medianTimeToGreenMs": 48365,
+        "avgVerifyAttempts": 2,
+        "avgRepairLoops": 1
+      },
+      "compiler-owned-air": {
+        "runCount": 1,
+        "passCount": 1,
+        "passRate": 1,
+        "avgDurationMs": 79422,
+        "medianDurationMs": 79422,
+        "avgTotalTokens": 169863,
+        "medianTotalTokens": 169863,
+        "avgUncachedTokens": 15111,
+        "medianUncachedTokens": 15111,
+        "avgTimeToGreenMs": 74107,
+        "medianTimeToGreenMs": 74107,
+        "avgVerifyAttempts": 2,
+        "avgRepairLoops": 1
+      }
+    },
+    "byMode": {
+      "raw-repo": {
+        "raw-text": {
+          "runCount": 1,
+          "passCount": 1,
+          "passRate": 1,
+          "avgDurationMs": 54451,
+          "medianDurationMs": 54451,
+          "avgTotalTokens": 105827,
+          "medianTotalTokens": 105827,
+          "avgUncachedTokens": 5859,
+          "medianUncachedTokens": 5859,
+          "avgTimeToGreenMs": 48365,
+          "medianTimeToGreenMs": 48365,
+          "avgVerifyAttempts": 2,
+          "avgRepairLoops": 1
+        },
+        "compiler-owned-air": {
+          "runCount": 1,
+          "passCount": 1,
+          "passRate": 1,
+          "avgDurationMs": 79422,
+          "medianDurationMs": 79422,
+          "avgTotalTokens": 169863,
+          "medianTotalTokens": 169863,
+          "avgUncachedTokens": 15111,
+          "medianUncachedTokens": 15111,
+          "avgTimeToGreenMs": 74107,
+          "medianTimeToGreenMs": 74107,
+          "avgVerifyAttempts": 2,
+          "avgRepairLoops": 1
+        }
+      }
+    },
+    "byTask": {
+      "lead-digest-upgrade": {
+        "raw-text": {
+          "runCount": 1,
+          "passCount": 1,
+          "passRate": 1,
+          "avgDurationMs": 54451,
+          "medianDurationMs": 54451,
+          "avgTotalTokens": 105827,
+          "medianTotalTokens": 105827,
+          "avgUncachedTokens": 5859,
+          "medianUncachedTokens": 5859,
+          "avgTimeToGreenMs": 48365,
+          "medianTimeToGreenMs": 48365,
+          "avgVerifyAttempts": 2,
+          "avgRepairLoops": 1
+        },
+        "compiler-owned-air": {
+          "runCount": 1,
+          "passCount": 1,
+          "passRate": 1,
+          "avgDurationMs": 79422,
+          "medianDurationMs": 79422,
+          "avgTotalTokens": 169863,
+          "medianTotalTokens": 169863,
+          "avgUncachedTokens": 15111,
+          "medianUncachedTokens": 15111,
+          "avgTimeToGreenMs": 74107,
+          "medianTimeToGreenMs": 74107,
+          "avgVerifyAttempts": 2,
+          "avgRepairLoops": 1
+        }
+      }
+    },
+    "compilerOwnedAirWins": {
+      "pairCount": 1,
+      "duration": 0,
+      "totalTokens": 0,
+      "uncachedTokens": 0,
+      "timeToGreen": 0
+    }
+  }
+}

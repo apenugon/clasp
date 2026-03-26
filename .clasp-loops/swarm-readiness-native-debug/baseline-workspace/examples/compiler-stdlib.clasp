@@ -1,0 +1,10 @@
+module Main
+
+joinedPath : Str
+joinedPath = pathJoin ["src", "Clasp", "Checker.hs"]
+
+summary : Str
+summary = textJoin " :: " [pathDirname joinedPath, pathBasename joinedPath]
+
+main : Str
+main = textConcat ["compiler-support=", summary]

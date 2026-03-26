@@ -1,0 +1,11 @@
+{
+  "id": "clasp-external-adaptation",
+  "title": "Repair bounded external-objective adaptation in the Clasp lead demo",
+  "suite": "external-objective-adaptation",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

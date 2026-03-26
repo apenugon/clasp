@@ -1,0 +1,12 @@
+{
+  "id": "ts-lead-priority",
+  "title": "Add priority hint across shared TypeScript schemas, route validation, and LLM-shaped output",
+  "suite": "llm-boundary-fullstack",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [
+    ["npm", "install"]
+  ],
+  "verify": ["bash", "scripts/verify.sh"]
+}

@@ -8,6 +8,18 @@ record VerifierReport = {
   tests_run : [Str],
   follow_up : [Str]
 }
+record LoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  builderRuns : Int,
+  verifierRuns : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  final : Bool
+}
 
 stateRoot : Str
 stateRoot = if textJoin "" argv == "" then "feedback-loop-state" else pathJoin argv
@@ -51,11 +63,20 @@ codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
 maxAttempts : Int
 maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
   Ok raw -> decode Int raw,
-  Err message -> 5
+  Err message -> 20
+}
+
+commandName : Str
+commandName = match envVar "CLASP_LOOP_COMMAND" {
+  Ok raw -> raw,
+  Err message -> "run"
 }
 
 feedbackPath : Str
 feedbackPath = pathJoin [stateRoot, "feedback.json"]
+
+loopStatePath : Str
+loopStatePath = pathJoin [stateRoot, "state.json"]
 
 baselineReadyPath : Str
 baselineReadyPath = pathJoin [stateRoot, "baseline.ready"]
@@ -124,6 +145,40 @@ readVerifierReport attempt = match readFile (verifierReportPath attempt) {
     }
 }
 
+loopState : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> LoopState
+loopState attempt phase verdict completed builderRuns verifierRuns healthy needsAttention attentionReason final =
+  LoopState {
+    attempt = attempt,
+    phase = phase,
+    verdict = verdict,
+    completed = completed,
+    builderRuns = builderRuns,
+    verifierRuns = verifierRuns,
+    healthy = healthy,
+    needsAttention = needsAttention,
+    attentionReason = attentionReason,
+    final = final
+  }
+
+emptyLoopState : LoopState
+emptyLoopState = loopState 1 "needs-builder" "pending" false 0 0 true false "" false
+
+writeLoopState : LoopState -> Str
+writeLoopState state = match writeFile loopStatePath (encode state) {
+  Ok written ->
+    "",
+  Err message ->
+    message
+}
+
+readLoopState : LoopState
+readLoopState = match readFile loopStatePath {
+  Ok raw ->
+    decode LoopState raw,
+  Err message ->
+    emptyLoopState
+}
+
 incrementAttempt : Int -> Int
 incrementAttempt value =
   if value == 0 then
@@ -146,6 +201,26 @@ incrementAttempt value =
     9
   else if value == 9 then
     10
+  else if value == 10 then
+    11
+  else if value == 11 then
+    12
+  else if value == 12 then
+    13
+  else if value == 13 then
+    14
+  else if value == 14 then
+    15
+  else if value == 15 then
+    16
+  else if value == 16 then
+    17
+  else if value == 17 then
+    18
+  else if value == 18 then
+    19
+  else if value == 19 then
+    20
   else
     value
 
@@ -180,6 +255,7 @@ builderPrompt attempt =
     "You are the builder subagent for the Clasp repository.",
     "Read AGENTS.md first if it exists.",
     textConcat ["Read the task file at ", taskFile, "."],
+    "Drive the repository toward the full task goal, not just the smallest local diff that would satisfy one verifier complaint.",
     "Work only in the current checkout.",
     "Keep changes small and local.",
     "Add or update tests for changed behavior.",
@@ -198,6 +274,9 @@ verifierPrompt attempt =
     "Read AGENTS.md first if it exists.",
     textConcat ["Read the task file at ", taskFile, "."],
     textConcat ["Review the changes since the baseline snapshot at ", baselineWorkspace, " using diff -ruN."],
+    "Use the diff to understand what changed, but judge pass or fail against the full repository state and the full task acceptance criteria.",
+    "Do not pass because the latest diff is locally good if the repository still falls short of the overall task goal.",
+    "Before returning pass, explicitly verify every required capability listed in the task file and fail if any are missing, partial, or only scaffolded.",
     "Run the narrowest verification needed to decide pass or fail.",
     "Treat missing scenario-level coverage for runtime, workflow, trust-boundary, interop, or app-surface changes as a defect.",
     "Before returning pass, run bash scripts/verify-all.sh successfully in the current checkout.",
@@ -279,7 +358,7 @@ runVerifier attempt =
 runAttempt : Int -> Str
 runAttempt attempt =
   if attempt > maxAttempts then
-    textConcat ["exhausted:", encode maxAttempts]
+    textConcat ["fail:", encode maxAttempts]
   else if taskFile == "" then
     "config-error:missing-task-file"
   else if workspaceRoot == "" then
@@ -289,25 +368,67 @@ runAttempt attempt =
       Err message ->
         textConcat ["state-root-error:", message],
       Ok created ->
-        {
-          let baselineResult = ensureBaseline in
-          if baselineResult.exitCode != 0 then
-            textConcat ["baseline-error:", baselineResult.stderr]
+        let baselineResult = ensureBaseline in
+        if baselineResult.exitCode != 0 then
+          textConcat ["baseline-error:", baselineResult.stderr]
+        else {
+          let builderStateError = writeLoopState (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
+          if builderStateError != "" then
+            textConcat ["state-error:", builderStateError]
           else {
             let builderRun = runBuilder attempt in
-            if builderRun.exitCode != 0 then
-              textConcat ["builder-crash:", encode builderRun.exitCode]
-            else {
-              let verifierRun = runVerifier attempt in
-              if verifierRun.exitCode != 0 then
-                textConcat ["verifier-crash:", encode verifierRun.exitCode]
+            if builderRun.exitCode != 0 then {
+              let stateError = writeLoopState (loopState attempt "builder-crashed" "fail" false attempt 0 false true builderRun.stderr true) in
+              if stateError != "" then
+                textConcat ["state-error:", stateError]
+              else
+                textConcat ["builder-crash:", encode builderRun.exitCode]
+            } else {
+              let verifierStateError = writeLoopState (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
+              if verifierStateError != "" then
+                textConcat ["state-error:", verifierStateError]
               else {
-                let report = readVerifierReport attempt in
-                if report.verdict == "pass" then
-                  textConcat ["pass:", encode attempt]
-                else {
-                  let feedbackWrite = writeFile feedbackPath (encode report) in
-                  runAttempt (incrementAttempt attempt)
+                let verifierRun = runVerifier attempt in
+                if verifierRun.exitCode != 0 then {
+                  let stateError = writeLoopState (loopState attempt "verifier-crashed" "fail" false attempt attempt false true verifierRun.stderr true) in
+                  if stateError != "" then
+                    textConcat ["state-error:", stateError]
+                  else
+                    textConcat ["verifier-crash:", encode verifierRun.exitCode]
+                } else {
+                  let report = readVerifierReport attempt in
+                  if report.verdict == "pass" then {
+                    let stateError = writeLoopState (loopState attempt "completed" "pass" true attempt attempt true false "" true) in
+                    if stateError != "" then
+                      textConcat ["state-error:", stateError]
+                    else
+                      match writeFile feedbackPath (encode report) {
+                        Ok written ->
+                          textConcat ["pass:", encode attempt],
+                        Err message ->
+                          textConcat ["feedback-error:", message]
+                      }
+                  } else {
+                    let isFinalAttempt = attempt == maxAttempts;
+                    let nextState =
+                      if isFinalAttempt then
+                        loopState attempt "failed" "fail" false attempt attempt false true report.summary true
+                      else
+                        loopState (incrementAttempt attempt) "needs-builder" "retry" false attempt attempt false true report.summary false;
+                    let stateError = writeLoopState nextState in
+                    if stateError != "" then
+                      textConcat ["state-error:", stateError]
+                    else
+                      match writeFile feedbackPath (encode report) {
+                        Ok written ->
+                          if isFinalAttempt then
+                            textConcat ["fail:", encode attempt]
+                          else
+                            runAttempt (incrementAttempt attempt),
+                        Err message ->
+                          textConcat ["feedback-error:", message]
+                      }
+                  }
                 }
               }
             }
@@ -317,4 +438,8 @@ runAttempt attempt =
   }
 
 main : Str
-main = runAttempt 1
+main =
+  if commandName == "status" then
+    encode readLoopState
+  else
+    runAttempt 1

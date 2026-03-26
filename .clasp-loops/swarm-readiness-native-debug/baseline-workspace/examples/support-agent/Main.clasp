@@ -1,0 +1,87 @@
+module Main
+
+record TicketDraft = {
+  customerId : Str,
+  issue : Str,
+  priority : Str
+}
+
+record CustomerLookup = { customerId : Str }
+
+record CustomerProfile = {
+  customerId : Str,
+  company : Str,
+  plan : Str,
+  renewalAtRisk : Bool
+}
+
+record PolicyLookup = { topic : Str }
+
+record PolicyNote = {
+  topic : Str,
+  guidance : Str
+}
+
+record ReplyDraft = {
+  action : Str,
+  customerId : Str,
+  subject : Str,
+  reply : Str
+}
+
+record EscalationDraft = {
+  action : Str,
+  customerId : Str,
+  queue : Str,
+  reason : Str,
+  brief : Str
+}
+
+sampleTicket : TicketDraft
+sampleTicket = TicketDraft {
+  customerId = "cust-42",
+  issue = "Renewal is blocked on legal review.",
+  priority = "normal"
+}
+
+riskTicket : TicketDraft
+riskTicket = TicketDraft {
+  customerId = "cust-99",
+  issue = "Enterprise renewal is blocked and the deadline is today.",
+  priority = "high"
+}
+
+lookupCustomerRequest : TicketDraft -> CustomerLookup
+lookupCustomerRequest draft = CustomerLookup { customerId = draft.customerId }
+
+lookupPolicyRequest : TicketDraft -> PolicyLookup
+lookupPolicyRequest draft = PolicyLookup { topic = "renewal-blockers" }
+
+decisionPrompt : TicketDraft -> CustomerProfile -> PolicyNote -> Prompt
+decisionPrompt draft customer note = appendPrompt (appendPrompt (appendPrompt (systemPrompt "You are the renewal desk agent.") (assistantPrompt customer.company)) (assistantPrompt note.guidance)) (userPrompt draft.issue)
+
+decisionPromptText : TicketDraft -> CustomerProfile -> PolicyNote -> Str
+decisionPromptText draft customer note = promptText (decisionPrompt draft customer note)
+
+guide RenewalDesk = {
+  scope: "Resolve renewal blockers with typed repo tools and validated structured outputs.",
+  plan: "Look up customer context, fetch the renewal policy note, then emit either a reply draft or an escalation draft."
+}
+
+policy SupportOps = public permits {
+  process "node",
+  network "api.openai.com",
+  secret "OPENAI_API_KEY"
+}
+
+role RenewalDeskRole = guide: RenewalDesk, policy: SupportOps, approval: on_request, sandbox: workspace_write
+
+agent renewalAgent = RenewalDeskRole
+
+toolserver SupportTools = "mcp" "stdio://support-tools" with SupportOps
+
+tool lookupCustomer = SupportTools "lookup_customer" CustomerLookup -> CustomerProfile
+tool lookupPolicy = SupportTools "lookup_policy" PolicyLookup -> PolicyNote
+
+main : Str
+main = decisionPromptText sampleTicket (CustomerProfile { customerId = "cust-42", company = "Northwind Studio", plan = "standard", renewalAtRisk = false }) (PolicyNote { topic = "renewal-blockers", guidance = "Offer a concise reply and confirm the next update window." })

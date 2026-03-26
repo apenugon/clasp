@@ -1,0 +1,11 @@
+{
+  "id": "clasp-lead-priority",
+  "title": "Add priority hint across shared Clasp schemas, route validation, and LLM-shaped output",
+  "suite": "llm-boundary-fullstack",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "app/Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

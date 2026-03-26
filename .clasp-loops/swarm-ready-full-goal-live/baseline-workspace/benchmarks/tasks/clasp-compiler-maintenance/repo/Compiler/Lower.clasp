@@ -1,0 +1,58 @@
+module Compiler.Lower
+
+type CoreExprText = CoreVar Str | CoreString Str | CoreCall Str [Str]
+type CoreDeclText = CoreValue Str CoreExprText | CoreFunction Str Str CoreExprText
+
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInvoke Str Str
+type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str Str LowerExprText
+
+lowerExpr : CoreExprText -> LowerExprText
+lowerExpr expr = match expr {
+  CoreVar name ->
+    LowerName name,
+  CoreString value ->
+    LowerLiteral value,
+  CoreCall callee args ->
+    LowerInvoke callee (textJoin ", " args)
+}
+
+lowerDecl : CoreDeclText -> LowerDeclText
+lowerDecl decl = match decl {
+  CoreValue name body ->
+    LowerConst name (lowerExpr body),
+  CoreFunction name param body ->
+    LowerFn name param (lowerExpr body)
+}
+
+renderLowerExpr : LowerExprText -> Str
+renderLowerExpr expr = match expr {
+  LowerName name ->
+    textConcat ["name:", name],
+  LowerLiteral value ->
+    textConcat ["literal:", value],
+  LowerInvoke callee args ->
+    textConcat ["call ", callee, "(", args, ")"]
+}
+
+renderLowerDecl : LowerDeclText -> Str
+renderLowerDecl decl = match decl {
+  LowerConst name body ->
+    textConcat ["const ", name, " = ", renderLowerExpr body],
+  LowerFn name param body ->
+    textConcat ["function ", name, "(", param, ") = ", renderLowerExpr body]
+}
+
+sampleValueDecl : CoreDeclText
+sampleValueDecl = CoreValue "greeting" (CoreString "hello")
+
+sampleFunctionDecl : CoreDeclText
+sampleFunctionDecl = CoreFunction "renderLead" "lead" (CoreCall "String" ["lead"])
+
+loweredValueDecl : LowerDeclText
+loweredValueDecl = lowerDecl sampleValueDecl
+
+loweredFunctionDecl : LowerDeclText
+loweredFunctionDecl = lowerDecl sampleFunctionDecl
+
+loweredSummary : Str
+loweredSummary = textJoin "\n" [renderLowerDecl loweredValueDecl, renderLowerDecl loweredFunctionDecl]

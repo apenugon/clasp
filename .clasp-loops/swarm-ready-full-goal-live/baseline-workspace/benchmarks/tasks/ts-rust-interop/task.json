@@ -1,0 +1,10 @@
+{
+  "id": "ts-rust-interop",
+  "title": "Repair handwritten JavaScript host glue for Rust native interop planning",
+  "suite": "foreign-package-interop",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["node", "test/rust-interop.test.mjs"]
+}

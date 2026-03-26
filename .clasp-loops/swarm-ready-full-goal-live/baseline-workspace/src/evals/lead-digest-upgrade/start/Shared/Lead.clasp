@@ -1,0 +1,28 @@
+module Shared.Lead
+
+type LeadPriority = Low | Medium | High
+
+record Empty = {}
+
+record LeadIntake = {
+  company : Str,
+  priority : LeadPriority
+}
+
+record LeadSummary = {
+  company : Str,
+  priorityLabel : Str,
+  status : Str
+}
+
+record LeadPlaybookLookup = {
+  status : Str
+}
+
+record LeadPlaybook = {
+  guidance : Str
+}
+
+record LeadFollowUpState = {
+  summary : LeadSummary
+}

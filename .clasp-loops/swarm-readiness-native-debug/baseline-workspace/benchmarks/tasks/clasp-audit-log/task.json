@@ -1,0 +1,11 @@
+{
+  "id": "clasp-audit-log",
+  "title": "Repair the Clasp audit log declarations so typed events, redaction, retention, and blame stay aligned",
+  "suite": "audit-log",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

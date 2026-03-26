@@ -1,0 +1,33 @@
+{
+  "task_id": "CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output",
+  "summary": "This task fit cleanly as an emitter-owned control-plane manifest addition; reusing the existing control-plane runtime demo avoided a parser/checker expansion and still gave end-to-end coverage.",
+  "ergonomics": [
+    "The generated manifest pattern in `Clasp.Emit.JavaScript` makes it easy to add a new compiler-owned surface that automatically shows up in bindings and docs.",
+    "The existing control-plane runtime scenario is a strong verification anchor because it already exercises policies, secrets, hooks, tools, and traceability in one path.",
+    "Large emitted-JavaScript string blocks remain brittle: small feature changes require careful synchronized updates across emitter strings and exact substring assertions."
+  ],
+  "follow_ups": [
+    "Add source-level audit-log declarations once control-plane syntax is ready so sink names and retention values are not compiler-hardcoded defaults.",
+    "Unify emitted audit records onto a single typed envelope instead of parallel ad hoc object shapes tagged with `eventType`.",
+    "Extend the audit runtime helper to enforce age-based retention and, if needed, durable sink adapters beyond the current in-memory runtime."
+  ],
+  "warnings": [
+    "Targeted Haskell tests still need `nix develop` in this workspace because `ghc` is not available on the host PATH.",
+    "The audit redaction helper only scrubs a fixed sensitive-key list right now; new secret-bearing field names will not be redacted until that list is updated.",
+    "Routing is shape-driven rather than declaration-driven today, so editing emitted event fields without checking the router can silently move entries to the wrong sink."
+  ],
+  "files_touched": [
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/06-control-plane/CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output/src/Clasp/Emit/JavaScript.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/06-control-plane/CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output/test/Main.hs",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/06-control-plane/CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output/docs/clasp-spec-v0.md",
+    "/home/akul/DevProjects/.clasp-agent-worktrees/synthspeak/full/06-control-plane/CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output/agents/feedback/CP-015-add-first-class-audit-log-declarations-sink-routing-retention-rules-and-redaction-policy-for-compiler-owned-audit-output.json"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc \"cabal test clasp-compiler-test --test-options='-p control-plane'\"",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "`maxAgeDays` is exported as retention metadata but the new in-memory audit runtime only enforces entry-count trimming today.",
+    "Audit routing is currently inferred from existing emitted event shapes and `eventType` tags, so future shape changes in policy/secret/traceability records could require matching updates in the routing helper."
+  ]
+}

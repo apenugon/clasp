@@ -8,12 +8,43 @@ rustc_bin="${RUSTC:-rustc}"
 rust_runtime_source="$project_root/runtime/clasp_runtime.rs"
 rust_runtime_lib="$test_root/libclasp_runtime.a"
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+node_bin="${NODE:-node}"
+nix_reentry="${CLASP_NATIVE_RUNTIME_NIX_REENTRY:-0}"
 
 cleanup() {
   rm -rf "$test_root"
 }
 
 trap cleanup EXIT
+
+maybe_enter_nix_shell() {
+  if [[ -n "${RUSTC:-}" ]]; then
+    return 1
+  fi
+
+  if [[ "$nix_reentry" == "1" || -n "${IN_NIX_SHELL:-}" ]]; then
+    return 1
+  fi
+
+  if command -v "$rustc_bin" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! command -v nix >/dev/null 2>&1; then
+    return 1
+  fi
+
+  nix develop "$project_root" --command bash -lc "
+    set -euo pipefail
+    cd \"$project_root\"
+    export CLASP_PROJECT_ROOT=\"$project_root\"
+    export CLASP_NATIVE_RUNTIME_NIX_REENTRY=1
+    bash scripts/test-native-runtime.sh
+  "
+  exit 0
+}
+
+maybe_enter_nix_shell
 
 ir_path="$test_root/durable-workflow.native.ir"
 image_path="${ir_path%.*}.image.json"
@@ -105,93 +136,71 @@ EOF
 [[ -f "$route_ir_path" ]]
 [[ -f "$route_image_path" ]]
 
-python3 - "$image_path" "$migrating_upgrade_path" "$incompatible_upgrade_path" "$hello_image_path" "$hello_structured_image_path" "$parser_image_path" "$parser_structured_image_path" "$hosted_image_path" "$hosted_structured_image_path" <<'PY'
-import json
-from copy import deepcopy
-import sys
+"$node_bin" - "$image_path" "$migrating_upgrade_path" "$incompatible_upgrade_path" "$hello_image_path" "$hello_structured_image_path" "$parser_image_path" "$parser_structured_image_path" "$hosted_image_path" "$hosted_structured_image_path" <<'NODE'
+const fs = require("fs");
 
-source_path, migrating_output_path, incompatible_output_path, hello_source_path, hello_structured_output_path, parser_source_path, parser_structured_output_path, hosted_source_path, hosted_structured_output_path = sys.argv[1:10]
+const [
+  sourcePath,
+  migratingOutputPath,
+  incompatibleOutputPath,
+  helloSourcePath,
+  helloStructuredOutputPath,
+  parserSourcePath,
+  parserStructuredOutputPath,
+  hostedSourcePath,
+  hostedStructuredOutputPath,
+] = process.argv.slice(2);
 
-with open(source_path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
+const writeJson = (outputPath, payload) => {
+  fs.writeFileSync(outputPath, `${JSON.stringify(payload)}\n`, "utf8");
+};
 
-original_fingerprint = payload["compatibility"]["interfaceFingerprint"]
+const payload = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+const originalFingerprint = payload.compatibility.interfaceFingerprint;
+const migratingPayload = structuredClone(payload);
+migratingPayload.compatibility.interfaceFingerprint = `${originalFingerprint}-upgrade`;
+migratingPayload.compatibility.acceptedPreviousFingerprints = [originalFingerprint];
+migratingPayload.compatibility.migration.strategy = "state-handoff";
+writeJson(migratingOutputPath, migratingPayload);
 
-migrating_payload = deepcopy(payload)
-migrating_payload["compatibility"]["interfaceFingerprint"] = f"{original_fingerprint}-upgrade"
-migrating_payload["compatibility"]["acceptedPreviousFingerprints"] = [original_fingerprint]
-migrating_payload["compatibility"]["migration"]["strategy"] = "state-handoff"
+const incompatiblePayload = structuredClone(migratingPayload);
+incompatiblePayload.compatibility.acceptedPreviousFingerprints = ["native-compat:incompatible"];
+writeJson(incompatibleOutputPath, incompatiblePayload);
 
-with open(migrating_output_path, "w", encoding="utf-8") as handle:
-    json.dump(migrating_payload, handle, separators=(",", ":"))
-    handle.write("\n")
+for (const [inputPath, outputPath] of [
+  [helloSourcePath, helloStructuredOutputPath],
+  [parserSourcePath, parserStructuredOutputPath],
+  [hostedSourcePath, hostedStructuredOutputPath],
+]) {
+  const structuredPayload = JSON.parse(fs.readFileSync(inputPath, "utf8"));
+  for (const decl of structuredPayload.decls ?? []) {
+    delete decl.bodyText;
+  }
+  writeJson(outputPath, structuredPayload);
+}
+NODE
 
-incompatible_payload = deepcopy(migrating_payload)
-incompatible_payload["compatibility"]["acceptedPreviousFingerprints"] = ["native-compat:incompatible"]
+"$node_bin" - "$hosted_durable_image_path" "$hosted_migrating_upgrade_path" "$hosted_incompatible_upgrade_path" <<'NODE'
+const fs = require("fs");
 
-with open(incompatible_output_path, "w", encoding="utf-8") as handle:
-    json.dump(incompatible_payload, handle, separators=(",", ":"))
-    handle.write("\n")
+const [sourcePath, migratingOutputPath, incompatibleOutputPath] = process.argv.slice(2);
 
-with open(hello_source_path, "r", encoding="utf-8") as handle:
-    hello_payload = json.load(handle)
+const writeJson = (outputPath, payload) => {
+  fs.writeFileSync(outputPath, `${JSON.stringify(payload)}\n`, "utf8");
+};
 
-for decl in hello_payload.get("decls", []):
-    decl.pop("bodyText", None)
+const payload = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+const originalFingerprint = payload.compatibility.interfaceFingerprint;
+const migratingPayload = structuredClone(payload);
+migratingPayload.compatibility.interfaceFingerprint = `${originalFingerprint}-upgrade`;
+migratingPayload.compatibility.acceptedPreviousFingerprints = [originalFingerprint];
+migratingPayload.compatibility.migration.strategy = "state-handoff";
+writeJson(migratingOutputPath, migratingPayload);
 
-with open(hello_structured_output_path, "w", encoding="utf-8") as handle:
-    json.dump(hello_payload, handle, separators=(",", ":"))
-    handle.write("\n")
-
-with open(parser_source_path, "r", encoding="utf-8") as handle:
-    parser_payload = json.load(handle)
-
-for decl in parser_payload.get("decls", []):
-    decl.pop("bodyText", None)
-
-with open(parser_structured_output_path, "w", encoding="utf-8") as handle:
-    json.dump(parser_payload, handle, separators=(",", ":"))
-    handle.write("\n")
-
-with open(hosted_source_path, "r", encoding="utf-8") as handle:
-    hosted_payload = json.load(handle)
-
-for decl in hosted_payload.get("decls", []):
-    decl.pop("bodyText", None)
-
-with open(hosted_structured_output_path, "w", encoding="utf-8") as handle:
-    json.dump(hosted_payload, handle, separators=(",", ":"))
-    handle.write("\n")
-PY
-
-python3 - "$hosted_durable_image_path" "$hosted_migrating_upgrade_path" "$hosted_incompatible_upgrade_path" <<'PY'
-import json
-from copy import deepcopy
-import sys
-
-source_path, migrating_output_path, incompatible_output_path = sys.argv[1:4]
-
-with open(source_path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-original_fingerprint = payload["compatibility"]["interfaceFingerprint"]
-
-migrating_payload = deepcopy(payload)
-migrating_payload["compatibility"]["interfaceFingerprint"] = f"{original_fingerprint}-upgrade"
-migrating_payload["compatibility"]["acceptedPreviousFingerprints"] = [original_fingerprint]
-migrating_payload["compatibility"]["migration"]["strategy"] = "state-handoff"
-
-with open(migrating_output_path, "w", encoding="utf-8") as handle:
-    json.dump(migrating_payload, handle, separators=(",", ":"))
-    handle.write("\n")
-
-incompatible_payload = deepcopy(migrating_payload)
-incompatible_payload["compatibility"]["acceptedPreviousFingerprints"] = ["native-compat:incompatible"]
-
-with open(incompatible_output_path, "w", encoding="utf-8") as handle:
-    json.dump(incompatible_payload, handle, separators=(",", ":"))
-    handle.write("\n")
-PY
+const incompatiblePayload = structuredClone(migratingPayload);
+incompatiblePayload.compatibility.acceptedPreviousFingerprints = ["native-compat:incompatible"];
+writeJson(incompatibleOutputPath, incompatiblePayload);
+NODE
 
 "$rustc_bin" \
   --edition=2021 \

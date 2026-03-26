@@ -1,0 +1,46 @@
+{
+  "taskId": "lead-profile-upgrade",
+  "title": "Upgrade the lead summary flow to a LeadProfile contract",
+  "mode": "file-hinted",
+  "assistance": "raw-text",
+  "sampleIndex": 1,
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T18:41:55.478Z",
+  "finishedAt": "2026-03-20T18:42:51.706Z",
+  "durationMs": 56228,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-32-18.006Z--lead-profile-upgrade--file-hinted--raw-text--sample01.prompt.md",
+  "promptBytes": 1308,
+  "codexExitCode": 0,
+  "codexTimedOut": false,
+  "tokenUsage": {
+    "prompt": 90535,
+    "completion": 2481,
+    "retry": 0,
+    "debug": 0,
+    "total": 93016
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 90535,
+    "cachedInputTokens": 81408,
+    "outputTokens": 2481,
+    "uncachedInputTokens": 9127,
+    "uncachedTotal": 11608
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-profile-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-profile-upgrade-file-hinted-raw-text-M3cP4l\",\n  \"main\": \"enterprise\",\n  \"routeResponseType\": \"LeadProfile\",\n  \"toolRequestFields\": [\n    \"ownerTeam\",\n    \"segment\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadProfile\",\n  \"primaryFields\": [\n    \"company\",\n    \"ownerTeam\",\n    \"plan\",\n    \"segment\"\n  ]\n}"
+  },
+  "verifyAttempts": 1,
+  "repairLoops": 0,
+  "timeToGreenMs": 49760,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

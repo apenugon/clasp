@@ -1,0 +1,35 @@
+{
+  "task_id": "BM-021-add-air-assisted-planning-benchmarks-comparing-raw-text-tasking-with-workflows-that-target-compiler-owned-air",
+  "summary": "BM-021 fit cleanly as benchmark-runner metadata plus reporting work: BM-020 had already generated AIR/context artifacts, so the missing piece was making workflow-assistance explicit in manifests/results instead of inferring it from bundle filenames.",
+  "ergonomics": [
+    "`benchmarks/run-benchmark.mjs` is centralized enough that protocol, summary, and packaging changes were local and coherent.",
+    "`benchmarks/test-series-summary.sh` is a good regression surface for synthetic benchmark records, but debugging failures is slower because one grep miss aborts the whole script silently unless rerun with `bash -x`.",
+    "The existing series wrappers already carried workflow-assistance in bundle filenames, which made the protocol addition straightforward and low-risk."
+  ],
+  "follow_ups": [
+    "Add a machine-readable schema for frozen fairness bundles so `workflowAssistance` and future benchmark protocol fields are validated, not just conventionally written.",
+    "Consider suite-level AIR-planning rollups in addition to per-task comparisons so repeated public scorecards can show compiler-owned-AIR uplift across a named Clasp benchmark slice.",
+    "If `compiler-assisted` is still an intended historical label, document whether it aliases `compiler-owned-air` or represents a separate workflow class."
+  ],
+  "warnings": [
+    "Before this change, workflow-assistance was only implicit in bundle filenames; older result files without `protocol.workflowAssistance` will show up as `unspecified` in summaries.",
+    "`benchmarks/test-series-summary.sh` contains hard-coded median and delta expectations; small fixture edits can break many assertions at once, so recalculate the expected numbers before patching blindly.",
+    "Full repo verification exercises real Clasp benchmark prep and can take a while in `test-task-prep`; a quick `node --check` is useful, but it is not enough to validate the benchmark path."
+  ],
+  "files_touched": [
+    "benchmarks/run-benchmark.mjs",
+    "benchmarks/result-schema.json",
+    "benchmarks/test-series-summary.sh",
+    "benchmarks/README.md",
+    "docs/clasp-benchmark-plan.md"
+  ],
+  "tests_run": [
+    "node --check benchmarks/run-benchmark.mjs",
+    "bash benchmarks/test-series-summary.sh",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The new AIR-planning comparison section currently compares only `raw-text` versus `compiler-owned-air` on Clasp task runs; other workflow-assistance variants remain recorded and filterable but are not given dedicated pairwise reporting.",
+    "Full verification still emits existing dirty-tree and Node module-type warnings during benchmark prep; they did not fail verification, but they add noise when reading benchmark logs."
+  ]
+}

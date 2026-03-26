@@ -255,6 +255,8 @@ The language/runtime surface should expose native operations for:
 
 These should be Clasp-level primitives over the native runtime, not external shell glue.
 
+The repo now has the first ordinary-program slice of this through the internal `@swarm` runtime lane, which is wrapped by ordinary Clasp code in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp). That path lets Clasp programs create objectives/tasks, acquire leases, run tools/verifiers, inspect artifacts/runs, and drive merge decisions without shell wrapper scripts or external `claspc swarm ...` subprocesses. Child worker spawn/reap and richer memory APIs remain future expansion work.
+
 ## Required Safety / Governance Features
 
 The swarm should be autonomous but bounded.

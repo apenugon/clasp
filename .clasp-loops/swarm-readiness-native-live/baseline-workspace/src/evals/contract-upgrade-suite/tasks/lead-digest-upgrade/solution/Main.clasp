@@ -1,0 +1,56 @@
+module Main
+
+import Shared.Lead
+
+policy LeadOps = public permits {
+  process "node"
+}
+
+toolserver LeadTools = "mcp" "stdio://lead-tools" with LeadOps
+
+tool lookupLeadPlaybook = LeadTools "lookup_lead_playbook" LeadPlaybookLookup -> LeadPlaybook
+
+priorityLabel : LeadPriority -> Str
+priorityLabel priority = match priority {
+  Low -> "low",
+  Medium -> "medium",
+  High -> "high"
+}
+
+leadOwner : LeadPriority -> Str
+leadOwner priority = match priority {
+  Low -> "self-serve",
+  Medium -> "renewals-pod",
+  High -> "senior-ae"
+}
+
+needsFollowUp : LeadPriority -> Bool
+needsFollowUp priority = match priority {
+  Low -> false,
+  Medium -> true,
+  High -> true
+}
+
+summarizeLead : LeadIntake -> LeadDigest
+summarizeLead intake = LeadDigest {
+  company = intake.company,
+  priorityLabel = priorityLabel intake.priority,
+  owner = leadOwner intake.priority,
+  needsFollowUp = needsFollowUp intake.priority
+}
+
+playbookRequest : LeadDigest -> LeadPlaybookLookup
+playbookRequest digest = LeadPlaybookLookup {
+  owner = digest.owner,
+  needsFollowUp = digest.needsFollowUp
+}
+
+workflow LeadFollowUpFlow = { state : LeadFollowUpState }
+
+summarizeLeadRoute : LeadIntake -> LeadDigest
+summarizeLeadRoute intake = summarizeLead intake
+
+route summarizeLeadApi = POST "/api/lead/summary" LeadIntake -> LeadDigest summarizeLeadRoute
+
+main : Str
+main = (playbookRequest (summarizeLead (LeadIntake { company = "Northwind", priority = High }))).owner

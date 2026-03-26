@@ -1,0 +1,32 @@
+{
+  "task_id": "DB-003-add-typed-query-and-row-mapping-support",
+  "summary": "Use generic sqlite runtime-name handlers when multiple foreign bindings share `sqlite:queryOne` or `sqlite:queryAll`; per-binding adapter installation collides on `runtimeName` and silently routes later bindings over earlier ones.",
+  "ergonomics": [
+    "The existing host-binding metadata and runtime contract plumbing made it easy to add sqlite operations without touching the checker or emitter.",
+    "The current runtime installation path is biased toward unique runtime names, which becomes a trap for capability-style namespaces like `sqlite:*` where many typed bindings intentionally share one operation name.",
+    "The compiled end-to-end test harness in `test/Main.hs` is effective for storage/runtime slices because it exercises actual emitted modules and the Bun runtime together."
+  ],
+  "follow_ups": [
+    "If sqlite needs scalar queries, add explicit runtime names such as `sqlite:queryValue` / `sqlite:queryValues` or extend the contract so installed runtime functions can recover the calling binding identity.",
+    "Consider extracting the sqlite runtime-name installation pattern into a shared helper so other namespace-style runtimes do not repeat the same duplicate-`runtimeName` failure mode.",
+    "The generated JS validator still appears sensitive to record fields literally named `value`; this task worked around it in the regression, but the emitter bug is worth a separate fix."
+  ],
+  "warnings": [
+    "Do not install sqlite bindings through `__claspAdaptHostBindings` when several foreign declarations reuse the same `sqlite:*` runtime name; only the last adapted binding survives under that key.",
+    "When writing sqlite runtime regressions, prefer compiled wrapper declarations (`firstNote`, `noteRows`, etc.) over calling foreign declarations directly from JS, because foreign declarations themselves are not exported callable surfaces.",
+    "Avoid using a record field named `value` in new emitted-JS runtime tests until the validator naming collision is fixed."
+  ],
+  "files_touched": [
+    "runtime/bun/server.mjs",
+    "test/Main.hs",
+    "docs/clasp-spec-v0.md"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cabal test'",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "SQLite query installation now installs generic runtime-name handlers instead of per-binding adapters so duplicate `sqlite:*` runtime names can coexist; that keeps compiled calls correct, but direct host-side use of installed sqlite bindings no longer gets the extra per-binding adapter round-trip.",
+    "The new slice covers record-shaped row mapping for `sqlite:queryOne` and `sqlite:queryAll`; primitive single-column query returns were intentionally left out to avoid ambiguous behavior across bindings that share the same runtime name."
+  ]
+}

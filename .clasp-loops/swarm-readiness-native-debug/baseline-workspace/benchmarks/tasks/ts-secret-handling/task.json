@@ -1,0 +1,10 @@
+{
+  "id": "ts-secret-handling",
+  "title": "Repair the handwritten secret surfaces so redaction, policy gating, and secret blame stay intact",
+  "suite": "secret-handling",
+  "language": "typescript",
+  "repo": "repo",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["node", "test/secret-handling.test.mjs"]
+}

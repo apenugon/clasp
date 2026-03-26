@@ -1,0 +1,52 @@
+{
+  "task_id": "DB-006-add-persistence-bearing-benchmarks-and-failure-mode-tests",
+  "summary": "Use the persisted `examples/lead-app-ts` app as the source of truth. For this slice, one TS-only benchmark plus one explicit incompatible-schema regression was enough.",
+  "ergonomics": [
+    "Task discovery needed no harness changes because `run-benchmark.mjs` already discovers manifests from `benchmarks/tasks/*/task.json`.",
+    "`benchmarks/test-task-prep.sh` is the key guardrail here; it proves both that the new repo starts incomplete and that copying the canonical persisted app files is sufficient to reach green.",
+    "The repeated Nix dirty-tree warnings add a lot of noise during benchmark verification but did not affect outcomes."
+  ],
+  "follow_ups": [
+    "Add a mirrored Clasp persistence task once the dogfood app has a compiler-managed SQLite-backed counterpart.",
+    "Factor the repeated temporary-database helpers out of the app and benchmark tests if more SQLite-backed benchmark slices are added.",
+    "Consider reducing or redirecting dirty-tree warning noise in benchmark verification output."
+  ],
+  "warnings": [
+    "`ts-lead-persistence` intentionally omits `src/server/store.ts`; task-prep now asserts that absence.",
+    "Copy `runtime-modules.d.ts` along with `main.ts` and `store.ts` when proving the canonical persisted solution surface, or TypeScript compilation will fail.",
+    "The schema failure is exercised at `createServer(...)` time, before any HTTP request is served."
+  ],
+  "files_touched": [
+    "benchmarks/tasks/ts-lead-persistence/task.json",
+    "benchmarks/tasks/ts-lead-persistence/prompt.md",
+    "benchmarks/tasks/ts-lead-persistence/repo/AGENTS.md",
+    "benchmarks/tasks/ts-lead-persistence/repo/package.json",
+    "benchmarks/tasks/ts-lead-persistence/repo/tsconfig.json",
+    "benchmarks/tasks/ts-lead-persistence/repo/scripts/verify.sh",
+    "benchmarks/tasks/ts-lead-persistence/repo/src/server/runtime.ts",
+    "benchmarks/tasks/ts-lead-persistence/repo/src/server/dev.ts",
+    "benchmarks/tasks/ts-lead-persistence/repo/src/server/main.ts",
+    "benchmarks/tasks/ts-lead-persistence/repo/src/shared/lead.ts",
+    "benchmarks/tasks/ts-lead-persistence/repo/test/lead-app.test.mjs",
+    "benchmarks/tasks/ts-lead-persistence/solution/src/server/main.ts",
+    "benchmarks/tasks/ts-lead-persistence/solution/src/server/store.ts",
+    "benchmarks/tasks/ts-lead-persistence/solution/src/server/runtime-modules.d.ts",
+    "benchmarks/tasks/ts-lead-persistence/solution/src/server/dev.ts",
+    "benchmarks/test-task-prep.sh",
+    "benchmarks/test-persistence-benchmarks.sh",
+    "benchmarks/README.md",
+    "examples/lead-app-ts/test/lead-app.test.mjs",
+    "scripts/verify-all.sh",
+    "agents/feedback/DB-006-add-persistence-bearing-benchmarks-and-failure-mode-tests.json"
+  ],
+  "tests_run": [
+    "nix develop -c bash -lc 'cd examples/lead-app-ts && npm test'",
+    "CLASP_PROJECT_ROOT=\"$PWD\" bash benchmarks/test-persistence-benchmarks.sh",
+    "CLASP_PROJECT_ROOT=\"$PWD\" bash benchmarks/test-task-prep.sh",
+    "bash scripts/verify-all.sh"
+  ],
+  "residual_risks": [
+    "The new persistence-bearing benchmark is TypeScript-only, so it does not yet participate in a mirrored Clasp-vs-TypeScript comparison.",
+    "The benchmark solution snapshot duplicates canonical `examples/lead-app-ts` server files and will need to stay aligned with future app-side SQLite changes."
+  ]
+}

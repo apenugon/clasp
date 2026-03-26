@@ -1,0 +1,88 @@
+module CompilerMain
+
+import Compiler.Driver.Frontend
+import Compiler.Driver.Native
+
+checkSourceText : Str -> Str
+checkSourceText source = frontendDriverCheckSourceText source
+
+explainSourceText : Str -> Str
+explainSourceText source = frontendDriverExplainSourceText source
+
+compileSourceText : Str -> Str
+compileSourceText source = frontendDriverCompileSourceText source
+
+nativeSourceText : Str -> Str
+nativeSourceText source = nativeDriverSourceText source
+
+nativeImageSourceText : Str -> Str
+nativeImageSourceText source = nativeDriverImageSourceText source
+
+checkCoreSourceText : Str -> Str
+checkCoreSourceText source = frontendDriverCheckCoreSourceText source
+
+checkProjectText : Str -> Str
+checkProjectText bundle = frontendDriverCheckProjectText bundle
+
+checkProjectModuleSummaryText : Str -> Str -> Str
+checkProjectModuleSummaryText bundle importedSummaryText = frontendDriverCheckProjectModuleSummaryText bundle importedSummaryText
+
+explainProjectText : Str -> Str
+explainProjectText bundle = frontendDriverExplainProjectText bundle
+
+compileProjectText : Str -> Str
+compileProjectText bundle = frontendDriverCompileProjectText bundle
+
+nativeProjectText : Str -> Str
+nativeProjectText bundle = nativeDriverProjectText bundle
+
+nativeImageProjectText : Str -> Str
+nativeImageProjectText bundle = nativeDriverImageProjectText bundle
+
+nativeImageProjectPlanText : Str -> Str
+nativeImageProjectPlanText bundle = nativeDriverImageProjectPlanText bundle
+
+nativeImageProjectBuildPlanText : Str -> Str
+nativeImageProjectBuildPlanText bundle = nativeDriverImageProjectBuildPlanText bundle
+
+nativeImageSourceModuleInterfaceFingerprintText : Str -> Str
+nativeImageSourceModuleInterfaceFingerprintText source = nativeDriverImageSourceModuleInterfaceFingerprintText source
+
+nativeImageProjectModuleText : Str -> Str
+nativeImageProjectModuleText bundle = nativeDriverImageProjectModuleText bundle
+
+nativeImageProjectExportsText : Str -> Str
+nativeImageProjectExportsText bundle = nativeDriverImageProjectExportsText bundle
+
+nativeImageProjectEntrypointsText : Str -> Str
+nativeImageProjectEntrypointsText bundle = nativeDriverImageProjectEntrypointsText bundle
+
+nativeImageProjectAbiText : Str -> Str
+nativeImageProjectAbiText bundle = nativeDriverImageProjectAbiText bundle
+
+nativeImageProjectRuntimeText : Str -> Str
+nativeImageProjectRuntimeText bundle = nativeDriverImageProjectRuntimeText bundle
+
+nativeImageProjectCompatibilityText : Str -> Str
+nativeImageProjectCompatibilityText bundle = nativeDriverImageProjectCompatibilityText bundle
+
+nativeImageProjectDeclsText : Str -> Str
+nativeImageProjectDeclsText bundle = nativeDriverImageProjectDeclsText bundle
+
+nativeImageProjectConstructorDeclsText : Str -> Str
+nativeImageProjectConstructorDeclsText bundle = nativeDriverImageProjectConstructorDeclsText bundle
+
+nativeImageProjectDeclNamesText : Str -> Str
+nativeImageProjectDeclNamesText bundle = nativeDriverImageProjectDeclNamesText bundle
+
+nativeImageProjectDeclModulePlanText : Str -> Str
+nativeImageProjectDeclModulePlanText bundle = nativeDriverImageProjectDeclModulePlanText bundle
+
+nativeImageProjectModuleDeclsText : Str -> Str -> Str
+nativeImageProjectModuleDeclsText bundle moduleName = nativeDriverImageProjectModuleDeclsText bundle moduleName
+
+nativeImageProjectNamedDeclsText : Str -> Str -> Str
+nativeImageProjectNamedDeclsText bundle namesText = nativeDriverImageProjectNamedDeclsText bundle namesText
+
+checkCoreProjectText : Str -> Str
+checkCoreProjectText bundle = frontendDriverCheckCoreProjectText bundle

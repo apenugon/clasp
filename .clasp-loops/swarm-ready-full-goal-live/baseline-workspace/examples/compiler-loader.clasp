@@ -1,0 +1,90 @@
+module Main
+
+record PackageSource = {
+  name : Str,
+  root : Str,
+  sourceDir : Str
+}
+
+record LoadedModule = {
+  packageName : Str,
+  moduleName : Str,
+  filePath : Str,
+  source : Str
+}
+
+record ResolutionSnapshot = {
+  localModule : Str,
+  packageModule : Str,
+  missingModule : Str
+}
+
+type ModuleResolution = ResolvedModule LoadedModule | MissingModule Str
+
+moduleRelativePath : Str -> Str
+moduleRelativePath moduleName = pathJoin (textSplit moduleName ".")
+
+moduleFilePath : PackageSource -> Str -> Str
+moduleFilePath packageSource moduleName = pathJoin [packageSource.root, packageSource.sourceDir, textConcat [moduleRelativePath moduleName, ".clasp"]]
+
+firstLine : Str -> Str
+firstLine source = {
+  for line in textSplit source "\n" {
+    return line
+  };
+  ""
+}
+
+resolveFromPackage : PackageSource -> Str -> ModuleResolution
+resolveFromPackage packageSource moduleName = {
+  let filePath = moduleFilePath packageSource moduleName;
+  match readFile filePath {
+    Ok source -> {
+      let loaded = LoadedModule { packageName = packageSource.name, moduleName = moduleName, filePath = filePath, source = source };
+      ResolvedModule loaded
+    },
+    Err readError ->
+      MissingModule (textConcat ["missing:", filePath])
+  }
+}
+
+resolveFromSearchPath : [PackageSource] -> Str -> ModuleResolution
+resolveFromSearchPath packageSources moduleName = {
+  let mut current = MissingModule (textConcat ["missing:", moduleName]);
+  for packageSource in packageSources {
+    match current {
+      ResolvedModule loaded ->
+        return ResolvedModule loaded,
+      MissingModule previous ->
+        match resolveFromPackage packageSource moduleName {
+          ResolvedModule loaded ->
+            return ResolvedModule loaded,
+          MissingModule resolutionError -> {
+            current = MissingModule previous;
+            current
+          }
+        }
+    }
+  };
+  current
+}
+
+renderResolution : ModuleResolution -> Str
+renderResolution resolution = match resolution {
+  ResolvedModule loaded ->
+    textJoin "|" [loaded.packageName, loaded.moduleName, loaded.filePath, firstLine loaded.source],
+  MissingModule message ->
+    message
+}
+
+searchPath : [PackageSource]
+searchPath = [PackageSource { name = "workspace", root = "workspace", sourceDir = "src" }, PackageSource { name = "stdlib", root = "packages/stdlib", sourceDir = "clasp" }, PackageSource { name = "vendor", root = "vendor/fallback", sourceDir = "src" }]
+
+resolutionSnapshot : ResolutionSnapshot
+resolutionSnapshot = ResolutionSnapshot { localModule = renderResolution (resolveFromSearchPath searchPath "App.Main"), packageModule = renderResolution (resolveFromSearchPath searchPath "Compiler.Loader"), missingModule = renderResolution (resolveFromSearchPath searchPath "Compiler.Emit") }
+
+snapshotJson : Str
+snapshotJson = encode resolutionSnapshot
+
+main : Str
+main = snapshotJson

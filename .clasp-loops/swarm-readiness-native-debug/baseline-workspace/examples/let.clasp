@@ -1,0 +1,12 @@
+module Main
+
+type Status = Idle | Busy Str
+
+describe : Status -> Str
+describe status = match status {
+  Idle -> let label = "idle" in label,
+  Busy note -> let copy = note in copy
+}
+
+main : Str
+main = let current = Busy "loading" in describe current

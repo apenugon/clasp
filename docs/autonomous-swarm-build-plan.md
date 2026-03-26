@@ -159,6 +159,7 @@ The repo now has two swarm layers:
 
 - a language-level native kernel example in [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp)
 - a first-class native CLI control plane in `claspc swarm ...`
+- an ordinary-program Clasp wrapper over the durable swarm substrate in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp) and [`examples/swarm-native/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Main.clasp)
 
 The implemented native primitives now include:
 
@@ -218,16 +219,16 @@ The native `claspc swarm` control plane now also proves:
 - lease-expiry-aware lease reacquisition rules
 - persisted merge-policy state with approval/verifier tracking
 - objective-driven next-action projection for the manager loop
+- ordinary Clasp programs can drive the same substrate directly through `runCommandJson`'s internal `@swarm` runtime lane without shell wrapper scripts or external `claspc swarm ...` subprocesses
+- the ordinary-program path can create objectives and tasks, acquire leases, run native tool and verifier commands, record approvals, decide merge gates, and inspect runs/artifacts/summary state from Clasp itself
 
-## Remaining Build Order
+## Remaining Expansion Work
 
-The next implementation steps should be:
+The repo now has a supervised single-node ordinary-program path over the durable store. The remaining expansion work is:
 
 1. Native workflow and supervision runtime.
-2. Approval-backed merge/review policy wiring beyond raw approval recording.
-3. Reusable memory retrieval and higher-level artifact indexing/search.
-4. Single-node swarm that can plan, code, verify, and integrate bounded tasks.
-5. Manager chat and higher-level objective steering over the native control plane.
-6. Benchmark-specialized optimizer loop for `AppBench`.
+2. Reusable memory retrieval and higher-level artifact indexing/search.
+3. Manager chat and higher-level objective steering over the native control plane.
+4. Benchmark-specialized optimizer loop for `AppBench`.
 
 Deleting the remaining deprecated expectations only becomes safe once those runtime and compiler ownership boundaries are real.

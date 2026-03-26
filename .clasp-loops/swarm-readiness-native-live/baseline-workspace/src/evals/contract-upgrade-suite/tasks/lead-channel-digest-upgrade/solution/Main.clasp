@@ -1,0 +1,56 @@
+module Main
+
+import Shared.Lead
+
+policy LeadOps = public permits {
+  process "node"
+}
+
+toolserver LeadTools = "mcp" "stdio://lead-tools" with LeadOps
+
+tool lookupLeadPlaybook = LeadTools "lookup_lead_playbook" LeadPlaybookLookup -> LeadPlaybook
+
+sourceChannel : LeadPriority -> Str
+sourceChannel priority = match priority {
+  Low -> "self-serve",
+  Medium -> "partner",
+  High -> "website"
+}
+
+campaignTag : LeadPriority -> Str
+campaignTag priority = match priority {
+  Low -> "self-serve-low",
+  Medium -> "partner-medium",
+  High -> "inbound-high"
+}
+
+ownerForPriority : LeadPriority -> Str
+ownerForPriority priority = match priority {
+  Low -> "velocity",
+  Medium -> "renewals-pod",
+  High -> "senior-ae"
+}
+
+summarizeLead : LeadIntake -> LeadChannelDigest
+summarizeLead intake = LeadChannelDigest {
+  company = intake.company,
+  sourceChannel = sourceChannel intake.priority,
+  campaignTag = campaignTag intake.priority,
+  owner = ownerForPriority intake.priority
+}
+
+playbookRequest : LeadChannelDigest -> LeadPlaybookLookup
+playbookRequest digest = LeadPlaybookLookup {
+  sourceChannel = digest.sourceChannel,
+  campaignTag = digest.campaignTag
+}
+
+workflow LeadFollowUpFlow = { state : LeadFollowUpState }
+
+summarizeLeadRoute : LeadIntake -> LeadChannelDigest
+summarizeLeadRoute intake = summarizeLead intake
+
+route summarizeLeadApi = POST "/api/lead/summary" LeadIntake -> LeadChannelDigest summarizeLeadRoute
+
+main : Str
+main = (playbookRequest (summarizeLead (LeadIntake { company = "Northwind", priority = High }))).campaignTag

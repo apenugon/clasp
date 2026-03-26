@@ -1,0 +1,11 @@
+{
+  "id": "clasp-secret-handling",
+  "title": "Repair the Clasp secret surfaces so redaction, policy gating, and secret blame stay intact",
+  "suite": "secret-handling",
+  "language": "clasp",
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

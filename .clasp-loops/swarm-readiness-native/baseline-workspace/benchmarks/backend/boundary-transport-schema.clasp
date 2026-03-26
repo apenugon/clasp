@@ -1,0 +1,32 @@
+module Main
+
+record LeadTag = {
+  label : Str,
+  weight : Int
+}
+
+record BoundaryTransportSample = {
+  leadId : Str,
+  company : Str,
+  budget : Int,
+  accepted : Bool,
+  routeName : Str,
+  score : Int,
+  primaryTag : LeadTag
+}
+
+seed : BoundaryTransportSample
+seed = BoundaryTransportSample {
+  leadId = "lead-benchmark-018",
+  company = "Acme Robotics",
+  budget = 42000,
+  accepted = true,
+  routeName = "summarizeLeadRoute",
+  score = 97,
+  primaryTag = LeadTag {
+    label = "priority",
+    weight = 7
+  }
+}
+
+main = encode seed

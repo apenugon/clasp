@@ -1,0 +1,39 @@
+module Main
+
+record Customer = {
+  id : Str,
+  company : Str,
+  contactEmail : Str classified pii,
+  plan : Str
+}
+
+policy SupportAccess = public
+
+projection SupportCustomer = Customer with SupportAccess {
+  id,
+  company,
+  plan
+}
+
+guide SupportGuide = {
+  scope: "Keep protected customer reads, writes, and field disclosures behind explicit policy proofs."
+}
+
+role SupportWorkerRole = guide: SupportGuide, policy: SupportAccess, approval: on_request, sandbox: workspace_write
+
+agent supportWorker = SupportWorkerRole
+
+readProofPolicy : Str
+readProofPolicy = "SupportAccess"
+
+writeProofPolicy : Str
+writeProofPolicy = "PublicAccess"
+
+disclosureProofPolicy : Str
+disclosureProofPolicy = "SupportAccess"
+
+disclosureField : Str
+disclosureField = "contactEmail"
+
+customerId : Str
+customerId = "cust-42"

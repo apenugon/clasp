@@ -1,0 +1,18 @@
+module Main
+
+record Lead = {
+  company : Str,
+  budget : Int
+}
+
+leadSummary : Lead -> Str
+leadSummary lead = lead.company
+
+defaultLead : Lead
+defaultLead = Lead {
+  company = "SynthSpeak",
+  budget = 75000
+}
+
+main : Str
+main = leadSummary defaultLead

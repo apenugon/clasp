@@ -1,0 +1,18 @@
+module Main
+
+record LeadRequest = {
+  company : Str,
+  budget : Int
+}
+
+foreign upperCase : Str -> Str = "upperCase"
+foreign formatLead : LeadRequest -> Str = "formatLead"
+
+shout : Str -> Str
+shout value = upperCase value
+
+describe : LeadRequest -> Str
+describe request = formatLead request
+
+main : Str
+main = "ready"

@@ -1,0 +1,45 @@
+{
+  "taskId": "lead-digest-upgrade",
+  "title": "Rename LeadSummary to LeadDigest and propagate the new contract",
+  "mode": "raw-repo",
+  "assistance": "raw-text",
+  "sampleIndex": 1,
+  "harness": "codex",
+  "model": "gpt-5.4",
+  "reasoningEffort": "high",
+  "startedAt": "2026-03-20T18:15:59.223Z",
+  "finishedAt": "2026-03-20T18:16:53.674Z",
+  "durationMs": 54451,
+  "promptFile": "/home/akul_medexfinance_com/clasp/compiler/hosted/evals/contract-upgrade-suite/results/2026-03-20T18-15-59.140Z--lead-digest-upgrade--raw-repo--raw-text--sample01.prompt.md",
+  "promptBytes": 1201,
+  "codexExitCode": 0,
+  "tokenUsage": {
+    "prompt": 103665,
+    "completion": 2162,
+    "retry": 0,
+    "debug": 0,
+    "total": 105827
+  },
+  "harnessUsage": {
+    "provider": "codex",
+    "inputTokens": 103665,
+    "cachedInputTokens": 99968,
+    "outputTokens": 2162,
+    "uncachedInputTokens": 3697,
+    "uncachedTotal": 5859
+  },
+  "verification": {
+    "passed": true,
+    "exitCode": 0,
+    "output": "{\n  \"status\": \"ok\",\n  \"taskId\": \"lead-digest-upgrade\",\n  \"candidateDir\": \"/tmp/nix-shell-1737626-0/clasp-contract-suite-lead-digest-upgrade-raw-repo-raw-text-xOVNuz\",\n  \"main\": \"senior-ae\",\n  \"routeResponseType\": \"LeadDigest\",\n  \"toolRequestFields\": [\n    \"needsFollowUp\",\n    \"owner\"\n  ],\n  \"workflowStateType\": \"LeadFollowUpState\",\n  \"primarySchema\": \"LeadDigest\",\n  \"primaryFields\": [\n    \"company\",\n    \"needsFollowUp\",\n    \"owner\",\n    \"priorityLabel\"\n  ]\n}"
+  },
+  "verifyAttempts": 2,
+  "repairLoops": 1,
+  "timeToGreenMs": 48365,
+  "changedFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "changedFileCount": 2,
+  "workspace": null
+}

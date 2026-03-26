@@ -1,0 +1,13 @@
+{
+  "name": "ts-control-plane-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "test": "npm run clean && npm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
