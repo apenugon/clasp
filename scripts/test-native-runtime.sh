@@ -19,19 +19,19 @@ trap cleanup EXIT
 
 maybe_enter_nix_shell() {
   if [[ -n "${RUSTC:-}" ]]; then
-    return 1
+    return 0
   fi
 
   if [[ "$nix_reentry" == "1" || -n "${IN_NIX_SHELL:-}" ]]; then
-    return 1
+    return 0
   fi
 
   if command -v "$rustc_bin" >/dev/null 2>&1; then
-    return 1
+    return 0
   fi
 
   if ! command -v nix >/dev/null 2>&1; then
-    return 1
+    return 0
   fi
 
   nix develop "$project_root" --command bash -lc "

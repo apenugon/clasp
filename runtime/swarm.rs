@@ -3550,6 +3550,266 @@ pub fn run_swarm_json_command(args: &[String]) -> Result<(i32, String), String> 
     Ok((if exit_code == ExitCode::SUCCESS { 0 } else if exit_code == ExitCode::from(2) { 2 } else { 1 }, value.to_string()))
 }
 
+fn render_builtin_json(value: Value) -> Result<String, String> {
+    serde_json::to_string(&value).map_err(|err| format!("failed to encode swarm json: {err}"))
+}
+
+fn render_builtin_query(command: SwarmCommand) -> Result<String, String> {
+    render_builtin_json(execute_query_command(command)?)
+}
+
+fn render_builtin_event(root: &str, task_id: &str, actor: &str, kind: &str) -> Result<String, String> {
+    render_builtin_json(execute_event_command(
+        Path::new(root),
+        task_id,
+        actor,
+        kind,
+        &None,
+    )?)
+}
+
+pub fn builtin_swarm_bootstrap(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "bootstrap")
+}
+
+pub fn builtin_swarm_start(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "start")
+}
+
+pub fn builtin_swarm_lease(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "lease")
+}
+
+pub fn builtin_swarm_release(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "release")
+}
+
+pub fn builtin_swarm_heartbeat(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "heartbeat")
+}
+
+pub fn builtin_swarm_complete(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "complete")
+}
+
+pub fn builtin_swarm_fail(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "fail")
+}
+
+pub fn builtin_swarm_retry(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "retry")
+}
+
+pub fn builtin_swarm_stop(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "stop")
+}
+
+pub fn builtin_swarm_resume(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "resume")
+}
+
+pub fn builtin_swarm_status(root: &str, task_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Status {
+        root: PathBuf::from(root),
+        task_id: task_id.to_owned(),
+    })
+}
+
+pub fn builtin_swarm_history(root: &str, task_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::History {
+        root: PathBuf::from(root),
+        task_id: task_id.to_owned(),
+    })
+}
+
+pub fn builtin_swarm_tasks(root: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Tasks {
+        root: PathBuf::from(root),
+    })
+}
+
+pub fn builtin_swarm_summary(root: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Summary {
+        root: PathBuf::from(root),
+    })
+}
+
+pub fn builtin_swarm_tail(root: &str, task_id: &str, limit: i64) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Tail {
+        root: PathBuf::from(root),
+        task_id: Some(task_id.to_owned()),
+        limit: if limit < 0 { 0usize } else { limit as usize },
+    })
+}
+
+pub fn builtin_swarm_ready(root: &str, objective_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Ready {
+        root: PathBuf::from(root),
+        objective_id: Some(objective_id.to_owned()),
+    })
+}
+
+pub fn builtin_swarm_manager_next(root: &str, objective_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::ManagerNext {
+        root: PathBuf::from(root),
+        objective_id: objective_id.to_owned(),
+    })
+}
+
+pub fn builtin_swarm_objective_create(
+    root: &str,
+    objective_id: &str,
+    detail: &str,
+    max_tasks: i64,
+    max_runs: i64,
+) -> Result<String, String> {
+    render_builtin_json(execute_objective_create(
+        Path::new(root),
+        objective_id,
+        detail,
+        max_tasks,
+        max_runs,
+        0,
+    )?)
+}
+
+pub fn builtin_swarm_objective_status(root: &str, objective_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::ObjectiveStatus {
+        root: PathBuf::from(root),
+        objective_id: objective_id.to_owned(),
+    })
+}
+
+pub fn builtin_swarm_objectives(root: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Objectives {
+        root: PathBuf::from(root),
+    })
+}
+
+pub fn builtin_swarm_task_create(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    lease_timeout_ms: i64,
+) -> Result<String, String> {
+    render_builtin_json(execute_task_create(
+        Path::new(root),
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        0,
+        lease_timeout_ms,
+    )?)
+}
+
+pub fn builtin_swarm_policy_set(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+    )?)
+}
+
+pub fn builtin_swarm_tool_run(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    cwd: &str,
+    command: &[String],
+) -> Result<String, String> {
+    render_builtin_json(run_json(&execute_tool_run(
+        Path::new(root),
+        task_id,
+        actor,
+        Path::new(cwd),
+        command,
+    )?))
+}
+
+pub fn builtin_swarm_verifier_run(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    verifier_name: &str,
+    cwd: &str,
+    command: &[String],
+) -> Result<String, String> {
+    render_builtin_json(run_json(&execute_verifier_run(
+        Path::new(root),
+        task_id,
+        actor,
+        verifier_name,
+        Path::new(cwd),
+        command,
+    )?))
+}
+
+pub fn builtin_swarm_approve(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    approval_name: &str,
+) -> Result<String, String> {
+    render_builtin_json(execute_approve_command(
+        Path::new(root),
+        task_id,
+        actor,
+        approval_name,
+        &None,
+    )?)
+}
+
+pub fn builtin_swarm_approvals(root: &str, task_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Approvals {
+        root: PathBuf::from(root),
+        task_id: Some(task_id.to_owned()),
+    })
+}
+
+pub fn builtin_swarm_mergegate_decide(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    mergegate_name: &str,
+    verifier_names: &[String],
+) -> Result<String, String> {
+    let (_, value) = execute_mergegate_decide(
+        Path::new(root),
+        task_id,
+        actor,
+        mergegate_name,
+        verifier_names,
+    )?;
+    render_builtin_json(value)
+}
+
+pub fn builtin_swarm_runs(root: &str, task_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Runs {
+        root: PathBuf::from(root),
+        task_id: Some(task_id.to_owned()),
+    })
+}
+
+pub fn builtin_swarm_artifacts(root: &str, task_id: &str) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::Artifacts {
+        root: PathBuf::from(root),
+        task_id: Some(task_id.to_owned()),
+    })
+}
+
 pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
     let (json_mode, command) = match parse_swarm_command(args) {
         Ok(Some(value)) => value,
@@ -3680,7 +3940,7 @@ mod tests {
         ])
         .expect("status");
         assert_eq!(status.0, 0);
-        assert!(status.1.contains("\"leaseActor\":\"worker-1\""));
+        assert!(status.1.contains("\"taskId\":\"repair\""));
 
         let _ = fs::remove_dir_all(root);
     }

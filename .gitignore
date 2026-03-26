@@ -1,5 +1,6 @@
 dist-newstyle/
 dist/
+.clasp-loops
 result
 *.hi
 *.o

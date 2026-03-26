@@ -4,23 +4,23 @@ import Swarm
 record NativeSwarmReport = {
   objective : Str,
   task : Str,
-  objectiveCreate : Str,
-  taskCreate : Str,
-  policy : Str,
-  ready : Str,
-  managerBefore : Str,
-  lease : Str,
-  toolRun : Str,
-  complete : Str,
-  verifierRun : Str,
-  approval : Str,
-  mergeDecision : Str,
-  taskStatus : Str,
-  objectiveStatus : Str,
-  runs : Str,
-  artifacts : Str,
-  summary : Str,
-  managerAfter : Str
+  objectiveCreate : SwarmObjective,
+  taskCreate : SwarmTask,
+  policy : SwarmPolicy,
+  ready : [SwarmTask],
+  managerBefore : SwarmManagerAction,
+  lease : SwarmTask,
+  toolRun : SwarmRun,
+  complete : SwarmTask,
+  verifierRun : SwarmRun,
+  approval : SwarmApproval,
+  mergeDecision : SwarmMergeDecision,
+  taskStatus : SwarmTask,
+  objectiveStatus : SwarmObjectiveStatus,
+  runs : [SwarmRun],
+  artifacts : [SwarmArtifact],
+  summary : SwarmSummary,
+  managerAfter : SwarmManagerAction
 }
 
 stateRoot : Str
@@ -44,33 +44,110 @@ workspaceCwd = match envVar "CLASP_SWARM_CWD" {
   Err message -> "."
 }
 
-unwrapOrCrash : Result Str -> Str
-unwrapOrCrash value = match value {
-  Ok output ->
-    output,
+main : Str
+main = match objectiveCreate stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6 {
+  Ok objectiveCreateValue ->
+    match taskCreate stateRoot objectiveId taskId "Repair the runtime using direct Clasp orchestration." [] 3 60000 {
+      Ok taskCreateValue ->
+        match policySet stateRoot taskId "trunk" ["merge-ready"] ["native-smoke"] {
+          Ok policyValue ->
+            match ready stateRoot objectiveId {
+              Ok readyValue ->
+                match managerNext stateRoot objectiveId {
+                  Ok managerBeforeValue ->
+                    match lease stateRoot taskId actorName {
+                      Ok leaseValue ->
+                        match toolRun stateRoot taskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"] {
+                          Ok toolRunValue ->
+                            match complete stateRoot taskId actorName {
+                              Ok completeValue ->
+                                match verifierRun stateRoot taskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"] {
+                                  Ok verifierRunValue ->
+                                    match approve stateRoot taskId actorName "merge-ready" {
+                                      Ok approvalValue ->
+                                        match mergegateDecide stateRoot taskId actorName "trunk" ["native-smoke"] {
+                                          Ok mergeDecisionValue ->
+                                            match status stateRoot taskId {
+                                              Ok taskStatusValue ->
+                                                match objectiveStatus stateRoot objectiveId {
+                                                  Ok objectiveStatusValue ->
+                                                    match runs stateRoot taskId {
+                                                      Ok runsValue ->
+                                                        match artifacts stateRoot taskId {
+                                                          Ok artifactsValue ->
+                                                            match summary stateRoot {
+                                                              Ok summaryValue ->
+                                                                match managerNext stateRoot objectiveId {
+                                                                  Ok managerAfterValue ->
+                                                                    encode (NativeSwarmReport {
+                                                                      objective = objectiveId,
+                                                                      task = taskId,
+                                                                      objectiveCreate = objectiveCreateValue,
+                                                                      taskCreate = taskCreateValue,
+                                                                      policy = policyValue,
+                                                                      ready = readyValue,
+                                                                      managerBefore = managerBeforeValue,
+                                                                      lease = leaseValue,
+                                                                      toolRun = toolRunValue,
+                                                                      complete = completeValue,
+                                                                      verifierRun = verifierRunValue,
+                                                                      approval = approvalValue,
+                                                                      mergeDecision = mergeDecisionValue,
+                                                                      taskStatus = taskStatusValue,
+                                                                      objectiveStatus = objectiveStatusValue,
+                                                                      runs = runsValue,
+                                                                      artifacts = artifactsValue,
+                                                                      summary = summaryValue,
+                                                                      managerAfter = managerAfterValue
+                                                                    }),
+                                                                  Err message ->
+                                                                    textConcat ["error:", message]
+                                                                },
+                                                              Err message ->
+                                                                textConcat ["error:", message]
+                                                            },
+                                                          Err message ->
+                                                            textConcat ["error:", message]
+                                                        },
+                                                      Err message ->
+                                                        textConcat ["error:", message]
+                                                    },
+                                                  Err message ->
+                                                    textConcat ["error:", message]
+                                                },
+                                              Err message ->
+                                                textConcat ["error:", message]
+                                            },
+                                          Err message ->
+                                            textConcat ["error:", message]
+                                        },
+                                      Err message ->
+                                        textConcat ["error:", message]
+                                    },
+                                  Err message ->
+                                    textConcat ["error:", message]
+                                },
+                              Err message ->
+                                textConcat ["error:", message]
+                            },
+                          Err message ->
+                            textConcat ["error:", message]
+                        },
+                      Err message ->
+                        textConcat ["error:", message]
+                    },
+                  Err message ->
+                    textConcat ["error:", message]
+                },
+              Err message ->
+                textConcat ["error:", message]
+            },
+          Err message ->
+            textConcat ["error:", message]
+        },
+      Err message ->
+        textConcat ["error:", message]
+    },
   Err message ->
     textConcat ["error:", message]
 }
-
-main : Str
-main = encode (NativeSwarmReport {
-  objective = objectiveId,
-  task = taskId,
-  objectiveCreate = unwrapOrCrash (objectiveCreate stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6),
-  taskCreate = unwrapOrCrash (taskCreate stateRoot objectiveId taskId "Repair the runtime using direct Clasp orchestration." 3 60000),
-  policy = unwrapOrCrash (policySet stateRoot taskId "trunk" ["merge-ready"] ["native-smoke"]),
-  ready = unwrapOrCrash (ready stateRoot objectiveId),
-  managerBefore = unwrapOrCrash (managerNext stateRoot objectiveId),
-  lease = unwrapOrCrash (lease stateRoot taskId actorName),
-  toolRun = unwrapOrCrash (toolRun stateRoot taskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"]),
-  complete = unwrapOrCrash (complete stateRoot taskId actorName),
-  verifierRun = unwrapOrCrash (verifierRun stateRoot taskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"]),
-  approval = unwrapOrCrash (approve stateRoot taskId actorName "merge-ready"),
-  mergeDecision = unwrapOrCrash (mergegateDecide stateRoot taskId "trunk" ["native-smoke"]),
-  taskStatus = unwrapOrCrash (status stateRoot taskId),
-  objectiveStatus = unwrapOrCrash (objectiveStatus stateRoot objectiveId),
-  runs = unwrapOrCrash (runs stateRoot taskId),
-  artifacts = unwrapOrCrash (artifacts stateRoot taskId),
-  summary = unwrapOrCrash (summary stateRoot),
-  managerAfter = unwrapOrCrash (managerNext stateRoot objectiveId)
-})

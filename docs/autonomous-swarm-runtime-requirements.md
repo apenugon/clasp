@@ -255,7 +255,7 @@ The language/runtime surface should expose native operations for:
 
 These should be Clasp-level primitives over the native runtime, not external shell glue.
 
-The repo now has the first ordinary-program slice of this through the internal `@swarm` runtime lane, which is wrapped by ordinary Clasp code in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp). That path lets Clasp programs create objectives/tasks, acquire leases, run tools/verifiers, inspect artifacts/runs, and drive merge decisions without shell wrapper scripts or external `claspc swarm ...` subprocesses. Child worker spawn/reap and richer memory APIs remain future expansion work.
+The repo now has an ordinary-program slice of this through the internal `@swarm` runtime lane, which is wrapped by ordinary Clasp code in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp). That path lets Clasp programs create objectives/tasks, acquire and release leases, inspect ready/state projections, run tools/verifiers, inspect runs/artifacts, and drive approvals and merge decisions without shell wrapper scripts or external `claspc swarm ...` subprocesses. For the current supervised single-node swarm model, task creation plus durable tool/verifier execution is the native child-work substrate; higher-level memory retrieval and indexing remain follow-on control-plane work rather than a blocker for the ordinary-program orchestration loop.
 
 ## Required Safety / Governance Features
 

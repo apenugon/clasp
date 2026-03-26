@@ -1,12 +1,20 @@
 module Main
 
 record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
 record VerifierReport = {
   verdict : Str,
   summary : Str,
   findings : [Str],
   tests_run : [Str],
-  follow_up : [Str]
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
 }
 record LoopState = {
   attempt : Int,
@@ -26,6 +34,9 @@ stateRoot = if textJoin "" argv == "" then "feedback-loop-state" else pathJoin a
 
 emptyTexts : [Str]
 emptyTexts = []
+
+emptyCapabilityStatuses : [CapabilityStatus]
+emptyCapabilityStatuses = []
 
 readEnvText : Str -> Str -> Str
 readEnvText name fallback = match envVar name {
@@ -74,6 +85,12 @@ commandName = match envVar "CLASP_LOOP_COMMAND" {
 
 feedbackPath : Str
 feedbackPath = pathJoin [stateRoot, "feedback.json"]
+
+builderPolicyPath : Str
+builderPolicyPath = pathJoin [stateRoot, "builder-policy.md"]
+
+verifierPolicyPath : Str
+verifierPolicyPath = pathJoin [stateRoot, "verifier-policy.md"]
 
 loopStatePath : Str
 loopStatePath = pathJoin [stateRoot, "state.json"]
@@ -141,9 +158,116 @@ readVerifierReport attempt = match readFile (verifierReportPath attempt) {
       summary = textConcat ["missing verifier report: ", message],
       findings = [message],
       tests_run = emptyTexts,
-      follow_up = ["leave a verifier report at the configured path"]
+      follow_up = ["leave a verifier report at the configured path"],
+      capability_statuses = emptyCapabilityStatuses
     }
 }
+
+readFeedbackText : Int -> Str
+readFeedbackText attempt = match readFile feedbackPath {
+  Ok raw ->
+    raw,
+  Err message ->
+    ""
+}
+
+defaultBuilderPolicyText : Str
+defaultBuilderPolicyText = textJoin "\n" [
+  "Close whole blocking capability categories rather than single complaint lines.",
+  "Prefer code/runtime/compiler/example/test changes over docs-only movement.",
+  "Use the previous verifier report as the primary steering input for the next attempt."
+]
+
+defaultVerifierPolicyText : Str
+defaultVerifierPolicyText = textJoin "\n" [
+  "Judge the whole repository, not only the latest diff.",
+  "Group failures by capability category.",
+  "Do not fail merely because legacy helper scripts remain in the repo if the ordinary-program path is complete and not required."
+]
+
+readPolicyText : Str -> Str -> Str
+readPolicyText path fallback = match readFile path {
+  Ok raw ->
+    raw,
+  Err message ->
+    fallback
+}
+
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicyFile path fallback =
+  if fileExists path then
+    ""
+  else
+    match writeFile path fallback {
+      Ok written ->
+        "",
+      Err message ->
+        message
+    }
+
+ensurePolicies : Str
+ensurePolicies = {
+  let builderError = ensurePolicyFile builderPolicyPath defaultBuilderPolicyText in
+  if builderError != "" then
+    builderError
+  else
+    ensurePolicyFile verifierPolicyPath defaultVerifierPolicyText
+}
+
+capabilityChecklist : [Str]
+capabilityChecklist = [
+  "ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes Codex directly from Clasp, and persists durable final state/status in ordinary runtime storage.",
+  "durable_native_substrate: objective/run/task/event/artifact persistence, DAG edges, projected status, leases, approvals, merge-policy state, tool/process execution, and monitoring/state inspection are durably available.",
+  "clasp_native_control_api: ordinary Clasp programs can use the orchestration substrate directly without requiring shell wrapper orchestration or external claspc swarm subprocesses as the primary model.",
+  "orchestration_viability: builder/verifier/planner-style programs are realistically implementable in Clasp itself without obvious missing runtime/control-plane substrate.",
+  "ergonomics: Dict state, empty lists, polymorphic collections, and record update/destructuring are usable enough for state-heavy orchestration code.",
+  "verification_gate: scenario-level coverage exists for the ordinary-program loop path and new runtime/workflow/control-plane behavior, and bash scripts/verify-all.sh passes."
+]
+
+capabilityChecklistText : Str
+capabilityChecklistText = textJoin "\n" [
+  "- ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes Codex directly from Clasp, and persists durable final state/status in ordinary runtime storage.",
+  "- durable_native_substrate: objective/run/task/event/artifact persistence, DAG edges, projected status, leases, approvals, merge-policy state, tool/process execution, and monitoring/state inspection are durably available.",
+  "- clasp_native_control_api: ordinary Clasp programs can use the orchestration substrate directly without requiring shell wrapper orchestration or external claspc swarm subprocesses as the primary model.",
+  "- orchestration_viability: builder/verifier/planner-style programs are realistically implementable in Clasp itself without obvious missing runtime/control-plane substrate.",
+  "- ergonomics: Dict state, empty lists, polymorphic collections, and record update/destructuring are usable enough for state-heavy orchestration code.",
+  "- verification_gate: scenario-level coverage exists for the ordinary-program loop path and new runtime/workflow/control-plane behavior, and bash scripts/verify-all.sh passes."
+]
+
+builderEscalationText : Int -> Str
+builderEscalationText attempt =
+  if attempt < 3 then
+    "Prefer closing at least one whole failing capability category this attempt, not just one complaint line."
+  else
+    textJoin "\n" [
+      "You have already seen multiple verifier failures.",
+      "Escalate to closing an entire blocking capability category even if that requires coordinated compiler/runtime/example/test/doc changes in one slice.",
+      "Do not spend this attempt on docs-only, wrapper-only, or single-harness-only fixes unless the previous verifier report makes clear that such a fix is the only remaining blocker."
+    ]
+
+builderFeedbackSection : Int -> Str
+builderFeedbackSection attempt =
+  if readFeedbackText attempt == "" then
+    "No previous verifier feedback is present yet."
+  else
+    textJoin "\n" [
+      "Verifier feedback from the previous attempt:",
+      readFeedbackText attempt
+    ]
+
+builderPolicySection : Int -> Str
+builderPolicySection attempt =
+  textJoin "\n" [
+    textConcat ["Current builder policy from ", builderPolicyPath, ":"],
+    readPolicyText builderPolicyPath defaultBuilderPolicyText
+  ]
+
+verifierPolicySection : Int -> Str
+verifierPolicySection attempt =
+  textJoin "\n" [
+    textConcat ["Current verifier policy from ", verifierPolicyPath, ":"],
+    readPolicyText verifierPolicyPath defaultVerifierPolicyText
+  ]
 
 loopState : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> LoopState
 loopState attempt phase verdict completed builderRuns verifierRuns healthy needsAttention attentionReason final =
@@ -257,14 +381,19 @@ builderPrompt attempt =
     textConcat ["Read the task file at ", taskFile, "."],
     "Drive the repository toward the full task goal, not just the smallest local diff that would satisfy one verifier complaint.",
     "Work only in the current checkout.",
-    "Keep changes small and local.",
+    "Keep changes coherent and scoped, but prefer closing an entire blocking capability category over a tiny local patch.",
     "Add or update tests for changed behavior.",
     "Run the narrowest checks that cover your changes before finishing.",
     "Do not run bash scripts/verify-all.sh; the verifier owns the repo-wide gate.",
+    "Do not assume that a docs tweak or one wrapper fix is enough if the previous verifier report still shows a broader architectural blocker.",
+    "Capability categories to close:",
+    capabilityChecklistText,
+    builderEscalationText attempt,
+    builderPolicySection attempt,
+    builderFeedbackSection attempt,
     "Return JSON matching the provided output schema.",
     "Include the required feedback object in your final JSON.",
-    textConcat ["Attempt: ", encode attempt],
-    textConcat ["If it exists, read the previous verifier feedback from ", feedbackPath, "."]
+    textConcat ["Attempt: ", encode attempt]
   ]
 
 verifierPrompt : Int -> Str
@@ -277,9 +406,20 @@ verifierPrompt attempt =
     "Use the diff to understand what changed, but judge pass or fail against the full repository state and the full task acceptance criteria.",
     "Do not pass because the latest diff is locally good if the repository still falls short of the overall task goal.",
     "Before returning pass, explicitly verify every required capability listed in the task file and fail if any are missing, partial, or only scaffolded.",
+    "Judge legacy shell wrapper scripts as supporting artifacts only. Fail on shell usage only if the required ordinary-program path is absent, incomplete, or still the primary required orchestration path.",
+    "Do not fail solely because an internal native lane uses JSON-shaped values. Fail only if real orchestration logic is still forced back into shell/CLI glue or cannot be implemented cleanly as an ordinary Clasp program.",
+    "Capability categories to judge:",
+    capabilityChecklistText,
+    builderPolicySection attempt,
+    verifierPolicySection attempt,
     "Run the narrowest verification needed to decide pass or fail.",
     "Treat missing scenario-level coverage for runtime, workflow, trust-boundary, interop, or app-surface changes as a defect.",
     "Before returning pass, run bash scripts/verify-all.sh successfully in the current checkout.",
+    "Return capability_statuses with one entry for every capability category above.",
+    "Each capability_statuses entry must include name, status, evidence, blocking_gaps, and required_closure.",
+    "Use status pass only when that whole category is convincingly closed in the current repository state; otherwise use fail.",
+    "When failing, make follow_up and required_closure aim at closing whole blocking categories, not single complaint lines.",
+    textConcat ["If repeated failures indicate a policy problem, you may edit ", builderPolicyPath, " and/or ", verifierPolicyPath, " directly so the next attempt runs with improved policy. Mention any policy edits you make in your report."],
     "Return JSON matching the provided output schema.",
     textConcat ["Attempt: ", encode attempt]
   ]
@@ -372,69 +512,74 @@ runAttempt attempt =
         if baselineResult.exitCode != 0 then
           textConcat ["baseline-error:", baselineResult.stderr]
         else {
-          let builderStateError = writeLoopState (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
-          if builderStateError != "" then
-            textConcat ["state-error:", builderStateError]
+          let policyError = ensurePolicies in
+          if policyError != "" then
+            textConcat ["policy-error:", policyError]
           else {
-            let builderRun = runBuilder attempt in
-            if builderRun.exitCode != 0 then {
-              let stateError = writeLoopState (loopState attempt "builder-crashed" "fail" false attempt 0 false true builderRun.stderr true) in
-              if stateError != "" then
-                textConcat ["state-error:", stateError]
-              else
-                textConcat ["builder-crash:", encode builderRun.exitCode]
-            } else {
-              let verifierStateError = writeLoopState (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
-              if verifierStateError != "" then
-                textConcat ["state-error:", verifierStateError]
-              else {
-                let verifierRun = runVerifier attempt in
-                if verifierRun.exitCode != 0 then {
-                  let stateError = writeLoopState (loopState attempt "verifier-crashed" "fail" false attempt attempt false true verifierRun.stderr true) in
-                  if stateError != "" then
-                    textConcat ["state-error:", stateError]
-                  else
-                    textConcat ["verifier-crash:", encode verifierRun.exitCode]
-                } else {
-                  let report = readVerifierReport attempt in
-                  if report.verdict == "pass" then {
-                    let stateError = writeLoopState (loopState attempt "completed" "pass" true attempt attempt true false "" true) in
+            let builderStateError = writeLoopState (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
+            if builderStateError != "" then
+              textConcat ["state-error:", builderStateError]
+            else {
+              let builderRun = runBuilder attempt in
+              if builderRun.exitCode != 0 then {
+                let stateError = writeLoopState (loopState attempt "builder-crashed" "fail" false attempt 0 false true builderRun.stderr true) in
+                if stateError != "" then
+                  textConcat ["state-error:", stateError]
+                else
+                  textConcat ["builder-crash:", encode builderRun.exitCode]
+              } else {
+                let verifierStateError = writeLoopState (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
+                if verifierStateError != "" then
+                  textConcat ["state-error:", verifierStateError]
+                else {
+                  let verifierRun = runVerifier attempt in
+                  if verifierRun.exitCode != 0 then {
+                    let stateError = writeLoopState (loopState attempt "verifier-crashed" "fail" false attempt attempt false true verifierRun.stderr true) in
                     if stateError != "" then
                       textConcat ["state-error:", stateError]
                     else
-                      match writeFile feedbackPath (encode report) {
-                        Ok written ->
-                          textConcat ["pass:", encode attempt],
-                        Err message ->
-                          textConcat ["feedback-error:", message]
-                      }
+                      textConcat ["verifier-crash:", encode verifierRun.exitCode]
                   } else {
-                    let isFinalAttempt = attempt == maxAttempts;
-                    let nextState =
-                      if isFinalAttempt then
-                        loopState attempt "failed" "fail" false attempt attempt false true report.summary true
+                    let report = readVerifierReport attempt in
+                    if report.verdict == "pass" then {
+                      let stateError = writeLoopState (loopState attempt "completed" "pass" true attempt attempt true false "" true) in
+                      if stateError != "" then
+                        textConcat ["state-error:", stateError]
                       else
-                        loopState (incrementAttempt attempt) "needs-builder" "retry" false attempt attempt false true report.summary false;
-                    let stateError = writeLoopState nextState in
-                    if stateError != "" then
-                      textConcat ["state-error:", stateError]
-                    else
-                      match writeFile feedbackPath (encode report) {
-                        Ok written ->
-                          if isFinalAttempt then
-                            textConcat ["fail:", encode attempt]
-                          else
-                            runAttempt (incrementAttempt attempt),
-                        Err message ->
-                          textConcat ["feedback-error:", message]
-                      }
+                        match writeFile feedbackPath (encode report) {
+                          Ok written ->
+                            textConcat ["pass:", encode attempt],
+                          Err message ->
+                            textConcat ["feedback-error:", message]
+                        }
+                    } else {
+                      let isFinalAttempt = attempt == maxAttempts;
+                      let nextState =
+                        if isFinalAttempt then
+                          loopState attempt "failed" "fail" false attempt attempt false true report.summary true
+                        else
+                          loopState (incrementAttempt attempt) "needs-builder" "retry" false attempt attempt false true report.summary false;
+                      let stateError = writeLoopState nextState in
+                      if stateError != "" then
+                        textConcat ["state-error:", stateError]
+                      else
+                        match writeFile feedbackPath (encode report) {
+                          Ok written ->
+                            if isFinalAttempt then
+                              textConcat ["fail:", encode attempt]
+                            else
+                              runAttempt (incrementAttempt attempt),
+                          Err message ->
+                            textConcat ["feedback-error:", message]
+                        }
+                    }
                   }
                 }
               }
             }
-          }
         }
     }
+  }
   }
 
 main : Str

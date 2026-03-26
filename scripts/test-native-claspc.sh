@@ -87,8 +87,8 @@ swarm_loop_state_root="$test_root/swarm-loop/state"
 swarm_loop_event_log="$swarm_loop_state_root/events.jsonl"
 swarm_sqlite_state_root="$test_root/swarm-sqlite/state"
 swarm_sqlite_db="$swarm_sqlite_state_root/swarm.db"
-swarm_native_binary="$test_root/swarm-native"
-swarm_native_state_root="$test_root/swarm-native/state"
+swarm_native_binary="$test_root/bin/swarm-native"
+swarm_native_state_root="$test_root/swarm-native-state"
 support_console_binary="$test_root/support-console-app"
 release_gate_binary="$test_root/release-gate-app"
 lead_app_binary="$test_root/lead-app"
@@ -320,10 +320,11 @@ fi
 
 workspace_path="$workspace_root/workspace.txt"
 feedback_path="$(dirname "$report_path")/feedback.json"
+builder_policy_path="$(dirname "$report_path")/builder-policy.md"
 
 if [[ "$prompt" == *"builder subagent"* ]]; then
   content="first-attempt"
-  if [[ -f "$feedback_path" ]]; then
+  if [[ -f "$feedback_path" && "$prompt" == *"Verifier feedback from the previous attempt:"* && "$prompt" == *"force-close-category"* ]]; then
     content="fixed-after-feedback"
   fi
   printf '%s\n' "$content" >"$workspace_path"
@@ -337,11 +338,12 @@ elif [[ "$prompt" == *"verifier subagent"* ]]; then
   fi
   if [[ "$content" == "fixed-after-feedback" ]]; then
     cat >"$report_path" <<'JSON'
-{"verdict":"pass","summary":"feedback loop converged","findings":[],"tests_run":["workspace converged"],"follow_up":[]}
+{"verdict":"pass","summary":"feedback loop converged","findings":[],"tests_run":["workspace converged"],"follow_up":[],"capability_statuses":[{"name":"ordinary_program_execution","status":"pass","evidence":["workspace converged after verifier feedback"],"blocking_gaps":[],"required_closure":[]},{"name":"durable_native_substrate","status":"pass","evidence":["test fixture does not model substrate gaps"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["feedback loop prompt included previous verifier feedback directly"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"pass","evidence":["ordinary loop completed end to end"],"blocking_gaps":[],"required_closure":[]},{"name":"ergonomics","status":"pass","evidence":["test fixture did not expose ergonomic blockers"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"pass","evidence":["workspace converged"],"blocking_gaps":[],"required_closure":[]}]}
 JSON
   else
+    printf '%s\n' 'force-close-category' >"$builder_policy_path"
     cat >"$report_path" <<'JSON'
-{"verdict":"fail","summary":"workspace still needs feedback","findings":["workspace.txt still has the first-attempt content"],"tests_run":["workspace converged"],"follow_up":["Use the verifier feedback to update workspace.txt"]}
+{"verdict":"fail","summary":"workspace still needs feedback","findings":["workspace.txt still has the first-attempt content"],"tests_run":["workspace converged"],"follow_up":["Close the ordinary_program_execution category by using the verifier feedback to update workspace.txt."],"capability_statuses":[{"name":"ordinary_program_execution","status":"fail","evidence":["workspace.txt still has the first-attempt content"],"blocking_gaps":["builder did not consume the previous verifier feedback"],"required_closure":["Use the verifier feedback to update workspace.txt."]},{"name":"durable_native_substrate","status":"pass","evidence":["test fixture does not model substrate gaps"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["direct Codex invocation path is present in the fixture"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"fail","evidence":["loop has not converged yet"],"blocking_gaps":["builder/verifier cycle has not closed the blocking category"],"required_closure":["Make the next builder attempt consume the previous verifier feedback and converge."]},{"name":"ergonomics","status":"pass","evidence":["test fixture does not expose ergonomic blockers"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"fail","evidence":["final convergence has not happened yet"],"blocking_gaps":["workspace still fails the acceptance check"],"required_closure":["Converge the workspace on the next attempt."]}]}
 JSON
   fi
 else
@@ -829,10 +831,12 @@ env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/example
 swarm_native_output="$(CLASP_SWARM_CWD="$project_root" CLASP_SWARM_ACTOR=manager "$swarm_native_binary" "$swarm_native_state_root")"
 printf '%s\n' "$swarm_native_output" | grep -F '"objective":"ordinary-loop"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"task":"repair-runtime"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":"{\"taskId\":\"repair-runtime\",\"mergegateName\":\"trunk\",\"verdict\":\"pass\"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":"{\"taskId\":\"repair-runtime\",\"status\":\"completed\"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":"{\"objectiveId\":\"ordinary-loop\",\"status\":\"completed\",\"action\":\"objective-complete\"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"artifacts":"[{' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"repair-runtime","mergegateName":"trunk","verdict":"pass"}' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"taskId":"repair-runtime","status":"completed"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"ordinary-loop","status":"completed","action":"objective-complete"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"artifacts":[{"taskId":"repair-runtime","kind":"stderr"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"toolRun":{"taskId":"repair-runtime","role":"tool"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"verifierRun":{"taskId":"repair-runtime","role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F 'ordinary-tool-ok' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F 'ordinary-verifier-ok' >/dev/null
 

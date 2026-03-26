@@ -53,3 +53,5 @@ CLASP_TEST_NATIVE_RUNTIME_NIX_LOG="$nix_log" \
 "$bash_bin" "$test_root/scripts/test-native-runtime.sh" >/dev/null
 
 grep -F "develop $test_root --command bash -lc" "$nix_log" >/dev/null
+grep -F 'if [[ "$nix_reentry" == "1" || -n "${IN_NIX_SHELL:-}" ]]; then' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'return 0' "$test_root/scripts/test-native-runtime.sh" >/dev/null
