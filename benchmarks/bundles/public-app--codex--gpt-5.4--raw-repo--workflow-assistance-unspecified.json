@@ -101,13 +101,13 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "size": 1349,
-      "sha256": "a7759d7dbe23310f44f13426d2b5ee6f527947116e169d0abae6cb32afabbe20"
+      "size": 1860,
+      "sha256": "260a1c2a3081bca90b1b77dbe751cb6c70a499bc3edf28891a0750adcb84a740"
     },
     {
       "path": "benchmarks/README.md",
-      "size": 26265,
-      "sha256": "ed9f818ed024c6017c1cfd79146cb83622eeb45adc0780f790e89edf3f94621a"
+      "size": 26246,
+      "sha256": "71c3e0f6a6a3b4e9f31179c4e492f626656e79435224823d8526eea1244a9ae1"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -116,8 +116,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 82933,
-      "sha256": "85dab02adeaf75a1f7da640e0a52bb8640d8130709e4eec6028fdefd729c78a5"
+      "size": 86969,
+      "sha256": "4ac556b3ed061bc70858cb956e6097a9e5d4962c7c04cd2c47e5e019c47073c8"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -162,7 +162,7 @@
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/demo.mjs",
       "size": 5184,
-      "sha256": "1e2ed163f47abe14cd8e932eec33a0a2242579d80fbb8d0b0fb0a71cf8ff9265"
+      "sha256": "851fd78cf7cbb181db1e91c1c4f6481a9f9bad07b297021bc6ee68177ce01161"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/Main.clasp",
@@ -187,7 +187,7 @@
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/solution/demo.mjs",
       "size": 5002,
-      "sha256": "a3f65ceb710143fa3a05c4d820113f4436fae660b60a2b7cd945d6a23638c335"
+      "sha256": "1ff88fc0cae35aa076520cf051ae4b0867899dee8d2fdc5abdff8f091c5983e4"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/task.json",
@@ -220,19 +220,19 @@
       "sha256": "f43883e752b39f646d2053bbe975e30d80ae94540af3d03def2adab842886419"
     },
     {
-      "path": "benchmarks/tasks/clasp-lead-priority/repo/runtime/server.mjs",
-      "size": 1983,
-      "sha256": "8e813a0c1a5f77b837b313d0be55d84f5600090c175db5eaac1cd349f9f31d8f"
+      "path": "benchmarks/tasks/clasp-lead-priority/repo/build/lead-priority",
+      "size": 2585204,
+      "sha256": "3d800f6cb942d2cabb3764ba6fc1e823217885dd5eba945a254b9e8eaf42946c"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/scripts/verify.sh",
-      "size": 386,
-      "sha256": "f01e04311dc595ce02ee619d56bb64a61efb3f79f7e90d209f5c1b84b75c8ff8"
+      "size": 640,
+      "sha256": "d7d53796962b080a6c168dde9ce8ef2ede00d7b8cb5b3a8e4a61b005b3a45a64"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/test/priority.test.mjs",
-      "size": 3654,
-      "sha256": "3edd46428c55508b6ca87f1312429726492bde3df89405e739a27d270978a955"
+      "size": 2155,
+      "sha256": "ddbc31c02cbdf70676ca53532bb287fcb350b0df3636f6cd8a5109ffc1f29366"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/task.json",
@@ -265,24 +265,19 @@
       "sha256": "f43883e752b39f646d2053bbe975e30d80ae94540af3d03def2adab842886419"
     },
     {
-      "path": "benchmarks/tasks/clasp-lead-rejection/repo/runtime/server.mjs",
-      "size": 1983,
-      "sha256": "8e813a0c1a5f77b837b313d0be55d84f5600090c175db5eaac1cd349f9f31d8f"
-    },
-    {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/scripts/verify.sh",
-      "size": 387,
-      "sha256": "c9c6b4a836888f8f735d44b8768fa9a2cc3793945da3d55187ca2fb3893acfa1"
+      "size": 642,
+      "sha256": "ed2dd3c8479d1eb71daca4d0a7c5296ec9377671b07bea1cca37c74426344e0b"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/priority.test.mjs",
-      "size": 3654,
-      "sha256": "3edd46428c55508b6ca87f1312429726492bde3df89405e739a27d270978a955"
+      "size": 2155,
+      "sha256": "ddbc31c02cbdf70676ca53532bb287fcb350b0df3636f6cd8a5109ffc1f29366"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/rejection.test.mjs",
-      "size": 3654,
-      "sha256": "3edd46428c55508b6ca87f1312429726492bde3df89405e739a27d270978a955"
+      "size": 2155,
+      "sha256": "ddbc31c02cbdf70676ca53532bb287fcb350b0df3636f6cd8a5109ffc1f29366"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/task.json",
@@ -296,8 +291,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.oracle.md",
-      "size": 2061,
-      "sha256": "a9ae4ad4c2fe93216489407d2a298ab7827f1233d5acbb102a1c806673711a2e"
+      "size": 2050,
+      "sha256": "9a33a2dbbfb3e54db603480a194ca3892a5a13cba6d7c0f71abb81e99231ec7b"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.raw.md",
@@ -311,13 +306,13 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/AGENTS.md",
-      "size": 860,
-      "sha256": "7c208d3671d0319747a92e573a32d7b46ff3fab3ef9bc82e4329d441c050dc06"
+      "size": 872,
+      "sha256": "08e0dbdff3461abe03eb1630612056b3b54339a7ab7b37440f9266b74bef375d"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/LANGUAGE_GUIDE.md",
-      "size": 2424,
-      "sha256": "38604f31e6771e38d1803852e963099e2ad3c4ab1c68de9085e5fbe48944acd3"
+      "size": 2377,
+      "sha256": "b5ee086f76fc918ff89b35cf50f65276091e18e78707ec5d2f05c4475126a167"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Main.clasp",
@@ -325,19 +320,9 @@
       "sha256": "b2315c90233031cefbe723f96c5887c890d40fe1991bdcfef459afaca3917313"
     },
     {
-      "path": "benchmarks/tasks/clasp-lead-segment/repo/runtime/server.mjs",
-      "size": 4976,
-      "sha256": "b102707001687fb2c77c89ce3edf921e77f7de0af8f0fadf5bb0b379f54794b0"
-    },
-    {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh",
-      "size": 402,
-      "sha256": "f08a08a4c70405038e07c0a3d22f53210a985ec1947a1c45750ee5511dd19348"
-    },
-    {
-      "path": "benchmarks/tasks/clasp-lead-segment/repo/server.mjs",
-      "size": 3966,
-      "sha256": "57afc4faf5765d4b3d512e2e2d5707fa222cfaa8c65e7dbe59bbdca577ee8834"
+      "size": 631,
+      "sha256": "e4fad4de021aac7b56fb466a9f8d40e662ccf6ca8796c5e24a187cd740e20ea8"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp",
@@ -346,8 +331,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/test/lead-app.test.mjs",
-      "size": 6762,
-      "sha256": "6dc77067944ab079036b7eb11273d229aa17cdef16aaf064cf0e1447e5179068"
+      "size": 5188,
+      "sha256": "91fa8cd01f2664fd78ae06b1544a67a5b439d828487b89d504e39db6d0627a05"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/task.json",

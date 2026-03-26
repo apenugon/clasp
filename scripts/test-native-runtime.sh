@@ -7,6 +7,7 @@ cc_bin="${CC:-cc}"
 rustc_bin="${RUSTC:-rustc}"
 rust_runtime_source="$project_root/runtime/clasp_runtime.rs"
 rust_runtime_lib="$test_root/libclasp_runtime.a"
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 
 cleanup() {
   rm -rf "$test_root"
@@ -23,7 +24,7 @@ hello_structured_image_path="$test_root/hello.structured.native.image.json"
 parser_ir_path="$test_root/compiler-parser.native.ir"
 parser_image_path="${parser_ir_path%.*}.image.json"
 parser_structured_image_path="$test_root/compiler-parser.structured.native.image.json"
-hosted_image_path="$project_root/src/stage1.native.image.json"
+hosted_image_path="$project_root/src/embedded.native.image.json"
 hosted_structured_image_path="$test_root/compiler-hosted.structured.native.image.json"
 hosted_durable_ir_path="$test_root/durable-workflow-hosted.native.ir"
 hosted_durable_image_path="${hosted_durable_ir_path%.*}.image.json"
@@ -80,16 +81,16 @@ EOF
 
 (
   cd "$project_root"
-  claspc native examples/durable-workflow/Main.clasp -o "$ir_path" --json >/dev/null
-  claspc native-image examples/durable-workflow/Main.clasp -o "$image_path" --json >/dev/null
-  claspc native examples/hello.clasp -o "$hello_ir_path" --json >/dev/null
-  claspc native-image examples/hello.clasp -o "$hello_image_path" --json >/dev/null
-  claspc native examples/compiler-parser.clasp -o "$parser_ir_path" --json >/dev/null
-  claspc native-image examples/compiler-parser.clasp -o "$parser_image_path" --json >/dev/null
-  claspc native examples/durable-workflow/Main.clasp -o "$hosted_durable_ir_path" --json >/dev/null
-  claspc native-image examples/durable-workflow/Main.clasp -o "$hosted_durable_image_path" --json >/dev/null
-  claspc native "$route_project_path" -o "$route_ir_path" --json >/dev/null
-  claspc native-image "$route_project_path" -o "$route_image_path" --json >/dev/null
+  "$claspc_bin" native examples/durable-workflow/Main.clasp -o "$ir_path" --json >/dev/null
+  "$claspc_bin" native-image examples/durable-workflow/Main.clasp -o "$image_path" --json >/dev/null
+  "$claspc_bin" native examples/hello.clasp -o "$hello_ir_path" --json >/dev/null
+  "$claspc_bin" native-image examples/hello.clasp -o "$hello_image_path" --json >/dev/null
+  "$claspc_bin" native examples/compiler-parser.clasp -o "$parser_ir_path" --json >/dev/null
+  "$claspc_bin" native-image examples/compiler-parser.clasp -o "$parser_image_path" --json >/dev/null
+  "$claspc_bin" native examples/durable-workflow/Main.clasp -o "$hosted_durable_ir_path" --json >/dev/null
+  "$claspc_bin" native-image examples/durable-workflow/Main.clasp -o "$hosted_durable_image_path" --json >/dev/null
+  "$claspc_bin" native "$route_project_path" -o "$route_ir_path" --json >/dev/null
+  "$claspc_bin" native-image "$route_project_path" -o "$route_image_path" --json >/dev/null
 )
 
 [[ -f "$ir_path" ]]
@@ -309,10 +310,10 @@ grep -F "hello : Str" "$test_root/hosted-tool-hello.check" >/dev/null
 grep -F "id : Str -> Str" "$test_root/hosted-tool-hello.check" >/dev/null
 grep -F "main : Str" "$test_root/hosted-tool-hello.check" >/dev/null
 
-CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" checkSourceText "$project_root/src/Compiler/Ast.clasp" "$test_root/hosted-tool-ast.check"
-grep -F "splitTopLevel : Str -> Str -> [Str]" "$test_root/hosted-tool-ast.check" >/dev/null
-grep -F "logicalLines : Str -> [Str]" "$test_root/hosted-tool-ast.check" >/dev/null
-grep -F "parseModuleAst : Str -> HostedModuleAst" "$test_root/hosted-tool-ast.check" >/dev/null
+CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" checkSourceText "$project_root/examples/compiler-parser.clasp" "$test_root/hosted-tool-parser.check"
+grep -F "firstSegment : Str -> Str" "$test_root/hosted-tool-parser.check" >/dev/null
+grep -F "remainingSegments : Str -> Str" "$test_root/hosted-tool-parser.check" >/dev/null
+grep -F "parseModuleSummary : Str -> ParserState" "$test_root/hosted-tool-parser.check" >/dev/null
 
 CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" compileSourceText "$project_root/examples/hello.clasp" "$test_root/hosted-tool-hello.mjs"
 grep -F 'export const hello = "Hello from Clasp";' "$test_root/hosted-tool-hello.mjs" >/dev/null

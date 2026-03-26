@@ -41,6 +41,8 @@ It includes:
 - Equality operators for `Int`, `Str`, and `Bool`
 - Integer comparison operators for branching
 - Field access
+- Record update expressions
+- Record destructuring in local `let` expressions
 - JSON `decode` and `encode` boundary expressions
 - Match expressions over constructors
 - Compiler-known `Page` and `View` primitives for safe SSR-first HTML rendering
@@ -60,7 +62,7 @@ It includes:
 It does not yet include:
 
 - Full module-wide polymorphic inference
-- Type parameters
+- Higher-rank polymorphism
 - Nested patterns
 - Effects
 - Dedicated schema syntax separate from records
@@ -83,11 +85,11 @@ The current `module Main`-style surface should be treated as provisional. Future
 - explicit results for failure and absence
 - informative compiler diagnostics that connect errors back to the shared type and schema model
 
-The v0 compiler now implements a first slice of those features through nominal sum types and constructor-based match expressions, but the design should still assume a broader static-semantics story later.
+The v0 compiler now implements a first slice of those features through nominal sum types, explicit type parameters on records/ADTs/signatures, constructor-based match expressions, and rank-1 polymorphism for declaration-level schemes, but the design should still assume a broader static-semantics story later.
 
 `Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`. Modules may use `Option`, `Some`, and `None` without declaring the type locally.
 
-`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`. Modules may use `Result`, `Ok`, and `Err` without declaring the type locally.
+`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result a = Ok a | Err Str`. Modules may use `Result`, `Ok`, and `Err` without declaring the type locally.
 
 The self-hosting slice also reserves a small compiler-known stdlib surface:
 
@@ -95,20 +97,28 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `textJoin : Str -> [Str] -> Str`
 - `textSplit : Str -> Str -> [Str]`
 - `textChars : Str -> [Str]`
+- `dictEmpty : Dict Str a`
+- `dictSet : Str -> a -> Dict Str a -> Dict Str a`
+- `dictGet : Str -> Dict Str a -> Result a`
+- `dictHas : Str -> Dict Str a -> Bool`
+- `dictRemove : Str -> Dict Str a -> Dict Str a`
+- `dictKeys : Dict Str a -> [Str]`
+- `dictValues : Dict Str a -> [a]`
 - `pathJoin : [Str] -> Str`
 - `pathDirname : Str -> Str`
 - `pathBasename : Str -> Str`
 - `fileExists : Str -> Bool`
 - `timeUnixMs : Int`
-- `envVar : Str -> Result`
-- `readFile : Str -> Result`
-- `writeFile : Str -> Str -> Result`
-- `appendFile : Str -> Str -> Result`
-- `mkdirAll : Str -> Result`
+- `envVar : Str -> Result Str`
+- `readFile : Str -> Result Str`
+- `runCommandJson : Str -> [Str] -> Result Str`
+- `writeFile : Str -> Str -> Result Str`
+- `appendFile : Str -> Str -> Result Str`
+- `mkdirAll : Str -> Result Str`
 - `sqliteOpen : Str -> SqliteConnection`
 - `sqliteOpenReadonly : Str -> SqliteConnection`
 
-The text and path helpers are emitted with default JavaScript behavior. The filesystem, environment, and time helpers remain host/runtime bindings so compiler code and native control-plane code can interact with the surrounding machine without baking host access into every target runtime. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
+The text and path helpers are emitted with default JavaScript behavior. The filesystem, environment, time, and command helpers remain host/runtime bindings so compiler code and ordinary native Clasp programs can interact with the surrounding machine without baking host access into every target runtime. Native `claspc run` compiles an entry module to a temporary backend binary and executes it with any trailing `--` arguments. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
 
 ## Design Constraints
 
@@ -345,6 +355,23 @@ main : Str
 main = showName defaultUser
 ```
 
+Records also support lightweight update and destructuring forms:
+
+```clasp
+module Main
+
+record User = {
+  name : Str,
+  active : Bool
+}
+
+renamed : User -> User
+renamed user = with user { name = "Grace" }
+
+main : Str
+main = let { name, active } = renamed (User { name = "Ada", active = true }) in name
+```
+
 List types use square brackets around any type expression:
 
 ```clasp
@@ -430,7 +457,7 @@ decl        ::= lower-ident lower-ident* "=" expr
 block-expr  ::= "{" block-let* expr "}"
 block-let   ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr | "for" lower-ident "in" for-iterable-expr block-expr) block-separator
 block-separator ::= ";" | newline+
-let-expr    ::= "let" lower-ident "=" expr "in" expr
+let-expr    ::= "let" (lower-ident | "{" lower-ident ("," lower-ident)* "}") "=" expr "in" expr
 expr        ::= let-expr | equality-expr
 for-iterable-expr ::= let-expr | for-equality-expr
 for-equality-expr ::= for-comparison-expr (("==" | "!=") for-comparison-expr)*
@@ -490,10 +517,17 @@ Package-backed foreign declarations are checked against the referenced declarati
 - A nullary constructor becomes an exported tagged JavaScript object.
 - A constructor with fields becomes an exported JavaScript function returning a tagged object.
 - A record literal becomes a plain JavaScript object literal.
+- `with subject { field = value }` creates a new record value by copying the unchanged fields from `subject` and replacing the named fields.
+- `let { fieldA, fieldB } = value in body` is shorthand for binding those named fields through record field access before evaluating `body`.
 - List literals, record literals, record field declarations, and other comma-delimited block forms may span multiple lines and accept an optional trailing comma after the final item.
-- A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type.
+- A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type, which may come from an annotation, a branch expectation, or a polymorphic builtin/constructor application.
 - `if condition then left else right` requires a `Bool` condition and matching branch types.
 - `append left right` is overloaded by the checker: list operands lower to array concatenation, while `View` operands keep the view-append surface.
+- `prepend value values` inserts a single element at the front of a list and is polymorphic over the element type.
+- `reverse values` reverses a list and preserves the list item type.
+- `length value` returns the length of a list or string.
+- `map f values`, `filter f values`, `any f values`, `all f values`, and `fold f initial values` provide polymorphic list traversal helpers, and today require a plain function name as their first argument.
+- `Dict Str a` is a compiler-known dictionary surface for state-heavy compiler and swarm code; `dictSet`, `dictGet`, `dictHas`, `dictRemove`, `dictKeys`, and `dictValues` provide immutable update and lookup helpers over string-keyed maps.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.
 - Policies list the field classifications a disclosure boundary may expose, and may also declare file, network, process, and secret permission grants for generated control-plane enforcement helpers.

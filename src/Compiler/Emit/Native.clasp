@@ -2,6 +2,10 @@ module Compiler.Emit.Native
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Emit.NativeDecls
+import Compiler.Emit.NativeJson
+import Compiler.Emit.NativeMetadata
+import Compiler.Emit.NativeSurface
 import Compiler.CheckedCore
 import Compiler.Json
 import Compiler.Lower
@@ -9,9 +13,15 @@ import Compiler.Lower
 appendNativeRenderedText : [Str] -> Str -> [Str]
 appendNativeRenderedText values value = append values [value]
 
+keepNoNativeTypeText : TypeText -> Bool
+keepNoNativeTypeText value = false
+
+emptyNativeTypeTexts : [TypeText]
+emptyNativeTypeTexts = filter keepNoNativeTypeText [TUnknown ""]
+
 emitNativeExprs : [LowerExprText] -> [Str]
 emitNativeExprs exprs = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for expr in exprs {
     rendered = appendNativeRenderedText rendered (emitNativeExpr expr);
     rendered
@@ -21,7 +31,7 @@ emitNativeExprs exprs = {
 
 emitNativeRecordFields : [LowerRecordFieldText] -> [Str]
 emitNativeRecordFields fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in fields {
     rendered = appendNativeRenderedText rendered (emitNativeRecordField field);
     rendered
@@ -43,7 +53,7 @@ emitNativeMatchBranch branch = match branch {
 
 emitNativeMatchBranches : [LowerMatchBranchText] -> [Str]
 emitNativeMatchBranches branches = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for branch in branches {
     rendered = appendNativeRenderedText rendered (emitNativeMatchBranch branch);
     rendered
@@ -65,6 +75,22 @@ emitNativeExpr expr = match expr {
     textConcat ["list([", textJoin ", " (emitNativeExprs values), "])"],
   LowerListAppend left right ->
     textConcat ["intrinsic.list.append(", emitNativeExpr left, ", ", emitNativeExpr right, ")"],
+  LowerListPrepend value values ->
+    textConcat ["intrinsic.list.prepend(", emitNativeExpr value, ", ", emitNativeExpr values, ")"],
+  LowerListReverse values ->
+    textConcat ["intrinsic.list.reverse(", emitNativeExpr values, ")"],
+  LowerLength value ->
+    textConcat ["intrinsic.length(", emitNativeExpr value, ")"],
+  LowerListMap callee values ->
+    textConcat ["intrinsic.list.map(", callee, ", ", emitNativeExpr values, ")"],
+  LowerListFilter callee values ->
+    textConcat ["intrinsic.list.filter(", callee, ", ", emitNativeExpr values, ")"],
+  LowerListAny callee values ->
+    textConcat ["intrinsic.list.any(", callee, ", ", emitNativeExpr values, ")"],
+  LowerListAll callee values ->
+    textConcat ["intrinsic.list.all(", callee, ", ", emitNativeExpr values, ")"],
+  LowerListFold callee initial values ->
+    textConcat ["intrinsic.list.fold(", callee, ", ", emitNativeExpr initial, ", ", emitNativeExpr values, ")"],
   LowerViewAppend left right ->
     textConcat ["intrinsic.view.append(", emitNativeExpr left, ", ", emitNativeExpr right, ")"],
   LowerEncode value ->
@@ -117,7 +143,7 @@ emitNativeDecl decl = match decl {
 
 collectLowerDeclNames : [LowerDeclText] -> [Str]
 collectLowerDeclNames decls = {
-  let mut names = [];
+  let mut names = emptyRenderedTexts;
   for decl in decls {
     names = append names [nativeDeclName decl];
     names
@@ -182,6 +208,15 @@ hostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool
 hostedTypeUsesNamedType typeAst targetName = match typeAst {
   HostedTypeName name ->
     name == targetName,
+  HostedTypeApply name args ->
+    if name == targetName then true else {
+      for arg in args {
+        if hostedTypeUsesNamedType arg targetName then return true else false
+      };
+      false
+    },
+  HostedTypeVar name ->
+    false,
   HostedTypeList itemType ->
     hostedTypeUsesNamedType itemType targetName,
   HostedTypeFunction input result ->
@@ -230,7 +265,7 @@ exprUsesBuiltinResultRuntime expr = match expr {
   HostedList values ->
     exprListUsesBuiltinResultRuntime values,
   HostedCall callee args ->
-    if callee == "textPrefix" then true else if callee == "textSplitFirst" then true else if callee == "readFile" then true else if callee == "writeFile" then true else if callee == "appendFile" then true else if callee == "mkdirAll" then true else if callee == "envVar" then true else exprListUsesBuiltinResultRuntime args,
+    if callee == "textPrefix" then true else if callee == "textSplitFirst" then true else if callee == "dictGet" then true else if callee == "readFile" then true else if callee == "runCommandJson" then true else if callee == "writeFile" then true else if callee == "appendFile" then true else if callee == "mkdirAll" then true else if callee == "envVar" then true else exprListUsesBuiltinResultRuntime args,
   HostedConstructor constructorName args ->
     exprListUsesBuiltinResultRuntime args,
   HostedMatch subject branches ->
@@ -330,7 +365,7 @@ nativeEmittedTypeDecls modl = if moduleUsesBuiltinResult modl then effectiveModu
 
 renderTypeTextList : [TypeText] -> [Str]
 renderTypeTextList types = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for typ in types {
     rendered = appendNativeRenderedText rendered (renderType typ);
     rendered
@@ -350,7 +385,11 @@ supportsRuntimeCodecType typ = match typ {
     supportsRuntimeCodecType itemType,
   TNamed name ->
     true,
+  TApply name args ->
+    false,
   TFunction input result ->
+    false,
+  TVar label ->
     false,
   TUnknown label ->
     false
@@ -375,7 +414,7 @@ appendUniqueRuntimeCodecTypes existing additions = {
 
 collectRuntimeCodecTypesFromExprList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> [TypeText]
 collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext exprs = {
-  let mut collected = [];
+  let mut collected = emptyNativeTypeTexts;
   for expr in exprs {
     collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext expr);
     collected
@@ -385,7 +424,7 @@ collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContex
 
 collectRuntimeCodecTypesFromRecordFields : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> [TypeText]
 collectRuntimeCodecTypesFromRecordFields typeDecls recordDecls env localEnv fnContext fields = {
-  let mut collected = [];
+  let mut collected = emptyNativeTypeTexts;
   for field in fields {
     collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue field));
     collected
@@ -395,7 +434,7 @@ collectRuntimeCodecTypesFromRecordFields typeDecls recordDecls env localEnv fnCo
 
 collectRuntimeCodecTypesFromBranches : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedMatchBranchAst] -> [TypeText]
 collectRuntimeCodecTypesFromBranches typeDecls recordDecls env localEnv fnContext branches = {
-  let mut collected = [];
+  let mut collected = emptyNativeTypeTexts;
   for branch in branches {
     collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext (branchBodyExpr branch));
     collected
@@ -406,13 +445,13 @@ collectRuntimeCodecTypesFromBranches typeDecls recordDecls env localEnv fnContex
 collectRuntimeCodecTypesFromExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> [TypeText]
 collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
   HostedName name ->
-    [],
+    emptyNativeTypeTexts,
   HostedString value ->
-    [],
+    emptyNativeTypeTexts,
   HostedInt value ->
-    [],
+    emptyNativeTypeTexts,
   HostedBool value ->
-    [],
+    emptyNativeTypeTexts,
   HostedList values ->
     collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext values,
   HostedCall callee args -> {
@@ -491,7 +530,7 @@ collectModuleRuntimeCodecTypes modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
   let env = lowerModuleEnv modl typeDecls;
-  let mut collected = [];
+  let mut collected = emptyNativeTypeTexts;
   for workflowDecl in moduleWorkflowDeclarations modl {
     collected = appendUniqueRuntimeCodecType collected (typeFromHostedTypeAst (workflowDeclStateTypeAst workflowDecl));
     collected
@@ -533,11 +572,11 @@ appendUniqueTextValues existing additions = {
 }
 
 builtinRuntimeBindingName : Str -> Bool
-builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "text" then true else if name == "element" then true else if name == "styled" then true else if name == "link" then true else if name == "form" then true else if name == "input" then true else if name == "submit" then true else if name == "systemPrompt" then true else if name == "assistantPrompt" then true else if name == "userPrompt" then true else if name == "appendPrompt" then true else if name == "promptText" then true else if name == "page" then true else if name == "redirect" then true else if name == "principal" then true else if name == "tenant" then true else if name == "resourceIdentity" then true else if name == "authSession" then true else if name == "argv" then true else if name == "timeUnixMs" then true else if name == "envVar" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "writeFile" then true else if name == "appendFile" then true else if name == "mkdirAll" then true else false
+builtinRuntimeBindingName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "text" then true else if name == "element" then true else if name == "styled" then true else if name == "link" then true else if name == "form" then true else if name == "input" then true else if name == "submit" then true else if name == "systemPrompt" then true else if name == "assistantPrompt" then true else if name == "userPrompt" then true else if name == "appendPrompt" then true else if name == "promptText" then true else if name == "page" then true else if name == "redirect" then true else if name == "principal" then true else if name == "tenant" then true else if name == "resourceIdentity" then true else if name == "authSession" then true else if name == "argv" then true else if name == "timeUnixMs" then true else if name == "envVar" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "runCommandJson" then true else if name == "writeFile" then true else if name == "appendFile" then true else if name == "mkdirAll" then true else false
 
 collectRuntimeBindingNamesFromExprList : [HostedExprAst] -> [Str]
 collectRuntimeBindingNamesFromExprList exprs = {
-  let mut collected = [];
+  let mut collected = emptyRenderedTexts;
   for expr in exprs {
     collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr expr);
     collected
@@ -547,7 +586,7 @@ collectRuntimeBindingNamesFromExprList exprs = {
 
 collectRuntimeBindingNamesFromRecordFields : [HostedRecordFieldExprAst] -> [Str]
 collectRuntimeBindingNamesFromRecordFields fields = {
-  let mut collected = [];
+  let mut collected = emptyRenderedTexts;
   for field in fields {
     collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (recordExprFieldValue field));
     collected
@@ -557,7 +596,7 @@ collectRuntimeBindingNamesFromRecordFields fields = {
 
 collectRuntimeBindingNamesFromBranches : [HostedMatchBranchAst] -> [Str]
 collectRuntimeBindingNamesFromBranches branches = {
-  let mut collected = [];
+  let mut collected = emptyRenderedTexts;
   for branch in branches {
     collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (branchBodyExpr branch));
     collected
@@ -568,13 +607,13 @@ collectRuntimeBindingNamesFromBranches branches = {
 collectRuntimeBindingNamesFromExpr : HostedExprAst -> [Str]
 collectRuntimeBindingNamesFromExpr expr = match expr {
   HostedName name ->
-    if builtinRuntimeBindingName name then [name] else [],
+    if builtinRuntimeBindingName name then [name] else emptyRenderedTexts,
   HostedString value ->
-    [],
+    emptyRenderedTexts,
   HostedInt value ->
-    [],
+    emptyRenderedTexts,
   HostedBool value ->
-    [],
+    emptyRenderedTexts,
   HostedList values ->
     collectRuntimeBindingNamesFromExprList values,
   HostedCall callee args -> {
@@ -643,7 +682,7 @@ collectRuntimeBindingNamesFromExpr expr = match expr {
 
 collectModuleRuntimeBindingNames : HostedModuleAst -> [Str]
 collectModuleRuntimeBindingNames modl = {
-  let mut collected = [];
+  let mut collected = emptyRenderedTexts;
   for decl in moduleDeclarations modl {
     collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (declBody decl));
     collected
@@ -723,10 +762,10 @@ emitRuntimeBindingImage name runtimeName bindingType =
   ]
 
 emitBuiltinRuntimeBindingImage : Str -> Str
-emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result" else if name == "text" then emitRuntimeBindingImage "text" "viewText" "Str -> View" else if name == "element" then emitRuntimeBindingImage "element" "viewElement" "Str -> View -> View" else if name == "styled" then emitRuntimeBindingImage "styled" "viewStyled" "Str -> View -> View" else if name == "link" then emitRuntimeBindingImage "link" "viewLink" "Str -> View -> View" else if name == "form" then emitRuntimeBindingImage "form" "viewForm" "Str -> Str -> View -> View" else if name == "input" then emitRuntimeBindingImage "input" "viewInput" "Str -> Str -> Str -> View" else if name == "submit" then emitRuntimeBindingImage "submit" "viewSubmit" "Str -> View" else if name == "systemPrompt" then emitRuntimeBindingImage "systemPrompt" "systemPrompt" "Str -> Prompt" else if name == "assistantPrompt" then emitRuntimeBindingImage "assistantPrompt" "assistantPrompt" "Str -> Prompt" else if name == "userPrompt" then emitRuntimeBindingImage "userPrompt" "userPrompt" "Str -> Prompt" else if name == "appendPrompt" then emitRuntimeBindingImage "appendPrompt" "appendPrompt" "Prompt -> Prompt -> Prompt" else if name == "promptText" then emitRuntimeBindingImage "promptText" "promptText" "Prompt -> Str" else if name == "page" then emitRuntimeBindingImage "page" "page" "Str -> View -> Page" else if name == "redirect" then emitRuntimeBindingImage "redirect" "redirect" "Str -> Redirect" else if name == "principal" then emitRuntimeBindingImage "principal" "principal" "Str -> Principal" else if name == "tenant" then emitRuntimeBindingImage "tenant" "tenant" "Str -> Tenant" else if name == "resourceIdentity" then emitRuntimeBindingImage "resourceIdentity" "resourceIdentity" "Str -> Str -> ResourceIdentity" else if name == "authSession" then emitRuntimeBindingImage "authSession" "authSession" "Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession" else if name == "argv" then emitRuntimeBindingImage "argv" "argv" "[Str]" else if name == "timeUnixMs" then emitRuntimeBindingImage "timeUnixMs" "timeUnixMs" "Int" else if name == "envVar" then emitRuntimeBindingImage "envVar" "envVar" "Str -> Result" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result" else if name == "writeFile" then emitRuntimeBindingImage "writeFile" "writeFile" "Str -> Str -> Result" else if name == "appendFile" then emitRuntimeBindingImage "appendFile" "appendFile" "Str -> Str -> Result" else if name == "mkdirAll" then emitRuntimeBindingImage "mkdirAll" "mkdirAll" "Str -> Result" else jsonObject []
+emitBuiltinRuntimeBindingImage name = if name == "textConcat" then emitRuntimeBindingImage "textConcat" "textConcat" "[Str] -> Str" else if name == "textJoin" then emitRuntimeBindingImage "textJoin" "textJoin" "Str -> [Str] -> Str" else if name == "textSplit" then emitRuntimeBindingImage "textSplit" "textSplit" "Str -> Str -> [Str]" else if name == "textChars" then emitRuntimeBindingImage "textChars" "textChars" "Str -> [Str]" else if name == "textFingerprint64Hex" then emitRuntimeBindingImage "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str" else if name == "textPrefix" then emitRuntimeBindingImage "textPrefix" "textPrefix" "Str -> Str -> Result Str" else if name == "textSplitFirst" then emitRuntimeBindingImage "textSplitFirst" "textSplitFirst" "Str -> Str -> Result Str" else if name == "dictEmpty" then emitRuntimeBindingImage "dictEmpty" "dictEmpty" "Dict Str a" else if name == "dictSet" then emitRuntimeBindingImage "dictSet" "dictSet" "Str -> a -> Dict Str a -> Dict Str a" else if name == "dictGet" then emitRuntimeBindingImage "dictGet" "dictGet" "Str -> Dict Str a -> Result a" else if name == "dictHas" then emitRuntimeBindingImage "dictHas" "dictHas" "Str -> Dict Str a -> Bool" else if name == "dictRemove" then emitRuntimeBindingImage "dictRemove" "dictRemove" "Str -> Dict Str a -> Dict Str a" else if name == "dictKeys" then emitRuntimeBindingImage "dictKeys" "dictKeys" "Dict Str a -> [Str]" else if name == "dictValues" then emitRuntimeBindingImage "dictValues" "dictValues" "Dict Str a -> [a]" else if name == "text" then emitRuntimeBindingImage "text" "viewText" "Str -> View" else if name == "element" then emitRuntimeBindingImage "element" "viewElement" "Str -> View -> View" else if name == "styled" then emitRuntimeBindingImage "styled" "viewStyled" "Str -> View -> View" else if name == "link" then emitRuntimeBindingImage "link" "viewLink" "Str -> View -> View" else if name == "form" then emitRuntimeBindingImage "form" "viewForm" "Str -> Str -> View -> View" else if name == "input" then emitRuntimeBindingImage "input" "viewInput" "Str -> Str -> Str -> View" else if name == "submit" then emitRuntimeBindingImage "submit" "viewSubmit" "Str -> View" else if name == "systemPrompt" then emitRuntimeBindingImage "systemPrompt" "systemPrompt" "Str -> Prompt" else if name == "assistantPrompt" then emitRuntimeBindingImage "assistantPrompt" "assistantPrompt" "Str -> Prompt" else if name == "userPrompt" then emitRuntimeBindingImage "userPrompt" "userPrompt" "Str -> Prompt" else if name == "appendPrompt" then emitRuntimeBindingImage "appendPrompt" "appendPrompt" "Prompt -> Prompt -> Prompt" else if name == "promptText" then emitRuntimeBindingImage "promptText" "promptText" "Prompt -> Str" else if name == "page" then emitRuntimeBindingImage "page" "page" "Str -> View -> Page" else if name == "redirect" then emitRuntimeBindingImage "redirect" "redirect" "Str -> Redirect" else if name == "principal" then emitRuntimeBindingImage "principal" "principal" "Str -> Principal" else if name == "tenant" then emitRuntimeBindingImage "tenant" "tenant" "Str -> Tenant" else if name == "resourceIdentity" then emitRuntimeBindingImage "resourceIdentity" "resourceIdentity" "Str -> Str -> ResourceIdentity" else if name == "authSession" then emitRuntimeBindingImage "authSession" "authSession" "Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession" else if name == "argv" then emitRuntimeBindingImage "argv" "argv" "[Str]" else if name == "timeUnixMs" then emitRuntimeBindingImage "timeUnixMs" "timeUnixMs" "Int" else if name == "envVar" then emitRuntimeBindingImage "envVar" "envVar" "Str -> Result Str" else if name == "pathJoin" then emitRuntimeBindingImage "pathJoin" "pathJoin" "[Str] -> Str" else if name == "pathDirname" then emitRuntimeBindingImage "pathDirname" "pathDirname" "Str -> Str" else if name == "pathBasename" then emitRuntimeBindingImage "pathBasename" "pathBasename" "Str -> Str" else if name == "fileExists" then emitRuntimeBindingImage "fileExists" "fileExists" "Str -> Bool" else if name == "readFile" then emitRuntimeBindingImage "readFile" "readFile" "Str -> Result Str" else if name == "runCommandJson" then emitRuntimeBindingImage "runCommandJson" "runCommandJson" "Str -> [Str] -> Result Str" else if name == "writeFile" then emitRuntimeBindingImage "writeFile" "writeFile" "Str -> Str -> Result Str" else if name == "appendFile" then emitRuntimeBindingImage "appendFile" "appendFile" "Str -> Str -> Result Str" else if name == "mkdirAll" then emitRuntimeBindingImage "mkdirAll" "mkdirAll" "Str -> Result Str" else jsonObject emptyJsonFields
 
 emitBuiltinRuntimeBindingText : Str -> Str
-emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "systemPrompt" then "systemPrompt{runtime=systemPrompt, symbol=clasp_rt_system_prompt, type=Str -> Prompt}" else if name == "assistantPrompt" then "assistantPrompt{runtime=assistantPrompt, symbol=clasp_rt_assistant_prompt, type=Str -> Prompt}" else if name == "userPrompt" then "userPrompt{runtime=userPrompt, symbol=clasp_rt_user_prompt, type=Str -> Prompt}" else if name == "appendPrompt" then "appendPrompt{runtime=appendPrompt, symbol=clasp_rt_append_prompt, type=Prompt -> Prompt -> Prompt}" else if name == "promptText" then "promptText{runtime=promptText, symbol=clasp_rt_prompt_text, type=Prompt -> Str}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "principal" then "principal{runtime=principal, symbol=clasp_rt_principal, type=Str -> Principal}" else if name == "tenant" then "tenant{runtime=tenant, symbol=clasp_rt_tenant, type=Str -> Tenant}" else if name == "resourceIdentity" then "resourceIdentity{runtime=resourceIdentity, symbol=clasp_rt_resource_identity, type=Str -> Str -> ResourceIdentity}" else if name == "authSession" then "authSession{runtime=authSession, symbol=clasp_rt_auth_session, type=Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "timeUnixMs" then "timeUnixMs{runtime=timeUnixMs, symbol=clasp_rt_time_unix_ms, type=Int}" else if name == "envVar" then "envVar{runtime=envVar, symbol=clasp_rt_env_var, type=Str -> Result}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result}" else if name == "appendFile" then "appendFile{runtime=appendFile, symbol=clasp_rt_append_file, type=Str -> Str -> Result}" else if name == "mkdirAll" then "mkdirAll{runtime=mkdirAll, symbol=clasp_rt_mkdir_all, type=Str -> Result}" else ""
+emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result Str}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result Str}" else if name == "dictEmpty" then "dictEmpty{runtime=dictEmpty, symbol=clasp_rt_dict_empty, type=Dict Str a}" else if name == "dictSet" then "dictSet{runtime=dictSet, symbol=clasp_rt_dict_set, type=Str -> a -> Dict Str a -> Dict Str a}" else if name == "dictGet" then "dictGet{runtime=dictGet, symbol=clasp_rt_dict_get, type=Str -> Dict Str a -> Result a}" else if name == "dictHas" then "dictHas{runtime=dictHas, symbol=clasp_rt_dict_has, type=Str -> Dict Str a -> Bool}" else if name == "dictRemove" then "dictRemove{runtime=dictRemove, symbol=clasp_rt_dict_remove, type=Str -> Dict Str a -> Dict Str a}" else if name == "dictKeys" then "dictKeys{runtime=dictKeys, symbol=clasp_rt_dict_keys, type=Dict Str a -> [Str]}" else if name == "dictValues" then "dictValues{runtime=dictValues, symbol=clasp_rt_dict_values, type=Dict Str a -> [a]}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "systemPrompt" then "systemPrompt{runtime=systemPrompt, symbol=clasp_rt_system_prompt, type=Str -> Prompt}" else if name == "assistantPrompt" then "assistantPrompt{runtime=assistantPrompt, symbol=clasp_rt_assistant_prompt, type=Str -> Prompt}" else if name == "userPrompt" then "userPrompt{runtime=userPrompt, symbol=clasp_rt_user_prompt, type=Str -> Prompt}" else if name == "appendPrompt" then "appendPrompt{runtime=appendPrompt, symbol=clasp_rt_append_prompt, type=Prompt -> Prompt -> Prompt}" else if name == "promptText" then "promptText{runtime=promptText, symbol=clasp_rt_prompt_text, type=Prompt -> Str}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "principal" then "principal{runtime=principal, symbol=clasp_rt_principal, type=Str -> Principal}" else if name == "tenant" then "tenant{runtime=tenant, symbol=clasp_rt_tenant, type=Str -> Tenant}" else if name == "resourceIdentity" then "resourceIdentity{runtime=resourceIdentity, symbol=clasp_rt_resource_identity, type=Str -> Str -> ResourceIdentity}" else if name == "authSession" then "authSession{runtime=authSession, symbol=clasp_rt_auth_session, type=Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "timeUnixMs" then "timeUnixMs{runtime=timeUnixMs, symbol=clasp_rt_time_unix_ms, type=Int}" else if name == "envVar" then "envVar{runtime=envVar, symbol=clasp_rt_env_var, type=Str -> Result Str}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result Str}" else if name == "runCommandJson" then "runCommandJson{runtime=runCommandJson, symbol=clasp_rt_run_command_json, type=Str -> [Str] -> Result Str}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result Str}" else if name == "appendFile" then "appendFile{runtime=appendFile, symbol=clasp_rt_append_file, type=Str -> Str -> Result Str}" else if name == "mkdirAll" then "mkdirAll{runtime=mkdirAll, symbol=clasp_rt_mkdir_all, type=Str -> Result Str}" else ""
 
 emitNativeRuntimeBindingImage : HostedForeignDeclAst -> Str
 emitNativeRuntimeBindingImage foreignDecl =
@@ -738,8 +777,8 @@ emitNativeRuntimeBindingText foreignDecl =
 
 emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingImages bindingNames = {
-  let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
+  let mut rendered = emptyRenderedTexts;
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "dictEmpty", "dictSet", "dictGet", "dictHas", "dictRemove", "dictKeys", "dictValues", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "runCommandJson", "writeFile", "appendFile", "mkdirAll"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingImage builtinName);
       rendered
@@ -752,8 +791,8 @@ emitNativeBuiltinRuntimeBindingImages bindingNames = {
 
 emitNativeBuiltinRuntimeBindingTexts : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingTexts bindingNames = {
-  let mut rendered = [];
-  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
+  let mut rendered = emptyRenderedTexts;
+  for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "dictEmpty", "dictSet", "dictGet", "dictHas", "dictRemove", "dictKeys", "dictValues", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "runCommandJson", "writeFile", "appendFile", "mkdirAll"] {
     if containsText bindingNames builtinName then {
       rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingText builtinName);
       rendered
@@ -796,8 +835,12 @@ nativeCodecSuffixForType typ = match typ {
     textConcat ["List_", nativeCodecSuffixForType itemType],
   TNamed name ->
     name,
+  TApply name args ->
+    textConcat [name, "_Generic"],
   TFunction input result ->
     "Unsupported",
+  TVar label ->
+    textConcat ["Var_", label],
   TUnknown label ->
     label
 }
@@ -828,7 +871,7 @@ emitNativeBinaryCodecText typ = {
 
 emitNativeJsonCodecImagesFromTypes : [TypeText] -> [Str]
 emitNativeJsonCodecImagesFromTypes codecTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for codecType in codecTypes {
     rendered = appendNativeRenderedText rendered (emitNativeJsonCodecImage codecType);
     rendered
@@ -838,7 +881,7 @@ emitNativeJsonCodecImagesFromTypes codecTypes = {
 
 emitNativeJsonCodecTextsFromTypes : [TypeText] -> [Str]
 emitNativeJsonCodecTextsFromTypes codecTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for codecType in codecTypes {
     rendered = appendNativeRenderedText rendered (emitNativeJsonCodecText codecType);
     rendered
@@ -848,7 +891,7 @@ emitNativeJsonCodecTextsFromTypes codecTypes = {
 
 emitNativeBinaryCodecImagesFromTypes : [TypeText] -> [Str]
 emitNativeBinaryCodecImagesFromTypes codecTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for codecType in codecTypes {
     rendered = appendNativeRenderedText rendered (emitNativeBinaryCodecImage codecType);
     rendered
@@ -858,7 +901,7 @@ emitNativeBinaryCodecImagesFromTypes codecTypes = {
 
 emitNativeBinaryCodecTextsFromTypes : [TypeText] -> [Str]
 emitNativeBinaryCodecTextsFromTypes codecTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for codecType in codecTypes {
     rendered = appendNativeRenderedText rendered (emitNativeBinaryCodecText codecType);
     rendered
@@ -866,629 +909,6 @@ emitNativeBinaryCodecTextsFromTypes codecTypes = {
   rendered
 }
 
-workflowCodecSuffix : HostedWorkflowDeclAst -> Str
-workflowCodecSuffix workflowDecl = nativeCodecSuffixForType (typeFromHostedTypeAst (workflowDeclStateTypeAst workflowDecl))
-
-workflowHandoffSymbol : Str -> HostedWorkflowDeclAst -> Str
-workflowHandoffSymbol moduleName workflowDecl = textConcat [nativeModuleSymbolPrefix moduleName, "__", workflowDeclName workflowDecl, "__handoff"]
-
-emitHostedWorkflowBoundaryImage : Str -> HostedWorkflowDeclAst -> Str
-emitHostedWorkflowBoundaryImage moduleName workflowDecl =
-  jsonObject [
-    jsonFieldText "kind" "workflow",
-    jsonFieldText "name" (workflowDeclName workflowDecl),
-    jsonFieldText "id" (workflowDeclIdentity workflowDecl),
-    jsonFieldText "state" (renderHostedType (workflowDeclStateTypeAst workflowDecl)),
-    jsonFieldText "checkpoint" (textConcat ["$encode_", workflowCodecSuffix workflowDecl]),
-    jsonFieldText "restore" (textConcat ["$decode_", workflowCodecSuffix workflowDecl]),
-    jsonFieldText "handoff" (workflowHandoffSymbol moduleName workflowDecl)
-  ]
-
-emitHostedWorkflowBoundaryImages : Str -> HostedModuleAst -> [Str]
-emitHostedWorkflowBoundaryImages moduleName modl = {
-  let mut rendered = [];
-  for workflowDecl in moduleWorkflowDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedWorkflowBoundaryImage moduleName workflowDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedWorkflowBoundaryText : Str -> HostedWorkflowDeclAst -> Str
-emitHostedWorkflowBoundaryText moduleName workflowDecl =
-  textConcat [
-    "workflow ",
-    workflowDeclName workflowDecl,
-    "{id=",
-    workflowDeclIdentity workflowDecl,
-    ", state=",
-    renderHostedType (workflowDeclStateTypeAst workflowDecl),
-    ", checkpoint=$encode_",
-    workflowCodecSuffix workflowDecl,
-    ", restore=$decode_",
-    workflowCodecSuffix workflowDecl,
-    ", handoff=",
-    workflowHandoffSymbol moduleName workflowDecl,
-    "}"
-  ]
-
-emitHostedWorkflowBoundaryTexts : Str -> HostedModuleAst -> [Str]
-emitHostedWorkflowBoundaryTexts moduleName modl = {
-  let mut rendered = [];
-  for workflowDecl in moduleWorkflowDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedWorkflowBoundaryText moduleName workflowDecl);
-    rendered
-  };
-  rendered
-}
-
-routeBoundaryKind : Str -> Str
-routeBoundaryKind responseType = if responseType == "Page" then "page" else if responseType == "Redirect" then "redirect" else "json"
-
-routeUsesServiceTransport : HostedRouteDeclAst -> Bool
-routeUsesServiceTransport routeDecl = routeBoundaryKind (routeDeclResponseType routeDecl) == "json"
-
-emitHostedRouteBoundaryImage : HostedRouteDeclAst -> Str
-emitHostedRouteBoundaryImage routeDecl =
-  jsonObject [
-    jsonFieldText "kind" "route",
-    jsonFieldText "name" (routeDeclName routeDecl),
-    jsonFieldText "id" (routeDeclIdentity routeDecl),
-    jsonFieldText "method" (routeDeclMethod routeDecl),
-    jsonFieldText "path" (routeDeclPath routeDecl),
-    jsonFieldText "request" (routeDeclRequestType routeDecl),
-    jsonFieldText "response" (routeDeclResponseType routeDecl),
-    jsonFieldText "handler" (routeDeclHandlerName routeDecl),
-    jsonFieldText "responseKind" (routeBoundaryKind (routeDeclResponseType routeDecl)),
-    jsonFieldText "encode" (textConcat ["$encode_", routeDeclResponseType routeDecl]),
-    jsonFieldText "decode" (textConcat ["$decode_", routeDeclRequestType routeDecl])
-  ]
-
-emitHostedRouteBoundaryImages : HostedModuleAst -> [Str]
-emitHostedRouteBoundaryImages modl = {
-  let mut rendered = [];
-  for routeDecl in moduleRouteDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedRouteBoundaryImage routeDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedRouteBoundaryText : HostedRouteDeclAst -> Str
-emitHostedRouteBoundaryText routeDecl =
-  textConcat [
-    "route ",
-    routeDeclName routeDecl,
-    "{id=",
-    routeDeclIdentity routeDecl,
-    ", method=",
-    routeDeclMethod routeDecl,
-    ", path=",
-    encode (routeDeclPath routeDecl),
-    ", request=",
-    routeDeclRequestType routeDecl,
-    ", response=",
-    routeDeclResponseType routeDecl,
-    ", response_kind=",
-    routeBoundaryKind (routeDeclResponseType routeDecl),
-    ", encode=$encode_",
-    routeDeclResponseType routeDecl,
-    ", decode=$decode_",
-    routeDeclRequestType routeDecl,
-    "}"
-  ]
-
-emitHostedRouteBoundaryTexts : HostedModuleAst -> [Str]
-emitHostedRouteBoundaryTexts modl = {
-  let mut rendered = [];
-  for routeDecl in moduleRouteDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedRouteBoundaryText routeDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedHookBoundaryImage : HostedHookDeclAst -> Str
-emitHostedHookBoundaryImage hookDecl =
-  jsonObject [
-    jsonFieldText "kind" "hook",
-    jsonFieldText "name" (hookDeclName hookDecl),
-    jsonFieldText "id" (textConcat ["hook:", hookDeclName hookDecl]),
-    jsonFieldText "event" (hookDeclEvent hookDecl),
-    jsonFieldText "request" (hookDeclRequestType hookDecl),
-    jsonFieldText "response" (hookDeclResponseType hookDecl),
-    jsonFieldText "handler" (hookDeclHandlerName hookDecl),
-    jsonFieldText "encode" (textConcat ["$encode_", hookDeclResponseType hookDecl]),
-    jsonFieldText "decode" (textConcat ["$decode_", hookDeclRequestType hookDecl])
-  ]
-
-emitHostedHookBoundaryImages : HostedModuleAst -> [Str]
-emitHostedHookBoundaryImages modl = {
-  let mut rendered = [];
-  for hookDecl in moduleHookDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedHookBoundaryImage hookDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedHookBoundaryText : HostedHookDeclAst -> Str
-emitHostedHookBoundaryText hookDecl =
-  textConcat [
-    "hook ",
-    hookDeclName hookDecl,
-    "{id=hook:",
-    hookDeclName hookDecl,
-    ", event=",
-    encode (hookDeclEvent hookDecl),
-    ", request=",
-    hookDeclRequestType hookDecl,
-    ", response=",
-    hookDeclResponseType hookDecl,
-    ", handler=",
-    hookDeclHandlerName hookDecl,
-    ", encode=$encode_",
-    hookDeclResponseType hookDecl,
-    ", decode=$decode_",
-    hookDeclRequestType hookDecl,
-    "}"
-  ]
-
-emitHostedHookBoundaryTexts : HostedModuleAst -> [Str]
-emitHostedHookBoundaryTexts modl = {
-  let mut rendered = [];
-  for hookDecl in moduleHookDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedHookBoundaryText hookDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolServerBoundaryImage : HostedToolServerDeclAst -> Str
-emitHostedToolServerBoundaryImage toolServerDecl =
-  jsonObject [
-    jsonFieldText "kind" "toolserver",
-    jsonFieldText "name" (toolServerDeclName toolServerDecl),
-    jsonFieldText "id" (textConcat ["toolserver:", toolServerDeclName toolServerDecl]),
-    jsonFieldText "protocol" (toolServerDeclProtocol toolServerDecl),
-    jsonFieldText "location" (toolServerDeclLocation toolServerDecl),
-    jsonFieldText "policy" (toolServerDeclPolicyName toolServerDecl)
-  ]
-
-emitHostedToolServerBoundaryImages : HostedModuleAst -> [Str]
-emitHostedToolServerBoundaryImages modl = {
-  let mut rendered = [];
-  for toolServerDecl in moduleToolServerDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolServerBoundaryImage toolServerDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolServerBoundaryText : HostedToolServerDeclAst -> Str
-emitHostedToolServerBoundaryText toolServerDecl =
-  textConcat [
-    "toolserver ",
-    toolServerDeclName toolServerDecl,
-    "{id=toolserver:",
-    toolServerDeclName toolServerDecl,
-    ", protocol=",
-    toolServerDeclProtocol toolServerDecl,
-    ", location=",
-    encode (toolServerDeclLocation toolServerDecl),
-    ", policy=",
-    toolServerDeclPolicyName toolServerDecl,
-    "}"
-  ]
-
-emitHostedToolServerBoundaryTexts : HostedModuleAst -> [Str]
-emitHostedToolServerBoundaryTexts modl = {
-  let mut rendered = [];
-  for toolServerDecl in moduleToolServerDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolServerBoundaryText toolServerDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolBoundaryImage : HostedToolDeclAst -> Str
-emitHostedToolBoundaryImage toolDecl =
-  jsonObject [
-    jsonFieldText "kind" "tool",
-    jsonFieldText "name" (toolDeclName toolDecl),
-    jsonFieldText "id" (textConcat ["tool:", toolDeclName toolDecl]),
-    jsonFieldText "server" (toolDeclServerName toolDecl),
-    jsonFieldText "operation" (toolDeclOperation toolDecl),
-    jsonFieldText "request" (toolDeclRequestType toolDecl),
-    jsonFieldText "response" (toolDeclResponseType toolDecl),
-    jsonFieldText "encode" (textConcat ["$encode_", toolDeclResponseType toolDecl]),
-    jsonFieldText "decode" (textConcat ["$decode_", toolDeclRequestType toolDecl])
-  ]
-
-emitHostedToolBoundaryImages : HostedModuleAst -> [Str]
-emitHostedToolBoundaryImages modl = {
-  let mut rendered = [];
-  for toolDecl in moduleToolDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolBoundaryImage toolDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolBoundaryText : HostedToolDeclAst -> Str
-emitHostedToolBoundaryText toolDecl =
-  textConcat [
-    "tool ",
-    toolDeclName toolDecl,
-    "{id=tool:",
-    toolDeclName toolDecl,
-    ", server=",
-    toolDeclServerName toolDecl,
-    ", operation=",
-    encode (toolDeclOperation toolDecl),
-    ", request=",
-    toolDeclRequestType toolDecl,
-    ", response=",
-    toolDeclResponseType toolDecl,
-    ", encode=$encode_",
-    toolDeclResponseType toolDecl,
-    ", decode=$decode_",
-    toolDeclRequestType toolDecl,
-    "}"
-  ]
-
-emitHostedToolBoundaryTexts : HostedModuleAst -> [Str]
-emitHostedToolBoundaryTexts modl = {
-  let mut rendered = [];
-  for toolDecl in moduleToolDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolBoundaryText toolDecl);
-    rendered
-  };
-  rendered
-}
-
-jsonOptionalTextField : Str -> Str -> Str
-jsonOptionalTextField name value = if value == "" then jsonFieldRaw name "null" else jsonFieldText name value
-
-emitHostedGuideEntryImages : [HostedGuideEntryAst] -> [Str]
-emitHostedGuideEntryImages entries = {
-  let mut rendered = [];
-  for entry in entries {
-    rendered = appendNativeRenderedText rendered (jsonFieldText (guideEntryName entry) (guideEntryValue entry));
-    rendered
-  };
-  rendered
-}
-
-emitHostedGuideMetadataImages : HostedModuleAst -> [Str]
-emitHostedGuideMetadataImages modl = {
-  let mut rendered = [];
-  for guideDecl in moduleGuideDeclarations modl {
-    rendered =
-      appendNativeRenderedText rendered
-        (jsonObject [
-          jsonFieldText "name" (guideDeclName guideDecl),
-          jsonFieldText "id" (textConcat ["guide:", guideDeclName guideDecl]),
-          jsonOptionalTextField "extends" (guideDeclExtends guideDecl),
-          jsonFieldRaw "entries" (jsonObject (emitHostedGuideEntryImages (guideDeclEntries guideDecl)))
-        ]);
-    rendered
-  };
-  rendered
-}
-
-emitHostedPolicyPermissionImages : HostedPolicyPermissionKindAst -> [HostedPolicyPermissionAst] -> [Str]
-emitHostedPolicyPermissionImages targetKind permissions = {
-  let mut rendered = [];
-  for permission in permissions {
-    if renderHostedPolicyPermissionKind (policyPermissionKind permission) == renderHostedPolicyPermissionKind targetKind then {
-      rendered = appendNativeRenderedText rendered (encode (policyPermissionValue permission));
-      rendered
-    } else {
-      rendered
-    }
-  };
-  rendered
-}
-
-emitHostedPolicyMetadataImages : HostedModuleAst -> [Str]
-emitHostedPolicyMetadataImages modl = {
-  let mut rendered = [];
-  for policyDecl in modulePolicyDeclarations modl {
-    rendered =
-      appendNativeRenderedText rendered
-        (jsonObject [
-          jsonFieldText "name" (policyDeclName policyDecl),
-          jsonFieldText "id" (textConcat ["policy:", policyDeclName policyDecl]),
-          jsonFieldArray "allowedClassifications" (emitNativeJsonStringList (policyDeclAllowedClassifications policyDecl)),
-          jsonFieldArray "file" (emitHostedPolicyPermissionImages HostedPolicyPermissionFile (policyDeclPermissions policyDecl)),
-          jsonFieldArray "network" (emitHostedPolicyPermissionImages HostedPolicyPermissionNetwork (policyDeclPermissions policyDecl)),
-          jsonFieldArray "process" (emitHostedPolicyPermissionImages HostedPolicyPermissionProcess (policyDeclPermissions policyDecl)),
-          jsonFieldArray "secret" (emitHostedPolicyPermissionImages HostedPolicyPermissionSecret (policyDeclPermissions policyDecl))
-        ]);
-    rendered
-  };
-  rendered
-}
-
-emitHostedAgentRoleMetadataImages : HostedModuleAst -> [Str]
-emitHostedAgentRoleMetadataImages modl = {
-  let mut rendered = [];
-  for roleDecl in moduleAgentRoleDeclarations modl {
-    rendered =
-      appendNativeRenderedText rendered
-        (jsonObject [
-          jsonFieldText "name" (agentRoleDeclName roleDecl),
-          jsonFieldText "id" (textConcat ["agent-role:", agentRoleDeclName roleDecl]),
-          jsonOptionalTextField "guideName" (agentRoleDeclGuideName roleDecl),
-          jsonOptionalTextField "policyName" (agentRoleDeclPolicyName roleDecl),
-          jsonOptionalTextField "approvalPolicy" (agentRoleDeclApprovalPolicy roleDecl),
-          jsonOptionalTextField "sandboxPolicy" (agentRoleDeclSandboxPolicy roleDecl)
-        ]);
-    rendered
-  };
-  rendered
-}
-
-emitHostedAgentMetadataImages : HostedModuleAst -> [Str]
-emitHostedAgentMetadataImages modl = {
-  let mut rendered = [];
-  for agentDecl in moduleAgentDeclarations modl {
-    rendered =
-      appendNativeRenderedText rendered
-        (jsonObject [
-          jsonFieldText "name" (agentDeclName agentDecl),
-          jsonFieldText "id" (textConcat ["agent:", agentDeclName agentDecl]),
-          jsonOptionalTextField "roleName" (agentDeclRoleName agentDecl)
-        ]);
-    rendered
-  };
-  rendered
-}
-
-emitHostedRuntimeMetadataImage : HostedModuleAst -> Str
-emitHostedRuntimeMetadataImage modl =
-  jsonObject [
-    jsonFieldArray "guides" (emitHostedGuideMetadataImages modl),
-    jsonFieldArray "policies" (emitHostedPolicyMetadataImages modl),
-    jsonFieldArray "agentRoles" (emitHostedAgentRoleMetadataImages modl),
-    jsonFieldArray "agents" (emitHostedAgentMetadataImages modl)
-  ]
-
-emitHostedBoundaryImages : Str -> HostedModuleAst -> [Str]
-emitHostedBoundaryImages moduleName modl =
-  append
-    (append
-      (append
-        (append (emitHostedRouteBoundaryImages modl) (emitHostedHookBoundaryImages modl))
-        (emitHostedToolServerBoundaryImages modl))
-      (emitHostedToolBoundaryImages modl))
-    (emitHostedWorkflowBoundaryImages moduleName modl)
-
-emitHostedBoundaryTexts : Str -> HostedModuleAst -> [Str]
-emitHostedBoundaryTexts moduleName modl =
-  append
-    (append
-      (append
-        (append (emitHostedRouteBoundaryTexts modl) (emitHostedHookBoundaryTexts modl))
-        (emitHostedToolServerBoundaryTexts modl))
-      (emitHostedToolBoundaryTexts modl))
-    (emitHostedWorkflowBoundaryTexts moduleName modl)
-
-emitHostedRouteServiceTransportImage : HostedRouteDeclAst -> Str
-emitHostedRouteServiceTransportImage routeDecl =
-  jsonObject [
-    jsonFieldText "kind" "route",
-    jsonFieldText "name" (routeDeclName routeDecl),
-    jsonFieldText "id" (routeDeclIdentity routeDecl),
-    jsonFieldText "mode" "request_response",
-    jsonFieldText "request" (routeDeclRequestType routeDecl),
-    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", routeDeclRequestType routeDecl]),
-    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", routeDeclRequestType routeDecl]),
-    jsonFieldText "response" (routeDeclResponseType routeDecl),
-    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", routeDeclResponseType routeDecl]),
-    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", routeDeclResponseType routeDecl]),
-    jsonFieldText "framing" "length_prefixed"
-  ]
-
-emitHostedRouteServiceTransportImages : HostedModuleAst -> [Str]
-emitHostedRouteServiceTransportImages modl = {
-  let mut rendered = [];
-  for routeDecl in moduleRouteDeclarations modl {
-    rendered = if routeUsesServiceTransport routeDecl then appendNativeRenderedText rendered (emitHostedRouteServiceTransportImage routeDecl) else rendered;
-    rendered
-  };
-  rendered
-}
-
-emitHostedRouteServiceTransportText : HostedRouteDeclAst -> Str
-emitHostedRouteServiceTransportText routeDecl =
-  textConcat [
-    "route ",
-    routeDeclName routeDecl,
-    "{id=",
-    routeDeclIdentity routeDecl,
-    ", mode=request_response, request=",
-    routeDeclRequestType routeDecl,
-    ", request_encode=$encode_binary_",
-    routeDeclRequestType routeDecl,
-    ", request_decode=$decode_binary_",
-    routeDeclRequestType routeDecl,
-    ", response=",
-    routeDeclResponseType routeDecl,
-    ", response_encode=$encode_binary_",
-    routeDeclResponseType routeDecl,
-    ", response_decode=$decode_binary_",
-    routeDeclResponseType routeDecl,
-    ", framing=length_prefixed}"
-  ]
-
-emitHostedRouteServiceTransportTexts : HostedModuleAst -> [Str]
-emitHostedRouteServiceTransportTexts modl = {
-  let mut rendered = [];
-  for routeDecl in moduleRouteDeclarations modl {
-    rendered = if routeUsesServiceTransport routeDecl then appendNativeRenderedText rendered (emitHostedRouteServiceTransportText routeDecl) else rendered;
-    rendered
-  };
-  rendered
-}
-
-emitHostedHookServiceTransportImage : HostedHookDeclAst -> Str
-emitHostedHookServiceTransportImage hookDecl =
-  jsonObject [
-    jsonFieldText "kind" "hook",
-    jsonFieldText "name" (hookDeclName hookDecl),
-    jsonFieldText "id" (textConcat ["hook:", hookDeclName hookDecl]),
-    jsonFieldText "mode" "event",
-    jsonFieldText "request" (hookDeclRequestType hookDecl),
-    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", hookDeclRequestType hookDecl]),
-    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", hookDeclRequestType hookDecl]),
-    jsonFieldText "response" (hookDeclResponseType hookDecl),
-    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", hookDeclResponseType hookDecl]),
-    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", hookDeclResponseType hookDecl]),
-    jsonFieldText "framing" "length_prefixed"
-  ]
-
-emitHostedHookServiceTransportImages : HostedModuleAst -> [Str]
-emitHostedHookServiceTransportImages modl = {
-  let mut rendered = [];
-  for hookDecl in moduleHookDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedHookServiceTransportImage hookDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedHookServiceTransportText : HostedHookDeclAst -> Str
-emitHostedHookServiceTransportText hookDecl =
-  textConcat [
-    "hook ",
-    hookDeclName hookDecl,
-    "{id=hook:",
-    hookDeclName hookDecl,
-    ", mode=event, request=",
-    hookDeclRequestType hookDecl,
-    ", request_encode=$encode_binary_",
-    hookDeclRequestType hookDecl,
-    ", request_decode=$decode_binary_",
-    hookDeclRequestType hookDecl,
-    ", response=",
-    hookDeclResponseType hookDecl,
-    ", response_encode=$encode_binary_",
-    hookDeclResponseType hookDecl,
-    ", response_decode=$decode_binary_",
-    hookDeclResponseType hookDecl,
-    ", framing=length_prefixed}"
-  ]
-
-emitHostedHookServiceTransportTexts : HostedModuleAst -> [Str]
-emitHostedHookServiceTransportTexts modl = {
-  let mut rendered = [];
-  for hookDecl in moduleHookDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedHookServiceTransportText hookDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolServiceTransportImage : HostedToolDeclAst -> Str
-emitHostedToolServiceTransportImage toolDecl =
-  jsonObject [
-    jsonFieldText "kind" "tool",
-    jsonFieldText "name" (toolDeclName toolDecl),
-    jsonFieldText "id" (textConcat ["tool:", toolDeclName toolDecl]),
-    jsonFieldText "mode" "rpc",
-    jsonFieldText "request" (toolDeclRequestType toolDecl),
-    jsonFieldText "requestEncode" (textConcat ["$encode_binary_", toolDeclRequestType toolDecl]),
-    jsonFieldText "requestDecode" (textConcat ["$decode_binary_", toolDeclRequestType toolDecl]),
-    jsonFieldText "response" (toolDeclResponseType toolDecl),
-    jsonFieldText "responseEncode" (textConcat ["$encode_binary_", toolDeclResponseType toolDecl]),
-    jsonFieldText "responseDecode" (textConcat ["$decode_binary_", toolDeclResponseType toolDecl]),
-    jsonFieldText "framing" "length_prefixed"
-  ]
-
-emitHostedToolServiceTransportImages : HostedModuleAst -> [Str]
-emitHostedToolServiceTransportImages modl = {
-  let mut rendered = [];
-  for toolDecl in moduleToolDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolServiceTransportImage toolDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedToolServiceTransportText : HostedToolDeclAst -> Str
-emitHostedToolServiceTransportText toolDecl =
-  textConcat [
-    "tool ",
-    toolDeclName toolDecl,
-    "{id=tool:",
-    toolDeclName toolDecl,
-    ", mode=rpc, request=",
-    toolDeclRequestType toolDecl,
-    ", request_encode=$encode_binary_",
-    toolDeclRequestType toolDecl,
-    ", request_decode=$decode_binary_",
-    toolDeclRequestType toolDecl,
-    ", response=",
-    toolDeclResponseType toolDecl,
-    ", response_encode=$encode_binary_",
-    toolDeclResponseType toolDecl,
-    ", response_decode=$decode_binary_",
-    toolDeclResponseType toolDecl,
-    ", framing=length_prefixed}"
-  ]
-
-emitHostedToolServiceTransportTexts : HostedModuleAst -> [Str]
-emitHostedToolServiceTransportTexts modl = {
-  let mut rendered = [];
-  for toolDecl in moduleToolDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitHostedToolServiceTransportText toolDecl);
-    rendered
-  };
-  rendered
-}
-
-emitHostedServiceTransportImages : HostedModuleAst -> [Str]
-emitHostedServiceTransportImages modl =
-  append
-    (append (emitHostedRouteServiceTransportImages modl) (emitHostedHookServiceTransportImages modl))
-    (emitHostedToolServiceTransportImages modl)
-
-emitHostedServiceTransportTexts : HostedModuleAst -> [Str]
-emitHostedServiceTransportTexts modl =
-  append
-    (append (emitHostedRouteServiceTransportTexts modl) (emitHostedHookServiceTransportTexts modl))
-    (emitHostedToolServiceTransportTexts modl)
-
-firstWorkflowDecl : HostedModuleAst -> HostedWorkflowDeclAst
-firstWorkflowDecl modl = {
-  for workflowDecl in moduleWorkflowDeclarations modl {
-    return workflowDecl
-  };
-  hostedWorkflowDeclAst "" "" (HostedTypeName "")
-}
-
-hasExactlyOneWorkflowDecl : HostedModuleAst -> Bool
-hasExactlyOneWorkflowDecl modl = {
-  let mut seenOne = false;
-  for workflowDecl in moduleWorkflowDeclarations modl {
-    if seenOne then return false else {
-      seenOne = true;
-      seenOne
-    }
-  };
-  seenOne
-}
-
-emitNativeMigrationStateTypeValue : HostedModuleAst -> Str
-emitNativeMigrationStateTypeValue modl = if hasExactlyOneWorkflowDecl modl then encode (renderHostedType (workflowDeclStateTypeAst (firstWorkflowDecl modl))) else "null"
-
-emitNativeMigrationSnapshotSymbolValue : HostedModuleAst -> Str
-emitNativeMigrationSnapshotSymbolValue modl = if hasExactlyOneWorkflowDecl modl then encode (textConcat ["$encode_", workflowCodecSuffix (firstWorkflowDecl modl)]) else "null"
-
-emitNativeMigrationHandoffSymbolValue : HostedModuleAst -> Str
-emitNativeMigrationHandoffSymbolValue modl = if hasExactlyOneWorkflowDecl modl then encode (workflowHandoffSymbol (moduleNameOf modl) (firstWorkflowDecl modl)) else "null"
 
 emitNativeJsonNumberList : [Str] -> [Str]
 emitNativeJsonNumberList values = values
@@ -1623,7 +1043,7 @@ emitHostedRecordFieldLayoutImage typeDecls recordDecls wordOffset fieldDecl =
 
 emitHostedRecordFieldLayoutImages : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
 emitHostedRecordFieldLayoutImages typeDecls recordDecls fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "0";
   for fieldDecl in fields {
     rendered = appendNativeRenderedText rendered (emitHostedRecordFieldLayoutImage typeDecls recordDecls wordOffset fieldDecl);
@@ -1637,7 +1057,7 @@ emitHostedRecordLayoutImages : HostedModuleAst -> [Str]
 emitHostedRecordLayoutImages modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for recordDecl in recordDecls {
     rendered = appendNativeRenderedText rendered (jsonObject [
       jsonFieldText "name" (recordDeclName recordDecl),
@@ -1661,7 +1081,7 @@ emitHostedPayloadLayoutImage typeDecls recordDecls wordOffset payloadType =
 
 emitHostedPayloadLayoutImages : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
 emitHostedPayloadLayoutImages typeDecls recordDecls payloadTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "1";
   for payloadType in payloadTypes {
     rendered = appendNativeRenderedText rendered (emitHostedPayloadLayoutImage typeDecls recordDecls wordOffset payloadType);
@@ -1690,10 +1110,10 @@ emitHostedVariantLayoutImages modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let emittedTypeDecls = nativeEmittedTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for typeDecl in emittedTypeDecls {
     let maxPayloadWords = countHostedTypes (maxConstructorPayloadTypes typeDecl);
-    let mut constructorLayouts = [];
+    let mut constructorLayouts = emptyRenderedTexts;
     for constructorDecl in typeDeclConstructors typeDecl {
       constructorLayouts = appendNativeRenderedText constructorLayouts (emitHostedConstructorLayoutImage typeDecls recordDecls constructorDecl);
       constructorLayouts
@@ -1714,7 +1134,7 @@ emitHostedRecordObjectLayoutImages : HostedModuleAst -> [Str]
 emitHostedRecordObjectLayoutImages modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for recordDecl in recordDecls {
     let fieldCount = countHostedRecordFields (recordDeclFields recordDecl);
     rendered = appendNativeRenderedText rendered (jsonObject [
@@ -1734,7 +1154,7 @@ emitHostedVariantObjectLayoutImages modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let emittedTypeDecls = nativeEmittedTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for typeDecl in emittedTypeDecls {
     for constructorDecl in typeDeclConstructors typeDecl {
       let payloadTypes = constructorDeclPayloadTypes constructorDecl;
@@ -1768,137 +1188,6 @@ emitNativeCompatibilitySurfaceImage modl decls = {
   ]
 }
 
-nativeModuleSymbolPrefix : Str -> Str
-nativeModuleSymbolPrefix moduleName = textConcat ["clasp_native__", textJoin "__" (textSplit moduleName ".")]
-
-nativeEntrypointSymbol : Str -> Str -> Str
-nativeEntrypointSymbol moduleName declName = textConcat [nativeModuleSymbolPrefix moduleName, "__", declName]
-
-emitNativeEntrypoint : Str -> LowerDeclText -> Str
-emitNativeEntrypoint moduleName decl = match decl {
-  LowerConst name body ->
-    textConcat [name, "{symbol=", nativeEntrypointSymbol moduleName name, ", kind=global, arity=0}"],
-  LowerFn name params body ->
-    textConcat [name, "{symbol=", nativeEntrypointSymbol moduleName name, ", kind=function, arity=", renderNativeArity params, "}"]
-}
-
-emitNativeEntrypoints : Str -> [LowerDeclText] -> [Str]
-emitNativeEntrypoints moduleName decls = {
-  let mut rendered = [];
-  for decl in decls {
-    rendered = appendNativeRenderedText rendered (emitNativeEntrypoint moduleName decl);
-    rendered
-  };
-  rendered
-}
-
-emitNativeConstructorParams : [HostedTypeAst] -> [Str]
-emitNativeConstructorParams payloadTypes = {
-  let mut rendered = [];
-  let mut index = "0";
-  for payloadType in payloadTypes {
-    let ignored = payloadType;
-    rendered = appendNativeRenderedText rendered (textConcat ["$", index]);
-    index = incrementNativeNumber index;
-    rendered
-  };
-  rendered
-}
-
-emitNativeConstructorArgExprs : [Str] -> [Str]
-emitNativeConstructorArgExprs params = {
-  let mut rendered = [];
-  for param in params {
-    rendered = appendNativeRenderedText rendered (textConcat ["local(", param, ")"]);
-    rendered
-  };
-  rendered
-}
-
-emitNativeConstructorDecl : HostedConstructorDeclAst -> Str
-emitNativeConstructorDecl constructorDecl = {
-  let params = emitNativeConstructorParams (constructorDeclPayloadTypes constructorDecl);
-  if hasHostedTypeValues (constructorDeclPayloadTypes constructorDecl) then textConcat ["function ", constructorDeclName constructorDecl, "(", textJoin ", " params, ") = construct ", constructorDeclName constructorDecl, "(", textJoin ", " (emitNativeConstructorArgExprs params), ")"] else textConcat ["global ", constructorDeclName constructorDecl, " = construct ", constructorDeclName constructorDecl, "()"]
-}
-
-emitNativeConstructorDecls : HostedModuleAst -> [Str]
-emitNativeConstructorDecls modl = {
-  let mut rendered = [];
-  for typeDecl in nativeEmittedTypeDecls modl {
-    for constructorDecl in typeDeclConstructors typeDecl {
-      rendered = appendNativeRenderedText rendered (emitNativeConstructorDecl constructorDecl);
-      rendered
-    };
-    rendered
-  };
-  rendered
-}
-
-emitNativeConstructorEntrypoint : Str -> HostedConstructorDeclAst -> Str
-emitNativeConstructorEntrypoint moduleName constructorDecl = {
-  let payloadTypes = constructorDeclPayloadTypes constructorDecl;
-  if hasHostedTypeValues payloadTypes then textConcat [constructorDeclName constructorDecl, "{symbol=", nativeEntrypointSymbol moduleName (constructorDeclName constructorDecl), ", kind=function, arity=", countHostedTypes payloadTypes, "}"] else textConcat [constructorDeclName constructorDecl, "{symbol=", nativeEntrypointSymbol moduleName (constructorDeclName constructorDecl), ", kind=global, arity=0}"]
-}
-
-emitNativeConstructorEntrypoints : Str -> HostedModuleAst -> [Str]
-emitNativeConstructorEntrypoints moduleName modl = {
-  let mut rendered = [];
-  for typeDecl in nativeEmittedTypeDecls modl {
-    for constructorDecl in typeDeclConstructors typeDecl {
-      rendered = appendNativeRenderedText rendered (emitNativeConstructorEntrypoint moduleName constructorDecl);
-      rendered
-    };
-    rendered
-  };
-  rendered
-}
-
-hostedDeclName : HostedDeclAst -> Str
-hostedDeclName decl = declName decl
-
-hostedDeclArity : HostedDeclAst -> Str
-hostedDeclArity decl = renderNativeArity (declParams decl)
-
-emitNativeEntrypointJsonFromDeclAst : Str -> HostedDeclAst -> Str
-emitNativeEntrypointJsonFromDeclAst moduleName decl =
-  if hasLowerParams decl then
-    jsonObject [jsonFieldText "name" (declName decl), jsonFieldText "symbol" (nativeEntrypointSymbol moduleName (declName decl)), jsonFieldText "kind" "function", jsonFieldRaw "arity" (hostedDeclArity decl)]
-  else
-    jsonObject [jsonFieldText "name" (declName decl), jsonFieldText "symbol" (nativeEntrypointSymbol moduleName (declName decl)), jsonFieldText "kind" "global", jsonFieldRaw "arity" "0"]
-
-emitNativeEntrypointJsonsFromModule : Str -> HostedModuleAst -> [Str]
-emitNativeEntrypointJsonsFromModule moduleName modl = {
-  let mut rendered = [];
-  for decl in moduleDeclarations modl {
-    rendered = appendNativeRenderedText rendered (emitNativeEntrypointJsonFromDeclAst moduleName decl);
-    rendered
-  };
-  rendered
-}
-
-collectNativeExportNamesFromModule : HostedModuleAst -> [Str]
-collectNativeExportNamesFromModule modl = {
-  let mut names = [];
-  for typeDecl in nativeEmittedTypeDecls modl {
-    for constructorDecl in typeDeclConstructors typeDecl {
-      names = appendNativeRenderedText names (constructorDeclName constructorDecl);
-      names
-    };
-    names
-  };
-  for decl in moduleDeclarations modl {
-    names = appendNativeRenderedText names (hostedDeclName decl);
-    names
-  };
-  names
-}
-
-collectNativeExportNames : HostedModuleAst -> [LowerDeclText] -> [Str]
-collectNativeExportNames modl decls = {
-  let ignored = decls;
-  collectNativeExportNamesFromModule modl
-}
-
 nativeDeclName : LowerDeclText -> Str
 nativeDeclName decl = match decl {
   LowerConst name body ->
@@ -1909,7 +1198,7 @@ nativeDeclName decl = match decl {
 
 renderNativeDecls : [LowerDeclText] -> [Str]
 renderNativeDecls decls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for decl in decls {
     rendered = appendNativeRenderedText rendered (emitNativeDecl decl);
     rendered
@@ -1919,7 +1208,7 @@ renderNativeDecls decls = {
 
 nativeAbiRecordLayoutLines : [Str]
 nativeAbiRecordLayoutLines = {
-  let mut lines = [];
+  let mut lines = emptyRenderedTexts;
   lines = appendNativeRenderedText lines "  record_layout Principal { words = 1, fields = [id:Str@word0/handle] }";
   lines = appendNativeRenderedText lines "  record_layout Tenant { words = 1, fields = [id:Str@word0/handle] }";
   lines = appendNativeRenderedText lines "  record_layout ResourceIdentity { words = 2, fields = [resourceType:Str@word0/handle, resourceId:Str@word1/handle] }";
@@ -1934,7 +1223,7 @@ nativeAbiRecordLayoutLines = {
 
 nativeAbiObjectLayoutLines : [Str]
 nativeAbiObjectLayoutLines = {
-  let mut lines = [];
+  let mut lines = emptyRenderedTexts;
   lines = appendNativeRenderedText lines "  object_layout Principal { kind = record, header_words = 2, words = 3, roots = [2] }";
   lines = appendNativeRenderedText lines "  object_layout Tenant { kind = record, header_words = 2, words = 3, roots = [2] }";
   lines = appendNativeRenderedText lines "  object_layout ResourceIdentity { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
@@ -1969,6 +1258,10 @@ nativeLayoutStorageForType typeDecls recordDecls typ = match typ {
             "handle"
         }
     },
+  HostedTypeApply name args ->
+    "handle",
+  HostedTypeVar name ->
+    "handle",
   HostedTypeList itemType ->
     "handle",
   HostedTypeFunction input result ->
@@ -1980,7 +1273,7 @@ emitHostedRecordFieldLayout typeDecls recordDecls wordOffset fieldDecl = textCon
 
 emitHostedRecordFieldLayouts : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
 emitHostedRecordFieldLayouts typeDecls recordDecls fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "0";
   for fieldDecl in fields {
     rendered = appendNativeRenderedText rendered (emitHostedRecordFieldLayout typeDecls recordDecls wordOffset fieldDecl);
@@ -1992,7 +1285,7 @@ emitHostedRecordFieldLayouts typeDecls recordDecls fields = {
 
 emitHostedRecordRootOffsets : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
 emitHostedRecordRootOffsets typeDecls recordDecls fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "0";
   for fieldDecl in fields {
     rendered = if nativeLayoutStorageForType typeDecls recordDecls (recordFieldDeclType fieldDecl) == "handle" then appendNativeRenderedText rendered (headerAdjustedOffset wordOffset) else rendered;
@@ -2006,7 +1299,7 @@ emitHostedRecordLayoutLines : HostedModuleAst -> [Str]
 emitHostedRecordLayoutLines modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for recordDecl in recordDecls {
     rendered = appendNativeRenderedText rendered (textConcat ["  record_layout ", recordDeclName recordDecl, " { words = ", countHostedRecordFields (recordDeclFields recordDecl), ", fields = [", textJoin ", " (emitHostedRecordFieldLayouts typeDecls recordDecls (recordDeclFields recordDecl)), "] }"]);
     rendered
@@ -2018,7 +1311,7 @@ emitHostedRecordObjectLayoutLines : HostedModuleAst -> [Str]
 emitHostedRecordObjectLayoutLines modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for recordDecl in recordDecls {
     let fieldCount = countHostedRecordFields (recordDeclFields recordDecl);
     rendered = appendNativeRenderedText rendered (textConcat ["  object_layout ", recordDeclName recordDecl, " { kind = record, header_words = 2, words = ", headerAdjustedOffset fieldCount, ", roots = [", textJoin ", " (emitHostedRecordRootOffsets typeDecls recordDecls (recordDeclFields recordDecl)), "] }"]);
@@ -2029,7 +1322,7 @@ emitHostedRecordObjectLayoutLines modl = {
 
 maxConstructorPayloadTypes : HostedTypeDeclAst -> [HostedTypeAst]
 maxConstructorPayloadTypes typeDecl = {
-  let mut payloadTypes = [];
+  let mut payloadTypes = emptyHostedTypes;
   for constructorDecl in typeDeclConstructors typeDecl {
     payloadTypes = maxHostedTypeList payloadTypes (constructorDeclPayloadTypes constructorDecl);
     payloadTypes
@@ -2039,7 +1332,7 @@ maxConstructorPayloadTypes typeDecl = {
 
 emitHostedPayloadLayouts : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
 emitHostedPayloadLayouts typeDecls recordDecls payloadTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "1";
   for payloadType in payloadTypes {
     rendered = appendNativeRenderedText rendered (textConcat ["$", decrementNativeNumber wordOffset, ":", renderHostedType payloadType, "@word", wordOffset, "/", nativeLayoutStorageForType typeDecls recordDecls payloadType]);
@@ -2062,11 +1355,11 @@ emitHostedVariantLayoutLines modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let emittedTypeDecls = nativeEmittedTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for typeDecl in emittedTypeDecls {
     let maxPayloadTypes = maxConstructorPayloadTypes typeDecl;
     let maxPayloadWords = countHostedTypes maxPayloadTypes;
-    let mut constructorLayouts = [];
+    let mut constructorLayouts = emptyRenderedTexts;
     for constructorDecl in typeDeclConstructors typeDecl {
       constructorLayouts = appendNativeRenderedText constructorLayouts (emitHostedConstructorLayout typeDecls recordDecls constructorDecl);
       constructorLayouts
@@ -2079,7 +1372,7 @@ emitHostedVariantLayoutLines modl = {
 
 emitHostedVariantRootOffsets : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
 emitHostedVariantRootOffsets typeDecls recordDecls payloadTypes = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   let mut wordOffset = "1";
   for payloadType in payloadTypes {
     rendered = if nativeLayoutStorageForType typeDecls recordDecls payloadType == "handle" then appendNativeRenderedText rendered (headerAdjustedOffset wordOffset) else rendered;
@@ -2094,7 +1387,7 @@ emitHostedVariantObjectLayoutLines modl = {
   let typeDecls = effectiveModuleTypeDecls modl;
   let emittedTypeDecls = nativeEmittedTypeDecls modl;
   let recordDecls = moduleRecordDeclarations modl;
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for typeDecl in emittedTypeDecls {
     for constructorDecl in typeDeclConstructors typeDecl {
       let payloadTypes = constructorDeclPayloadTypes constructorDecl;
@@ -2109,7 +1402,7 @@ emitHostedVariantObjectLayoutLines modl = {
 
 nativeAbiLines : HostedModuleAst -> [Str]
 nativeAbiLines modl = {
-  let mut lines = [];
+  let mut lines = emptyRenderedTexts;
   lines = appendNativeRenderedText lines "abi {";
   lines = appendNativeRenderedText lines "  version clasp-native-v1";
   lines = appendNativeRenderedText lines "  word_bytes 8";
@@ -2141,7 +1434,7 @@ nativeRuntimeLines modl = {
   let moduleName = moduleNameOf modl;
   let runtimeBindings = emitNativeRuntimeBindingTexts modl;
   let codecTypes = collectModuleRuntimeCodecTypes modl;
-  let mut lines = [];
+  let mut lines = emptyRenderedTexts;
   lines = appendNativeRenderedText lines "runtime {";
   lines = appendNativeRenderedText lines "  profile compiler_backend_minimal";
   lines = appendNativeRenderedText lines "  artifacts [\"runtime/clasp_runtime.h\", \"runtime/clasp_runtime.rs\"]";
@@ -2158,7 +1451,7 @@ nativeRuntimeLines modl = {
 emitNativeHeaderSection : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeHeaderSection modl decls = {
   let moduleName = moduleNameOf modl;
-  let mut lines = [];
+  let mut lines = emptyRenderedTexts;
   lines = appendNativeRenderedText lines "format clasp-native-ir-v1";
   lines = appendNativeRenderedText lines (textConcat ["module ", moduleName]);
   lines = appendNativeRenderedText lines (textConcat ["exports [", textJoin ", " (collectNativeExportNames modl decls), "]"]);
@@ -2177,174 +1470,13 @@ emitNativeDeclSection decls = textJoin "\n\n" (renderNativeDecls decls)
 
 emitNativeModule : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeModule modl decls = {
-  let mut sections = [];
+  let mut sections = emptyRenderedTexts;
   let allDeclLines = append (emitNativeConstructorDecls modl) (renderNativeDecls decls);
   sections = appendNativeRenderedText sections (emitNativeHeaderSection modl decls);
   sections = appendNativeRenderedText sections (emitNativeAbiSection modl);
   sections = appendNativeRenderedText sections (emitNativeRuntimeSection modl);
   sections = appendNativeRenderedText sections (textJoin "\n\n" allDeclLines);
   textConcat [textJoin "\n\n" sections, "\n\n"]
-}
-
-emitNativeJsonStringList : [Str] -> [Str]
-emitNativeJsonStringList values = {
-  let mut rendered = [];
-  for value in values {
-    rendered = appendNativeRenderedText rendered (encode value);
-    rendered
-  };
-  rendered
-}
-
-emitNativeJsonExprList : [LowerExprText] -> [Str]
-emitNativeJsonExprList exprs = {
-  let mut rendered = [];
-  for expr in exprs {
-    rendered = appendNativeRenderedText rendered (emitNativeExprJson expr);
-    rendered
-  };
-  rendered
-}
-
-emitNativeJsonRecordFieldList : [LowerRecordFieldText] -> [Str]
-emitNativeJsonRecordFieldList fields = {
-  let mut rendered = [];
-  for field in fields {
-    rendered = appendNativeRenderedText rendered (emitNativeRecordFieldJson field);
-    rendered
-  };
-  rendered
-}
-
-emitNativeJsonMatchBranchList : [LowerMatchBranchText] -> [Str]
-emitNativeJsonMatchBranchList branches = {
-  let mut rendered = [];
-  for branch in branches {
-    rendered = appendNativeRenderedText rendered (emitNativeMatchBranchJson branch);
-    rendered
-  };
-  rendered
-}
-
-emitNativeCompareOpJson : LowerExprText -> LowerExprText -> Str -> Str
-emitNativeCompareOpJson left right kindName =
-  jsonObject [jsonFieldText "kind" "compare", jsonFieldText "op" kindName, jsonFieldRaw "left" (emitNativeExprJson left), jsonFieldRaw "right" (emitNativeExprJson right)]
-
-emitNativeExprJson : LowerExprText -> Str
-emitNativeExprJson expr = match expr {
-  LowerName name ->
-    jsonObject [jsonFieldText "kind" "local", jsonFieldText "name" name],
-  LowerLiteral value ->
-    jsonObject [jsonFieldText "kind" "string", jsonFieldText "value" value],
-  LowerInt value ->
-    jsonObject [jsonFieldText "kind" "int", jsonFieldRaw "value" value],
-  LowerBool value ->
-    jsonObject [jsonFieldText "kind" "bool", jsonFieldRaw "value" (if value then "true" else "false")],
-  LowerArray values ->
-    jsonObject [jsonFieldText "kind" "list", jsonFieldArray "items" (emitNativeJsonExprList values)],
-  LowerListAppend left right ->
-    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.append", jsonFieldRaw "left" (emitNativeExprJson left), jsonFieldRaw "right" (emitNativeExprJson right)],
-  LowerViewAppend left right ->
-    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "view.append", jsonFieldRaw "left" (emitNativeExprJson left), jsonFieldRaw "right" (emitNativeExprJson right)],
-  LowerEncode value ->
-    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "encode", jsonFieldRaw "value" (emitNativeExprJson value)],
-  LowerDecode targetType value ->
-    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "decode", jsonFieldText "type" (renderType targetType), jsonFieldRaw "value" (emitNativeExprJson value)],
-  LowerIf condition thenBranch elseBranch ->
-    jsonObject [jsonFieldText "kind" "if", jsonFieldRaw "condition" (emitNativeExprJson condition), jsonFieldRaw "thenBranch" (emitNativeExprJson thenBranch), jsonFieldRaw "elseBranch" (emitNativeExprJson elseBranch)],
-  LowerEqual left right ->
-    emitNativeCompareOpJson left right "eq",
-  LowerNotEqual left right ->
-    emitNativeCompareOpJson left right "ne",
-  LowerLessThan left right ->
-    emitNativeCompareOpJson left right "lt",
-  LowerLessThanOrEqual left right ->
-    emitNativeCompareOpJson left right "le",
-  LowerGreaterThan left right ->
-    emitNativeCompareOpJson left right "gt",
-  LowerGreaterThanOrEqual left right ->
-    emitNativeCompareOpJson left right "ge",
-  LowerInvoke callee args ->
-    jsonObject [jsonFieldText "kind" "call", jsonFieldRaw "callee" (jsonObject [jsonFieldText "kind" "local", jsonFieldText "name" callee]), jsonFieldArray "args" (emitNativeJsonExprList args)],
-  LowerConstructor constructorName args ->
-    jsonObject [jsonFieldText "kind" "construct", jsonFieldText "name" constructorName, jsonFieldArray "args" (emitNativeJsonExprList args)],
-  LowerMatch subject branches ->
-    jsonObject [jsonFieldText "kind" "match", jsonFieldRaw "scrutinee" (emitNativeExprJson subject), jsonFieldArray "branches" (emitNativeJsonMatchBranchList branches)],
-  LowerRecord recordName fields ->
-    jsonObject [jsonFieldText "kind" "record", jsonFieldText "recordName" recordName, jsonFieldArray "fields" (emitNativeJsonRecordFieldList fields)],
-  LowerFieldAccess recordName subject fieldName ->
-    jsonObject [jsonFieldText "kind" "field_access", jsonFieldText "recordName" recordName, jsonFieldRaw "target" (emitNativeExprJson subject), jsonFieldText "fieldName" fieldName],
-  LowerLet binder value body ->
-    jsonObject [jsonFieldText "kind" "let", jsonFieldText "mutability" "immutable", jsonFieldText "name" binder, jsonFieldRaw "value" (emitNativeExprJson value), jsonFieldRaw "body" (emitNativeExprJson body)],
-  LowerMutableLet binder value body ->
-    jsonObject [jsonFieldText "kind" "let", jsonFieldText "mutability" "mutable", jsonFieldText "name" binder, jsonFieldRaw "value" (emitNativeExprJson value), jsonFieldRaw "body" (emitNativeExprJson body)],
-  LowerAssign binder value body ->
-    jsonObject [jsonFieldText "kind" "assign", jsonFieldText "name" binder, jsonFieldRaw "value" (emitNativeExprJson value), jsonFieldRaw "body" (emitNativeExprJson body)],
-  LowerFor binder iterable loopBody body ->
-    jsonObject [jsonFieldText "kind" "for_each", jsonFieldText "name" binder, jsonFieldRaw "iterable" (emitNativeExprJson iterable), jsonFieldRaw "loopBody" (emitNativeExprJson loopBody), jsonFieldRaw "body" (emitNativeExprJson body)],
-  LowerReturn value ->
-    jsonObject [jsonFieldText "kind" "return", jsonFieldRaw "value" (emitNativeExprJson value)]
-}
-
-emitNativeRecordFieldJson : LowerRecordFieldText -> Str
-emitNativeRecordFieldJson field = match field {
-  LowerRecordFieldText name value ->
-    jsonObject [jsonFieldText "name" name, jsonFieldRaw "value" (emitNativeExprJson value)]
-}
-
-emitNativeMatchBranchJson : LowerMatchBranchText -> Str
-emitNativeMatchBranchJson branch = match branch {
-  LowerMatchBranchText constructorName binders body ->
-    jsonObject [jsonFieldText "tag" constructorName, jsonFieldArray "binders" (emitNativeJsonStringList binders), jsonFieldRaw "body" (emitNativeExprJson body)]
-}
-
-emitNativeConstructorBodyJson : HostedConstructorDeclAst -> Str
-emitNativeConstructorBodyJson constructorDecl = {
-  let params = emitNativeConstructorParams (constructorDeclPayloadTypes constructorDecl);
-  let mut args = [];
-  for param in params {
-    args = appendNativeRenderedText args (jsonObject [jsonFieldText "kind" "local", jsonFieldText "name" param]);
-    args
-  };
-  jsonObject [jsonFieldText "kind" "construct", jsonFieldText "name" (constructorDeclName constructorDecl), jsonFieldArray "args" args]
-}
-
-emitNativeConstructorDeclJson : HostedConstructorDeclAst -> Str
-emitNativeConstructorDeclJson constructorDecl = {
-  let params = emitNativeConstructorParams (constructorDeclPayloadTypes constructorDecl);
-  let bodyJson = emitNativeConstructorBodyJson constructorDecl;
-  if hasHostedTypeValues (constructorDeclPayloadTypes constructorDecl) then jsonObject [jsonFieldText "kind" "function", jsonFieldText "name" (constructorDeclName constructorDecl), jsonFieldArray "params" (emitNativeJsonStringList params), jsonFieldRaw "body" bodyJson] else jsonObject [jsonFieldText "kind" "global", jsonFieldText "name" (constructorDeclName constructorDecl), jsonFieldRaw "body" bodyJson]
-}
-
-emitNativeConstructorDeclJsons : HostedModuleAst -> [Str]
-emitNativeConstructorDeclJsons modl = {
-  let mut rendered = [];
-  for typeDecl in nativeEmittedTypeDecls modl {
-    for constructorDecl in typeDeclConstructors typeDecl {
-      rendered = appendNativeRenderedText rendered (emitNativeConstructorDeclJson constructorDecl);
-      rendered
-    };
-    rendered
-  };
-  rendered
-}
-
-emitNativeDeclJson : LowerDeclText -> Str
-emitNativeDeclJson decl = match decl {
-  LowerConst name body ->
-    jsonObject [jsonFieldText "kind" "global", jsonFieldText "name" name, jsonFieldRaw "body" (emitNativeExprJson body)],
-  LowerFn name params body ->
-    jsonObject [jsonFieldText "kind" "function", jsonFieldText "name" name, jsonFieldArray "params" (emitNativeJsonStringList params), jsonFieldRaw "body" (emitNativeExprJson body)]
-}
-
-emitNativeDeclJsons : [LowerDeclText] -> [Str]
-emitNativeDeclJsons decls = {
-  let mut rendered = [];
-  for decl in decls {
-    rendered = appendNativeRenderedText rendered (emitNativeDeclJson decl);
-    rendered
-  };
-  rendered
 }
 
 emitNativeEntrypointJson : Str -> LowerDeclText -> Str
@@ -2357,7 +1489,7 @@ emitNativeEntrypointJson moduleName decl = match decl {
 
 emitNativeEntrypointJsons : Str -> [LowerDeclText] -> [Str]
 emitNativeEntrypointJsons moduleName decls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for decl in decls {
     rendered = appendNativeRenderedText rendered (emitNativeEntrypointJson moduleName decl);
     rendered
@@ -2365,24 +1497,6 @@ emitNativeEntrypointJsons moduleName decls = {
   rendered
 }
 
-emitNativeConstructorEntrypointJson : Str -> HostedConstructorDeclAst -> Str
-emitNativeConstructorEntrypointJson moduleName constructorDecl = {
-  let payloadTypes = constructorDeclPayloadTypes constructorDecl;
-  jsonObject [jsonFieldText "name" (constructorDeclName constructorDecl), jsonFieldText "symbol" (nativeEntrypointSymbol moduleName (constructorDeclName constructorDecl)), jsonFieldText "kind" (if hasHostedTypeValues payloadTypes then "function" else "global"), jsonFieldRaw "arity" (if hasHostedTypeValues payloadTypes then countHostedTypes payloadTypes else "0")]
-}
-
-emitNativeConstructorEntrypointJsons : Str -> HostedModuleAst -> [Str]
-emitNativeConstructorEntrypointJsons moduleName modl = {
-  let mut rendered = [];
-  for typeDecl in nativeEmittedTypeDecls modl {
-    for constructorDecl in typeDeclConstructors typeDecl {
-      rendered = appendNativeRenderedText rendered (emitNativeConstructorEntrypointJson moduleName constructorDecl);
-      rendered
-    };
-    rendered
-  };
-  rendered
-}
 
 emitNativeCompatibilityFingerprint : HostedModuleAst -> [LowerDeclText] -> Str
 emitNativeCompatibilityFingerprint modl decls =
@@ -2455,149 +1569,9 @@ emitNativeModuleImageEntrypoints modl decls = {
   jsonArray (append (emitNativeConstructorEntrypointJsons moduleName modl) (emitNativeEntrypointJsonsFromModule moduleName modl))
 }
 
-emitNativeModuleImageDecls : HostedModuleAst -> [LowerDeclText] -> Str
-emitNativeModuleImageDecls modl decls =
-  jsonArray (append (emitNativeConstructorDeclJsons modl) (emitNativeDeclJsons decls))
-
 emitNativeModuleImageConstructorDecls : HostedModuleAst -> Str
 emitNativeModuleImageConstructorDecls modl = jsonArray (emitNativeConstructorDeclJsons modl)
 
-collectHostedDeclNames : HostedModuleAst -> [Str]
-collectHostedDeclNames modl = {
-  let mut names = [];
-  for decl in moduleDeclarations modl {
-    names = appendNativeRenderedText names (declName decl);
-    names
-  };
-  names
-}
-
-emitNativeModuleImageDeclNames : HostedModuleAst -> Str
-emitNativeModuleImageDeclNames modl = textJoin "\n" (collectHostedDeclNames modl)
-
-emitNativeTypeDeclFingerprintText : HostedTypeDeclAst -> Str
-emitNativeTypeDeclFingerprintText typeDecl = {
-  let mut constructorTexts = [];
-  for constructorDecl in typeDeclConstructors typeDecl {
-    let payloadTexts = emitNativeJsonStringList (renderHostedTypeList (constructorDeclPayloadTypes constructorDecl));
-    constructorTexts = appendNativeRenderedText constructorTexts (textConcat [constructorDeclName constructorDecl, "(", textJoin "," payloadTexts, ")"]);
-    constructorTexts
-  };
-  textConcat [typeDeclName typeDecl, "=", textJoin "|" constructorTexts]
-}
-
-emitNativeRecordFieldFingerprintText : HostedRecordFieldDeclAst -> Str
-emitNativeRecordFieldFingerprintText field = textConcat [recordFieldDeclName field, ":", renderType (typeFromHostedTypeAst (recordFieldDeclType field))]
-
-emitNativeRecordDeclFingerprintText : HostedRecordDeclAst -> Str
-emitNativeRecordDeclFingerprintText recordDecl = {
-  let mut fieldTexts = [];
-  for field in recordDeclFields recordDecl {
-    fieldTexts = appendNativeRenderedText fieldTexts (emitNativeRecordFieldFingerprintText field);
-    fieldTexts
-  };
-  textConcat [recordDeclName recordDecl, "{", textJoin "," fieldTexts, "}"]
-}
-
-emitNativeForeignDeclFingerprintText : HostedForeignDeclAst -> Str
-emitNativeForeignDeclFingerprintText foreignDecl = textConcat [foreignDeclName foreignDecl, ":", renderType (typeFromHostedTypeAst (foreignDeclTypeAst foreignDecl))]
-
-emitNativeTypeBindingFingerprintText : TypeBinding -> Str
-emitNativeTypeBindingFingerprintText binding = match binding {
-  TypeBinding name bindingType ->
-    textConcat [name, ":", renderType bindingType]
-}
-
-emitNativeProjectDeclContextFingerprint : HostedModuleAst -> Str
-emitNativeProjectDeclContextFingerprint modl = {
-  let mut fingerprintParts = [];
-  if moduleDeclarationsFullyAnnotated modl then {
-    for binding in collectAnnotatedBindings modl {
-      fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeTypeBindingFingerprintText binding);
-      fingerprintParts
-    };
-    fingerprintParts
-  } else {
-    fingerprintParts = appendNativeRenderedText fingerprintParts (renderModuleSummary modl);
-    fingerprintParts
-  };
-  for typeDecl in effectiveModuleTypeDecls modl {
-    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeTypeDeclFingerprintText typeDecl);
-    fingerprintParts
-  };
-  for recordDecl in effectiveModuleRecordDecls modl {
-    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeRecordDeclFingerprintText recordDecl);
-    fingerprintParts
-  };
-  for foreignDecl in moduleForeignDeclarations modl {
-    fingerprintParts = appendNativeRenderedText fingerprintParts (emitNativeForeignDeclFingerprintText foreignDecl);
-    fingerprintParts
-  };
-  textFingerprint64Hex (textJoin "\n" fingerprintParts)
-}
-
-nativeImageDeclPlanFieldSeparator : Str
-nativeImageDeclPlanFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --\n"
-
-nativeImageDeclModuleSeparator : Str
-nativeImageDeclModuleSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE --\n"
-
-nativeImageDeclModuleFieldSeparator : Str
-nativeImageDeclModuleFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --\n"
-
-emitNativeDeclModulePlanEntryText : HostedModuleAst -> Str
-emitNativeDeclModulePlanEntryText sourceModule =
-  textJoin
-    nativeImageDeclModuleFieldSeparator
-    [
-      moduleNameOf sourceModule,
-      emitNativeModuleImageDeclNames sourceModule
-    ]
-
-emitNativeDeclModulePlanEntriesText : [HostedModuleAst] -> Str
-emitNativeDeclModulePlanEntriesText sourceModules = {
-  let mut entries = [];
-  for sourceModule in sourceModules {
-    entries = appendNativeRenderedText entries (emitNativeDeclModulePlanEntryText sourceModule);
-    entries
-  };
-  textJoin nativeImageDeclModuleSeparator entries
-}
-
-emitNativeProjectDeclModulePlanText : HostedModuleAst -> [HostedModuleAst] -> Str
-emitNativeProjectDeclModulePlanText mergedModule sourceModules =
-  textJoin
-    nativeImageDeclPlanFieldSeparator
-    [
-      emitNativeProjectDeclContextFingerprint mergedModule,
-      emitNativeDeclModulePlanEntriesText sourceModules
-    ]
-
-emitNativeDeclJsonsFromDeclarations : HostedModuleAst -> [HostedDeclAst] -> [Str] -> [Str]
-emitNativeDeclJsonsFromDeclarations mergedModule declarations selectedNames = {
-  let typeDecls = effectiveModuleTypeDecls mergedModule;
-  let recordDecls = effectiveModuleRecordDecls mergedModule;
-  let env = lowerModuleEnv mergedModule typeDecls;
-  let mut rendered = [];
-  for decl in declarations {
-    if containsText selectedNames (declName decl) then {
-      rendered = appendNativeRenderedText rendered (emitNativeDeclJson (lowerDecl typeDecls recordDecls env decl));
-      rendered
-    } else {
-      rendered
-    }
-  };
-  rendered
-}
-
-emitNativeDeclJsonsForNamedDecls : HostedModuleAst -> [Str] -> [Str]
-emitNativeDeclJsonsForNamedDecls modl selectedNames = emitNativeDeclJsonsFromDeclarations modl (moduleDeclarations modl) selectedNames
-
-emitNativeModuleImageNamedDecls : HostedModuleAst -> [Str] -> Str
-emitNativeModuleImageNamedDecls modl selectedNames = jsonArray (emitNativeDeclJsonsForNamedDecls modl selectedNames)
-
-emitNativeSourceModuleImageDecls : HostedModuleAst -> HostedModuleAst -> Str
-emitNativeSourceModuleImageDecls mergedModule sourceModule = jsonArray (emitNativeDeclJsonsFromDeclarations mergedModule (moduleDeclarations sourceModule) (collectHostedDeclNames sourceModule))
 
 nativeImagePlanFieldSeparator : Str
 nativeImagePlanFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n"
@@ -2608,13 +1582,28 @@ emitNativeModuleImagePlanText modl =
     nativeImagePlanFieldSeparator
     [
       emitNativeModuleImageModuleName modl,
-      emitNativeModuleImageExports modl [],
-      emitNativeModuleImageEntrypoints modl [],
+      emitNativeModuleImageExports modl emptyLowerDecls,
+      emitNativeModuleImageEntrypoints modl emptyLowerDecls,
       emitNativeAbiImage modl,
       emitNativeRuntimeImage modl,
-      emitNativeCompatibilityImage modl [],
+      emitNativeCompatibilityImage modl emptyLowerDecls,
       emitNativeModuleImageConstructorDecls modl,
       emitNativeModuleImageDeclNames modl
+    ]
+
+emitNativeModuleImageBuildPlanText : HostedModuleAst -> [HostedModuleAst] -> Str
+emitNativeModuleImageBuildPlanText mergedModule sourceModules =
+  textJoin
+    nativeImagePlanFieldSeparator
+    [
+      emitNativeModuleImageModuleName mergedModule,
+      emitNativeModuleImageExports mergedModule emptyLowerDecls,
+      emitNativeModuleImageEntrypoints mergedModule emptyLowerDecls,
+      emitNativeAbiImage mergedModule,
+      emitNativeRuntimeImage mergedModule,
+      emitNativeCompatibilityImage mergedModule emptyLowerDecls,
+      emitNativeModuleImageConstructorDecls mergedModule,
+      emitNativeProjectDeclModulePlanText mergedModule sourceModules
     ]
 
 emitNativeModuleImage : HostedModuleAst -> [LowerDeclText] -> Str

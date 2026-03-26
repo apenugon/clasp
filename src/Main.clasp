@@ -1,15 +1,8 @@
 module Main
 
-import Compiler.Checker
-import Compiler.CheckedCore
-import Compiler.Emit.JavaScript
-import Compiler.Emit.Native
-import Compiler.Json
-import Compiler.Lower
-import Compiler.Project
+import Compiler.Driver.Frontend
+import Compiler.Driver.Native
 import Compiler.SnapshotFixture
-sourceLoweredDecls : Str -> [LowerDeclText]
-sourceLoweredDecls source = lowerModule (sourceModule source)
 
 checkEntrypoint : Str
 checkEntrypoint = compilerSnapshotCheckEntrypoint
@@ -27,174 +20,88 @@ nativeImageEntrypoint : Str
 nativeImageEntrypoint = compilerSnapshotNativeImageEntrypoint
 
 checkSourceText : Str -> Str
-checkSourceText source = renderModuleSummary (sourceModule source)
+checkSourceText source = frontendDriverCheckSourceText source
 
 explainSourceText : Str -> Str
-explainSourceText source = renderModuleSummary (sourceModule source)
+explainSourceText source = frontendDriverExplainSourceText source
 
 compileSourceText : Str -> Str
-compileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else emitFrontendModule (sourceModule source) (sourceLoweredDecls source)
+compileSourceText source = frontendDriverCompileSourceText source
 
 nativeSourceText : Str -> Str
-nativeSourceText source = emitNativeModule (sourceModule source) (sourceLoweredDecls source)
+nativeSourceText source = nativeDriverSourceText source
 
 nativeImageSourceText : Str -> Str
-nativeImageSourceText source = emitNativeModuleImage (sourceModule source) (sourceLoweredDecls source)
+nativeImageSourceText source = nativeDriverImageSourceText source
 
 checkCoreSourceText : Str -> Str
-checkCoreSourceText source = checkedCoreSourceJson source
+checkCoreSourceText source = frontendDriverCheckCoreSourceText source
 
 checkProjectText : Str -> Str
-checkProjectText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    renderModuleSummary modl,
-  HostedProjectBundleError message ->
-    message
-}
+checkProjectText bundle = frontendDriverCheckProjectText bundle
+
+checkProjectModuleSummaryText : Str -> Str -> Str
+checkProjectModuleSummaryText bundle importedSummaryText = frontendDriverCheckProjectModuleSummaryText bundle importedSummaryText
 
 explainProjectText : Str -> Str
-explainProjectText bundle = checkProjectText bundle
+explainProjectText bundle = frontendDriverExplainProjectText bundle
 
 compileProjectText : Str -> Str
-compileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitFrontendModule modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    textConcat ["// compiler-selfhost project error: ", message]
-}
+compileProjectText bundle = frontendDriverCompileProjectText bundle
 
 nativeProjectText : Str -> Str
-nativeProjectText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModule modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    textConcat ["// compiler-selfhost project error: ", message]
-}
+nativeProjectText bundle = nativeDriverProjectText bundle
 
 nativeImageProjectText : Str -> Str
-nativeImageProjectText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImage modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    jsonObject [jsonFieldText "format" "clasp-native-image-v1", jsonFieldText "error" message]
-}
+nativeImageProjectText bundle = nativeDriverImageProjectText bundle
 
 nativeImageProjectPlanText : Str -> Str
-nativeImageProjectPlanText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImagePlanText modl,
-  HostedProjectBundleError message ->
-    textConcat ["ERROR:", message]
-}
+nativeImageProjectPlanText bundle = nativeDriverImageProjectPlanText bundle
+
+nativeImageProjectBuildPlanText : Str -> Str
+nativeImageProjectBuildPlanText bundle = nativeDriverImageProjectBuildPlanText bundle
+
+nativeImageSourceModuleInterfaceFingerprintText : Str -> Str
+nativeImageSourceModuleInterfaceFingerprintText source = nativeDriverImageSourceModuleInterfaceFingerprintText source
 
 nativeImageProjectModuleText : Str -> Str
-nativeImageProjectModuleText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageModuleName modl,
-  HostedProjectBundleError message ->
-    textConcat ["ERROR:", message]
-}
+nativeImageProjectModuleText bundle = nativeDriverImageProjectModuleText bundle
 
 nativeImageProjectExportsText : Str -> Str
-nativeImageProjectExportsText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageExports modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectExportsText bundle = nativeDriverImageProjectExportsText bundle
 
 nativeImageProjectEntrypointsText : Str -> Str
-nativeImageProjectEntrypointsText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageEntrypoints modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectEntrypointsText bundle = nativeDriverImageProjectEntrypointsText bundle
 
 nativeImageProjectAbiText : Str -> Str
-nativeImageProjectAbiText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeAbiImage modl,
-  HostedProjectBundleError message ->
-    jsonObject [jsonFieldText "error" message]
-}
+nativeImageProjectAbiText bundle = nativeDriverImageProjectAbiText bundle
 
 nativeImageProjectRuntimeText : Str -> Str
-nativeImageProjectRuntimeText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeRuntimeImage modl,
-  HostedProjectBundleError message ->
-    jsonObject [jsonFieldText "error" message]
-}
+nativeImageProjectRuntimeText bundle = nativeDriverImageProjectRuntimeText bundle
 
 nativeImageProjectCompatibilityText : Str -> Str
-nativeImageProjectCompatibilityText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeCompatibilityImage modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    jsonObject [jsonFieldText "error" message]
-}
+nativeImageProjectCompatibilityText bundle = nativeDriverImageProjectCompatibilityText bundle
 
 nativeImageProjectDeclsText : Str -> Str
-nativeImageProjectDeclsText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageDecls modl (lowerModule modl),
-  HostedProjectBundleError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectDeclsText bundle = nativeDriverImageProjectDeclsText bundle
 
 nativeImageProjectConstructorDeclsText : Str -> Str
-nativeImageProjectConstructorDeclsText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageConstructorDecls modl,
-  HostedProjectBundleError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectConstructorDeclsText bundle = nativeDriverImageProjectConstructorDeclsText bundle
 
 nativeImageProjectDeclNamesText : Str -> Str
-nativeImageProjectDeclNamesText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageDeclNames modl,
-  HostedProjectBundleError message ->
-    textConcat ["ERROR:", message]
-}
+nativeImageProjectDeclNamesText bundle = nativeDriverImageProjectDeclNamesText bundle
 
 nativeImageProjectDeclModulePlanText : Str -> Str
-nativeImageProjectDeclModulePlanText bundle = match resolveProjectModules bundle {
-  HostedResolvedProjectOk mergedModule sourceModules ->
-    emitNativeProjectDeclModulePlanText mergedModule sourceModules,
-  HostedResolvedProjectError message ->
-    textConcat ["ERROR:", message]
-}
+nativeImageProjectDeclModulePlanText bundle = nativeDriverImageProjectDeclModulePlanText bundle
 
 nativeImageProjectModuleDeclsText : Str -> Str -> Str
-nativeImageProjectModuleDeclsText bundle moduleName = match resolveProjectModules bundle {
-  HostedResolvedProjectOk mergedModule sourceModules ->
-    match lookupProjectModule sourceModules moduleName {
-      FoundHostedProjectModule sourceModule ->
-        emitNativeSourceModuleImageDecls mergedModule sourceModule,
-      MissingHostedProjectModule missing ->
-        jsonArray [encode (textConcat ["ERROR:", missing])]
-    },
-  HostedResolvedProjectError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectModuleDeclsText bundle moduleName = nativeDriverImageProjectModuleDeclsText bundle moduleName
 
 nativeImageProjectNamedDeclsText : Str -> Str -> Str
-nativeImageProjectNamedDeclsText bundle namesText = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    emitNativeModuleImageNamedDecls modl (if namesText == "" then [] else textSplit namesText "\n"),
-  HostedProjectBundleError message ->
-    jsonArray [encode (textConcat ["ERROR:", message])]
-}
+nativeImageProjectNamedDeclsText bundle namesText = nativeDriverImageProjectNamedDeclsText bundle namesText
 
 checkCoreProjectText : Str -> Str
-checkCoreProjectText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl ->
-    renderCheckedCoreArtifactResultJson (checkedCoreArtifactResult modl),
-  HostedProjectBundleError message ->
-    renderCheckedCoreArtifactResultJson (CheckedCoreArtifactError message)
-}
+checkCoreProjectText bundle = frontendDriverCheckCoreProjectText bundle
 
 snapshot : HostedCompilerSnapshot
 snapshot = compilerSnapshot
@@ -205,8 +112,8 @@ snapshotJson = compilerSnapshotJson
 snapshotJsonLiteral : Str
 snapshotJsonLiteral = compilerSnapshotJsonLiteral
 
-stage2CompilerModule : Str
-stage2CompilerModule = compilerSnapshotStage2Module
+candidateCompilerModule : Str
+candidateCompilerModule = compilerSnapshotCandidateModule
 
 main : Str
 main = snapshotJson

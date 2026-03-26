@@ -1,6 +1,47 @@
 module Main
 
 record SwarmEvent = { kind : Str, taskId : Str, actor : Str, detail : Str, atMs : Int }
+record SwarmTaskState = {
+  taskId : Str,
+  status : Str,
+  leaseActor : Str,
+  lastHeartbeatAtMs : Int,
+  heartbeatSeen : Bool
+}
+record SwarmSummary = {
+  allTaskIds : [Str],
+  createdTaskIds : [Str],
+  leasedTaskIds : [Str],
+  activeTaskIds : [Str],
+  queuedTaskIds : [Str],
+  completedTaskIds : [Str],
+  failedTaskIds : [Str],
+  heartbeatTaskIds : [Str],
+  statusByTask : Dict Str Str,
+  leaseByTask : Dict Str Str,
+  hasBootstrap : Bool,
+  bootstrapStatus : Str,
+  taskStatusKeys : [Str],
+  leaseValuesWithoutDraft : [Str]
+}
+record SwarmLoopState = {
+  taskId : Str,
+  attempt : Int,
+  phase : Str,
+  completed : Bool,
+  lastFailure : Str,
+  builderRuns : Int,
+  verifierRuns : Int,
+  builderStartedAtMs : Int,
+  verifierStartedAtMs : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  suggestedRole : Str,
+  suggestedCommand : Str
+}
+record TaskStateEventUpdate = { event : SwarmEvent, matched : Bool, states : [SwarmTaskState] }
+record TaskStateDicts = { statuses : Dict Str Str, leases : Dict Str Str }
 
 swarmRoot : Str
 swarmRoot = if textJoin "" argv == "" then "swarm-state" else pathJoin argv
@@ -14,25 +55,427 @@ actorName = match envVar "CLASP_SWARM_ACTOR" {
   Err message -> "manager"
 }
 
-bootstrapEvent : SwarmEvent
-bootstrapEvent = SwarmEvent {
-  kind = "task_created",
-  taskId = "bootstrap",
+commandName : Str
+commandName = match envVar "CLASP_SWARM_COMMAND" {
+  Ok value -> value,
+  Err message -> "bootstrap"
+}
+
+taskName : Str
+taskName = match envVar "CLASP_SWARM_TASK_ID" {
+  Ok value -> value,
+  Err message -> "bootstrap"
+}
+
+commandDetailOverride : Str
+commandDetailOverride = match envVar "CLASP_SWARM_DETAIL" {
+  Ok value -> value,
+  Err message -> ""
+}
+
+eventKind : Str
+eventKind =
+  if commandName == "lease" then
+    "lease_acquired"
+  else if commandName == "release" then
+    "lease_released"
+  else if commandName == "heartbeat" then
+    "worker_heartbeat"
+  else if commandName == "complete" then
+    "task_completed"
+  else if commandName == "fail" then
+    "task_failed"
+  else if commandName == "retry" then
+    "task_requeued"
+  else if commandName == "builder-start" then
+    "builder_started"
+  else if commandName == "builder-complete" then
+    "builder_completed"
+  else if commandName == "builder-fail" then
+    "builder_failed"
+  else if commandName == "verifier-start" then
+    "verifier_started"
+  else if commandName == "verifier-pass" then
+    "verifier_passed"
+  else if commandName == "verifier-fail" then
+    "verifier_failed"
+  else
+    "task_created"
+
+eventDetail : Str
+eventDetail =
+  if commandName == "lease" then
+    textConcat ["Acquire lease for ", taskName, "."]
+  else if commandName == "release" then
+    textConcat ["Release lease for ", taskName, "."]
+  else if commandName == "heartbeat" then
+    textConcat ["Heartbeat for ", taskName, "."]
+  else if commandName == "complete" then
+    textConcat ["Complete task ", taskName, "."]
+  else if commandName == "fail" then
+    textConcat ["Fail task ", taskName, "."]
+  else if commandName == "retry" then
+    textConcat ["Requeue task ", taskName, "."]
+  else if commandName == "builder-start" then
+    textConcat ["Start builder attempt for ", taskName, "."]
+  else if commandName == "builder-complete" then
+    textConcat ["Builder completed for ", taskName, "."]
+  else if commandName == "builder-fail" then
+    if commandDetailOverride == "" then
+      textConcat ["Builder failed for ", taskName, "."]
+    else
+      commandDetailOverride
+  else if commandName == "verifier-start" then
+    textConcat ["Start verifier attempt for ", taskName, "."]
+  else if commandName == "verifier-pass" then
+    textConcat ["Verifier passed for ", taskName, "."]
+  else if commandName == "verifier-fail" then
+    if commandDetailOverride == "" then
+      textConcat ["Verifier failed for ", taskName, "."]
+    else
+      commandDetailOverride
+  else
+    "Initialize swarm kernel state."
+
+currentEvent : SwarmEvent
+currentEvent = SwarmEvent {
+  kind = eventKind,
+  taskId = taskName,
   actor = actorName,
-  detail = "Initialize swarm kernel state.",
+  detail = eventDetail,
   atMs = timeUnixMs
 }
 
-appendBootstrapEvent : Result
-appendBootstrapEvent = appendFile eventLogPath (textConcat [encode bootstrapEvent, "\n"])
+appendSwarmEvent : Result Str
+appendSwarmEvent = appendFile eventLogPath (textConcat [encode currentEvent, "\n"])
+
+buildTaskState : Str -> Str -> Str -> Int -> SwarmTaskState
+buildTaskState targetTask status leaseActor lastHeartbeatAtMs = {
+  SwarmTaskState {
+    taskId = targetTask,
+    status = status,
+    leaseActor = leaseActor,
+    lastHeartbeatAtMs = lastHeartbeatAtMs,
+    heartbeatSeen = lastHeartbeatAtMs != 0
+  }
+}
+
+emptyTaskState : Str -> SwarmTaskState
+emptyTaskState targetTask = buildTaskState targetTask "missing" "" 0
+
+applyTaskEvent : SwarmTaskState -> SwarmEvent -> SwarmTaskState
+applyTaskEvent taskState event =
+  if event.taskId != taskState.taskId then
+    taskState
+  else if event.kind == "task_created" then
+    buildTaskState taskState.taskId "created" taskState.leaseActor taskState.lastHeartbeatAtMs
+  else if event.kind == "lease_acquired" then
+    buildTaskState taskState.taskId "leased" event.actor taskState.lastHeartbeatAtMs
+  else if event.kind == "lease_released" then
+    buildTaskState taskState.taskId "queued" "" 0
+  else if event.kind == "worker_heartbeat" then
+    buildTaskState taskState.taskId "active" event.actor event.atMs
+  else if event.kind == "task_completed" then
+    buildTaskState taskState.taskId "completed" taskState.leaseActor taskState.lastHeartbeatAtMs
+  else if event.kind == "task_failed" then
+    buildTaskState taskState.taskId "failed" taskState.leaseActor taskState.lastHeartbeatAtMs
+  else if event.kind == "task_requeued" then
+    buildTaskState taskState.taskId "queued" "" 0
+  else
+    buildTaskState taskState.taskId taskState.status taskState.leaseActor taskState.lastHeartbeatAtMs
+
+applyTaskLine : SwarmTaskState -> Str -> SwarmTaskState
+applyTaskLine taskState rawLine =
+  if rawLine == "" then
+    taskState
+  else
+    applyTaskEvent taskState (decode SwarmEvent rawLine)
+
+collectTaskHistory : [SwarmEvent] -> Str -> [SwarmEvent]
+collectTaskHistory events rawLine =
+  if rawLine == "" then
+    events
+  else {
+    let event = decode SwarmEvent rawLine;
+    if event.taskId == taskName then
+      append events [event]
+    else
+      events
+  }
+
+updateTaskStateEntry : TaskStateEventUpdate -> SwarmTaskState -> TaskStateEventUpdate
+updateTaskStateEntry update currentState =
+  if currentState.taskId == update.event.taskId then
+    TaskStateEventUpdate {
+      event = update.event,
+      matched = true,
+      states = append update.states [applyTaskEvent currentState update.event]
+    }
+  else
+    TaskStateEventUpdate {
+      event = update.event,
+      matched = update.matched,
+      states = append update.states [currentState]
+    }
+
+applyTaskLineToStates : [SwarmTaskState] -> Str -> [SwarmTaskState]
+applyTaskLineToStates states rawLine =
+  if rawLine == "" then
+    states
+  else {
+    let event = decode SwarmEvent rawLine;
+    let update = fold updateTaskStateEntry (TaskStateEventUpdate { event = event, matched = false, states = [] }) states;
+    if update.matched then
+      update.states
+    else
+      append update.states [applyTaskEvent (emptyTaskState event.taskId) event]
+  }
+
+projectTaskState : Str -> Str -> SwarmTaskState
+projectTaskState targetTask contents = fold applyTaskLine (emptyTaskState targetTask) (textSplit contents "\n")
+
+isCreatedTask : SwarmTaskState -> Bool
+isCreatedTask taskState = taskState.status == "created"
+
+isLeasedTask : SwarmTaskState -> Bool
+isLeasedTask taskState = taskState.status == "leased"
+
+isActiveTask : SwarmTaskState -> Bool
+isActiveTask taskState = taskState.status == "active"
+
+isQueuedTask : SwarmTaskState -> Bool
+isQueuedTask taskState = taskState.status == "queued"
+
+isCompletedTask : SwarmTaskState -> Bool
+isCompletedTask taskState = taskState.status == "completed"
+
+isFailedTask : SwarmTaskState -> Bool
+isFailedTask taskState = taskState.status == "failed"
+
+hasHeartbeatTask : SwarmTaskState -> Bool
+hasHeartbeatTask taskState = taskState.heartbeatSeen
+
+taskStateTaskId : SwarmTaskState -> Str
+taskStateTaskId taskState = taskState.taskId
+
+collectTaskStateDicts : TaskStateDicts -> SwarmTaskState -> TaskStateDicts
+collectTaskStateDicts summary taskState =
+  TaskStateDicts {
+    statuses = dictSet taskState.taskId taskState.status summary.statuses,
+    leases = dictSet taskState.taskId taskState.leaseActor summary.leases
+  }
+
+bootstrapStatusFrom : Dict Str Str -> Str
+bootstrapStatusFrom statuses = match dictGet "bootstrap" statuses {
+  Ok value -> value,
+  Err message -> "missing"
+}
+
+buildSwarmSummary : [SwarmTaskState] -> SwarmSummary
+buildSwarmSummary taskStates = {
+  let dicts = fold collectTaskStateDicts (TaskStateDicts { statuses = dictEmpty, leases = dictEmpty }) taskStates;
+  SwarmSummary {
+    allTaskIds = map taskStateTaskId taskStates,
+    createdTaskIds = map taskStateTaskId (filter isCreatedTask taskStates),
+    leasedTaskIds = map taskStateTaskId (filter isLeasedTask taskStates),
+    activeTaskIds = map taskStateTaskId (filter isActiveTask taskStates),
+    queuedTaskIds = map taskStateTaskId (filter isQueuedTask taskStates),
+    completedTaskIds = map taskStateTaskId (filter isCompletedTask taskStates),
+    failedTaskIds = map taskStateTaskId (filter isFailedTask taskStates),
+    heartbeatTaskIds = map taskStateTaskId (filter hasHeartbeatTask taskStates),
+    statusByTask = dicts.statuses,
+    leaseByTask = dicts.leases,
+    hasBootstrap = dictHas "bootstrap" dicts.statuses,
+    bootstrapStatus = bootstrapStatusFrom dicts.statuses,
+    taskStatusKeys = dictKeys dicts.statuses,
+    leaseValuesWithoutDraft = dictValues (dictRemove "draft" dicts.leases)
+  }
+}
+
+builderStartCommand : Str -> Str
+builderStartCommand targetTask = textConcat ["CLASP_SWARM_COMMAND=builder-start CLASP_SWARM_TASK_ID=", targetTask]
+
+verifierStartCommand : Str -> Str
+verifierStartCommand targetTask = textConcat ["CLASP_SWARM_COMMAND=verifier-start CLASP_SWARM_TASK_ID=", targetTask]
+
+emptyLoopState : Str -> SwarmLoopState
+emptyLoopState targetTask =
+  SwarmLoopState {
+    taskId = targetTask,
+    attempt = 1,
+    phase = "needs-builder",
+    completed = false,
+    lastFailure = "",
+    builderRuns = 0,
+    verifierRuns = 0,
+    builderStartedAtMs = 0,
+    verifierStartedAtMs = 0,
+    healthy = true,
+    needsAttention = false,
+    attentionReason = "",
+    suggestedRole = "builder",
+    suggestedCommand = builderStartCommand targetTask
+  }
+
+incrementLoopCounter : Int -> Int
+incrementLoopCounter value =
+  if value == 0 then
+    1
+  else if value == 1 then
+    2
+  else if value == 2 then
+    3
+  else if value == 3 then
+    4
+  else
+    value
+
+applyLoopEvent : SwarmLoopState -> SwarmEvent -> SwarmLoopState
+applyLoopEvent loopState event =
+  let currentTaskId = loopState.taskId in
+  let currentAttempt = loopState.attempt in
+  let currentBuilderRuns = loopState.builderRuns in
+  let currentVerifierRuns = loopState.verifierRuns in
+  if event.taskId != currentTaskId then
+    loopState
+  else if event.kind == "builder_started" then
+    with loopState {
+      phase = "builder-running",
+      builderRuns = incrementLoopCounter currentBuilderRuns,
+      builderStartedAtMs = event.atMs,
+      verifierStartedAtMs = 0,
+      healthy = true,
+      needsAttention = false,
+      attentionReason = "",
+      suggestedRole = "builder",
+      suggestedCommand = ""
+    }
+  else if event.kind == "builder_completed" then
+    with loopState {
+      phase = "needs-verifier",
+      builderStartedAtMs = 0,
+      healthy = true,
+      needsAttention = false,
+      attentionReason = "",
+      suggestedRole = "verifier",
+      suggestedCommand = verifierStartCommand currentTaskId
+    }
+  else if event.kind == "builder_failed" then
+    with loopState {
+      attempt = incrementLoopCounter currentAttempt,
+      phase = "needs-builder",
+      lastFailure = event.detail,
+      builderStartedAtMs = 0,
+      verifierStartedAtMs = 0,
+      healthy = false,
+      needsAttention = true,
+      attentionReason = event.detail,
+      suggestedRole = "builder",
+      suggestedCommand = builderStartCommand currentTaskId
+    }
+  else if event.kind == "verifier_started" then
+    with loopState {
+      phase = "verifier-running",
+      verifierRuns = incrementLoopCounter currentVerifierRuns,
+      verifierStartedAtMs = event.atMs,
+      healthy = true,
+      needsAttention = false,
+      attentionReason = "",
+      suggestedRole = "verifier",
+      suggestedCommand = ""
+    }
+  else if event.kind == "verifier_passed" then
+    with loopState {
+      phase = "completed",
+      completed = true,
+      verifierStartedAtMs = 0,
+      healthy = true,
+      needsAttention = false,
+      attentionReason = "",
+      suggestedRole = "",
+      suggestedCommand = ""
+    }
+  else if event.kind == "verifier_failed" then
+    with loopState {
+      attempt = incrementLoopCounter currentAttempt,
+      phase = "needs-builder",
+      completed = false,
+      lastFailure = event.detail,
+      builderStartedAtMs = 0,
+      verifierStartedAtMs = 0,
+      healthy = false,
+      needsAttention = true,
+      attentionReason = event.detail,
+      suggestedRole = "builder",
+      suggestedCommand = builderStartCommand currentTaskId
+    }
+  else
+    loopState
+
+applyLoopLine : SwarmLoopState -> Str -> SwarmLoopState
+applyLoopLine loopState rawLine =
+  if rawLine == "" then
+    loopState
+  else
+    applyLoopEvent loopState (decode SwarmEvent rawLine)
+
+projectLoopState : Str -> Str -> SwarmLoopState
+projectLoopState targetTask contents = fold applyLoopLine (emptyLoopState targetTask) (textSplit contents "\n")
+
+statusOutput : Str
+statusOutput = match readFile eventLogPath {
+  Ok contents -> encode (projectTaskState taskName contents),
+  Err message -> encode (emptyTaskState taskName)
+}
+
+historyOutput : Str
+historyOutput = match readFile eventLogPath {
+  Ok contents -> encode (fold collectTaskHistory [] (textSplit contents "\n")),
+  Err message -> encode []
+}
+
+tasksOutput : Str
+tasksOutput = match readFile eventLogPath {
+  Ok contents -> encode (fold applyTaskLineToStates [] (textSplit contents "\n")),
+  Err message -> encode []
+}
+
+summaryOutput : Str
+summaryOutput = match readFile eventLogPath {
+  Ok contents -> encode (buildSwarmSummary (fold applyTaskLineToStates [] (textSplit contents "\n"))),
+  Err message -> encode (buildSwarmSummary [])
+}
+
+loopStatusOutput : Str
+loopStatusOutput = match readFile eventLogPath {
+  Ok contents -> encode (projectLoopState taskName contents),
+  Err message -> encode (emptyLoopState taskName)
+}
+
+monitorOutput : Str
+monitorOutput = loopStatusOutput
 
 main : Str
-main = match mkdirAll swarmRoot {
-  Ok created ->
-    match appendBootstrapEvent {
-      Ok written -> written,
-      Err message -> message
-    },
-  Err message ->
-    message
-}
+main =
+  if commandName == "status" then
+    statusOutput
+  else if commandName == "history" then
+    historyOutput
+  else if commandName == "tasks" then
+    tasksOutput
+  else if commandName == "summary" then
+    summaryOutput
+  else if commandName == "loop-status" then
+    loopStatusOutput
+  else if commandName == "monitor" then
+    monitorOutput
+  else
+    match mkdirAll swarmRoot {
+      Ok created ->
+        match appendSwarmEvent {
+          Ok written -> written,
+          Err message -> message
+        },
+      Err message ->
+        message
+    }

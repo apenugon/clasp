@@ -26,14 +26,7 @@ run_verify() {
 
   "$binary_path" route GET /release/audit '{}' | grep -F '"status":{"$tag":"Pending"}' >/dev/null
 
-  release_server_port="$(python - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-)"
+  release_server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
   release_server_addr="127.0.0.1:$release_server_port"
   "$binary_path" serve "$release_server_addr" >/dev/null 2>&1 &
   server_pid=$!

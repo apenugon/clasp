@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::{align_of, size_of};
 use std::ptr::{self, null_mut, NonNull};
+use std::process::Command as ProcessCommand;
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -306,6 +307,14 @@ enum ClaspRtInterpretedCompareOp {
 #[derive(Clone)]
 enum ClaspRtInterpretedIntrinsic {
     ListAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    ListPrepend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
+    ListReverse(Box<ClaspRtInterpretedExpr>),
+    Length(Box<ClaspRtInterpretedExpr>),
+    ListMap(String, Box<ClaspRtInterpretedExpr>),
+    ListFilter(String, Box<ClaspRtInterpretedExpr>),
+    ListAny(String, Box<ClaspRtInterpretedExpr>),
+    ListAll(String, Box<ClaspRtInterpretedExpr>),
+    ListFold(String, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     ViewAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     Encode(Box<ClaspRtInterpretedExpr>),
     Decode(ClaspRtSchemaType, Box<ClaspRtInterpretedExpr>),
@@ -1104,6 +1113,16 @@ fn interpret_native_decl(
         return null_mut();
     }
     let Some(decl) = (unsafe { (*image).interpreted_decl(decl_name) }) else {
+        let binding_result = unsafe {
+            if has_runtime_binding_or_builtin(image, decl_name) {
+                interpret_runtime_binding_by_name(image, decl_name, args)
+            } else {
+                null_mut()
+            }
+        };
+        if !binding_result.is_null() {
+            return binding_result;
+        }
         let codec_result = unsafe { interpret_native_codec_decl(decl_name, args) };
         if !codec_result.is_null() {
             return codec_result;
@@ -1413,6 +1432,520 @@ unsafe fn append_list_like_values(
     Some(items)
 }
 
+unsafe fn prepend_list_like_value(
+    value: *mut ClaspRtHeader,
+    values: *mut ClaspRtHeader,
+) -> Option<Vec<*mut ClaspRtHeader>> {
+    if value.is_null() || values.is_null() {
+        return None;
+    }
+    let mut items = Vec::new();
+    items.push(value);
+    if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+        for item in string_list_items_mut(values as *mut ClaspRtStringList) {
+            retain_header(*item as *mut ClaspRtHeader);
+            items.push(*item as *mut ClaspRtHeader);
+        }
+    } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+        for item in list_value_items(values as *mut ClaspRtListValue) {
+            retain_header(*item);
+            items.push(*item);
+        }
+    } else {
+        return None;
+    }
+    Some(items)
+}
+
+unsafe fn reverse_list_like_values(values: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtHeader>> {
+    if values.is_null() {
+        return None;
+    }
+    let mut items = Vec::new();
+    if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+        for item in string_list_items_mut(values as *mut ClaspRtStringList).iter().rev() {
+            retain_header(*item as *mut ClaspRtHeader);
+            items.push(*item as *mut ClaspRtHeader);
+        }
+    } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+        for item in list_value_items(values as *mut ClaspRtListValue).iter().rev() {
+            retain_header(*item);
+            items.push(*item);
+        }
+    } else {
+        return None;
+    }
+    Some(items)
+}
+
+unsafe fn list_or_text_length(value: *mut ClaspRtHeader) -> Option<i64> {
+    if value.is_null() {
+        return None;
+    }
+    if (*value).layout_id == CLASP_RT_LAYOUT_STRING {
+        return Some(string_bytes(value as *mut ClaspRtString).len() as i64);
+    }
+    if (*value).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+        return Some(string_list_items_mut(value as *mut ClaspRtStringList).len() as i64);
+    }
+    if (*value).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+        return Some(list_value_items(value as *mut ClaspRtListValue).len() as i64);
+    }
+    None
+}
+
+unsafe fn list_like_borrowed_values(values: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtHeader>> {
+    if values.is_null() {
+        return None;
+    }
+    if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+        return Some(
+            string_list_items_mut(values as *mut ClaspRtStringList)
+                .iter()
+                .map(|item| *item as *mut ClaspRtHeader)
+                .collect(),
+        );
+    }
+    if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+        return Some(list_value_items(values as *mut ClaspRtListValue).iter().copied().collect());
+    }
+    None
+}
+
+fn local_function_name(expr: &ClaspRtInterpretedExpr) -> Option<&str> {
+    match expr {
+        ClaspRtInterpretedExpr::Local(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn interpret_legacy_list_builtin_call(
+    runtime: *mut ClaspRtRuntime,
+    image: *mut ClaspRtNativeModuleImage,
+    name: &str,
+    args: &[ClaspRtInterpretedExpr],
+    env: &[(&str, *mut ClaspRtHeader)],
+    depth: usize,
+) -> Option<*mut ClaspRtHeader> {
+    match name {
+        "||" if args.len() == 2 => {
+            let left_value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if left_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return Some(left_value);
+            }
+            let Some(left_bool) = (unsafe { header_bool_value(left_value) }) else {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return Some(null_mut());
+            };
+            unsafe {
+                release_header(runtime, left_value);
+            }
+            if left_bool {
+                return Some(unsafe { build_runtime_bool(true) as *mut ClaspRtHeader });
+            }
+            let right_value = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if right_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                return Some(right_value);
+            }
+            let result = match unsafe { header_bool_value(right_value) } {
+                Some(value) => unsafe { build_runtime_bool(value) as *mut ClaspRtHeader },
+                None => null_mut(),
+            };
+            unsafe {
+                release_header(runtime, right_value);
+            }
+            Some(result)
+        }
+        "&&" if args.len() == 2 => {
+            let left_value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if left_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return Some(left_value);
+            }
+            let Some(left_bool) = (unsafe { header_bool_value(left_value) }) else {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return Some(null_mut());
+            };
+            unsafe {
+                release_header(runtime, left_value);
+            }
+            if !left_bool {
+                return Some(unsafe { build_runtime_bool(false) as *mut ClaspRtHeader });
+            }
+            let right_value = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if right_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                return Some(right_value);
+            }
+            let result = match unsafe { header_bool_value(right_value) } {
+                Some(value) => unsafe { build_runtime_bool(value) as *mut ClaspRtHeader },
+                None => null_mut(),
+            };
+            unsafe {
+                release_header(runtime, right_value);
+            }
+            Some(result)
+        }
+        "append" if args.len() == 2 => {
+            let left_value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if left_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(left_value) } {
+                return Some(left_value);
+            }
+            let right_value = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if right_value.is_null() {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(right_value) } {
+                unsafe {
+                    release_header(runtime, left_value);
+                }
+                return Some(right_value);
+            }
+            let appended = unsafe { append_list_like_values(left_value, right_value) };
+            unsafe {
+                release_header(runtime, left_value);
+                release_header(runtime, right_value);
+            }
+            Some(match appended {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            })
+        }
+        "prepend" if args.len() == 2 => {
+            let value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(value) } {
+                return Some(value);
+            }
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                unsafe {
+                    release_header(runtime, value);
+                }
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                unsafe {
+                    release_header(runtime, value);
+                }
+                return Some(values);
+            }
+            let prepended = unsafe { prepend_list_like_value(value, values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            Some(match prepended {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => unsafe {
+                    release_header(runtime, value);
+                    null_mut()
+                },
+            })
+        }
+        "reverse" if args.len() == 1 => {
+            let values = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let reversed = unsafe { reverse_list_like_values(values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            Some(match reversed {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            })
+        }
+        "length" if args.len() == 1 => {
+            let value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(value) } {
+                return Some(value);
+            }
+            let result = unsafe { list_or_text_length(value) };
+            unsafe {
+                release_header(runtime, value);
+            }
+            Some(match result {
+                Some(length) => unsafe { build_runtime_int(length) as *mut ClaspRtHeader },
+                None => null_mut(),
+            })
+        }
+        "map" if args.len() == 2 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let result = unsafe {
+                let iterable_items: Vec<*mut ClaspRtHeader> = if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+                    string_list_items_mut(values as *mut ClaspRtStringList)
+                        .iter()
+                        .map(|item| *item as *mut ClaspRtHeader)
+                        .collect()
+                } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+                    list_value_items(values as *mut ClaspRtListValue).iter().copied().collect()
+                } else {
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                let mut mapped_items = Vec::with_capacity(iterable_items.len());
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        for mapped_item in mapped_items {
+                            release_header(runtime, mapped_item);
+                        }
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    mapped_items.push(step_result);
+                }
+                release_header(runtime, values);
+                Some(build_runtime_list_value(mapped_items) as *mut ClaspRtHeader)
+            };
+            result
+        }
+        "filter" if args.len() == 2 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                let mut filtered_items = Vec::new();
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        for filtered_item in filtered_items {
+                            release_header(runtime, filtered_item);
+                        }
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    let Some(keep_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        for filtered_item in filtered_items {
+                            release_header(runtime, filtered_item);
+                        }
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    };
+                    release_header(runtime, step_result);
+                    if keep_item {
+                        retain_header(item);
+                        filtered_items.push(item);
+                    }
+                }
+                release_header(runtime, values);
+                Some(build_runtime_list_value(filtered_items) as *mut ClaspRtHeader)
+            };
+            result
+        }
+        "any" if args.len() == 2 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    };
+                    release_header(runtime, step_result);
+                    if matches_item {
+                        release_header(runtime, values);
+                        return Some(build_runtime_bool(true) as *mut ClaspRtHeader);
+                    }
+                }
+                release_header(runtime, values);
+                Some(build_runtime_bool(false) as *mut ClaspRtHeader)
+            };
+            result
+        }
+        "all" if args.len() == 2 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    };
+                    release_header(runtime, step_result);
+                    if !matches_item {
+                        release_header(runtime, values);
+                        return Some(build_runtime_bool(false) as *mut ClaspRtHeader);
+                    }
+                }
+                release_header(runtime, values);
+                Some(build_runtime_bool(true) as *mut ClaspRtHeader)
+            };
+            result
+        }
+        "fold" if args.len() == 3 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let initial_value = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if initial_value.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(initial_value) } {
+                return Some(initial_value);
+            }
+            let values = interpret_native_expr(runtime, image, &args[2], env, depth + 1);
+            if values.is_null() {
+                unsafe {
+                    release_header(runtime, initial_value);
+                }
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                unsafe {
+                    release_header(runtime, initial_value);
+                }
+                return Some(values);
+            }
+            let result = unsafe {
+                let iterable_items: Vec<*mut ClaspRtHeader> = if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+                    string_list_items_mut(values as *mut ClaspRtStringList)
+                        .iter()
+                        .map(|item| *item as *mut ClaspRtHeader)
+                        .collect()
+                } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+                    list_value_items(values as *mut ClaspRtListValue).iter().copied().collect()
+                } else {
+                    release_header(runtime, initial_value);
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                let mut accumulator = initial_value;
+                for item in iterable_items {
+                    let step_result = if callee == "||" {
+                        match (header_bool_value(accumulator), header_bool_value(item)) {
+                            (Some(left), Some(right)) => build_runtime_bool(left || right) as *mut ClaspRtHeader,
+                            _ => null_mut(),
+                        }
+                    } else if callee == "&&" {
+                        match (header_bool_value(accumulator), header_bool_value(item)) {
+                            (Some(left), Some(right)) => build_runtime_bool(left && right) as *mut ClaspRtHeader,
+                            _ => null_mut(),
+                        }
+                    } else if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[accumulator, item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[accumulator, item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, accumulator);
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    release_header(runtime, accumulator);
+                    accumulator = step_result;
+                }
+                release_header(runtime, values);
+                Some(accumulator)
+            };
+            result
+        }
+        _ => None,
+    }
+}
+
 unsafe fn compare_runtime_values(
     op: ClaspRtInterpretedCompareOp,
     left: *mut ClaspRtHeader,
@@ -1422,41 +1955,87 @@ unsafe fn compare_runtime_values(
         return None;
     }
 
+    if matches!(
+        op,
+        ClaspRtInterpretedCompareOp::Eq | ClaspRtInterpretedCompareOp::Ne
+    ) {
+        let equality = compare_runtime_value_equality(left, right)?;
+        return Some(match op {
+            ClaspRtInterpretedCompareOp::Eq => equality,
+            ClaspRtInterpretedCompareOp::Ne => !equality,
+            _ => unreachable!(),
+        });
+    }
+
     if (*left).layout_id == CLASP_RT_LAYOUT_STRING && (*right).layout_id == CLASP_RT_LAYOUT_STRING {
         let ordering = string_bytes(left as *mut ClaspRtString).cmp(string_bytes(right as *mut ClaspRtString));
         return Some(match op {
-            ClaspRtInterpretedCompareOp::Eq => ordering.is_eq(),
-            ClaspRtInterpretedCompareOp::Ne => !ordering.is_eq(),
             ClaspRtInterpretedCompareOp::Lt => ordering.is_lt(),
             ClaspRtInterpretedCompareOp::Le => ordering.is_le(),
             ClaspRtInterpretedCompareOp::Gt => ordering.is_gt(),
             ClaspRtInterpretedCompareOp::Ge => ordering.is_ge(),
+            _ => unreachable!(),
         });
     }
 
     if let (Some(left_value), Some(right_value)) = (header_int_value(left), header_int_value(right)) {
         return Some(match op {
-            ClaspRtInterpretedCompareOp::Eq => left_value == right_value,
-            ClaspRtInterpretedCompareOp::Ne => left_value != right_value,
             ClaspRtInterpretedCompareOp::Lt => left_value < right_value,
             ClaspRtInterpretedCompareOp::Le => left_value <= right_value,
             ClaspRtInterpretedCompareOp::Gt => left_value > right_value,
             ClaspRtInterpretedCompareOp::Ge => left_value >= right_value,
+            _ => unreachable!(),
         });
     }
 
     if let (Some(left_value), Some(right_value)) = (header_bool_value(left), header_bool_value(right)) {
         return Some(match op {
-            ClaspRtInterpretedCompareOp::Eq => left_value == right_value,
-            ClaspRtInterpretedCompareOp::Ne => left_value != right_value,
             ClaspRtInterpretedCompareOp::Lt => (!left_value) && right_value,
             ClaspRtInterpretedCompareOp::Le => left_value == right_value || ((!left_value) && right_value),
             ClaspRtInterpretedCompareOp::Gt => left_value && (!right_value),
             ClaspRtInterpretedCompareOp::Ge => left_value == right_value || (left_value && (!right_value)),
+            _ => unreachable!(),
         });
     }
 
     None
+}
+
+unsafe fn compare_runtime_value_equality(left: *mut ClaspRtHeader, right: *mut ClaspRtHeader) -> Option<bool> {
+    if left.is_null() || right.is_null() {
+        return None;
+    }
+
+    if ptr::eq(left, right) {
+        return Some(true);
+    }
+
+    if (*left).layout_id == CLASP_RT_LAYOUT_STRING && (*right).layout_id == CLASP_RT_LAYOUT_STRING {
+        return Some(string_bytes(left as *mut ClaspRtString) == string_bytes(right as *mut ClaspRtString));
+    }
+
+    if let (Some(left_value), Some(right_value)) = (header_int_value(left), header_int_value(right)) {
+        return Some(left_value == right_value);
+    }
+
+    if let (Some(left_value), Some(right_value)) = (header_bool_value(left), header_bool_value(right)) {
+        return Some(left_value == right_value);
+    }
+
+    let left_items = list_like_borrowed_values(left)?;
+    let right_items = list_like_borrowed_values(right)?;
+    if left_items.len() != right_items.len() {
+        return Some(false);
+    }
+
+    for (left_item, right_item) in left_items.iter().zip(right_items.iter()) {
+        match compare_runtime_value_equality(*left_item, *right_item) {
+            Some(true) => {}
+            Some(false) => return Some(false),
+            None => return None,
+        }
+    }
+    Some(true)
 }
 
 fn interpret_native_expr(
@@ -1477,8 +2056,8 @@ fn interpret_native_expr(
         ClaspRtInterpretedExpr::Local(name) => {
             let value = read_env_value(env, name);
             if value.is_null() {
-                let runtime_value = if let Some(binding) = unsafe { (*image).runtime_binding(name) } {
-                    interpret_runtime_binding(binding, &[])
+                let runtime_value = if unsafe { has_runtime_binding_or_builtin(image, name) } {
+                    unsafe { interpret_runtime_binding_by_name(image, name, &[]) }
                 } else {
                     null_mut()
                 };
@@ -1569,6 +2148,19 @@ fn interpret_native_expr(
             }
         }
         ClaspRtInterpretedExpr::CallLocal(name, args) => {
+            if let Some(result) =
+                interpret_legacy_list_builtin_call(runtime, image, name, args, env, depth)
+            {
+                if result.is_null() && trace_interpreter_enabled() {
+                    eprintln!(
+                        "clasp native trace: legacy builtin call `{}` returned null at depth {} with {} arg(s)",
+                        name,
+                        depth,
+                        args.len()
+                    );
+                }
+                return result;
+            }
             let mut interpreted_args: Vec<*mut ClaspRtHeader> = Vec::with_capacity(args.len());
             for arg in args {
                 let value = interpret_native_expr(runtime, image, arg, env, depth + 1);
@@ -1587,8 +2179,8 @@ fn interpret_native_expr(
                 interpreted_args.push(value);
             }
 
-            let result = if let Some(binding) = unsafe { (*image).runtime_binding(name) } {
-                interpret_runtime_binding(binding, &interpreted_args)
+            let result = if unsafe { has_runtime_binding_or_builtin(image, name) } {
+                unsafe { interpret_runtime_binding_by_name(image, name, &interpreted_args) }
             } else {
                 interpret_native_decl(runtime, image, name, &interpreted_args, depth + 1)
             };
@@ -1835,6 +2427,296 @@ fn interpret_native_expr(
                 None => null_mut(),
             }
         }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListPrepend(value_expr, values_expr)) => {
+            let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
+            if value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(value) } {
+                return value;
+            }
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                unsafe {
+                    release_header(runtime, value);
+                }
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                unsafe {
+                    release_header(runtime, value);
+                }
+                return values;
+            }
+            let prepended = unsafe { prepend_list_like_value(value, values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            match prepended {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => unsafe {
+                    release_header(runtime, value);
+                    null_mut()
+                },
+            }
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListReverse(values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let reversed = unsafe { reverse_list_like_values(values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            match reversed {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::Length(value_expr)) => {
+            let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
+            if value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(value) } {
+                return value;
+            }
+            let result = unsafe { list_or_text_length(value) };
+            unsafe {
+                release_header(runtime, value);
+            }
+            match result {
+                Some(length) => unsafe { build_runtime_int(length) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListMap(callee, values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let result = unsafe {
+                let iterable_items: Vec<*mut ClaspRtHeader> = if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+                    string_list_items_mut(values as *mut ClaspRtStringList)
+                        .iter()
+                        .map(|item| *item as *mut ClaspRtHeader)
+                        .collect()
+                } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+                    list_value_items(values as *mut ClaspRtListValue).iter().copied().collect()
+                } else {
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                let mut mapped_items = Vec::with_capacity(iterable_items.len());
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        for mapped_item in mapped_items {
+                            release_header(runtime, mapped_item);
+                        }
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    mapped_items.push(step_result);
+                }
+                release_header(runtime, values);
+                build_runtime_list_value(mapped_items) as *mut ClaspRtHeader
+            };
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListFilter(callee, values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                let mut filtered_items = Vec::new();
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        for filtered_item in filtered_items {
+                            release_header(runtime, filtered_item);
+                        }
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    let Some(keep_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        for filtered_item in filtered_items {
+                            release_header(runtime, filtered_item);
+                        }
+                        release_header(runtime, values);
+                        return null_mut();
+                    };
+                    release_header(runtime, step_result);
+                    if keep_item {
+                        retain_header(item);
+                        filtered_items.push(item);
+                    }
+                }
+                release_header(runtime, values);
+                build_runtime_list_value(filtered_items) as *mut ClaspRtHeader
+            };
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListAny(callee, values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, values);
+                        return null_mut();
+                    };
+                    release_header(runtime, step_result);
+                    if matches_item {
+                        release_header(runtime, values);
+                        return build_runtime_bool(true) as *mut ClaspRtHeader;
+                    }
+                }
+                release_header(runtime, values);
+                build_runtime_bool(false) as *mut ClaspRtHeader
+            };
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListAll(callee, values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, values);
+                        return null_mut();
+                    };
+                    release_header(runtime, step_result);
+                    if !matches_item {
+                        release_header(runtime, values);
+                        return build_runtime_bool(false) as *mut ClaspRtHeader;
+                    }
+                }
+                release_header(runtime, values);
+                build_runtime_bool(true) as *mut ClaspRtHeader
+            };
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListFold(
+            callee,
+            initial_expr,
+            values_expr,
+        )) => {
+            let initial_value = interpret_native_expr(runtime, image, initial_expr, env, depth + 1);
+            if initial_value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(initial_value) } {
+                return initial_value;
+            }
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                unsafe {
+                    release_header(runtime, initial_value);
+                }
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                unsafe {
+                    release_header(runtime, initial_value);
+                }
+                return values;
+            }
+            let result = unsafe {
+                let iterable_items: Vec<*mut ClaspRtHeader> = if (*values).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+                    string_list_items_mut(values as *mut ClaspRtStringList)
+                        .iter()
+                        .map(|item| *item as *mut ClaspRtHeader)
+                        .collect()
+                } else if (*values).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+                    list_value_items(values as *mut ClaspRtListValue).iter().copied().collect()
+                } else {
+                    release_header(runtime, initial_value);
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                let mut accumulator = initial_value;
+                for item in iterable_items {
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[accumulator, item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[accumulator, item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, accumulator);
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    release_header(runtime, accumulator);
+                    accumulator = step_result;
+                }
+                release_header(runtime, values);
+                accumulator
+            };
+            result
+        }
         ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ViewAppend(left, right)) => {
             let left_value = interpret_native_expr(runtime, image, left, env, depth + 1);
             if left_value.is_null() {
@@ -1926,6 +2808,13 @@ fn interpret_runtime_binding(
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("dictEmpty", 0) => unsafe { clasp_rt_dict_empty() },
+        ("dictSet", 3) => unsafe { clasp_rt_dict_set(args[0] as *mut ClaspRtString, args[1], args[2]) },
+        ("dictGet", 2) => unsafe { clasp_rt_dict_get(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictHas", 2) => unsafe { clasp_rt_dict_has(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictRemove", 2) => unsafe { clasp_rt_dict_remove(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictKeys", 1) => unsafe { clasp_rt_dict_keys(args[0]) },
+        ("dictValues", 1) => unsafe { clasp_rt_dict_values(args[0]) },
         ("viewText", 1) => unsafe { clasp_rt_view_text(args[0] as *mut ClaspRtString) },
         ("viewElement", 2) => unsafe { clasp_rt_view_element(args[0] as *mut ClaspRtString, args[1]) },
         ("viewStyled", 2) => unsafe { clasp_rt_view_styled(args[0] as *mut ClaspRtString, args[1]) },
@@ -1961,7 +2850,10 @@ fn interpret_runtime_binding(
                 .map(|parts| build_runtime_string(&join_string_bytes(&parts, b"/")) as *mut ClaspRtHeader)
                 .unwrap_or(null_mut())
         },
+        ("pathBasename", 1) => unsafe { clasp_rt_path_basename(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
+        ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -1981,6 +2873,144 @@ fn interpret_runtime_binding(
         ("provider:replyPreview", 1) => unsafe { interpret_reply_preview_binding(binding, args[0]) },
         _ => null_mut(),
     }
+}
+
+fn interpret_builtin_runtime_binding(
+    name: &str,
+    args: &[*mut ClaspRtHeader],
+) -> *mut ClaspRtHeader {
+    match (name, args.len()) {
+        ("textConcat", 1) => unsafe {
+            list_like_string_items(args[0])
+                .map(|parts| build_runtime_string(&join_string_bytes(&parts, &[])) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
+        ("textJoin", 2) => unsafe {
+            list_like_string_items(args[1])
+                .map(|parts| build_runtime_string(&join_string_bytes(&parts, string_bytes(args[0] as *mut ClaspRtString))) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
+        ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("dictEmpty", 0) => unsafe { clasp_rt_dict_empty() },
+        ("dictSet", 3) => unsafe { clasp_rt_dict_set(args[0] as *mut ClaspRtString, args[1], args[2]) },
+        ("dictGet", 2) => unsafe { clasp_rt_dict_get(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictHas", 2) => unsafe { clasp_rt_dict_has(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictRemove", 2) => unsafe { clasp_rt_dict_remove(args[0] as *mut ClaspRtString, args[1]) },
+        ("dictKeys", 1) => unsafe { clasp_rt_dict_keys(args[0]) },
+        ("dictValues", 1) => unsafe { clasp_rt_dict_values(args[0]) },
+        ("viewText" | "text", 1) => unsafe { clasp_rt_view_text(args[0] as *mut ClaspRtString) },
+        ("viewElement" | "element", 2) => unsafe { clasp_rt_view_element(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewStyled" | "styled", 2) => unsafe { clasp_rt_view_styled(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewLink" | "link", 2) => unsafe { clasp_rt_view_link(args[0] as *mut ClaspRtString, args[1]) },
+        ("viewForm" | "form", 3) => unsafe { clasp_rt_view_form(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2]) },
+        ("viewInput" | "input", 3) => unsafe { clasp_rt_view_input(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) },
+        ("viewSubmit" | "submit", 1) => unsafe { clasp_rt_view_submit(args[0] as *mut ClaspRtString) },
+        ("systemPrompt", 1) => unsafe { clasp_rt_system_prompt(args[0] as *mut ClaspRtString) },
+        ("assistantPrompt", 1) => unsafe { clasp_rt_assistant_prompt(args[0] as *mut ClaspRtString) },
+        ("userPrompt", 1) => unsafe { clasp_rt_user_prompt(args[0] as *mut ClaspRtString) },
+        ("appendPrompt", 2) => unsafe { clasp_rt_append_prompt(args[0], args[1]) },
+        ("promptText", 1) => unsafe { clasp_rt_prompt_text(args[0]) as *mut ClaspRtHeader },
+        ("page", 2) => unsafe { clasp_rt_page(args[0] as *mut ClaspRtString, args[1]) },
+        ("redirect", 1) => unsafe { clasp_rt_redirect(args[0] as *mut ClaspRtString) },
+        ("principal", 1) => unsafe { clasp_rt_principal(args[0] as *mut ClaspRtString) },
+        ("tenant", 1) => unsafe { clasp_rt_tenant(args[0] as *mut ClaspRtString) },
+        ("resourceIdentity", 2) => unsafe {
+            clasp_rt_resource_identity(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString)
+        },
+        ("authSession", 4) => unsafe {
+            clasp_rt_auth_session(args[0] as *mut ClaspRtString, args[1], args[2], args[3])
+        },
+        ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
+        ("timeUnixMs", 0) => unsafe { clasp_rt_time_unix_ms() },
+        ("envVar", 1) => unsafe { clasp_rt_env_var(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("pathJoin", 1) => unsafe { clasp_rt_path_join(args[0] as *mut ClaspRtStringList) as *mut ClaspRtHeader },
+        ("pathBasename", 1) => unsafe { clasp_rt_path_basename(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
+        ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
+        ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        _ => null_mut(),
+    }
+}
+
+fn builtin_runtime_binding_name(name: &str) -> bool {
+    matches!(
+        name,
+        "textConcat"
+            | "textJoin"
+            | "textSplit"
+            | "textChars"
+            | "textFingerprint64Hex"
+            | "textPrefix"
+            | "textSplitFirst"
+            | "dictEmpty"
+            | "dictSet"
+            | "dictGet"
+            | "dictHas"
+            | "dictRemove"
+            | "dictKeys"
+            | "dictValues"
+            | "text"
+            | "viewText"
+            | "element"
+            | "viewElement"
+            | "styled"
+            | "viewStyled"
+            | "link"
+            | "viewLink"
+            | "form"
+            | "viewForm"
+            | "input"
+            | "viewInput"
+            | "submit"
+            | "viewSubmit"
+            | "systemPrompt"
+            | "assistantPrompt"
+            | "userPrompt"
+            | "appendPrompt"
+            | "promptText"
+            | "page"
+            | "redirect"
+            | "principal"
+            | "tenant"
+            | "resourceIdentity"
+            | "authSession"
+            | "argv"
+            | "timeUnixMs"
+            | "envVar"
+            | "pathJoin"
+            | "pathBasename"
+            | "pathDirname"
+            | "fileExists"
+            | "runCommandJson"
+            | "writeFile"
+            | "appendFile"
+            | "mkdirAll"
+            | "readFile"
+    )
+}
+
+unsafe fn interpret_runtime_binding_by_name(
+    image: *mut ClaspRtNativeModuleImage,
+    name: &str,
+    args: &[*mut ClaspRtHeader],
+) -> *mut ClaspRtHeader {
+    if let Some(binding) = (*image).runtime_binding(name) {
+        interpret_runtime_binding(binding, args)
+    } else {
+        interpret_builtin_runtime_binding(name, args)
+    }
+}
+
+unsafe fn has_runtime_binding_or_builtin(image: *mut ClaspRtNativeModuleImage, name: &str) -> bool {
+    (*image).runtime_binding(name).is_some() || builtin_runtime_binding_name(name)
 }
 
 fn binding_return_type_name(binding: &ClaspRtNativeRuntimeBinding) -> Option<&str> {
@@ -2842,6 +3872,47 @@ unsafe fn record_field_value_by_name(
         }
     }
     None
+}
+
+unsafe fn record_is_dict(value: *mut ClaspRtRecordValue) -> bool {
+    !value.is_null() && string_bytes((*value).record_name) == b"Dict"
+}
+
+unsafe fn dict_clone_fields(
+    value: *mut ClaspRtRecordValue,
+    skip_field_name: Option<&[u8]>,
+    replacement: Option<(&str, *mut ClaspRtHeader)>,
+) -> Vec<(String, *mut ClaspRtHeader)> {
+    let mut fields = Vec::new();
+    let mut replaced = false;
+    for (name_ptr, value_ptr) in record_field_names(value)
+        .iter()
+        .zip(record_field_values(value).iter())
+    {
+        let name_bytes = string_bytes(*name_ptr);
+        if let Some(skip_name) = skip_field_name {
+            if name_bytes == skip_name {
+                continue;
+            }
+        }
+        if let Some((replacement_name, replacement_value)) = replacement {
+            if name_bytes == replacement_name.as_bytes() {
+                retain_header(replacement_value);
+                fields.push((replacement_name.to_owned(), replacement_value));
+                replaced = true;
+                continue;
+            }
+        }
+        retain_header(*value_ptr);
+        fields.push((String::from_utf8_lossy(string_bytes(*name_ptr)).into_owned(), *value_ptr));
+    }
+    if let Some((replacement_name, replacement_value)) = replacement {
+        if !replaced {
+            retain_header(replacement_value);
+            fields.push((replacement_name.to_owned(), replacement_value));
+        }
+    }
+    fields
 }
 
 unsafe fn build_prompt_message_header(role: &str, content: *mut ClaspRtString) -> *mut ClaspRtHeader {
@@ -3911,6 +4982,86 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
                 ClaspRtInterpretedIntrinsic::ListAppend(
                     Box::new(parse_interpreted_expr_json(bytes, left_slice)?),
                     Box::new(parse_interpreted_expr_json(bytes, right_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.prepend") {
+            let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListPrepend(
+                    Box::new(parse_interpreted_expr_json(bytes, value_slice)?),
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.reverse") {
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListReverse(Box::new(parse_interpreted_expr_json(
+                    bytes,
+                    values_slice,
+                )?)),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "length") {
+            let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::Length(Box::new(parse_interpreted_expr_json(
+                    bytes,
+                    value_slice,
+                )?)),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.map") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListMap(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.filter") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListFilter(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.any") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListAny(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.all") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListAll(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.fold") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let initial_slice = json_object_lookup(bytes, expr_slice, "initial")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListFold(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, initial_slice)?),
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
                 ),
             ));
         }
@@ -5669,6 +6820,119 @@ pub unsafe extern "C" fn clasp_rt_text_split_first(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_empty() -> *mut ClaspRtHeader {
+    clasp_rt_build_record_header("Dict", Vec::new())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_set(
+    key: *mut ClaspRtString,
+    value: *mut ClaspRtHeader,
+    dict: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if key.is_null() || dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    let key_text = String::from_utf8_lossy(string_bytes(key)).into_owned();
+    clasp_rt_build_record_header("Dict", dict_clone_fields(dict_value, None, Some((&key_text, value))))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_get(
+    key: *mut ClaspRtString,
+    dict: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if key.is_null() || dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    let key_bytes = string_bytes(key);
+    match record_field_value_by_name(dict_value, key_bytes) {
+        Some(value) => {
+            retain_header(value);
+            clasp_rt_build_variant_header("Ok", vec![value])
+        }
+        None => clasp_rt_build_variant_header(
+            "Err",
+            vec![clasp_rt_build_string_header(&format!(
+                "Missing dict key: {}",
+                String::from_utf8_lossy(key_bytes)
+            ))],
+        ),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_has(
+    key: *mut ClaspRtString,
+    dict: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if key.is_null() || dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    clasp_rt_build_bool_header(record_field_value_by_name(dict_value, string_bytes(key)).is_some())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_remove(
+    key: *mut ClaspRtString,
+    dict: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    if key.is_null() || dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    clasp_rt_build_record_header("Dict", dict_clone_fields(dict_value, Some(string_bytes(key)), None))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_keys(dict: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    let mut items = Vec::new();
+    for name_ptr in record_field_names(dict_value) {
+        items.push(build_runtime_string(string_bytes(*name_ptr)) as *mut ClaspRtHeader);
+    }
+    clasp_rt_build_list_header(items)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_dict_values(dict: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    if dict.is_null() || (*dict).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return null_mut();
+    }
+    let dict_value = dict as *mut ClaspRtRecordValue;
+    if !record_is_dict(dict_value) {
+        return null_mut();
+    }
+    let mut items = Vec::new();
+    for value in record_field_values(dict_value) {
+        retain_header(*value);
+        items.push(*value);
+    }
+    clasp_rt_build_list_header(items)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_path_join(parts: *mut ClaspRtStringList) -> *mut ClaspRtString {
     let items = string_list_items_mut(parts);
     build_runtime_string(&join_string_bytes(items, b"/"))
@@ -5758,5 +7022,167 @@ pub unsafe extern "C" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut Cl
     match file.read_to_end(&mut buffer) {
         Ok(_) => clasp_rt_result_ok_string(build_runtime_string(&buffer)),
         Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_run_command_json(
+    cwd: *mut ClaspRtString,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    if command_items.is_empty() {
+        return clasp_rt_result_err_string(build_runtime_string(b"missing_command"));
+    }
+
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+
+    let output = match ProcessCommand::new(&command_values[0])
+        .args(&command_values[1..])
+        .current_dir(&cwd_string)
+        .output()
+    {
+        Ok(output) => output,
+        Err(err) => {
+            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+        }
+    };
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"{\"exitCode\":");
+    payload.extend_from_slice(output.status.code().unwrap_or(-1).to_string().as_bytes());
+    payload.extend_from_slice(b",\"stdout\":");
+    append_json_string_literal(&mut payload, &output.stdout);
+    payload.extend_from_slice(b",\"stderr\":");
+    append_json_string_literal(&mut payload, &output.stderr);
+    payload.push(b'}');
+    clasp_rt_result_ok_string(build_runtime_string(&payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe fn build_string_list(values: &[&[u8]]) -> *mut ClaspRtHeader {
+        let list = build_runtime_string_list(values.len());
+        for (index, value) in values.iter().enumerate() {
+            string_list_items_mut(list)[index] = build_runtime_string(value);
+        }
+        list as *mut ClaspRtHeader
+    }
+
+    unsafe fn build_value_list(values: &[&[u8]]) -> *mut ClaspRtHeader {
+        let items: Vec<*mut ClaspRtHeader> = values
+            .iter()
+            .map(|value| build_runtime_string(value) as *mut ClaspRtHeader)
+            .collect();
+        build_runtime_list_value(items) as *mut ClaspRtHeader
+    }
+
+    #[test]
+    fn list_equality_handles_string_list_and_value_list() {
+        unsafe {
+            let split_value = build_string_list(&[b"Ada"]);
+            let literal_value = build_value_list(&[b"Ada"]);
+
+            assert_eq!(
+                compare_runtime_values(ClaspRtInterpretedCompareOp::Eq, split_value, literal_value),
+                Some(true)
+            );
+            assert_eq!(
+                compare_runtime_values(ClaspRtInterpretedCompareOp::Ne, split_value, literal_value),
+                Some(false)
+            );
+
+            release_header(null_mut(), split_value);
+            release_header(null_mut(), literal_value);
+        }
+    }
+
+    #[test]
+    fn list_equality_detects_mismatched_items() {
+        unsafe {
+            let left = build_string_list(&[b"Grace", b"Linus"]);
+            let right = build_value_list(&[b"Grace", b"Ada"]);
+
+            assert_eq!(
+                compare_runtime_values(ClaspRtInterpretedCompareOp::Eq, left, right),
+                Some(false)
+            );
+            assert_eq!(
+                compare_runtime_values(ClaspRtInterpretedCompareOp::Ne, left, right),
+                Some(true)
+            );
+
+            release_header(null_mut(), left);
+            release_header(null_mut(), right);
+        }
+    }
+
+    #[test]
+    fn run_command_json_captures_exit_code_and_streams() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let script_path = cwd_dir.join(format!("clasp-run-command-json-{}.sh", std::process::id()));
+            std::fs::write(
+                &script_path,
+                b"#!/bin/sh\nprintf stdout-text\nprintf stderr-text >&2\nexit 7\n",
+            )
+            .expect("expected test script write to succeed");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected executable test script permissions");
+
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_command_json(cwd, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(7));
+            assert_eq!(parsed["stdout"].as_str(), Some("stdout-text"));
+            assert_eq!(parsed["stderr"].as_str(), Some("stderr-text"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+        }
+    }
+
+    #[test]
+    fn builtin_runtime_binding_dispatches_file_exists() {
+        unsafe {
+            let path = build_runtime_string(b"/");
+            let args = [path as *mut ClaspRtHeader];
+
+            let builtin_result = interpret_builtin_runtime_binding("fileExists", &args);
+            assert_eq!(header_bool_value(builtin_result), Some(true));
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "fileExists".to_owned(),
+                runtime_name: "fileExists".to_owned(),
+                binding_type: "Str -> Bool".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(header_bool_value(binding_result), Some(true));
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), builtin_result);
+            release_header(null_mut(), binding_result);
+        }
     }
 }

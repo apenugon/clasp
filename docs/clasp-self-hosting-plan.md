@@ -73,7 +73,7 @@ The bootstrap compiler and the primary compiler should have different responsibi
 
 The bootstrap compiler implementation in Haskell is responsible for:
 
-- remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass
+- remaining the release-producing and fallback compiler until bootstrap checks pass
 - supporting the self-hosting subset before the `Clasp` compiler is allowed to depend on it
 - serving as the semantic reference when the hosted compiler disagrees with expected output
 - compiling the `Clasp` compiler to the first runnable JavaScript host-runtime artifact
@@ -150,9 +150,9 @@ Use the Haskell bootstrap compiler to build the `Clasp` compiler written in `Cla
 
 Run that compiler on a JavaScript host runtime, then add bootstrap checks:
 
-- stage0 Haskell compiler builds stage1 Clasp compiler
-- stage1 Clasp compiler builds stage2 Clasp compiler
-- stage1 and stage2 are identical or semantically equivalent
+- Haskell bootstrap builds the embedded Clasp compiler
+- embedded Clasp compiler builds a candidate Clasp compiler
+- embedded and candidate compilers are identical or semantically equivalent
 
 Once those checks are reliable, the hosted `Clasp` implementation should move out of the proof-harness example tree into a real compiler implementation directory, then become the primary compiler. After that, the Haskell bootstrap should be quarantined behind an explicit recovery-only path rather than remaining an easy ordinary fallback.
 

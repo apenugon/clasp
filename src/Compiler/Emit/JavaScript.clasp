@@ -23,7 +23,7 @@ hasReturnInExprs exprs = {
 }
 
 jsBuiltinPreludeName : Str -> Bool
-jsBuiltinPreludeName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else false
+jsBuiltinPreludeName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "runCommandJson" then true else false
 
 exprsNeedBuiltinPrelude : [LowerExprText] -> Bool
 exprsNeedBuiltinPrelude exprs = {
@@ -69,6 +69,22 @@ exprNeedsBuiltinPrelude expr = match expr {
     exprsNeedBuiltinPrelude values,
   LowerListAppend left right ->
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerListPrepend value values ->
+    if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude values,
+  LowerListReverse values ->
+    exprNeedsBuiltinPrelude values,
+  LowerLength value ->
+    exprNeedsBuiltinPrelude value,
+  LowerListMap callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListFilter callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListAny callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListAll callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListFold callee initial values ->
+    if exprNeedsBuiltinPrelude initial then true else exprNeedsBuiltinPrelude values,
   LowerViewAppend left right ->
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
   LowerEncode value ->
@@ -147,6 +163,22 @@ emitExprContainsReturn expr = match expr {
     hasReturnInExprs values,
   LowerListAppend left right ->
     if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerListPrepend value values ->
+    if emitExprContainsReturn value then true else emitExprContainsReturn values,
+  LowerListReverse values ->
+    emitExprContainsReturn values,
+  LowerLength value ->
+    emitExprContainsReturn value,
+  LowerListMap callee values ->
+    emitExprContainsReturn values,
+  LowerListFilter callee values ->
+    emitExprContainsReturn values,
+  LowerListAny callee values ->
+    emitExprContainsReturn values,
+  LowerListAll callee values ->
+    emitExprContainsReturn values,
+  LowerListFold callee initial values ->
+    if emitExprContainsReturn initial then true else emitExprContainsReturn values,
   LowerViewAppend left right ->
     if emitExprContainsReturn left then true else emitExprContainsReturn right,
   LowerEncode value ->
@@ -191,7 +223,7 @@ emitExprContainsReturn expr = match expr {
 
 emitExprs : [LowerExprText] -> [Str]
 emitExprs exprs = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for expr in exprs {
     rendered = appendJsRenderedText rendered (emitExpr expr);
     rendered
@@ -201,7 +233,7 @@ emitExprs exprs = {
 
 emitRecordFields : [LowerRecordFieldText] -> [Str]
 emitRecordFields fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in fields {
     rendered = appendJsRenderedText rendered (emitRecordField field);
     rendered
@@ -223,7 +255,7 @@ emitMatchBranchLines branch = match branch {
 
 emitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]
 emitMatchBranchBlocks branches = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for branch in branches {
     rendered = append rendered (emitMatchBranchLines branch);
     rendered
@@ -245,6 +277,22 @@ emitExpr expr = match expr {
     textConcat ["[", textJoin ", " (emitExprs values), "]"],
   LowerListAppend left right ->
     textConcat ["(", emitExpr left, ").concat(", emitExpr right, ")"],
+  LowerListPrepend value values ->
+    textConcat ["[", emitExpr value, "].concat(", emitExpr values, ")"],
+  LowerListReverse values ->
+    textConcat ["(() => { const __values = ", emitExpr values, "; return Object.freeze([...__values].reverse()); })()"],
+  LowerLength value ->
+    textConcat ["(", emitExpr value, ").length"],
+  LowerListMap callee values ->
+    textConcat ["Object.freeze((", emitExpr values, ").map(($item) => ", callee, "($item)))"],
+  LowerListFilter callee values ->
+    textConcat ["Object.freeze((", emitExpr values, ").filter(($item) => ", callee, "($item)))"],
+  LowerListAny callee values ->
+    textConcat ["(", emitExpr values, ").some(($item) => ", callee, "($item))"],
+  LowerListAll callee values ->
+    textConcat ["(", emitExpr values, ").every(($item) => ", callee, "($item))"],
+  LowerListFold callee initial values ->
+    textJoin "\n" ["(() => {", textConcat ["  let __acc = ", emitExpr initial, ";"], textConcat ["  for (const __item of ", emitExpr values, ") {"], textConcat ["    __acc = ", callee, "(__acc, __item);"], "  }", "  return __acc;", "})()"],
   LowerViewAppend left right ->
     textConcat ["Object.freeze({ $kind: \"append\", left: ", emitExpr left, ", right: ", emitExpr right, " })"],
   LowerEncode value ->
@@ -311,7 +359,7 @@ moduleHasReturn decls = {
 }
 
 emitEarlyReturnPrelude : [LowerDeclText] -> [Str]
-emitEarlyReturnPrelude decls = if moduleHasReturn decls then ["function $claspEarlyReturn(value) {", "  return { $claspEarlyReturn: true, value };", "}"] else []
+emitEarlyReturnPrelude decls = if moduleHasReturn decls then ["function $claspEarlyReturn(value) {", "  return { $claspEarlyReturn: true, value };", "}"] else emptyRenderedTexts
 
 moduleNeedsBuiltinPrelude : [LowerDeclText] -> Bool
 moduleNeedsBuiltinPrelude decls = {
@@ -417,6 +465,47 @@ builtinPreludeLines =
     "      ? [\"Err\", value]",
     "      : [\"Ok\", value.slice(0, index) + \"\\n\" + value.slice(index + separator.length)];",
     "  },",
+    "  dictEmpty() {",
+    "    return Object.freeze({});",
+    "  },",
+    "  dictSet(key, value, dict) {",
+    "    if (typeof key !== \"string\") {",
+    "      throw new Error(`key expected a string`);",
+    "    }",
+    "    const objectValue = $claspExpectObject(dict, \"dict\");",
+    "    return Object.freeze({ ...objectValue, [key]: $claspSnapshotValue(value) });",
+    "  },",
+    "  dictGet(key, dict) {",
+    "    if (typeof key !== \"string\") {",
+    "      throw new Error(`key expected a string`);",
+    "    }",
+    "    const objectValue = $claspExpectObject(dict, \"dict\");",
+    "    return Object.prototype.hasOwnProperty.call(objectValue, key)",
+    "      ? Object.freeze({ $tag: \"Ok\", $0: $claspSnapshotValue(objectValue[key]) })",
+    "      : Object.freeze({ $tag: \"Err\", $0: `Missing dict key: ${key}` });",
+    "  },",
+    "  dictHas(key, dict) {",
+    "    if (typeof key !== \"string\") {",
+    "      throw new Error(`key expected a string`);",
+    "    }",
+    "    const objectValue = $claspExpectObject(dict, \"dict\");",
+    "    return Object.prototype.hasOwnProperty.call(objectValue, key);",
+    "  },",
+    "  dictRemove(key, dict) {",
+    "    if (typeof key !== \"string\") {",
+    "      throw new Error(`key expected a string`);",
+    "    }",
+    "    const objectValue = $claspExpectObject(dict, \"dict\");",
+    "    const next = { ...objectValue };",
+    "    delete next[key];",
+    "    return Object.freeze(next);",
+    "  },",
+    "  dictKeys(dict) {",
+    "    return Object.freeze(Object.keys($claspExpectObject(dict, \"dict\")));",
+    "  },",
+    "  dictValues(dict) {",
+    "    return Object.freeze(Object.values($claspExpectObject(dict, \"dict\")).map((value) => $claspSnapshotValue(value)));",
+    "  },",
     "  pathJoin(parts) {",
     "    const normalized = $claspNormalizePathSegments(parts, \"parts\")",
     "      .filter((part) => part !== \"\")",
@@ -455,15 +544,23 @@ builtinPreludeLines =
     "function textFingerprint64Hex($0) { return $claspBuiltinRuntime.textFingerprint64Hex($0); }",
     "function textPrefix($0, $1) { return $claspBuiltinRuntime.textPrefix($0, $1); }",
     "function textSplitFirst($0, $1) { return $claspBuiltinRuntime.textSplitFirst($0, $1); }",
+    "const dictEmpty = $claspBuiltinRuntime.dictEmpty();",
+    "function dictSet($0, $1, $2) { return $claspBuiltinRuntime.dictSet($0, $1, $2); }",
+    "function dictGet($0, $1) { return $claspBuiltinRuntime.dictGet($0, $1); }",
+    "function dictHas($0, $1) { return $claspBuiltinRuntime.dictHas($0, $1); }",
+    "function dictRemove($0, $1) { return $claspBuiltinRuntime.dictRemove($0, $1); }",
+    "function dictKeys($0) { return $claspBuiltinRuntime.dictKeys($0); }",
+    "function dictValues($0) { return $claspBuiltinRuntime.dictValues($0); }",
     "function pathJoin($0) { return $claspBuiltinRuntime.pathJoin($0); }",
     "function pathDirname($0) { return $claspBuiltinRuntime.pathDirname($0); }",
     "function pathBasename($0) { return $claspBuiltinRuntime.pathBasename($0); }",
     "function fileExists($0) { return $claspHostRuntime(\"fileExists\")($0); }",
-    "function readFile($0) { return $claspHostRuntime(\"readFile\")($0); }"
+    "function readFile($0) { return $claspHostRuntime(\"readFile\")($0); }",
+    "function runCommandJson($0, $1) { return $claspHostRuntime(\"runCommandJson\")($0, $1); }"
   ]
 
 emitBuiltinPrelude : [LowerDeclText] -> [Str]
-emitBuiltinPrelude decls = if moduleNeedsBuiltinPrelude decls then builtinPreludeLines else []
+emitBuiltinPrelude decls = if moduleNeedsBuiltinPrelude decls then builtinPreludeLines else emptyRenderedTexts
 
 defaultForeignParamNames : [Str]
 defaultForeignParamNames = ["arg0", "arg1", "arg2", "arg3", "arg4", "arg5"]
@@ -481,9 +578,13 @@ emitForeignParamsFromType typ availableNames = match typ {
   HostedTypeFunction input result ->
     append [firstText availableNames] (emitForeignParamsFromType result (remainingTexts availableNames)),
   HostedTypeName name ->
-    [],
+    emptyRenderedTexts,
+  HostedTypeApply name args ->
+    emptyRenderedTexts,
+  HostedTypeVar name ->
+    emptyRenderedTexts,
   HostedTypeList itemType ->
-    []
+    emptyRenderedTexts
 }
 
 emitForeignParams : HostedForeignDeclAst -> [Str]
@@ -494,6 +595,10 @@ emitForeignReturnType typ = match typ {
   HostedTypeFunction input result ->
     emitForeignReturnType result,
   HostedTypeName name ->
+    typ,
+  HostedTypeApply name args ->
+    typ,
+  HostedTypeVar name ->
     typ,
   HostedTypeList itemType ->
     typ
@@ -534,9 +639,13 @@ emitForeignParamCodecsFromType typ = match typ {
   HostedTypeFunction input result ->
     append [emitIdentityHostCodec input "from"] (emitForeignParamCodecsFromType result),
   HostedTypeName name ->
-    [],
+    emptyRenderedTexts,
+  HostedTypeApply name args ->
+    emptyRenderedTexts,
+  HostedTypeVar name ->
+    emptyRenderedTexts,
   HostedTypeList itemType ->
-    []
+    emptyRenderedTexts
 }
 
 hasPackageForeignDecl : [HostedForeignDeclAst] -> Bool
@@ -575,7 +684,7 @@ emitPackageForeignImport foreignDecl = match foreignDeclSource foreignDecl {
 
 emitPackageForeignImports : [HostedForeignDeclAst] -> [Str]
 emitPackageForeignImports foreignDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     match foreignDeclSource foreignDecl {
       HostedForeignPackageImport kind specifier declarationPath -> {
@@ -594,7 +703,7 @@ emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: 
 
 emitHostBindingEntries : [HostedForeignDeclAst] -> [Str]
 emitHostBindingEntries foreignDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     rendered = appendJsRenderedText rendered (emitHostBindingEntry foreignDecl);
     rendered
@@ -612,7 +721,7 @@ emitPackageImportEntry foreignDecl = match foreignDeclSource foreignDecl {
 
 emitPackageImportEntries : [HostedForeignDeclAst] -> [Str]
 emitPackageImportEntries foreignDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     match foreignDeclSource foreignDecl {
       HostedForeignPackageImport kind specifier declarationPath -> {
@@ -631,12 +740,12 @@ emitPackageBindingEntry foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
     [textConcat ["  \"", foreignDeclName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  \"", foreignDeclRuntimeName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","]],
   HostedForeignRuntime ->
-    []
+    emptyRenderedTexts
 }
 
 emitPackageBindingEntries : [HostedForeignDeclAst] -> [Str]
 emitPackageBindingEntries foreignDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     rendered = append rendered (emitPackageBindingEntry foreignDecl);
     rendered
@@ -645,23 +754,23 @@ emitPackageBindingEntries foreignDecls = {
 }
 
 emitHostBindingPrelude : [HostedForeignDeclAst] -> [Str]
-emitHostBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["function $claspRuntime(name) {", "  const runtime = globalThis.__claspRuntime;", "  if (!runtime || !(name in runtime)) {", "    throw new Error(`Missing Clasp runtime binding: ${name}`);", "  }", "  return runtime[name];", "}", "function $claspHostBinding(name) {", "  const binding = $claspHostBindingMap[name];", "  if (!binding) {", "    throw new Error(`Missing Clasp host binding manifest: ${name}`);", "  }", "  return binding;", "}", "function $claspCallHostBinding(name, args) {", "  const binding = $claspHostBinding(name);", "  const runtime = $claspRuntime(binding.runtimeName);", "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));", "  return binding.returns.fromHost(runtime(...hostArgs));", "}", "function $claspAdaptHostBinding(binding, implementation) {", "  return (...args) => {", "    const preparedArgs = binding.params.map((param, index) => {", "      const path = `arguments[${index}]`;", "      return param.toHost(param.fromHost(args[index], path), path);", "    });", "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");", "  };", "}"] else []
+emitHostBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["function $claspRuntime(name) {", "  const runtime = globalThis.__claspRuntime;", "  if (!runtime || !(name in runtime)) {", "    throw new Error(`Missing Clasp runtime binding: ${name}`);", "  }", "  return runtime[name];", "}", "function $claspHostBinding(name) {", "  const binding = $claspHostBindingMap[name];", "  if (!binding) {", "    throw new Error(`Missing Clasp host binding manifest: ${name}`);", "  }", "  return binding;", "}", "function $claspCallHostBinding(name, args) {", "  const binding = $claspHostBinding(name);", "  const runtime = $claspRuntime(binding.runtimeName);", "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));", "  return binding.returns.fromHost(runtime(...hostArgs));", "}", "function $claspAdaptHostBinding(binding, implementation) {", "  return (...args) => {", "    const preparedArgs = binding.params.map((param, index) => {", "      const path = `arguments[${index}]`;", "      return param.toHost(param.fromHost(args[index], path), path);", "    });", "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");", "  };", "}"] else emptyRenderedTexts
 
 emitHostBindingExports : [HostedForeignDeclAst] -> [Str]
-emitHostBindingExports foreignDecls = if hasForeignDecls foreignDecls then ["export const __claspHostBindings = ["] else []
+emitHostBindingExports foreignDecls = if hasForeignDecls foreignDecls then ["export const __claspHostBindings = ["] else emptyRenderedTexts
 
 emitPackageImportExports : [HostedForeignDeclAst] -> [Str]
-emitPackageImportExports foreignDecls = if hasForeignDecls foreignDecls then ["];", "export const __claspPackageImports = ["] else []
+emitPackageImportExports foreignDecls = if hasForeignDecls foreignDecls then ["];", "export const __claspPackageImports = ["] else emptyRenderedTexts
 
 emitPackageBindingPrelude : [HostedForeignDeclAst] -> [Str]
-emitPackageBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["];", "const __claspPackageBindings = Object.freeze({"] else []
+emitPackageBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["];", "const __claspPackageBindings = Object.freeze({"] else emptyRenderedTexts
 
 emitPackageBindingSupport : [HostedForeignDeclAst] -> [Str]
-emitPackageBindingSupport foreignDecls = if hasForeignDecls foreignDecls then ["});", "const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));", "export function __claspAdaptHostBindings(implementations = {}) {", "  const runtimeBindings = {};", "  for (const binding of __claspHostBindings) {", "    const byName = implementations[binding.name];", "    const byRuntimeName = implementations[binding.runtimeName];", "    const implementation = typeof byName === \"function\" ? byName : byRuntimeName;", "    if (typeof implementation === \"function\") {", "      runtimeBindings[binding.runtimeName] = $claspAdaptHostBinding(binding, implementation);", "    }", "  }", "  return runtimeBindings;", "}", "export function __claspPackageHostBindings() {", "  return __claspAdaptHostBindings(__claspPackageBindings);", "}"] else []
+emitPackageBindingSupport foreignDecls = if hasForeignDecls foreignDecls then ["});", "const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));", "export function __claspAdaptHostBindings(implementations = {}) {", "  const runtimeBindings = {};", "  for (const binding of __claspHostBindings) {", "    const byName = implementations[binding.name];", "    const byRuntimeName = implementations[binding.runtimeName];", "    const implementation = typeof byName === \"function\" ? byName : byRuntimeName;", "    if (typeof implementation === \"function\") {", "      runtimeBindings[binding.runtimeName] = $claspAdaptHostBinding(binding, implementation);", "    }", "  }", "  return runtimeBindings;", "}", "export function __claspPackageHostBindings() {", "  return __claspAdaptHostBindings(__claspPackageBindings);", "}"] else emptyRenderedTexts
 
 emitForeignBindings : [HostedForeignDeclAst] -> [Str]
 emitForeignBindings foreignDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     let params = emitForeignParams foreignDecl;
     let bindingLine = if firstText params == "" then textConcat ["export const ", foreignDeclName foreignDecl, " = () => $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", []);"] else textConcat ["export function ", foreignDeclName foreignDecl, "(", textJoin ", " params, ") { return $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", [", textJoin ", " params, "]); }"];
@@ -751,7 +860,7 @@ hasMergeGateDeclarations decls = {
 
 renderGuideEntryObjectLines : [HostedGuideEntryAst] -> [Str]
 renderGuideEntryObjectLines entries = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for entry in entries {
     rendered = appendJsRenderedText rendered (textConcat ["      ", emitJsString (guideEntryName entry), ": ", emitJsString (guideEntryValue entry), ","]);
     rendered
@@ -773,7 +882,7 @@ emitGuides guides = if hasGuideDeclarations guides then {
 
 emitPolicyPermissionValues : HostedPolicyPermissionKindAst -> [HostedPolicyPermissionAst] -> [Str]
 emitPolicyPermissionValues targetKind permissions = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for permission in permissions {
     if renderHostedPolicyPermissionKind (policyPermissionKind permission) == renderHostedPolicyPermissionKind targetKind then {
       rendered = appendRenderedText rendered (emitJsString (policyPermissionValue permission));
@@ -787,7 +896,7 @@ emitPolicyPermissionValues targetKind permissions = {
 
 emitJsStringValues : [Str] -> [Str]
 emitJsStringValues values = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for value in values {
     rendered = appendRenderedText rendered (emitJsString value);
     rendered
@@ -799,6 +908,10 @@ emitTypeSchemaDecodeExpr : HostedTypeAst -> Str -> Str -> Str
 emitTypeSchemaDecodeExpr typ valueRef pathRef = match typ {
   HostedTypeName name ->
     if name == "Str" then textConcat ["$claspExpectString(", valueRef, ", ", pathRef, ")"] else if name == "Int" then textConcat ["$claspExpectInt(", valueRef, ", ", pathRef, ")"] else if name == "Bool" then textConcat ["$claspExpectBool(", valueRef, ", ", pathRef, ")"] else if name == "Prompt" then textConcat ["$claspExpectPrompt(", valueRef, ", ", pathRef, ")"] else textConcat ["((__claspSchemas[", emitJsString name, "] ?? { fromHost(value) { return value; } }).fromHost(", valueRef, ", ", pathRef, "))"],
+  HostedTypeApply name args ->
+    textConcat ["((__claspSchemas[", emitJsString name, "] ?? { fromHost(value) { return value; } }).fromHost(", valueRef, ", ", pathRef, "))"],
+  HostedTypeVar name ->
+    valueRef,
   HostedTypeList itemType ->
     textConcat ["Object.freeze($claspExpectArray(", valueRef, ", ", pathRef, ").map((item) => ", emitTypeSchemaDecodeExpr itemType "item" pathRef, "))"],
   HostedTypeFunction input result ->
@@ -807,7 +920,7 @@ emitTypeSchemaDecodeExpr typ valueRef pathRef = match typ {
 
 emitSchemaFieldNames : [HostedRecordFieldDeclAst] -> [Str]
 emitSchemaFieldNames fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in fields {
     rendered = appendRenderedText rendered (emitJsString (recordFieldDeclName field));
     rendered
@@ -817,7 +930,7 @@ emitSchemaFieldNames fields = {
 
 emitSchemaFieldLines : [HostedRecordFieldDeclAst] -> [Str]
 emitSchemaFieldLines fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in fields {
     let fieldName = recordFieldDeclName field;
     rendered = appendRenderedText rendered (textConcat ["      ", fieldName, ": ", emitTypeSchemaDecodeExpr (recordFieldDeclType field) (textConcat ["objectValue.", fieldName]) (textConcat ["`${path}.", fieldName, "`"]), ","]);
@@ -830,30 +943,30 @@ emitRecordSchema : HostedRecordDeclAst -> [Str]
 emitRecordSchema decl = {
   let schemaName = recordDeclName decl;
   let schemaConstName = textConcat ["$claspSchema_", schemaName];
-  let header = [textConcat ["const ", schemaConstName, " = Object.freeze({"], "  kind: \"clasp-schema-contract\",", "  version: 1,", textConcat ["  name: ", emitJsString schemaName, ","], textConcat ["  schema: Object.freeze({ kind: \"record\", name: ", emitJsString schemaName, ", fields: Object.freeze([", textJoin ", " (emitSchemaFieldNames (recordDeclFields decl)), "]) }),"], "  seed: null,", "  fromHost(value, path = \"value\") {", "    const objectValue = $claspExpectObject(value, path);", "    return Object.freeze({"];
-  let footer = [ "    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return JSON.stringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return Object.freeze({ kind: \"clasp-schema-stream\", schema: this, initial }); }", "});", "" ];
+  let header = [textConcat ["const ", schemaConstName, " = {"], "  kind: \"clasp-schema-contract\",", "  version: 1,", textConcat ["  name: ", emitJsString schemaName, ","], textConcat ["  schema: Object.freeze({ kind: \"record\", name: ", emitJsString schemaName, ", fields: Object.freeze([", textJoin ", " (emitSchemaFieldNames (recordDeclFields decl)), "]) }),"], "  seed: null,", "  fromHost(value, path = \"value\") {", "    const objectValue = $claspExpectObject(value, path);", "    return Object.freeze({"];
+  let footer = [ "    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return JSON.stringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return $claspCreateSchemaStream(this, initial); }", "};", "" ];
   append header (append (emitSchemaFieldLines (recordDeclFields decl)) footer)
 }
 
 emitSchemas : [HostedRecordDeclAst] -> [Str]
 emitSchemas recordDecls = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for recordDecl in recordDecls {
     rendered = append rendered (emitRecordSchema recordDecl);
     rendered
   };
-  let mut entries = [];
+  let mut entries = emptyRenderedTexts;
   for recordDecl in recordDecls {
     let recordName = recordDeclName recordDecl;
     entries = appendRenderedText entries (textConcat [recordName, ": $claspSchema_", recordName]);
     entries
   };
-  append rendered [textConcat ["export const __claspSchemas = Object.freeze({ ", textJoin ", " entries, " });"], ""]
+  append rendered [textConcat ["export const __claspSchemas = Object.freeze({ ", textJoin ", " entries, " });"], "for (const schemaContract of Object.values(__claspSchemas)) {", "  schemaContract.binary = $claspCreateSchemaBinaryCodec(schemaContract);", "  schemaContract.encodeBinary = function (value) { return this.binary.encode(value); };", "  schemaContract.decodeBinary = function (payload, path = \"value\") { return this.binary.decode(payload, path); };", "  schemaContract.encodeFramedBinary = function (value) { return this.binary.frame(value); };", "  schemaContract.decodeFramedBinary = function (frame, path = \"value\") { return this.binary.unframe(frame, path); };", "  Object.freeze(schemaContract);", "}", ""]
 }
 
 emitExportsRegistry : HostedModuleAst -> [Str]
 emitExportsRegistry modl = {
-  let mut entries = [];
+  let mut entries = emptyRenderedTexts;
   for exportName in declNames modl {
     entries = appendRenderedText entries (textConcat [exportName, ": ", exportName]);
     entries
@@ -863,7 +976,7 @@ emitExportsRegistry modl = {
 
 emitSelfHostedRuntimePrelude : [Str]
 emitSelfHostedRuntimePrelude = {
-  let core = [ "function $claspSnapshotValue(value) {", "  if (typeof globalThis.structuredClone === \"function\") {", "    return globalThis.structuredClone(value);", "  }", "  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}" ];
+  let core = [ "function $claspSnapshotValue(value) {", "  if (typeof globalThis.structuredClone === \"function\") {", "    return globalThis.structuredClone(value);", "  }", "  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}", "", "const $claspBinaryMagic = Object.freeze([67, 76, 66, 49]);", "const $claspTextEncoder = typeof TextEncoder === \"undefined\" ? null : new TextEncoder();", "const $claspTextDecoder = typeof TextDecoder === \"undefined\" ? null : new TextDecoder();", "", "function $claspEncodeUtf8Text(value) {", "  if ($claspTextEncoder === null) {", "    throw new Error(\"This runtime does not provide TextEncoder for binary Clasp codecs\");", "  }", "  return $claspTextEncoder.encode($claspExpectString(value, \"value\"));", "}", "", "function $claspDecodeUtf8Text(bytes, path = \"value\") {", "  if ($claspTextDecoder === null) {", "    throw new Error(\"This runtime does not provide TextDecoder for binary Clasp codecs\");", "  }", "  return $claspTextDecoder.decode($claspNormalizeBinaryBytes(bytes, path));", "}", "", "function $claspNormalizeBinaryBytes(value, path = \"value\") {", "  if (value instanceof Uint8Array) {", "    return value;", "  }", "  if (value instanceof ArrayBuffer) {", "    return new Uint8Array(value);", "  }", "  if (ArrayBuffer.isView(value)) {", "    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);", "  }", "  throw new Error(`${path} expected binary bytes`);", "}", "", "function $claspWriteUint32(target, offset, value) {", "  new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, true);", "}", "", "function $claspReadUint32(source, offset, path = \"value\") {", "  if (offset + 4 > source.byteLength) {", "    throw new Error(`${path} truncated binary payload`);", "  }", "  return new DataView(source.buffer, source.byteOffset, source.byteLength).getUint32(offset, true);", "}", "", "function $claspFrameBinaryPayload(payload) {", "  const bytes = $claspNormalizeBinaryBytes(payload, \"payload\");", "  const frame = new Uint8Array(4 + bytes.byteLength);", "  $claspWriteUint32(frame, 0, bytes.byteLength);", "  frame.set(bytes, 4);", "  return frame;", "}", "", "function $claspUnframeBinaryPayload(frame, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(frame, path);", "  const expectedLength = $claspReadUint32(bytes, 0, path);", "  const payload = bytes.slice(4);", "  if (payload.byteLength !== expectedLength) {", "    throw new Error(`${path} expected ${expectedLength} framed bytes but received ${payload.byteLength}`);", "  }", "  return payload;", "}", "", "function $claspEncodeSchemaBinaryPayload(schemaContract, value) {", "  const normalizedValue = schemaContract.toHost(schemaContract.fromHost(value, \"value\"), \"value\");", "  const fingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  const fingerprintBytes = $claspEncodeUtf8Text(fingerprint);", "  const payloadBytes = $claspEncodeUtf8Text(JSON.stringify(normalizedValue));", "  const buffer = new Uint8Array(12 + fingerprintBytes.byteLength + payloadBytes.byteLength);", "  buffer.set($claspBinaryMagic, 0);", "  $claspWriteUint32(buffer, 4, fingerprintBytes.byteLength);", "  $claspWriteUint32(buffer, 8, payloadBytes.byteLength);", "  buffer.set(fingerprintBytes, 12);", "  buffer.set(payloadBytes, 12 + fingerprintBytes.byteLength);", "  return buffer;", "}", "", "function $claspDecodeSchemaBinaryPayload(schemaContract, payload, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(payload, path);", "  if (bytes.byteLength < 12) {", "    throw new Error(`${path} expected a Clasp binary payload`);", "  }", "  for (let index = 0; index < $claspBinaryMagic.length; index += 1) {", "    if (bytes[index] !== $claspBinaryMagic[index]) {", "      throw new Error(`${path} expected a Clasp binary payload`);", "    }", "  }", "  const fingerprintLength = $claspReadUint32(bytes, 4, path);", "  const payloadLength = $claspReadUint32(bytes, 8, path);", "  const payloadOffset = 12 + fingerprintLength;", "  if (payloadOffset + payloadLength !== bytes.byteLength) {", "    throw new Error(`${path} has an invalid Clasp binary payload length`);", "  }", "  const fingerprint = $claspDecodeUtf8Text(bytes.slice(12, payloadOffset), `${path}.fingerprint`);", "  const expectedFingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  if (fingerprint !== expectedFingerprint) {", "    throw new Error(`${path} expected schema fingerprint ${expectedFingerprint} but received ${fingerprint}`);", "  }", "  const payloadText = $claspDecodeUtf8Text(bytes.slice(payloadOffset), `${path}.payload`);", "  return schemaContract.toHost(schemaContract.fromHost(JSON.parse(payloadText), path), path);", "}", "", "function $claspCreateSchemaBinaryCodec(schemaContract) {", "  return Object.freeze({", "    type: schemaContract.type ?? schemaContract.name ?? null,", "    schemaFingerprint: String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\"),", "    framing: \"length_prefixed\",", "    encode(value) { return $claspEncodeSchemaBinaryPayload(schemaContract, value); },", "    decode(bytes, path = \"value\") { return $claspDecodeSchemaBinaryPayload(schemaContract, bytes, path); },", "    frame(value) { return $claspFrameBinaryPayload(this.encode(value)); },", "    unframe(frame, path = \"value\") { return this.decode($claspUnframeBinaryPayload(frame, path), path); }", "  });", "}", "", "function $claspCreateSchemaStream(contract, initial = null) {", "  return Object.freeze({ kind: \"clasp-schema-stream\", schema: contract, initial });", "}" ];
   let prompts = [ "", "function $claspPromptMessage(role, content) {", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([Object.freeze({", "      role: $claspExpectString(role, \"prompt.role\"),", "      content: $claspExpectString(content, \"prompt.content\")", "    })])", "  });", "}", "", "function $claspExpectPrompt(value, path = \"value\") {", "  const objectValue = $claspExpectObject(value, path);", "  if (objectValue.$kind !== \"prompt\") {", "    throw new Error(`${path} expected a Prompt value`);", "  }", "  const messages = $claspExpectArray(objectValue.messages, `${path}.messages`).map((message, index) => {", "    const messagePath = `${path}.messages[${index}]`;", "    const messageObject = $claspExpectObject(message, messagePath);", "    return Object.freeze({", "      role: $claspExpectString(messageObject.role, `${messagePath}.role`),", "      content: $claspExpectString(messageObject.content, `${messagePath}.content`)", "    });", "  });", "  return Object.freeze({ $kind: \"prompt\", messages: Object.freeze(messages) });", "}", "", "function systemPrompt(content) { return $claspPromptMessage(\"system\", content); }", "function assistantPrompt(content) { return $claspPromptMessage(\"assistant\", content); }", "function userPrompt(content) { return $claspPromptMessage(\"user\", content); }", "", "function appendPrompt(left, right) {", "  const leftPrompt = $claspExpectPrompt(left, \"left\");", "  const rightPrompt = $claspExpectPrompt(right, \"right\");", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([...leftPrompt.messages, ...rightPrompt.messages].map((message) => Object.freeze({ role: message.role, content: message.content })))", "  });", "}", "", "function promptText(value) {", "  const prompt = $claspExpectPrompt(value, \"value\");", "  return prompt.messages.map((message) => `${message.role}: ${message.content}`).join(\"\\n\\n\");", "}" ];
   let traces = [ "", "function $claspCreateTraceCollector(seed = []) {", "  const entries = Array.isArray(seed) ? seed.map((entry) => $claspSnapshotValue(entry)) : [];", "  return Object.freeze({", "    kind: \"clasp-trace-collector\",", "    version: 1,", "    record(entry) {", "      const snapshot = $claspSnapshotValue(entry);", "      entries.push(snapshot);", "      return snapshot;", "    },", "    entries() {", "      return $claspSnapshotValue(entries);", "    },", "    clear() {", "      entries.length = 0;", "      return this.entries();", "    }", "  });", "}", "", "function $claspMaybeRecordTrace(options = null, kind, name, action) {", "  const collector = options && typeof options === \"object\" && options.collector && typeof options.collector.record === \"function\"", "    ? options.collector", "    : null;", "  if (collector) {", "    collector.record(Object.freeze({ kind, name, action, status: \"ok\" }));", "  }", "}" ];
   append core (append prompts traces)
@@ -914,7 +1027,7 @@ emitHooks hooks = if hasHookDeclarations hooks then {
     rendered
   };
   append rendered ["]);", ""]
-} else []
+} else emptyRenderedTexts
 
 emitToolServers : [HostedToolServerDeclAst] -> [Str]
 emitToolServers servers = if hasToolServerDeclarations servers then {
@@ -950,7 +1063,7 @@ emitMergeGates : [HostedMergeGateDeclAst] -> [Str]
 emitMergeGates mergeGates = if hasMergeGateDeclarations mergeGates then {
   let mut rendered = ["export const __claspMergeGates = Object.freeze(["];
   for mergeGateDecl in mergeGates {
-    let mut verifierNames = [];
+    let mut verifierNames = emptyRenderedTexts;
     for verifierName in mergeGateDeclVerifierNames mergeGateDecl {
       verifierNames = appendRenderedText verifierNames (emitJsString verifierName);
       verifierNames
@@ -959,7 +1072,7 @@ emitMergeGates mergeGates = if hasMergeGateDeclarations mergeGates then {
     rendered
   };
   append rendered ["]);", ""]
-} else []
+} else emptyRenderedTexts
 
 emitFrontendModuleBindings : HostedModuleAst -> [Str]
 emitFrontendModuleBindings modl =

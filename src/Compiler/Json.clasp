@@ -2,6 +2,18 @@ module Compiler.Json
 
 type JsonField = JsonFieldRaw Str Str | JsonFieldText Str Str | JsonFieldArray Str [Str]
 
+keepNoJsonRenderedText : Str -> Bool
+keepNoJsonRenderedText value = false
+
+emptyJsonRenderedTexts : [Str]
+emptyJsonRenderedTexts = filter keepNoJsonRenderedText [""]
+
+keepNoJsonField : JsonField -> Bool
+keepNoJsonField field = false
+
+emptyJsonFields : [JsonField]
+emptyJsonFields = filter keepNoJsonField [JsonFieldRaw "" ""]
+
 appendRenderedJson : [Str] -> Str -> [Str]
 appendRenderedJson values value = append values [value]
 
@@ -20,7 +32,7 @@ renderJsonField field = match field {
 
 renderJsonFields : [JsonField] -> [Str]
 renderJsonFields fields = {
-  let mut rendered = [];
+  let mut rendered = emptyJsonRenderedTexts;
   for field in fields {
     rendered = appendRenderedJson rendered (renderJsonField field);
     rendered

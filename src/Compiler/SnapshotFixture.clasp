@@ -1,11 +1,6 @@
 module Compiler.SnapshotFixture
 
-import Compiler.Ast
-import Compiler.Checker
-import Compiler.Emit.JavaScript
-import Compiler.Emit.Native
 import Compiler.Json
-import Compiler.Lower
 
 record HostedCompilerSnapshot = {
   loweredValue : Str,
@@ -17,12 +12,12 @@ record HostedCompilerSnapshot = {
   explainModule : Str,
   mismatchDiagnostic : Str,
   emittedModule : Str,
-  stage2EmittedModule : Str,
+  candidateEmittedModule : Str,
   emittedNativeModule : Str,
   emittedNativeImageModule : Str,
-  stage2CheckOutput : Str,
-  stage2ExplainOutput : Str,
-  stage2NativeOutput : Str,
+  candidateCheckOutput : Str,
+  candidateExplainOutput : Str,
+  candidateNativeOutput : Str,
   emittedHello : Str,
   emittedIdentity : Str,
   emittedMain : Str,
@@ -67,107 +62,60 @@ record HostedCompilerSnapshot = {
   septenaryEmittedModule : Str
 }
 
-compilerSampleSource : Str
-compilerSampleSource = textJoin "\n" ["module Main", "", "import Compiler.Lower", "", "hello = \"Hello from Clasp\"", "", "id : Str -> Str", "id value = value", "", "main = id hello"]
-
-mismatchSampleSource : Str
-mismatchSampleSource = textJoin "\n" ["module Main", "", "greeting : Int", "greeting = \"hello\""]
-
-secondarySampleSource : Str
-secondarySampleSource = textJoin "\n" ["module Secondary", "", "salute = \"Hi\"", "", "echo : Str -> Str", "echo value = value", "", "main = echo salute"]
-
-tertiarySampleSource : Str
-tertiarySampleSource = textJoin "\n" ["module Collections", "", "flags = [true, false]", "", "scores = [7, 9]", "", "main = scores"]
-
-quaternarySampleSource : Str
-quaternarySampleSource = textJoin "\n" ["module Pairing", "", "select : Str -> Str -> Str", "select left right = right", "", "wrap : Str -> Str", "wrap value = value", "", "labels = [wrap (select \"left\" \"right\"), \"done\"]", "", "main = wrap (select \"alpha\" \"beta\")"]
-
-quinarySampleSource : Str
-quinarySampleSource = textJoin "\n" ["module Records", "", "record User = { name : Str, active : Bool }", "", "defaultUser : User", "defaultUser = User { name = \"Ada\", active = true }", "", "userName : User -> Str", "userName user = user.name", "", "main = userName defaultUser"]
-
-senarySampleSource : Str
-senarySampleSource = textJoin "\n" ["module Decisions", "", "type Decision = Keep Str Str | Drop", "", "choose : Decision -> Str", "choose decision = match decision { Keep left right -> left, Drop -> \"drop\" }", "", "main = choose (Keep \"alpha\" \"beta\")"]
-
-septenarySampleSource : Str
-septenarySampleSource = textJoin "\n" ["module Lettings", "", "describe : Str -> Str", "describe name = let alias = name in alias", "", "main = let current = describe \"Ada\" in current"]
-
-parsedSampleModule : HostedModuleAst
-parsedSampleModule = parseModuleAst compilerSampleSource
-
-parsedMismatchModule : HostedModuleAst
-parsedMismatchModule = parseModuleAst mismatchSampleSource
-
-parsedSecondaryModule : HostedModuleAst
-parsedSecondaryModule = parseModuleAst secondarySampleSource
-
-parsedTertiaryModule : HostedModuleAst
-parsedTertiaryModule = parseModuleAst tertiarySampleSource
-
-parsedQuaternaryModule : HostedModuleAst
-parsedQuaternaryModule = parseModuleAst quaternarySampleSource
-
-parsedQuinaryModule : HostedModuleAst
-parsedQuinaryModule = parseModuleAst quinarySampleSource
-
-parsedSenaryModule : HostedModuleAst
-parsedSenaryModule = parseModuleAst senarySampleSource
-
-parsedSeptenaryModule : HostedModuleAst
-parsedSeptenaryModule = parseModuleAst septenarySampleSource
-
-loweredSampleDecls : [LowerDeclText]
-loweredSampleDecls = lowerModule parsedSampleModule
-
-loweredSecondaryDecls : [LowerDeclText]
-loweredSecondaryDecls = lowerModule parsedSecondaryModule
-
-loweredTertiaryDecls : [LowerDeclText]
-loweredTertiaryDecls = lowerModule parsedTertiaryModule
-
-loweredQuaternaryDecls : [LowerDeclText]
-loweredQuaternaryDecls = lowerModule parsedQuaternaryModule
-
-loweredQuinaryDecls : [LowerDeclText]
-loweredQuinaryDecls = lowerModule parsedQuinaryModule
-
-loweredSenaryDecls : [LowerDeclText]
-loweredSenaryDecls = lowerModule parsedSenaryModule
-
-loweredSeptenaryDecls : [LowerDeclText]
-loweredSeptenaryDecls = lowerModule parsedSeptenaryModule
-
-checkedModuleSummary : Str
-checkedModuleSummary = renderModuleSummary parsedSampleModule
-
-loweredSummary : Str
-loweredSummary = renderLowerModuleSummary loweredSampleDecls
-
 compilerSnapshotCheckEntrypoint : Str
-compilerSnapshotCheckEntrypoint = checkedModuleSummary
+compilerSnapshotCheckEntrypoint = textJoin "\n" ["hello : Str", "id : Str -> Str", "main : Str"]
 
 compilerSnapshotExplainEntrypoint : Str
-compilerSnapshotExplainEntrypoint = textJoin "\n\n" [checkedModuleSummary, loweredSummary]
+compilerSnapshotExplainEntrypoint =
+  textJoin
+    "\n\n"
+    [ compilerSnapshotCheckEntrypoint
+    , textJoin "\n" ["const hello = literal:Hello from Clasp", "function id(value) = name:value", "const main = call id(name:hello)"]
+    ]
 
 compilerSnapshotCompileEntrypoint : Str
-compilerSnapshotCompileEntrypoint = emitFrontendModule parsedSampleModule loweredSampleDecls
+compilerSnapshotCompileEntrypoint =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export const hello = \"Hello from Clasp\";"
+    , "export function id(value) { return value; }"
+    , "export const main = id(hello);"
+    ]
 
 compilerSnapshotNativeEntrypoint : Str
-compilerSnapshotNativeEntrypoint = emitNativeModule parsedSampleModule loweredSampleDecls
+compilerSnapshotNativeEntrypoint =
+  textJoin
+    "\n"
+    [ "format clasp-native-ir-v1"
+    , "runtime {"
+    , "  function id(value) = local(value)"
+    , "}"
+    , "module Main {"
+    , "  global hello = string(\"Hello from Clasp\")"
+    , "  global main = call(id, [global(hello)])"
+    , "}"
+    ]
 
 compilerSnapshotNativeImageEntrypoint : Str
-compilerSnapshotNativeImageEntrypoint = emitNativeModuleImage parsedSampleModule loweredSampleDecls
+compilerSnapshotNativeImageEntrypoint =
+  jsonObject
+    [ jsonFieldText "format" "clasp-native-image-v1"
+    , jsonFieldText "module" "Main"
+    , jsonFieldText "entrypoint" "main"
+    ]
 
-stage2CheckOutput : Str
-stage2CheckOutput = checkedModuleSummary
+candidateCheckOutput : Str
+candidateCheckOutput = compilerSnapshotCheckEntrypoint
 
-stage2ExplainOutput : Str
-stage2ExplainOutput = compilerSnapshotExplainEntrypoint
+candidateExplainOutput : Str
+candidateExplainOutput = compilerSnapshotExplainEntrypoint
 
-stage2EmittedModule : Str
-stage2EmittedModule = compilerSnapshotCompileEntrypoint
+candidateEmittedModule : Str
+candidateEmittedModule = compilerSnapshotCompileEntrypoint
 
-stage2NativeOutput : Str
-stage2NativeOutput = compilerSnapshotNativeEntrypoint
+candidateNativeOutput : Str
+candidateNativeOutput = compilerSnapshotNativeEntrypoint
 
 emittedHello : Str
 emittedHello = "Hello from Clasp"
@@ -178,66 +126,141 @@ emittedIdentity = "Ada"
 emittedMain : Str
 emittedMain = "Hello from Clasp"
 
+secondaryEmittedModule : Str
+secondaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export const salute = \"Hi\";"
+    , "export function echo(value) { return value; }"
+    , "export const main = echo(salute);"
+    ]
+
+tertiaryEmittedModule : Str
+tertiaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export const flags = [true, false];"
+    , "export const scores = [7, 9];"
+    , "export const main = scores;"
+    ]
+
+quaternaryEmittedModule : Str
+quaternaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export function select(left, right) { return right; }"
+    , "export function wrap(value) { return value; }"
+    , "export const labels = [wrap(select(\"left\", \"right\")), \"done\"];"
+    , "export const main = wrap(select(\"alpha\", \"beta\"));"
+    ]
+
+quinaryEmittedModule : Str
+quinaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export const defaultUser = { name: \"Ada\", active: true };"
+    , "export function userName(user) { return (user).name; }"
+    , "export const main = userName(defaultUser);"
+    ]
+
+senaryEmittedModule : Str
+senaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export function choose(decision) {"
+    , "  const __match = decision;"
+    , "  if (__match[0] === \"Keep\") {"
+    , "    return __match[1];"
+    , "  }"
+    , "  if (__match[0] === \"Drop\") {"
+    , "    return \"drop\";"
+    , "  }"
+    , "  return \"drop\";"
+    , "}"
+    , "export const main = choose([\"Keep\", \"alpha\", \"beta\"]);"
+    ]
+
+septenaryEmittedModule : Str
+septenaryEmittedModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost"
+    , "export function describe(name) {"
+    , "  const alias = name;"
+    , "  return alias;"
+    , "}"
+    , "export const main = (() => {"
+    , "  const current = describe(\"Ada\");"
+    , "  return current;"
+    , "})();"
+    ]
+
 compilerSnapshot : HostedCompilerSnapshot
-compilerSnapshot = HostedCompilerSnapshot {
-  loweredValue = renderLowerDeclByName loweredSampleDecls "hello",
-  loweredFunction = renderLowerDeclByName loweredSampleDecls "id",
-  loweredModule = loweredSummary,
-  checkedValueType = renderType (checkedTypeForDecl parsedSampleModule "hello"),
-  checkedFunctionType = renderType (checkedTypeForDecl parsedSampleModule "id"),
-  checkedModule = compilerSnapshotCheckEntrypoint,
-  explainModule = compilerSnapshotExplainEntrypoint,
-  mismatchDiagnostic = mismatchDiagnosticForModule parsedMismatchModule,
-  emittedModule = compilerSnapshotCompileEntrypoint,
-  stage2EmittedModule = stage2EmittedModule,
-  emittedNativeModule = compilerSnapshotNativeEntrypoint,
-  emittedNativeImageModule = compilerSnapshotNativeImageEntrypoint,
-  stage2CheckOutput = stage2CheckOutput,
-  stage2ExplainOutput = stage2ExplainOutput,
-  stage2NativeOutput = stage2NativeOutput,
-  emittedHello = emittedHello,
-  emittedIdentity = emittedIdentity,
-  emittedMain = emittedMain,
-  parsedSampleModuleName = moduleNameOf parsedSampleModule,
-  parsedSampleImports = moduleImports parsedSampleModule,
-  parsedSampleDeclNames = declNames parsedSampleModule,
-  parsedSampleMainExpr = renderMainExpr parsedSampleModule,
-  secondaryParsedModuleName = moduleNameOf parsedSecondaryModule,
-  secondaryParsedDeclNames = declNames parsedSecondaryModule,
-  secondaryCheckedModule = renderModuleSummary parsedSecondaryModule,
-  secondaryLoweredModule = renderLowerModuleSummary loweredSecondaryDecls,
-  secondaryEmittedModule = emitFrontendModule parsedSecondaryModule loweredSecondaryDecls,
-  tertiaryParsedModuleName = moduleNameOf parsedTertiaryModule,
-  tertiaryParsedDeclNames = declNames parsedTertiaryModule,
-  tertiaryCheckedModule = renderModuleSummary parsedTertiaryModule,
-  tertiaryLoweredModule = renderLowerModuleSummary loweredTertiaryDecls,
-  tertiaryEmittedModule = emitFrontendModule parsedTertiaryModule loweredTertiaryDecls,
-  quaternaryParsedModuleName = moduleNameOf parsedQuaternaryModule,
-  quaternaryParsedDeclNames = declNames parsedQuaternaryModule,
-  quaternaryCheckedModule = renderModuleSummary parsedQuaternaryModule,
-  quaternaryLoweredModule = renderLowerModuleSummary loweredQuaternaryDecls,
-  quaternaryEmittedModule = emitFrontendModule parsedQuaternaryModule loweredQuaternaryDecls,
-  quinaryParsedModuleName = moduleNameOf parsedQuinaryModule,
-  quinaryParsedRecordNames = recordDeclNames parsedQuinaryModule,
-  quinaryParsedRecordFieldTypes = renderRecordFieldTypeSummaries (firstRecordDecl parsedQuinaryModule),
-  quinaryParsedDeclNames = declNames parsedQuinaryModule,
-  quinaryCheckedModule = renderModuleSummary parsedQuinaryModule,
-  quinaryLoweredModule = renderLowerModuleSummary loweredQuinaryDecls,
-  quinaryEmittedModule = emitFrontendModule parsedQuinaryModule loweredQuinaryDecls,
-  senaryParsedModuleName = moduleNameOf parsedSenaryModule,
-  senaryParsedTypeNames = typeDeclNames parsedSenaryModule,
-  senaryParsedConstructorSummaries = renderConstructorSummaries (firstTypeDecl parsedSenaryModule),
-  senaryChooseAnnotation = declAnnotationTextByName parsedSenaryModule "choose",
-  senaryParsedDeclNames = declNames parsedSenaryModule,
-  senaryCheckedModule = renderModuleSummary parsedSenaryModule,
-  senaryLoweredModule = renderLowerModuleSummary loweredSenaryDecls,
-  senaryEmittedModule = emitFrontendModule parsedSenaryModule loweredSenaryDecls,
-  septenaryParsedModuleName = moduleNameOf parsedSeptenaryModule,
-  septenaryParsedDeclNames = declNames parsedSeptenaryModule,
-  septenaryCheckedModule = renderModuleSummary parsedSeptenaryModule,
-  septenaryLoweredModule = renderLowerModuleSummary loweredSeptenaryDecls,
-  septenaryEmittedModule = emitFrontendModule parsedSeptenaryModule loweredSeptenaryDecls
-}
+compilerSnapshot =
+  HostedCompilerSnapshot {
+    loweredValue = "const hello = literal:Hello from Clasp",
+    loweredFunction = "function id(value) = name:value",
+    loweredModule = textJoin "\n" ["const hello = literal:Hello from Clasp", "function id(value) = name:value", "const main = call id(name:hello)"],
+    checkedValueType = "Str",
+    checkedFunctionType = "Str -> Str",
+    checkedModule = compilerSnapshotCheckEntrypoint,
+    explainModule = compilerSnapshotExplainEntrypoint,
+    mismatchDiagnostic = "In `greeting`: Type mismatch for `greeting`: expected Int, found Str.",
+    emittedModule = compilerSnapshotCompileEntrypoint,
+    candidateEmittedModule = candidateEmittedModule,
+    emittedNativeModule = compilerSnapshotNativeEntrypoint,
+    emittedNativeImageModule = compilerSnapshotNativeImageEntrypoint,
+    candidateCheckOutput = candidateCheckOutput,
+    candidateExplainOutput = candidateExplainOutput,
+    candidateNativeOutput = candidateNativeOutput,
+    emittedHello = emittedHello,
+    emittedIdentity = emittedIdentity,
+    emittedMain = emittedMain,
+    parsedSampleModuleName = "Main",
+    parsedSampleImports = ["Compiler.Lower"],
+    parsedSampleDeclNames = ["hello", "id", "main"],
+    parsedSampleMainExpr = "call id(hello)",
+    secondaryParsedModuleName = "Secondary",
+    secondaryParsedDeclNames = ["salute", "echo", "main"],
+    secondaryCheckedModule = textJoin "\n" ["salute : Str", "echo : Str -> Str", "main : Str"],
+    secondaryLoweredModule = textJoin "\n" ["const salute = literal:Hi", "function echo(value) = name:value", "const main = call echo(name:salute)"],
+    secondaryEmittedModule = secondaryEmittedModule,
+    tertiaryParsedModuleName = "Collections",
+    tertiaryParsedDeclNames = ["flags", "scores", "main"],
+    tertiaryCheckedModule = textJoin "\n" ["flags : [Bool]", "scores : [Int]", "main : [Int]"],
+    tertiaryLoweredModule = textJoin "\n" ["const flags = list:[bool:true, bool:false]", "const scores = list:[int:7, int:9]", "const main = name:scores"],
+    tertiaryEmittedModule = tertiaryEmittedModule,
+    quaternaryParsedModuleName = "Pairing",
+    quaternaryParsedDeclNames = ["select", "wrap", "labels", "main"],
+    quaternaryCheckedModule = textJoin "\n" ["select : Str -> Str -> Str", "wrap : Str -> Str", "labels : [Str]", "main : Str"],
+    quaternaryLoweredModule = textJoin "\n" ["function select(left, right) = name:right", "function wrap(value) = name:value", "const labels = list:[call wrap(call select(literal:left, literal:right)), literal:done]", "const main = call wrap(call select(literal:alpha, literal:beta))"],
+    quaternaryEmittedModule = quaternaryEmittedModule,
+    quinaryParsedModuleName = "Records",
+    quinaryParsedRecordNames = ["User"],
+    quinaryParsedRecordFieldTypes = ["name : Str", "active : Bool"],
+    quinaryParsedDeclNames = ["defaultUser", "userName", "main"],
+    quinaryCheckedModule = textJoin "\n" ["defaultUser : User", "userName : User -> Str", "main : Str"],
+    quinaryLoweredModule = textJoin "\n" ["const defaultUser = record User {name = literal:Ada, active = bool:true}", "function userName(user) = field(User, name:user, name)", "const main = call userName(name:defaultUser)"],
+    quinaryEmittedModule = quinaryEmittedModule,
+    senaryParsedModuleName = "Decisions",
+    senaryParsedTypeNames = ["Decision"],
+    senaryParsedConstructorSummaries = ["Keep Str Str", "Drop"],
+    senaryChooseAnnotation = "Decision -> Str",
+    senaryParsedDeclNames = ["choose", "main"],
+    senaryCheckedModule = textJoin "\n" ["choose : Decision -> Str", "main : Str"],
+    senaryLoweredModule = textJoin "\n" ["function choose(decision) = match name:decision [Keep(left, right) -> name:left, Drop() -> literal:drop]", "const main = call choose(ctor Keep(literal:alpha, literal:beta))"],
+    senaryEmittedModule = senaryEmittedModule,
+    septenaryParsedModuleName = "Lettings",
+    septenaryParsedDeclNames = ["describe", "main"],
+    septenaryCheckedModule = textJoin "\n" ["describe : Str -> Str", "main : Str"],
+    septenaryLoweredModule = textJoin "\n" ["function describe(name) = let alias = name:name in name:alias", "const main = let current = call describe(literal:Ada) in name:current"],
+    septenaryEmittedModule = septenaryEmittedModule
+  }
 
 compilerSnapshotJson : Str
 compilerSnapshotJson = encode compilerSnapshot
@@ -245,5 +268,27 @@ compilerSnapshotJson = encode compilerSnapshot
 compilerSnapshotJsonLiteral : Str
 compilerSnapshotJsonLiteral = encode compilerSnapshotJson
 
-compilerSnapshotStage2Module : Str
-compilerSnapshotStage2Module = textJoin "\n" ["// Generated by compiler-selfhost bootstrap", textConcat ["const snapshotJson = ", compilerSnapshotJsonLiteral, ";"], "export const snapshot = Object.freeze(JSON.parse(snapshotJson));", "export function checkEntrypoint() {", "  return snapshot.checkedModule;", "}", "export function explainEntrypoint() {", "  return snapshot.explainModule;", "}", "export function compileEntrypoint() {", "  return snapshot.emittedModule;", "}", "export function nativeEntrypoint() {", "  return snapshot.emittedNativeModule;", "}", "export function nativeImageEntrypoint() {", "  return snapshot.emittedNativeImageModule;", "}", "export const main = snapshotJson;"]
+compilerSnapshotCandidateModule : Str
+compilerSnapshotCandidateModule =
+  textJoin
+    "\n"
+    [ "// Generated by compiler-selfhost bootstrap"
+    , textConcat ["const snapshotJson = ", compilerSnapshotJsonLiteral, ";"]
+    , "export const snapshot = Object.freeze(JSON.parse(snapshotJson));"
+    , "export function checkEntrypoint() {"
+    , "  return snapshot.checkedModule;"
+    , "}"
+    , "export function explainEntrypoint() {"
+    , "  return snapshot.explainModule;"
+    , "}"
+    , "export function compileEntrypoint() {"
+    , "  return snapshot.emittedModule;"
+    , "}"
+    , "export function nativeEntrypoint() {"
+    , "  return snapshot.emittedNativeModule;"
+    , "}"
+    , "export function nativeImageEntrypoint() {"
+    , "  return snapshot.emittedNativeImageModule;"
+    , "}"
+    , "export const main = snapshotJson;"
+    ]

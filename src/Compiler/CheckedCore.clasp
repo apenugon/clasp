@@ -21,6 +21,48 @@ type CheckedCoreDeclBuildResult = CheckedCoreDeclBuilt CheckedCoreDeclArtifact |
 type CheckedCoreDeclListBuildResult = CheckedCoreDeclListBuilt [CheckedCoreDeclArtifact] | CheckedCoreDeclListBuildError Str
 type CheckedCoreMatchBranchBuildResult = CheckedCoreMatchBranchBuilt CheckedCoreMatchBranchArtifact | CheckedCoreMatchBranchBuildError Str
 
+keepNoCheckedCoreParamArtifact : CheckedCoreParamArtifact -> Bool
+keepNoCheckedCoreParamArtifact value = false
+
+emptyCheckedCoreParamArtifacts : [CheckedCoreParamArtifact]
+emptyCheckedCoreParamArtifacts = filter keepNoCheckedCoreParamArtifact [CheckedCoreParamArtifact "" (TUnknown "")]
+
+keepNoCheckedCorePatternBinderArtifact : CheckedCorePatternBinderArtifact -> Bool
+keepNoCheckedCorePatternBinderArtifact value = false
+
+emptyCheckedCorePatternBinderArtifacts : [CheckedCorePatternBinderArtifact]
+emptyCheckedCorePatternBinderArtifacts = filter keepNoCheckedCorePatternBinderArtifact [CheckedCorePatternBinderArtifact "" (TUnknown "")]
+
+keepNoCheckedCoreExprArtifact : CheckedCoreExprArtifact -> Bool
+keepNoCheckedCoreExprArtifact value = false
+
+emptyCheckedCoreExprArtifacts : [CheckedCoreExprArtifact]
+emptyCheckedCoreExprArtifacts = filter keepNoCheckedCoreExprArtifact [CheckedCoreStringArtifact ""]
+
+keepNoCheckedCoreRecordFieldArtifact : CheckedCoreRecordFieldArtifact -> Bool
+keepNoCheckedCoreRecordFieldArtifact value = false
+
+emptyCheckedCoreRecordFieldArtifacts : [CheckedCoreRecordFieldArtifact]
+emptyCheckedCoreRecordFieldArtifacts = filter keepNoCheckedCoreRecordFieldArtifact [CheckedCoreRecordFieldArtifact "" (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreMatchBranchArtifact : CheckedCoreMatchBranchArtifact -> Bool
+keepNoCheckedCoreMatchBranchArtifact value = false
+
+emptyCheckedCoreMatchBranchArtifacts : [CheckedCoreMatchBranchArtifact]
+emptyCheckedCoreMatchBranchArtifacts = filter keepNoCheckedCoreMatchBranchArtifact [CheckedCoreMatchBranchArtifact (CheckedCoreConstructorPatternArtifact "" emptyCheckedCorePatternBinderArtifacts) (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreDeclArtifact : CheckedCoreDeclArtifact -> Bool
+keepNoCheckedCoreDeclArtifact value = false
+
+emptyCheckedCoreDeclArtifacts : [CheckedCoreDeclArtifact]
+emptyCheckedCoreDeclArtifacts = filter keepNoCheckedCoreDeclArtifact [CheckedCoreDeclArtifact "" (TUnknown "") emptyCheckedCoreParamArtifacts (CheckedCoreStringArtifact "")]
+
+keepNoCheckedCoreRenderedText : Str -> Bool
+keepNoCheckedCoreRenderedText value = false
+
+emptyCheckedCoreRenderedTexts : [Str]
+emptyCheckedCoreRenderedTexts = filter keepNoCheckedCoreRenderedText [""]
+
 appendCheckedCoreExprArtifact : [CheckedCoreExprArtifact] -> CheckedCoreExprArtifact -> [CheckedCoreExprArtifact]
 appendCheckedCoreExprArtifact values value = append values [value]
 
@@ -65,6 +107,10 @@ checkedCoreExtendLoopLocalEnv typeDecls recordDecls env localEnv fnContext binde
         localEnv,
       TNamed label ->
         localEnv,
+      TApply label args ->
+        localEnv,
+      TVar label ->
+        localEnv,
       TUnknown label ->
         localEnv
     },
@@ -74,7 +120,7 @@ checkedCoreExtendLoopLocalEnv typeDecls recordDecls env localEnv fnContext binde
 
 checkedCoreFunctionLocalEnv : HostedDeclAst -> [TypeBinding]
 checkedCoreFunctionLocalEnv decl = if hasAnnotationAst (declAnnotation decl) then {
-  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
   match bindFunctionParams decl declaredType {
     BindingParams localEnv expectedBodyType ->
       localEnv,
@@ -87,7 +133,7 @@ checkedCoreFunctionLocalEnv decl = if hasAnnotationAst (declAnnotation decl) the
 
 checkedCoreFunctionContext : HostedDeclAst -> ReturnContext
 checkedCoreFunctionContext decl = if hasAnnotationAst (declAnnotation decl) then {
-  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
   match bindFunctionParams decl declaredType {
     BindingParams localEnv expectedBodyType ->
       InsideFunction expectedBodyType,
@@ -100,20 +146,20 @@ checkedCoreFunctionContext decl = if hasAnnotationAst (declAnnotation decl) then
 
 checkedCoreParamArtifacts : HostedDeclAst -> [CheckedCoreParamArtifact]
 checkedCoreParamArtifacts decl = if hasAnnotationAst (declAnnotation decl) then {
-  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  let declaredType = instantiateGenericType (textConcat ["decl:", declName decl]) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)));
   match bindFunctionParams decl declaredType {
     BindingParams localEnv expectedBodyType ->
       checkedCoreParamArtifactsFromBindings localEnv,
     BindingParamError message ->
-      []
+      emptyCheckedCoreParamArtifacts
   }
 } else {
-  []
+  emptyCheckedCoreParamArtifacts
 }
 
 checkedCoreParamArtifactsFromBindings : [TypeBinding] -> [CheckedCoreParamArtifact]
 checkedCoreParamArtifactsFromBindings bindings = {
-  let mut params = [];
+  let mut params = emptyCheckedCoreParamArtifacts;
   for binding in bindings {
     params = match binding {
       TypeBinding name bindingType ->
@@ -126,7 +172,7 @@ checkedCoreParamArtifactsFromBindings bindings = {
 
 checkedCorePatternBinderArtifacts : [TypeBinding] -> [CheckedCorePatternBinderArtifact]
 checkedCorePatternBinderArtifacts bindings = {
-  let mut binders = [];
+  let mut binders = emptyCheckedCorePatternBinderArtifacts;
   for binding in bindings {
     binders = match binding {
       TypeBinding name bindingType ->
@@ -139,7 +185,7 @@ checkedCorePatternBinderArtifacts bindings = {
 
 checkedCoreExprList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> CheckedCoreExprListBuildResult
 checkedCoreExprList typeDecls recordDecls env localEnv fnContext values = {
-  let mut state = CheckedCoreExprListBuilt [];
+  let mut state = CheckedCoreExprListBuilt emptyCheckedCoreExprArtifacts;
   for value in values {
     state = match state {
       CheckedCoreExprListBuildError message ->
@@ -159,7 +205,7 @@ checkedCoreExprList typeDecls recordDecls env localEnv fnContext values = {
 
 checkedCoreRecordFieldList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> CheckedCoreRecordFieldListBuildResult
 checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields = {
-  let mut state = CheckedCoreRecordFieldListBuilt [];
+  let mut state = CheckedCoreRecordFieldListBuilt emptyCheckedCoreRecordFieldArtifacts;
   for field in fields {
     state = match state {
       CheckedCoreRecordFieldListBuildError message ->
@@ -177,10 +223,10 @@ checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields =
   state
 }
 
-checkedCoreMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> HostedMatchBranchAst -> CheckedCoreMatchBranchBuildResult
-checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl branch = {
+checkedCoreMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> CheckedCoreMatchBranchBuildResult
+checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch = {
   let pattern = branchPatternAst branch;
-  match bindPattern typeDecl pattern {
+  match bindPattern typeDecl subjectType pattern {
     PatternBindError message ->
       CheckedCoreMatchBranchBuildError message,
     BoundPattern bindings ->
@@ -193,15 +239,15 @@ checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl bra
   }
 }
 
-checkedCoreMatchBranchList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> [HostedMatchBranchAst] -> CheckedCoreMatchBranchListBuildResult
-checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl branches = {
-  let mut state = CheckedCoreMatchBranchListBuilt [];
+checkedCoreMatchBranchList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> [HostedMatchBranchAst] -> CheckedCoreMatchBranchListBuildResult
+checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches = {
+  let mut state = CheckedCoreMatchBranchListBuilt emptyCheckedCoreMatchBranchArtifacts;
   for branch in branches {
     state = match state {
       CheckedCoreMatchBranchListBuildError message ->
         CheckedCoreMatchBranchListBuildError message,
       CheckedCoreMatchBranchListBuilt artifacts ->
-        match checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl branch {
+        match checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
           CheckedCoreMatchBranchBuilt artifact ->
             CheckedCoreMatchBranchListBuilt (appendCheckedCoreMatchBranchArtifact artifacts artifact),
           CheckedCoreMatchBranchBuildError message ->
@@ -265,7 +311,24 @@ checkedCoreExprWithType typeDecls recordDecls env localEnv fnContext expr exprTy
                   CheckedCoreExprBuildError message ->
                     CheckedCoreExprBuildError message,
                   CheckedCoreExprBuilt subjectArtifact ->
-                    match checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl branches {
+                    match checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches {
+                      CheckedCoreMatchBranchListBuilt branchArtifacts ->
+                        CheckedCoreExprBuilt (CheckedCoreMatchArtifact exprType subjectArtifact branchArtifacts),
+                      CheckedCoreMatchBranchListBuildError message ->
+                        CheckedCoreExprBuildError message
+                    }
+                }
+            },
+          TApply typeName args ->
+            match lookupTypeDecl typeDecls typeName {
+              MissingTypeDecl missing ->
+                CheckedCoreExprBuildError (textConcat ["Unknown match type `", missing, "`."]),
+              FoundTypeDecl typeDecl ->
+                match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subject {
+                  CheckedCoreExprBuildError message ->
+                    CheckedCoreExprBuildError message,
+                  CheckedCoreExprBuilt subjectArtifact ->
+                    match checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl subjectType branches {
                       CheckedCoreMatchBranchListBuilt branchArtifacts ->
                         CheckedCoreExprBuilt (CheckedCoreMatchArtifact exprType subjectArtifact branchArtifacts),
                       CheckedCoreMatchBranchListBuildError message ->
@@ -283,6 +346,8 @@ checkedCoreExprWithType typeDecls recordDecls env localEnv fnContext expr exprTy
             CheckedCoreExprBuildError "`match` requires a named type.",
           TFunction inputType resultType ->
             CheckedCoreExprBuildError "`match` requires a named type.",
+          TVar label ->
+            CheckedCoreExprBuildError "`match` requires a known type.",
           TUnknown label ->
             CheckedCoreExprBuildError "`match` requires a known type."
         }
@@ -470,7 +535,7 @@ checkedCoreDecl typeDecls recordDecls env decl = match inferDecl typeDecls recor
 
 checkedCoreDecls : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> CheckedCoreDeclListBuildResult
 checkedCoreDecls typeDecls recordDecls env decls = {
-  let mut state = CheckedCoreDeclListBuilt [];
+  let mut state = CheckedCoreDeclListBuilt emptyCheckedCoreDeclArtifacts;
   for decl in decls {
     state = match state {
       CheckedCoreDeclListBuildError message ->
@@ -522,6 +587,16 @@ renderTaggedObject4 tag value0 value1 value2 value3 = jsonObject [jsonFieldText 
 renderTaggedObject5 : Str -> Str -> Str -> Str -> Str -> Str -> Str
 renderTaggedObject5 tag value0 value1 value2 value3 value4 = jsonObject [jsonFieldText "$tag" tag, jsonFieldRaw "$0" value0, jsonFieldRaw "$1" value1, jsonFieldRaw "$2" value2, jsonFieldRaw "$3" value3, jsonFieldRaw "$4" value4]
 
+renderCheckedCoreTypeJsonList : [TypeText] -> [Str]
+renderCheckedCoreTypeJsonList values = {
+  let mut rendered = emptyCheckedCoreRenderedTexts;
+  for value in values {
+    rendered = append rendered [renderCheckedCoreTypeJson value];
+    rendered
+  };
+  rendered
+}
+
 renderCheckedCoreTypeJson : TypeText -> Str
 renderCheckedCoreTypeJson value = match value {
   TInt ->
@@ -536,6 +611,10 @@ renderCheckedCoreTypeJson value = match value {
     renderTaggedObject2 "TFunction" (renderCheckedCoreTypeJson inputType) (renderCheckedCoreTypeJson resultType),
   TNamed label ->
     renderTaggedObject1 "TNamed" (encode label),
+  TApply label args ->
+    renderTaggedObject2 "TApply" (encode label) (renderJsonArray (renderCheckedCoreTypeJsonList args)),
+  TVar label ->
+    renderTaggedObject1 "TVar" (encode label),
   TUnknown label ->
     renderTaggedObject1 "TUnknown" (encode label)
 }
@@ -548,7 +627,7 @@ renderCheckedCoreParamJson param = match param {
 
 renderCheckedCoreParamJsonList : [CheckedCoreParamArtifact] -> [Str]
 renderCheckedCoreParamJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCoreParamJson value];
     rendered
@@ -564,7 +643,7 @@ renderCheckedCorePatternBinderJson binder = match binder {
 
 renderCheckedCorePatternBinderJsonList : [CheckedCorePatternBinderArtifact] -> [Str]
 renderCheckedCorePatternBinderJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCorePatternBinderJson value];
     rendered
@@ -586,7 +665,7 @@ renderCheckedCoreRecordFieldJson field = match field {
 
 renderCheckedCoreRecordFieldJsonList : [CheckedCoreRecordFieldArtifact] -> [Str]
 renderCheckedCoreRecordFieldJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCoreRecordFieldJson value];
     rendered
@@ -602,7 +681,7 @@ renderCheckedCoreMatchBranchJson branch = match branch {
 
 renderCheckedCoreMatchBranchJsonList : [CheckedCoreMatchBranchArtifact] -> [Str]
 renderCheckedCoreMatchBranchJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCoreMatchBranchJson value];
     rendered
@@ -612,7 +691,7 @@ renderCheckedCoreMatchBranchJsonList values = {
 
 renderCheckedCoreExprJsonList : [CheckedCoreExprArtifact] -> [Str]
 renderCheckedCoreExprJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCoreExprJson value];
     rendered
@@ -674,7 +753,7 @@ renderCheckedCoreDeclJson decl = match decl {
 
 renderCheckedCoreDeclJsonList : [CheckedCoreDeclArtifact] -> [Str]
 renderCheckedCoreDeclJsonList values = {
-  let mut rendered = [];
+  let mut rendered = emptyCheckedCoreRenderedTexts;
   for value in values {
     rendered = append rendered [renderCheckedCoreDeclJson value];
     rendered

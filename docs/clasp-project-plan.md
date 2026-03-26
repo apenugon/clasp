@@ -586,7 +586,7 @@ Critical path:
 - `SH-006` Port lowered IR helpers and the JavaScript emitter to Clasp.
 - `SH-007` Port checker and type-inference logic to Clasp.
 - `SH-008` Build the hosted Clasp compiler in Clasp and run it through a JavaScript host runtime.
-- `SH-009` Add stage0/stage1/stage2 bootstrap reproducibility checks.
+- `SH-009` Add bootstrap bootstrap reproducibility checks.
 - `SH-010` Switch the primary compiler implementation to Clasp while retaining the Haskell bootstrap fallback.
 - `SH-011` Promote the hosted Clasp compiler from `examples/compiler-selfhost` into a real compiler implementation tree that can serve ordinary compiler entrypoints instead of only the special self-hosting proof harness.
 - `SH-012` Switch ordinary `check`, `compile`, `explain`, manifest, and package-tool flows to the Clasp compiler by default while retaining the Haskell bootstrap fallback and explicit compatibility checks.

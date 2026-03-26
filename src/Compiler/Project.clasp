@@ -7,6 +7,12 @@ type HostedProjectModulesResult = HostedProjectModules [HostedModuleAst] | Hoste
 type HostedResolvedProjectResult = HostedResolvedProjectOk HostedModuleAst [HostedModuleAst] | HostedResolvedProjectError Str
 type HostedProjectBundleResult = HostedProjectBundleOk HostedModuleAst | HostedProjectBundleError Str
 
+keepNoHostedModule : HostedModuleAst -> Bool
+keepNoHostedModule modl = false
+
+emptyHostedModules : [HostedModuleAst]
+emptyHostedModules = filter keepNoHostedModule [hostedModuleAst "" emptyRenderedTexts emptyHostedTypeDecls emptyHostedRecordDecls emptyHostedForeignDecls emptyHostedDecls emptyHostedGuideDecls emptyHostedPolicyDecls emptyHostedProjectionDecls emptyHostedAgentRoleDecls emptyHostedAgentDecls emptyHostedWorkflowDecls emptyHostedRouteDecls emptyHostedHookDecls emptyHostedToolServerDecls emptyHostedToolDecls emptyHostedVerifierDecls emptyHostedMergeGateDecls ""]
+
 sourceModule : Str -> HostedModuleAst
 sourceModule source = synthesizeModuleProjections (parseModuleAst source)
 
@@ -19,25 +25,25 @@ lookupRecordDeclByName recordDeclarations targetName = {
       recordDecl
     }
   };
-  hostedRecordDeclAst targetName []
+  hostedRecordDeclAst targetName emptyHostedRecordFieldDecls
 }
 
 projectRecordFields : HostedRecordDeclAst -> [HostedProjectionFieldDeclAst] -> [HostedRecordFieldDeclAst]
 projectRecordFields sourceRecord projectionFields = {
-  let mut projectedFields = [];
+  let mut projectedFieldsReversed = emptyHostedRecordFieldDecls;
   for projectionField in projectionFields {
     let targetName = projectionFieldDeclName projectionField;
     for recordField in recordDeclFields sourceRecord {
       if recordFieldDeclName recordField == targetName then {
-        projectedFields = append projectedFields [recordField];
-        projectedFields
+        projectedFieldsReversed = prepend recordField projectedFieldsReversed;
+        projectedFieldsReversed
       } else {
-        projectedFields
+        projectedFieldsReversed
       }
     };
-    projectedFields
+    projectedFieldsReversed
   };
-  projectedFields
+  reverse projectedFieldsReversed
 }
 
 synthesizeProjectionRecordDecl : [HostedRecordDeclAst] -> HostedProjectionDeclAst -> HostedRecordDeclAst
@@ -84,17 +90,17 @@ projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n"
 
 parseProjectModules : Str -> [HostedModuleAst]
 parseProjectModules bundle = {
-  let mut modules = [];
+  let mut modulesReversed = emptyHostedModules;
   for source in textSplit bundle projectBundleSeparator {
     let trimmed = trimSpaces source;
     if trimmed == "" then {
-      modules
+      modulesReversed
     } else {
-      modules = append modules [parseModuleAst trimmed];
-      modules
+      modulesReversed = prepend (sourceModule trimmed) modulesReversed;
+      modulesReversed
     }
   };
-  modules
+  reverse modulesReversed
 }
 
 lookupProjectModule : [HostedModuleAst] -> Str -> HostedProjectModuleLookupResult
@@ -117,36 +123,44 @@ containsProjectModule modules targetName = {
   false
 }
 
+hasProjectModules : [HostedModuleAst] -> Bool
+hasProjectModules modules = {
+  for modl in modules {
+    return true
+  };
+  false
+}
+
 appendUniqueProjectModules : [HostedModuleAst] -> [HostedModuleAst] -> [HostedModuleAst]
 appendUniqueProjectModules modules additions = {
-  let mut combined = modules;
+  let mut combinedReversed = reverse modules;
   for modl in additions {
     let name = moduleNameOf modl;
-    if containsProjectModule combined name then {
-      combined
+    if containsProjectModule combinedReversed name then {
+      combinedReversed
     } else {
-      combined = append combined [modl];
-      combined
+      combinedReversed = prepend modl combinedReversed;
+      combinedReversed
     }
   };
-  combined
+  reverse combinedReversed
 }
 
 collectProjectImportNames : [HostedModuleAst] -> [Str]
 collectProjectImportNames modules = {
-  let mut importedNames = [];
+  let mut importedNamesReversed = emptyRenderedTexts;
   for modl in modules {
     for importName in moduleImports modl {
-      if containsText importedNames importName then {
-        importedNames
+      if containsText importedNamesReversed importName then {
+        importedNamesReversed
       } else {
-        importedNames = append importedNames [importName];
-        importedNames
+        importedNamesReversed = prepend importName importedNamesReversed;
+        importedNamesReversed
       }
     };
-    importedNames
+    importedNamesReversed
   };
-  importedNames
+  reverse importedNamesReversed
 }
 
 collectProjectImports : [HostedModuleAst] -> [Str] -> [Str] -> HostedProjectModulesResult
@@ -154,15 +168,15 @@ collectProjectImports modules seen dependencyNames = {
   let dependencyName = firstText dependencyNames;
   let remainingDependencyNames = remainingTexts dependencyNames;
   if dependencyName == "" then {
-    HostedProjectModules []
+    HostedProjectModules emptyHostedModules
   } else if containsText seen dependencyName then {
     collectProjectImports modules seen remainingDependencyNames
   } else {
     match lookupProjectModule modules dependencyName {
       FoundHostedProjectModule imported ->
-        match collectProjectImports modules (append seen [dependencyName]) (moduleImports imported) {
+        match collectProjectImports modules (prepend dependencyName seen) (moduleImports imported) {
           HostedProjectModules nestedImports ->
-            match collectProjectImports modules (append seen [dependencyName]) remainingDependencyNames {
+            match collectProjectImports modules (prepend dependencyName seen) remainingDependencyNames {
               HostedProjectModules remainingImports ->
                 HostedProjectModules (appendUniqueProjectModules (appendUniqueProjectModules nestedImports [imported]) remainingImports),
               HostedProjectModulesError message ->
@@ -179,46 +193,147 @@ collectProjectImports modules seen dependencyNames = {
 
 mergeProjectModules : HostedModuleAst -> [HostedModuleAst] -> HostedModuleAst
 mergeProjectModules entry importedModules = {
-  let mut typeDeclarations = [];
-  let mut recordDeclarations = [];
-  let mut foreignDeclarations = [];
-  let mut declarations = [];
-  let mut guideDeclarations = [];
-  let mut policyDeclarations = [];
-  let mut projectionDeclarations = [];
-  let mut agentRoleDeclarations = [];
-  let mut agentDeclarations = [];
-  let mut workflowDeclarations = [];
-  let mut routeDeclarations = [];
-  let mut hookDeclarations = [];
-  let mut toolServerDeclarations = [];
-  let mut toolDeclarations = [];
-  let mut verifierDeclarations = [];
-  let mut mergeGateDeclarations = [];
+  let mut typeDeclarationsReversed = emptyHostedTypeDecls;
+  let mut recordDeclarationsReversed = emptyHostedRecordDecls;
+  let mut foreignDeclarationsReversed = emptyHostedForeignDecls;
+  let mut declarationsReversed = emptyHostedDecls;
+  let mut guideDeclarationsReversed = emptyHostedGuideDecls;
+  let mut policyDeclarationsReversed = emptyHostedPolicyDecls;
+  let mut projectionDeclarationsReversed = emptyHostedProjectionDecls;
+  let mut agentRoleDeclarationsReversed = emptyHostedAgentRoleDecls;
+  let mut agentDeclarationsReversed = emptyHostedAgentDecls;
+  let mut workflowDeclarationsReversed = emptyHostedWorkflowDecls;
+  let mut routeDeclarationsReversed = emptyHostedRouteDecls;
+  let mut hookDeclarationsReversed = emptyHostedHookDecls;
+  let mut toolServerDeclarationsReversed = emptyHostedToolServerDecls;
+  let mut toolDeclarationsReversed = emptyHostedToolDecls;
+  let mut verifierDeclarationsReversed = emptyHostedVerifierDecls;
+  let mut mergeGateDeclarationsReversed = emptyHostedMergeGateDecls;
   for modl in append importedModules [entry] {
-    typeDeclarations = append typeDeclarations (moduleTypeDeclarations modl);
-    recordDeclarations = append recordDeclarations (moduleRecordDeclarations modl);
-    foreignDeclarations = append foreignDeclarations (moduleForeignDeclarations modl);
-    declarations = append declarations (moduleDeclarations modl);
-    guideDeclarations = append guideDeclarations (moduleGuideDeclarations modl);
-    policyDeclarations = append policyDeclarations (modulePolicyDeclarations modl);
-    projectionDeclarations = append projectionDeclarations (moduleProjectionDeclarations modl);
-    agentRoleDeclarations = append agentRoleDeclarations (moduleAgentRoleDeclarations modl);
-    agentDeclarations = append agentDeclarations (moduleAgentDeclarations modl);
-    workflowDeclarations = append workflowDeclarations (moduleWorkflowDeclarations modl);
-    routeDeclarations = append routeDeclarations (moduleRouteDeclarations modl);
-    hookDeclarations = append hookDeclarations (moduleHookDeclarations modl);
-    toolServerDeclarations = append toolServerDeclarations (moduleToolServerDeclarations modl);
-    toolDeclarations = append toolDeclarations (moduleToolDeclarations modl);
-    verifierDeclarations = append verifierDeclarations (moduleVerifierDeclarations modl);
-    mergeGateDeclarations = append mergeGateDeclarations (moduleMergeGateDeclarations modl);
-    declarations
+    for typeDeclaration in moduleTypeDeclarations modl {
+      typeDeclarationsReversed = prepend typeDeclaration typeDeclarationsReversed;
+      typeDeclarationsReversed
+    };
+    for recordDeclaration in moduleRecordDeclarations modl {
+      recordDeclarationsReversed = prepend recordDeclaration recordDeclarationsReversed;
+      recordDeclarationsReversed
+    };
+    for foreignDeclaration in moduleForeignDeclarations modl {
+      foreignDeclarationsReversed = prepend foreignDeclaration foreignDeclarationsReversed;
+      foreignDeclarationsReversed
+    };
+    for declaration in moduleDeclarations modl {
+      declarationsReversed = prepend declaration declarationsReversed;
+      declarationsReversed
+    };
+    for guideDeclaration in moduleGuideDeclarations modl {
+      guideDeclarationsReversed = prepend guideDeclaration guideDeclarationsReversed;
+      guideDeclarationsReversed
+    };
+    for policyDeclaration in modulePolicyDeclarations modl {
+      policyDeclarationsReversed = prepend policyDeclaration policyDeclarationsReversed;
+      policyDeclarationsReversed
+    };
+    for projectionDeclaration in moduleProjectionDeclarations modl {
+      projectionDeclarationsReversed = prepend projectionDeclaration projectionDeclarationsReversed;
+      projectionDeclarationsReversed
+    };
+    for agentRoleDeclaration in moduleAgentRoleDeclarations modl {
+      agentRoleDeclarationsReversed = prepend agentRoleDeclaration agentRoleDeclarationsReversed;
+      agentRoleDeclarationsReversed
+    };
+    for agentDeclaration in moduleAgentDeclarations modl {
+      agentDeclarationsReversed = prepend agentDeclaration agentDeclarationsReversed;
+      agentDeclarationsReversed
+    };
+    for workflowDeclaration in moduleWorkflowDeclarations modl {
+      workflowDeclarationsReversed = prepend workflowDeclaration workflowDeclarationsReversed;
+      workflowDeclarationsReversed
+    };
+    for routeDeclaration in moduleRouteDeclarations modl {
+      routeDeclarationsReversed = prepend routeDeclaration routeDeclarationsReversed;
+      routeDeclarationsReversed
+    };
+    for hookDeclaration in moduleHookDeclarations modl {
+      hookDeclarationsReversed = prepend hookDeclaration hookDeclarationsReversed;
+      hookDeclarationsReversed
+    };
+    for toolServerDeclaration in moduleToolServerDeclarations modl {
+      toolServerDeclarationsReversed = prepend toolServerDeclaration toolServerDeclarationsReversed;
+      toolServerDeclarationsReversed
+    };
+    for toolDeclaration in moduleToolDeclarations modl {
+      toolDeclarationsReversed = prepend toolDeclaration toolDeclarationsReversed;
+      toolDeclarationsReversed
+    };
+    for verifierDeclaration in moduleVerifierDeclarations modl {
+      verifierDeclarationsReversed = prepend verifierDeclaration verifierDeclarationsReversed;
+      verifierDeclarationsReversed
+    };
+    for mergeGateDeclaration in moduleMergeGateDeclarations modl {
+      mergeGateDeclarationsReversed = prepend mergeGateDeclaration mergeGateDeclarationsReversed;
+      mergeGateDeclarationsReversed
+    };
+    declarationsReversed
   };
-  hostedModuleAst (moduleNameOf entry) [] typeDeclarations (appendProjectionRecordDecls recordDeclarations projectionDeclarations) foreignDeclarations declarations guideDeclarations policyDeclarations projectionDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
+  let typeDeclarations = reverse typeDeclarationsReversed;
+  let recordDeclarations = reverse recordDeclarationsReversed;
+  let foreignDeclarations = reverse foreignDeclarationsReversed;
+  let declarations = reverse declarationsReversed;
+  let guideDeclarations = reverse guideDeclarationsReversed;
+  let policyDeclarations = reverse policyDeclarationsReversed;
+  let projectionDeclarations = reverse projectionDeclarationsReversed;
+  let agentRoleDeclarations = reverse agentRoleDeclarationsReversed;
+  let agentDeclarations = reverse agentDeclarationsReversed;
+  let workflowDeclarations = reverse workflowDeclarationsReversed;
+  let routeDeclarations = reverse routeDeclarationsReversed;
+  let hookDeclarations = reverse hookDeclarationsReversed;
+  let toolServerDeclarations = reverse toolServerDeclarationsReversed;
+  let toolDeclarations = reverse toolDeclarationsReversed;
+  let verifierDeclarations = reverse verifierDeclarationsReversed;
+  let mergeGateDeclarations = reverse mergeGateDeclarationsReversed;
+  hostedModuleAst (moduleNameOf entry) [] typeDeclarations recordDeclarations foreignDeclarations declarations guideDeclarations policyDeclarations projectionDeclarations agentRoleDeclarations agentDeclarations workflowDeclarations routeDeclarations hookDeclarations toolServerDeclarations toolDeclarations verifierDeclarations mergeGateDeclarations (moduleMainExprSummary entry)
 }
 
 orderedProjectModules : HostedModuleAst -> [HostedModuleAst] -> [HostedModuleAst]
 orderedProjectModules entry importedModules = append importedModules [entry]
+
+projectImportedModules : [HostedModuleAst] -> Str -> [HostedModuleAst]
+projectImportedModules sourceModules entryModuleName = {
+  let mut importedModules = emptyHostedModules;
+  for modl in sourceModules {
+    if moduleNameOf modl == entryModuleName then {
+      importedModules
+    } else {
+      importedModules = append importedModules [modl];
+      importedModules
+    }
+  };
+  importedModules
+}
+
+projectCheckScopeModule : HostedModuleAst -> [HostedModuleAst] -> HostedModuleAst
+projectCheckScopeModule entry importedModules = {
+  let mut typeDeclarationsReversed = emptyHostedTypeDecls;
+  let mut recordDeclarationsReversed = emptyHostedRecordDecls;
+  let mut foreignDeclarationsReversed = emptyHostedForeignDecls;
+  for modl in append importedModules [entry] {
+    for typeDeclaration in moduleTypeDeclarations modl {
+      typeDeclarationsReversed = prepend typeDeclaration typeDeclarationsReversed;
+      typeDeclarationsReversed
+    };
+    for recordDeclaration in moduleRecordDeclarations modl {
+      recordDeclarationsReversed = prepend recordDeclaration recordDeclarationsReversed;
+      recordDeclarationsReversed
+    };
+    for foreignDeclaration in moduleForeignDeclarations modl {
+      foreignDeclarationsReversed = prepend foreignDeclaration foreignDeclarationsReversed;
+      foreignDeclarationsReversed
+    };
+    foreignDeclarationsReversed
+  };
+  hostedModuleAst (moduleNameOf entry) (moduleImports entry) (reverse typeDeclarationsReversed) (reverse recordDeclarationsReversed) (reverse foreignDeclarationsReversed) (moduleDeclarations entry) emptyHostedGuideDecls emptyHostedPolicyDecls emptyHostedProjectionDecls emptyHostedAgentRoleDecls emptyHostedAgentDecls emptyHostedWorkflowDecls emptyHostedRouteDecls emptyHostedHookDecls emptyHostedToolServerDecls emptyHostedToolDecls emptyHostedVerifierDecls emptyHostedMergeGateDecls (moduleMainExprSummary entry)
+}
 
 resolveProjectModules : Str -> HostedResolvedProjectResult
 resolveProjectModules bundle = {
@@ -247,7 +362,7 @@ resolveProjectModules bundle = {
       FoundHostedProjectModule entry ->
         match collectProjectImports modules [entryModuleName] (moduleImports entry) {
           HostedProjectModules importedModules ->
-            HostedResolvedProjectOk (mergeProjectModules entry importedModules) (orderedProjectModules entry importedModules),
+            if hasProjectModules importedModules then HostedResolvedProjectOk (mergeProjectModules entry importedModules) (orderedProjectModules entry importedModules) else HostedResolvedProjectOk entry [entry],
           HostedProjectModulesError message ->
             HostedResolvedProjectError message
         },

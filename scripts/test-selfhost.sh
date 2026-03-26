@@ -3,7 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_root="$(mktemp -d)"
-claspc_bin="${CLASPC_BIN:-$project_root/runtime/target/debug/claspc}"
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 check_output="$test_root/selfhost.check.txt"
 image_output="$test_root/selfhost.native.image.json"
 sample_project_root="$test_root/project"
@@ -15,10 +15,6 @@ cleanup() {
 
 trap cleanup EXIT
 
-if [[ ! -x "$claspc_bin" ]]; then
-  cargo build --quiet --manifest-path "$project_root/runtime/Cargo.toml" --bin claspc
-fi
-
 run_export() {
   local result_var="$1"
   local export_name="$2"
@@ -26,7 +22,7 @@ run_export() {
   local log_path="$4"
 
   bash "$project_root/src/scripts/run-native-tool.sh" \
-    "$project_root/src/stage1.native.image.json" \
+    "$project_root/src/embedded.compiler.native.image.json" \
     "$export_name" \
     "--project-entry=$sample_entry_path" \
     "$export_path" >"$log_path" 2>&1 &

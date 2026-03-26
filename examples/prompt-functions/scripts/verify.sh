@@ -5,7 +5,7 @@ project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.
 example_root="$project_root/examples/prompt-functions"
 compiled_path="$example_root/compiled"
 image_path="$example_root/compiled.native.image.json"
-claspc_bin="${CLASP_CLASPC:-$project_root/runtime/target/debug/claspc}"
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 
 cleanup() {
   rm -f "$compiled_path" "$image_path"

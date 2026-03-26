@@ -55,8 +55,8 @@ Prompt-pasting is not enough. Agents need native shared state with four layers:
 
 The storage stack should start simple:
 
-- append-only JSONL event logs
-- SQLite-backed indexed state and memory
+- append-only JSONL event logs for language-level prototyping
+- SQLite-backed indexed state and memory for the real native control plane
 - file-backed artifact blobs
 
 ## Native Runtime Features Needed
@@ -155,12 +155,21 @@ The manager chat should be backed by real runtime state transitions, not prompt-
 
 ## What Is Implemented Now
 
-This slice lands the minimum native primitives for an actual swarm kernel bootstrap:
+The repo now has two swarm layers:
+
+- a language-level native kernel example in [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp)
+- a first-class native CLI control plane in `claspc swarm ...`
+
+The implemented native primitives now include:
 
 - `timeUnixMs : Int`
-- `envVar : Str -> Result`
-- `appendFile : Str -> Str -> Result`
-- `mkdirAll : Str -> Result`
+- `envVar : Str -> Result Str`
+- `readFile : Str -> Result Str`
+- `appendFile : Str -> Str -> Result Str`
+- `mkdirAll : Str -> Result Str`
+- SQLite-backed task/event state in the native launcher
+- native artifact capture for tool and verifier runs
+- native mergegate decisions over stored verifier runs
 
 These are available through the self-hosted native compiler/runtime path and are exercised by the native example at [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp).
 
@@ -170,16 +179,55 @@ That example proves:
 - append-only event logging
 - environment-configured actor identity
 - native timestamp capture
+- per-task state projection from the event log
+- per-task event history replay
+- whole-log task snapshots for manager views
+- direct native control-plane readouts for:
+  - `status`
+  - `history`
+  - `tasks`
+  - `summary`
+- native task lifecycle transitions for:
+  - create
+  - lease
+  - release
+  - heartbeat
+  - complete
+  - fail
+  - retry / requeue
+
+The native `claspc swarm` control plane now also proves:
+
+- durable SQLite-backed task state
+- `claspc swarm start|status|history|tasks|summary|tail|runs|artifacts`
+- native `claspc swarm stop|resume`
+- native `claspc swarm approve|approvals`
+- native `claspc swarm policy set`
+- native `claspc swarm manager next`
+- native `claspc swarm objective create|status`
+- native `claspc swarm objectives`
+- native `claspc swarm task create`
+- native `claspc swarm ready`
+- native `claspc swarm tool ...` execution with stdout/stderr artifacts
+- native `claspc swarm verifier run ...`
+- native `claspc swarm mergegate decide ...`
+- objective-scoped task budgets
+- task dependency edges and ready-set projection
+- task/objective run-budget enforcement
+- deadline-aware ready/lease gating
+- lease-expiry-aware lease reacquisition rules
+- persisted merge-policy state with approval/verifier tracking
+- objective-driven next-action projection for the manager loop
 
 ## Remaining Build Order
 
 The next implementation steps should be:
 
-1. SQLite-backed event/task store.
-2. Native workflow and supervision runtime.
-3. Native tool execution and verifier/mergegate surfaces.
-4. Manager-facing `claspc swarm` control plane.
-5. Single-node swarm that can plan, code, verify, and integrate bounded tasks.
+1. Native workflow and supervision runtime.
+2. Approval-backed merge/review policy wiring beyond raw approval recording.
+3. Reusable memory retrieval and higher-level artifact indexing/search.
+4. Single-node swarm that can plan, code, verify, and integrate bounded tasks.
+5. Manager chat and higher-level objective steering over the native control plane.
 6. Benchmark-specialized optimizer loop for `AppBench`.
 
 Deleting the remaining deprecated expectations only becomes safe once those runtime and compiler ownership boundaries are real.

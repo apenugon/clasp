@@ -47,13 +47,13 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "size": 1349,
-      "sha256": "a7759d7dbe23310f44f13426d2b5ee6f527947116e169d0abae6cb32afabbe20"
+      "size": 1860,
+      "sha256": "260a1c2a3081bca90b1b77dbe751cb6c70a499bc3edf28891a0750adcb84a740"
     },
     {
       "path": "benchmarks/README.md",
-      "size": 26265,
-      "sha256": "ed9f818ed024c6017c1cfd79146cb83622eeb45adc0780f790e89edf3f94621a"
+      "size": 26246,
+      "sha256": "71c3e0f6a6a3b4e9f31179c4e492f626656e79435224823d8526eea1244a9ae1"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -62,8 +62,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 82933,
-      "sha256": "85dab02adeaf75a1f7da640e0a52bb8640d8130709e4eec6028fdefd729c78a5"
+      "size": 86969,
+      "sha256": "4ac556b3ed061bc70858cb956e6097a9e5d4962c7c04cd2c47e5e019c47073c8"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",

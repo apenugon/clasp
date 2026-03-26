@@ -11,3 +11,7 @@ crate-type = ["staticlib", "rlib"]
 [[bin]]
 name = "claspc"
 path = "claspc.rs"
+
+[dependencies]
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+serde_json = "1.0"

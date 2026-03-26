@@ -1556,7 +1556,7 @@ checkerTests =
               Just typeDecl ->
                 assertEqual
                   "builtin Result constructors"
-                  [ ConstructorDecl "Ok" dummySpan dummySpan [TStr]
+                  [ ConstructorDecl "Ok" dummySpan dummySpan [TVar "a"]
                   , ConstructorDecl "Err" dummySpan dummySpan [TStr]
                   ]
                   (normalizeConstructors (typeDeclConstructors typeDecl))
@@ -1564,9 +1564,9 @@ checkerTests =
                 assertFailure "expected compiler-known Result type declaration"
             case find ((== "unwrap") . coreDeclName) (coreModuleDecls checked) of
               Just decl -> do
-                assertEqual "unwrap type" (TFunction [TNamed "Result"] TStr) (coreDeclType decl)
+                assertEqual "unwrap type" (TFunction [TApply "Result" [TStr]] TStr) (coreDeclType decl)
                 case coreDeclBody decl of
-                  CMatch _ TStr (CVar _ (TNamed "Result") "result") [CoreMatchBranch _ (CConstructorPattern _ "Ok" [CorePatternBinder "value" _ TStr]) (CVar _ TStr "value"), CoreMatchBranch _ (CConstructorPattern _ "Err" [CorePatternBinder "message" _ TStr]) (CVar _ TStr "message")] ->
+                  CMatch _ TStr (CVar _ (TApply "Result" [TStr]) "result") [CoreMatchBranch _ (CConstructorPattern _ "Ok" [CorePatternBinder "value" _ TStr]) (CVar _ TStr "value"), CoreMatchBranch _ (CConstructorPattern _ "Err" [CorePatternBinder "message" _ TStr]) (CVar _ TStr "message")] ->
                     pure ()
                   other ->
                     assertFailure ("expected checked Result match expression, got " <> show other)
@@ -1622,13 +1622,20 @@ checkerTests =
             let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
             assertBool "expected envVar builtin" ("envVar" `elem` foreignNames)
             assertBool "expected appendFile builtin" ("appendFile" `elem` foreignNames)
+            assertBool "expected dictSet builtin" ("dictSet" `elem` foreignNames)
+            assertBool "expected dictGet builtin" ("dictGet" `elem` foreignNames)
             assertBool "expected mkdirAll builtin" ("mkdirAll" `elem` foreignNames)
             assertBool "expected timeUnixMs builtin" ("timeUnixMs" `elem` foreignNames)
-            case find ((== "appendBootstrapEvent") . coreDeclName) (coreModuleDecls checked) of
+            case find ((== "appendSwarmEvent") . coreDeclName) (coreModuleDecls checked) of
               Just decl ->
-                assertEqual "appendBootstrapEvent type" (TFunction [TStr] (TNamed "Result")) (coreDeclType decl)
+                assertEqual "appendSwarmEvent type" (TApply "Result" [TStr]) (coreDeclType decl)
               Nothing ->
-                assertFailure "expected appendBootstrapEvent declaration"
+                assertFailure "expected appendSwarmEvent declaration"
+            case find ((== "buildSwarmSummary") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "buildSwarmSummary type" (TFunction [TList (TNamed "SwarmTaskState")] (TNamed "SwarmSummary")) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected buildSwarmSummary declaration"
     , testCase "typechecks generic records, ADTs, and annotated functions" $
         case checkSource "generic" genericTypeSource of
           Left err ->
@@ -1649,6 +1656,11 @@ checkerTests =
                 assertEqual "wrap type" (TFunction [TVar "a"] (TApply "Box" [TVar "a"])) (coreDeclType decl)
               Nothing ->
                 assertFailure "expected wrap declaration"
+            case find ((== "inferredIdentity") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "inferredIdentity type" (TFunction [TVar "a"] (TVar "a")) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected inferredIdentity declaration"
             case find ((== "readBox") . coreDeclName) (coreModuleDecls checked) of
               Just decl -> do
                 assertEqual "readBox type" (TFunction [TApply "Box" [TVar "a"]] (TVar "a")) (coreDeclType decl)
@@ -1669,6 +1681,36 @@ checkerTests =
                     assertFailure ("expected generic match expression, got " <> show other)
               Nothing ->
                 assertFailure "expected unwrapOr declaration"
+            case find ((== "seedTexts") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "seedTexts type" (TList TStr) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected seedTexts declaration"
+            case find ((== "emptyBoxes") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "emptyBoxes type" (TList (TApply "Box" [TStr])) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected emptyBoxes declaration"
+            case find ((== "fallbackChoices") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "fallbackChoices type" (TList (TApply "Choice" [TStr])) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected fallbackChoices declaration"
+            case find ((== "choices") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "choices type" (TList (TApply "Choice" [TStr])) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected choices declaration"
+            case find ((== "matrix") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "matrix type" (TList (TList TStr)) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected matrix declaration"
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "generic main type" TStr (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected main declaration"
     , testCase "typechecks compiler-known sqlite connection helpers" $
         case checkSource "sqlite-runtime" sqliteRuntimeSource of
           Left err ->
@@ -3454,7 +3496,7 @@ nativeTests =
                       0
                       1
                       2
-                      [ NativeConstructorLayout "Ok" 0 1 2 [NativeSlotLayout "$0" TStr NativeHandleStorage 1 1]
+                      [ NativeConstructorLayout "Ok" 0 1 2 [NativeSlotLayout "$0" (TVar "a") NativeHandleStorage 1 1]
                       , NativeConstructorLayout "Err" 0 1 2 [NativeSlotLayout "$0" TStr NativeHandleStorage 1 1]
                       ]
                   )
@@ -3789,7 +3831,7 @@ nativeTests =
               assertFailure ("expected Result native emission to succeed:\n" <> stdoutText <> stderrText)
             ExitSuccess -> do
               nativeIr <- TIO.readFile outputPath
-              assertBool "expected result variant layout" ("variant_layout Result { tag_word = 0, max_payload_words = 1, words = 2, constructors = [Ok{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}, Err{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}] }" `T.isInfixOf` nativeIr)
+              assertBool "expected result variant layout" ("variant_layout Result { tag_word = 0, max_payload_words = 1, words = 2, constructors = [Ok{tag_word=0, payload_words=1, words=2, payloads=[$0:a@word1/handle]}, Err{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}] }" `T.isInfixOf` nativeIr)
               assertBool "expected result ok object layout" ("object_layout Result.Ok { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
               assertBool "expected result constructors" ("function Ok($0) = construct Ok(local($0))" `T.isInfixOf` nativeIr)
               assertBool "expected result unwrap match" ("function unwrap(result) = match local(result) [Ok(value) -> local(value), Err(message) -> local(message)]" `T.isInfixOf` nativeIr)
@@ -3831,6 +3873,42 @@ nativeTests =
             assertFailure ("expected swarm kernel native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right nativeMod -> do
             let runtime = nativeModuleRuntime nativeMod
+            case findRuntimeBinding "dictEmpty" (nativeRuntimeBindings runtime) of
+              Just binding -> do
+                assertEqual "dictEmpty runtime name" "dictEmpty" (nativeRuntimeBindingRuntimeName binding)
+                assertEqual "dictEmpty symbol" "clasp_rt_dict_empty" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictEmpty runtime binding"
+            case findRuntimeBinding "dictSet" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictSet symbol" "clasp_rt_dict_set" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictSet runtime binding"
+            case findRuntimeBinding "dictGet" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictGet symbol" "clasp_rt_dict_get" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictGet runtime binding"
+            case findRuntimeBinding "dictHas" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictHas symbol" "clasp_rt_dict_has" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictHas runtime binding"
+            case findRuntimeBinding "dictRemove" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictRemove symbol" "clasp_rt_dict_remove" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictRemove runtime binding"
+            case findRuntimeBinding "dictKeys" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictKeys symbol" "clasp_rt_dict_keys" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictKeys runtime binding"
+            case findRuntimeBinding "dictValues" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "dictValues symbol" "clasp_rt_dict_values" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected dictValues runtime binding"
             case findRuntimeBinding "timeUnixMs" (nativeRuntimeBindings runtime) of
               Just binding ->
                 assertEqual "timeUnixMs symbol" "clasp_rt_time_unix_ms" (nativeRuntimeBindingSymbol binding)
@@ -4013,7 +4091,7 @@ nativeTests =
             assertBool "expected native runtime section" ("runtime {" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime header artifact" ("\"runtime/clasp_runtime.h\"" `T.isInfixOf` nativeIr)
             assertBool "expected native runtime textSplit binding" ("textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" `T.isInfixOf` nativeIr)
-            assertBool "expected native runtime textPrefix binding" ("textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result}" `T.isInfixOf` nativeIr)
+            assertBool "expected native runtime textPrefix binding" ("textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result Str}" `T.isInfixOf` nativeIr)
             assertBool "expected parser state record layout" ("record_layout ParserState { words = 4, fields = [moduleName:Str@word0/handle, imports:Str@word1/handle, signatures:Str@word2/handle, declarations:Str@word3/handle] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser variant object layout" ("object_layout LineKind.ModuleLine { kind = variant, header_words = 2, words = 4, roots = [3] }" `T.isInfixOf` nativeIr)
             assertBool "expected parser function emission" ("function parseModuleSummary(source) =" `T.isInfixOf` nativeIr)
@@ -4166,12 +4244,18 @@ nativeTests =
         headerExists <- doesFileExist ("runtime" </> "clasp_runtime.h")
         sourceExists <- doesFileExist ("runtime" </> "clasp_runtime.rs")
         harnessExists <- doesFileExist ("runtime" </> "test_native_image.c")
+        stage1PrimaryExists <- doesFileExist ("src" </> "stage1.primary.clasp")
+        embeddedPrimaryExists <- doesFileExist ("src" </> "embedded.primary.clasp")
         assertBool "expected native runtime header to exist" headerExists
         assertBool "expected native runtime source to exist" sourceExists
         assertBool "expected native runtime smoke harness to exist" harnessExists
+        assertBool "expected stage1 primary source snapshot to exist" stage1PrimaryExists
+        assertBool "expected embedded primary source snapshot to exist" embeddedPrimaryExists
         header <- TIO.readFile ("runtime" </> "clasp_runtime.h")
         source <- TIO.readFile ("runtime" </> "clasp_runtime.rs")
         harness <- TIO.readFile ("runtime" </> "test_native_image.c")
+        stage1Primary <- TIO.readFile ("src" </> "stage1.primary.clasp")
+        embeddedPrimary <- TIO.readFile ("src" </> "embedded.primary.clasp")
         assertBool "expected runtime init export" ("void clasp_rt_init(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime shutdown export" ("void clasp_rt_shutdown(ClaspRtRuntime *runtime);" `T.isInfixOf` header)
         assertBool "expected runtime object allocator export" ("ClaspRtObject *clasp_rt_alloc_object(const ClaspRtObjectLayout *layout);" `T.isInfixOf` header)
@@ -4258,6 +4342,10 @@ nativeTests =
         assertBool "expected native generation state snapshot implementation" ("pub unsafe extern \"C\" fn clasp_rt_native_module_generation_state_snapshot(" `T.isInfixOf` source)
         assertBool "expected native dispatch call implementation" ("pub unsafe extern \"C\" fn clasp_rt_call_native_dispatch(" `T.isInfixOf` source)
         assertBool "expected generation-specific native dispatch call implementation" ("pub unsafe extern \"C\" fn clasp_rt_call_native_dispatch_generation(" `T.isInfixOf` source)
+        assertBool "expected builtin runtime binding fallback table" ("fn builtin_runtime_binding_name(name: &str) -> bool" `T.isInfixOf` source)
+        assertBool "expected dict runtime binding fallback" ("| \"dictEmpty\"" `T.isInfixOf` source)
+        assertBool "expected runtime binding fallback helper" ("unsafe fn interpret_runtime_binding_by_name(" `T.isInfixOf` source)
+        assertBool "expected missing decl runtime binding fallback" ("if has_runtime_binding_or_builtin(image, decl_name) {" `T.isInfixOf` source)
         assertBool "expected runtime object destroy path" ("unsafe extern \"C\" fn destroy_object(runtime: *mut ClaspRtRuntime, header: *mut ClaspRtHeader)" `T.isInfixOf` source)
         assertBool "expected runtime text chars implementation" ("pub unsafe extern \"C\" fn clasp_rt_text_chars(value: *mut ClaspRtString) -> *mut ClaspRtStringList" `T.isInfixOf` source)
         assertBool "expected runtime file read helper" ("pub unsafe extern \"C\" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut ClaspRtResultString" `T.isInfixOf` source)
@@ -4265,6 +4353,10 @@ nativeTests =
         assertBool "expected interpreted if support" ("ClaspRtInterpretedExpr::If(" `T.isInfixOf` source)
         assertBool "expected interpreted compare support" ("ClaspRtInterpretedExpr::Compare(" `T.isInfixOf` source)
         assertBool "expected interpreted list append intrinsic" ("ClaspRtInterpretedIntrinsic::ListAppend" `T.isInfixOf` source)
+        assertBool "expected stage1 primary dict builtin binding" ("emitRuntimeBindingImage \"dictEmpty\" \"dictEmpty\" \"Dict Str a\"" `T.isInfixOf` stage1Primary)
+        assertBool "expected stage1 primary dict builtin list" ("for builtinName in [\"textConcat\", \"textJoin\", \"textSplit\", \"textChars\", \"textFingerprint64Hex\", \"textPrefix\", \"textSplitFirst\", \"dictEmpty\", \"dictSet\"" `T.isInfixOf` stage1Primary)
+        assertBool "expected embedded primary dict builtin binding" ("emitRuntimeBindingImage \"dictEmpty\" \"dictEmpty\" \"Dict Str a\"" `T.isInfixOf` embeddedPrimary)
+        assertBool "expected embedded primary dict builtin list" ("for builtinName in [\"textConcat\", \"textJoin\", \"textSplit\", \"textChars\", \"textFingerprint64Hex\", \"textPrefix\", \"textSplitFirst\", \"dictEmpty\", \"dictSet\"" `T.isInfixOf` embeddedPrimary)
         assertBool "expected native runtime smoke harness summary" ("native-image-ok module=%s profile=%s fingerprint=%s next_fingerprint=%s handoff_strategy=%s state_type=%s snapshot_symbol=%s handoff_symbol=%s snapshot=%s snapshot_hook=%d handoff=%d active_modules=%zu latest_generation=%zu overlap=%zu rejected_incompatible_upgrade=%d symbol=%s dispatch=%s old_dispatch=%s call=%s old_call=%s exports=%zu decls=%zu" `T.isInfixOf` harness)
     ]
 
@@ -4275,7 +4367,7 @@ docsTests =
     [ testCase "v0 spec documents compiler-known Option and Result bootstrap types" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
-        assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result = Ok Str | Err Str`." `T.isInfixOf` spec)
+        assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result a = Ok a | Err Str`." `T.isInfixOf` spec)
     , testCase "v0 spec documents the compiler-support text traversal helper" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected textChars bootstrap helper" ("- `textChars : Str -> [Str]`" `T.isInfixOf` spec)
@@ -4298,7 +4390,7 @@ docsTests =
         assertBool "expected subset to include compiler-oriented language forms" ("- package-aware modules and imports" `T.isInfixOf` plan)
         assertBool "expected subset to exclude app-facing runtime features" ("- workflow, worker, or durable execution features" `T.isInfixOf` plan)
         assertBool "expected bootstrap boundary section" ("## Bootstrap And Primary Compiler Boundary" `T.isInfixOf` plan)
-        assertBool "expected bootstrap compiler responsibility" ("- remaining the release-producing and fallback compiler until stage0/stage1/stage2 checks pass" `T.isInfixOf` plan)
+        assertBool "expected bootstrap compiler responsibility" ("- remaining the release-producing and fallback compiler until bootstrap checks pass" `T.isInfixOf` plan)
         assertBool "expected primary compiler responsibility" ("- staying within the self-hosting subset until `SH-010` promotes it to the default compiler path" `T.isInfixOf` plan)
         assertBool "expected subset admission rule" ("A language or runtime feature enters the self-hosting subset only when:" `T.isInfixOf` plan)
     , testCase "self-hosting plan defines the native runtime boundary and language choice" $ do
@@ -4330,6 +4422,13 @@ docsTests =
         assertBool "expected compiler image execution rule" ("- make the kernel execute structured compiler-image exports directly so compiler entrypoints like `compileSourceText` stop depending on a JS host at runtime" `T.isInfixOf` roadmap)
         assertBool "expected Rust kernel rule" ("- keep the lowest native runtime layer in `Rust` behind a narrow C-shaped ABI instead of embedding the Haskell RTS into production server/runtime targets" `T.isInfixOf` roadmap)
         assertBool "expected Clasp-above-kernel rule" ("- build higher-level supervision, upgrade, workflow, and compiler behavior in `Clasp` on top of that kernel rather than growing the kernel into a second application platform" `T.isInfixOf` roadmap)
+    , testCase "iteration speed note records exact self-hosted hot-path evidence" $ do
+        note <- TIO.readFile ("docs" </> "iteration-speed-loop-evidence.md")
+        assertBool "expected direct self-hosted check command" ("runtime/target/debug/claspc --json check src/Main.clasp" `T.isInfixOf` note)
+        assertBool "expected dedicated compiler entrypoint note" ("src/CompilerMain.clasp" `T.isInfixOf` note)
+        assertBool "expected fast verify command" ("env CLASP_NATIVE_VERIFY_MODE=fast bash src/scripts/verify.sh" `T.isInfixOf` note)
+        assertBool "expected full verify command" ("env CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh" `T.isInfixOf` note)
+        assertBool "expected next-slice note" ("remaining bottleneck" `T.isInfixOf` note)
     ]
 
 compileTests :: TestTree
@@ -4719,22 +4818,22 @@ compileTests =
                 assertBool "expected emitted module main export" ("export const main = id(hello);" `T.isInfixOf` emittedModuleText)
               _ ->
                 assertFailure "expected emittedModule field"
-            case lookupObjectText "stage2EmittedModule" runtimeValue of
-              Just stage2EmittedModuleText -> do
-                assertBool "expected stage2 emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` stage2EmittedModuleText)
-                assertBool "expected stage2 emitted module hello export" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` stage2EmittedModuleText)
-                assertBool "expected stage2 emitted module id export" ("export function id(value) { return value; }" `T.isInfixOf` stage2EmittedModuleText)
-                assertBool "expected stage2 emitted module main export" ("export const main = id(hello);" `T.isInfixOf` stage2EmittedModuleText)
+            case lookupObjectText "candidateEmittedModule" runtimeValue of
+              Just candidateEmittedModuleText -> do
+                assertBool "expected candidate emitted module header" ("// Generated by compiler-selfhost" `T.isPrefixOf` candidateEmittedModuleText)
+                assertBool "expected candidate emitted module hello export" ("export const hello = \"Hello from Clasp\";" `T.isInfixOf` candidateEmittedModuleText)
+                assertBool "expected candidate emitted module id export" ("export function id(value) { return value; }" `T.isInfixOf` candidateEmittedModuleText)
+                assertBool "expected candidate emitted module main export" ("export const main = id(hello);" `T.isInfixOf` candidateEmittedModuleText)
               _ ->
-                assertFailure "expected stage2EmittedModule field"
+                assertFailure "expected candidateEmittedModule field"
             assertEqual
-              "expected stage2 check output"
+              "expected candidate check output"
               (Just (String "hello : Str\nid : Str -> Str\nmain : Str"))
-              (lookupObjectKey "stage2CheckOutput" runtimeValue)
+              (lookupObjectKey "candidateCheckOutput" runtimeValue)
             assertEqual
-              "expected stage2 explain output"
+              "expected candidate explain output"
               (Just (String "hello : Str\nid : Str -> Str\nmain : Str\n\nconst hello = literal:Hello from Clasp\nfunction id(value) = name:value\nconst main = call id(name:hello)"))
-              (lookupObjectKey "stage2ExplainOutput" runtimeValue)
+              (lookupObjectKey "candidateExplainOutput" runtimeValue)
             case lookupObjectKey "emittedNativeModule" runtimeValue of
               Just (String nativeText) -> do
                 assertBool "expected emitted native module format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
@@ -4743,12 +4842,12 @@ compileTests =
                 assertBool "expected emitted native function" ("function id(value) = local(value)" `T.isInfixOf` nativeText)
               _ ->
                 assertFailure "expected emittedNativeModule field"
-            case lookupObjectKey "stage2NativeOutput" runtimeValue of
+            case lookupObjectKey "candidateNativeOutput" runtimeValue of
               Just (String nativeText) -> do
-                assertBool "expected stage2 native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
-                assertBool "expected stage2 native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeText)
+                assertBool "expected candidate native format header" ("format clasp-native-ir-v1" `T.isInfixOf` nativeText)
+                assertBool "expected candidate native global" ("global hello = string(\"Hello from Clasp\")" `T.isInfixOf` nativeText)
               _ ->
-                assertFailure "expected stage2NativeOutput field"
+                assertFailure "expected candidateNativeOutput field"
             assertEqual
               "expected emitted hello export"
               (Just (String "Hello from Clasp"))
@@ -4992,7 +5091,7 @@ compileTests =
               _ ->
                 assertFailure "expected septenaryEmittedModule field"
     , testCase "promoted hosted native seed rebuilds end-to-end without JS staging" $ do
-        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        embeddedPath <- makeAbsolute "src/embedded.native.image.json"
         hostedEntryPath <- makeAbsolute "src/Main.clasp"
         let rebuiltImagePath = "dist/compiler-selfhost-promoted.verify.native.image.json"
             promotedSnapshotPath = "dist/compiler-selfhost-promoted.snapshot.json"
@@ -5008,36 +5107,44 @@ compileTests =
             promotedImagePath = "dist/compiler-selfhost-promoted.native.image.json"
             rebuiltProjectImagePath = "dist/compiler-selfhost-rebuilt-project.native.image.json"
         createDirectoryIfMissing True "dist"
-        rebuiltImageOutput <- runHostedNativeTool stage1Path "nativeImageProjectText" (Just ("--project-entry=" <> hostedEntryPath)) rebuiltImagePath
-        promotedImageBytes <- TIO.readFile stage1Path
-        promotedSnapshot <- runHostedNativeTool stage1Path "main" Nothing promotedSnapshotPath
+        rebuiltImageOutput <- runHostedNativeTool embeddedPath "nativeImageProjectText" (Just ("--project-entry=" <> hostedEntryPath)) rebuiltImagePath
+        promotedImageBytes <- TIO.readFile embeddedPath
+        promotedSnapshot <- runHostedNativeTool embeddedPath "main" Nothing promotedSnapshotPath
         rebuiltSnapshot <- runHostedNativeTool rebuiltImagePath "main" Nothing rebuiltSnapshotPath
         assertEqual "expected rebuilt native image bytes to match promoted seed" promotedImageBytes rebuiltImageOutput
         assertEqual "expected rebuilt snapshot to match promoted snapshot" promotedSnapshot rebuiltSnapshot
-        promotedCheck <- runHostedNativeTool stage1Path "checkEntrypoint" Nothing promotedCheckPath
+        promotedCheck <- runHostedNativeTool embeddedPath "checkEntrypoint" Nothing promotedCheckPath
         rebuiltCheck <- runHostedNativeTool rebuiltImagePath "checkEntrypoint" Nothing rebuiltCheckPath
         assertEqual "expected rebuilt check entrypoint to match promoted seed" promotedCheck rebuiltCheck
-        promotedExplain <- runHostedNativeTool stage1Path "explainEntrypoint" Nothing promotedExplainPath
+        promotedExplain <- runHostedNativeTool embeddedPath "explainEntrypoint" Nothing promotedExplainPath
         rebuiltExplain <- runHostedNativeTool rebuiltImagePath "explainEntrypoint" Nothing rebuiltExplainPath
         assertEqual "expected rebuilt explain entrypoint to match promoted seed" promotedExplain rebuiltExplain
-        promotedCompile <- runHostedNativeTool stage1Path "compileEntrypoint" Nothing promotedCompilePath
+        promotedCompile <- runHostedNativeTool embeddedPath "compileEntrypoint" Nothing promotedCompilePath
         rebuiltCompile <- runHostedNativeTool rebuiltImagePath "compileEntrypoint" Nothing rebuiltCompilePath
         assertEqual "expected rebuilt compile entrypoint to match promoted seed" promotedCompile rebuiltCompile
-        promotedNative <- runHostedNativeTool stage1Path "nativeEntrypoint" Nothing promotedNativePath
+        promotedNative <- runHostedNativeTool embeddedPath "nativeEntrypoint" Nothing promotedNativePath
         rebuiltNative <- runHostedNativeTool rebuiltImagePath "nativeEntrypoint" Nothing rebuiltNativePath
         assertEqual "expected rebuilt native entrypoint to match promoted seed" promotedNative rebuiltNative
-        promotedImage <- runHostedNativeTool stage1Path "nativeImageEntrypoint" Nothing promotedImagePath
+        promotedImage <- runHostedNativeTool embeddedPath "nativeImageEntrypoint" Nothing promotedImagePath
         rebuiltImage <- runHostedNativeTool rebuiltImagePath "nativeImageEntrypoint" Nothing rebuiltProjectImagePath
         assertEqual "expected rebuilt native-image entrypoint to match promoted seed" promotedImage rebuiltImage
     , testCase "hosted verify scripts avoid Haskell and Node in the promoted native self-check loop" $ do
         verifyScript <- TIO.readFile "src/scripts/verify.sh"
         verifyAllScript <- TIO.readFile "scripts/verify-all.sh"
+        verifySelfhostScript <- TIO.readFile "scripts/verify-selfhost.sh"
+        selfhostScript <- TIO.readFile "scripts/test-selfhost.sh"
         assertBool
           "expected hosted verify script to rebuild via nativeProjectText"
           ("nativeProjectText" `T.isInfixOf` verifyScript)
         assertBool
           "expected hosted verify script to rebuild via nativeImageProjectText"
           ("nativeImageProjectText" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected fast hosted verify loop to execute the native check command directly"
+          ("--json check \"$project_root/src/Main.clasp\"" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected hosted verify script to seed project rebuilds from the smaller compiler image"
+          ("embedded.compiler.native.image.json" `T.isInfixOf` verifyScript)
         assertBool
           "expected hosted verify script to use project-entry bundling instead of a flattened seed"
           ("--project-entry=" `T.isInfixOf` verifyScript)
@@ -5051,16 +5158,42 @@ compileTests =
           "expected hosted verify script to avoid node-driven hosted verification"
           (not ("node src/demo.mjs" `T.isInfixOf` verifyScript))
         assertBool
+          "expected top-level verify-all to use the default fast hosted verify loop"
+          ("bash src/scripts/verify.sh" `T.isInfixOf` verifyAllScript)
+        assertBool
+          "expected top-level verify-all to avoid forcing the slow full hosted verify loop"
+          (not ("CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh" `T.isInfixOf` verifyAllScript))
+        assertBool
+          "expected dedicated selfhost verification to retain the full hosted loop"
+          ("CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh" `T.isInfixOf` verifySelfhostScript)
+        assertBool
           "expected top-level verify-all to defer hosted verification to the native hosted loop"
           (not ("cabal run claspc -- check src/Main.clasp" `T.isInfixOf` verifyAllScript))
+        assertBool
+          "expected selfhost smoke test to use the smaller compiler image seed"
+          ("embedded.compiler.native.image.json" `T.isInfixOf` selfhostScript)
+    , testCase "snapshot fixture keeps the hosted compiler entrypoint off the heavy compiler import closure" $ do
+        snapshotFixture <- TIO.readFile "src/Compiler/SnapshotFixture.clasp"
+        assertBool
+          "expected snapshot fixture to keep the JSON helper import"
+          ("import Compiler.Json" `T.isInfixOf` snapshotFixture)
+        assertBool
+          "expected snapshot fixture to avoid importing the parser/checker pipeline"
+          (not ("import Compiler.Checker" `T.isInfixOf` snapshotFixture))
+        assertBool
+          "expected snapshot fixture to avoid importing the lowering pipeline"
+          (not ("import Compiler.Lower" `T.isInfixOf` snapshotFixture))
+        assertBool
+          "expected snapshot fixture to avoid importing the emitters"
+          (not ("import Compiler.Emit." `T.isInfixOf` snapshotFixture))
     , testCase "primary compiler driver avoids the Node hosted tool runner in the live execution path" $ do
         compilerSource <- TIO.readFile "deprecated/bootstrap/src/Clasp/Compiler.hs"
         assertBool
           "expected compiler driver to avoid the Node hosted tool runner"
           (not ("run-tool.mjs" `T.isInfixOf` compilerSource))
         assertBool
-          "expected compiler driver to avoid stage1.mjs in the live execution path"
-          (not ("stage1.mjs" `T.isInfixOf` compilerSource))
+          "expected compiler driver to avoid embedded.mjs in the live execution path"
+          (not ("embedded.mjs" `T.isInfixOf` compilerSource))
         assertBool
           "expected compiler driver to avoid Haskell hosted-source preflight helpers in the live text-tool path"
           (not ("prepareHostedPrimarySource" `T.isInfixOf` compilerSource))
@@ -5094,10 +5227,10 @@ compileTests =
             )
           ]
           $ \root -> do
-          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          embeddedPath <- makeAbsolute "src/embedded.native.image.json"
           let renderedPath = root </> "Main.clasp"
               resultPath = root </> "result.mjs"
-          rebuiltModule <- runHostedNativeTool stage1Path "compileSourceText" (Just renderedPath) resultPath
+          rebuiltModule <- runHostedNativeTool embeddedPath "compileSourceText" (Just renderedPath) resultPath
           assertBool "expected emitted compileEntrypoint export" ("export const compileEntrypoint = \"compiler-marker\";" `T.isInfixOf` rebuiltModule)
           assertBool "expected emitted main export" ("export const main = \"hello\";" `T.isInfixOf` rebuiltModule)
     , testCase "compiled hosted compiler accepts multiline continuation formatting" $ do
@@ -5952,10 +6085,10 @@ compileTests =
             assertBool "expected native image artifact" imageExists
     , testCase "hosted native tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
-          let stage1IrPath = root </> "Fake.native.ir"
-              stage1ImagePath = replaceExtension stage1IrPath "native.image.json"
+          let embeddedIrPath = root </> "Fake.native.ir"
+              embeddedImagePath = replaceExtension embeddedIrPath "native.image.json"
               resultPath = root </> "result.txt"
-          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["native", root </> "Fake.clasp", "-o", stage1IrPath]
+          (compileExitCode, compileStdout, compileStderr) <- runClaspc ["native", root </> "Fake.clasp", "-o", embeddedIrPath]
           case compileExitCode of
             ExitSuccess ->
               pure ()
@@ -5965,7 +6098,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1ImagePath
+              , embeddedImagePath
               , "checkEntrypoint"
               , resultPath
               ]
@@ -5977,13 +6110,13 @@ compileTests =
               assertBool "expected hosted native tool runner to report missing export support" ("runtime failed to execute native compiler export" `isInfixOf` stderrText)
     , testCase "hosted native tool runner accepts ordinary native output without a bootstrap oracle" $
         withProjectFiles "hosted-native-tool-runner-native-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
-          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          embeddedPath <- makeAbsolute "src/embedded.native.image.json"
           let resultPath = root </> "result.native.ir"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "nativeSourceText"
               , root </> "Main.clasp"
               , resultPath
@@ -5999,13 +6132,13 @@ compileTests =
           assertBool "expected hosted native global" ("global main = string(\"hello\")" `T.isInfixOf` nativeIr)
     , testCase "hosted native tool runner accepts ordinary compile output without a bootstrap oracle" $
         withProjectFiles "hosted-native-tool-runner-compile-no-bootstrap" [("Main.clasp", "module Main\n\nmain : Str\nmain = \"hello\"\n")] $ \root -> do
-          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          embeddedPath <- makeAbsolute "src/embedded.native.image.json"
           let resultPath = root </> "result.mjs"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "compileSourceText"
               , root </> "Main.clasp"
               , resultPath
@@ -6020,13 +6153,13 @@ compileTests =
           assertBool "expected hosted compile output" ("export const main = \"hello\";" `T.isInfixOf` compiledJs)
     , testCase "hosted native tool runner rejects route-style backend source from frontend JS compile" $
         withProjectFiles "hosted-native-tool-runner-route-needs-native" [("Main.clasp", T.unlines ["module Main", "", "route inboxRoute = GET \"/inbox\" Empty -> Page inbox"])] $ \root -> do
-          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          embeddedPath <- makeAbsolute "src/embedded.native.image.json"
           let resultPath = root </> "result.mjs"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "compileSourceText"
               , root </> "Main.clasp"
               , resultPath
@@ -6042,14 +6175,14 @@ compileTests =
           assertBool "expected native entrypoint hint" ("nativeSourceText or nativeProjectText" `T.isInfixOf` compiledJs)
     , testCase "hosted native tool runner rejects backend workflow projects from frontend JS compile" $
         withProjectFiles "hosted-native-tool-runner-project-needs-native" [] $ \root -> do
-          stage1Path <- makeAbsolute "src/stage1.native.image.json"
+          embeddedPath <- makeAbsolute "src/embedded.native.image.json"
           workflowEntryPath <- makeAbsolute ("examples" </> "durable-workflow" </> "Main.clasp")
           let resultPath = root </> "result.mjs"
           (exitCode, _stdoutText, stderrText) <-
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "compileProjectText"
               , "--project-entry=" <> workflowEntryPath
               , resultPath
@@ -6064,7 +6197,7 @@ compileTests =
           assertBool "expected frontend-only project compile error" ("frontend-only compile error" `T.isInfixOf` compiledJs)
           assertBool "expected native project entrypoint hint" ("nativeSourceText or nativeProjectText" `T.isInfixOf` compiledJs)
     , testCase "hosted native tool runner handles examples/hello.clasp end to end" $ do
-        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        embeddedPath <- makeAbsolute "src/embedded.native.image.json"
         helloExampleSource <- readExampleSource "hello.clasp"
         withProjectFiles "hosted-native-tool-runner-hello" [("Main.clasp", helloExampleSource)] $ \root -> do
           helloPath <- makeAbsolute (root </> "Main.clasp")
@@ -6077,7 +6210,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "checkSourceText"
               , helloPath
               , checkPath
@@ -6096,7 +6229,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "checkCoreSourceText"
               , helloPath
               , checkCorePath
@@ -6115,7 +6248,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "compileSourceText"
               , helloPath
               , compilePath
@@ -6134,7 +6267,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "nativeSourceText"
               , helloPath
               , nativePath
@@ -6155,7 +6288,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "nativeImageSourceText"
               , helloPath
               , nativeImagePath
@@ -6171,7 +6304,7 @@ compileTests =
           assertBool "expected hello native image module" ("\"module\": \"Main\"" `T.isInfixOf` nativeImage)
           assertBool "expected hello native image main entry" ("\"name\": \"main\"" `T.isInfixOf` nativeImage)
     , testCase "hosted native tool runner rebuilds the hosted compiler project with native list append intrinsics" $ do
-        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        embeddedPath <- makeAbsolute "src/embedded.native.image.json"
         hostedCompilerPath <- makeAbsolute "src/Main.clasp"
         withProjectFiles "hosted-native-tool-runner-self-rebuild" [] $ \root -> do
           let nativePath = root </> "hosted.native.ir"
@@ -6180,7 +6313,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "nativeProjectText"
               , "--project-entry=" <> hostedCompilerPath
               , nativePath
@@ -6197,7 +6330,7 @@ compileTests =
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "nativeImageProjectText"
               , "--project-entry=" <> hostedCompilerPath
               , nativeImagePath
@@ -6211,14 +6344,14 @@ compileTests =
           nativeImage <- TIO.readFile nativeImagePath
           assertBool "expected hosted native self-rebuild native image to preserve list append intrinsics" ("\"name\": \"list.append\"" `T.isInfixOf` nativeImage)
     , testCase "promoted hosted native seed preserves escaped string literals across self-hosted compile" $ do
-        stage1Path <- makeAbsolute "src/stage1.native.image.json"
+        embeddedPath <- makeAbsolute "src/embedded.native.image.json"
         withProjectFiles "hosted-native-tool-runner-escaped-string" [("Main.clasp", "module Main\n\nmain : Str\nmain = textJoin \"\\n\" [\"left\", \"right\"]\n")] $ \root -> do
           let compilePath = root </> "escaped.mjs"
           (compileExitCode, _compileStdout, compileStderr) <-
             readProcessWithExitCode
               "bash"
               [ "src/scripts/run-native-tool.sh"
-              , stage1Path
+              , embeddedPath
               , "compileSourceText"
               , root </> "Main.clasp"
               , compilePath
@@ -8594,6 +8727,8 @@ genericTypeSource =
     , "identity : a -> a"
     , "identity value = value"
     , ""
+    , "inferredIdentity value = value"
+    , ""
     , "wrap : a -> Box a"
     , "wrap value = Box { value = value }"
     , ""
@@ -8606,8 +8741,50 @@ genericTypeSource =
     , "  None -> fallback"
     , "}"
     , ""
+    , "chooseText : Choice Str -> Str"
+    , "chooseText value = unwrapOr value \"fallback\""
+    , ""
+    , "isNotFallback : Str -> Bool"
+    , "isNotFallback value = value != \"fallback\""
+    , ""
+    , "isOk : Str -> Bool"
+    , "isOk value = value == \"ok\""
+    , ""
+    , "isShort : Str -> Bool"
+    , "isShort value = length value <= 8"
+    , ""
+    , "joinWithComma : Str -> Str -> Str"
+    , "joinWithComma acc value = if acc == \"\" then value else textJoin \",\" [acc, value]"
+    , ""
+    , "seedTexts : [Str]"
+    , "seedTexts = prepend \"ok\" []"
+    , ""
+    , "emptyBoxes : [Box Str]"
+    , "emptyBoxes = []"
+    , ""
+    , "fallbackChoices : [Choice Str]"
+    , "fallbackChoices = [None]"
+    , ""
+    , "choices : [Choice Str]"
+    , "choices = prepend (Some (readBox (wrap (inferredIdentity (identity \"ok\"))))) fallbackChoices"
+    , ""
+    , "choiceTexts : [Str]"
+    , "choiceTexts = map chooseText choices"
+    , ""
+    , "nonFallbackChoices : [Str]"
+    , "nonFallbackChoices = filter isNotFallback choiceTexts"
+    , ""
+    , "matrix : [[Str]]"
+    , "matrix = [[], seedTexts]"
+    , ""
+    , "hasOk : Bool"
+    , "hasOk = any isOk choiceTexts"
+    , ""
+    , "allShort : Bool"
+    , "allShort = all isShort choiceTexts"
+    , ""
     , "main : Str"
-    , "main = readBox (wrap \"ok\")"
+    , "main = textJoin \"|\" [fold joinWithComma \"\" nonFallbackChoices, if length emptyBoxes == 0 then \"true\" else \"false\", if hasOk then \"true\" else \"false\", if allShort then \"true\" else \"false\"]"
     ]
 
 unboundNameSource :: Text
@@ -8665,7 +8842,7 @@ builtinResultSource =
   T.unlines
     [ "module Main"
     , ""
-    , "unwrap : Result -> Str"
+    , "unwrap : Result Str -> Str"
     , "unwrap result = match result {"
     , "  Ok value -> value,"
     , "  Err message -> message"
@@ -8749,6 +8926,22 @@ swarmKernelSource =
     [ "module Main"
     , ""
     , "record SwarmEvent = { kind : Str, taskId : Str, actor : Str, detail : Str, atMs : Int }"
+    , "record SwarmTaskState = { taskId : Str, status : Str, leaseActor : Str, lastHeartbeatAtMs : Int, heartbeatSeen : Bool }"
+    , "record SwarmSummary = { allTaskIds : [Str], createdTaskIds : [Str], leasedTaskIds : [Str], activeTaskIds : [Str], queuedTaskIds : [Str], completedTaskIds : [Str], failedTaskIds : [Str], heartbeatTaskIds : [Str], statusByTask : Dict Str Str, leaseByTask : Dict Str Str, hasBootstrap : Bool, bootstrapStatus : Str, taskStatusKeys : [Str], leaseValuesWithoutDraft : [Str] }"
+    , "record TaskStateEventUpdate = { event : SwarmEvent, matched : Bool, states : [SwarmTaskState] }"
+    , "record TaskStateDicts = { statuses : Dict Str Str, leases : Dict Str Str }"
+    , ""
+    , "commandName : Str"
+    , "commandName = match envVar \"CLASP_SWARM_COMMAND\" {"
+    , "  Ok value -> value,"
+    , "  Err message -> \"bootstrap\""
+    , "}"
+    , ""
+    , "taskName : Str"
+    , "taskName = match envVar \"CLASP_SWARM_TASK_ID\" {"
+    , "  Ok value -> value,"
+    , "  Err message -> \"bootstrap\""
+    , "}"
     , ""
     , "actorName : Str"
     , "actorName = match envVar \"CLASP_SWARM_ACTOR\" {"
@@ -8756,23 +8949,239 @@ swarmKernelSource =
     , "  Err message -> \"manager\""
     , "}"
     , ""
-    , "bootstrapEvent : SwarmEvent"
-    , "bootstrapEvent = SwarmEvent {"
-    , "  kind = \"task_created\","
-    , "  taskId = \"bootstrap\","
+    , "eventKind : Str"
+    , "eventKind ="
+    , "  if commandName == \"lease\" then"
+    , "    \"lease_acquired\""
+    , "  else if commandName == \"release\" then"
+    , "    \"lease_released\""
+    , "  else if commandName == \"heartbeat\" then"
+    , "    \"worker_heartbeat\""
+    , "  else if commandName == \"complete\" then"
+    , "    \"task_completed\""
+    , "  else if commandName == \"fail\" then"
+    , "    \"task_failed\""
+    , "  else if commandName == \"retry\" then"
+    , "    \"task_requeued\""
+    , "  else"
+    , "    \"task_created\""
+    , ""
+    , "eventDetail : Str"
+    , "eventDetail ="
+    , "  if commandName == \"lease\" then"
+    , "    textConcat [\"Acquire lease for \", taskName, \".\"]"
+    , "  else if commandName == \"release\" then"
+    , "    textConcat [\"Release lease for \", taskName, \".\"]"
+    , "  else if commandName == \"heartbeat\" then"
+    , "    textConcat [\"Heartbeat for \", taskName, \".\"]"
+    , "  else if commandName == \"complete\" then"
+    , "    textConcat [\"Complete task \", taskName, \".\"]"
+    , "  else if commandName == \"fail\" then"
+    , "    textConcat [\"Fail task \", taskName, \".\"]"
+    , "  else if commandName == \"retry\" then"
+    , "    textConcat [\"Requeue task \", taskName, \".\"]"
+    , "  else"
+    , "    \"Initialize swarm kernel state.\""
+    , ""
+    , "currentEvent : SwarmEvent"
+    , "currentEvent = SwarmEvent {"
+    , "  kind = eventKind,"
+    , "  taskId = taskName,"
     , "  actor = actorName,"
-    , "  detail = \"Initialize swarm kernel state.\","
+    , "  detail = eventDetail,"
     , "  atMs = timeUnixMs"
     , "}"
     , ""
-    , "appendBootstrapEvent : Str -> Result"
-    , "appendBootstrapEvent root = match mkdirAll root {"
-    , "  Ok created -> appendFile (pathJoin [root, \"events.jsonl\"]) (textConcat [encode bootstrapEvent, \"\\n\"]),"
+    , "buildTaskState : Str -> Str -> Str -> Int -> SwarmTaskState"
+    , "buildTaskState targetTask status leaseActor lastHeartbeatAtMs = {"
+    , "  SwarmTaskState {"
+    , "    taskId = targetTask,"
+    , "    status = status,"
+    , "    leaseActor = leaseActor,"
+    , "    lastHeartbeatAtMs = lastHeartbeatAtMs,"
+    , "    heartbeatSeen = lastHeartbeatAtMs != 0"
+    , "  }"
+    , "}"
+    , ""
+    , "emptyTaskState : Str -> SwarmTaskState"
+    , "emptyTaskState targetTask = buildTaskState targetTask \"missing\" \"\" 0"
+    , ""
+    , "applyTaskEvent : SwarmTaskState -> SwarmEvent -> SwarmTaskState"
+    , "applyTaskEvent taskState event ="
+    , "  if event.taskId != taskState.taskId then"
+    , "    taskState"
+    , "  else if event.kind == \"task_created\" then"
+    , "    buildTaskState taskState.taskId \"created\" taskState.leaseActor taskState.lastHeartbeatAtMs"
+    , "  else if event.kind == \"lease_acquired\" then"
+    , "    buildTaskState taskState.taskId \"leased\" event.actor taskState.lastHeartbeatAtMs"
+    , "  else if event.kind == \"lease_released\" then"
+    , "    buildTaskState taskState.taskId \"queued\" \"\" 0"
+    , "  else if event.kind == \"worker_heartbeat\" then"
+    , "    buildTaskState taskState.taskId \"active\" event.actor event.atMs"
+    , "  else if event.kind == \"task_completed\" then"
+    , "    buildTaskState taskState.taskId \"completed\" taskState.leaseActor taskState.lastHeartbeatAtMs"
+    , "  else if event.kind == \"task_failed\" then"
+    , "    buildTaskState taskState.taskId \"failed\" taskState.leaseActor taskState.lastHeartbeatAtMs"
+    , "  else if event.kind == \"task_requeued\" then"
+    , "    buildTaskState taskState.taskId \"queued\" \"\" 0"
+    , "  else"
+    , "    buildTaskState taskState.taskId taskState.status taskState.leaseActor taskState.lastHeartbeatAtMs"
+    , ""
+    , "applyTaskLine : SwarmTaskState -> Str -> SwarmTaskState"
+    , "applyTaskLine taskState rawLine ="
+    , "  if rawLine == \"\" then"
+    , "    taskState"
+    , "  else"
+    , "    applyTaskEvent taskState (decode SwarmEvent rawLine)"
+    , ""
+    , "collectTaskHistory : [SwarmEvent] -> Str -> [SwarmEvent]"
+    , "collectTaskHistory events rawLine ="
+    , "  if rawLine == \"\" then"
+    , "    events"
+    , "  else {"
+    , "    let event = decode SwarmEvent rawLine;"
+    , "    if event.taskId == taskName then"
+    , "      append events [event]"
+    , "    else"
+    , "      events"
+    , "  }"
+    , ""
+    , "updateTaskStateEntry : TaskStateEventUpdate -> SwarmTaskState -> TaskStateEventUpdate"
+    , "updateTaskStateEntry update currentState ="
+    , "  if currentState.taskId == update.event.taskId then"
+    , "    TaskStateEventUpdate {"
+    , "      event = update.event,"
+    , "      matched = true,"
+    , "      states = append update.states [applyTaskEvent currentState update.event]"
+    , "    }"
+    , "  else"
+    , "    TaskStateEventUpdate {"
+    , "      event = update.event,"
+    , "      matched = update.matched,"
+    , "      states = append update.states [currentState]"
+    , "    }"
+    , ""
+    , "applyTaskLineToStates : [SwarmTaskState] -> Str -> [SwarmTaskState]"
+    , "applyTaskLineToStates states rawLine ="
+    , "  if rawLine == \"\" then"
+    , "    states"
+    , "  else {"
+    , "    let event = decode SwarmEvent rawLine;"
+    , "    let update = fold updateTaskStateEntry (TaskStateEventUpdate { event = event, matched = false, states = [] }) states;"
+    , "    if update.matched then"
+    , "      update.states"
+    , "    else"
+    , "      append update.states [applyTaskEvent (emptyTaskState event.taskId) event]"
+    , "  }"
+    , ""
+    , "projectTaskState : Str -> Str -> SwarmTaskState"
+    , "projectTaskState targetTask contents = fold applyTaskLine (emptyTaskState targetTask) (textSplit contents \"\\n\")"
+    , ""
+    , "isCreatedTask : SwarmTaskState -> Bool"
+    , "isCreatedTask taskState = taskState.status == \"created\""
+    , ""
+    , "isLeasedTask : SwarmTaskState -> Bool"
+    , "isLeasedTask taskState = taskState.status == \"leased\""
+    , ""
+    , "isActiveTask : SwarmTaskState -> Bool"
+    , "isActiveTask taskState = taskState.status == \"active\""
+    , ""
+    , "isQueuedTask : SwarmTaskState -> Bool"
+    , "isQueuedTask taskState = taskState.status == \"queued\""
+    , ""
+    , "isCompletedTask : SwarmTaskState -> Bool"
+    , "isCompletedTask taskState = taskState.status == \"completed\""
+    , ""
+    , "isFailedTask : SwarmTaskState -> Bool"
+    , "isFailedTask taskState = taskState.status == \"failed\""
+    , ""
+    , "hasHeartbeatTask : SwarmTaskState -> Bool"
+    , "hasHeartbeatTask taskState = taskState.heartbeatSeen"
+    , ""
+    , "taskStateTaskId : SwarmTaskState -> Str"
+    , "taskStateTaskId taskState = taskState.taskId"
+    , ""
+    , "collectTaskStateDicts : TaskStateDicts -> SwarmTaskState -> TaskStateDicts"
+    , "collectTaskStateDicts summary taskState = TaskStateDicts { statuses = dictSet taskState.taskId taskState.status summary.statuses, leases = dictSet taskState.taskId taskState.leaseActor summary.leases }"
+    , ""
+    , "bootstrapStatusFrom : Dict Str Str -> Str"
+    , "bootstrapStatusFrom statuses = match dictGet \"bootstrap\" statuses {"
+    , "  Ok value -> value,"
+    , "  Err message -> \"missing\""
+    , "}"
+    , ""
+    , "buildSwarmSummary : [SwarmTaskState] -> SwarmSummary"
+    , "buildSwarmSummary taskStates = {"
+    , "  let dicts = fold collectTaskStateDicts (TaskStateDicts { statuses = dictEmpty, leases = dictEmpty }) taskStates;"
+    , "  SwarmSummary {"
+    , "    allTaskIds = map taskStateTaskId taskStates,"
+    , "    createdTaskIds = map taskStateTaskId (filter isCreatedTask taskStates),"
+    , "    leasedTaskIds = map taskStateTaskId (filter isLeasedTask taskStates),"
+    , "    activeTaskIds = map taskStateTaskId (filter isActiveTask taskStates),"
+    , "    queuedTaskIds = map taskStateTaskId (filter isQueuedTask taskStates),"
+    , "    completedTaskIds = map taskStateTaskId (filter isCompletedTask taskStates),"
+    , "    failedTaskIds = map taskStateTaskId (filter isFailedTask taskStates),"
+    , "    heartbeatTaskIds = map taskStateTaskId (filter hasHeartbeatTask taskStates),"
+    , "    statusByTask = dicts.statuses,"
+    , "    leaseByTask = dicts.leases,"
+    , "    hasBootstrap = dictHas \"bootstrap\" dicts.statuses,"
+    , "    bootstrapStatus = bootstrapStatusFrom dicts.statuses,"
+    , "    taskStatusKeys = dictKeys dicts.statuses,"
+    , "    leaseValuesWithoutDraft = dictValues (dictRemove \"draft\" dicts.leases)"
+    , "  }"
+    , "}"
+    , ""
+    , "swarmRoot : Str"
+    , "swarmRoot = \"swarm-state\""
+    , ""
+    , "eventLogPath : Str"
+    , "eventLogPath = pathJoin [swarmRoot, \"events.jsonl\"]"
+    , ""
+    , "appendSwarmEvent : Result Str"
+    , "appendSwarmEvent = match mkdirAll swarmRoot {"
+    , "  Ok created -> appendFile eventLogPath (textConcat [encode currentEvent, \"\\n\"]),"
     , "  Err message -> Err message"
     , "}"
     , ""
-    , "main : Result"
-    , "main = appendBootstrapEvent \"swarm-state\""
+    , "statusOutput : Str"
+    , "statusOutput = match readFile eventLogPath {"
+    , "  Ok contents -> encode (projectTaskState taskName contents),"
+    , "  Err message -> encode (emptyTaskState taskName)"
+    , "}"
+    , ""
+    , "historyOutput : Str"
+    , "historyOutput = match readFile eventLogPath {"
+    , "  Ok contents -> encode (fold collectTaskHistory [] (textSplit contents \"\\n\")),"
+    , "  Err message -> encode []"
+    , "}"
+    , ""
+    , "tasksOutput : Str"
+    , "tasksOutput = match readFile eventLogPath {"
+    , "  Ok contents -> encode (fold applyTaskLineToStates [] (textSplit contents \"\\n\")),"
+    , "  Err message -> encode []"
+    , "}"
+    , ""
+    , "summaryOutput : Str"
+    , "summaryOutput = match readFile eventLogPath {"
+    , "  Ok contents -> encode (buildSwarmSummary (fold applyTaskLineToStates [] (textSplit contents \"\\n\"))),"
+    , "  Err message -> encode (buildSwarmSummary [])"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main ="
+    , "  if commandName == \"status\" then"
+    , "    statusOutput"
+    , "  else if commandName == \"history\" then"
+    , "    historyOutput"
+    , "  else if commandName == \"tasks\" then"
+    , "    tasksOutput"
+    , "  else if commandName == \"summary\" then"
+    , "    summaryOutput"
+    , "  else"
+    , "    match appendSwarmEvent {"
+    , "      Ok written -> written,"
+    , "      Err message -> message"
+    , "    }"
     ]
 
 textCharsNativeSource :: Text

@@ -12,10 +12,12 @@ cleanup() {
 trap cleanup EXIT
 
 test_root="$(mktemp -d)"
-mkdir -p "$test_root/bin" "$test_root/scripts"
+mkdir -p "$test_root/bin" "$test_root/scripts" "$test_root/src/scripts" "$test_root/src"
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
+cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -23,10 +25,18 @@ grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
-grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'verify_mode="${CLASP_NATIVE_VERIFY_MODE:-fast}"' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'if [[ "$verify_mode" == "full" ]]; then' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F '"promotedSnapshotExecutes":true' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'acquire_verify_lock()' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'nativeImageProjectText' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'fast_verify_source_path="${CLASP_NATIVE_VERIFY_SOURCE_INPUT:-$project_root/examples/feedback-loop/Main.clasp}"' "$test_root/src/scripts/verify.sh" >/dev/null
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash
@@ -49,6 +59,7 @@ fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLA
 
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
@@ -72,6 +83,7 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
@@ -82,6 +94,7 @@ grep -F 'verify-fast: falling back to sandbox verification because Nix is unavai
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 "$bash_bin" "$test_root/scripts/verify-selfhost.sh" >/dev/null 2>"$stderr_capture"
@@ -147,6 +160,7 @@ CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
 rm -f "$fallback_capture"
 if PATH="$test_root/bin:$PATH" \
   IN_NIX_SHELL= \
+  XDG_CACHE_HOME= \
   CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
   CLASP_TEST_NIX_MESSAGE='error: unexpected nix failure' \
   CLASP_VERIFY_FALLBACK_COMMANDS=$'printf should-not-run > fallback.txt' \
@@ -156,3 +170,85 @@ if PATH="$test_root/bin:$PATH" \
 fi
 
 [[ ! -f "$fallback_capture" ]]
+
+cat > "$test_root/bin/fake-claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+log_path="${CLASP_TEST_FAKE_CLASPC_LOG:?}"
+printf '%s\n' "$*" >> "$log_path"
+
+if [[ "$1" == "--json" && "$2" == "check" ]]; then
+  printf '{"status":"ok","command":"check","input":"%s"}\n' "$3"
+  exit 0
+fi
+
+if [[ "$1" != "exec-image" ]]; then
+  printf 'unsupported fake-claspc invocation: %s\n' "$*" >&2
+  exit 1
+fi
+
+image_path="$2"
+export_name="$3"
+output_path="${@: -1}"
+
+case "$export_name" in
+  main)
+    printf '{"snapshot":"ok"}\n' > "$output_path"
+    ;;
+  nativeProjectText)
+    printf 'native ir\n' > "$output_path"
+    ;;
+  nativeImageProjectText)
+    printf '{"image":"rebuilt"}\n' > "$output_path"
+    ;;
+  checkProjectText)
+    printf 'checked project\n' > "$output_path"
+    ;;
+  checkCoreProjectText)
+    printf '{"checked":"core"}\n' > "$output_path"
+    ;;
+  compileProjectText)
+    printf 'compiled project\n' > "$output_path"
+    ;;
+  checkEntrypoint|explainEntrypoint|compileEntrypoint|nativeEntrypoint)
+    printf '%s output\n' "$export_name" > "$output_path"
+    ;;
+  nativeImageEntrypoint)
+    printf '{"entrypoint":"native-image"}\n' > "$output_path"
+    ;;
+  *)
+    printf 'unexpected export: %s\n' "$export_name" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$test_root/bin/fake-claspc"
+
+printf '{"image":"rebuilt"}\n' > "$test_root/src/embedded.native.image.json"
+printf '{"image":"compiler"}\n' > "$test_root/src/embedded.compiler.native.image.json"
+
+fast_log="$test_root/fake-fast.log"
+IN_NIX_SHELL=1 \
+CLASP_PROJECT_ROOT="$test_root" \
+CLASPC_BIN="$test_root/bin/fake-claspc" \
+CLASP_TEST_FAKE_CLASPC_LOG="$fast_log" \
+"$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
+
+grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json main' "$fast_log" >/dev/null
+grep -F -- '--json check '"$test_root"'/examples/feedback-loop/Main.clasp' "$fast_log" >/dev/null
+if grep -F 'nativeImageProjectText' "$fast_log" >/dev/null; then
+  printf 'fast hosted verify unexpectedly rebuilt the native image\n' >&2
+  exit 1
+fi
+
+full_log="$test_root/fake-full.log"
+IN_NIX_SHELL=1 \
+CLASP_PROJECT_ROOT="$test_root" \
+CLASPC_BIN="$test_root/bin/fake-claspc" \
+CLASP_TEST_FAKE_CLASPC_LOG="$full_log" \
+CLASP_NATIVE_VERIFY_MODE=full \
+"$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
+
+grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectText' "$full_log" >/dev/null
+grep -F 'exec-image '"$test_root"'/src/embedded.verify.native.image.json main' "$full_log" >/dev/null

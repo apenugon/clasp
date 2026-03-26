@@ -1,15 +1,17 @@
 module Compiler.Ast
 
-type HostedTypeAst = HostedTypeName Str | HostedTypeList HostedTypeAst | HostedTypeFunction HostedTypeAst HostedTypeAst
+import Compiler.AstText
+
+type HostedTypeAst = HostedTypeName Str | HostedTypeApply Str [HostedTypeAst] | HostedTypeVar Str | HostedTypeList HostedTypeAst | HostedTypeFunction HostedTypeAst HostedTypeAst
 type HostedAnnotationAst = MissingAnnotation | PresentAnnotation HostedTypeAst
 type HostedPackageImportKindAst = HostedPackageImportNpm | HostedPackageImportTypeScript
 type HostedForeignSourceAst = HostedForeignRuntime | HostedForeignPackageImport HostedPackageImportKindAst Str Str
 type HostedExprAst = HostedName Str | HostedString Str | HostedInt Str | HostedBool Bool | HostedList [HostedExprAst] | HostedCall Str [HostedExprAst] | HostedConstructor Str [HostedExprAst] | HostedMatch HostedExprAst [HostedMatchBranchAst] | HostedRecord Str [HostedRecordFieldExprAst] | HostedFieldAccess HostedExprAst Str | HostedLet Str HostedExprAst HostedExprAst | HostedMutableLet Str HostedExprAst HostedExprAst | HostedAssign Str HostedExprAst HostedExprAst | HostedFor Str HostedExprAst HostedExprAst HostedExprAst | HostedReturn HostedExprAst | HostedIf HostedExprAst HostedExprAst HostedExprAst | HostedEqual HostedExprAst HostedExprAst | HostedNotEqual HostedExprAst HostedExprAst | HostedLessThan HostedExprAst HostedExprAst | HostedLessThanOrEqual HostedExprAst HostedExprAst | HostedGreaterThan HostedExprAst HostedExprAst | HostedGreaterThanOrEqual HostedExprAst HostedExprAst
 type HostedRecordFieldExprAst = HostedRecordFieldExprAst Str HostedExprAst
 type HostedRecordFieldDeclAst = HostedRecordFieldDeclAst Str HostedTypeAst Str
-type HostedRecordDeclAst = HostedRecordDeclAst Str [HostedRecordFieldDeclAst]
+type HostedRecordDeclAst = HostedRecordDeclAst Str [Str] [HostedRecordFieldDeclAst]
 type HostedConstructorDeclAst = HostedConstructorDeclAst Str [HostedTypeAst]
-type HostedTypeDeclAst = HostedTypeDeclAst Str [HostedConstructorDeclAst]
+type HostedTypeDeclAst = HostedTypeDeclAst Str [Str] [HostedConstructorDeclAst]
 type HostedForeignDeclAst = HostedForeignDeclAst Str Bool HostedTypeAst Str HostedForeignSourceAst Str
 type HostedGuideEntryAst = HostedGuideEntryAst Str Str
 type HostedGuideDeclAst = HostedGuideDeclAst Str Str [HostedGuideEntryAst]
@@ -37,6 +39,7 @@ type SplitTailState = WaitingForHead | CapturingTail Str
 type ParserTextResult = ParsedText Str | MissingText Str
 type NestDepth = ZeroDepth | DeeperDepth NestDepth
 type RecordLiteralParseResult = ParsedRecordLiteral Str [HostedRecordFieldExprAst] | MissingRecordLiteral Str
+type RecordUpdateParseResult = ParsedRecordUpdate HostedExprAst [HostedRecordFieldExprAst] | MissingRecordUpdate Str
 type MatchParseResult = ParsedMatch HostedExprAst [HostedMatchBranchAst] | MissingMatch Str
 type LetPartsResult = FoundLetParts [Str] [Str] | MissingLetParts
 type LetParseResult = ParsedLet Str HostedExprAst HostedExprAst | MissingLet Str
@@ -52,9 +55,166 @@ type BinaryExprParseResult = ParsedBinaryExpr HostedExprAst | MissingBinaryExpr 
 type QuotedPrefixResult = ParsedQuotedPrefix Str Str | MissingQuotedPrefix Str
 type TokenSplitResult = FoundTokenSplit [Str] [Str] | MissingTokenSplit
 type MatchSubjectSplitResult = FoundMatchSubject Str Str | MissingMatchSubject
+type OpenGroupState = OpenGroupState NestDepth NestDepth NestDepth Bool Bool
 
 renderStringLiteral : Str -> Str
 renderStringLiteral value = encode value
+
+keepNoRenderedText : Str -> Bool
+keepNoRenderedText value = false
+
+emptyRenderedTexts : [Str]
+emptyRenderedTexts = filter keepNoRenderedText [""]
+
+keepNoHostedForeignDecl : HostedForeignDeclAst -> Bool
+keepNoHostedForeignDecl value = false
+
+emptyHostedForeignDecls : [HostedForeignDeclAst]
+emptyHostedForeignDecls = filter keepNoHostedForeignDecl [HostedForeignDeclAst "" false (HostedTypeName "") "" HostedForeignRuntime ""]
+
+keepNoHostedType : HostedTypeAst -> Bool
+keepNoHostedType value = false
+
+emptyHostedTypes : [HostedTypeAst]
+emptyHostedTypes = filter keepNoHostedType [HostedTypeName ""]
+
+keepNoHostedConstructorDecl : HostedConstructorDeclAst -> Bool
+keepNoHostedConstructorDecl value = false
+
+emptyHostedConstructorDecls : [HostedConstructorDeclAst]
+emptyHostedConstructorDecls = filter keepNoHostedConstructorDecl [HostedConstructorDeclAst "" emptyHostedTypes]
+
+keepNoHostedRecordFieldDecl : HostedRecordFieldDeclAst -> Bool
+keepNoHostedRecordFieldDecl value = false
+
+emptyHostedRecordFieldDecls : [HostedRecordFieldDeclAst]
+emptyHostedRecordFieldDecls = filter keepNoHostedRecordFieldDecl [HostedRecordFieldDeclAst "" (HostedTypeName "") ""]
+
+keepNoHostedGuideEntry : HostedGuideEntryAst -> Bool
+keepNoHostedGuideEntry value = false
+
+emptyHostedGuideEntries : [HostedGuideEntryAst]
+emptyHostedGuideEntries = filter keepNoHostedGuideEntry [HostedGuideEntryAst "" ""]
+
+keepNoHostedPolicyPermission : HostedPolicyPermissionAst -> Bool
+keepNoHostedPolicyPermission value = false
+
+emptyHostedPolicyPermissions : [HostedPolicyPermissionAst]
+emptyHostedPolicyPermissions = filter keepNoHostedPolicyPermission [HostedPolicyPermissionAst HostedPolicyPermissionFile ""]
+
+keepNoHostedProjectionFieldDecl : HostedProjectionFieldDeclAst -> Bool
+keepNoHostedProjectionFieldDecl value = false
+
+emptyHostedProjectionFieldDecls : [HostedProjectionFieldDeclAst]
+emptyHostedProjectionFieldDecls = filter keepNoHostedProjectionFieldDecl [HostedProjectionFieldDeclAst ""]
+
+keepNoHostedRecordFieldExpr : HostedRecordFieldExprAst -> Bool
+keepNoHostedRecordFieldExpr value = false
+
+emptyHostedRecordFieldExprs : [HostedRecordFieldExprAst]
+emptyHostedRecordFieldExprs = filter keepNoHostedRecordFieldExpr [HostedRecordFieldExprAst "" (HostedName "")]
+
+keepNoHostedExpr : HostedExprAst -> Bool
+keepNoHostedExpr value = false
+
+emptyHostedExprs : [HostedExprAst]
+emptyHostedExprs = filter keepNoHostedExpr [HostedName ""]
+
+keepNoHostedMatchBranch : HostedMatchBranchAst -> Bool
+keepNoHostedMatchBranch value = false
+
+emptyHostedMatchBranches : [HostedMatchBranchAst]
+emptyHostedMatchBranches = filter keepNoHostedMatchBranch [HostedMatchBranchAst (HostedPatternAst "" emptyRenderedTexts) (HostedName "")]
+
+keepNoHostedDecl : HostedDeclAst -> Bool
+keepNoHostedDecl value = false
+
+emptyHostedDecls : [HostedDeclAst]
+emptyHostedDecls = filter keepNoHostedDecl [HostedDeclAst "" MissingAnnotation emptyRenderedTexts (HostedName "")]
+
+keepNoHostedTypeDecl : HostedTypeDeclAst -> Bool
+keepNoHostedTypeDecl value = false
+
+emptyHostedTypeDecls : [HostedTypeDeclAst]
+emptyHostedTypeDecls = filter keepNoHostedTypeDecl [HostedTypeDeclAst "" emptyRenderedTexts emptyHostedConstructorDecls]
+
+keepNoHostedRecordDecl : HostedRecordDeclAst -> Bool
+keepNoHostedRecordDecl value = false
+
+emptyHostedRecordDecls : [HostedRecordDeclAst]
+emptyHostedRecordDecls = filter keepNoHostedRecordDecl [HostedRecordDeclAst "" emptyRenderedTexts emptyHostedRecordFieldDecls]
+
+keepNoHostedGuideDecl : HostedGuideDeclAst -> Bool
+keepNoHostedGuideDecl value = false
+
+emptyHostedGuideDecls : [HostedGuideDeclAst]
+emptyHostedGuideDecls = filter keepNoHostedGuideDecl [HostedGuideDeclAst "" "" emptyHostedGuideEntries]
+
+keepNoHostedPolicyDecl : HostedPolicyDeclAst -> Bool
+keepNoHostedPolicyDecl value = false
+
+emptyHostedPolicyDecls : [HostedPolicyDeclAst]
+emptyHostedPolicyDecls = filter keepNoHostedPolicyDecl [HostedPolicyDeclAst "" emptyRenderedTexts emptyHostedPolicyPermissions]
+
+keepNoHostedProjectionDecl : HostedProjectionDeclAst -> Bool
+keepNoHostedProjectionDecl value = false
+
+emptyHostedProjectionDecls : [HostedProjectionDeclAst]
+emptyHostedProjectionDecls = filter keepNoHostedProjectionDecl [HostedProjectionDeclAst "" "" "" emptyHostedProjectionFieldDecls]
+
+keepNoHostedAgentRoleDecl : HostedAgentRoleDeclAst -> Bool
+keepNoHostedAgentRoleDecl value = false
+
+emptyHostedAgentRoleDecls : [HostedAgentRoleDeclAst]
+emptyHostedAgentRoleDecls = filter keepNoHostedAgentRoleDecl [HostedAgentRoleDeclAst "" "" "" "" ""]
+
+keepNoHostedAgentDecl : HostedAgentDeclAst -> Bool
+keepNoHostedAgentDecl value = false
+
+emptyHostedAgentDecls : [HostedAgentDeclAst]
+emptyHostedAgentDecls = filter keepNoHostedAgentDecl [HostedAgentDeclAst "" ""]
+
+keepNoHostedWorkflowDecl : HostedWorkflowDeclAst -> Bool
+keepNoHostedWorkflowDecl value = false
+
+emptyHostedWorkflowDecls : [HostedWorkflowDeclAst]
+emptyHostedWorkflowDecls = filter keepNoHostedWorkflowDecl [HostedWorkflowDeclAst "" "" (HostedTypeName "")]
+
+keepNoHostedRouteDecl : HostedRouteDeclAst -> Bool
+keepNoHostedRouteDecl value = false
+
+emptyHostedRouteDecls : [HostedRouteDeclAst]
+emptyHostedRouteDecls = filter keepNoHostedRouteDecl [HostedRouteDeclAst "" "" "" "" "" "" ""]
+
+keepNoHostedHookDecl : HostedHookDeclAst -> Bool
+keepNoHostedHookDecl value = false
+
+emptyHostedHookDecls : [HostedHookDeclAst]
+emptyHostedHookDecls = filter keepNoHostedHookDecl [HostedHookDeclAst "" "" "" "" ""]
+
+keepNoHostedToolServerDecl : HostedToolServerDeclAst -> Bool
+keepNoHostedToolServerDecl value = false
+
+emptyHostedToolServerDecls : [HostedToolServerDeclAst]
+emptyHostedToolServerDecls = filter keepNoHostedToolServerDecl [HostedToolServerDeclAst "" "" "" ""]
+
+keepNoHostedToolDecl : HostedToolDeclAst -> Bool
+keepNoHostedToolDecl value = false
+
+emptyHostedToolDecls : [HostedToolDeclAst]
+emptyHostedToolDecls = filter keepNoHostedToolDecl [HostedToolDeclAst "" "" "" "" ""]
+
+keepNoHostedVerifierDecl : HostedVerifierDeclAst -> Bool
+keepNoHostedVerifierDecl value = false
+
+emptyHostedVerifierDecls : [HostedVerifierDeclAst]
+emptyHostedVerifierDecls = filter keepNoHostedVerifierDecl [HostedVerifierDeclAst "" ""]
+
+keepNoHostedMergeGateDecl : HostedMergeGateDeclAst -> Bool
+keepNoHostedMergeGateDecl value = false
+
+emptyHostedMergeGateDecls : [HostedMergeGateDeclAst]
+emptyHostedMergeGateDecls = filter keepNoHostedMergeGateDecl [HostedMergeGateDeclAst "" emptyRenderedTexts]
 
 renderHostedAtomicType : HostedTypeAst -> Str
 renderHostedAtomicType typeAst = match typeAst {
@@ -62,6 +222,10 @@ renderHostedAtomicType typeAst = match typeAst {
     textConcat ["(", renderHostedType typeAst, ")"],
   HostedTypeList itemType ->
     textConcat ["[", renderHostedType itemType, "]"],
+  HostedTypeApply name args ->
+    textConcat ["(", renderHostedType typeAst, ")"],
+  HostedTypeVar name ->
+    name,
   HostedTypeName name ->
     name
 }
@@ -69,6 +233,10 @@ renderHostedAtomicType typeAst = match typeAst {
 renderHostedType : HostedTypeAst -> Str
 renderHostedType typeAst = match typeAst {
   HostedTypeName name ->
+    name,
+  HostedTypeApply name args ->
+    textConcat [name, " ", textJoin " " (renderHostedTypeList args)],
+  HostedTypeVar name ->
     name,
   HostedTypeList itemType ->
     textConcat ["[", renderHostedType itemType, "]"],
@@ -125,17 +293,26 @@ constructorDeclPayloadTypes decl = match decl {
 }
 
 hostedTypeDeclAst : Str -> [HostedConstructorDeclAst] -> HostedTypeDeclAst
-hostedTypeDeclAst name constructors = HostedTypeDeclAst name constructors
+hostedTypeDeclAst name constructors = HostedTypeDeclAst name emptyRenderedTexts constructors
+
+hostedTypeDeclAstWithParams : Str -> [Str] -> [HostedConstructorDeclAst] -> HostedTypeDeclAst
+hostedTypeDeclAstWithParams name params constructors = HostedTypeDeclAst name params constructors
 
 typeDeclName : HostedTypeDeclAst -> Str
 typeDeclName decl = match decl {
-  HostedTypeDeclAst name constructors ->
+  HostedTypeDeclAst name params constructors ->
     name
+}
+
+typeDeclParams : HostedTypeDeclAst -> [Str]
+typeDeclParams decl = match decl {
+  HostedTypeDeclAst name params constructors ->
+    params
 }
 
 typeDeclConstructors : HostedTypeDeclAst -> [HostedConstructorDeclAst]
 typeDeclConstructors decl = match decl {
-  HostedTypeDeclAst name constructors ->
+  HostedTypeDeclAst name params constructors ->
     constructors
 }
 
@@ -617,23 +794,32 @@ recordFieldDeclClassification field = match field {
 }
 
 hostedRecordDeclAst : Str -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst
-hostedRecordDeclAst name fields = HostedRecordDeclAst name fields
+hostedRecordDeclAst name fields = HostedRecordDeclAst name emptyRenderedTexts fields
+
+hostedRecordDeclAstWithParams : Str -> [Str] -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst
+hostedRecordDeclAstWithParams name params fields = HostedRecordDeclAst name params fields
 
 recordDeclName : HostedRecordDeclAst -> Str
 recordDeclName decl = match decl {
-  HostedRecordDeclAst name fields ->
+  HostedRecordDeclAst name params fields ->
     name
+}
+
+recordDeclParams : HostedRecordDeclAst -> [Str]
+recordDeclParams decl = match decl {
+  HostedRecordDeclAst name params fields ->
+    params
 }
 
 recordDeclFields : HostedRecordDeclAst -> [HostedRecordFieldDeclAst]
 recordDeclFields decl = match decl {
-  HostedRecordDeclAst name fields ->
+  HostedRecordDeclAst name params fields ->
     fields
 }
 
 renderHostedTypeList : [HostedTypeAst] -> [Str]
 renderHostedTypeList values = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for value in values {
     rendered = appendRenderedText rendered (renderHostedType value);
     rendered
@@ -643,7 +829,7 @@ renderHostedTypeList values = {
 
 renderRecordFieldTypeSummaries : HostedRecordDeclAst -> [Str]
 renderRecordFieldTypeSummaries decl = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in recordDeclFields decl {
     rendered = appendRenderedText rendered (textConcat [recordFieldDeclName field, " : ", renderHostedType (recordFieldDeclType field), if recordFieldDeclClassification field == "" then "" else textConcat [" classified ", recordFieldDeclClassification field]]);
     rendered
@@ -660,7 +846,7 @@ renderConstructorSummary decl = {
 
 renderConstructorSummaries : HostedTypeDeclAst -> [Str]
 renderConstructorSummaries decl = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for constructorDecl in typeDeclConstructors decl {
     rendered = appendRenderedText rendered (renderConstructorSummary constructorDecl);
     rendered
@@ -922,7 +1108,7 @@ applyForeignSignature foreignDecl targetName signature = if foreignDeclName fore
 
 applyForeignSignatureList : [HostedForeignDeclAst] -> Str -> Str -> [HostedForeignDeclAst]
 applyForeignSignatureList foreignDecls targetName signature = {
-  let mut updated = [];
+  let mut updated = emptyHostedForeignDecls;
   for foreignDecl in foreignDecls {
     updated = appendForeignDecl updated (applyForeignSignature foreignDecl targetName signature);
     updated
@@ -978,6 +1164,9 @@ appendPolicyPermission values value = append values [value]
 appendRenderedText : [Str] -> Str -> [Str]
 appendRenderedText values value = append values [value]
 
+prependRenderedText : [Str] -> Str -> [Str]
+prependRenderedText values value = prepend value values
+
 appendRecordFieldDecl : [HostedRecordFieldDeclAst] -> HostedRecordFieldDeclAst -> [HostedRecordFieldDeclAst]
 appendRecordFieldDecl values value = append values [value]
 
@@ -996,77 +1185,17 @@ appendExpr values value = append values [value]
 appendChar : Str -> Str -> Str
 appendChar value char = textConcat [value, char]
 
+textFromReversedChars : [Str] -> Str
+textFromReversedChars chars = textJoin "" (reverse chars)
+
 trimSpaces : Str -> Str
-trimSpaces value = {
-  let mut started = false;
-  let mut result = "";
-  let mut pendingSpaces = "";
-  for char in textChars value {
-    if started then {
-      if isLayoutWhitespaceChar char then {
-        pendingSpaces = appendChar pendingSpaces char;
-        pendingSpaces
-      } else {
-        result = textConcat [result, pendingSpaces, char];
-        pendingSpaces = "";
-        started = true;
-        result
-      }
-    } else if isLayoutWhitespaceChar char then {
-      result
-    } else {
-      result = appendChar result char;
-      started = true;
-      result
-    }
-  };
-  result
-}
+trimSpaces value = astTextTrimSpaces value
 
 isLayoutWhitespaceChar : Str -> Bool
 isLayoutWhitespaceChar value = if value == " " then true else if value == "\n" then true else if value == "\t" then true else if value == "\r" then true else false
 
 normalizeLayoutText : Str -> Str
-normalizeLayoutText value = {
-  let mut inString = false;
-  let mut escapeNext = false;
-  let mut pendingSpace = "";
-  let mut result = "";
-  for char in textChars value {
-    if inString then {
-      result = appendChar result char;
-      if escapeNext then {
-        escapeNext = false;
-        result
-      } else if char == "\\" then {
-        escapeNext = true;
-        result
-      } else if char == "\"" then {
-        inString = false;
-        result
-      } else {
-        result
-      }
-    } else if char == "\"" then {
-      result = textConcat [result, pendingSpace, char];
-      pendingSpace = "";
-      inString = true;
-      result
-    } else if isLayoutWhitespaceChar char then {
-      if result == "" then {
-        result
-      } else {
-        pendingSpace = " ";
-        result
-      }
-    } else {
-      result = textConcat [result, pendingSpace, char];
-      pendingSpace = "";
-      result
-    }
-  };
-  result
-}
+normalizeLayoutText value = astTextNormalizeLayoutText value
 
 appendNonEmptyText : [Str] -> Str -> [Str]
 appendNonEmptyText values value = {
@@ -1075,59 +1204,25 @@ appendNonEmptyText values value = {
 }
 
 firstSegment : Str -> Str
-firstSegment value = {
-  for segment in textSplit value "\n" {
-    return segment
-  };
-  ""
-}
+firstSegment value = astTextFirstSegment value
 
 remainingSegments : Str -> Str
-remainingSegments value = {
-  let mut state = WaitingForHead;
-  for segment in textSplit value "\n" {
-    state = match state {
-      WaitingForHead ->
-        CapturingTail "",
-      CapturingTail current ->
-        CapturingTail (textConcat [current, segment])
-    };
-    state
-  };
-  match state {
-    WaitingForHead ->
-      "",
-    CapturingTail current ->
-      current
-  }
-}
+remainingSegments value = astTextRemainingSegments value
 
 splitWords : Str -> [Str]
-splitWords value = if value == "" then [] else splitTopLevel (normalizeLayoutText value) " "
+splitWords value = astTextSplitWords value
 
 firstCharText : Str -> Str
-firstCharText value = {
-  for char in textChars value {
-    return char
-  };
-  ""
-}
+firstCharText value = astTextFirstCharText value
 
 lastCharText : Str -> Str
-lastCharText value = {
-  let mut last = "";
-  for char in textChars value {
-    last = char;
-    last
-  };
-  last
-}
+lastCharText value = astTextLastCharText value
 
 isUppercaseChar : Str -> Bool
-isUppercaseChar value = if value == "A" then true else if value == "B" then true else if value == "C" then true else if value == "D" then true else if value == "E" then true else if value == "F" then true else if value == "G" then true else if value == "H" then true else if value == "I" then true else if value == "J" then true else if value == "K" then true else if value == "L" then true else if value == "M" then true else if value == "N" then true else if value == "O" then true else if value == "P" then true else if value == "Q" then true else if value == "R" then true else if value == "S" then true else if value == "T" then true else if value == "U" then true else if value == "V" then true else if value == "W" then true else if value == "X" then true else if value == "Y" then true else if value == "Z" then true else false
+isUppercaseChar value = astTextIsUppercaseChar value
 
 startsWithUppercase : Str -> Bool
-startsWithUppercase value = isUppercaseChar (firstCharText (trimSpaces value))
+startsWithUppercase value = astTextStartsWithUppercase value
 
 stripToken : Str -> Str -> Str
 stripToken value token = textJoin "" (textSplit value token)
@@ -1136,7 +1231,7 @@ stripDigits : Str -> Str
 stripDigits value = stripToken (stripToken (stripToken (stripToken (stripToken (stripToken (stripToken (stripToken (stripToken (stripToken value "0") "1") "2") "3") "4") "5") "6") "7") "8") "9"
 
 isIntLiteral : Str -> Bool
-isIntLiteral value = if value == "" then false else stripDigits value == ""
+isIntLiteral value = astTextIsIntLiteral value
 
 increaseDepth : NestDepth -> NestDepth
 increaseDepth depth = DeeperDepth depth
@@ -1161,76 +1256,7 @@ isTopLevel : NestDepth -> NestDepth -> NestDepth -> Bool
 isTopLevel parenDepth bracketDepth braceDepth = if isZeroDepth parenDepth then if isZeroDepth bracketDepth then isZeroDepth braceDepth else false else false
 
 splitTopLevel : Str -> Str -> [Str]
-splitTopLevel value separator = {
-  let mut parts = [];
-  let mut current = "";
-  let mut parenDepth = ZeroDepth;
-  let mut bracketDepth = ZeroDepth;
-  let mut braceDepth = ZeroDepth;
-  let mut inString = false;
-  let mut escapeNext = false;
-  for char in textChars value {
-    if inString then {
-      if escapeNext then {
-        current = appendChar current char;
-        escapeNext = false;
-        current
-      } else if char == "\\" then {
-        current = appendChar current char;
-        escapeNext = true;
-        current
-      } else if char == "\"" then {
-        current = appendChar current char;
-        inString = false;
-        current
-      } else {
-        current = appendChar current char;
-        current
-      }
-    } else if char == "\"" then {
-      current = appendChar current char;
-      inString = true;
-      current
-    } else if char == "(" then {
-      current = appendChar current char;
-      parenDepth = increaseDepth parenDepth;
-      current
-    } else if char == ")" then {
-      current = appendChar current char;
-      parenDepth = decreaseDepth parenDepth;
-      current
-    } else if char == "[" then {
-      current = appendChar current char;
-      bracketDepth = increaseDepth bracketDepth;
-      current
-    } else if char == "]" then {
-      current = appendChar current char;
-      bracketDepth = decreaseDepth bracketDepth;
-      current
-    } else if char == "{" then {
-      current = appendChar current char;
-      braceDepth = increaseDepth braceDepth;
-      current
-    } else if char == "}" then {
-      current = appendChar current char;
-      braceDepth = decreaseDepth braceDepth;
-      current
-    } else if char == separator then {
-      if isTopLevel parenDepth bracketDepth braceDepth then {
-        parts = appendNonEmptyText parts current;
-        current = "";
-        current
-      } else {
-        current = appendChar current char;
-        current
-      }
-    } else {
-      current = appendChar current char;
-      current
-    }
-  };
-  appendNonEmptyText parts current
-}
+splitTopLevel value separator = astTextSplitTopLevel value separator
 
 firstText : [Str] -> Str
 firstText values = {
@@ -1242,18 +1268,18 @@ firstText values = {
 
 remainingTexts : [Str] -> [Str]
 remainingTexts values = {
-  let mut remaining = [];
+  let mut remaining = emptyRenderedTexts;
   let mut seenFirst = false;
   for value in values {
     if seenFirst then {
-      remaining = appendRenderedText remaining value;
+      remaining = prependRenderedText remaining value;
       remaining
     } else {
       seenFirst = true;
       remaining
     }
   };
-  remaining
+  reverse remaining
 }
 
 hasAdditionalText : [Str] -> Bool
@@ -1275,57 +1301,59 @@ unwrapDelimited value open close = {
   let trimmed = trimSpaces value;
   match textPrefix trimmed open {
     Ok tail -> {
-      let mut body = "";
-      let mut trailing = "";
+      let mut bodyChars = emptyRenderedTexts;
+      let mut trailingChars = emptyRenderedTexts;
       let mut depth = increaseDepth ZeroDepth;
       let mut inString = false;
       let mut escapeNext = false;
       let mut closed = false;
       for char in textChars tail {
         if closed then {
-          trailing = appendChar trailing char;
-          trailing
+          trailingChars = prepend char trailingChars;
+          trailingChars
         } else if inString then {
           if escapeNext then {
-            body = appendChar body char;
+            bodyChars = prepend char bodyChars;
             escapeNext = false;
-            body
+            bodyChars
           } else if char == "\\" then {
-            body = appendChar body char;
+            bodyChars = prepend char bodyChars;
             escapeNext = true;
-            body
+            bodyChars
           } else if char == "\"" then {
-            body = appendChar body char;
+            bodyChars = prepend char bodyChars;
             inString = false;
-            body
+            bodyChars
           } else {
-            body = appendChar body char;
-            body
+            bodyChars = prepend char bodyChars;
+            bodyChars
           }
         } else if char == "\"" then {
-          body = appendChar body char;
+          bodyChars = prepend char bodyChars;
           inString = true;
-          body
+          bodyChars
         } else if char == open then {
-          body = appendChar body char;
+          bodyChars = prepend char bodyChars;
           depth = increaseDepth depth;
-          body
+          bodyChars
         } else if char == close then {
           let nextDepth = decreaseDepth depth;
           if isZeroDepth nextDepth then {
             depth = nextDepth;
             closed = true;
-            body
+            bodyChars
           } else {
-            body = appendChar body char;
+            bodyChars = prepend char bodyChars;
             depth = nextDepth;
-            body
+            bodyChars
           }
         } else {
-          body = appendChar body char;
-          body
+          bodyChars = prepend char bodyChars;
+          bodyChars
         }
       };
+      let body = textFromReversedChars bodyChars;
+      let trailing = textFromReversedChars trailingChars;
       if closed then {
         if trimSpaces trailing == "" then ParsedText body else MissingText trimmed
       } else {
@@ -1342,30 +1370,32 @@ unwrapStringLiteral value = {
   let trimmed = trimSpaces value;
   match textPrefix trimmed "\"" {
     Ok tail -> {
-      let mut body = "";
-      let mut trailing = "";
+      let mut bodyChars = emptyRenderedTexts;
+      let mut trailingChars = emptyRenderedTexts;
       let mut closed = false;
       let mut escapeNext = false;
       for char in textChars tail {
         if closed then {
-          trailing = appendChar trailing char;
-          trailing
+          trailingChars = prepend char trailingChars;
+          trailingChars
         } else if escapeNext then {
-          body =
-            if char == "n" then textConcat [body, "\n"] else if char == "r" then textConcat [body, "\r"] else if char == "t" then textConcat [body, "\t"] else appendChar body char;
+          bodyChars =
+            if char == "n" then prepend "\n" bodyChars else if char == "r" then prepend "\r" bodyChars else if char == "t" then prepend "\t" bodyChars else prepend char bodyChars;
           escapeNext = false;
-          body
+          bodyChars
         } else if char == "\\" then {
           escapeNext = true;
-          body
+          bodyChars
         } else if char == "\"" then {
           closed = true;
-          body
+          bodyChars
         } else {
-          body = appendChar body char;
-          body
+          bodyChars = prepend char bodyChars;
+          bodyChars
         }
       };
+      let body = textFromReversedChars bodyChars;
+      let trailing = textFromReversedChars trailingChars;
       if closed then {
         if trimSpaces trailing == "" then ParsedText body else MissingText trimmed
       } else {
@@ -1382,30 +1412,32 @@ parseQuotedPrefix value = {
   let trimmed = trimSpaces value;
   match textPrefix trimmed "\"" {
     Ok tail -> {
-      let mut body = "";
-      let mut trailing = "";
+      let mut bodyChars = emptyRenderedTexts;
+      let mut trailingChars = emptyRenderedTexts;
       let mut closed = false;
       let mut escapeNext = false;
       for char in textChars tail {
         if closed then {
-          trailing = appendChar trailing char;
-          trailing
+          trailingChars = prepend char trailingChars;
+          trailingChars
         } else if escapeNext then {
-          body =
-            if char == "n" then textConcat [body, "\n"] else if char == "r" then textConcat [body, "\r"] else if char == "t" then textConcat [body, "\t"] else appendChar body char;
+          bodyChars =
+            if char == "n" then prepend "\n" bodyChars else if char == "r" then prepend "\r" bodyChars else if char == "t" then prepend "\t" bodyChars else prepend char bodyChars;
           escapeNext = false;
-          body
+          bodyChars
         } else if char == "\\" then {
           escapeNext = true;
-          body
+          bodyChars
         } else if char == "\"" then {
           closed = true;
-          body
+          bodyChars
         } else {
-          body = appendChar body char;
-          body
+          bodyChars = prepend char bodyChars;
+          bodyChars
         }
       };
+      let body = textFromReversedChars bodyChars;
+      let trailing = textFromReversedChars trailingChars;
       if closed then ParsedQuotedPrefix body (trimSpaces trailing) else MissingQuotedPrefix trimmed
     },
     Err missingPrefix ->
@@ -1440,7 +1472,20 @@ betweenBraces value = match unwrapDelimited value "{" "}" {
 parseAtomicHostedType : Str -> HostedTypeAst
 parseAtomicHostedType rawValue = {
   let value = trimSpaces rawValue;
-  if isListLiteral value then HostedTypeList (parseHostedType (betweenBrackets value)) else HostedTypeName value
+  if isListLiteral value then {
+    HostedTypeList (parseHostedType (betweenBrackets value))
+  } else {
+    let parts = splitWords value;
+    let head = firstText parts;
+    let tail = remainingTexts parts;
+    if head == "" then {
+      HostedTypeName ""
+    } else if firstText tail == "" then {
+      if startsWithUppercase head then HostedTypeName head else HostedTypeVar head
+    } else {
+      HostedTypeApply head (parseHostedTypes tail)
+    }
+  }
 }
 
 parseHostedType : Str -> HostedTypeAst
@@ -1458,38 +1503,43 @@ parseConstructorDecl : Str -> HostedConstructorDeclAst
 parseConstructorDecl rawValue = {
   let value = trimSpaces rawValue;
   let parts = splitWords value;
-  if hasAdditionalText parts then hostedConstructorDeclAst (firstText parts) (parseHostedTypes (remainingTexts parts)) else hostedConstructorDeclAst value []
+  if hasAdditionalText parts then hostedConstructorDeclAst (firstText parts) (parseHostedTypes (remainingTexts parts)) else hostedConstructorDeclAst value emptyHostedTypes
 }
 
 parseHostedTypes : [Str] -> [HostedTypeAst]
 parseHostedTypes values = {
-  let mut parsed = [];
+  let mut parsed = emptyHostedTypes;
   for value in values {
-    parsed = append parsed [parseHostedType value];
+    parsed = prepend (parseHostedType value) parsed;
     parsed
   };
-  parsed
+  reverse parsed
 }
 
 parseConstructorDecls : Str -> [HostedConstructorDeclAst]
 parseConstructorDecls value = {
-  let mut constructors = [];
+  let mut constructors = emptyHostedConstructorDecls;
   for constructorValue in splitTopLevel value "|" {
-    constructors = appendConstructorDecl constructors (parseConstructorDecl constructorValue);
+    constructors = prepend (parseConstructorDecl constructorValue) constructors;
     constructors
   };
-  constructors
+  reverse constructors
 }
 
 parseTypeDecl : Str -> HostedTypeDeclAst
 parseTypeDecl value = match textSplitFirst value " = " {
   Ok payload -> {
-    let name = trimSpaces (firstSegment payload);
+    let headerParts = splitWords (trimSpaces (firstSegment payload));
+    let name = firstText headerParts;
+    let params = remainingTexts headerParts;
     let constructors = parseConstructorDecls (remainingSegments payload);
-    hostedTypeDeclAst name constructors
+    hostedTypeDeclAstWithParams name params constructors
   },
   Err missingBody ->
-    hostedTypeDeclAst (trimSpaces value) []
+    {
+      let headerParts = splitWords (trimSpaces value);
+      hostedTypeDeclAstWithParams (firstText headerParts) (remainingTexts headerParts) emptyHostedConstructorDecls
+    }
 }
 
 parseRecordFieldDecl : Str -> HostedRecordFieldDeclAst
@@ -1520,23 +1570,28 @@ parseRecordFieldDecl rawValue = {
 
 parseRecordFieldDecls : Str -> [HostedRecordFieldDeclAst]
 parseRecordFieldDecls value = {
-  let mut fields = [];
+  let mut fields = emptyHostedRecordFieldDecls;
   for fieldValue in splitTopLevel value "," {
-    fields = appendRecordFieldDecl fields (parseRecordFieldDecl fieldValue);
+    fields = prepend (parseRecordFieldDecl fieldValue) fields;
     fields
   };
-  fields
+  reverse fields
 }
 
 parseRecordDecl : Str -> HostedRecordDeclAst
 parseRecordDecl value = match textSplitFirst value " = " {
   Ok payload -> {
-    let name = trimSpaces (firstSegment payload);
+    let headerParts = splitWords (trimSpaces (firstSegment payload));
+    let name = firstText headerParts;
+    let params = remainingTexts headerParts;
     let body = trimSpaces (remainingSegments payload);
-    hostedRecordDeclAst name (parseRecordFieldDecls (betweenBraces body))
+    hostedRecordDeclAstWithParams name params (parseRecordFieldDecls (betweenBraces body))
   },
   Err missingBody ->
-    hostedRecordDeclAst (trimSpaces value) []
+    {
+      let headerParts = splitWords (trimSpaces value);
+      hostedRecordDeclAstWithParams (firstText headerParts) (remainingTexts headerParts) emptyHostedRecordFieldDecls
+    }
 }
 
 parsePackageImportKind : Str -> HostedPackageImportKindAst
@@ -1636,12 +1691,12 @@ parseGuideEntry rawValue = {
 
 parseGuideEntries : Str -> [HostedGuideEntryAst]
 parseGuideEntries value = {
-  let mut entries = [];
+  let mut entries = emptyHostedGuideEntries;
   for entryValue in splitTopLevel value "," {
-    entries = appendGuideEntry entries (parseGuideEntry entryValue);
+    entries = prepend (parseGuideEntry entryValue) entries;
     entries
   };
-  entries
+  reverse entries
 }
 
 parseGuideDecl : Str -> HostedGuideDeclAst
@@ -1659,7 +1714,7 @@ parseGuideDecl rawValue = {
       }
     },
     Err missingBody ->
-      hostedGuideDeclAst value "" []
+      hostedGuideDeclAst value "" emptyHostedGuideEntries
   }
 }
 
@@ -1694,22 +1749,22 @@ parsePolicyPermission rawValue = {
 
 parsePolicyPermissions : Str -> [HostedPolicyPermissionAst]
 parsePolicyPermissions value = {
-  let mut permissions = [];
+  let mut permissions = emptyHostedPolicyPermissions;
   for permissionValue in splitTopLevel value "," {
-    permissions = appendPolicyPermission permissions (parsePolicyPermission permissionValue);
+    permissions = prepend (parsePolicyPermission permissionValue) permissions;
     permissions
   };
-  permissions
+  reverse permissions
 }
 
 parsePolicyClassifications : Str -> [Str]
 parsePolicyClassifications value = {
-  let mut classifications = [];
+  let mut classifications = emptyRenderedTexts;
   for classificationValue in splitTopLevel value "," {
-    classifications = appendRenderedText classifications (trimSpaces classificationValue);
+    classifications = prependRenderedText classifications (trimSpaces classificationValue);
     classifications
   };
-  classifications
+  reverse classifications
 }
 
 parsePolicyDecl : Str -> HostedPolicyDeclAst
@@ -1723,27 +1778,27 @@ parsePolicyDecl rawValue = {
         Ok permitsPayload ->
           hostedPolicyDeclAst name (parsePolicyClassifications (firstSegment permitsPayload)) (parsePolicyPermissions (betweenBraces (remainingSegments permitsPayload))),
         Err noPermits ->
-          hostedPolicyDeclAst name (parsePolicyClassifications body) []
+          hostedPolicyDeclAst name (parsePolicyClassifications body) emptyHostedPolicyPermissions
       }
     },
     Err missingBody ->
-      hostedPolicyDeclAst value [] []
+      hostedPolicyDeclAst value emptyRenderedTexts emptyHostedPolicyPermissions
   }
 }
 
 parseProjectionFieldDecls : Str -> [HostedProjectionFieldDeclAst]
 parseProjectionFieldDecls value = {
-  let mut fields = [];
+  let mut fields = emptyHostedProjectionFieldDecls;
   for fieldValue in splitTopLevel value "," {
     let fieldName = trimSpaces fieldValue;
     if fieldName == "" then {
       fields
     } else {
-      fields = append fields [hostedProjectionFieldDeclAst fieldName];
+      fields = prepend (hostedProjectionFieldDeclAst fieldName) fields;
       fields
     }
   };
-  fields
+  reverse fields
 }
 
 parseProjectionDecl : Str -> HostedProjectionDeclAst
@@ -1769,16 +1824,16 @@ parseProjectionDecl rawValue = {
                   hostedProjectionDeclAst name sourceRecordName (trimSpaces (firstSegment policyBody)) (parseProjectionFieldDecls (betweenBraces fieldBody))
                 },
                 Err missingBrace ->
-                  hostedProjectionDeclAst name sourceRecordName policyPayload []
+                  hostedProjectionDeclAst name sourceRecordName policyPayload emptyHostedProjectionFieldDecls
               }
           }
         },
         Err missingPolicy ->
-          hostedProjectionDeclAst name body "" []
+          hostedProjectionDeclAst name body "" emptyHostedProjectionFieldDecls
       }
     },
     Err missingBody ->
-      hostedProjectionDeclAst value "" "" []
+      hostedProjectionDeclAst value "" "" emptyHostedProjectionFieldDecls
   }
 }
 
@@ -1973,7 +2028,7 @@ parseMergeGateDecl rawValue = {
   let value = trimSpaces rawValue;
   match textSplitFirst value " = " {
     Ok payload -> {
-      let mut verifierNames = [];
+      let mut verifierNames = emptyRenderedTexts;
       for verifierName in splitTopLevel (remainingSegments payload) "," {
         verifierNames = appendRenderedText verifierNames (trimSpaces verifierName);
         verifierNames
@@ -1981,7 +2036,7 @@ parseMergeGateDecl rawValue = {
       hostedMergeGateDeclAst (trimSpaces (firstSegment payload)) verifierNames
     },
     Err missingVerifiers ->
-      hostedMergeGateDeclAst value []
+      hostedMergeGateDeclAst value emptyRenderedTexts
   }
 }
 
@@ -1998,12 +2053,45 @@ parseRecordFieldExpr rawValue = {
 
 parseRecordFieldExprs : Str -> [HostedRecordFieldExprAst]
 parseRecordFieldExprs value = {
-  let mut fields = [];
+  let mut fields = emptyHostedRecordFieldExprs;
   for fieldValue in splitTopLevel value "," {
     fields = appendRecordFieldExpr fields (parseRecordFieldExpr fieldValue);
     fields
   };
   fields
+}
+
+recordDestructureTempName : Str
+recordDestructureTempName = "__clasp_record_subject__"
+
+recordUpdateBuiltinName : Str
+recordUpdateBuiltinName = "__recordUpdate"
+
+recordUpdatePlaceholderName : Str
+recordUpdatePlaceholderName = "__record_update__"
+
+parseRecordBinderNames : Str -> [Str]
+parseRecordBinderNames rawValue = match unwrapDelimited (trimSpaces rawValue) "{" "}" {
+  ParsedText payload -> {
+    let mut names = emptyRenderedTexts;
+    for name in splitTopLevel payload "," {
+      names = appendNonEmptyText names name;
+      names
+    };
+    names
+  },
+  MissingText missing ->
+    emptyRenderedTexts
+}
+
+buildRecordDestructureBindings : Str -> [Str] -> HostedExprAst -> HostedExprAst
+buildRecordDestructureBindings subjectName fieldNames body = {
+  let mut current = body;
+  for fieldName in reverse fieldNames {
+    current = HostedLet fieldName (HostedFieldAccess (HostedName subjectName) fieldName) current;
+    current
+  };
+  current
 }
 
 parseFieldAccessChain : HostedExprAst -> [Str] -> HostedExprAst
@@ -2045,64 +2133,107 @@ parseRecordLiteral value = match textSplitFirst value " {" {
     }
 }
 
+parseRecordUpdateExpr : Str -> RecordUpdateParseResult
+parseRecordUpdateExpr value = match textPrefix value "with " {
+  Ok tail -> {
+    match textSplitFirst tail " {" {
+      Ok payload -> {
+        let subjectText = trimSpaces (firstSegment payload);
+        let bodyTail = textConcat ["{", remainingSegments payload];
+        if subjectText == "" then {
+          MissingRecordUpdate value
+        } else {
+          match unwrapDelimited bodyTail "{" "}" {
+            ParsedText fieldBody ->
+              ParsedRecordUpdate (parseExpr subjectText) (parseRecordFieldExprs fieldBody),
+            MissingText missing ->
+              MissingRecordUpdate value
+          }
+        }
+      },
+      Err missingSpacedBody ->
+        match textSplitFirst tail "{" {
+          Ok payload -> {
+            let subjectText = trimSpaces (firstSegment payload);
+            let bodyTail = textConcat ["{", remainingSegments payload];
+            if subjectText == "" then {
+              MissingRecordUpdate value
+            } else {
+              match unwrapDelimited bodyTail "{" "}" {
+                ParsedText fieldBody ->
+                  ParsedRecordUpdate (parseExpr subjectText) (parseRecordFieldExprs fieldBody),
+                MissingText missing ->
+                  MissingRecordUpdate value
+              }
+            }
+          },
+          Err missingCompactBody ->
+            MissingRecordUpdate value
+        }
+    }
+  },
+  Err notRecordUpdate ->
+    MissingRecordUpdate value
+}
+
 parseExprItems : Str -> [HostedExprAst]
 parseExprItems value = {
-  let mut items = [];
+  let mut items = emptyHostedExprs;
   for item in splitTopLevel value "," {
-    items = appendExpr items (parseExpr item);
+    items = prepend (parseExpr item) items;
     items
   };
-  items
+  reverse items
 }
 
 parseExprArgs : [Str] -> [HostedExprAst]
 parseExprArgs values = {
-  let mut args = [];
+  let mut args = emptyHostedExprs;
   for argValue in values {
-    args = appendExpr args (parseExpr argValue);
+    args = prepend (parseExpr argValue) args;
     args
   };
-  args
+  reverse args
 }
 
 splitLetParts : [Str] -> LetPartsResult
 splitLetParts values = {
-  let mut valueTokens = [];
-  let mut bodyTokens = [];
+  let mut valueTokens = emptyRenderedTexts;
+  let mut bodyTokens = emptyRenderedTexts;
   let mut seenIn = false;
   for value in values {
     if seenIn then {
-      bodyTokens = appendRenderedText bodyTokens value;
+      bodyTokens = prependRenderedText bodyTokens value;
       bodyTokens
     } else if value == "in" then {
       seenIn = true;
       bodyTokens
     } else {
-      valueTokens = appendRenderedText valueTokens value;
+      valueTokens = prependRenderedText valueTokens value;
       valueTokens
     }
   };
-  if seenIn then FoundLetParts valueTokens bodyTokens else MissingLetParts
+  if seenIn then FoundLetParts (reverse valueTokens) (reverse bodyTokens) else MissingLetParts
 }
 
 splitTokensAt : Str -> [Str] -> TokenSplitResult
 splitTokensAt separator values = {
-  let mut lhs = [];
-  let mut rhs = [];
+  let mut lhs = emptyRenderedTexts;
+  let mut rhs = emptyRenderedTexts;
   let mut seenSeparator = false;
   for value in values {
     if seenSeparator then {
-      rhs = appendRenderedText rhs value;
+      rhs = prependRenderedText rhs value;
       rhs
     } else if value == separator then {
       seenSeparator = true;
       rhs
     } else {
-      lhs = appendRenderedText lhs value;
+      lhs = prependRenderedText lhs value;
       lhs
     }
   };
-  if seenSeparator then FoundTokenSplit lhs rhs else MissingTokenSplit
+  if seenSeparator then FoundTokenSplit (reverse lhs) (reverse rhs) else MissingTokenSplit
 }
 
 parseLetExpr : Str -> LetParseResult
@@ -2110,13 +2241,18 @@ parseLetExpr value = match textPrefix value "let " {
   Ok tail -> {
     let parts = splitTopLevel tail " ";
     let binder = firstText parts;
+    let destructuredFields = parseRecordBinderNames binder;
     let afterBinder = remainingTexts parts;
     if binder == "" then {
       MissingLet value
     } else if firstText afterBinder == "=" then {
       match splitLetParts (remainingTexts afterBinder) {
         FoundLetParts valueTokens bodyTokens ->
-          if firstText valueTokens == "" then MissingLet value else if firstText bodyTokens == "" then MissingLet value else ParsedLet binder (parseExpr (textJoin " " valueTokens)) (parseExpr (textJoin " " bodyTokens)),
+          if firstText valueTokens == "" then MissingLet value else if firstText bodyTokens == "" then MissingLet value else {
+            let valueExpr = parseExpr (textJoin " " valueTokens);
+            let bodyExpr = parseExpr (textJoin " " bodyTokens);
+            if firstText destructuredFields == "" then ParsedLet binder valueExpr bodyExpr else ParsedLet recordDestructureTempName valueExpr (buildRecordDestructureBindings recordDestructureTempName destructuredFields bodyExpr)
+          },
         MissingLetParts ->
           MissingLet value
       }
@@ -2164,8 +2300,8 @@ parseForBlockBinding value mutableBinders = match textPrefix value "for " {
 
 splitForIterableAndBody : Str -> ForBodySplitResult
 splitForIterableAndBody value = {
-  let mut iterable = "";
-  let mut body = "";
+  let mut iterableChars = emptyRenderedTexts;
+  let mut bodyChars = emptyRenderedTexts;
   let mut foundBody = false;
   let mut parenDepth = ZeroDepth;
   let mut bracketDepth = ZeroDepth;
@@ -2174,62 +2310,62 @@ splitForIterableAndBody value = {
   let mut escapeNext = false;
   for char in textChars value {
     if foundBody then {
-      body = appendChar body char;
-      body
+      bodyChars = prepend char bodyChars;
+      bodyChars
     } else if inString then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       if escapeNext then {
         escapeNext = false;
-        iterable
+        iterableChars
       } else if char == "\\" then {
         escapeNext = true;
-        iterable
+        iterableChars
       } else if char == "\"" then {
         inString = false;
-        iterable
+        iterableChars
       } else {
-        iterable
+        iterableChars
       }
     } else if char == "\"" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       inString = true;
-      iterable
+      iterableChars
     } else if char == "(" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       parenDepth = increaseDepth parenDepth;
-      iterable
+      iterableChars
     } else if char == ")" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       parenDepth = decreaseDepth parenDepth;
-      iterable
+      iterableChars
     } else if char == "[" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       bracketDepth = increaseDepth bracketDepth;
-      iterable
+      iterableChars
     } else if char == "]" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       bracketDepth = decreaseDepth bracketDepth;
-      iterable
+      iterableChars
     } else if char == "{" then {
       if isTopLevel parenDepth bracketDepth braceDepth then {
         foundBody = true;
-        body = "{";
-        body
+        bodyChars = prepend "{" bodyChars;
+        bodyChars
       } else {
-        iterable = appendChar iterable char;
+        iterableChars = prepend char iterableChars;
         braceDepth = increaseDepth braceDepth;
-        iterable
+        iterableChars
       }
     } else if char == "}" then {
-      iterable = appendChar iterable char;
+      iterableChars = prepend char iterableChars;
       braceDepth = decreaseDepth braceDepth;
-      iterable
+      iterableChars
     } else {
-      iterable = appendChar iterable char;
-      iterable
+      iterableChars = prepend char iterableChars;
+      iterableChars
     }
   };
-  if foundBody then FoundForBody (trimSpaces iterable) body else MissingForBodySplit
+  if foundBody then FoundForBody (trimSpaces (textFromReversedChars iterableChars)) (textFromReversedChars bodyChars) else MissingForBodySplit
 }
 
 parseBlockBinding : Str -> [Str] -> BlockBindingParseResult
@@ -2352,7 +2488,7 @@ parseBlockExprWithMutable value mutableBinders = match unwrapDelimited value "{"
 }
 
 parseBlockExpr : Str -> BlockExprParseResult
-parseBlockExpr value = parseBlockExprWithMutable value []
+parseBlockExpr value = parseBlockExprWithMutable value emptyRenderedTexts
 
 parseReturnExpr : Str -> ReturnParseResult
 parseReturnExpr value = match textPrefix value "return " {
@@ -2364,20 +2500,20 @@ parseReturnExpr value = match textPrefix value "return " {
 
 splitIfParts : [Str] -> IfPartsResult
 splitIfParts values = {
-  let mut conditionTokens = [];
-  let mut thenTokens = [];
-  let mut elseTokens = [];
+  let mut conditionTokens = emptyRenderedTexts;
+  let mut thenTokens = emptyRenderedTexts;
+  let mut elseTokens = emptyRenderedTexts;
   let mut seenThen = false;
   let mut seenElse = false;
-  let mut nestedIfs = [];
+  let mut nestedIfs = emptyRenderedTexts;
   for value in values {
     if seenElse then {
-      elseTokens = appendRenderedText elseTokens value;
+      elseTokens = prependRenderedText elseTokens value;
       elseTokens
     } else if seenThen then {
       if value == "if" then {
-        nestedIfs = appendRenderedText nestedIfs value;
-        thenTokens = appendRenderedText thenTokens value;
+        nestedIfs = prependRenderedText nestedIfs value;
+        thenTokens = prependRenderedText thenTokens value;
         thenTokens
       } else if value == "else" then {
         if firstText nestedIfs == "" then {
@@ -2385,22 +2521,22 @@ splitIfParts values = {
           elseTokens
         } else {
           nestedIfs = remainingTexts nestedIfs;
-          thenTokens = appendRenderedText thenTokens value;
+          thenTokens = prependRenderedText thenTokens value;
           thenTokens
         }
       } else {
-        thenTokens = appendRenderedText thenTokens value;
+        thenTokens = prependRenderedText thenTokens value;
         thenTokens
       }
     } else if value == "then" then {
       seenThen = true;
       thenTokens
     } else {
-      conditionTokens = appendRenderedText conditionTokens value;
+      conditionTokens = prependRenderedText conditionTokens value;
       conditionTokens
     }
   };
-  if seenThen then if seenElse then FoundIfParts conditionTokens thenTokens elseTokens else MissingIfParts else MissingIfParts
+  if seenThen then if seenElse then FoundIfParts (reverse conditionTokens) (reverse thenTokens) (reverse elseTokens) else MissingIfParts else MissingIfParts
 }
 
 parseIfExpr : Str -> IfParseResult
@@ -2459,6 +2595,10 @@ parseNonBinaryExpr rawValue = {
 
 parseFallbackExpr : Str -> HostedExprAst
 parseFallbackExpr value = {
+  match parseRecordUpdateExpr value {
+    ParsedRecordUpdate subject fields ->
+      HostedCall recordUpdateBuiltinName [subject, HostedRecord recordUpdatePlaceholderName fields],
+    MissingRecordUpdate missingUpdate ->
   match parseRecordLiteral value {
     ParsedRecordLiteral recordName fields ->
       HostedRecord recordName fields,
@@ -2470,9 +2610,10 @@ parseFallbackExpr value = {
         if startsWithUppercase callee then HostedConstructor callee args else HostedCall callee args
       } else {
         let fieldParts = splitTopLevel value ".";
-        if hasAdditionalText fieldParts then parseFieldAccessChain (parseExpr (firstText fieldParts)) (remainingTexts fieldParts) else if startsWithUppercase value then HostedConstructor value [] else HostedName value
+        if hasAdditionalText fieldParts then parseFieldAccessChain (parseExpr (firstText fieldParts)) (remainingTexts fieldParts) else if startsWithUppercase value then HostedConstructor value emptyHostedExprs else HostedName value
       }
     }
+  }
   }
 }
 
@@ -2502,7 +2643,7 @@ stripLeadingOperatorPrefix prefix value = match textPrefix (trimSpaces value) pr
 
 normalizeTrailingOperatorParts : Str -> [Str] -> [Str]
 normalizeTrailingOperatorParts prefix values = {
-  let mut normalized = [];
+  let mut normalized = emptyRenderedTexts;
   let mut seenFirst = false;
   for value in values {
     if seenFirst then {
@@ -2647,10 +2788,7 @@ parseExpr rawValue = {
 }
 
 startsWithIndent : Str -> Bool
-startsWithIndent value = {
-  let first = firstCharText value;
-  if first == " " then true else first == "\t"
-}
+startsWithIndent value = astTextStartsWithIndent value
 
 appendLogicalLine : [Str] -> Str -> [Str]
 appendLogicalLine values value = {
@@ -2658,91 +2796,107 @@ appendLogicalLine values value = {
   if trimmed == "" then values else appendRenderedText values value
 }
 
-hasOpenGroup : Str -> Bool
-hasOpenGroup value = {
-  let mut parenDepth = ZeroDepth;
-  let mut bracketDepth = ZeroDepth;
-  let mut braceDepth = ZeroDepth;
-  let mut inString = false;
-  let mut escapeNext = false;
-  for char in textChars value {
-    if inString then {
-      if escapeNext then {
-        escapeNext = false;
-        ""
-      } else if char == "\\" then {
-        escapeNext = true;
-        ""
-      } else if char == "\"" then {
-        inString = false;
-        ""
-      } else {
-        ""
-      }
-    } else if char == "\"" then {
-      inString = true;
-      ""
-    } else if char == "(" then {
-      parenDepth = increaseDepth parenDepth;
-      ""
-    } else if char == ")" then {
-      parenDepth = decreaseDepth parenDepth;
-      ""
-    } else if char == "[" then {
-      bracketDepth = increaseDepth bracketDepth;
-      ""
-    } else if char == "]" then {
-      bracketDepth = decreaseDepth bracketDepth;
-      ""
-    } else if char == "{" then {
-      braceDepth = increaseDepth braceDepth;
-      ""
-    } else if char == "}" then {
-      braceDepth = decreaseDepth braceDepth;
-      ""
-    } else {
-      ""
-    }
-  };
-  if isTopLevel parenDepth bracketDepth braceDepth then false else true
+prependLogicalLine : [Str] -> Str -> [Str]
+prependLogicalLine values value = {
+  let trimmed = trimSpaces value;
+  if trimmed == "" then values else prependRenderedText values value
 }
 
-logicalLines : Str -> [Str]
-logicalLines source = {
-  let mut current = "";
-  let mut lines = [];
-  for line in textSplit source "\n" {
-    let trimmed = trimSpaces line;
-    if trimmed == "" then {
-      if current == "" then {
-        lines
-      } else {
-        lines = appendLogicalLine lines current;
-        current = "";
-        lines
-      }
-    } else if current == "" then {
-      current = line;
-      lines
-    } else if startsWithIndent line then {
-      current = textConcat [current, " ", trimmed];
-      lines
-    } else if hasOpenGroup current then {
-      current = textConcat [current, " ", trimmed];
-      lines
-    } else {
-      lines = appendLogicalLine lines current;
-      current = line;
-      lines
-    }
-  };
-  appendLogicalLine lines current
+openGroupState : NestDepth -> NestDepth -> NestDepth -> Bool -> Bool -> OpenGroupState
+openGroupState parenDepth bracketDepth braceDepth inString escapeNext = OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext
+
+emptyOpenGroupState : OpenGroupState
+emptyOpenGroupState = openGroupState ZeroDepth ZeroDepth ZeroDepth false false
+
+openGroupParenDepth : OpenGroupState -> NestDepth
+openGroupParenDepth state = match state {
+  OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    parenDepth
 }
+
+openGroupBracketDepth : OpenGroupState -> NestDepth
+openGroupBracketDepth state = match state {
+  OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    bracketDepth
+}
+
+openGroupBraceDepth : OpenGroupState -> NestDepth
+openGroupBraceDepth state = match state {
+  OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    braceDepth
+}
+
+openGroupInString : OpenGroupState -> Bool
+openGroupInString state = match state {
+  OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    inString
+}
+
+openGroupEscapeNext : OpenGroupState -> Bool
+openGroupEscapeNext state = match state {
+  OpenGroupState parenDepth bracketDepth braceDepth inString escapeNext ->
+    escapeNext
+}
+
+openGroupHasOpenGroup : OpenGroupState -> Bool
+openGroupHasOpenGroup state = if isTopLevel (openGroupParenDepth state) (openGroupBracketDepth state) (openGroupBraceDepth state) then false else true
+
+stepOpenGroupState : OpenGroupState -> Str -> OpenGroupState
+stepOpenGroupState state char = {
+  let parenDepth = openGroupParenDepth state;
+  let bracketDepth = openGroupBracketDepth state;
+  let braceDepth = openGroupBraceDepth state;
+  let inString = openGroupInString state;
+  let escapeNext = openGroupEscapeNext state;
+  if inString then {
+    if escapeNext then {
+      openGroupState parenDepth bracketDepth braceDepth inString false
+    } else if char == "\\" then {
+      openGroupState parenDepth bracketDepth braceDepth inString true
+    } else if char == "\"" then {
+      openGroupState parenDepth bracketDepth braceDepth false false
+    } else {
+      state
+    }
+  } else if char == "\"" then {
+    openGroupState parenDepth bracketDepth braceDepth true false
+  } else if char == "(" then {
+    openGroupState (increaseDepth parenDepth) bracketDepth braceDepth false false
+  } else if char == ")" then {
+    openGroupState (decreaseDepth parenDepth) bracketDepth braceDepth false false
+  } else if char == "[" then {
+    openGroupState parenDepth (increaseDepth bracketDepth) braceDepth false false
+  } else if char == "]" then {
+    openGroupState parenDepth (decreaseDepth bracketDepth) braceDepth false false
+  } else if char == "{" then {
+    openGroupState parenDepth bracketDepth (increaseDepth braceDepth) false false
+  } else if char == "}" then {
+    openGroupState parenDepth bracketDepth (decreaseDepth braceDepth) false false
+  } else {
+    state
+  }
+}
+
+scanOpenGroupState : OpenGroupState -> Str -> OpenGroupState
+scanOpenGroupState initialState value = {
+  let mut state = initialState;
+  for char in textChars value {
+    state = stepOpenGroupState state char;
+    state
+  };
+  state
+}
+
+hasOpenGroup : Str -> Bool
+hasOpenGroup value = astTextHasOpenGroup value
+
+logicalLines : Str -> [Str]
+logicalLines source = astTextLogicalLines source
 
 parsePattern : Str -> HostedPatternAst
 parsePattern rawValue = {
   let parts = splitWords (trimSpaces rawValue);
-  if hasAdditionalText parts then hostedPatternAst (firstText parts) (remainingTexts parts) else hostedPatternAst (firstText parts) []
+  if hasAdditionalText parts then hostedPatternAst (firstText parts) (remainingTexts parts) else hostedPatternAst (firstText parts) emptyRenderedTexts
 }
 
 parseMatchBranch : Str -> HostedMatchBranchAst
@@ -2758,18 +2912,18 @@ parseMatchBranch rawValue = {
 
 parseMatchBranches : Str -> [HostedMatchBranchAst]
 parseMatchBranches value = {
-  let mut branches = [];
+  let mut branches = emptyHostedMatchBranches;
   for branchValue in splitTopLevel value "," {
-    branches = appendMatchBranch branches (parseMatchBranch branchValue);
+    branches = prepend (parseMatchBranch branchValue) branches;
     branches
   };
-  branches
+  reverse branches
 }
 
 splitMatchSubjectAndBody : Str -> MatchSubjectSplitResult
 splitMatchSubjectAndBody value = {
-  let mut subject = "";
-  let mut body = "";
+  let mut subjectChars = emptyRenderedTexts;
+  let mut bodyChars = emptyRenderedTexts;
   let mut foundBody = false;
   let mut parenDepth = ZeroDepth;
   let mut bracketDepth = ZeroDepth;
@@ -2778,62 +2932,62 @@ splitMatchSubjectAndBody value = {
   let mut escapeNext = false;
   for char in textChars value {
     if foundBody then {
-      body = appendChar body char;
-      body
+      bodyChars = prepend char bodyChars;
+      bodyChars
     } else if inString then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       if escapeNext then {
         escapeNext = false;
-        subject
+        subjectChars
       } else if char == "\\" then {
         escapeNext = true;
-        subject
+        subjectChars
       } else if char == "\"" then {
         inString = false;
-        subject
+        subjectChars
       } else {
-        subject
+        subjectChars
       }
     } else if char == "\"" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       inString = true;
-      subject
+      subjectChars
     } else if char == "(" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       parenDepth = increaseDepth parenDepth;
-      subject
+      subjectChars
     } else if char == ")" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       parenDepth = decreaseDepth parenDepth;
-      subject
+      subjectChars
     } else if char == "[" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       bracketDepth = increaseDepth bracketDepth;
-      subject
+      subjectChars
     } else if char == "]" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       bracketDepth = decreaseDepth bracketDepth;
-      subject
+      subjectChars
     } else if char == "{" then {
       if isTopLevel parenDepth bracketDepth braceDepth then {
         foundBody = true;
-        body = "{";
-        body
+        bodyChars = prepend "{" bodyChars;
+        bodyChars
       } else {
-        subject = appendChar subject char;
+        subjectChars = prepend char subjectChars;
         braceDepth = increaseDepth braceDepth;
-        subject
+        subjectChars
       }
     } else if char == "}" then {
-      subject = appendChar subject char;
+      subjectChars = prepend char subjectChars;
       braceDepth = decreaseDepth braceDepth;
-      subject
+      subjectChars
     } else {
-      subject = appendChar subject char;
-      subject
+      subjectChars = prepend char subjectChars;
+      subjectChars
     }
   };
-  if foundBody then FoundMatchSubject (trimSpaces subject) body else MissingMatchSubject
+  if foundBody then FoundMatchSubject (trimSpaces (textFromReversedChars subjectChars)) (textFromReversedChars bodyChars) else MissingMatchSubject
 }
 
 parseMatchExpr : Str -> MatchParseResult
@@ -2861,7 +3015,7 @@ parseMatchExpr value = match textPrefix value "match " {
 
 renderExprSummaries : [HostedExprAst] -> [Str]
 renderExprSummaries values = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for value in values {
     rendered = appendRenderedText rendered (expressionSummary value);
     rendered
@@ -2874,7 +3028,7 @@ renderBoolLiteral value = if value then "true" else "false"
 
 renderRecordFieldExprSummaries : [HostedRecordFieldExprAst] -> [Str]
 renderRecordFieldExprSummaries fields = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for field in fields {
     rendered = appendRenderedText rendered (textConcat [recordExprFieldName field, " = ", expressionSummary (recordExprFieldValue field)]);
     rendered
@@ -2900,7 +3054,7 @@ renderMatchBranchSummary branch = {
 
 renderMatchBranchSummaries : [HostedMatchBranchAst] -> [Str]
 renderMatchBranchSummaries values = {
-  let mut rendered = [];
+  let mut rendered = emptyRenderedTexts;
   for value in values {
     rendered = appendRenderedText rendered (renderMatchBranchSummary value);
     rendered
@@ -2969,20 +3123,20 @@ declarationParams lhs = match textSplitFirst lhs " " {
   Ok payload ->
     splitWords (remainingSegments payload),
   Err noParams ->
-    []
+    emptyRenderedTexts
 }
 
 appendDefinition : ParserState -> Str -> Str -> ParserState
-appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs))) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendDefinition state lhs rhs = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (prepend (hostedDeclAst (declarationHead lhs) (statePendingAnnotation state) (declarationParams lhs) (parseExpr rhs)) (stateDeclarations state)) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendTypeDefinition : ParserState -> Str -> ParserState
-appendTypeDefinition state body = parserState (stateModuleName state) (stateImports state) (appendTypeDecl (stateTypeDeclarations state) (parseTypeDecl body)) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
+appendTypeDefinition state body = parserState (stateModuleName state) (stateImports state) (prepend (parseTypeDecl body) (stateTypeDeclarations state)) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
 
 appendRecordDefinition : ParserState -> Str -> ParserState
-appendRecordDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (appendRecordDecl (stateRecordDeclarations state) (parseRecordDecl body)) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
+appendRecordDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (prepend (parseRecordDecl body) (stateRecordDeclarations state)) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state)
 
 appendForeignDefinition : ParserState -> Str -> ParserState
-appendForeignDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (appendForeignDecl (stateForeignDeclarations state) (parseForeignDecl body)) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendForeignDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (prepend (parseForeignDecl body) (stateForeignDeclarations state)) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendForeignSignatureDefinition : ParserState -> Str -> ParserState
 appendForeignSignatureDefinition state body = match textSplitFirst body " = " {
@@ -2998,45 +3152,45 @@ appendForeignSignatureDefinition state body = match textSplitFirst body " = " {
 }
 
 appendGuideDefinition : ParserState -> Str -> ParserState
-appendGuideDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (appendGuideDecl (stateGuideDeclarations state) (parseGuideDecl body)) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendGuideDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (prepend (parseGuideDecl body) (stateGuideDeclarations state)) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendPolicyDefinition : ParserState -> Str -> ParserState
-appendPolicyDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (appendPolicyDecl (statePolicyDeclarations state) (parsePolicyDecl body)) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendPolicyDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (prepend (parsePolicyDecl body) (statePolicyDeclarations state)) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendProjectionDefinition : ParserState -> Str -> ParserState
-appendProjectionDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (appendProjectionDecl (stateProjectionDeclarations state) (parseProjectionDecl body)) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendProjectionDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (prepend (parseProjectionDecl body) (stateProjectionDeclarations state)) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendRoleDefinition : ParserState -> Str -> ParserState
-appendRoleDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (appendAgentRoleDecl (stateAgentRoleDeclarations state) (parseRoleDecl body)) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendRoleDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (prepend (parseRoleDecl body) (stateAgentRoleDeclarations state)) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendAgentDefinition : ParserState -> Str -> ParserState
-appendAgentDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (appendAgentDecl (stateAgentDeclarations state) (parseAgentDecl body)) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendAgentDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (prepend (parseAgentDecl body) (stateAgentDeclarations state)) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendWorkflowDefinition : ParserState -> Str -> ParserState
-appendWorkflowDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (appendWorkflowDecl (stateWorkflowDeclarations state) (parseWorkflowDecl body)) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendWorkflowDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (prepend (parseWorkflowDecl body) (stateWorkflowDeclarations state)) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendRouteDefinition : ParserState -> Str -> ParserState
-appendRouteDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (appendRouteDecl (stateRouteDeclarations state) (parseRouteDecl body)) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendRouteDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (prepend (parseRouteDecl body) (stateRouteDeclarations state)) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendHookDefinition : ParserState -> Str -> ParserState
-appendHookDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (appendHookDecl (stateHookDeclarations state) (parseHookDecl body)) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendHookDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (prepend (parseHookDecl body) (stateHookDeclarations state)) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendToolServerDefinition : ParserState -> Str -> ParserState
-appendToolServerDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (appendToolServerDecl (stateToolServerDeclarations state) (parseToolServerDecl body)) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendToolServerDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (prepend (parseToolServerDecl body) (stateToolServerDeclarations state)) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendToolDefinition : ParserState -> Str -> ParserState
-appendToolDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (appendToolDecl (stateToolDeclarations state) (parseToolDecl body)) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendToolDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (prepend (parseToolDecl body) (stateToolDeclarations state)) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendVerifierDefinition : ParserState -> Str -> ParserState
-appendVerifierDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (appendVerifierDecl (stateVerifierDeclarations state) (parseVerifierDecl body)) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
+appendVerifierDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (prepend (parseVerifierDecl body) (stateVerifierDeclarations state)) (stateMergeGateDeclarations state) missingAnnotation (stateMainExprSummary state)
 
 appendMergeGateDefinition : ParserState -> Str -> ParserState
-appendMergeGateDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (appendMergeGateDecl (stateMergeGateDeclarations state) (parseMergeGateDecl body)) missingAnnotation (stateMainExprSummary state)
+appendMergeGateDefinition state body = parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (prepend (parseMergeGateDecl body) (stateMergeGateDeclarations state)) missingAnnotation (stateMainExprSummary state)
 
 appendMainDefinition : ParserState -> Str -> ParserState
 appendMainDefinition state body = {
   let expr = parseExpr body;
-  parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (appendDecl (stateDeclarations state) (hostedDeclAst "main" (statePendingAnnotation state) [] expr)) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (expressionSummary expr)
+  parserState (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (prepend (hostedDeclAst "main" (statePendingAnnotation state) emptyRenderedTexts expr) (stateDeclarations state)) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) missingAnnotation (expressionSummary expr)
 }
 
 stepParserDefinition : ParserState -> [Str] -> ParserState
@@ -3189,7 +3343,7 @@ stepParserType state line = match textPrefix line "type " {
 stepParserImport : ParserState -> Str -> ParserState
 stepParserImport state line = match textPrefix line "import " {
   Ok importName ->
-    parserState (stateModuleName state) (appendRenderedText (stateImports state) importName) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
+    parserState (stateModuleName state) (prepend importName (stateImports state)) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (statePendingAnnotation state) (stateMainExprSummary state),
   Err importMiss ->
     stepParserType state line
 }
@@ -3204,17 +3358,17 @@ stepParser state line = match textPrefix line "module " {
 
 parseModuleAst : Str -> HostedModuleAst
 parseModuleAst source = {
-  let mut state = parserState "Main" [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] [] missingAnnotation "<missing>";
+  let mut state = parserState "Main" emptyRenderedTexts emptyHostedTypeDecls emptyHostedRecordDecls emptyHostedForeignDecls emptyHostedDecls emptyHostedGuideDecls emptyHostedPolicyDecls emptyHostedProjectionDecls emptyHostedAgentRoleDecls emptyHostedAgentDecls emptyHostedWorkflowDecls emptyHostedRouteDecls emptyHostedHookDecls emptyHostedToolServerDecls emptyHostedToolDecls emptyHostedVerifierDecls emptyHostedMergeGateDecls missingAnnotation "<missing>";
   for line in logicalLines source {
     state = stepParser state line;
     state
   };
-  hostedModuleAst (stateModuleName state) (stateImports state) (stateTypeDeclarations state) (stateRecordDeclarations state) (stateForeignDeclarations state) (stateDeclarations state) (stateGuideDeclarations state) (statePolicyDeclarations state) (stateProjectionDeclarations state) (stateAgentRoleDeclarations state) (stateAgentDeclarations state) (stateWorkflowDeclarations state) (stateRouteDeclarations state) (stateHookDeclarations state) (stateToolServerDeclarations state) (stateToolDeclarations state) (stateVerifierDeclarations state) (stateMergeGateDeclarations state) (stateMainExprSummary state)
+  hostedModuleAst (stateModuleName state) (reverse (stateImports state)) (reverse (stateTypeDeclarations state)) (reverse (stateRecordDeclarations state)) (reverse (stateForeignDeclarations state)) (reverse (stateDeclarations state)) (reverse (stateGuideDeclarations state)) (reverse (statePolicyDeclarations state)) (reverse (stateProjectionDeclarations state)) (reverse (stateAgentRoleDeclarations state)) (reverse (stateAgentDeclarations state)) (reverse (stateWorkflowDeclarations state)) (reverse (stateRouteDeclarations state)) (reverse (stateHookDeclarations state)) (reverse (stateToolServerDeclarations state)) (reverse (stateToolDeclarations state)) (reverse (stateVerifierDeclarations state)) (reverse (stateMergeGateDeclarations state)) (stateMainExprSummary state)
 }
 
 declNames : HostedModuleAst -> [Str]
 declNames modl = {
-  let mut names = [];
+  let mut names = emptyRenderedTexts;
   for decl in moduleDeclarations modl {
     names = appendRenderedText names (declName decl);
     names
@@ -3224,7 +3378,7 @@ declNames modl = {
 
 recordDeclNames : HostedModuleAst -> [Str]
 recordDeclNames modl = {
-  let mut names = [];
+  let mut names = emptyRenderedTexts;
   for decl in moduleRecordDeclarations modl {
     names = appendRenderedText names (recordDeclName decl);
     names
@@ -3237,12 +3391,12 @@ firstRecordDecl modl = {
   for decl in moduleRecordDeclarations modl {
     return decl
   };
-  hostedRecordDeclAst "" []
+  hostedRecordDeclAst "" emptyHostedRecordFieldDecls
 }
 
 typeDeclNames : HostedModuleAst -> [Str]
 typeDeclNames modl = {
-  let mut names = [];
+  let mut names = emptyRenderedTexts;
   for decl in moduleTypeDeclarations modl {
     names = appendRenderedText names (typeDeclName decl);
     names
@@ -3255,7 +3409,7 @@ firstTypeDecl modl = {
   for decl in moduleTypeDeclarations modl {
     return decl
   };
-  hostedTypeDeclAst "" []
+  hostedTypeDeclAst "" emptyHostedConstructorDecls
 }
 
 declAnnotationTextByName : HostedModuleAst -> Str -> Str

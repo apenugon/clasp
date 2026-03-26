@@ -1,0 +1,34 @@
+stateRoot : Str
+emptyTexts : [Str]
+readEnvText : Str -> Str -> Str
+taskFile : Str
+workspaceRoot : Str
+baselineWorkspace : Str
+builderSchemaPath : Str
+verifierSchemaPath : Str
+codexBin : Str
+codexModel : Str
+codexReasoning : Str
+codexSandbox : Str
+maxAttempts : Int
+feedbackPath : Str
+baselineReadyPath : Str
+builderReportPath : Int -> Str
+builderStdoutPath : Int -> Str
+builderStderrPath : Int -> Str
+verifierReportPath : Int -> Str
+verifierStdoutPath : Int -> Str
+verifierStderrPath : Int -> Str
+runProcess : Str -> [Str] -> ProcessResult
+persistProcessArtifacts : Str -> Int -> ProcessResult -> ProcessResult
+readVerifierReport : Int -> VerifierReport
+incrementAttempt : Int -> Int
+codexReasoningConfig : Str
+codexCommand : Str -> Str -> Str -> [Str]
+builderPrompt : Int -> Str
+verifierPrompt : Int -> Str
+ensureBaseline : ProcessResult
+runBuilder : Int -> ProcessResult
+runVerifier : Int -> ProcessResult
+runAttempt : Int -> Str
+main : Str

@@ -5,7 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 selfhost_parallel_verify_commands=$'
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
-bash src/scripts/verify.sh
+CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh
 '
 selfhost_sequential_verify_commands=$'
 bash scripts/test-verify-all.sh

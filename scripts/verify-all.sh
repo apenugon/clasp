@@ -9,6 +9,7 @@ verify_lock_file="${CLASP_VERIFY_LOCK_FILE:-}"
 verify_lock_owner=0
 full_parallel_verify_commands=$'
 bash scripts/test-swarm-control.sh
+bash scripts/test-codex-loop.sh
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-native-runtime.sh

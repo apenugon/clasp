@@ -2,17 +2,17 @@ import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [, , commandArg, entryPathArg, stage1PathArg, bootstrapOutputPathArg, resultPathArg, validationDirArg] = process.argv;
+const [, , commandArg, entryPathArg, embeddedPathArg, bootstrapOutputPathArg, resultPathArg, validationDirArg] = process.argv;
 
-if (!commandArg || !entryPathArg || !stage1PathArg || !bootstrapOutputPathArg || !resultPathArg || !validationDirArg) {
+if (!commandArg || !entryPathArg || !embeddedPathArg || !bootstrapOutputPathArg || !resultPathArg || !validationDirArg) {
   throw new Error(
-    "usage: node src/run-tool.mjs <check|check-core|compile|explain|native|native-image> <entry-path> <stage1-path> <bootstrap-output-path> <result-path> <validation-dir>"
+    "usage: node src/run-tool.mjs <check|check-core|compile|explain|native|native-image> <entry-path> <embedded-path> <bootstrap-output-path> <result-path> <validation-dir>"
   );
 }
 
 const command = commandArg;
 const entryPath = resolve(entryPathArg);
-const stage1Path = resolve(stage1PathArg);
+const embeddedPath = resolve(embeddedPathArg);
 const bootstrapOutputPath = resolve(bootstrapOutputPathArg);
 const resultPath = resolve(resultPathArg);
 const validationDir = resolve(validationDirArg);
@@ -23,7 +23,7 @@ function bustImportCache(filePath, label) {
 
 const entrySource = readFileSync(entryPath, "utf8");
 const bootstrapOutput = readFileSync(bootstrapOutputPath, "utf8");
-const stage1Module = await import(bustImportCache(stage1Path, "clasp-stage1"));
+const embeddedModule = await import(bustImportCache(embeddedPath, "clasp-embedded"));
 
 async function validateHostedCompileOutput(outputPath) {
   await import(bustImportCache(outputPath, "clasp-verify"));
@@ -104,7 +104,7 @@ const commandPlans = {
   check: {
     exportName: "checkSourceText",
     marker: "checkEntrypoint : Str",
-    stage2Name: "checkEntrypoint",
+    candidateName: "checkEntrypoint",
     snapshotField: "checkedModule"
   },
   "check-core": {
@@ -113,25 +113,25 @@ const commandPlans = {
   explain: {
     exportName: "explainSourceText",
     marker: "explainEntrypoint : Str",
-    stage2Name: "explainEntrypoint",
+    candidateName: "explainEntrypoint",
     snapshotField: "explainModule"
   },
   compile: {
     exportName: "compileSourceText",
     marker: "compileEntrypoint : Str",
-    stage2Name: "compileEntrypoint",
+    candidateName: "compileEntrypoint",
     snapshotField: "emittedModule"
   },
   native: {
     exportName: "nativeSourceText",
     marker: "nativeEntrypoint : Str",
-    stage2Name: "nativeEntrypoint",
+    candidateName: "nativeEntrypoint",
     snapshotField: "emittedNativeModule"
   },
   "native-image": {
     exportName: "nativeImageSourceText",
     marker: "nativeImageEntrypoint : Str",
-    stage2Name: "nativeImageEntrypoint",
+    candidateName: "nativeImageEntrypoint",
     snapshotField: "emittedNativeImageModule"
   }
 };
@@ -146,38 +146,42 @@ if (
   bootstrapOutput.length > 0 &&
   typeof plan.marker === "string" &&
   entrySource.includes(plan.marker) &&
-  typeof stage1Module.stage2CompilerModule === "string" &&
-  typeof stage1Module.main === "string"
+  (typeof embeddedModule.candidateCompilerModule === "string" || typeof embeddedModule.stage2CompilerModule === "string") &&
+  typeof embeddedModule.main === "string"
 ) {
-  const stage2CompilerPath = `${resultPath}.stage2.mjs`;
-  writeFileSync(stage2CompilerPath, stage1Module.stage2CompilerModule);
-  const stage2Compiler = await import(bustImportCache(stage2CompilerPath, "clasp-stage2"));
-  const snapshot = JSON.parse(stage1Module.main);
-  const stage2Run = stage2Compiler[plan.stage2Name];
-  if (typeof stage2Run !== "function") {
-    throw new Error(`compiler artifact ${stage1Path} does not expose hosted ${command} support`);
+  const embeddedCandidateModule =
+    typeof embeddedModule.candidateCompilerModule === "string"
+      ? embeddedModule.candidateCompilerModule
+      : embeddedModule.stage2CompilerModule;
+  const candidateCompilerPath = `${resultPath}.candidate.mjs`;
+  writeFileSync(candidateCompilerPath, embeddedCandidateModule);
+  const candidateCompiler = await import(bustImportCache(candidateCompilerPath, "clasp-candidate"));
+  const snapshot = JSON.parse(embeddedModule.main);
+  const candidateRun = candidateCompiler[plan.candidateName];
+  if (typeof candidateRun !== "function") {
+    throw new Error(`compiler artifact ${embeddedPath} does not expose hosted ${command} support`);
   }
-  const stage2Output = stage2Run();
-  if (stage2Output !== snapshot[plan.snapshotField]) {
-    throw new Error(`hosted ${command} compatibility check did not reproduce the stage1 snapshot`);
+  const candidateOutput = candidateRun();
+  if (candidateOutput !== snapshot[plan.snapshotField]) {
+    throw new Error(`hosted ${command} compatibility check did not reproduce the embedded snapshot`);
   }
   writeFileSync(resultPath, bootstrapOutput);
 } else {
-  const compileSource = stage1Module[plan.exportName];
+  const compileSource = embeddedModule[plan.exportName];
   if (typeof compileSource !== "function") {
-    throw new Error(`compiler artifact ${stage1Path} does not expose hosted ${command} support`);
+    throw new Error(`compiler artifact ${embeddedPath} does not expose hosted ${command} support`);
   }
-  const stage1Output = compileSource(entrySource);
+  const embeddedOutput = compileSource(entrySource);
   if ((command === "check" || command === "explain") && bootstrapOutput.length === 0) {
-    validateHostedSummaryOutput(command, stage1Output);
-    writeFileSync(resultPath, stage1Output);
+    validateHostedSummaryOutput(command, embeddedOutput);
+    writeFileSync(resultPath, embeddedOutput);
   } else if (command === "check-core" && bootstrapOutput.length === 0) {
-    validateHostedJsonOutput(command, stage1Output);
-    writeFileSync(resultPath, stage1Output);
+    validateHostedJsonOutput(command, embeddedOutput);
+    writeFileSync(resultPath, embeddedOutput);
   } else if (command === "compile") {
     const validationPath = resolve(validationDir, ".clasp-primary-compile-verify.mjs");
-    writeFileSync(resultPath, stage1Output);
-    writeFileSync(validationPath, stage1Output);
+    writeFileSync(resultPath, embeddedOutput);
+    writeFileSync(validationPath, embeddedOutput);
     try {
       await validateHostedCompileOutput(validationPath);
     } catch (error) {
@@ -189,15 +193,15 @@ if (
       }
     }
   } else if (command === "native" && bootstrapOutput.length === 0) {
-    validateHostedNativeOutput(stage1Output);
-    writeFileSync(resultPath, stage1Output);
+    validateHostedNativeOutput(embeddedOutput);
+    writeFileSync(resultPath, embeddedOutput);
   } else if (command === "native-image" && bootstrapOutput.length === 0) {
-    validateHostedNativeImageOutput(stage1Output);
-    writeFileSync(resultPath, stage1Output);
+    validateHostedNativeImageOutput(embeddedOutput);
+    writeFileSync(resultPath, embeddedOutput);
   } else {
-    if (stage1Output !== bootstrapOutput) {
+    if (embeddedOutput !== bootstrapOutput) {
       throw new Error(`hosted ${command} compatibility check did not reproduce the bootstrap output`);
     }
-    writeFileSync(resultPath, stage1Output);
+    writeFileSync(resultPath, embeddedOutput);
   }
 }

@@ -149,13 +149,23 @@ async function detectEnvironment() {
 }
 
 async function captureVersion(command) {
-  const { stdout } = await runCommand(command);
-  return stdout.trim().split("\n")[0] ?? "";
+  try {
+    const { stdout } = await runCommand(command);
+    return stdout.trim().split("\n")[0] ?? "";
+  } catch (error) {
+    if (
+      (error && typeof error === "object" && error.code === "ENOENT") ||
+      (error instanceof Error && error.message.includes(" ENOENT"))
+    ) {
+      return "";
+    }
+    throw error;
+  }
 }
 
 async function buildNativeRuntimeHarness() {
   const outputPath = path.join(distRoot, "runtime-bench");
-  const rustRuntimeSource = path.join(projectRoot, "runtime", "native", "clasp_runtime.rs");
+  const rustRuntimeSource = path.join(projectRoot, "runtime", "clasp_runtime.rs");
   const rustRuntimeLibrary = path.join(distRoot, "libclasp_runtime.a");
 
   await runCommand([
@@ -179,7 +189,9 @@ async function buildNativeRuntimeHarness() {
     "panic=abort",
     "--print",
     "native-static-libs",
-    rustRuntimeSource
+    rustRuntimeSource,
+    "-o",
+    rustRuntimeLibrary
   ]);
 
   const rustLinkArgs = (nativeStaticLibs.stderr

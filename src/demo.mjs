@@ -2,45 +2,45 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [, , compiledPathArg, stage2CompilerPathArg, emittedPathArg] = process.argv;
+const [, , compiledPathArg, candidateCompilerPathArg, emittedPathArg] = process.argv;
 
-if (!compiledPathArg || !stage2CompilerPathArg || !emittedPathArg) {
-  throw new Error("usage: node src/demo.mjs <stage1-path> <stage2-compiler-path> <stage2-output-path>");
+if (!compiledPathArg || !candidateCompilerPathArg || !emittedPathArg) {
+  throw new Error("usage: node src/demo.mjs <embedded-path> <candidate-compiler-path> <candidate-output-path>");
 }
 
 const compiledPath = resolve(compiledPathArg);
-const stage2CompilerPath = resolve(stage2CompilerPathArg);
+const candidateCompilerPath = resolve(candidateCompilerPathArg);
 const emittedPath = resolve(emittedPathArg);
-const stage1Module = await import(pathToFileURL(compiledPath).href);
-const snapshot = JSON.parse(stage1Module.main);
+const embeddedModule = await import(pathToFileURL(compiledPath).href);
+const snapshot = JSON.parse(embeddedModule.main);
 
-writeFileSync(stage2CompilerPath, stage1Module.stage2CompilerModule);
+writeFileSync(candidateCompilerPath, embeddedModule.candidateCompilerModule);
 
-const stage2Compiler = await import(pathToFileURL(stage2CompilerPath).href);
-const stage2CheckOutput = stage2Compiler.checkEntrypoint();
-const stage2ExplainOutput = stage2Compiler.explainEntrypoint();
-const stage2EmittedModule = stage2Compiler.compileEntrypoint();
-const stage2NativeOutput = stage2Compiler.nativeEntrypoint();
+const candidateCompiler = await import(pathToFileURL(candidateCompilerPath).href);
+const candidateCheckOutput = candidateCompiler.checkEntrypoint();
+const candidateExplainOutput = candidateCompiler.explainEntrypoint();
+const candidateEmittedModule = candidateCompiler.compileEntrypoint();
+const candidateNativeOutput = candidateCompiler.nativeEntrypoint();
 
-writeFileSync(emittedPath, stage2EmittedModule);
+writeFileSync(emittedPath, candidateEmittedModule);
 
 const emittedModule = await import(pathToFileURL(emittedPath).href);
 
 console.log(
   JSON.stringify({
-    stage1CompilerModule: stage1Module.stage2CompilerModule,
-    stage1SnapshotJson: stage1Module.main,
-    stage2SnapshotJson: stage2Compiler.main,
-    stage2CheckOutput,
-    stage2ExplainOutput,
-    stage2EmittedModule,
-    stage2NativeOutput,
-    stage2MatchesStage1Snapshot: stage2Compiler.main === stage1Module.main,
-    stage2CompilerMatchesStage1Snapshot: JSON.stringify(stage2Compiler.snapshot) === JSON.stringify(snapshot),
-    stage2CheckMatchesStage1: stage2CheckOutput === snapshot.checkedModule,
-    stage2ExplainMatchesStage1: stage2ExplainOutput === snapshot.explainModule,
-    stage2OutputMatchesStage1: stage2EmittedModule === snapshot.emittedModule,
-    stage2NativeMatchesStage1: stage2NativeOutput === snapshot.emittedNativeModule,
+    embeddedCompilerModule: embeddedModule.candidateCompilerModule,
+    embeddedSnapshotJson: embeddedModule.main,
+    candidateSnapshotJson: candidateCompiler.main,
+    candidateCheckOutput,
+    candidateExplainOutput,
+    candidateEmittedModule,
+    candidateNativeOutput,
+    candidateMatchesEmbeddedSnapshot: candidateCompiler.main === embeddedModule.main,
+    candidateCompilerMatchesEmbeddedSnapshot: JSON.stringify(candidateCompiler.snapshot) === JSON.stringify(snapshot),
+    candidateCheckMatchesEmbedded: candidateCheckOutput === snapshot.checkedModule,
+    candidateExplainMatchesEmbedded: candidateExplainOutput === snapshot.explainModule,
+    candidateOutputMatchesEmbedded: candidateEmittedModule === snapshot.emittedModule,
+    candidateNativeMatchesEmbedded: candidateNativeOutput === snapshot.emittedNativeModule,
     loweredValue: snapshot.loweredValue,
     loweredFunction: snapshot.loweredFunction,
     loweredModule: snapshot.loweredModule,

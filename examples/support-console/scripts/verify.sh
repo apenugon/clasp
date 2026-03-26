@@ -26,14 +26,7 @@ run_verify() {
   "$binary_path" route GET /support/customer '{}' | grep -F '"contactEmail":"ops@northwind.example"' >/dev/null
   "$binary_path" route GET /support/customer/page '{}' | grep -F '"title":"Customer export"' >/dev/null
 
-  support_server_port="$(python - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-)"
+  support_server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
   support_server_addr="127.0.0.1:$support_server_port"
   "$binary_path" serve "$support_server_addr" >/dev/null 2>&1 &
   server_pid=$!
