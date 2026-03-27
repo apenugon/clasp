@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$0" "$@" >"$(dirname "$0")/argv.log"
+workspace_root="."
+report_path=""
+prompt=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cd) workspace_root="$2"; shift 2 ;;
+    -o|--output-last-message) report_path="$2"; shift 2 ;;
+    *) prompt="$1"; shift ;;
+  esac
+done
+printf 'report=%s\n' "$report_path" >>"$(dirname "$0")/argv.log"
+printf 'prompt=%s\n' "$prompt" >>"$(dirname "$0")/argv.log"
+workspace_path="$workspace_root/workspace.txt"
+feedback_path="$(dirname "$report_path")/feedback.json"
+builder_policy_path="$(dirname "$report_path")/builder-policy.md"
+printf '{"phase":"builder-start"}\n'
+printf 'builder-progress\n' >&2
+sleep 0.1
+content="first-attempt"
+printf '%s\n' "$content" >"$workspace_path"
+cat >"$report_path" <<JSON
+{"summary":"builder wrote $content","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"use verifier feedback","ergonomics":["ordinary loop works"],"follow_ups":["keep direct codex invocation"],"warnings":[]}}
+JSON

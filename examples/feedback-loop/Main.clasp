@@ -38,6 +38,14 @@ record LoopState = {
   attentionReason : Str,
   final : Bool
 }
+record StepHandle = {
+  prefix : Str,
+  attempt : Int,
+  reportPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str
+}
 
 stateRoot : Str
 stateRoot = if textJoin "" argv == "" then "feedback-loop-state" else pathJoin argv
@@ -55,7 +63,7 @@ readEnvText name fallback = match envVar name {
 }
 
 taskFile : Str
-taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0009-swarm-readiness-loop.md"
+taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0011-swarm-ready-full-goal.md"
 
 workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
@@ -162,6 +170,24 @@ processHeartbeatPath prefix attempt =
   else
     verifierHeartbeatPath attempt
 
+processReportPath : Str -> Int -> Str
+processReportPath prefix attempt =
+  if prefix == "builder" then
+    builderReportPath attempt
+  else
+    verifierReportPath attempt
+
+stepHandle : Str -> Int -> StepHandle
+stepHandle prefix attempt =
+  StepHandle {
+    prefix = prefix,
+    attempt = attempt,
+    reportPath = processReportPath prefix attempt,
+    stdoutPath = processStdoutPath prefix attempt,
+    stderrPath = processStderrPath prefix attempt,
+    heartbeatPath = processHeartbeatPath prefix attempt
+  }
+
 runProcess : Str -> [Str] -> ProcessResult
 runProcess cwd command = match runCommandJson cwd command {
   Ok raw ->
@@ -174,50 +200,113 @@ runProcess cwd command = match runCommandJson cwd command {
     }
 }
 
-persistProcessArtifacts : Str -> Int -> ProcessResult -> ProcessResult
-persistProcessArtifacts prefix attempt result = {
-  let stdoutPath =
-    if prefix == "builder" then
-      builderStdoutPath attempt
-    else
-      verifierStdoutPath attempt;
-  let stderrPath =
-    if prefix == "builder" then
-      builderStderrPath attempt
-    else
-      verifierStderrPath attempt;
-  let wroteStdout = writeFile stdoutPath result.stdout in
-  let wroteStderr = writeFile stderrPath result.stderr in
-  result
+readTextOrEmpty : Str -> Str
+readTextOrEmpty path = match readFile path {
+  Ok raw ->
+    raw,
+  Err message ->
+    ""
 }
 
-writeHeartbeat : Str -> Str -> Str -> Bool -> ProcessResult -> Result Str
-writeHeartbeat path stdoutPath stderrPath running result =
-  writeFile
-    path
-    (encode
-      (WatchedProcess {
-        pid = 0,
-        running = running,
-        completed = if running then false else true,
-        exitCode = result.exitCode,
-        stdoutPath = stdoutPath,
-        stderrPath = stderrPath,
-        heartbeatPath = path,
-        updatedAtMs = timeUnixMs
-      }))
+watchedProcessOk : WatchedProcess -> Result WatchedProcess
+watchedProcessOk process = Ok process
 
-runWatchedProcess : Str -> Int -> [Str] -> ProcessResult
-runWatchedProcess prefix attempt command = {
-  let stdoutPath = processStdoutPath prefix attempt;
-  let stderrPath = processStderrPath prefix attempt;
-  let heartbeatPath = processHeartbeatPath prefix attempt;
-  let starting = ProcessResult { exitCode = 0, stdout = "", stderr = "" };
-  let wroteStartHeartbeat = writeHeartbeat heartbeatPath stdoutPath stderrPath true starting;
-  let result = persistProcessArtifacts prefix attempt (runProcess workspaceRoot command);
-  let wroteDoneHeartbeat = writeHeartbeat heartbeatPath stdoutPath stderrPath false result in
-  result
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+successProcessResult : StepHandle -> ProcessResult
+successProcessResult step =
+  ProcessResult {
+    exitCode = 0,
+    stdout = readTextOrEmpty step.stdoutPath,
+    stderr = readTextOrEmpty step.stderrPath
+  }
+
+failedProcessResult : Str -> ProcessResult
+failedProcessResult message =
+  ProcessResult {
+    exitCode = 1,
+    stdout = "",
+    stderr = message
+  }
+
+processResultFromStep : StepHandle -> Int -> ProcessResult
+processResultFromStep step exitCode =
+  ProcessResult {
+    exitCode = exitCode,
+    stdout = readTextOrEmpty step.stdoutPath,
+    stderr = readTextOrEmpty step.stderrPath
+  }
+
+readWatchedProcess : Str -> Result WatchedProcess
+readWatchedProcess heartbeatPath = match readFile heartbeatPath {
+  Ok raw ->
+    watchedProcessOk (decode WatchedProcess raw),
+  Err message ->
+    watchedProcessError message
 }
+
+spawnStep : StepHandle -> [Str] -> Result WatchedProcess
+spawnStep step command =
+  match spawnCommandJson workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command {
+    Ok raw ->
+      watchedProcessOk (decode WatchedProcess raw),
+    Err message ->
+      watchedProcessError message
+  }
+
+awaitStep : StepHandle -> Result WatchedProcess
+awaitStep step =
+  match awaitWatchedProcessJson step.heartbeatPath watchPollMs {
+    Ok raw ->
+      watchedProcessOk (decode WatchedProcess raw),
+    Err message ->
+      watchedProcessError message
+  }
+
+resumeStep : StepHandle -> ProcessResult
+resumeStep step = match awaitStep step {
+  Ok process ->
+    processResultFromStep step process.exitCode,
+  Err message ->
+    failedProcessResult message
+}
+
+launchStepAndAwait : StepHandle -> [Str] -> LoopState -> ProcessResult
+launchStepAndAwait step command runningState =
+  match spawnStep step command {
+    Err message ->
+      failedProcessResult message,
+    Ok process ->
+      let stateError = writeLoopState runningState in
+      if stateError != "" then
+        failedProcessResult stateError
+      else
+        resumeStep step
+  }
+
+ensureStepReport : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
+ensureStepReport step command launchingState runningState =
+  if fileExists step.reportPath then
+    successProcessResult step
+  else if fileExists step.heartbeatPath then {
+    let resumed = resumeStep step in
+    if fileExists step.reportPath then
+      successProcessResult step
+    else
+      launchStepAndAwait step command runningState
+  } else {
+    let launchingStateError = writeLoopState launchingState in
+    if launchingStateError != "" then
+      failedProcessResult launchingStateError
+    else {
+      let launched = launchStepAndAwait step command runningState in
+      if fileExists step.reportPath then
+        successProcessResult step
+      else
+        launched
+    }
+  }
 
 readVerifierReport : Int -> VerifierReport
 readVerifierReport attempt = match readFile (verifierReportPath attempt) {
@@ -241,6 +330,17 @@ readFeedbackText attempt = match readFile feedbackPath {
   Err message ->
     ""
 }
+
+syntheticFailureReport : Str -> Str -> VerifierReport
+syntheticFailureReport summary detail =
+  VerifierReport {
+    verdict = "fail",
+    summary = summary,
+    findings = [detail],
+    tests_run = emptyTexts,
+    follow_up = ["Retry the failed step after inspecting its stderr artifact and persisted heartbeat."],
+    capability_statuses = emptyCapabilityStatuses
+  }
 
 defaultBuilderPolicyText : Str
 defaultBuilderPolicyText = textJoin "\n" [
@@ -567,25 +667,9 @@ ensureBaseline =
     }
   }
 
-runBuilder : Int -> ProcessResult
-runBuilder attempt =
-  runWatchedProcess
-    "builder"
-    attempt
-    (codexCommand builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
-
-runVerifier : Int -> ProcessResult
-runVerifier attempt =
-  runWatchedProcess
-    "verifier"
-    attempt
-    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
-
-runAttempt : Int -> Str
-runAttempt attempt =
-  if attempt > maxAttempts then
-    textConcat ["fail:", encode maxAttempts]
-  else if taskFile == "" then
+ensureLoopReady : Str
+ensureLoopReady =
+  if taskFile == "" then
     "config-error:missing-task-file"
   else if workspaceRoot == "" then
     "config-error:missing-workspace-root"
@@ -601,76 +685,138 @@ runAttempt attempt =
           let policyError = ensurePolicies in
           if policyError != "" then
             textConcat ["policy-error:", policyError]
-          else {
-            let builderStateError = writeLoopState (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
-            if builderStateError != "" then
-              textConcat ["state-error:", builderStateError]
-            else {
-              let builderRun = runBuilder attempt in
-              if builderRun.exitCode != 0 then {
-                let stateError = writeLoopState (loopState attempt "builder-crashed" "fail" false attempt 0 false true builderRun.stderr true) in
-                if stateError != "" then
-                  textConcat ["state-error:", stateError]
-                else
-                  textConcat ["builder-crash:", encode builderRun.exitCode]
-              } else {
-                let verifierStateError = writeLoopState (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
-                if verifierStateError != "" then
-                  textConcat ["state-error:", verifierStateError]
-                else {
-                  let verifierRun = runVerifier attempt in
-                  if verifierRun.exitCode != 0 then {
-                    let stateError = writeLoopState (loopState attempt "verifier-crashed" "fail" false attempt attempt false true verifierRun.stderr true) in
-                    if stateError != "" then
-                      textConcat ["state-error:", stateError]
-                    else
-                      textConcat ["verifier-crash:", encode verifierRun.exitCode]
-                  } else {
-                    let report = readVerifierReport attempt in
-                    if report.verdict == "pass" then {
-                      let stateError = writeLoopState (loopState attempt "completed" "pass" true attempt attempt true false "" true) in
-                      if stateError != "" then
-                        textConcat ["state-error:", stateError]
-                      else
-                        match writeFile feedbackPath (encode report) {
-                          Ok written ->
-                            textConcat ["pass:", encode attempt],
-                          Err message ->
-                            textConcat ["feedback-error:", message]
-                        }
-                    } else {
-                      let isFinalAttempt = attempt == maxAttempts;
-                      let nextState =
-                        if isFinalAttempt then
-                          loopState attempt "failed" "fail" false attempt attempt false true report.summary true
-                        else
-                          loopState (incrementAttempt attempt) "needs-builder" "retry" false attempt attempt false true report.summary false;
-                      let stateError = writeLoopState nextState in
-                      if stateError != "" then
-                        textConcat ["state-error:", stateError]
-                      else
-                        match writeFile feedbackPath (encode report) {
-                          Ok written ->
-                            if isFinalAttempt then
-                              textConcat ["fail:", encode attempt]
-                            else
-                              runAttempt (incrementAttempt attempt),
-                          Err message ->
-                            textConcat ["feedback-error:", message]
-                        }
-                    }
-                  }
-                }
-              }
-            }
+          else
+            ""
         }
     }
   }
+
+persistFailureAndContinue : Int -> VerifierReport -> Str
+persistFailureAndContinue attempt report = {
+  let isFinalAttempt = attempt == maxAttempts;
+  let nextState =
+    if isFinalAttempt then
+      loopState attempt "failed" "fail" false attempt attempt false true report.summary true
+    else
+      loopState (incrementAttempt attempt) "needs-builder" "retry" false attempt attempt false true report.summary false;
+  let stateError = writeLoopState nextState in
+  if stateError != "" then
+    textConcat ["state-error:", stateError]
+  else
+    match writeFile feedbackPath (encode report) {
+      Ok written ->
+        if isFinalAttempt then
+          textConcat ["fail:", encode attempt]
+        else
+          runAttempt (incrementAttempt attempt),
+      Err message ->
+        textConcat ["feedback-error:", message]
+    }
+}
+
+finishPass : Int -> VerifierReport -> Str
+finishPass attempt report =
+  match writeFile feedbackPath (encode report) {
+    Err message ->
+      textConcat ["feedback-error:", message],
+    Ok written ->
+      let stateError = writeLoopState (loopState attempt "completed" "pass" true attempt attempt true false "" true) in
+      if stateError != "" then
+        textConcat ["state-error:", stateError]
+      else
+        textConcat ["pass:", encode attempt]
   }
+
+runVerifierPhase : Int -> Str
+runVerifierPhase attempt =
+  if attempt > maxAttempts then
+    textConcat ["fail:", encode maxAttempts]
+  else {
+    let prepError = ensureLoopReady in
+    if prepError != "" then
+      prepError
+    else {
+      let verifierStep = stepHandle "verifier" attempt;
+      let verifierRun =
+        ensureStepReport
+          verifierStep
+          (codexCommand verifierSchemaPath verifierStep.reportPath (verifierPrompt attempt))
+          (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
+          (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
+      if fileExists verifierStep.reportPath then {
+        let report = readVerifierReport attempt in
+        if report.verdict == "pass" then
+          finishPass attempt report
+        else
+          persistFailureAndContinue attempt report
+      } else
+        persistFailureAndContinue
+          attempt
+          (syntheticFailureReport
+            "verifier step failed before producing a durable report"
+            verifierRun.stderr)
+    }
+  }
+
+runBuilderPhase : Int -> Str
+runBuilderPhase attempt =
+  if attempt > maxAttempts then
+    textConcat ["fail:", encode maxAttempts]
+  else {
+    let prepError = ensureLoopReady in
+    if prepError != "" then
+      prepError
+    else {
+      let builderStep = stepHandle "builder" attempt in
+      if fileExists builderStep.reportPath then
+        runVerifierPhase attempt
+      else {
+        let builderRun =
+          ensureStepReport
+            builderStep
+            (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
+            (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
+            (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
+        if fileExists builderStep.reportPath then
+          runVerifierPhase attempt
+        else
+          persistFailureAndContinue
+            attempt
+            (syntheticFailureReport
+              "builder step failed before producing a durable report"
+              builderRun.stderr)
+      }
+    }
+  }
+
+runAttempt : Int -> Str
+runAttempt attempt = runBuilderPhase attempt
+
+resumeLoop : LoopState -> Str
+resumeLoop state =
+  if state.final then
+    if state.verdict == "pass" then
+      textConcat ["pass:", encode state.attempt]
+    else if state.verdict == "fail" then
+      textConcat ["fail:", encode state.attempt]
+    else
+      runAttempt state.attempt
+  else if state.phase == "builder-running" then
+    runBuilderPhase state.attempt
+  else if state.phase == "builder-launching" then
+    runBuilderPhase state.attempt
+  else if state.phase == "verifier-running" then
+    runVerifierPhase state.attempt
+  else if state.phase == "verifier-launching" then
+    runVerifierPhase state.attempt
+  else if state.attempt == 0 then
+    runAttempt 1
+  else
+    runAttempt state.attempt
 
 main : Str
 main =
   if commandName == "status" then
     encode readLoopState
   else
-    runAttempt 1
+    resumeLoop readLoopState

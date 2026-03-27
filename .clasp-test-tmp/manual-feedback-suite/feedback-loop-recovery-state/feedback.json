@@ -1,0 +1,1 @@
+{"verdict":"fail","summary":"builder step failed before producing a durable report","findings":["invalid watched process heartbeat: EOF while parsing a value at line 1 column 0"],"tests_run":[],"follow_up":["Retry the failed step after inspecting its stderr artifact and persisted heartbeat."],"capability_statuses":[]}

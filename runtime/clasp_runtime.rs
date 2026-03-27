@@ -2321,22 +2321,22 @@ fn interpret_native_expr(
             let result = match name.as_str() {
                 "Ok" if owned_args.as_ref().map_or(0, Vec::len) == 1 => unsafe {
                     let args = owned_args.as_ref().unwrap();
-                    if (*args[0]).layout_id != CLASP_RT_LAYOUT_STRING {
-                        null_mut()
-                    } else {
+                    if (*args[0]).layout_id == CLASP_RT_LAYOUT_STRING {
                         let built = build_runtime_result_string(true, args[0] as *mut ClaspRtString);
                         release_header(runtime, args[0]);
                         built as *mut ClaspRtHeader
+                    } else {
+                        build_runtime_variant_value(name, owned_args.take().unwrap()) as *mut ClaspRtHeader
                     }
                 },
                 "Err" if owned_args.as_ref().map_or(0, Vec::len) == 1 => unsafe {
                     let args = owned_args.as_ref().unwrap();
-                    if (*args[0]).layout_id != CLASP_RT_LAYOUT_STRING {
-                        null_mut()
-                    } else {
+                    if (*args[0]).layout_id == CLASP_RT_LAYOUT_STRING {
                         let built = build_runtime_result_string(false, args[0] as *mut ClaspRtString);
                         release_header(runtime, args[0]);
                         built as *mut ClaspRtHeader
+                    } else {
+                        build_runtime_variant_value(name, owned_args.take().unwrap()) as *mut ClaspRtHeader
                     }
                 },
                 _ => unsafe {
@@ -2871,8 +2871,15 @@ fn interpret_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmReleaseJson", 3) => unsafe { clasp_rt_swarm_release_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmHeartbeatJson", 3) => unsafe { clasp_rt_swarm_heartbeat_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmCompleteJson", 3) => unsafe { clasp_rt_swarm_complete_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmFailJson", 3) => unsafe { clasp_rt_swarm_fail_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmRetryJson", 3) => unsafe { clasp_rt_swarm_retry_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmStopJson", 3) => unsafe { clasp_rt_swarm_stop_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmResumeJson", 3) => unsafe { clasp_rt_swarm_resume_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStatusJson", 2) => unsafe { clasp_rt_swarm_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmHistoryJson", 2) => unsafe { clasp_rt_swarm_history_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTasksJson", 1) => unsafe { clasp_rt_swarm_tasks_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -2899,6 +2906,33 @@ fn interpret_runtime_binding(
         ("swarmRunsJson", 2) => unsafe { clasp_rt_swarm_runs_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
+        ("spawnCommandJson", 6) => unsafe {
+            clasp_rt_spawn_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("watchCommandJson", 6) => unsafe {
+            clasp_rt_watch_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("reconcileWatchedProcessJson", 1) => unsafe {
+            clasp_rt_reconcile_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
+        },
+        ("awaitWatchedProcessJson", 2) => unsafe {
+            clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
+        },
+        ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -2982,8 +3016,15 @@ fn interpret_builtin_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmReleaseJson", 3) => unsafe { clasp_rt_swarm_release_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmHeartbeatJson", 3) => unsafe { clasp_rt_swarm_heartbeat_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmCompleteJson", 3) => unsafe { clasp_rt_swarm_complete_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmFailJson", 3) => unsafe { clasp_rt_swarm_fail_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmRetryJson", 3) => unsafe { clasp_rt_swarm_retry_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmStopJson", 3) => unsafe { clasp_rt_swarm_stop_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmResumeJson", 3) => unsafe { clasp_rt_swarm_resume_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStatusJson", 2) => unsafe { clasp_rt_swarm_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmHistoryJson", 2) => unsafe { clasp_rt_swarm_history_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTasksJson", 1) => unsafe { clasp_rt_swarm_tasks_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3010,6 +3051,33 @@ fn interpret_builtin_runtime_binding(
         ("swarmRunsJson", 2) => unsafe { clasp_rt_swarm_runs_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
+        ("spawnCommandJson", 6) => unsafe {
+            clasp_rt_spawn_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("watchCommandJson", 6) => unsafe {
+            clasp_rt_watch_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("reconcileWatchedProcessJson", 1) => unsafe {
+            clasp_rt_reconcile_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
+        },
+        ("awaitWatchedProcessJson", 2) => unsafe {
+            clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
+        },
+        ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3069,8 +3137,15 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "pathDirname"
             | "fileExists"
             | "swarmBootstrapJson"
+            | "swarmStartJson"
             | "swarmLeaseJson"
+            | "swarmReleaseJson"
+            | "swarmHeartbeatJson"
             | "swarmCompleteJson"
+            | "swarmFailJson"
+            | "swarmRetryJson"
+            | "swarmStopJson"
+            | "swarmResumeJson"
             | "swarmStatusJson"
             | "swarmHistoryJson"
             | "swarmTasksJson"
@@ -3091,6 +3166,11 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmRunsJson"
             | "swarmArtifactsJson"
             | "runCommandJson"
+            | "spawnCommandJson"
+            | "watchCommandJson"
+            | "reconcileWatchedProcessJson"
+            | "awaitWatchedProcessJson"
+            | "sleepMs"
             | "writeFile"
             | "appendFile"
             | "mkdirAll"
@@ -6489,7 +6569,9 @@ fn watched_process_status_json(
 
 fn write_watched_process_heartbeat(path: &str, payload: &str) -> Result<(), String> {
     ensure_parent_dir(path)?;
-    fs::write(path, payload.as_bytes()).map_err(|err| err.to_string())
+    let temp_path = format!("{path}.tmp");
+    fs::write(&temp_path, payload.as_bytes()).map_err(|err| err.to_string())?;
+    fs::rename(&temp_path, path).map_err(|err| err.to_string())
 }
 
 fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String), String> {
@@ -6552,6 +6634,213 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
             }
             Err(err) => return Err(err.to_string()),
         }
+    }
+}
+
+fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 5 {
+        return Err("invalid_spawn_command".to_owned());
+    }
+
+    let stdout_path = args[0].clone();
+    let stderr_path = args[1].clone();
+    let heartbeat_path = args[2].clone();
+    let poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let watched_command = args[4..].to_vec();
+    if watched_command.is_empty() {
+        return Err("missing_watch_command".to_owned());
+    }
+
+    let stdout_file = create_truncated_output_file(&stdout_path)?;
+    let stderr_file = create_truncated_output_file(&stderr_path)?;
+    let mut child = ProcessCommand::new(&watched_command[0])
+        .args(&watched_command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .map_err(|err| err.to_string())?;
+    let pid = child.id();
+
+    let initial = watched_process_status_json(
+        pid,
+        true,
+        false,
+        -1,
+        &stdout_path,
+        &stderr_path,
+        &heartbeat_path,
+    );
+    write_watched_process_heartbeat(&heartbeat_path, &initial)?;
+
+    thread::spawn(move || loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let payload = watched_process_status_json(
+                    pid,
+                    false,
+                    true,
+                    exit_code,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                break;
+            }
+            Ok(None) => {
+                let payload = watched_process_status_json(
+                    pid,
+                    true,
+                    false,
+                    -1,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                thread::sleep(Duration::from_millis(poll_ms));
+            }
+            Err(err) => {
+                if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&stderr_path) {
+                    let _ = writeln!(file, "{err}");
+                }
+                let payload = watched_process_status_json(
+                    pid,
+                    false,
+                    true,
+                    -1,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                break;
+            }
+        }
+    });
+
+    Ok(initial)
+}
+
+fn watched_process_exists(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+fn reconcile_watched_process_json(heartbeat_path: &str) -> Result<String, String> {
+    let heartbeat_text = fs::read_to_string(heartbeat_path).map_err(|err| err.to_string())?;
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&heartbeat_text).map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+    let pid = payload
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+        .max(0) as u32;
+    let running = payload
+        .get("running")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let completed = payload
+        .get("completed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    if completed || !running {
+        return Ok(payload.to_string());
+    }
+
+    if watched_process_exists(pid) {
+        return Ok(payload.to_string());
+    }
+
+    payload["running"] = serde_json::Value::Bool(false);
+    payload["completed"] = serde_json::Value::Bool(true);
+    payload["exitCode"] = serde_json::Value::Number(serde_json::Number::from(-1));
+    payload["updatedAtMs"] = serde_json::Value::Number(serde_json::Number::from(runtime_time_unix_ms()));
+
+    let updated = payload.to_string();
+    write_watched_process_heartbeat(heartbeat_path, &updated)?;
+    Ok(updated)
+}
+
+fn sleep_ms_json(delay_ms: i64) -> String {
+    let clamped = delay_ms.max(0) as u64;
+    thread::sleep(Duration::from_millis(clamped));
+    serde_json::json!({
+        "sleptMs": clamped as i64,
+    })
+    .to_string()
+}
+
+fn read_watched_process_payload(heartbeat_path: &str) -> Result<(String, serde_json::Value), String> {
+    let mut last_error = "invalid watched process heartbeat: empty payload".to_owned();
+    for _ in 0..10 {
+        let payload = fs::read_to_string(heartbeat_path).map_err(|err| err.to_string())?;
+        if payload.trim().is_empty() {
+            last_error = "invalid watched process heartbeat: empty payload".to_owned();
+            thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(&payload) {
+            Ok(decoded) => return Ok((payload, decoded)),
+            Err(err) if err.is_eof() => {
+                last_error = format!("invalid watched process heartbeat: {err}");
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => return Err(format!("invalid watched process heartbeat: {err}")),
+        }
+    }
+    Err(last_error)
+}
+
+fn await_watched_process_json(heartbeat_path: &str, poll_ms: u64) -> Result<String, String> {
+    let clamped = poll_ms.max(50);
+    loop {
+        let (payload, decoded) = read_watched_process_payload(heartbeat_path)?;
+        let running = decoded
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let completed = decoded
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if completed || !running {
+            return Ok(payload);
+        }
+        let pid = decoded
+            .get("pid")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            .max(0) as u32;
+        if watched_process_exists(pid) {
+            thread::sleep(Duration::from_millis(clamped));
+            continue;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+        let (refreshed_payload, refreshed) = read_watched_process_payload(heartbeat_path)?;
+        let refreshed_running = refreshed
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let refreshed_completed = refreshed
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if refreshed_completed || !refreshed_running {
+            return Ok(refreshed_payload);
+        }
+
+        return reconcile_watched_process_json(heartbeat_path);
     }
 }
 
@@ -7279,6 +7568,18 @@ pub unsafe extern "C" fn clasp_rt_swarm_bootstrap_json(
     ))
 }
 
+pub unsafe extern "C" fn clasp_rt_swarm_start_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_start(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_lease_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -7291,12 +7592,84 @@ pub unsafe extern "C" fn clasp_rt_swarm_lease_json(
     ))
 }
 
+pub unsafe extern "C" fn clasp_rt_swarm_release_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_release(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_heartbeat_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_heartbeat(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_complete_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
     actor: *mut ClaspRtString,
 ) -> *mut ClaspRtResultString {
     clasp_rt_result_string_from_owned(swarm::builtin_swarm_complete(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_fail_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_fail(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_retry_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_retry(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_stop_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_stop(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_resume_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_resume(
         &String::from_utf8_lossy(string_bytes(root)).into_owned(),
         &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
         &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
@@ -7644,6 +8017,114 @@ pub unsafe extern "C" fn clasp_rt_run_command_json(
     render_payload(output.status.code().unwrap_or(-1), &output.stdout, &output.stderr)
 }
 
+pub unsafe extern "C" fn clasp_rt_watch_command_json(
+    cwd: *mut ClaspRtString,
+    stdout_path: *mut ClaspRtString,
+    stderr_path: *mut ClaspRtString,
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let stdout_path_string = String::from_utf8_lossy(string_bytes(stdout_path)).into_owned();
+    let stderr_path_string = String::from_utf8_lossy(string_bytes(stderr_path)).into_owned();
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let mut args = vec![
+        stdout_path_string,
+        stderr_path_string,
+        heartbeat_path_string,
+        poll_ms_value.to_string(),
+    ];
+    args.extend(command_values);
+    match run_watched_process_json(&cwd_string, &args) {
+        Ok((_exit_code, payload)) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_spawn_command_json(
+    cwd: *mut ClaspRtString,
+    stdout_path: *mut ClaspRtString,
+    stderr_path: *mut ClaspRtString,
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let stdout_path_string = String::from_utf8_lossy(string_bytes(stdout_path)).into_owned();
+    let stderr_path_string = String::from_utf8_lossy(string_bytes(stderr_path)).into_owned();
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let mut args = vec![
+        stdout_path_string,
+        stderr_path_string,
+        heartbeat_path_string,
+        poll_ms_value.to_string(),
+    ];
+    args.extend(command_values);
+    match spawn_watched_process_json(&cwd_string, &args) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_reconcile_watched_process_json(
+    heartbeat_path: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    match reconcile_watched_process_json(&heartbeat_path_string) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_await_watched_process_json(
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    match await_watched_process_json(&heartbeat_path_string, poll_ms_value.max(0) as u64) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_sleep_ms(
+    delay_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let value = match clasp_rt_int_arg(delay_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let payload = sleep_ms_json(value);
+    clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7833,6 +8314,152 @@ mod tests {
             let _ = std::fs::remove_file(script_path);
             let _ = std::fs::remove_file(stdout_path);
             let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+        }
+    }
+
+    #[test]
+    fn spawn_command_json_returns_running_handle_and_awaits_completion() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let script_path = cwd_dir.join(format!("clasp-spawn-command-json-{}.sh", std::process::id()));
+            let stdout_path = cwd_dir.join(format!("clasp-spawn-command-json-{}.stdout", std::process::id()));
+            let stderr_path = cwd_dir.join(format!("clasp-spawn-command-json-{}.stderr", std::process::id()));
+            let heartbeat_path =
+                cwd_dir.join(format!("clasp-spawn-command-json-{}.heartbeat.json", std::process::id()));
+            std::fs::write(
+                &script_path,
+                b"#!/bin/sh\nprintf spawn-start\\n\nprintf spawn-progress >&2\nsleep 0.1\nprintf spawn-finish\\n\n",
+            )
+            .expect("expected spawn test script write to succeed");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected spawn test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected executable test script permissions");
+
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let spawned = clasp_rt_spawn_command_json(cwd, stdout_rt, stderr_rt, heartbeat_rt, poll_ms, command);
+            assert!((*spawned).is_ok);
+            let spawned_payload = String::from_utf8_lossy(string_bytes((*spawned).value)).into_owned();
+            let spawned_json: serde_json::Value =
+                serde_json::from_str(&spawned_payload).expect("expected valid spawned heartbeat");
+            assert_eq!(spawned_json["running"].as_bool(), Some(true));
+            assert_eq!(spawned_json["completed"].as_bool(), Some(false));
+            assert!(spawned_json["pid"].as_i64().unwrap_or_default() > 0);
+
+            let awaited = clasp_rt_await_watched_process_json(heartbeat_rt, poll_ms);
+            assert!((*awaited).is_ok);
+            let awaited_payload = String::from_utf8_lossy(string_bytes((*awaited).value)).into_owned();
+            let awaited_json: serde_json::Value =
+                serde_json::from_str(&awaited_payload).expect("expected valid awaited heartbeat");
+            assert_eq!(awaited_json["completed"].as_bool(), Some(true));
+            assert_eq!(awaited_json["exitCode"].as_i64(), Some(0));
+
+            let streamed_stdout = std::fs::read_to_string(&stdout_path).expect("expected stdout log");
+            let streamed_stderr = std::fs::read_to_string(&stderr_path).expect("expected stderr log");
+            assert!(streamed_stdout.contains("spawn-start"));
+            assert!(streamed_stdout.contains("spawn-finish"));
+            assert!(streamed_stderr.contains("spawn-progress"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), spawned as *mut ClaspRtHeader);
+            release_header(null_mut(), awaited as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+            let _ = std::fs::remove_file(stdout_path);
+            let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+        }
+    }
+
+    #[test]
+    fn reconcile_watched_process_json_marks_missing_pid_completed() {
+        unsafe {
+            let heartbeat_path =
+                std::env::temp_dir().join(format!("clasp-reconcile-watch-{}.heartbeat.json", std::process::id()));
+            std::fs::write(
+                &heartbeat_path,
+                serde_json::json!({
+                    "pid": 0,
+                    "running": true,
+                    "completed": false,
+                    "exitCode": 0,
+                    "stdoutPath": heartbeat_path.with_extension("stdout").display().to_string(),
+                    "stderrPath": heartbeat_path.with_extension("stderr").display().to_string(),
+                    "heartbeatPath": heartbeat_path.display().to_string(),
+                    "updatedAtMs": 0,
+                })
+                .to_string(),
+            )
+            .expect("expected stale heartbeat write");
+
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let result = clasp_rt_reconcile_watched_process_json(heartbeat_rt);
+            assert!((*result).is_ok);
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid reconciled heartbeat");
+            assert_eq!(parsed["running"].as_bool(), Some(false));
+            assert_eq!(parsed["completed"].as_bool(), Some(true));
+            assert_eq!(parsed["exitCode"].as_i64(), Some(-1));
+
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(heartbeat_path);
+        }
+    }
+
+    #[test]
+    fn await_watched_process_json_retries_transient_empty_heartbeat() {
+        unsafe {
+            let heartbeat_path =
+                std::env::temp_dir().join(format!("clasp-await-watch-empty-{}.heartbeat.json", std::process::id()));
+            std::fs::write(&heartbeat_path, "").expect("expected initial empty heartbeat write");
+
+            let completed_payload = serde_json::json!({
+                "pid": 0,
+                "running": false,
+                "completed": true,
+                "exitCode": 0,
+                "stdoutPath": heartbeat_path.with_extension("stdout").display().to_string(),
+                "stderrPath": heartbeat_path.with_extension("stderr").display().to_string(),
+                "heartbeatPath": heartbeat_path.display().to_string(),
+                "updatedAtMs": runtime_time_unix_ms(),
+            })
+            .to_string();
+
+            let writer_path = heartbeat_path.clone();
+            let writer_payload = completed_payload.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(20));
+                std::fs::write(writer_path, writer_payload).expect("expected completed heartbeat write");
+            });
+
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let result = clasp_rt_await_watched_process_json(heartbeat_rt, poll_ms);
+            assert!((*result).is_ok);
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid awaited heartbeat");
+            assert_eq!(parsed["completed"].as_bool(), Some(true));
+            assert_eq!(parsed["exitCode"].as_i64(), Some(0));
+
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
             let _ = std::fs::remove_file(heartbeat_path);
         }
     }

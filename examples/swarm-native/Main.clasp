@@ -1,20 +1,18 @@
 module Main
+
 import Swarm
 
-useLatestArg : Str -> Str -> Str
-useLatestArg current value = value
-
 stateRoot : Str
-stateRoot = fold useLatestArg "swarm-native-state" (reverse argv)
+stateRoot = if textJoin "" argv == "" then "swarm-native-state" else pathJoin argv
 
 objectiveId : Str
-objectiveId = "ordinary-loop"
+objectiveId = "appbench"
 
 planningTaskId : Str
-planningTaskId = "plan-runtime"
+planningTaskId = "plan"
 
 repairTaskId : Str
-repairTaskId = "repair-runtime"
+repairTaskId = "repair-2"
 
 actorName : Str
 actorName = match envVar "CLASP_SWARM_ACTOR" {
@@ -37,16 +35,22 @@ jsonFieldRaw name value = textConcat ["\"", name, "\":", value]
 jsonObject : [Str] -> Str
 jsonObject fields = textConcat ["{", textJoin "," fields, "}"]
 
-errorText : Str -> Str
-errorText message = textConcat ["error:", message]
+plannerCommand : [Str]
+plannerCommand = ["bash", "-lc", "printf planner-ok"]
+
+builderCommand : [Str]
+builderCommand = ["bash", "-lc", "printf builder-ok"]
+
+verifierCommand : [Str]
+verifierCommand = ["bash", "-lc", "printf verifier-ok"]
 
 main : Str
 main =
-  match swarmObjectiveCreateRaw stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6 {
+  match swarmObjectiveCreateRaw stateRoot objectiveId "Run a planner/builder/verifier loop directly from ordinary Clasp code over the native swarm substrate." 6 6 {
     Ok objectiveCreateValue ->
-      match swarmTaskCreateRaw stateRoot objectiveId planningTaskId "Plan the runtime repair using direct Clasp orchestration." [] 1 60000 {
+      match swarmTaskCreateRaw stateRoot objectiveId planningTaskId "Plan the repair work and unblock the execution DAG." [] 1 60000 {
         Ok planningTaskCreateValue ->
-          match swarmTaskCreateRaw stateRoot objectiveId repairTaskId "Repair the runtime using direct Clasp orchestration." [planningTaskId] 3 60000 {
+          match swarmTaskCreateRaw stateRoot objectiveId repairTaskId "Run the repair, verification, approval, and mergegate path." [planningTaskId] 2 60000 {
             Ok repairTaskCreateValue ->
               match swarmPolicySetRaw stateRoot repairTaskId "trunk" ["merge-ready"] ["native-smoke"] {
                 Ok policyValue ->
@@ -56,126 +60,186 @@ main =
                         Ok managerBeforeValue ->
                           match swarmLeaseRaw stateRoot planningTaskId actorName {
                             Ok planningLeaseValue ->
-                              match swarmToolRunRaw stateRoot planningTaskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-plan-ok"] {
+                              match swarmToolRunRaw stateRoot planningTaskId actorName workspaceCwd plannerCommand {
                                 Ok planningRunValue ->
                                   match swarmCompleteRaw stateRoot planningTaskId actorName {
                                     Ok planningCompleteValue ->
-                                      match swarmManagerNextRaw stateRoot objectiveId {
-                                        Ok managerAfterPlanValue ->
-                                          match swarmLeaseRaw stateRoot repairTaskId actorName {
-                                            Ok repairLeaseValue ->
-                                              match swarmToolRunRaw stateRoot repairTaskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"] {
-                                                Ok toolRunValue ->
-                                                  match swarmCompleteRaw stateRoot repairTaskId actorName {
-                                                    Ok repairCompleteValue ->
-                                                      match swarmVerifierRunRaw stateRoot repairTaskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"] {
-                                                        Ok verifierRunValue ->
-                                                          match swarmApproveRaw stateRoot repairTaskId actorName "merge-ready" {
-                                                            Ok approvalValue ->
-                                                              match swarmMergegateDecideRaw stateRoot repairTaskId actorName "trunk" ["native-smoke"] {
-                                                                Ok mergeDecisionValue ->
-                                                                  match swarmStatusRaw stateRoot repairTaskId {
-                                                                    Ok repairStatusValue ->
-                                                                      match swarmObjectiveStatusRaw stateRoot objectiveId {
-                                                                        Ok objectiveStatusValue ->
-                                                                          match swarmRunsRaw stateRoot repairTaskId {
-                                                                            Ok runsValue ->
-                                                                              match swarmArtifactsRaw stateRoot repairTaskId {
-                                                                                Ok artifactsValue ->
-                                                                                  match swarmSummaryRaw stateRoot {
-                                                                                    Ok summaryValue ->
-                                                                                      match swarmManagerNextRaw stateRoot objectiveId {
-                                                                                        Ok managerAfterValue ->
-                                                                                          jsonObject [
-                                                                                            jsonFieldText "objective" objectiveId,
-                                                                                            jsonFieldText "planningTask" planningTaskId,
-                                                                                            jsonFieldText "repairTask" repairTaskId,
-                                                                                            jsonFieldRaw "objectiveCreate" objectiveCreateValue,
-                                                                                            jsonFieldRaw "planningTaskCreate" planningTaskCreateValue,
-                                                                                            jsonFieldRaw "repairTaskCreate" repairTaskCreateValue,
-                                                                                            jsonFieldRaw "policy" policyValue,
-                                                                                            jsonFieldRaw "readyBefore" readyBeforeValue,
-                                                                                            jsonFieldRaw "managerBefore" managerBeforeValue,
-                                                                                            jsonFieldRaw "planningLease" planningLeaseValue,
-                                                                                            jsonFieldRaw "planningRun" planningRunValue,
-                                                                                            jsonFieldRaw "planningComplete" planningCompleteValue,
-                                                                                            jsonFieldRaw "managerAfterPlan" managerAfterPlanValue,
-                                                                                            jsonFieldRaw "repairLease" repairLeaseValue,
-                                                                                            jsonFieldRaw "toolRun" toolRunValue,
-                                                                                            jsonFieldRaw "repairComplete" repairCompleteValue,
-                                                                                            jsonFieldRaw "verifierRun" verifierRunValue,
-                                                                                            jsonFieldRaw "approval" approvalValue,
-                                                                                            jsonFieldRaw "mergeDecision" mergeDecisionValue,
-                                                                                            jsonFieldRaw "repairStatus" repairStatusValue,
-                                                                                            jsonFieldRaw "objectiveStatus" objectiveStatusValue,
-                                                                                            jsonFieldRaw "runs" runsValue,
-                                                                                            jsonFieldRaw "artifacts" artifactsValue,
-                                                                                            jsonFieldRaw "summary" summaryValue,
-                                                                                            jsonFieldRaw "managerAfter" managerAfterValue
-                                                                                          ],
+                                      match swarmReadyRaw stateRoot objectiveId {
+                                        Ok readyAfterPlanValue ->
+                                          match swarmManagerNextRaw stateRoot objectiveId {
+                                            Ok managerAfterPlanValue ->
+                                              match swarmLeaseRaw stateRoot repairTaskId actorName {
+                                                Ok repairLeaseValue ->
+                                                  match swarmToolRunRaw stateRoot repairTaskId actorName workspaceCwd builderCommand {
+                                                    Ok toolRunValue ->
+                                                      match swarmCompleteRaw stateRoot repairTaskId actorName {
+                                                        Ok repairCompleteValue ->
+                                                          match swarmStatusRaw stateRoot repairTaskId {
+                                                            Ok repairStatusBeforeVerifierValue ->
+                                                              match swarmManagerNextRaw stateRoot objectiveId {
+                                                                Ok managerAfterRepairValue ->
+                                                                  match swarmVerifierRunRaw stateRoot repairTaskId actorName "native-smoke" workspaceCwd verifierCommand {
+                                                                    Ok verifierRunValue ->
+                                                                      match swarmManagerNextRaw stateRoot objectiveId {
+                                                                        Ok managerAfterVerifierValue ->
+                                                                          match swarmApproveRaw stateRoot repairTaskId actorName "merge-ready" {
+                                                                            Ok approvalValue ->
+                                                                              match swarmApprovalsRaw stateRoot repairTaskId {
+                                                                                Ok approvalsValue ->
+                                                                                  match swarmManagerNextRaw stateRoot objectiveId {
+                                                                                    Ok managerAfterApprovalValue ->
+                                                                                      match swarmMergegateDecideRaw stateRoot repairTaskId actorName "trunk" ["native-smoke"] {
+                                                                                        Ok mergeDecisionValue ->
+                                                                                          match swarmStatusRaw stateRoot repairTaskId {
+                                                                                            Ok repairStatusValue ->
+                                                                                              match swarmHistoryRaw stateRoot repairTaskId {
+                                                                                                Ok repairHistoryValue ->
+                                                                                                  match swarmTailRaw stateRoot repairTaskId 4 {
+                                                                                                    Ok repairTailValue ->
+                                                                                                      match swarmObjectiveStatusRaw stateRoot objectiveId {
+                                                                                                        Ok objectiveStatusValue ->
+                                                                                                          match swarmObjectivesRaw stateRoot {
+                                                                                                            Ok objectivesValue ->
+                                                                                                              match swarmTasksRaw stateRoot {
+                                                                                                                Ok tasksValue ->
+                                                                                                                  match swarmRunsRaw stateRoot repairTaskId {
+                                                                                                                    Ok runsValue ->
+                                                                                                                      match swarmArtifactsRaw stateRoot repairTaskId {
+                                                                                                                        Ok artifactsValue ->
+                                                                                                                          match swarmSummaryRaw stateRoot {
+                                                                                                                            Ok summaryValue ->
+                                                                                                                              match swarmManagerNextRaw stateRoot objectiveId {
+                                                                                                                                Ok managerAfterValue ->
+                                                                                                                                  jsonObject [
+                                                                                                                                    jsonFieldText "objective" objectiveId,
+                                                                                                                                    jsonFieldText "planningTask" planningTaskId,
+                                                                                                                                    jsonFieldText "repairTask" repairTaskId,
+                                                                                                                                    jsonFieldRaw "objectiveCreate" objectiveCreateValue,
+                                                                                                                                    jsonFieldRaw "planningTaskCreate" planningTaskCreateValue,
+                                                                                                                                    jsonFieldRaw "repairTaskCreate" repairTaskCreateValue,
+                                                                                                                                    jsonFieldRaw "policy" policyValue,
+                                                                                                                                    jsonFieldRaw "readyBefore" readyBeforeValue,
+                                                                                                                                    jsonFieldRaw "managerBefore" managerBeforeValue,
+                                                                                                                                    jsonFieldRaw "planningLease" planningLeaseValue,
+                                                                                                                                    jsonFieldRaw "planningRun" planningRunValue,
+                                                                                                                                    jsonFieldRaw "planningComplete" planningCompleteValue,
+                                                                                                                                    jsonFieldRaw "readyAfterPlan" readyAfterPlanValue,
+                                                                                                                                    jsonFieldRaw "managerAfterPlan" managerAfterPlanValue,
+                                                                                                                                    jsonFieldRaw "repairLease" repairLeaseValue,
+                                                                                                                                    jsonFieldRaw "toolRun" toolRunValue,
+                                                                                                                                    jsonFieldRaw "repairComplete" repairCompleteValue,
+                                                                                                                                    jsonFieldRaw "repairStatusBeforeVerifier" repairStatusBeforeVerifierValue,
+                                                                                                                                    jsonFieldRaw "managerAfterRepair" managerAfterRepairValue,
+                                                                                                                                    jsonFieldRaw "verifierRun" verifierRunValue,
+                                                                                                                                    jsonFieldRaw "managerAfterVerifier" managerAfterVerifierValue,
+                                                                                                                                    jsonFieldRaw "approval" approvalValue,
+                                                                                                                                    jsonFieldRaw "approvals" approvalsValue,
+                                                                                                                                    jsonFieldRaw "managerAfterApproval" managerAfterApprovalValue,
+                                                                                                                                    jsonFieldRaw "mergeDecision" mergeDecisionValue,
+                                                                                                                                    jsonFieldRaw "repairStatus" repairStatusValue,
+                                                                                                                                    jsonFieldRaw "repairHistory" repairHistoryValue,
+                                                                                                                                    jsonFieldRaw "repairTail" repairTailValue,
+                                                                                                                                    jsonFieldRaw "objectiveStatus" objectiveStatusValue,
+                                                                                                                                    jsonFieldRaw "objectives" objectivesValue,
+                                                                                                                                    jsonFieldRaw "tasks" tasksValue,
+                                                                                                                                    jsonFieldRaw "runs" runsValue,
+                                                                                                                                    jsonFieldRaw "artifacts" artifactsValue,
+                                                                                                                                    jsonFieldRaw "summary" summaryValue,
+                                                                                                                                    jsonFieldRaw "managerAfter" managerAfterValue
+                                                                                                                                  ],
+                                                                                                                                Err message ->
+                                                                                                                                  message
+                                                                                                                              },
+                                                                                                                            Err message ->
+                                                                                                                              message
+                                                                                                                          },
+                                                                                                                        Err message ->
+                                                                                                                          message
+                                                                                                                      },
+                                                                                                                    Err message ->
+                                                                                                                      message
+                                                                                                                  },
+                                                                                                                Err message ->
+                                                                                                                  message
+                                                                                                              },
+                                                                                                            Err message ->
+                                                                                                              message
+                                                                                                          },
+                                                                                                        Err message ->
+                                                                                                          message
+                                                                                                      },
+                                                                                                    Err message ->
+                                                                                                      message
+                                                                                                  },
+                                                                                                Err message ->
+                                                                                                  message
+                                                                                              },
+                                                                                            Err message ->
+                                                                                              message
+                                                                                          },
                                                                                         Err message ->
-                                                                                          errorText message
+                                                                                          message
                                                                                       },
                                                                                     Err message ->
-                                                                                      errorText message
+                                                                                      message
                                                                                   },
                                                                                 Err message ->
-                                                                                  errorText message
+                                                                                  message
                                                                               },
                                                                             Err message ->
-                                                                              errorText message
+                                                                              message
                                                                           },
                                                                         Err message ->
-                                                                          errorText message
+                                                                          message
                                                                       },
                                                                     Err message ->
-                                                                      errorText message
+                                                                      message
                                                                   },
                                                                 Err message ->
-                                                                  errorText message
+                                                                  message
                                                               },
                                                             Err message ->
-                                                              errorText message
+                                                              message
                                                           },
                                                         Err message ->
-                                                          errorText message
+                                                          message
                                                       },
                                                     Err message ->
-                                                      errorText message
+                                                      message
                                                   },
                                                 Err message ->
-                                                  errorText message
+                                                  message
                                               },
                                             Err message ->
-                                              errorText message
+                                              message
                                           },
                                         Err message ->
-                                          errorText message
+                                          message
                                       },
                                     Err message ->
-                                      errorText message
+                                      message
                                   },
                                 Err message ->
-                                  errorText message
+                                  message
                               },
                             Err message ->
-                              errorText message
+                              message
                           },
                         Err message ->
-                          errorText message
+                          message
                       },
                     Err message ->
-                      errorText message
+                      message
                   },
                 Err message ->
-                  errorText message
+                  message
               },
             Err message ->
-              errorText message
+              message
           },
         Err message ->
-          errorText message
+          message
       },
     Err message ->
-      errorText message
+      message
   }

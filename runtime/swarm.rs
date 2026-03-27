@@ -3569,15 +3569,43 @@ fn render_builtin_event(root: &str, task_id: &str, actor: &str, kind: &str) -> R
 }
 
 pub fn builtin_swarm_bootstrap(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "bootstrap")
+    render_builtin_event(root, task_id, actor, "task_created")
+}
+
+pub fn builtin_swarm_start(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "task_created")
 }
 
 pub fn builtin_swarm_lease(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "lease")
+    render_builtin_event(root, task_id, actor, "lease_acquired")
+}
+
+pub fn builtin_swarm_release(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "lease_released")
+}
+
+pub fn builtin_swarm_heartbeat(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "worker_heartbeat")
 }
 
 pub fn builtin_swarm_complete(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "complete")
+    render_builtin_event(root, task_id, actor, "task_completed")
+}
+
+pub fn builtin_swarm_fail(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "task_failed")
+}
+
+pub fn builtin_swarm_retry(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "task_requeued")
+}
+
+pub fn builtin_swarm_stop(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "task_stopped")
+}
+
+pub fn builtin_swarm_resume(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
+    render_builtin_event(root, task_id, actor, "task_resumed")
 }
 
 pub fn builtin_swarm_status(root: &str, task_id: &str) -> Result<String, String> {

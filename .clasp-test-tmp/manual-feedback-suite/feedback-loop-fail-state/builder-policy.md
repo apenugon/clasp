@@ -1,0 +1,1 @@
+force-close-category
