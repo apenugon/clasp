@@ -29,3 +29,527 @@ foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
 foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
 foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
 foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmCommand = { cwd : Str, command : [Str] }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmPolicy = {
+  createdAtMs : Int,
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  updatedAtMs : Int
+}
+
+record SwarmRun = {
+  actor : Str,
+  command : [Str],
+  cwd : Str,
+  endedAtMs : Int,
+  exitCode : Int,
+  name : Str,
+  role : Str,
+  runId : Int,
+  startedAtMs : Int,
+  status : Str,
+  stderrArtifactPath : Str,
+  stdoutArtifactPath : Str,
+  taskId : Str,
+}
+
+record SwarmApproval = {
+  actor : Str,
+  approvalId : Int,
+  atMs : Int,
+  detail : Str,
+  name : Str,
+  taskId : Str
+}
+
+record SwarmMergeDecision = {
+  taskId : Str,
+  mergegateName : Str,
+  verdict : Str
+}
+
+record SwarmArtifact = {
+  artifactId : Int,
+  createdAtMs : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str
+}
+
+record SwarmEvent = {
+  actor : Str,
+  atMs : Int,
+  detail : Str,
+  kind : Str,
+  taskId : Str,
+}
+
+record SwarmTaskUpdate = {
+  database : Str,
+  event : SwarmEvent,
+  root : Str,
+  task : SwarmTask
+}
+
+record SwarmSummary = {
+  allTaskIds : [Str],
+  completedTaskIds : [Str],
+  readyTaskIds : [Str],
+  hasBootstrap : Bool,
+  bootstrapStatus : Str
+}
+
+record SwarmManagerAction = {
+  objectiveId : Str,
+  status : Str,
+  action : Str,
+  suggestedCommand : [Str]
+}
+
+record SwarmObjectiveStatus = {
+  objective : SwarmObjective,
+  projectedStatus : Str,
+  tasks : [SwarmTask]
+}
+
+record SwarmMailbox = {
+  history : [SwarmEvent],
+  tail : [SwarmEvent],
+  approvals : [SwarmApproval],
+  runs : [SwarmRun],
+  artifacts : [SwarmArtifact]
+}
+
+record ToolStepResult = {
+  lease : SwarmTaskUpdate,
+  run : SwarmRun,
+  status : SwarmTaskUpdate,
+  mailbox : SwarmMailbox
+}
+
+record VerifierStepResult = {
+  run : SwarmRun,
+  mailbox : SwarmMailbox
+}
+
+record ReviewStepResult = {
+  approval : SwarmApproval,
+  approvals : [SwarmApproval],
+  mergeDecision : SwarmMergeDecision,
+  mailbox : SwarmMailbox
+}
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+commandSpec : Str -> [Str] -> SwarmCommand
+commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+policyResultError : Str -> Result SwarmPolicy
+policyResultError message = Err message
+
+runResultError : Str -> Result SwarmRun
+runResultError message = Err message
+
+approvalResultError : Str -> Result SwarmApproval
+approvalResultError message = Err message
+
+mergeDecisionResultError : Str -> Result SwarmMergeDecision
+mergeDecisionResultError message = Err message
+
+summaryResultError : Str -> Result SwarmSummary
+summaryResultError message = Err message
+
+managerActionResultError : Str -> Result SwarmManagerAction
+managerActionResultError message = Err message
+
+objectiveStatusResultError : Str -> Result SwarmObjectiveStatus
+objectiveStatusResultError message = Err message
+
+taskListResultError : Str -> Result [SwarmTask]
+taskListResultError message = Err message
+
+runListResultError : Str -> Result [SwarmRun]
+runListResultError message = Err message
+
+artifactListResultError : Str -> Result [SwarmArtifact]
+artifactListResultError message = Err message
+
+eventListResultError : Str -> Result [SwarmEvent]
+eventListResultError message = Err message
+
+approvalListResultError : Str -> Result [SwarmApproval]
+approvalListResultError message = Err message
+
+objectiveListResultError : Str -> Result [SwarmObjective]
+objectiveListResultError message = Err message
+
+mailboxResultError : Str -> Result SwarmMailbox
+mailboxResultError message = Err message
+
+toolStepResultError : Str -> Result ToolStepResult
+toolStepResultError message = Err message
+
+verifierStepResultError : Str -> Result VerifierStepResult
+verifierStepResultError message = Err message
+
+reviewStepResultError : Str -> Result ReviewStepResult
+reviewStepResultError message = Err message
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+taskUpdateResultError : Str -> Result SwarmTaskUpdate
+taskUpdateResultError message = Err message
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> taskUpdateResultError message
+}
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> policyResultError message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> runResultError message
+}
+
+approvalResult : Result Str -> Result SwarmApproval
+approvalResult value = match value {
+  Ok raw -> Ok (decode SwarmApproval raw),
+  Err message -> approvalResultError message
+}
+
+mergeDecisionResult : Result Str -> Result SwarmMergeDecision
+mergeDecisionResult value = match value {
+  Ok raw -> Ok (decode SwarmMergeDecision raw),
+  Err message -> mergeDecisionResultError message
+}
+
+summaryResult : Result Str -> Result SwarmSummary
+summaryResult value = match value {
+  Ok raw -> Ok (decode SwarmSummary raw),
+  Err message -> summaryResultError message
+}
+
+managerActionResult : Result Str -> Result SwarmManagerAction
+managerActionResult value = match value {
+  Ok raw -> Ok (decode SwarmManagerAction raw),
+  Err message -> managerActionResultError message
+}
+
+objectiveStatusResult : Result Str -> Result SwarmObjectiveStatus
+objectiveStatusResult value = match value {
+  Ok raw -> Ok (decode SwarmObjectiveStatus raw),
+  Err message -> objectiveStatusResultError message
+}
+
+taskListResult : Result Str -> Result [SwarmTask]
+taskListResult value = match value {
+  Ok raw -> Ok (decode [SwarmTask] raw),
+  Err message -> taskListResultError message
+}
+
+runListResult : Result Str -> Result [SwarmRun]
+runListResult value = match value {
+  Ok raw -> Ok (decode [SwarmRun] raw),
+  Err message -> runListResultError message
+}
+
+artifactListResult : Result Str -> Result [SwarmArtifact]
+artifactListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifact] raw),
+  Err message -> artifactListResultError message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> eventListResultError message
+}
+
+approvalListResult : Result Str -> Result [SwarmApproval]
+approvalListResult value = match value {
+  Ok raw -> Ok (decode [SwarmApproval] raw),
+  Err message -> approvalListResultError message
+}
+
+objectiveListResult : Result Str -> Result [SwarmObjective]
+objectiveListResult value = match value {
+  Ok raw -> Ok (decode [SwarmObjective] raw),
+  Err message -> objectiveListResultError message
+}
+
+bootstrap : TaskHandle -> Result SwarmTaskUpdate
+bootstrap handle = taskUpdateResult (swarmBootstrapRaw handle.root.path handle.taskId handle.actor)
+
+start : TaskHandle -> Result SwarmTaskUpdate
+start handle = taskUpdateResult (swarmStartRaw handle.root.path handle.taskId handle.actor)
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle = taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+release : TaskHandle -> Result SwarmTaskUpdate
+release handle = taskUpdateResult (swarmReleaseRaw handle.root.path handle.taskId handle.actor)
+
+heartbeat : TaskHandle -> Result SwarmTaskUpdate
+heartbeat handle = taskUpdateResult (swarmHeartbeatRaw handle.root.path handle.taskId handle.actor)
+
+complete : TaskHandle -> Result SwarmTaskUpdate
+complete handle = taskUpdateResult (swarmCompleteRaw handle.root.path handle.taskId handle.actor)
+
+fail : TaskHandle -> Result SwarmTaskUpdate
+fail handle = taskUpdateResult (swarmFailRaw handle.root.path handle.taskId handle.actor)
+
+retry : TaskHandle -> Result SwarmTaskUpdate
+retry handle = taskUpdateResult (swarmRetryRaw handle.root.path handle.taskId handle.actor)
+
+stop : TaskHandle -> Result SwarmTaskUpdate
+stop handle = taskUpdateResult (swarmStopRaw handle.root.path handle.taskId handle.actor)
+
+resume : TaskHandle -> Result SwarmTaskUpdate
+resume handle = taskUpdateResult (swarmResumeRaw handle.root.path handle.taskId handle.actor)
+
+status : TaskHandle -> Result SwarmTask
+status handle = taskResult (swarmStatusRaw handle.root.path handle.taskId)
+
+summary : SwarmRoot -> Result SwarmSummary
+summary root = summaryResult (swarmSummaryRaw root.path)
+
+ready : ObjectiveHandle -> Result [SwarmTask]
+ready handle = taskListResult (swarmReadyRaw handle.root.path handle.objectiveId)
+
+managerNext : ObjectiveHandle -> Result SwarmManagerAction
+managerNext handle = managerActionResult (swarmManagerNextRaw handle.root.path handle.objectiveId)
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+objectiveStatus : ObjectiveHandle -> Result SwarmObjectiveStatus
+objectiveStatus handle = objectiveStatusResult (swarmObjectiveStatusRaw handle.root.path handle.objectiveId)
+
+objectives : SwarmRoot -> Result [SwarmObjective]
+objectives root = objectiveListResult (swarmObjectivesRaw root.path)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+tasks : SwarmRoot -> Result [SwarmTask]
+tasks root = taskListResult (swarmTasksRaw root.path)
+
+policySet : TaskHandle -> Str -> [Str] -> [Str] -> Result SwarmPolicy
+policySet handle mergegateName requiredApprovals requiredVerifiers =
+  policyResult (swarmPolicySetRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers)
+
+toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
+toolRun handle spec =
+  runResult (swarmToolRunRaw handle.root.path handle.taskId handle.actor spec.cwd spec.command)
+
+verifierRun : TaskHandle -> Str -> SwarmCommand -> Result SwarmRun
+verifierRun handle verifierName spec =
+  runResult (swarmVerifierRunRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd spec.command)
+
+approve : TaskHandle -> Str -> Result SwarmApproval
+approve handle approvalName =
+  approvalResult (swarmApproveRaw handle.root.path handle.taskId handle.actor approvalName)
+
+approvals : TaskHandle -> Result [SwarmApproval]
+approvals handle = approvalListResult (swarmApprovalsRaw handle.root.path handle.taskId)
+
+mergegateDecide : TaskHandle -> Str -> [Str] -> Result SwarmMergeDecision
+mergegateDecide handle mergegateName requiredVerifiers =
+  mergeDecisionResult (swarmMergegateDecideRaw handle.root.path handle.taskId handle.actor mergegateName requiredVerifiers)
+
+runs : TaskHandle -> Result [SwarmRun]
+runs handle = runListResult (swarmRunsRaw handle.root.path handle.taskId)
+
+artifacts : TaskHandle -> Result [SwarmArtifact]
+artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle.taskId)
+
+history : TaskHandle -> Result [SwarmEvent]
+history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)
+
+tail : TaskHandle -> Int -> Result [SwarmEvent]
+tail handle limit = eventListResult (swarmTailRaw handle.root.path handle.taskId limit)
+
+taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
+taskMailbox handle limit =
+  match history handle {
+    Ok historyValue ->
+      match tail handle limit {
+        Ok tailValue ->
+          match approvals handle {
+            Ok approvalsValue ->
+              match runs handle {
+                Ok runsValue ->
+                  match artifacts handle {
+                    Ok artifactsValue ->
+                    Ok (SwarmMailbox {
+                      history = historyValue,
+                      tail = tailValue,
+                      approvals = approvalsValue,
+                      runs = runsValue,
+                      artifacts = artifactsValue
+                    }),
+                    Err message ->
+                      mailboxResultError message
+                  },
+                Err message ->
+                  mailboxResultError message
+              },
+            Err message ->
+              mailboxResultError message
+          },
+        Err message ->
+          mailboxResultError message
+      },
+    Err message ->
+      mailboxResultError message
+  }
+
+runToolStep : TaskHandle -> SwarmCommand -> Int -> Result ToolStepResult
+runToolStep handle spec mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRun handle spec {
+        Ok runValue ->
+          match complete handle {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult {
+                    lease = leaseValue,
+                    run = runValue,
+                    status = statusValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  toolStepResultError message
+              },
+            Err message ->
+              toolStepResultError message
+          },
+        Err message ->
+          toolStepResultError message
+      },
+    Err message ->
+      toolStepResultError message
+  }
+
+runVerifierStep : TaskHandle -> Str -> SwarmCommand -> Int -> Result VerifierStepResult
+runVerifierStep handle verifierName spec mailboxLimit =
+  match verifierRun handle verifierName spec {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue ->
+          Ok (VerifierStepResult {
+            run = runValue,
+            mailbox = mailboxValue
+          }),
+        Err message ->
+          verifierStepResultError message
+      },
+    Err message ->
+      verifierStepResultError message
+  }
+
+approveAndMerge : TaskHandle -> Str -> Str -> [Str] -> Int -> Result ReviewStepResult
+approveAndMerge handle approvalName mergegateName requiredVerifiers mailboxLimit =
+  match approve handle approvalName {
+    Ok approvalValue ->
+      match approvals handle {
+        Ok approvalsValue ->
+          match mergegateDecide handle mergegateName requiredVerifiers {
+            Ok mergeDecisionValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ReviewStepResult {
+                    approval = approvalValue,
+                    approvals = approvalsValue,
+                    mergeDecision = mergeDecisionValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  reviewStepResultError message
+              },
+            Err message ->
+              reviewStepResultError message
+          },
+        Err message ->
+          reviewStepResultError message
+      },
+    Err message ->
+      reviewStepResultError message
+  }
