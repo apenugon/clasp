@@ -1,0 +1,31 @@
+wave: status-test-2757284
+summary: lanes=2 running=1 stopped=1 completed=3 blocked=1
+run-states: builder-complete=1 pass=1
+lane: 01-active
+  status: stopped
+  stale pid: 2797509
+  current task: AA-100-sample
+  completed: 2
+  blocked: 1
+  latest run: 20260314T121500Z-AA-100-sample-attempt2
+  latest attempt: 2
+  run status: pass
+  run summary: latest verifier summary
+  log: /home/akul_medexfinance_com/clasp/.clasp-swarm/status-test-2757284/01-active/lane.log
+    line 2
+    line 3
+    line 4
+    line 5
+    line 6
+lane: 02-idle
+  status: running
+  pid: 2797514
+  completed: 1
+  blocked: 0
+  latest run: 20260314T122000Z-BB-200-sample-attempt1
+  latest attempt: 1
+  run status: builder-complete
+  run summary: builder summary only
+  log: /home/akul_medexfinance_com/clasp/.clasp-swarm/status-test-2757284/02-idle/lane.log
+    idle line 1
+    idle line 2
