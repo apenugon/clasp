@@ -1,0 +1,227 @@
+{"mode":"fast","promotedSnapshotExecutes":true,"promotedSourceCheckExecutes":true}
+warning: Git tree '/home/akul_medexfinance_com/clasp' is dirty
+building '/nix/store/7cq4ryfrpvjf2wsjffghfiyy2kqiwmh9-claspc-0.1.0.drv'...
+building '/nix/store/ap3ik8c67m9y77wx9008g39bpiwr85gw-nix-shell-env.drv'...
+warning: field `name` is never read
+   --> clasp_runtime.rs:356:5
+    |
+355 | struct ClaspRtNativeRuntimeBinding {
+    |        --------------------------- field in this struct
+356 |     name: String,
+    |     ^^^^
+    |
+    = note: `ClaspRtNativeRuntimeBinding` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` on by default
+
+warning: fields `name`, `response_type`, and `response_kind` are never read
+   --> clasp_runtime.rs:394:5
+    |
+393 | struct ClaspRtNativeRouteBoundary {
+    |        -------------------------- fields in this struct
+394 |     name: String,
+    |     ^^^^
+...
+398 |     response_type: String,
+    |     ^^^^^^^^^^^^^
+399 |     response_kind: String,
+    |     ^^^^^^^^^^^^^
+    |
+    = note: `ClaspRtNativeRouteBoundary` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: function `clasp_rt_string_arg` is never used
+    --> clasp_runtime.rs:7248:11
+     |
+7248 | unsafe fn clasp_rt_string_arg(value: *mut ClaspRtHeader) -> Result<String, String> {
+     |           ^^^^^^^^^^^^^^^^^^^
+
+warning: fields `task_id`, `created_at_ms`, and `updated_at_ms` are never read
+  --> swarm.rs:79:5
+   |
+78 | struct SwarmTaskSpecRecord {
+   |        ------------------- fields in this struct
+79 |     task_id: String,
+   |     ^^^^^^^
+...
+85 |     created_at_ms: i64,
+   |     ^^^^^^^^^^^^^
+86 |     updated_at_ms: i64,
+   |     ^^^^^^^^^^^^^
+
+warning: function `swarm_usage` is never used
+   --> swarm.rs:173:4
+    |
+173 | fn swarm_usage(program: &str) -> ! {
+    |    ^^^^^^^^^^^
+
+warning: function `task_json` is never used
+    --> swarm.rs:1491:4
+     |
+1491 | fn task_json(task: &SwarmTaskState) -> Value {
+     |    ^^^^^^^^^
+
+warning: function `string_field` is never used
+    --> swarm.rs:2783:4
+     |
+2783 | fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+     |    ^^^^^^^^^^^^
+
+warning: function `bool_field` is never used
+    --> swarm.rs:2787:4
+     |
+2787 | fn bool_field(value: &Value, key: &str) -> Option<bool> {
+     |    ^^^^^^^^^^
+
+warning: function `i64_field` is never used
+    --> swarm.rs:2791:4
+     |
+2791 | fn i64_field(value: &Value, key: &str) -> Option<i64> {
+     |    ^^^^^^^^^
+
+warning: function `string_list` is never used
+    --> swarm.rs:2795:4
+     |
+2795 | fn string_list(value: Option<&Value>) -> Vec<String> {
+     |    ^^^^^^^^^^^
+
+warning: function `format_event_line` is never used
+    --> swarm.rs:2808:4
+     |
+2808 | fn format_event_line(value: &Value) -> Option<String> {
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `format_task_text` is never used
+    --> swarm.rs:2817:4
+     |
+2817 | fn format_task_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `format_approval_text` is never used
+    --> swarm.rs:2872:4
+     |
+2872 | fn format_approval_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `format_run_text` is never used
+    --> swarm.rs:2885:4
+     |
+2885 | fn format_run_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `format_artifact_text` is never used
+    --> swarm.rs:2894:4
+     |
+2894 | fn format_artifact_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `format_objective_text` is never used
+    --> swarm.rs:2901:4
+     |
+2901 | fn format_objective_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `format_manager_next_text` is never used
+    --> swarm.rs:2910:4
+     |
+2910 | fn format_manager_next_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `format_objective_status_text` is never used
+    --> swarm.rs:2938:4
+     |
+2938 | fn format_objective_status_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_swarm_text` is never used
+    --> swarm.rs:2952:4
+     |
+2952 | fn render_swarm_text(value: &Value) -> String {
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `print_output` is never used
+    --> swarm.rs:3010:4
+     |
+3010 | fn print_output(value: &Value, json_mode: bool) {
+     |    ^^^^^^^^^^^^
+
+warning: function `fail` is never used
+    --> swarm.rs:3018:4
+     |
+3018 | fn fail(message: &str, json_mode: bool) -> ExitCode {
+     |    ^^^^
+
+warning: function `handle_event_command` is never used
+    --> swarm.rs:3063:4
+     |
+3063 | fn handle_event_command(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_query_command` is never used
+    --> swarm.rs:3118:4
+     |
+3118 | fn handle_query_command(json_mode: bool, command: SwarmCommand) -> ExitCode {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_approve_command` is never used
+    --> swarm.rs:3143:4
+     |
+3143 | fn handle_approve_command(
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_objective_create` is never used
+    --> swarm.rs:3176:4
+     |
+3176 | fn handle_objective_create(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_task_create` is never used
+    --> swarm.rs:3225:4
+     |
+3225 | fn handle_task_create(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_policy_set` is never used
+    --> swarm.rs:3276:4
+     |
+3276 | fn handle_policy_set(
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `handle_tool_run` is never used
+    --> swarm.rs:3304:4
+     |
+3304 | fn handle_tool_run(
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `handle_verifier_run` is never used
+    --> swarm.rs:3346:4
+     |
+3346 | fn handle_verifier_run(
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `handle_mergegate_decide` is never used
+    --> swarm.rs:3438:4
+     |
+3438 | fn handle_mergegate_decide(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `maybe_run_swarm` is never used
+    --> swarm.rs:3786:8
+     |
+3786 | pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
+     |        ^^^^^^^^^^^^^^^
+
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/hello.mjs with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/backend-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/cli-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/imported-cli-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/imported-cli-serial.native.image.json with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/imported-cli-parallel.native.image.json with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/imported-cli-monolithic.native.image.json with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/imported-cli-whole-monolithic.native.image.json with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/list-ops-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/record-ergonomics-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/polymorphism-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/swarm-kernel with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/bin/swarm-native with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/support-console-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/release-gate-app with clasp-native
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/lead-app with clasp-native
