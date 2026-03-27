@@ -1,36 +1,20 @@
 module Main
 import Swarm
 
-record NativeSwarmReport = {
-  objective : Str,
-  task : Str,
-  objectiveCreate : SwarmObjective,
-  taskCreate : SwarmTask,
-  policy : SwarmPolicy,
-  ready : [SwarmTask],
-  managerBefore : SwarmManagerAction,
-  lease : SwarmTask,
-  toolRun : SwarmRun,
-  complete : SwarmTask,
-  verifierRun : SwarmRun,
-  approval : SwarmApproval,
-  mergeDecision : SwarmMergeDecision,
-  taskStatus : SwarmTask,
-  objectiveStatus : SwarmObjectiveStatus,
-  runs : [SwarmRun],
-  artifacts : [SwarmArtifact],
-  summary : SwarmSummary,
-  managerAfter : SwarmManagerAction
-}
+useLatestArg : Str -> Str -> Str
+useLatestArg current value = value
 
 stateRoot : Str
-stateRoot = if textJoin "" argv == "" then "swarm-native-state" else pathJoin argv
+stateRoot = fold useLatestArg "swarm-native-state" (reverse argv)
 
 objectiveId : Str
 objectiveId = "ordinary-loop"
 
-taskId : Str
-taskId = "repair-runtime"
+planningTaskId : Str
+planningTaskId = "plan-runtime"
+
+repairTaskId : Str
+repairTaskId = "repair-runtime"
 
 actorName : Str
 actorName = match envVar "CLASP_SWARM_ACTOR" {
@@ -44,110 +28,154 @@ workspaceCwd = match envVar "CLASP_SWARM_CWD" {
   Err message -> "."
 }
 
+jsonFieldText : Str -> Str -> Str
+jsonFieldText name value = textConcat ["\"", name, "\":", encode value]
+
+jsonFieldRaw : Str -> Str -> Str
+jsonFieldRaw name value = textConcat ["\"", name, "\":", value]
+
+jsonObject : [Str] -> Str
+jsonObject fields = textConcat ["{", textJoin "," fields, "}"]
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
 main : Str
-main = match objectiveCreate stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6 {
-  Ok objectiveCreateValue ->
-    match taskCreate stateRoot objectiveId taskId "Repair the runtime using direct Clasp orchestration." [] 3 60000 {
-      Ok taskCreateValue ->
-        match policySet stateRoot taskId "trunk" ["merge-ready"] ["native-smoke"] {
-          Ok policyValue ->
-            match ready stateRoot objectiveId {
-              Ok readyValue ->
-                match managerNext stateRoot objectiveId {
-                  Ok managerBeforeValue ->
-                    match lease stateRoot taskId actorName {
-                      Ok leaseValue ->
-                        match toolRun stateRoot taskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"] {
-                          Ok toolRunValue ->
-                            match complete stateRoot taskId actorName {
-                              Ok completeValue ->
-                                match verifierRun stateRoot taskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"] {
-                                  Ok verifierRunValue ->
-                                    match approve stateRoot taskId actorName "merge-ready" {
-                                      Ok approvalValue ->
-                                        match mergegateDecide stateRoot taskId actorName "trunk" ["native-smoke"] {
-                                          Ok mergeDecisionValue ->
-                                            match status stateRoot taskId {
-                                              Ok taskStatusValue ->
-                                                match objectiveStatus stateRoot objectiveId {
-                                                  Ok objectiveStatusValue ->
-                                                    match runs stateRoot taskId {
-                                                      Ok runsValue ->
-                                                        match artifacts stateRoot taskId {
-                                                          Ok artifactsValue ->
-                                                            match summary stateRoot {
-                                                              Ok summaryValue ->
-                                                                match managerNext stateRoot objectiveId {
-                                                                  Ok managerAfterValue ->
-                                                                    encode (NativeSwarmReport {
-                                                                      objective = objectiveId,
-                                                                      task = taskId,
-                                                                      objectiveCreate = objectiveCreateValue,
-                                                                      taskCreate = taskCreateValue,
-                                                                      policy = policyValue,
-                                                                      ready = readyValue,
-                                                                      managerBefore = managerBeforeValue,
-                                                                      lease = leaseValue,
-                                                                      toolRun = toolRunValue,
-                                                                      complete = completeValue,
-                                                                      verifierRun = verifierRunValue,
-                                                                      approval = approvalValue,
-                                                                      mergeDecision = mergeDecisionValue,
-                                                                      taskStatus = taskStatusValue,
-                                                                      objectiveStatus = objectiveStatusValue,
-                                                                      runs = runsValue,
-                                                                      artifacts = artifactsValue,
-                                                                      summary = summaryValue,
-                                                                      managerAfter = managerAfterValue
-                                                                    }),
-                                                                  Err message ->
-                                                                    textConcat ["error:", message]
-                                                                },
-                                                              Err message ->
-                                                                textConcat ["error:", message]
-                                                            },
-                                                          Err message ->
-                                                            textConcat ["error:", message]
-                                                        },
-                                                      Err message ->
-                                                        textConcat ["error:", message]
-                                                    },
-                                                  Err message ->
-                                                    textConcat ["error:", message]
-                                                },
-                                              Err message ->
-                                                textConcat ["error:", message]
-                                            },
-                                          Err message ->
-                                            textConcat ["error:", message]
-                                        },
-                                      Err message ->
-                                        textConcat ["error:", message]
-                                    },
-                                  Err message ->
-                                    textConcat ["error:", message]
-                                },
-                              Err message ->
-                                textConcat ["error:", message]
-                            },
-                          Err message ->
-                            textConcat ["error:", message]
-                        },
-                      Err message ->
-                        textConcat ["error:", message]
-                    },
-                  Err message ->
-                    textConcat ["error:", message]
-                },
-              Err message ->
-                textConcat ["error:", message]
-            },
-          Err message ->
-            textConcat ["error:", message]
-        },
-      Err message ->
-        textConcat ["error:", message]
-    },
-  Err message ->
-    textConcat ["error:", message]
-}
+main =
+  match swarmObjectiveCreateRaw stateRoot objectiveId "Drive the supervised ordinary-program loop." 4 6 {
+    Ok objectiveCreateValue ->
+      match swarmTaskCreateRaw stateRoot objectiveId planningTaskId "Plan the runtime repair using direct Clasp orchestration." [] 1 60000 {
+        Ok planningTaskCreateValue ->
+          match swarmTaskCreateRaw stateRoot objectiveId repairTaskId "Repair the runtime using direct Clasp orchestration." [planningTaskId] 3 60000 {
+            Ok repairTaskCreateValue ->
+              match swarmPolicySetRaw stateRoot repairTaskId "trunk" ["merge-ready"] ["native-smoke"] {
+                Ok policyValue ->
+                  match swarmReadyRaw stateRoot objectiveId {
+                    Ok readyBeforeValue ->
+                      match swarmManagerNextRaw stateRoot objectiveId {
+                        Ok managerBeforeValue ->
+                          match swarmLeaseRaw stateRoot planningTaskId actorName {
+                            Ok planningLeaseValue ->
+                              match swarmToolRunRaw stateRoot planningTaskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-plan-ok"] {
+                                Ok planningRunValue ->
+                                  match swarmCompleteRaw stateRoot planningTaskId actorName {
+                                    Ok planningCompleteValue ->
+                                      match swarmManagerNextRaw stateRoot objectiveId {
+                                        Ok managerAfterPlanValue ->
+                                          match swarmLeaseRaw stateRoot repairTaskId actorName {
+                                            Ok repairLeaseValue ->
+                                              match swarmToolRunRaw stateRoot repairTaskId actorName workspaceCwd ["bash", "-lc", "printf ordinary-tool-ok; >&2 printf ordinary-tool-err"] {
+                                                Ok toolRunValue ->
+                                                  match swarmCompleteRaw stateRoot repairTaskId actorName {
+                                                    Ok repairCompleteValue ->
+                                                      match swarmVerifierRunRaw stateRoot repairTaskId actorName "native-smoke" workspaceCwd ["bash", "-lc", "printf ordinary-verifier-ok"] {
+                                                        Ok verifierRunValue ->
+                                                          match swarmApproveRaw stateRoot repairTaskId actorName "merge-ready" {
+                                                            Ok approvalValue ->
+                                                              match swarmMergegateDecideRaw stateRoot repairTaskId actorName "trunk" ["native-smoke"] {
+                                                                Ok mergeDecisionValue ->
+                                                                  match swarmStatusRaw stateRoot repairTaskId {
+                                                                    Ok repairStatusValue ->
+                                                                      match swarmObjectiveStatusRaw stateRoot objectiveId {
+                                                                        Ok objectiveStatusValue ->
+                                                                          match swarmRunsRaw stateRoot repairTaskId {
+                                                                            Ok runsValue ->
+                                                                              match swarmArtifactsRaw stateRoot repairTaskId {
+                                                                                Ok artifactsValue ->
+                                                                                  match swarmSummaryRaw stateRoot {
+                                                                                    Ok summaryValue ->
+                                                                                      match swarmManagerNextRaw stateRoot objectiveId {
+                                                                                        Ok managerAfterValue ->
+                                                                                          jsonObject [
+                                                                                            jsonFieldText "objective" objectiveId,
+                                                                                            jsonFieldText "planningTask" planningTaskId,
+                                                                                            jsonFieldText "repairTask" repairTaskId,
+                                                                                            jsonFieldRaw "objectiveCreate" objectiveCreateValue,
+                                                                                            jsonFieldRaw "planningTaskCreate" planningTaskCreateValue,
+                                                                                            jsonFieldRaw "repairTaskCreate" repairTaskCreateValue,
+                                                                                            jsonFieldRaw "policy" policyValue,
+                                                                                            jsonFieldRaw "readyBefore" readyBeforeValue,
+                                                                                            jsonFieldRaw "managerBefore" managerBeforeValue,
+                                                                                            jsonFieldRaw "planningLease" planningLeaseValue,
+                                                                                            jsonFieldRaw "planningRun" planningRunValue,
+                                                                                            jsonFieldRaw "planningComplete" planningCompleteValue,
+                                                                                            jsonFieldRaw "managerAfterPlan" managerAfterPlanValue,
+                                                                                            jsonFieldRaw "repairLease" repairLeaseValue,
+                                                                                            jsonFieldRaw "toolRun" toolRunValue,
+                                                                                            jsonFieldRaw "repairComplete" repairCompleteValue,
+                                                                                            jsonFieldRaw "verifierRun" verifierRunValue,
+                                                                                            jsonFieldRaw "approval" approvalValue,
+                                                                                            jsonFieldRaw "mergeDecision" mergeDecisionValue,
+                                                                                            jsonFieldRaw "repairStatus" repairStatusValue,
+                                                                                            jsonFieldRaw "objectiveStatus" objectiveStatusValue,
+                                                                                            jsonFieldRaw "runs" runsValue,
+                                                                                            jsonFieldRaw "artifacts" artifactsValue,
+                                                                                            jsonFieldRaw "summary" summaryValue,
+                                                                                            jsonFieldRaw "managerAfter" managerAfterValue
+                                                                                          ],
+                                                                                        Err message ->
+                                                                                          errorText message
+                                                                                      },
+                                                                                    Err message ->
+                                                                                      errorText message
+                                                                                  },
+                                                                                Err message ->
+                                                                                  errorText message
+                                                                              },
+                                                                            Err message ->
+                                                                              errorText message
+                                                                          },
+                                                                        Err message ->
+                                                                          errorText message
+                                                                      },
+                                                                    Err message ->
+                                                                      errorText message
+                                                                  },
+                                                                Err message ->
+                                                                  errorText message
+                                                              },
+                                                            Err message ->
+                                                              errorText message
+                                                          },
+                                                        Err message ->
+                                                          errorText message
+                                                      },
+                                                    Err message ->
+                                                      errorText message
+                                                  },
+                                                Err message ->
+                                                  errorText message
+                                              },
+                                            Err message ->
+                                              errorText message
+                                          },
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

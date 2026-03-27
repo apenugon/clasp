@@ -3127,8 +3127,17 @@ swarmCompleteJsonBuiltinType = TFunction TStr (TFunction TStr (TFunction TStr re
 swarmStatusJsonBuiltinType : TypeText
 swarmStatusJsonBuiltinType = TFunction TStr (TFunction TStr resultStringBuiltinType)
 
+swarmHistoryJsonBuiltinType : TypeText
+swarmHistoryJsonBuiltinType = TFunction TStr (TFunction TStr resultStringBuiltinType)
+
+swarmTasksJsonBuiltinType : TypeText
+swarmTasksJsonBuiltinType = TFunction TStr resultStringBuiltinType
+
 swarmSummaryJsonBuiltinType : TypeText
 swarmSummaryJsonBuiltinType = TFunction TStr resultStringBuiltinType
+
+swarmTailJsonBuiltinType : TypeText
+swarmTailJsonBuiltinType = TFunction TStr (TFunction TStr (TFunction TInt resultStringBuiltinType))
 
 swarmReadyJsonBuiltinType : TypeText
 swarmReadyJsonBuiltinType = TFunction TStr (TFunction TStr resultStringBuiltinType)
@@ -3141,6 +3150,9 @@ swarmObjectiveCreateJsonBuiltinType = TFunction TStr (TFunction TStr (TFunction 
 
 swarmObjectiveStatusJsonBuiltinType : TypeText
 swarmObjectiveStatusJsonBuiltinType = TFunction TStr (TFunction TStr resultStringBuiltinType)
+
+swarmObjectivesJsonBuiltinType : TypeText
+swarmObjectivesJsonBuiltinType = TFunction TStr resultStringBuiltinType
 
 swarmTaskCreateJsonBuiltinType : TypeText
 swarmTaskCreateJsonBuiltinType =
@@ -3160,6 +3172,9 @@ swarmVerifierRunJsonBuiltinType =
 
 swarmApproveJsonBuiltinType : TypeText
 swarmApproveJsonBuiltinType = TFunction TStr (TFunction TStr (TFunction TStr (TFunction TStr resultStringBuiltinType)))
+
+swarmApprovalsJsonBuiltinType : TypeText
+swarmApprovalsJsonBuiltinType = TFunction TStr (TFunction TStr resultStringBuiltinType)
 
 swarmMergegateDecideJsonBuiltinType : TypeText
 swarmMergegateDecideJsonBuiltinType =
@@ -3247,7 +3262,7 @@ authSessionBuiltinType =
   TFunction TStr (TFunction (TNamed "Principal") (TFunction (TNamed "Tenant") (TFunction (TNamed "ResourceIdentity") (TNamed "AuthSession"))))
 
 baseEnv : [TypeBinding]
-baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "prepend" prependBuiltinType, TypeBinding "reverse" reverseBuiltinType, TypeBinding "map" mapBuiltinType, TypeBinding "filter" filterBuiltinType, TypeBinding "any" anyBuiltinType, TypeBinding "all" allBuiltinType, TypeBinding "fold" foldBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "dictEmpty" dictEmptyBuiltinType, TypeBinding "dictSet" dictSetBuiltinType, TypeBinding "dictGet" dictGetBuiltinType, TypeBinding "dictHas" dictHasBuiltinType, TypeBinding "dictRemove" dictRemoveBuiltinType, TypeBinding "dictKeys" dictKeysBuiltinType, TypeBinding "dictValues" dictValuesBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "timeUnixMs" timeUnixMsBuiltinType, TypeBinding "envVar" envVarBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "swarmBootstrapJson" swarmBootstrapJsonBuiltinType, TypeBinding "swarmLeaseJson" swarmLeaseJsonBuiltinType, TypeBinding "swarmCompleteJson" swarmCompleteJsonBuiltinType, TypeBinding "swarmStatusJson" swarmStatusJsonBuiltinType, TypeBinding "swarmSummaryJson" swarmSummaryJsonBuiltinType, TypeBinding "swarmReadyJson" swarmReadyJsonBuiltinType, TypeBinding "swarmManagerNextJson" swarmManagerNextJsonBuiltinType, TypeBinding "swarmObjectiveCreateJson" swarmObjectiveCreateJsonBuiltinType, TypeBinding "swarmObjectiveStatusJson" swarmObjectiveStatusJsonBuiltinType, TypeBinding "swarmTaskCreateJson" swarmTaskCreateJsonBuiltinType, TypeBinding "swarmPolicySetJson" swarmPolicySetJsonBuiltinType, TypeBinding "swarmToolRunJson" swarmToolRunJsonBuiltinType, TypeBinding "swarmVerifierRunJson" swarmVerifierRunJsonBuiltinType, TypeBinding "swarmApproveJson" swarmApproveJsonBuiltinType, TypeBinding "swarmMergegateDecideJson" swarmMergegateDecideJsonBuiltinType, TypeBinding "swarmRunsJson" swarmRunsJsonBuiltinType, TypeBinding "swarmArtifactsJson" swarmArtifactsJsonBuiltinType, TypeBinding "runCommandJson" runCommandJsonBuiltinType, TypeBinding "writeFile" writeFileBuiltinType, TypeBinding "appendFile" appendFileBuiltinType, TypeBinding "mkdirAll" mkdirAllBuiltinType]
+baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "prepend" prependBuiltinType, TypeBinding "reverse" reverseBuiltinType, TypeBinding "map" mapBuiltinType, TypeBinding "filter" filterBuiltinType, TypeBinding "any" anyBuiltinType, TypeBinding "all" allBuiltinType, TypeBinding "fold" foldBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "dictEmpty" dictEmptyBuiltinType, TypeBinding "dictSet" dictSetBuiltinType, TypeBinding "dictGet" dictGetBuiltinType, TypeBinding "dictHas" dictHasBuiltinType, TypeBinding "dictRemove" dictRemoveBuiltinType, TypeBinding "dictKeys" dictKeysBuiltinType, TypeBinding "dictValues" dictValuesBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "timeUnixMs" timeUnixMsBuiltinType, TypeBinding "envVar" envVarBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "swarmBootstrapJson" swarmBootstrapJsonBuiltinType, TypeBinding "swarmLeaseJson" swarmLeaseJsonBuiltinType, TypeBinding "swarmCompleteJson" swarmCompleteJsonBuiltinType, TypeBinding "swarmStatusJson" swarmStatusJsonBuiltinType, TypeBinding "swarmHistoryJson" swarmHistoryJsonBuiltinType, TypeBinding "swarmTasksJson" swarmTasksJsonBuiltinType, TypeBinding "swarmSummaryJson" swarmSummaryJsonBuiltinType, TypeBinding "swarmTailJson" swarmTailJsonBuiltinType, TypeBinding "swarmReadyJson" swarmReadyJsonBuiltinType, TypeBinding "swarmManagerNextJson" swarmManagerNextJsonBuiltinType, TypeBinding "swarmObjectiveCreateJson" swarmObjectiveCreateJsonBuiltinType, TypeBinding "swarmObjectiveStatusJson" swarmObjectiveStatusJsonBuiltinType, TypeBinding "swarmObjectivesJson" swarmObjectivesJsonBuiltinType, TypeBinding "swarmTaskCreateJson" swarmTaskCreateJsonBuiltinType, TypeBinding "swarmPolicySetJson" swarmPolicySetJsonBuiltinType, TypeBinding "swarmToolRunJson" swarmToolRunJsonBuiltinType, TypeBinding "swarmVerifierRunJson" swarmVerifierRunJsonBuiltinType, TypeBinding "swarmApproveJson" swarmApproveJsonBuiltinType, TypeBinding "swarmApprovalsJson" swarmApprovalsJsonBuiltinType, TypeBinding "swarmMergegateDecideJson" swarmMergegateDecideJsonBuiltinType, TypeBinding "swarmRunsJson" swarmRunsJsonBuiltinType, TypeBinding "swarmArtifactsJson" swarmArtifactsJsonBuiltinType, TypeBinding "runCommandJson" runCommandJsonBuiltinType, TypeBinding "writeFile" writeFileBuiltinType, TypeBinding "appendFile" appendFileBuiltinType, TypeBinding "mkdirAll" mkdirAllBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = inferModuleBindingsWithImportedBindings emptyTypeBindings modl

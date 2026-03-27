@@ -4911,6 +4911,13 @@ collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext ex
     let argTypes = collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext args;
     if callee == "encode" then {
       appendUniqueRuntimeCodecType argTypes (inferredExprType typeDecls recordDecls env localEnv fnContext (firstHostedExpr args))
+    } else if callee == "decode" then {
+      match decodeTargetTypeFromExpr (firstHostedExpr args) {
+        DecodeTargetType targetType ->
+          appendUniqueRuntimeCodecType argTypes targetType,
+        DecodeTargetTypeError message ->
+          argTypes
+      }
     } else {
       argTypes
     }
@@ -5177,12 +5184,9 @@ emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingImages bindingNames = {
   let mut rendered = [];
   for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "dictEmpty", "dictSet", "dictGet", "dictHas", "dictRemove", "dictKeys", "dictValues", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
-    if containsText bindingNames builtinName then {
-      rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingImage builtinName);
-      rendered
-    } else {
-      rendered
-    }
+    let ignored = bindingNames;
+    rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingImage builtinName);
+    rendered
   };
   rendered
 }
@@ -5190,12 +5194,9 @@ emitNativeBuiltinRuntimeBindingTexts : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingTexts bindingNames = {
   let mut rendered = [];
   for builtinName in ["textConcat", "textJoin", "textSplit", "textChars", "textFingerprint64Hex", "textPrefix", "textSplitFirst", "dictEmpty", "dictSet", "dictGet", "dictHas", "dictRemove", "dictKeys", "dictValues", "text", "element", "styled", "link", "form", "input", "submit", "systemPrompt", "assistantPrompt", "userPrompt", "appendPrompt", "promptText", "page", "redirect", "principal", "tenant", "resourceIdentity", "authSession", "argv", "timeUnixMs", "envVar", "pathJoin", "pathDirname", "pathBasename", "fileExists", "readFile", "writeFile", "appendFile", "mkdirAll"] {
-    if containsText bindingNames builtinName then {
-      rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingText builtinName);
-      rendered
-    } else {
-      rendered
-    }
+    let ignored = bindingNames;
+    rendered = appendNativeRenderedText rendered (emitBuiltinRuntimeBindingText builtinName);
+    rendered
   };
   rendered
 }

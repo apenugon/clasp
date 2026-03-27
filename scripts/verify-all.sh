@@ -2,6 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+verify_tmp_root="${CLASP_VERIFY_TMPDIR:-$project_root/.clasp-verify-tmp}"
 nix_config_features='experimental-features = nix-command flakes'
 readonly_nix_cache_root="/tmp/clasp-nix-cache"
 verify_label="${CLASP_VERIFY_LABEL:-verify-all}"
@@ -101,6 +102,9 @@ if [[ -n "${NIX_CONFIG:-}" ]]; then
 else
   export NIX_CONFIG="${nix_config_features}"
 fi
+
+mkdir -p "$verify_tmp_root"
+export TMPDIR="$verify_tmp_root"
 
 default_parallel_jobs() {
   local cpu_count=""

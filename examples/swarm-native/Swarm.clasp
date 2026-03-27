@@ -1,5 +1,28 @@
 module Swarm
 
+foreign swarmBootstrapRaw : Str -> Str -> Str -> Result Str = "swarmBootstrapJson"
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmCompleteRaw : Str -> Str -> Str -> Result Str = "swarmCompleteJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
+foreign swarmSummaryRaw : Str -> Result Str = "swarmSummaryJson"
+foreign swarmReadyRaw : Str -> Str -> Result Str = "swarmReadyJson"
+foreign swarmManagerNextRaw : Str -> Str -> Result Str = "swarmManagerNextJson"
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmObjectiveStatusRaw : Str -> Str -> Result Str = "swarmObjectiveStatusJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
+foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
+foreign swarmVerifierRunRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmVerifierRunJson"
+foreign swarmApproveRaw : Str -> Str -> Str -> Str -> Result Str = "swarmApproveJson"
+foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmMergegateDecideJson"
+foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
+foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
+foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+foreign swarmApprovalsRaw : Str -> Str -> Result Str = "swarmApprovalsJson"
+foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
+foreign swarmObjectivesRaw : Str -> Result Str = "swarmObjectivesJson"
+
 record SwarmObjective = {
   objectiveId : Str,
   detail : Str,
@@ -40,6 +63,14 @@ record SwarmMergeDecision = { taskId : Str, mergegateName : Str, verdict : Str }
 
 record SwarmArtifact = { taskId : Str, kind : Str, path : Str }
 
+record SwarmEvent = {
+  kind : Str,
+  taskId : Str,
+  actor : Str,
+  detail : Str,
+  atMs : Int
+}
+
 record SwarmSummary = {
   allTaskIds : [Str],
   completedTaskIds : [Str],
@@ -61,130 +92,208 @@ record SwarmObjectiveStatus = {
   tasks : [SwarmTask]
 }
 
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+policyResultError : Str -> Result SwarmPolicy
+policyResultError message = Err message
+
+runResultError : Str -> Result SwarmRun
+runResultError message = Err message
+
+approvalResultError : Str -> Result SwarmApproval
+approvalResultError message = Err message
+
+mergeDecisionResultError : Str -> Result SwarmMergeDecision
+mergeDecisionResultError message = Err message
+
+summaryResultError : Str -> Result SwarmSummary
+summaryResultError message = Err message
+
+managerActionResultError : Str -> Result SwarmManagerAction
+managerActionResultError message = Err message
+
+objectiveStatusResultError : Str -> Result SwarmObjectiveStatus
+objectiveStatusResultError message = Err message
+
+taskListResultError : Str -> Result [SwarmTask]
+taskListResultError message = Err message
+
+runListResultError : Str -> Result [SwarmRun]
+runListResultError message = Err message
+
+artifactListResultError : Str -> Result [SwarmArtifact]
+artifactListResultError message = Err message
+
+eventListResultError : Str -> Result [SwarmEvent]
+eventListResultError message = Err message
+
+approvalListResultError : Str -> Result [SwarmApproval]
+approvalListResultError message = Err message
+
+objectiveListResultError : Str -> Result [SwarmObjective]
+objectiveListResultError message = Err message
+
 decodeTaskResult : Result Str -> Result SwarmTask
 decodeTaskResult value = match value {
   Ok raw -> Ok (decode SwarmTask raw),
-  Err message -> Err message
+  Err message -> taskResultError message
 }
 
 decodeObjectiveResult : Result Str -> Result SwarmObjective
 decodeObjectiveResult value = match value {
   Ok raw -> Ok (decode SwarmObjective raw),
-  Err message -> Err message
+  Err message -> objectiveResultError message
 }
 
 decodePolicyResult : Result Str -> Result SwarmPolicy
 decodePolicyResult value = match value {
   Ok raw -> Ok (decode SwarmPolicy raw),
-  Err message -> Err message
+  Err message -> policyResultError message
 }
 
 decodeRunResult : Result Str -> Result SwarmRun
 decodeRunResult value = match value {
   Ok raw -> Ok (decode SwarmRun raw),
-  Err message -> Err message
+  Err message -> runResultError message
 }
 
 decodeApprovalResult : Result Str -> Result SwarmApproval
 decodeApprovalResult value = match value {
   Ok raw -> Ok (decode SwarmApproval raw),
-  Err message -> Err message
+  Err message -> approvalResultError message
 }
 
 decodeMergeDecisionResult : Result Str -> Result SwarmMergeDecision
 decodeMergeDecisionResult value = match value {
   Ok raw -> Ok (decode SwarmMergeDecision raw),
-  Err message -> Err message
+  Err message -> mergeDecisionResultError message
 }
 
 decodeSummaryResult : Result Str -> Result SwarmSummary
 decodeSummaryResult value = match value {
   Ok raw -> Ok (decode SwarmSummary raw),
-  Err message -> Err message
+  Err message -> summaryResultError message
 }
 
 decodeManagerActionResult : Result Str -> Result SwarmManagerAction
 decodeManagerActionResult value = match value {
   Ok raw -> Ok (decode SwarmManagerAction raw),
-  Err message -> Err message
+  Err message -> managerActionResultError message
 }
 
 decodeObjectiveStatusResult : Result Str -> Result SwarmObjectiveStatus
 decodeObjectiveStatusResult value = match value {
   Ok raw -> Ok (decode SwarmObjectiveStatus raw),
-  Err message -> Err message
+  Err message -> objectiveStatusResultError message
 }
 
 decodeTaskListResult : Result Str -> Result [SwarmTask]
 decodeTaskListResult value = match value {
   Ok raw -> Ok (decode [SwarmTask] raw),
-  Err message -> Err message
+  Err message -> taskListResultError message
 }
 
 decodeRunListResult : Result Str -> Result [SwarmRun]
 decodeRunListResult value = match value {
   Ok raw -> Ok (decode [SwarmRun] raw),
-  Err message -> Err message
+  Err message -> runListResultError message
 }
 
 decodeArtifactListResult : Result Str -> Result [SwarmArtifact]
 decodeArtifactListResult value = match value {
   Ok raw -> Ok (decode [SwarmArtifact] raw),
-  Err message -> Err message
+  Err message -> artifactListResultError message
+}
+
+decodeEventListResult : Result Str -> Result [SwarmEvent]
+decodeEventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> eventListResultError message
+}
+
+decodeApprovalListResult : Result Str -> Result [SwarmApproval]
+decodeApprovalListResult value = match value {
+  Ok raw -> Ok (decode [SwarmApproval] raw),
+  Err message -> approvalListResultError message
+}
+
+decodeObjectiveListResult : Result Str -> Result [SwarmObjective]
+decodeObjectiveListResult value = match value {
+  Ok raw -> Ok (decode [SwarmObjective] raw),
+  Err message -> objectiveListResultError message
 }
 
 bootstrap : Str -> Str -> Str -> Result SwarmTask
-bootstrap root taskId actor = decodeTaskResult (swarmBootstrapJson root taskId actor)
+bootstrap root taskId actor = decodeTaskResult (swarmBootstrapRaw root taskId actor)
 
 lease : Str -> Str -> Str -> Result SwarmTask
-lease root taskId actor = decodeTaskResult (swarmLeaseJson root taskId actor)
+lease root taskId actor = decodeTaskResult (swarmLeaseRaw root taskId actor)
 
 complete : Str -> Str -> Str -> Result SwarmTask
-complete root taskId actor = decodeTaskResult (swarmCompleteJson root taskId actor)
+complete root taskId actor = decodeTaskResult (swarmCompleteRaw root taskId actor)
 
 status : Str -> Str -> Result SwarmTask
-status root taskId = decodeTaskResult (swarmStatusJson root taskId)
+status root taskId = decodeTaskResult (swarmStatusRaw root taskId)
 
 summary : Str -> Result SwarmSummary
-summary root = decodeSummaryResult (swarmSummaryJson root)
+summary root = decodeSummaryResult (swarmSummaryRaw root)
 
 ready : Str -> Str -> Result [SwarmTask]
-ready root objectiveId = decodeTaskListResult (swarmReadyJson root objectiveId)
+ready root objectiveId = decodeTaskListResult (swarmReadyRaw root objectiveId)
 
 managerNext : Str -> Str -> Result SwarmManagerAction
-managerNext root objectiveId = decodeManagerActionResult (swarmManagerNextJson root objectiveId)
+managerNext root objectiveId = decodeManagerActionResult (swarmManagerNextRaw root objectiveId)
 
 objectiveCreate : Str -> Str -> Str -> Int -> Int -> Result SwarmObjective
 objectiveCreate root objectiveId detail maxTasks maxRuns =
-  decodeObjectiveResult (swarmObjectiveCreateJson root objectiveId detail maxTasks maxRuns)
+  decodeObjectiveResult (swarmObjectiveCreateRaw root objectiveId detail maxTasks maxRuns)
 
 objectiveStatus : Str -> Str -> Result SwarmObjectiveStatus
-objectiveStatus root objectiveId = decodeObjectiveStatusResult (swarmObjectiveStatusJson root objectiveId)
+objectiveStatus root objectiveId = decodeObjectiveStatusResult (swarmObjectiveStatusRaw root objectiveId)
 
 taskCreate : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
 taskCreate root objectiveId taskId detail dependencies maxRuns leaseTimeoutMs =
-  decodeTaskResult (swarmTaskCreateJson root objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+  decodeTaskResult (swarmTaskCreateRaw root objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
 
 policySet : Str -> Str -> Str -> [Str] -> [Str] -> Result SwarmPolicy
 policySet root taskId mergegateName requiredApprovals requiredVerifiers =
-  decodePolicyResult (swarmPolicySetJson root taskId mergegateName requiredApprovals requiredVerifiers)
+  decodePolicyResult (swarmPolicySetRaw root taskId mergegateName requiredApprovals requiredVerifiers)
 
 toolRun : Str -> Str -> Str -> Str -> [Str] -> Result SwarmRun
-toolRun root taskId actor cwd command = decodeRunResult (swarmToolRunJson root taskId actor cwd command)
+toolRun root taskId actor cwd command = decodeRunResult (swarmToolRunRaw root taskId actor cwd command)
 
 verifierRun : Str -> Str -> Str -> Str -> Str -> [Str] -> Result SwarmRun
 verifierRun root taskId actor verifierName cwd command =
-  decodeRunResult (swarmVerifierRunJson root taskId actor verifierName cwd command)
+  decodeRunResult (swarmVerifierRunRaw root taskId actor verifierName cwd command)
 
 approve : Str -> Str -> Str -> Str -> Result SwarmApproval
-approve root taskId actor approvalName = decodeApprovalResult (swarmApproveJson root taskId actor approvalName)
+approve root taskId actor approvalName = decodeApprovalResult (swarmApproveRaw root taskId actor approvalName)
 
 mergegateDecide : Str -> Str -> Str -> Str -> [Str] -> Result SwarmMergeDecision
 mergegateDecide root taskId actor mergegateName verifiers =
-  decodeMergeDecisionResult (swarmMergegateDecideJson root taskId actor mergegateName verifiers)
+  decodeMergeDecisionResult (swarmMergegateDecideRaw root taskId actor mergegateName verifiers)
 
 runs : Str -> Str -> Result [SwarmRun]
-runs root taskId = decodeRunListResult (swarmRunsJson root taskId)
+runs root taskId = decodeRunListResult (swarmRunsRaw root taskId)
 
 artifacts : Str -> Str -> Result [SwarmArtifact]
-artifacts root taskId = decodeArtifactListResult (swarmArtifactsJson root taskId)
+artifacts root taskId = decodeArtifactListResult (swarmArtifactsRaw root taskId)
+
+history : Str -> Str -> Result [SwarmEvent]
+history root taskId = decodeEventListResult (swarmHistoryRaw root taskId)
+
+tail : Str -> Str -> Int -> Result [SwarmEvent]
+tail root taskId limit = decodeEventListResult (swarmTailRaw root taskId limit)
+
+approvals : Str -> Str -> Result [SwarmApproval]
+approvals root taskId = decodeApprovalListResult (swarmApprovalsRaw root taskId)
+
+tasks : Str -> Result [SwarmTask]
+tasks root = decodeTaskListResult (swarmTasksRaw root)
+
+objectives : Str -> Result [SwarmObjective]
+objectives root = decodeObjectiveListResult (swarmObjectivesRaw root)

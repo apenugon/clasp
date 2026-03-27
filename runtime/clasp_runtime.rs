@@ -7,11 +7,13 @@ use std::ffi::{c_char, CStr};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::{align_of, size_of};
+use std::path::Path;
 use std::ptr::{self, null_mut, NonNull};
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::slice;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLASP_RT_LAYOUT_STRING: u32 = 1;
 const CLASP_RT_LAYOUT_BYTES: u32 = 2;
@@ -2816,6 +2818,11 @@ fn interpret_runtime_binding(
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("not", 1) => unsafe {
+            header_bool_value(args[0])
+                .map(|value| build_runtime_bool(!value) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
         ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("dictEmpty", 0) => unsafe { clasp_rt_dict_empty() },
@@ -2867,16 +2874,27 @@ fn interpret_runtime_binding(
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmCompleteJson", 3) => unsafe { clasp_rt_swarm_complete_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStatusJson", 2) => unsafe { clasp_rt_swarm_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmHistoryJson", 2) => unsafe { clasp_rt_swarm_history_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmTasksJson", 1) => unsafe { clasp_rt_swarm_tasks_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmSummaryJson", 1) => unsafe { clasp_rt_swarm_summary_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmTailJson", 3) => unsafe {
+            clasp_rt_swarm_tail_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as i64,
+            ) as *mut ClaspRtHeader
+        },
         ("swarmReadyJson", 2) => unsafe { clasp_rt_swarm_ready_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmManagerNextJson", 2) => unsafe { clasp_rt_swarm_manager_next_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectiveCreateJson", 5) => unsafe { clasp_rt_swarm_objective_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmObjectiveStatusJson", 2) => unsafe { clasp_rt_swarm_objective_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
         ("swarmApproveJson", 4) => unsafe { clasp_rt_swarm_approve_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmApprovalsJson", 2) => unsafe { clasp_rt_swarm_approvals_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMergegateDecideJson", 5) => unsafe { clasp_rt_swarm_mergegate_decide_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmRunsJson", 2) => unsafe { clasp_rt_swarm_runs_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -2920,6 +2938,11 @@ fn interpret_builtin_runtime_binding(
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("not", 1) => unsafe {
+            header_bool_value(args[0])
+                .map(|value| build_runtime_bool(!value) as *mut ClaspRtHeader)
+                .unwrap_or(null_mut())
+        },
         ("textPrefix", 2) => unsafe { clasp_rt_text_prefix(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textSplitFirst", 2) => unsafe { clasp_rt_text_split_first(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("dictEmpty", 0) => unsafe { clasp_rt_dict_empty() },
@@ -2962,16 +2985,27 @@ fn interpret_builtin_runtime_binding(
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmCompleteJson", 3) => unsafe { clasp_rt_swarm_complete_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStatusJson", 2) => unsafe { clasp_rt_swarm_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmHistoryJson", 2) => unsafe { clasp_rt_swarm_history_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmTasksJson", 1) => unsafe { clasp_rt_swarm_tasks_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmSummaryJson", 1) => unsafe { clasp_rt_swarm_summary_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmTailJson", 3) => unsafe {
+            clasp_rt_swarm_tail_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as i64,
+            ) as *mut ClaspRtHeader
+        },
         ("swarmReadyJson", 2) => unsafe { clasp_rt_swarm_ready_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmManagerNextJson", 2) => unsafe { clasp_rt_swarm_manager_next_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectiveCreateJson", 5) => unsafe { clasp_rt_swarm_objective_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmObjectiveStatusJson", 2) => unsafe { clasp_rt_swarm_objective_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
         ("swarmApproveJson", 4) => unsafe { clasp_rt_swarm_approve_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmApprovalsJson", 2) => unsafe { clasp_rt_swarm_approvals_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMergegateDecideJson", 5) => unsafe { clasp_rt_swarm_mergegate_decide_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmRunsJson", 2) => unsafe { clasp_rt_swarm_runs_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -2992,6 +3026,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "textSplit"
             | "textChars"
             | "textFingerprint64Hex"
+            | "not"
             | "textPrefix"
             | "textSplitFirst"
             | "dictEmpty"
@@ -3037,16 +3072,21 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmLeaseJson"
             | "swarmCompleteJson"
             | "swarmStatusJson"
+            | "swarmHistoryJson"
+            | "swarmTasksJson"
             | "swarmSummaryJson"
+            | "swarmTailJson"
             | "swarmReadyJson"
             | "swarmManagerNextJson"
             | "swarmObjectiveCreateJson"
             | "swarmObjectiveStatusJson"
+            | "swarmObjectivesJson"
             | "swarmTaskCreateJson"
             | "swarmPolicySetJson"
             | "swarmToolRunJson"
             | "swarmVerifierRunJson"
             | "swarmApproveJson"
+            | "swarmApprovalsJson"
             | "swarmMergegateDecideJson"
             | "swarmRunsJson"
             | "swarmArtifactsJson"
@@ -6403,6 +6443,118 @@ pub unsafe extern "C" fn clasp_rt_time_unix_ms() -> *mut ClaspRtHeader {
     }
 }
 
+fn runtime_time_unix_ms() -> i64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as i64,
+        Err(_) => 0,
+    }
+}
+
+fn ensure_parent_dir(path: &str) -> Result<(), String> {
+    let Some(parent) = Path::new(path).parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(parent).map_err(|err| err.to_string())
+}
+
+fn create_truncated_output_file(path: &str) -> Result<File, String> {
+    ensure_parent_dir(path)?;
+    File::create(path).map_err(|err| err.to_string())
+}
+
+fn watched_process_status_json(
+    pid: u32,
+    running: bool,
+    completed: bool,
+    exit_code: i32,
+    stdout_path: &str,
+    stderr_path: &str,
+    heartbeat_path: &str,
+) -> String {
+    serde_json::json!({
+        "pid": pid as i64,
+        "running": running,
+        "completed": completed,
+        "exitCode": exit_code,
+        "stdoutPath": stdout_path,
+        "stderrPath": stderr_path,
+        "heartbeatPath": heartbeat_path,
+        "updatedAtMs": runtime_time_unix_ms(),
+    })
+    .to_string()
+}
+
+fn write_watched_process_heartbeat(path: &str, payload: &str) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    fs::write(path, payload.as_bytes()).map_err(|err| err.to_string())
+}
+
+fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String), String> {
+    if args.len() < 5 {
+        return Err("invalid_watch_command".to_owned());
+    }
+
+    let stdout_path = &args[0];
+    let stderr_path = &args[1];
+    let heartbeat_path = &args[2];
+    let poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let watched_command = &args[4..];
+    if watched_command.is_empty() {
+        return Err("missing_watch_command".to_owned());
+    }
+
+    let stdout_file = create_truncated_output_file(stdout_path)?;
+    let stderr_file = create_truncated_output_file(stderr_path)?;
+    let mut child = ProcessCommand::new(&watched_command[0])
+        .args(&watched_command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .map_err(|err| err.to_string())?;
+    let pid = child.id();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let payload = watched_process_status_json(
+                    pid,
+                    false,
+                    true,
+                    exit_code,
+                    stdout_path,
+                    stderr_path,
+                    heartbeat_path,
+                );
+                write_watched_process_heartbeat(heartbeat_path, &payload)?;
+                return Ok((exit_code, payload));
+            }
+            Ok(None) => {
+                let payload = watched_process_status_json(
+                    pid,
+                    true,
+                    false,
+                    -1,
+                    stdout_path,
+                    stderr_path,
+                    heartbeat_path,
+                );
+                write_watched_process_heartbeat(heartbeat_path, &payload)?;
+                thread::sleep(Duration::from_millis(poll_ms));
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn clasp_rt_view_text(value: *mut ClaspRtString) -> *mut ClaspRtHeader {
     if value.is_null() {
@@ -7094,7 +7246,7 @@ unsafe fn clasp_rt_result_string_from_owned(value: Result<String, String>) -> *m
 }
 
 unsafe fn clasp_rt_string_arg(value: *mut ClaspRtHeader) -> Result<String, String> {
-    if layout_id(value) != CLASP_RT_LAYOUT_STRING {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_STRING {
         return Err("invalid_string".to_owned());
     }
     Ok(String::from_utf8_lossy(string_bytes(value as *mut ClaspRtString)).into_owned())
@@ -7127,7 +7279,6 @@ pub unsafe extern "C" fn clasp_rt_swarm_bootstrap_json(
     ))
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_lease_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -7140,7 +7291,6 @@ pub unsafe extern "C" fn clasp_rt_swarm_lease_json(
     ))
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_complete_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -7153,7 +7303,6 @@ pub unsafe extern "C" fn clasp_rt_swarm_complete_json(
     ))
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_status_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -7164,14 +7313,40 @@ pub unsafe extern "C" fn clasp_rt_swarm_status_json(
     ))
 }
 
-#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_history_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_history(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+    ))
+}
+
+pub unsafe extern "C" fn clasp_rt_swarm_tasks_json(root: *mut ClaspRtString) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_tasks(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_summary_json(root: *mut ClaspRtString) -> *mut ClaspRtResultString {
     clasp_rt_result_string_from_owned(swarm::builtin_swarm_summary(
         &String::from_utf8_lossy(string_bytes(root)).into_owned(),
     ))
 }
 
-#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_tail_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    limit: i64,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_tail(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        limit,
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_ready_json(
     root: *mut ClaspRtString,
     objective_id: *mut ClaspRtString,
@@ -7229,7 +7404,12 @@ pub unsafe extern "C" fn clasp_rt_swarm_objective_status_json(
     ))
 }
 
-#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_objectives_json(root: *mut ClaspRtString) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_objectives(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_task_create_json(
     root: *mut ClaspRtString,
     objective_id: *mut ClaspRtString,
@@ -7346,7 +7526,16 @@ pub unsafe extern "C" fn clasp_rt_swarm_approve_json(
     ))
 }
 
-#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_approvals_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_approvals(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+    ))
+}
+
 pub unsafe extern "C" fn clasp_rt_swarm_mergegate_decide_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -7425,6 +7614,21 @@ pub unsafe extern "C" fn clasp_rt_run_command_json(
             Err(message) => (2, json_error_message(&message)),
         };
         return render_payload(exit_code, stdout.as_bytes(), b"");
+    }
+
+    if command_values[0] == "@proc" {
+        let (exit_code, stdout, stderr) = if command_values.len() < 2 {
+            (2, String::new(), "missing_proc_command".to_owned())
+        } else {
+            match command_values[1].as_str() {
+                "watch" => match run_watched_process_json(&cwd_string, &command_values[2..]) {
+                    Ok((exit_code, stdout)) => (exit_code, stdout, String::new()),
+                    Err(message) => (2, String::new(), message),
+                },
+                _ => (2, String::new(), "invalid_proc_command".to_owned()),
+            }
+        };
+        return render_payload(exit_code, stdout.as_bytes(), stderr.as_bytes());
     }
 
     let output = match ProcessCommand::new(&command_values[0])
@@ -7574,6 +7778,66 @@ mod tests {
     }
 
     #[test]
+    fn run_command_json_watch_streams_to_files_and_writes_heartbeat() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let script_path = cwd_dir.join(format!("clasp-run-command-json-watch-{}.sh", std::process::id()));
+            let stdout_path = cwd_dir.join(format!("clasp-run-command-json-watch-{}.stdout", std::process::id()));
+            let stderr_path = cwd_dir.join(format!("clasp-run-command-json-watch-{}.stderr", std::process::id()));
+            let heartbeat_path = cwd_dir.join(format!("clasp-run-command-json-watch-{}.heartbeat.json", std::process::id()));
+            std::fs::write(
+                &script_path,
+                b"#!/bin/sh\nprintf builder-start\\n\nprintf builder-progress >&2\nsleep 0.1\nprintf builder-finish\\n\n",
+            )
+            .expect("expected watch test script write to succeed");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected watch test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected executable test script permissions");
+
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"@proc") as *mut ClaspRtHeader,
+                build_runtime_string(b"watch") as *mut ClaspRtHeader,
+                build_runtime_string(stdout_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+                build_runtime_string(stderr_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+                build_runtime_string(heartbeat_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+                build_runtime_string(b"50") as *mut ClaspRtHeader,
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_command_json(cwd, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(0));
+            let stdout = parsed["stdout"].as_str().expect("stdout string");
+            let stdout_json: serde_json::Value = serde_json::from_str(stdout).expect("stdout json");
+            assert_eq!(stdout_json["completed"].as_bool(), Some(true));
+            assert_eq!(stdout_json["exitCode"].as_i64(), Some(0));
+
+            let streamed_stdout = std::fs::read_to_string(&stdout_path).expect("expected stdout log");
+            let streamed_stderr = std::fs::read_to_string(&stderr_path).expect("expected stderr log");
+            let heartbeat = std::fs::read_to_string(&heartbeat_path).expect("expected heartbeat file");
+            assert!(streamed_stdout.contains("builder-start"));
+            assert!(streamed_stdout.contains("builder-finish"));
+            assert!(streamed_stderr.contains("builder-progress"));
+            assert!(heartbeat.contains("\"completed\":true"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+            let _ = std::fs::remove_file(stdout_path);
+            let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+        }
+    }
+
+    #[test]
     fn builtin_runtime_binding_dispatches_file_exists() {
         unsafe {
             let path = build_runtime_string(b"/");
@@ -7593,6 +7857,19 @@ mod tests {
             release_header(null_mut(), path as *mut ClaspRtHeader);
             release_header(null_mut(), builtin_result);
             release_header(null_mut(), binding_result);
+        }
+    }
+
+    #[test]
+    fn builtin_not_negates_booleans() {
+        unsafe {
+            let value = build_runtime_bool(true) as *mut ClaspRtHeader;
+            let result = interpret_builtin_runtime_binding("not", &[value]);
+
+            assert_eq!(header_bool_value(result), Some(false));
+
+            release_header(null_mut(), value);
+            release_header(null_mut(), result);
         }
     }
 }

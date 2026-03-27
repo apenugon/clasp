@@ -1,6 +1,16 @@
 module Main
 
 record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
 record CapabilityStatus = {
   name : Str,
   status : Str,
@@ -71,6 +81,12 @@ codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
 codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
 
+watchPollMs : Int
+watchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 1000
+}
+
 maxAttempts : Int
 maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
   Ok raw -> decode Int raw,
@@ -119,6 +135,33 @@ verifierStdoutPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encod
 verifierStderrPath : Int -> Str
 verifierStderrPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".stderr.log"]]
 
+builderHeartbeatPath : Int -> Str
+builderHeartbeatPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".heartbeat.json"]]
+
+verifierHeartbeatPath : Int -> Str
+verifierHeartbeatPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".heartbeat.json"]]
+
+processStdoutPath : Str -> Int -> Str
+processStdoutPath prefix attempt =
+  if prefix == "builder" then
+    builderStdoutPath attempt
+  else
+    verifierStdoutPath attempt
+
+processStderrPath : Str -> Int -> Str
+processStderrPath prefix attempt =
+  if prefix == "builder" then
+    builderStderrPath attempt
+  else
+    verifierStderrPath attempt
+
+processHeartbeatPath : Str -> Int -> Str
+processHeartbeatPath prefix attempt =
+  if prefix == "builder" then
+    builderHeartbeatPath attempt
+  else
+    verifierHeartbeatPath attempt
+
 runProcess : Str -> [Str] -> ProcessResult
 runProcess cwd command = match runCommandJson cwd command {
   Ok raw ->
@@ -145,6 +188,34 @@ persistProcessArtifacts prefix attempt result = {
       verifierStderrPath attempt;
   let wroteStdout = writeFile stdoutPath result.stdout in
   let wroteStderr = writeFile stderrPath result.stderr in
+  result
+}
+
+writeHeartbeat : Str -> Str -> Str -> Bool -> ProcessResult -> Result Str
+writeHeartbeat path stdoutPath stderrPath running result =
+  writeFile
+    path
+    (encode
+      (WatchedProcess {
+        pid = 0,
+        running = running,
+        completed = if running then false else true,
+        exitCode = result.exitCode,
+        stdoutPath = stdoutPath,
+        stderrPath = stderrPath,
+        heartbeatPath = path,
+        updatedAtMs = timeUnixMs
+      }))
+
+runWatchedProcess : Str -> Int -> [Str] -> ProcessResult
+runWatchedProcess prefix attempt command = {
+  let stdoutPath = processStdoutPath prefix attempt;
+  let stderrPath = processStderrPath prefix attempt;
+  let heartbeatPath = processHeartbeatPath prefix attempt;
+  let starting = ProcessResult { exitCode = 0, stdout = "", stderr = "" };
+  let wroteStartHeartbeat = writeHeartbeat heartbeatPath stdoutPath stderrPath true starting;
+  let result = persistProcessArtifacts prefix attempt (runProcess workspaceRoot command);
+  let wroteDoneHeartbeat = writeHeartbeat heartbeatPath stdoutPath stderrPath false result in
   result
 }
 
@@ -175,14 +246,17 @@ defaultBuilderPolicyText : Str
 defaultBuilderPolicyText = textJoin "\n" [
   "Close whole blocking capability categories rather than single complaint lines.",
   "Prefer code/runtime/compiler/example/test changes over docs-only movement.",
-  "Use the previous verifier report as the primary steering input for the next attempt."
+  "Use the previous verifier report as the primary steering input for the next attempt.",
+  "Do not broaden backend-native swarm/runtime work into JavaScript-emitter parity unless the frontend compile target actually requires it.",
+  "Treat Compiler.Emit.JavaScript as the frontend/client emitter, not as a backend execution path."
 ]
 
 defaultVerifierPolicyText : Str
 defaultVerifierPolicyText = textJoin "\n" [
   "Judge the whole repository, not only the latest diff.",
   "Group failures by capability category.",
-  "Do not fail merely because legacy helper scripts remain in the repo if the ordinary-program path is complete and not required."
+  "Do not fail merely because legacy helper scripts remain in the repo if the ordinary-program path is complete and not required.",
+  "Do not demand JavaScript-emitter parity for backend-native swarm/runtime capabilities unless the task explicitly requires frontend/client support."
 ]
 
 readPolicyText : Str -> Str -> Str
@@ -437,63 +511,75 @@ ensureBaseline =
       if created.exitCode != 0 then
         created
       else {
-        let archived = runProcess workspaceRoot [
-          "tar",
-          "-cf",
-          baselineArchivePath,
-          "--exclude=.git",
-          "--exclude=*/.git",
-          "--exclude=.clasp-agents",
-          "--exclude=*/.clasp-agents",
-          "--exclude=.clasp-loops",
-          "--exclude=*/.clasp-loops",
-          "--exclude=.clasp-swarm",
-          "--exclude=*/.clasp-swarm",
-          "--exclude=dist",
-          "--exclude=*/dist",
-          "--exclude=dist-newstyle",
-          "--exclude=*/dist-newstyle",
-          "--exclude=result",
-          "--exclude=*/result",
-          "--exclude=runtime/target",
-          "--exclude=*/runtime/target",
-          "--exclude=node_modules",
-          "--exclude=*/node_modules",
-          "."
+        let streamed = runProcess workspaceRoot [
+          "bash",
+          "-lc",
+          textConcat [
+            "tar -cf - ",
+            "--exclude=.git ",
+            "--exclude=*/.git ",
+            "--exclude=.clasp-agents ",
+            "--exclude=*/.clasp-agents ",
+            "--exclude=.clasp-loops ",
+            "--exclude=*/.clasp-loops ",
+            "--exclude=.clasp-swarm ",
+            "--exclude=*/.clasp-swarm ",
+            "--exclude=.clasp-test-tmp ",
+            "--exclude=*/.clasp-test-tmp ",
+            "--exclude=.clasp-verify-tmp ",
+            "--exclude=*/.clasp-verify-tmp ",
+            "--exclude=dist ",
+            "--exclude=*/dist ",
+            "--exclude=dist-newstyle ",
+            "--exclude=*/dist-newstyle ",
+            "--exclude=result ",
+            "--exclude=*/result ",
+            "--exclude=runtime/target ",
+            "--exclude=*/runtime/target ",
+            "--exclude=node_modules ",
+            "--exclude=*/node_modules ",
+            "--exclude=__serve-native-export-host ",
+            "--exclude=*/__serve-native-export-host ",
+            "--exclude=exec-image ",
+            "--exclude=*/exec-image ",
+            "--exclude=feedback-loop-state ",
+            "--exclude=*/feedback-loop-state ",
+            "--exclude=swarm-native-state ",
+            "--exclude=*/swarm-native-state ",
+            "--exclude=help ",
+            "--exclude=*/help ",
+            "--exclude=src/native-verify-cache ",
+            "--exclude=*/src/native-verify-cache ",
+            ". | tar -xf - -C ",
+            baselineWorkspace
+          ]
         ] in
-        if archived.exitCode != 0 then
-          archived
-        else {
-          let extracted = runProcess workspaceRoot ["tar", "-xf", baselineArchivePath, "-C", baselineWorkspace] in
-          if extracted.exitCode != 0 then
-            extracted
-          else {
-            let removedArchive = runProcess workspaceRoot ["rm", "-f", baselineArchivePath] in
-            match writeFile baselineReadyPath "ready" {
-              Ok written ->
-                ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" },
-              Err message ->
-                ProcessResult { exitCode = 1, stdout = "", stderr = message }
-            }
+        if streamed.exitCode != 0 then
+          streamed
+        else
+          match writeFile baselineReadyPath "ready" {
+            Ok written ->
+              ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" },
+            Err message ->
+              ProcessResult { exitCode = 1, stdout = "", stderr = message }
           }
-        }
       }
     }
   }
 
 runBuilder : Int -> ProcessResult
 runBuilder attempt =
-  persistProcessArtifacts
+  runWatchedProcess
     "builder"
     attempt
-    (runProcess workspaceRoot (codexCommand builderSchemaPath (builderReportPath attempt) (builderPrompt attempt)))
+    (codexCommand builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
 
 runVerifier : Int -> ProcessResult
 runVerifier attempt =
-  persistProcessArtifacts
+  runWatchedProcess
     "verifier"
     attempt
-    (runProcess workspaceRoot (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt)))
+    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
 
 runAttempt : Int -> Str
 runAttempt attempt =

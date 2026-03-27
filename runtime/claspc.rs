@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use tool_support::{
     build_project_bundle, build_project_bundle_build, execute_native_export_from_image_path,
+    execute_native_export_from_image_path_args_local_only,
     execute_native_export_from_image_path_args, execute_native_export_from_image_text,
     execute_native_route_from_image_text, project_declares_backend_surface, run_native_export_host_server,
     ProjectBundleBuild, ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
@@ -1563,6 +1564,28 @@ renderUser value = [value]
             PathBuf::from("/tmp/clasp-nix-cache").join("claspc-native")
         );
     }
+
+    #[test]
+    fn embedded_app_image_path_uses_cache_root_and_reuses_same_file() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("embedded-app-image-cache");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let first = super::embedded_app_image_path("{\"module\":\"Main\"}").expect("first embedded app image");
+        let second = super::embedded_app_image_path("{\"module\":\"Main\"}").expect("second embedded app image");
+        let third = super::embedded_app_image_path("{\"module\":\"Other\"}").expect("third embedded app image");
+
+        assert_eq!(first, second);
+        assert_ne!(first, third);
+        assert!(first.starts_with(cache_root.join("claspc-native")));
+        assert_eq!(
+            fs::read_to_string(&first).expect("read cached embedded app image"),
+            "{\"module\":\"Main\"}"
+        );
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
 }
 
 fn cache_root() -> PathBuf {
@@ -1954,6 +1977,11 @@ fn embedded_runtime_image_path() -> Result<PathBuf, String> {
 
 fn embedded_compiler_image_path() -> Result<PathBuf, String> {
     embedded_image_path("embedded.compiler.native.image.json", EMBEDDED_COMPILER_NATIVE_IMAGE)
+}
+
+fn embedded_app_image_path(image_text: &str) -> Result<PathBuf, String> {
+    let fingerprint = stable_fingerprint_text(image_text);
+    embedded_image_path(&format!("embedded-app-{fingerprint}.native.image.json"), image_text)
 }
 
 fn bundle_build(entry_path: &Path) -> Result<ProjectBundleBuild, String> {
@@ -2373,7 +2401,16 @@ fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
     }
 
     if args.get(1).map(|value| value.as_str()) != Some("route") {
-        let result = unsafe { execute_native_export_from_image_text(image_text, "main", None) };
+        let embedded_image_path = match embedded_app_image_path(image_text) {
+            Ok(path) => path,
+            Err(message) => {
+                eprintln!("{message}");
+                return ExitCode::from(1);
+            }
+        };
+        let embedded_image_path_text = embedded_image_path.to_string_lossy();
+        let result =
+            unsafe { execute_native_export_from_image_path_args_local_only(&embedded_image_path_text, "main", &[]) };
         let output_bytes = match result {
             Ok(output_bytes) => output_bytes,
             Err(message) => {

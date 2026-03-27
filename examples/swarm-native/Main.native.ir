@@ -1,0 +1,201 @@
+format clasp-native-ir-v1
+module Main
+exports [Ok, Err, taskResultError, objectiveResultError, policyResultError, runResultError, approvalResultError, mergeDecisionResultError, summaryResultError, managerActionResultError, objectiveStatusResultError, taskListResultError, runListResultError, artifactListResultError, eventListResultError, approvalListResultError, objectiveListResultError, decodeTaskResult, decodeObjectiveResult, decodePolicyResult, decodeRunResult, decodeApprovalResult, decodeMergeDecisionResult, decodeSummaryResult, decodeManagerActionResult, decodeObjectiveStatusResult, decodeTaskListResult, decodeRunListResult, decodeArtifactListResult, decodeEventListResult, decodeApprovalListResult, decodeObjectiveListResult, bootstrap, lease, complete, status, summary, ready, managerNext, objectiveCreate, objectiveStatus, taskCreate, policySet, toolRun, verifierRun, approve, mergegateDecide, runs, artifacts, history, tail, approvals, tasks, objectives, stateRoot, objectiveId, planningTaskId, repairTaskId, actorName, workspaceCwd, main]
+entrypoints [Ok{symbol=clasp_native__Main__Ok, kind=function, arity=1}, Err{symbol=clasp_native__Main__Err, kind=function, arity=1}, taskResultError{symbol=clasp_native__Main__taskResultError, kind=function, arity=1}, objectiveResultError{symbol=clasp_native__Main__objectiveResultError, kind=function, arity=1}, policyResultError{symbol=clasp_native__Main__policyResultError, kind=function, arity=1}, runResultError{symbol=clasp_native__Main__runResultError, kind=function, arity=1}, approvalResultError{symbol=clasp_native__Main__approvalResultError, kind=function, arity=1}, mergeDecisionResultError{symbol=clasp_native__Main__mergeDecisionResultError, kind=function, arity=1}, summaryResultError{symbol=clasp_native__Main__summaryResultError, kind=function, arity=1}, managerActionResultError{symbol=clasp_native__Main__managerActionResultError, kind=function, arity=1}, objectiveStatusResultError{symbol=clasp_native__Main__objectiveStatusResultError, kind=function, arity=1}, taskListResultError{symbol=clasp_native__Main__taskListResultError, kind=function, arity=1}, runListResultError{symbol=clasp_native__Main__runListResultError, kind=function, arity=1}, artifactListResultError{symbol=clasp_native__Main__artifactListResultError, kind=function, arity=1}, eventListResultError{symbol=clasp_native__Main__eventListResultError, kind=function, arity=1}, approvalListResultError{symbol=clasp_native__Main__approvalListResultError, kind=function, arity=1}, objectiveListResultError{symbol=clasp_native__Main__objectiveListResultError, kind=function, arity=1}, decodeTaskResult{symbol=clasp_native__Main__decodeTaskResult, kind=function, arity=1}, decodeObjectiveResult{symbol=clasp_native__Main__decodeObjectiveResult, kind=function, arity=1}, decodePolicyResult{symbol=clasp_native__Main__decodePolicyResult, kind=function, arity=1}, decodeRunResult{symbol=clasp_native__Main__decodeRunResult, kind=function, arity=1}, decodeApprovalResult{symbol=clasp_native__Main__decodeApprovalResult, kind=function, arity=1}, decodeMergeDecisionResult{symbol=clasp_native__Main__decodeMergeDecisionResult, kind=function, arity=1}, decodeSummaryResult{symbol=clasp_native__Main__decodeSummaryResult, kind=function, arity=1}, decodeManagerActionResult{symbol=clasp_native__Main__decodeManagerActionResult, kind=function, arity=1}, decodeObjectiveStatusResult{symbol=clasp_native__Main__decodeObjectiveStatusResult, kind=function, arity=1}, decodeTaskListResult{symbol=clasp_native__Main__decodeTaskListResult, kind=function, arity=1}, decodeRunListResult{symbol=clasp_native__Main__decodeRunListResult, kind=function, arity=1}, decodeArtifactListResult{symbol=clasp_native__Main__decodeArtifactListResult, kind=function, arity=1}, decodeEventListResult{symbol=clasp_native__Main__decodeEventListResult, kind=function, arity=1}, decodeApprovalListResult{symbol=clasp_native__Main__decodeApprovalListResult, kind=function, arity=1}, decodeObjectiveListResult{symbol=clasp_native__Main__decodeObjectiveListResult, kind=function, arity=1}, bootstrap{symbol=clasp_native__Main__bootstrap, kind=function, arity=3}, lease{symbol=clasp_native__Main__lease, kind=function, arity=3}, complete{symbol=clasp_native__Main__complete, kind=function, arity=3}, status{symbol=clasp_native__Main__status, kind=function, arity=2}, summary{symbol=clasp_native__Main__summary, kind=function, arity=1}, ready{symbol=clasp_native__Main__ready, kind=function, arity=2}, managerNext{symbol=clasp_native__Main__managerNext, kind=function, arity=2}, objectiveCreate{symbol=clasp_native__Main__objectiveCreate, kind=function, arity=5}, objectiveStatus{symbol=clasp_native__Main__objectiveStatus, kind=function, arity=2}, taskCreate{symbol=clasp_native__Main__taskCreate, kind=function, arity=7}, policySet{symbol=clasp_native__Main__policySet, kind=function, arity=5}, toolRun{symbol=clasp_native__Main__toolRun, kind=function, arity=5}, verifierRun{symbol=clasp_native__Main__verifierRun, kind=function, arity=6}, approve{symbol=clasp_native__Main__approve, kind=function, arity=4}, mergegateDecide{symbol=clasp_native__Main__mergegateDecide, kind=function, arity=5}, runs{symbol=clasp_native__Main__runs, kind=function, arity=2}, artifacts{symbol=clasp_native__Main__artifacts, kind=function, arity=2}, history{symbol=clasp_native__Main__history, kind=function, arity=2}, tail{symbol=clasp_native__Main__tail, kind=function, arity=3}, approvals{symbol=clasp_native__Main__approvals, kind=function, arity=2}, tasks{symbol=clasp_native__Main__tasks, kind=function, arity=1}, objectives{symbol=clasp_native__Main__objectives, kind=function, arity=1}, stateRoot{symbol=clasp_native__Main__stateRoot, kind=global, arity=0}, objectiveId{symbol=clasp_native__Main__objectiveId, kind=global, arity=0}, planningTaskId{symbol=clasp_native__Main__planningTaskId, kind=global, arity=0}, repairTaskId{symbol=clasp_native__Main__repairTaskId, kind=global, arity=0}, actorName{symbol=clasp_native__Main__actorName, kind=global, arity=0}, workspaceCwd{symbol=clasp_native__Main__workspaceCwd, kind=global, arity=0}, main{symbol=clasp_native__Main__main, kind=global, arity=0}]
+
+abi {
+  version clasp-native-v1
+  word_bytes 8
+  memory_strategy reference_counting
+  allocation { immediate = stack, handle = heap, global = static }
+  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]
+  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]
+  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]
+  builtin_layout Int { storage = immediate, words = 1 }
+  builtin_layout Bool { storage = immediate, words = 1 }
+  builtin_layout Str { storage = handle, words = 1 }
+  builtin_layout List { storage = handle, words = 1 }
+  builtin_layout Page { storage = handle, words = 1 }
+  builtin_layout Redirect { storage = handle, words = 1 }
+  builtin_layout View { storage = handle, words = 1 }
+  builtin_layout Prompt { storage = handle, words = 1 }
+  record_layout Principal { words = 1, fields = [id:Str@word0/handle] }
+  record_layout Tenant { words = 1, fields = [id:Str@word0/handle] }
+  record_layout ResourceIdentity { words = 2, fields = [resourceType:Str@word0/handle, resourceId:Str@word1/handle] }
+  record_layout AuditActor { words = 2, fields = [actorType:Str@word0/handle, actorId:Str@word1/handle] }
+  record_layout AuditAction { words = 2, fields = [actionType:Str@word0/handle, summary:Str@word1/handle] }
+  record_layout AuditProvenance { words = 3, fields = [source:Str@word0/handle, requestId:Str@word1/handle, traceId:Str@word2/handle] }
+  record_layout SqliteConnection { words = 4, fields = [id:Str@word0/handle, databasePath:Str@word1/handle, readOnly:Bool@word2/immediate, memory:Bool@word3/immediate] }
+  record_layout AuthSession { words = 4, fields = [sessionId:Str@word0/handle, principal:Principal@word1/handle, tenant:Tenant@word2/handle, resource:ResourceIdentity@word3/handle] }
+  record_layout StandardAuditEnvelope { words = 5, fields = [actor:AuditActor@word0/handle, resource:ResourceIdentity@word1/handle, action:AuditAction@word2/handle, timestamp:Int@word3/immediate, provenance:AuditProvenance@word4/handle] }
+  record_layout SwarmObjective { words = 5, fields = [objectiveId:Str@word0/handle, detail:Str@word1/handle, projectedStatus:Str@word2/handle, taskCount:Int@word3/immediate, runCount:Int@word4/immediate] }
+  record_layout SwarmTask { words = 6, fields = [taskId:Str@word0/handle, status:Str@word1/handle, objectiveId:Str@word2/handle, detail:Str@word3/handle, ready:Bool@word4/immediate, blockedBy:[Str]@word5/handle] }
+  record_layout SwarmPolicy { words = 4, fields = [taskId:Str@word0/handle, mergegateName:Str@word1/handle, requiredApprovals:[Str]@word2/handle, requiredVerifiers:[Str]@word3/handle] }
+  record_layout SwarmRun { words = 7, fields = [taskId:Str@word0/handle, role:Str@word1/handle, name:Str@word2/handle, exitCode:Int@word3/immediate, status:Str@word4/handle, stdoutArtifactPath:Str@word5/handle, stderrArtifactPath:Str@word6/handle] }
+  record_layout SwarmApproval { words = 3, fields = [taskId:Str@word0/handle, name:Str@word1/handle, actor:Str@word2/handle] }
+  record_layout SwarmMergeDecision { words = 3, fields = [taskId:Str@word0/handle, mergegateName:Str@word1/handle, verdict:Str@word2/handle] }
+  record_layout SwarmArtifact { words = 3, fields = [taskId:Str@word0/handle, kind:Str@word1/handle, path:Str@word2/handle] }
+  record_layout SwarmEvent { words = 5, fields = [kind:Str@word0/handle, taskId:Str@word1/handle, actor:Str@word2/handle, detail:Str@word3/handle, atMs:Int@word4/immediate] }
+  record_layout SwarmSummary { words = 5, fields = [allTaskIds:[Str]@word0/handle, completedTaskIds:[Str]@word1/handle, readyTaskIds:[Str]@word2/handle, hasBootstrap:Bool@word3/immediate, bootstrapStatus:Str@word4/handle] }
+  record_layout SwarmManagerAction { words = 4, fields = [objectiveId:Str@word0/handle, status:Str@word1/handle, action:Str@word2/handle, suggestedCommand:[Str]@word3/handle] }
+  record_layout SwarmObjectiveStatus { words = 3, fields = [objective:SwarmObjective@word0/handle, projectedStatus:Str@word1/handle, tasks:[SwarmTask]@word2/handle] }
+  record_layout NativeSwarmReport { words = 30, fields = [objective:Str@word0/handle, planningTask:Str@word1/handle, repairTask:Str@word2/handle, objectiveCreate:SwarmObjective@word3/handle, planningTaskCreate:SwarmTask@word4/handle, repairTaskCreate:SwarmTask@word5/handle, policy:SwarmPolicy@word6/handle, readyBefore:[SwarmTask]@word7/handle, managerBefore:SwarmManagerAction@word8/handle, planningLease:SwarmTask@word9/handle, planningRun:SwarmRun@word10/handle, planningComplete:SwarmTask@word11/handle, managerAfterPlan:SwarmManagerAction@word12/handle, repairLease:SwarmTask@word13/handle, toolRun:SwarmRun@word14/handle, repairComplete:SwarmTask@word15/handle, verifierRun:SwarmRun@word16/handle, approval:SwarmApproval@word17/handle, approvals:[SwarmApproval]@word18/handle, mergeDecision:SwarmMergeDecision@word19/handle, repairStatus:SwarmTask@word20/handle, repairHistory:[SwarmEvent]@word21/handle, repairTail:[SwarmEvent]@word22/handle, objectiveStatus:SwarmObjectiveStatus@word23/handle, objectives:[SwarmObjective]@word24/handle, tasks:[SwarmTask]@word25/handle, runs:[SwarmRun]@word26/handle, artifacts:[SwarmArtifact]@word27/handle, summary:SwarmSummary@word28/handle, managerAfter:SwarmManagerAction@word29/handle] }
+  variant_layout Result { tag_word = 0, max_payload_words = 0, words = 1, constructors = [Ok{tag_word=0, payload_words=1, words=2, payloads=[$0:a@word1/handle]}, Err{tag_word=0, payload_words=1, words=2, payloads=[$0:Str@word1/handle]}] }
+  object_layout Principal { kind = record, header_words = 2, words = 3, roots = [2] }
+  object_layout Tenant { kind = record, header_words = 2, words = 3, roots = [2] }
+  object_layout ResourceIdentity { kind = record, header_words = 2, words = 4, roots = [2, 3] }
+  object_layout AuditActor { kind = record, header_words = 2, words = 4, roots = [2, 3] }
+  object_layout AuditAction { kind = record, header_words = 2, words = 4, roots = [2, 3] }
+  object_layout AuditProvenance { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }
+  object_layout SqliteConnection { kind = record, header_words = 2, words = 6, roots = [2, 3] }
+  object_layout AuthSession { kind = record, header_words = 2, words = 6, roots = [2, 3, 4, 5] }
+  object_layout StandardAuditEnvelope { kind = record, header_words = 2, words = 7, roots = [2, 3, 4, 6] }
+  object_layout SwarmObjective { kind = record, header_words = 2, words = 7, roots = [2, 3, 4] }
+  object_layout SwarmTask { kind = record, header_words = 2, words = 8, roots = [2, 3, 4, 5, 7] }
+  object_layout SwarmPolicy { kind = record, header_words = 2, words = 6, roots = [2, 3, 4, 5] }
+  object_layout SwarmRun { kind = record, header_words = 2, words = 9, roots = [2, 3, 4, 6, 7, 8] }
+  object_layout SwarmApproval { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }
+  object_layout SwarmMergeDecision { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }
+  object_layout SwarmArtifact { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }
+  object_layout SwarmEvent { kind = record, header_words = 2, words = 7, roots = [2, 3, 4, 5] }
+  object_layout SwarmSummary { kind = record, header_words = 2, words = 7, roots = [2, 3, 4, 6] }
+  object_layout SwarmManagerAction { kind = record, header_words = 2, words = 6, roots = [2, 3, 4, 5] }
+  object_layout SwarmObjectiveStatus { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }
+  object_layout NativeSwarmReport { kind = record, header_words = 2, words = 32, roots = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] }
+  object_layout Result.Ok { kind = variant, header_words = 2, words = 4, roots = [3] }
+  object_layout Result.Err { kind = variant, header_words = 2, words = 4, roots = [3] }
+}
+
+runtime {
+  profile compiler_backend_minimal
+  artifacts ["runtime/clasp_runtime.h", "runtime/clasp_runtime.rs"]
+  memory_symbols [clasp_rt_init, clasp_rt_register_static_root, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_string_from_utf8, clasp_rt_bytes_new, clasp_rt_string_list_new, clasp_rt_result_ok_string, clasp_rt_result_err_string, clasp_rt_json_from_string, clasp_rt_json_to_string, clasp_rt_binary_from_json, clasp_rt_json_from_binary, clasp_rt_transport_frame, clasp_rt_transport_unframe]
+  bindings [textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}, textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}, argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}, envVar{runtime=envVar, symbol=clasp_rt_env_var, type=Str -> Result Str}, pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}, swarmBootstrapRaw{runtime=swarmBootstrapJson, symbol=clasp_rt_swarm_bootstrap_json, type=Str -> Str -> Str -> Result Str}, swarmLeaseRaw{runtime=swarmLeaseJson, symbol=clasp_rt_swarm_lease_json, type=Str -> Str -> Str -> Result Str}, swarmCompleteRaw{runtime=swarmCompleteJson, symbol=clasp_rt_swarm_complete_json, type=Str -> Str -> Str -> Result Str}, swarmStatusRaw{runtime=swarmStatusJson, symbol=clasp_rt_swarm_status_json, type=Str -> Str -> Result Str}, swarmSummaryRaw{runtime=swarmSummaryJson, symbol=clasp_rt_swarm_summary_json, type=Str -> Result Str}, swarmReadyRaw{runtime=swarmReadyJson, symbol=clasp_rt_swarm_ready_json, type=Str -> Str -> Result Str}, swarmManagerNextRaw{runtime=swarmManagerNextJson, symbol=clasp_rt_swarm_manager_next_json, type=Str -> Str -> Result Str}, swarmObjectiveCreateRaw{runtime=swarmObjectiveCreateJson, symbol=clasp_rt_swarm_objective_create_json, type=Str -> Str -> Str -> Int -> Int -> Result Str}, swarmObjectiveStatusRaw{runtime=swarmObjectiveStatusJson, symbol=clasp_rt_swarm_objective_status_json, type=Str -> Str -> Result Str}, swarmTaskCreateRaw{runtime=swarmTaskCreateJson, symbol=clasp_rt_swarm_task_create_json, type=Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str}, swarmPolicySetRaw{runtime=swarmPolicySetJson, symbol=clasp_rt_swarm_policy_set_json, type=Str -> Str -> Str -> [Str] -> [Str] -> Result Str}, swarmToolRunRaw{runtime=swarmToolRunJson, symbol=clasp_rt_swarm_tool_run_json, type=Str -> Str -> Str -> Str -> [Str] -> Result Str}, swarmVerifierRunRaw{runtime=swarmVerifierRunJson, symbol=clasp_rt_swarm_verifier_run_json, type=Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str}, swarmApproveRaw{runtime=swarmApproveJson, symbol=clasp_rt_swarm_approve_json, type=Str -> Str -> Str -> Str -> Result Str}, swarmMergegateDecideRaw{runtime=swarmMergegateDecideJson, symbol=clasp_rt_swarm_mergegate_decide_json, type=Str -> Str -> Str -> Str -> [Str] -> Result Str}, swarmRunsRaw{runtime=swarmRunsJson, symbol=clasp_rt_swarm_runs_json, type=Str -> Str -> Result Str}, swarmArtifactsRaw{runtime=swarmArtifactsJson, symbol=clasp_rt_swarm_artifacts_json, type=Str -> Str -> Result Str}, swarmHistoryRaw{runtime=swarmHistoryJson, symbol=clasp_rt_swarm_history_json, type=Str -> Str -> Result Str}, swarmTailRaw{runtime=swarmTailJson, symbol=clasp_rt_swarm_tail_json, type=Str -> Str -> Int -> Result Str}, swarmApprovalsRaw{runtime=swarmApprovalsJson, symbol=clasp_rt_swarm_approvals_json, type=Str -> Str -> Result Str}, swarmTasksRaw{runtime=swarmTasksJson, symbol=clasp_rt_swarm_tasks_json, type=Str -> Result Str}, swarmObjectivesRaw{runtime=swarmObjectivesJson, symbol=clasp_rt_swarm_objectives_json, type=Str -> Result Str}]
+  json_codecs []
+  binary_codecs []
+  boundaries []
+  service_transports []
+}
+
+function Ok($0) = construct Ok(local($0))
+
+function Err($0) = construct Err(local($0))
+
+function taskResultError(message) = call(local(Err), [local(message)])
+
+function objectiveResultError(message) = call(local(Err), [local(message)])
+
+function policyResultError(message) = call(local(Err), [local(message)])
+
+function runResultError(message) = call(local(Err), [local(message)])
+
+function approvalResultError(message) = call(local(Err), [local(message)])
+
+function mergeDecisionResultError(message) = call(local(Err), [local(message)])
+
+function summaryResultError(message) = call(local(Err), [local(message)])
+
+function managerActionResultError(message) = call(local(Err), [local(message)])
+
+function objectiveStatusResultError(message) = call(local(Err), [local(message)])
+
+function taskListResultError(message) = call(local(Err), [local(message)])
+
+function runListResultError(message) = call(local(Err), [local(message)])
+
+function artifactListResultError(message) = call(local(Err), [local(message)])
+
+function eventListResultError(message) = call(local(Err), [local(message)])
+
+function approvalListResultError(message) = call(local(Err), [local(message)])
+
+function objectiveListResultError(message) = call(local(Err), [local(message)])
+
+function decodeTaskResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmTask, local(raw))]), Err(message) -> call(local(taskResultError), [local(message)])]
+
+function decodeObjectiveResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmObjective, local(raw))]), Err(message) -> call(local(objectiveResultError), [local(message)])]
+
+function decodePolicyResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmPolicy, local(raw))]), Err(message) -> call(local(policyResultError), [local(message)])]
+
+function decodeRunResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmRun, local(raw))]), Err(message) -> call(local(runResultError), [local(message)])]
+
+function decodeApprovalResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmApproval, local(raw))]), Err(message) -> call(local(approvalResultError), [local(message)])]
+
+function decodeMergeDecisionResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmMergeDecision, local(raw))]), Err(message) -> call(local(mergeDecisionResultError), [local(message)])]
+
+function decodeSummaryResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmSummary, local(raw))]), Err(message) -> call(local(summaryResultError), [local(message)])]
+
+function decodeManagerActionResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmManagerAction, local(raw))]), Err(message) -> call(local(managerActionResultError), [local(message)])]
+
+function decodeObjectiveStatusResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode(SwarmObjectiveStatus, local(raw))]), Err(message) -> call(local(objectiveStatusResultError), [local(message)])]
+
+function decodeTaskListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmTask], local(raw))]), Err(message) -> call(local(taskListResultError), [local(message)])]
+
+function decodeRunListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmRun], local(raw))]), Err(message) -> call(local(runListResultError), [local(message)])]
+
+function decodeArtifactListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmArtifact], local(raw))]), Err(message) -> call(local(artifactListResultError), [local(message)])]
+
+function decodeEventListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmEvent], local(raw))]), Err(message) -> call(local(eventListResultError), [local(message)])]
+
+function decodeApprovalListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmApproval], local(raw))]), Err(message) -> call(local(approvalListResultError), [local(message)])]
+
+function decodeObjectiveListResult(value) = match local(value) [Ok(raw) -> call(local(Ok), [intrinsic.decode([SwarmObjective], local(raw))]), Err(message) -> call(local(objectiveListResultError), [local(message)])]
+
+function bootstrap(root, taskId, actor) = call(local(decodeTaskResult), [call(local(swarmBootstrapRaw), [local(root), local(taskId), local(actor)])])
+
+function lease(root, taskId, actor) = call(local(decodeTaskResult), [call(local(swarmLeaseRaw), [local(root), local(taskId), local(actor)])])
+
+function complete(root, taskId, actor) = call(local(decodeTaskResult), [call(local(swarmCompleteRaw), [local(root), local(taskId), local(actor)])])
+
+function status(root, taskId) = call(local(decodeTaskResult), [call(local(swarmStatusRaw), [local(root), local(taskId)])])
+
+function summary(root) = call(local(decodeSummaryResult), [call(local(swarmSummaryRaw), [local(root)])])
+
+function ready(root, objectiveId) = call(local(decodeTaskListResult), [call(local(swarmReadyRaw), [local(root), local(objectiveId)])])
+
+function managerNext(root, objectiveId) = call(local(decodeManagerActionResult), [call(local(swarmManagerNextRaw), [local(root), local(objectiveId)])])
+
+function objectiveCreate(root, objectiveId, detail, maxTasks, maxRuns) = call(local(decodeObjectiveResult), [call(local(swarmObjectiveCreateRaw), [local(root), local(objectiveId), local(detail), local(maxTasks), local(maxRuns)])])
+
+function objectiveStatus(root, objectiveId) = call(local(decodeObjectiveStatusResult), [call(local(swarmObjectiveStatusRaw), [local(root), local(objectiveId)])])
+
+function taskCreate(root, objectiveId, taskId, detail, dependencies, maxRuns, leaseTimeoutMs) = call(local(decodeTaskResult), [call(local(swarmTaskCreateRaw), [local(root), local(objectiveId), local(taskId), local(detail), local(dependencies), local(maxRuns), local(leaseTimeoutMs)])])
+
+function policySet(root, taskId, mergegateName, requiredApprovals, requiredVerifiers) = call(local(decodePolicyResult), [call(local(swarmPolicySetRaw), [local(root), local(taskId), local(mergegateName), local(requiredApprovals), local(requiredVerifiers)])])
+
+function toolRun(root, taskId, actor, cwd, command) = call(local(decodeRunResult), [call(local(swarmToolRunRaw), [local(root), local(taskId), local(actor), local(cwd), local(command)])])
+
+function verifierRun(root, taskId, actor, verifierName, cwd, command) = call(local(decodeRunResult), [call(local(swarmVerifierRunRaw), [local(root), local(taskId), local(actor), local(verifierName), local(cwd), local(command)])])
+
+function approve(root, taskId, actor, approvalName) = call(local(decodeApprovalResult), [call(local(swarmApproveRaw), [local(root), local(taskId), local(actor), local(approvalName)])])
+
+function mergegateDecide(root, taskId, actor, mergegateName, verifiers) = call(local(decodeMergeDecisionResult), [call(local(swarmMergegateDecideRaw), [local(root), local(taskId), local(actor), local(mergegateName), local(verifiers)])])
+
+function runs(root, taskId) = call(local(decodeRunListResult), [call(local(swarmRunsRaw), [local(root), local(taskId)])])
+
+function artifacts(root, taskId) = call(local(decodeArtifactListResult), [call(local(swarmArtifactsRaw), [local(root), local(taskId)])])
+
+function history(root, taskId) = call(local(decodeEventListResult), [call(local(swarmHistoryRaw), [local(root), local(taskId)])])
+
+function tail(root, taskId, limit) = call(local(decodeEventListResult), [call(local(swarmTailRaw), [local(root), local(taskId), local(limit)])])
+
+function approvals(root, taskId) = call(local(decodeApprovalListResult), [call(local(swarmApprovalsRaw), [local(root), local(taskId)])])
+
+function tasks(root) = call(local(decodeTaskListResult), [call(local(swarmTasksRaw), [local(root)])])
+
+function objectives(root) = call(local(decodeObjectiveListResult), [call(local(swarmObjectivesRaw), [local(root)])])
+
+global stateRoot = if compare.eq(call(local(textJoin), [string(""), local(argv)]), string("")) then string("swarm-native-state") else call(local(pathJoin), [local(argv)])
+
+global objectiveId = string("ordinary-loop")
+
+global planningTaskId = string("plan-runtime")
+
+global repairTaskId = string("repair-runtime")
+
+global actorName = match call(local(envVar), [string("CLASP_SWARM_ACTOR")]) [Ok(value) -> local(value), Err(message) -> string("manager")]
+
+global workspaceCwd = match call(local(envVar), [string("CLASP_SWARM_CWD")]) [Ok(value) -> local(value), Err(message) -> string(".")]
+
+global main = match call(local(objectiveCreate), [local(stateRoot), local(objectiveId), string("Drive the supervised ordinary-program loop."), int(4), int(6)]) [Ok(objectiveCreateValue) -> match call(local(taskCreate), [local(stateRoot), local(objectiveId), local(planningTaskId), string("Plan the runtime repair using direct Clasp orchestration."), list([]), int(1), int(60000)]) [Ok(planningTaskCreateValue) -> match call(local(taskCreate), [local(stateRoot), local(objectiveId), local(repairTaskId), string("Repair the runtime using direct Clasp orchestration."), list([local(planningTaskId)]), int(3), int(60000)]) [Ok(repairTaskCreateValue) -> match call(local(policySet), [local(stateRoot), local(repairTaskId), string("trunk"), list([string("merge-ready")]), list([string("native-smoke")])]) [Ok(policyValue) -> match call(local(ready), [local(stateRoot), local(objectiveId)]) [Ok(readyBeforeValue) -> match call(local(managerNext), [local(stateRoot), local(objectiveId)]) [Ok(managerBeforeValue) -> match call(local(lease), [local(stateRoot), local(planningTaskId), local(actorName)]) [Ok(planningLeaseValue) -> match call(local(toolRun), [local(stateRoot), local(planningTaskId), local(actorName), local(workspaceCwd), list([string("bash"), string("-lc"), string("printf ordinary-plan-ok")])]) [Ok(planningRunValue) -> match call(local(complete), [local(stateRoot), local(planningTaskId), local(actorName)]) [Ok(planningCompleteValue) -> match call(local(managerNext), [local(stateRoot), local(objectiveId)]) [Ok(managerAfterPlanValue) -> match call(local(lease), [local(stateRoot), local(repairTaskId), local(actorName)]) [Ok(repairLeaseValue) -> match call(local(toolRun), [local(stateRoot), local(repairTaskId), local(actorName), local(workspaceCwd), list([string("bash"), string("-lc"), string("printf ordinary-tool-ok; >&2 printf ordinary-tool-err")])]) [Ok(toolRunValue) -> match call(local(complete), [local(stateRoot), local(repairTaskId), local(actorName)]) [Ok(repairCompleteValue) -> match call(local(verifierRun), [local(stateRoot), local(repairTaskId), local(actorName), string("native-smoke"), local(workspaceCwd), list([string("bash"), string("-lc"), string("printf ordinary-verifier-ok")])]) [Ok(verifierRunValue) -> match call(local(approve), [local(stateRoot), local(repairTaskId), local(actorName), string("merge-ready")]) [Ok(approvalValue) -> match call(local(approvals), [local(stateRoot), local(repairTaskId)]) [Ok(approvalsValue) -> match call(local(mergegateDecide), [local(stateRoot), local(repairTaskId), local(actorName), string("trunk"), list([string("native-smoke")])]) [Ok(mergeDecisionValue) -> match call(local(status), [local(stateRoot), local(repairTaskId)]) [Ok(repairStatusValue) -> match call(local(history), [local(stateRoot), local(repairTaskId)]) [Ok(repairHistoryValue) -> match call(local(tail), [local(stateRoot), local(repairTaskId), int(5)]) [Ok(repairTailValue) -> match call(local(objectiveStatus), [local(stateRoot), local(objectiveId)]) [Ok(objectiveStatusValue) -> match call(local(objectives), [local(stateRoot)]) [Ok(objectivesValue) -> match call(local(tasks), [local(stateRoot)]) [Ok(tasksValue) -> match call(local(runs), [local(stateRoot), local(repairTaskId)]) [Ok(runsValue) -> match call(local(artifacts), [local(stateRoot), local(repairTaskId)]) [Ok(artifactsValue) -> match call(local(summary), [local(stateRoot)]) [Ok(summaryValue) -> match call(local(managerNext), [local(stateRoot), local(objectiveId)]) [Ok(managerAfterValue) -> intrinsic.encode(record NativeSwarmReport {objective = local(objectiveId), planningTask = local(planningTaskId), repairTask = local(repairTaskId), objectiveCreate = local(objectiveCreateValue), planningTaskCreate = local(planningTaskCreateValue), repairTaskCreate = local(repairTaskCreateValue), policy = local(policyValue), readyBefore = local(readyBeforeValue), managerBefore = local(managerBeforeValue), planningLease = local(planningLeaseValue), planningRun = local(planningRunValue), planningComplete = local(planningCompleteValue), managerAfterPlan = local(managerAfterPlanValue), repairLease = local(repairLeaseValue), toolRun = local(toolRunValue), repairComplete = local(repairCompleteValue), verifierRun = local(verifierRunValue), approval = local(approvalValue), approvals = local(approvalsValue), mergeDecision = local(mergeDecisionValue), repairStatus = local(repairStatusValue), repairHistory = local(repairHistoryValue), repairTail = local(repairTailValue), objectiveStatus = local(objectiveStatusValue), objectives = local(objectivesValue), tasks = local(tasksValue), runs = local(runsValue), artifacts = local(artifactsValue), summary = local(summaryValue), managerAfter = local(managerAfterValue)}), Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])], Err(message) -> call(local(textConcat), [list([string("error:"), local(message)])])]
+

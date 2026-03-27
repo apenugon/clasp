@@ -1305,6 +1305,14 @@ unsafe fn execute_native_export_from_image_path_args_local(
     result
 }
 
+pub unsafe fn execute_native_export_from_image_path_args_local_only(
+    image_path_text: &str,
+    export_name: &str,
+    source_args: &[String],
+) -> Result<Vec<u8>, String> {
+    execute_native_export_from_image_path_args_local(image_path_text, export_name, source_args)
+}
+
 pub unsafe fn execute_native_export_from_image_text(
     image_text: &str,
     export_name: &str,

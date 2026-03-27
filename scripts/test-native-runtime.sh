@@ -2,11 +2,14 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-test_root="$(mktemp -d)"
+tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+mkdir -p "$tmp_root"
+export TMPDIR="$tmp_root"
+test_root="$(mktemp -d "$TMPDIR/test-native-runtime.XXXXXX")"
 cc_bin="${CC:-cc}"
+cargo_bin="${CARGO:-cargo}"
 rustc_bin="${RUSTC:-rustc}"
-rust_runtime_source="$project_root/runtime/clasp_runtime.rs"
-rust_runtime_lib="$test_root/libclasp_runtime.a"
+rust_runtime_lib="$project_root/runtime/target/debug/libclasp_runtime.a"
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 node_bin="${NODE:-node}"
 nix_reentry="${CLASP_NATIVE_RUNTIME_NIX_REENTRY:-0}"
@@ -18,15 +21,11 @@ cleanup() {
 trap cleanup EXIT
 
 maybe_enter_nix_shell() {
-  if [[ -n "${RUSTC:-}" ]]; then
+  if command -v "$rustc_bin" >/dev/null 2>&1 && command -v "$cargo_bin" >/dev/null 2>&1; then
     return 0
   fi
 
-  if [[ "$nix_reentry" == "1" || -n "${IN_NIX_SHELL:-}" ]]; then
-    return 0
-  fi
-
-  if command -v "$rustc_bin" >/dev/null 2>&1; then
+  if [[ "$nix_reentry" == "1" ]]; then
     return 0
   fi
 
@@ -202,20 +201,11 @@ incompatiblePayload.compatibility.acceptedPreviousFingerprints = ["native-compat
 writeJson(incompatibleOutputPath, incompatiblePayload);
 NODE
 
-"$rustc_bin" \
-  --edition=2021 \
-  --crate-type staticlib \
-  -C panic=abort \
-  "$rust_runtime_source" \
-  -o "$rust_runtime_lib" >/dev/null
+cargo build --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib >/dev/null
+[[ -f "$rust_runtime_lib" ]]
 
 rust_native_libs="$(
-  "$rustc_bin" \
-    --edition=2021 \
-    --crate-type staticlib \
-    -C panic=abort \
-    --print native-static-libs \
-    "$rust_runtime_source" 2>&1 >/dev/null |
+  cargo rustc --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib -- --print native-static-libs 2>&1 >/dev/null |
     sed -n 's/^note: native-static-libs: //p' |
     tail -n 1
 )"

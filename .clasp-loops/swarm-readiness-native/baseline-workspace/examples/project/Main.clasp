@@ -1,4 +1,0 @@
-module Main with Shared.User
-
-main : Str
-main = formatUser defaultUser

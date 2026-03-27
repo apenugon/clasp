@@ -3572,40 +3572,12 @@ pub fn builtin_swarm_bootstrap(root: &str, task_id: &str, actor: &str) -> Result
     render_builtin_event(root, task_id, actor, "bootstrap")
 }
 
-pub fn builtin_swarm_start(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "start")
-}
-
 pub fn builtin_swarm_lease(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
     render_builtin_event(root, task_id, actor, "lease")
 }
 
-pub fn builtin_swarm_release(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "release")
-}
-
-pub fn builtin_swarm_heartbeat(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "heartbeat")
-}
-
 pub fn builtin_swarm_complete(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
     render_builtin_event(root, task_id, actor, "complete")
-}
-
-pub fn builtin_swarm_fail(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "fail")
-}
-
-pub fn builtin_swarm_retry(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "retry")
-}
-
-pub fn builtin_swarm_stop(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "stop")
-}
-
-pub fn builtin_swarm_resume(root: &str, task_id: &str, actor: &str) -> Result<String, String> {
-    render_builtin_event(root, task_id, actor, "resume")
 }
 
 pub fn builtin_swarm_status(root: &str, task_id: &str) -> Result<String, String> {
@@ -3635,10 +3607,11 @@ pub fn builtin_swarm_summary(root: &str) -> Result<String, String> {
 }
 
 pub fn builtin_swarm_tail(root: &str, task_id: &str, limit: i64) -> Result<String, String> {
+    let limit = if limit <= 0 { 0 } else { limit as usize };
     render_builtin_query(SwarmCommand::Tail {
         root: PathBuf::from(root),
         task_id: Some(task_id.to_owned()),
-        limit: if limit < 0 { 0usize } else { limit as usize },
+        limit,
     })
 }
 

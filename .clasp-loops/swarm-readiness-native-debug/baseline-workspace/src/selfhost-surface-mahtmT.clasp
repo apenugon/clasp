@@ -1,5 +1,0 @@
-module SelfHostSurfaceSmoke
-
-import Compiler.Emit.NativeSurface
-
-main = nativeEntrypointSymbol "A.B" "main"

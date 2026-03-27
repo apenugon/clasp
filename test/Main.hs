@@ -1836,6 +1836,22 @@ checkerTests =
                 assertEqual "main type" TStr (coreDeclType decl)
               Nothing ->
                 assertFailure "expected main declaration"
+    , testCase "checkEntryWithPreference Clasp typechecks the ordinary native swarm wrapper example" $ do
+        (implementation, result) <- checkEntryWithPreference CompilerPreferenceClasp ("examples" </> "swarm-native" </> "Main.clasp")
+        assertEqual "implementation" CompilerImplementationClasp implementation
+        case result of
+          Left err ->
+            assertFailure ("expected hosted check for swarm-native example to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked -> do
+            let foreignNames = fmap foreignDeclName (coreModuleForeignDecls checked)
+            assertBool "expected direct swarm bootstrap runtime binding" ("swarmBootstrapRaw" `elem` foreignNames)
+            assertBool "expected direct swarm tool runtime binding" ("swarmToolRunRaw" `elem` foreignNames)
+            assertBool "expected direct swarm objective runtime binding" ("swarmObjectiveCreateRaw" `elem` foreignNames)
+            case find ((== "main") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "main type" TStr (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected main declaration in swarm-native example"
     , testCase "typechecks the compiler renderers example file on the hosted Clasp path" $ do
         (exitCode, stdoutText, stderrText) <- runClaspc ["check", "examples/compiler-renderers.clasp"]
         case exitCode of
@@ -3929,6 +3945,53 @@ nativeTests =
                 assertEqual "mkdirAll symbol" "clasp_rt_mkdir_all" (nativeRuntimeBindingSymbol binding)
               Nothing ->
                 assertFailure "expected mkdirAll runtime binding"
+    , testCase "native runtime tracks decode codecs and ordinary swarm control bindings" $
+        case nativeSource "swarm-control" swarmControlSource of
+          Left err ->
+            assertFailure ("expected swarm control native lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeMod -> do
+            let runtime = nativeModuleRuntime nativeMod
+            assertBool
+              "expected decoded SwarmTask codec"
+              (NativeJsonCodec (TNamed "SwarmTask") "$encode_SwarmTask" "$decode_SwarmTask" `elem` nativeRuntimeJsonCodecs runtime)
+            assertBool
+              "expected decoded SwarmRun codec"
+              (NativeJsonCodec (TNamed "SwarmRun") "$encode_SwarmRun" "$decode_SwarmRun" `elem` nativeRuntimeJsonCodecs runtime)
+            case findRuntimeBinding "swarmObjectiveCreateJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm objective create symbol" "clasp_rt_swarm_objective_create_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmObjectiveCreateJson runtime binding"
+            case findRuntimeBinding "swarmToolRunJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm tool run symbol" "clasp_rt_swarm_tool_run_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmToolRunJson runtime binding"
+            case findRuntimeBinding "swarmHistoryJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm history symbol" "clasp_rt_swarm_history_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmHistoryJson runtime binding"
+            case findRuntimeBinding "swarmTailJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm tail symbol" "clasp_rt_swarm_tail_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmTailJson runtime binding"
+            case findRuntimeBinding "swarmTasksJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm tasks symbol" "clasp_rt_swarm_tasks_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmTasksJson runtime binding"
+            case findRuntimeBinding "swarmObjectivesJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm objectives symbol" "clasp_rt_swarm_objectives_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmObjectivesJson runtime binding"
+            case findRuntimeBinding "swarmApprovalsJson" (nativeRuntimeBindings runtime) of
+              Just binding ->
+                assertEqual "swarm approvals symbol" "clasp_rt_swarm_approvals_json" (nativeRuntimeBindingSymbol binding)
+              Nothing ->
+                assertFailure "expected swarmApprovalsJson runtime binding"
     , testCase "native lowering preserves list append as a dedicated intrinsic" $
         case nativeSource "list-append" listAppendSource of
           Left err ->
@@ -9182,6 +9245,57 @@ swarmKernelSource =
     , "      Ok written -> written,"
     , "      Err message -> message"
     , "    }"
+    ]
+
+swarmControlSource :: Text
+swarmControlSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record SwarmTask = { taskId : Str, status : Str }"
+    , "record SwarmRun = { taskId : Str, role : Str, name : Str, exitCode : Int, status : Str, stdoutArtifactPath : Str, stderrArtifactPath : Str }"
+    , "record SwarmEvent = { kind : Str, taskId : Str, actor : Str, detail : Str, atMs : Int }"
+    , "record SwarmObjective = { objectiveId : Str, detail : Str, projectedStatus : Str, taskCount : Int, runCount : Int }"
+    , "record SwarmApproval = { taskId : Str, name : Str, actor : Str }"
+    , ""
+    , "decodeTask : Str -> SwarmTask"
+    , "decodeTask raw = decode SwarmTask raw"
+    , ""
+    , "decodeRun : Str -> SwarmRun"
+    , "decodeRun raw = decode SwarmRun raw"
+    , ""
+    , "taskResultError : Str -> Result SwarmTask"
+    , "taskResultError message = Err message"
+    , ""
+    , "decodeTaskResult : Result Str -> Result SwarmTask"
+    , "decodeTaskResult value = match value {"
+    , "  Ok raw -> Ok (decode SwarmTask raw),"
+    , "  Err message -> taskResultError message"
+    , "}"
+    , ""
+    , "createObjective : Str -> Result Str"
+    , "createObjective root = swarmObjectiveCreateJson root \"loop\" \"detail\" 1 1"
+    , ""
+    , "runRepair : Str -> Result Str"
+    , "runRepair root = swarmToolRunJson root \"repair\" \"manager\" \".\" [\"bash\", \"-lc\", \"printf ok\"]"
+    , ""
+    , "repairHistory : Str -> Result Str"
+    , "repairHistory root = swarmHistoryJson root \"repair\""
+    , ""
+    , "repairTail : Str -> Result Str"
+    , "repairTail root = swarmTailJson root \"repair\" 4"
+    , ""
+    , "taskApprovals : Str -> Result Str"
+    , "taskApprovals root = swarmApprovalsJson root \"repair\""
+    , ""
+    , "allTasks : Str -> Result Str"
+    , "allTasks root = swarmTasksJson root"
+    , ""
+    , "allObjectives : Str -> Result Str"
+    , "allObjectives root = swarmObjectivesJson root"
+    , ""
+    , "main : Str"
+    , "main = \"ok\""
     ]
 
 textCharsNativeSource :: Text

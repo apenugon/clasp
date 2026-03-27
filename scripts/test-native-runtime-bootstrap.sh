@@ -2,7 +2,10 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-test_root="$(mktemp -d)"
+tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+mkdir -p "$tmp_root"
+export TMPDIR="$tmp_root"
+test_root="$(mktemp -d "$TMPDIR/test-native-runtime-bootstrap.XXXXXX")"
 bash_bin="$(command -v bash)"
 
 cleanup() {
@@ -53,5 +56,5 @@ CLASP_TEST_NATIVE_RUNTIME_NIX_LOG="$nix_log" \
 "$bash_bin" "$test_root/scripts/test-native-runtime.sh" >/dev/null
 
 grep -F "develop $test_root --command bash -lc" "$nix_log" >/dev/null
-grep -F 'if [[ "$nix_reentry" == "1" || -n "${IN_NIX_SHELL:-}" ]]; then' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'if [[ "$nix_reentry" == "1" ]]; then' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'return 0' "$test_root/scripts/test-native-runtime.sh" >/dev/null
