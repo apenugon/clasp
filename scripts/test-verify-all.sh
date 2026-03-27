@@ -6,6 +6,12 @@ test_root=""
 bash_bin="$(command -v bash)"
 tmp_root="${TMPDIR:-/tmp}"
 
+unset CLASP_VERIFY_IN_PROGRESS
+unset CLASP_VERIFY_ACTIVE_ROOT
+unset CLASP_VERIFY_LOCK_HELD
+unset CLASP_VERIFY_TOPLEVEL_REENTRY
+unset CLASP_VERIFY_USE_CURRENT_SHELL
+
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
 fi
