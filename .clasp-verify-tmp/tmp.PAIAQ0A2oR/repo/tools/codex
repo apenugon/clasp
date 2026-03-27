@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+cat > "${CLASP_TEST_PROMPT_CAPTURE:?}"
+
+if [[ -n "${CLASP_TEST_ENV_CAPTURE:-}" ]]; then
+  cat > "$CLASP_TEST_ENV_CAPTURE" <<ENV
+HOME=$HOME
+XDG_CACHE_HOME=${XDG_CACHE_HOME:-}
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}
+XDG_DATA_HOME=${XDG_DATA_HOME:-}
+XDG_STATE_HOME=${XDG_STATE_HOME:-}
+TMPDIR=${TMPDIR:-}
+CODEX_HOME=${CODEX_HOME:-}
+ENV
+fi
+
+case "${CLASP_TEST_CODEX_MODE:-builder}" in
+  builder)
+    cat > "$output_file" <<'JSON'
+{
+  "summary": "stub builder report",
+  "files_touched": [],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+    ;;
+  verifier)
+    cat > "$output_file" <<'JSON'
+{
+  "verdict": "pass",
+  "summary": "stub verifier report",
+  "findings": [],
+  "tests_run": [],
+  "follow_up": []
+}
+JSON
+    ;;
+  *)
+    echo "unknown CLASP_TEST_CODEX_MODE" >&2
+    exit 1
+    ;;
+esac

@@ -1,9 +1,0 @@
-{
-  "summary": "Previous verifier said $(printf verifier-summary) should stay literal.",
-  "findings": [
-    "Do not execute ${HOME} while rendering feedback."
-  ],
-  "follow_up": [
-    "Keep `touch /tmp/feedback` as plain text."
-  ]
-}
