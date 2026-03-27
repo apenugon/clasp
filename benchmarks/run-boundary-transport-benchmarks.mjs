@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const projectRoot = path.resolve(".");
@@ -32,6 +32,7 @@ const seed = Object.freeze({
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+let cachedClaspcBinary = null;
 
 async function main() {
   const options = parseOptions(process.argv.slice(2));
@@ -117,12 +118,42 @@ function parseOptions(args) {
 
 async function compileSchemaModel() {
   await runCommand([
-    "claspc",
+    resolveClaspcBinary(),
     "compile",
     schemaSourcePath,
     "-o",
     compiledSchemaPath
   ]);
+}
+
+function commandEnv() {
+  const tempDir = process.env.TMPDIR;
+  return {
+    ...process.env,
+    TMPDIR: tempDir ? tempDir : "/tmp"
+  };
+}
+
+function resolveClaspcBinary() {
+  if (process.env.CLASPC_BIN) {
+    return process.env.CLASPC_BIN;
+  }
+  if (cachedClaspcBinary) {
+    return cachedClaspcBinary;
+  }
+
+  const result = spawnSync("bash", [path.join(projectRoot, "scripts", "resolve-claspc.sh")], {
+    cwd: projectRoot,
+    env: commandEnv(),
+    encoding: "utf8"
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`failed to resolve claspc binary\n${result.stderr ?? ""}`);
+  }
+
+  cachedClaspcBinary = result.stdout.trim();
+  return cachedClaspcBinary;
 }
 
 async function benchmarkProjection(runSample, samples, warmupRuns) {
@@ -243,6 +274,7 @@ async function runCommand(command) {
   return new Promise((resolve, reject) => {
     const child = spawn(command[0], command.slice(1), {
       cwd: projectRoot,
+      env: commandEnv(),
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
