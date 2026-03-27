@@ -66,8 +66,19 @@ lock_capture="$test_root/lock-path.txt"
 stderr_capture="$test_root/stderr.txt"
 writable_nested_capture="$test_root/nested.txt"
 writable_cache_root="$test_root/writable-cache"
+expected_lock_path="$test_root/.clasp-verify.lock"
 mkdir -p "$writable_cache_root"
 fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"
+
+if git -C "$test_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git_common_dir="$(git -C "$test_root" rev-parse --path-format=absolute --git-common-dir)"
+  if [[ -w "$git_common_dir" ]]; then
+    expected_lock_path="$git_common_dir/clasp-verify.lock"
+  else
+    fingerprint="$(printf '%s\n' "$test_root" | cksum | awk '{print $1}')"
+    expected_lock_path="/tmp/clasp-verify-${fingerprint}.lock"
+  fi
+fi
 
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
@@ -78,7 +89,7 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$env_capture")" == "/tmp/clasp-nix-cache" ]]
-[[ "$(< "$lock_capture")" == "$test_root/.clasp-verify.lock" ]]
+[[ "$(< "$lock_capture")" == "$expected_lock_path" ]]
 
 rm -f "$fallback_capture" "$env_capture" "$lock_capture"
 PATH="$test_root/bin:$PATH" \
@@ -90,7 +101,7 @@ CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$env_capture")" == "$writable_cache_root" ]]
-[[ "$(< "$lock_capture")" == "$test_root/.clasp-verify.lock" ]]
+[[ "$(< "$lock_capture")" == "$expected_lock_path" ]]
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \

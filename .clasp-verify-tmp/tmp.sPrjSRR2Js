@@ -1,0 +1,37 @@
+{
+  "wave": "summary-test-2483237",
+  "summary": {
+    "totalRuns": 4,
+    "completedRuns": 3,
+    "incompleteRuns": 1,
+    "passCount": 1,
+    "timeoutCount": 1,
+    "passRate": 0.3333333333333333,
+    "timeoutRate": 0.3333333333333333,
+    "meanTimeSeconds": 700
+  },
+  "families": [
+    {
+      "taskFamily": "LG",
+      "totalRuns": 2,
+      "completedRuns": 1,
+      "incompleteRuns": 1,
+      "passCount": 0,
+      "timeoutCount": 0,
+      "passRate": 0,
+      "timeoutRate": 0,
+      "meanTimeSeconds": 300
+    },
+    {
+      "taskFamily": "SW",
+      "totalRuns": 2,
+      "completedRuns": 2,
+      "incompleteRuns": 0,
+      "passCount": 1,
+      "timeoutCount": 1,
+      "passRate": 0.5,
+      "timeoutRate": 0.5,
+      "meanTimeSeconds": 900
+    }
+  ]
+}

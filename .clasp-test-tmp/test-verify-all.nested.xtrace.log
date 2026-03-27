@@ -1,0 +1,87 @@
++2: set -euo pipefail
++++4: dirname scripts/test-verify-all.sh
+++4: cd scripts/..
+++4: pwd
++4: project_root=/home/akul_medexfinance_com/clasp
++5: test_root=
+++6: command -v bash
++6: bash_bin=/nix/store/nn27l879np49xvx6l1a8nqnqlp9apd8n-bash-interactive-5.2p37/bin/bash
++7: tmp_root=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq
++9: unset CLASP_VERIFY_IN_PROGRESS
++10: unset CLASP_VERIFY_ACTIVE_ROOT
++11: unset CLASP_VERIFY_LOCK_HELD
++12: unset CLASP_VERIFY_TOPLEVEL_REENTRY
++13: unset CLASP_VERIFY_USE_CURRENT_SHELL
++15: [[ ! -d /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq ]]
++15: [[ ! -w /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq ]]
++18: export TMPDIR=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq
++18: TMPDIR=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq
++24: trap cleanup EXIT
+++26: mktemp -d
++26: test_root=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe
++27: mkdir -p /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/bin /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src
++28: cp /home/akul_medexfinance_com/clasp/scripts/verify-all.sh /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
++29: cp /home/akul_medexfinance_com/clasp/scripts/verify-fast.sh /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++30: cp /home/akul_medexfinance_com/clasp/scripts/verify-selfhost.sh /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-selfhost.sh
++31: cp /home/akul_medexfinance_com/clasp/src/scripts/verify.sh /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++32: cp /home/akul_medexfinance_com/clasp/src/scripts/run-native-tool.sh /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/run-native-tool.sh
++34: grep -F 'bash scripts/test-selfhost.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++35: grep -F 'bash scripts/test-native-claspc.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++36: grep -F 'bash scripts/test-native-runtime.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++37: grep -F CLASP_VERIFY_PARALLEL_COMMANDS /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++38: grep -F CLASP_VERIFY_SEQUENTIAL_COMMANDS /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-fast.sh
++39: grep -F 'bash scripts/test-selfhost.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
++40: grep -F 'bash scripts/test-codex-loop.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
++41: grep -F 'bash scripts/test-native-claspc.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
++42: grep -F 'bash src/scripts/verify.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
++43: grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-selfhost.sh
++44: grep -F CLASP_VERIFY_PARALLEL_COMMANDS /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-selfhost.sh
++45: grep -F CLASP_VERIFY_SEQUENTIAL_COMMANDS /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-selfhost.sh
++46: grep -F 'verify_mode="${CLASP_NATIVE_VERIFY_MODE:-fast}"' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++47: grep -F 'if [[ "$verify_mode" == "full" ]]; then' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++48: grep -F '"promotedSnapshotExecutes":true' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++49: grep -F 'acquire_verify_lock()' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++50: grep -F nativeImageProjectText /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++51: grep -F 'fast_verify_source_path="${CLASP_NATIVE_VERIFY_SOURCE_INPUT:-$project_root/examples/feedback-loop/Main.clasp}"' /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/src/scripts/verify.sh
++53: cat
++61: chmod +x /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/bin/nix
++63: fallback_capture=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/fallback.txt
++64: env_capture=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/nix-env.txt
++65: lock_capture=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/lock-path.txt
++66: stderr_capture=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/stderr.txt
++67: writable_nested_capture=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/nested.txt
++68: writable_cache_root=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/writable-cache
++69: expected_lock_path=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/.clasp-verify.lock
++70: mkdir -p /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/writable-cache
++71: fallback_commands='printf fallback-ok > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/fallback.txt
+printf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/lock-path.txt'
++73: git -C /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe rev-parse --is-inside-work-tree
+++74: git -C /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe rev-parse --path-format=absolute --git-common-dir
++74: git_common_dir=/home/akul_medexfinance_com/clasp/.git
++75: [[ -w /home/akul_medexfinance_com/clasp/.git ]]
++76: expected_lock_path=/home/akul_medexfinance_com/clasp/.git/clasp-verify.lock
++83: PATH=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/bin:/home/akul_medexfinance_com/.codex/tmp/arg0/codex-arg0jHNxd1:/home/akul_medexfinance_com/.local/share/pnpm/global/5/.pnpm/@openai+codex@0.115.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/path:/nix/store/nn27l879np49xvx6l1a8nqnqlp9apd8n-bash-interactive-5.2p37/bin:/nix/store/5wf9wpdkxs30811kfgkicn9i3nz9jhsh-patchelf-0.15.0/bin:/nix/store/kks0nbx2riwry5qsx0qr87qr0lswmhzi-gcc-wrapper-14.3.0/bin:/nix/store/y28c83zz73yr4vwz1fsl4nsrn6yz5fj0-gcc-14.3.0/bin:/nix/store/fm1snxs1cg8ml9fjj6kra32sc8413k8z-glibc-2.40-66-bin/bin:/nix/store/zwplch93wbpj82bp7riwaixmdx2xi0ah-coreutils-9.7/bin:/nix/store/iga4lv0say4pbbbgkf1v79403n1ip7hf-binutils-wrapper-2.44/bin:/nix/store/42pzy4ahwk8p41hwfmz2nldgvsdws8q1-binutils-2.44/bin:/nix/store/i7qmfwp9jwqkm0f0hdzvm7w9jp5pjj7p-tmux-3.5a/bin:/nix/store/v2w0wxqcjqf74i6gys0l6dmhqg0ykmmc-pnpm-10.15.1/bin:/nix/store/5h3di3m60im6v37gl4g4m6w4d94mr84q-nodejs-22.20.0-dev/bin:/nix/store/xv1lykwi8n984ips4rpjv1imfwqpak31-nodejs-22.20.0/bin:/nix/store/zwplch93wbpj82bp7riwaixmdx2xi0ah-coreutils-9.7/bin:/nix/store/c9jzm47zb8j7jbpw4a7zdm35qmhdf6ws-findutils-4.10.0/bin:/nix/store/z059fc40f58cp2yflhbpfdg539x66b0g-diffutils-3.12/bin:/nix/store/m0i5hf36sv62vgm2ppjkynv03ihdlxvv-gnused-4.9/bin:/nix/store/90r466lzg0jw11v60cki60s0qfhs93vp-gnugrep-3.11/bin:/nix/store/qvgw9scl3jjy1zsjipm3ngpcq472wj7w-gawk-5.3.2/bin:/nix/store/76df6j9sq1ar58id3y3v4rkijany1wxp-gnutar-1.35/bin:/nix/store/44c243x0jpv587hmxrzl31pripa0f0j8-gzip-1.14/bin:/nix/store/59pgpbm743q1nhav513283zinqrf4rqk-bzip2-1.0.8-bin/bin:/nix/store/xpsgmdsqym0ydx6hkvpxrp6174s4fwbl-gnumake-4.4.1/bin:/nix/store/l9k32vj2aczxw62134j1x0dsh569jz2l-bash-5.2p37/bin:/nix/store/jangxddrzycnc2rl1wc1sqhqp26yrx4k-patch-2.7.6/bin:/nix/store/b7g83isqdl778kmcpv6v68z76x4x5riv-xz-5.8.1-bin/bin:/nix/store/4zpfjm2r6chc8b10c1xa1d6asy100sqv-file-5.45/bin:/home/akul_medexfinance_com/.local/share/pnpm:/run/wrappers/bin:/home/akul_medexfinance_com/.nix-profile/bin:/nix/profile/bin:/home/akul_medexfinance_com/.local/state/nix/profile/bin:/etc/profiles/per-user/akul_medexfinance_com/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin
++83: IN_NIX_SHELL=
++83: XDG_CACHE_HOME=
++83: CLASP_TEST_NIX_ENV_CAPTURE=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/nix-env.txt
++83: CLASP_VERIFY_FALLBACK_COMMANDS='printf fallback-ok > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/fallback.txt
+printf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/lock-path.txt'
++83: /nix/store/nn27l879np49xvx6l1a8nqnqlp9apd8n-bash-interactive-5.2p37/bin/bash /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
+verify-all: falling back to sandbox verification because Nix is unavailable in this environment
++90: [[ fallback-ok == \f\a\l\l\b\a\c\k\-\o\k ]]
++91: [[ /tmp/clasp-nix-cache == \/\t\m\p\/\c\l\a\s\p\-\n\i\x\-\c\a\c\h\e ]]
++92: [[ /home/akul_medexfinance_com/clasp/.git/clasp-verify.lock == \/\h\o\m\e\/\a\k\u\l\_\m\e\d\e\x\f\i\n\a\n\c\e\_\c\o\m\/\c\l\a\s\p\/\.\g\i\t\/\c\l\a\s\p\-\v\e\r\i\f\y\.\l\o\c\k ]]
++94: rm -f /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/fallback.txt /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/nix-env.txt /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/lock-path.txt
++95: PATH=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/bin:/home/akul_medexfinance_com/.codex/tmp/arg0/codex-arg0jHNxd1:/home/akul_medexfinance_com/.local/share/pnpm/global/5/.pnpm/@openai+codex@0.115.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/path:/nix/store/nn27l879np49xvx6l1a8nqnqlp9apd8n-bash-interactive-5.2p37/bin:/nix/store/5wf9wpdkxs30811kfgkicn9i3nz9jhsh-patchelf-0.15.0/bin:/nix/store/kks0nbx2riwry5qsx0qr87qr0lswmhzi-gcc-wrapper-14.3.0/bin:/nix/store/y28c83zz73yr4vwz1fsl4nsrn6yz5fj0-gcc-14.3.0/bin:/nix/store/fm1snxs1cg8ml9fjj6kra32sc8413k8z-glibc-2.40-66-bin/bin:/nix/store/zwplch93wbpj82bp7riwaixmdx2xi0ah-coreutils-9.7/bin:/nix/store/iga4lv0say4pbbbgkf1v79403n1ip7hf-binutils-wrapper-2.44/bin:/nix/store/42pzy4ahwk8p41hwfmz2nldgvsdws8q1-binutils-2.44/bin:/nix/store/i7qmfwp9jwqkm0f0hdzvm7w9jp5pjj7p-tmux-3.5a/bin:/nix/store/v2w0wxqcjqf74i6gys0l6dmhqg0ykmmc-pnpm-10.15.1/bin:/nix/store/5h3di3m60im6v37gl4g4m6w4d94mr84q-nodejs-22.20.0-dev/bin:/nix/store/xv1lykwi8n984ips4rpjv1imfwqpak31-nodejs-22.20.0/bin:/nix/store/zwplch93wbpj82bp7riwaixmdx2xi0ah-coreutils-9.7/bin:/nix/store/c9jzm47zb8j7jbpw4a7zdm35qmhdf6ws-findutils-4.10.0/bin:/nix/store/z059fc40f58cp2yflhbpfdg539x66b0g-diffutils-3.12/bin:/nix/store/m0i5hf36sv62vgm2ppjkynv03ihdlxvv-gnused-4.9/bin:/nix/store/90r466lzg0jw11v60cki60s0qfhs93vp-gnugrep-3.11/bin:/nix/store/qvgw9scl3jjy1zsjipm3ngpcq472wj7w-gawk-5.3.2/bin:/nix/store/76df6j9sq1ar58id3y3v4rkijany1wxp-gnutar-1.35/bin:/nix/store/44c243x0jpv587hmxrzl31pripa0f0j8-gzip-1.14/bin:/nix/store/59pgpbm743q1nhav513283zinqrf4rqk-bzip2-1.0.8-bin/bin:/nix/store/xpsgmdsqym0ydx6hkvpxrp6174s4fwbl-gnumake-4.4.1/bin:/nix/store/l9k32vj2aczxw62134j1x0dsh569jz2l-bash-5.2p37/bin:/nix/store/jangxddrzycnc2rl1wc1sqhqp26yrx4k-patch-2.7.6/bin:/nix/store/b7g83isqdl778kmcpv6v68z76x4x5riv-xz-5.8.1-bin/bin:/nix/store/4zpfjm2r6chc8b10c1xa1d6asy100sqv-file-5.45/bin:/home/akul_medexfinance_com/.local/share/pnpm:/run/wrappers/bin:/home/akul_medexfinance_com/.nix-profile/bin:/nix/profile/bin:/home/akul_medexfinance_com/.local/state/nix/profile/bin:/etc/profiles/per-user/akul_medexfinance_com/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin
++95: IN_NIX_SHELL=
++95: XDG_CACHE_HOME=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/writable-cache
++95: CLASP_TEST_NIX_ENV_CAPTURE=/home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/nix-env.txt
++95: CLASP_VERIFY_FALLBACK_COMMANDS='printf fallback-ok > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/fallback.txt
+printf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/lock-path.txt'
++95: /nix/store/nn27l879np49xvx6l1a8nqnqlp9apd8n-bash-interactive-5.2p37/bin/bash /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/scripts/verify-all.sh
+verify-all: falling back to sandbox verification because Nix is unavailable in this environment
++102: [[ fallback-ok == \f\a\l\l\b\a\c\k\-\o\k ]]
++103: [[ /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe/writable-cache == \/\h\o\m\e\/\a\k\u\l\_\m\e\d\e\x\f\i\n\a\n\c\e\_\c\o\m\/\c\l\a\s\p\/\.\c\l\a\s\p\-\v\e\r\i\f\y\-\t\m\p\-\s\e\q\/\t\m\p\.\I\I\Z\9\b\w\o\c\x\e\/\w\r\i\t\a\b\l\e\-\c\a\c\h\e ]]
++104: [[ /home/akul_medexfinance_com/clasp/.git/clasp-verify.lock == \/\h\o\m\e\/\a\k\u\l\_\m\e\d\e\x\f\i\n\a\n\c\e\_\c\o\m\/\c\l\a\s\p\/\.\c\l\a\s\p\-\v\e\r\i\f\y\-\t\m\p\-\s\e\q\/\t\m\p\.\I\I\Z\9\b\w\o\c\x\e\/\.\c\l\a\s\p\-\v\e\r\i\f\y\.\l\o\c\k ]]
++1: cleanup
++21: rm -rf /home/akul_medexfinance_com/clasp/.clasp-verify-tmp-seq/tmp.IIZ9bwocxe
