@@ -9,17 +9,17 @@ verify_label="${CLASP_VERIFY_LABEL:-verify-all}"
 verify_lock_file="${CLASP_VERIFY_LOCK_FILE:-}"
 verify_lock_owner=0
 full_parallel_verify_commands=$'
-bash scripts/test-swarm-control.sh
 bash scripts/test-codex-loop.sh
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
-bash examples/lead-app-ts/scripts/verify.sh
 node benchmarks/run-benchmark.mjs list >/dev/null
 '
 full_sequential_verify_commands=$'
+bash scripts/test-swarm-control.sh
 bash scripts/test-verify-all.sh
+bash examples/lead-app-ts/scripts/verify.sh
 bash benchmarks/test-task-prep.sh
 bash benchmarks/test-persistence-benchmarks.sh
 bash benchmarks/test-correctness-benchmarks.sh

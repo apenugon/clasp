@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clasp Verifier Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "summary",
+    "findings",
+    "tests_run",
+    "follow_up",
+    "capability_statuses"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"]
+    },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tests_run": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "follow_up": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "capability_statuses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status",
+          "evidence",
+          "blocking_gaps",
+          "required_closure"
+        ],
+        "properties": {
+          "name": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "required_closure": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

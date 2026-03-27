@@ -1,0 +1,6 @@
+module Shared.User
+
+record User = { name : Str }
+
+defaultUser : User
+defaultUser = User { name = "planner" }
