@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const projectRoot = path.resolve(".");
 const benchmarkRoot = path.join(projectRoot, "benchmarks");
@@ -31,6 +32,60 @@ const runtimeWorkloads = [
     input: "benchmarks/backend/runtime-payload.json"
   }
 ];
+
+let cachedClaspcBinary = null;
+
+function commandEnv() {
+  const tempDir = process.env.TMPDIR;
+  return {
+    ...process.env,
+    TMPDIR: tempDir && existsSync(tempDir) ? tempDir : "/tmp"
+  };
+}
+
+function commandExists(command) {
+  const result = spawnSync("bash", ["-lc", `command -v ${command} >/dev/null 2>&1`], {
+    cwd: projectRoot,
+    env: commandEnv(),
+    stdio: "ignore"
+  });
+  return result.status === 0;
+}
+
+function resolveClaspcBinary() {
+  if (process.env.CLASPC_BIN) {
+    return process.env.CLASPC_BIN;
+  }
+  if (cachedClaspcBinary) {
+    return cachedClaspcBinary;
+  }
+
+  const result = spawnSync("bash", [path.join(projectRoot, "scripts", "resolve-claspc.sh")], {
+    cwd: projectRoot,
+    env: commandEnv(),
+    encoding: "utf8"
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`failed to resolve claspc binary\n${result.stderr ?? ""}`);
+  }
+
+  cachedClaspcBinary = result.stdout.trim();
+  return cachedClaspcBinary;
+}
+
+function cargoCommand(args) {
+  if (process.env.CARGO) {
+    return [process.env.CARGO, ...args];
+  }
+  if (commandExists("cargo")) {
+    return ["cargo", ...args];
+  }
+  if (commandExists("nix")) {
+    return ["nix", "develop", projectRoot, "--command", "cargo", ...args];
+  }
+  return ["cargo", ...args];
+}
 
 async function main() {
   const options = parseOptions(process.argv.slice(2));
@@ -165,34 +220,27 @@ async function captureVersion(command) {
 
 async function buildNativeRuntimeHarness() {
   const outputPath = path.join(distRoot, "runtime-bench");
-  const rustRuntimeSource = path.join(projectRoot, "runtime", "clasp_runtime.rs");
-  const rustRuntimeLibrary = path.join(distRoot, "libclasp_runtime.a");
+  const cargoManifestPath = path.join(projectRoot, "runtime", "Cargo.toml");
+  const rustRuntimeLibrary = path.join(projectRoot, "runtime", "target", "debug", "libclasp_runtime.a");
 
-  await runCommand([
-    "rustc",
-    "--edition=2021",
-    "--crate-type",
-    "staticlib",
-    "-C",
-    "panic=abort",
-    rustRuntimeSource,
-    "-o",
-    rustRuntimeLibrary
-  ]);
+  await runCommand(cargoCommand([
+    "build",
+    "--quiet",
+    "--manifest-path",
+    cargoManifestPath,
+    "--lib"
+  ]));
 
-  const nativeStaticLibs = await runCommand([
+  const nativeStaticLibs = await runCommand(cargoCommand([
     "rustc",
-    "--edition=2021",
-    "--crate-type",
-    "staticlib",
-    "-C",
-    "panic=abort",
+    "--quiet",
+    "--manifest-path",
+    cargoManifestPath,
+    "--lib",
+    "--",
     "--print",
-    "native-static-libs",
-    rustRuntimeSource,
-    "-o",
-    rustRuntimeLibrary
-  ]);
+    "native-static-libs"
+  ]));
 
   const rustLinkArgs = (nativeStaticLibs.stderr
     .split("\n")
@@ -219,15 +267,16 @@ async function runCompileBenchmark(workload, samples, warmupRuns) {
   const inputPath = path.join(projectRoot, workload.input);
   const jsOutput = path.join(distRoot, `${workload.id}.js`);
   const nativeOutput = path.join(distRoot, `${workload.id}.native.ir`);
+  const claspcBin = resolveClaspcBinary();
   const jsCommand = [
-    "claspc",
+    claspcBin,
     "compile",
     inputPath,
     "-o",
     jsOutput
   ];
   const nativeCommand = [
-    "claspc",
+    claspcBin,
     "native",
     inputPath,
     "-o",
@@ -362,6 +411,7 @@ async function runCommand(command) {
   return new Promise((resolve, reject) => {
     const child = spawn(command[0], command.slice(1), {
       cwd: projectRoot,
+      env: commandEnv(),
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
