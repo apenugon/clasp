@@ -1,0 +1,4 @@
+module Helper
+
+helper : Str -> Str
+helper value = value

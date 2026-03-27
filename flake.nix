@@ -97,8 +97,21 @@
             nodejs_22
             python3
             rustc
-          ] ++ [
-            self.packages.${system}.claspc
+            (writeShellScriptBin "claspc" ''
+              set -euo pipefail
+
+              project_root="''${CLASP_PROJECT_ROOT:-}"
+              if [[ -z "$project_root" ]]; then
+                if git rev-parse --show-toplevel >/dev/null 2>&1; then
+                  project_root="$(git rev-parse --show-toplevel)"
+                else
+                  project_root="$PWD"
+                fi
+              fi
+
+              resolved_bin="$("$project_root/scripts/resolve-claspc.sh")"
+              exec "$resolved_bin" "$@"
+            '')
           ];
         };
       });

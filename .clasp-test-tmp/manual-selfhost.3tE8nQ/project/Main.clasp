@@ -1,0 +1,6 @@
+module Main
+
+import Helper
+
+main : Str
+main = helper "hello"

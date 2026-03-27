@@ -24,7 +24,7 @@ run_export() {
   local export_path="$3"
   local log_path="$4"
 
-  bash "$project_root/src/scripts/run-native-tool.sh" \
+  CLASPC_BIN="$claspc_bin" bash "$project_root/src/scripts/run-native-tool.sh" \
     "$project_root/src/embedded.compiler.native.image.json" \
     "$export_name" \
     "--project-entry=$sample_entry_path" \

@@ -10,7 +10,6 @@ cc_bin="${CC:-cc}"
 cargo_bin="${CARGO:-cargo}"
 rustc_bin="${RUSTC:-rustc}"
 rust_runtime_lib="$project_root/runtime/target/debug/libclasp_runtime.a"
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 node_bin="${NODE:-node}"
 nix_reentry="${CLASP_NATIVE_RUNTIME_NIX_REENTRY:-0}"
 
@@ -44,6 +43,9 @@ maybe_enter_nix_shell() {
 }
 
 maybe_enter_nix_shell
+
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+export CLASPC_BIN="$claspc_bin"
 
 ir_path="$test_root/durable-workflow.native.ir"
 image_path="${ir_path%.*}.image.json"
