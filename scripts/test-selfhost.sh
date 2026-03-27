@@ -2,7 +2,10 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-test_root="$(mktemp -d)"
+tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+mkdir -p "$tmp_root"
+export TMPDIR="$tmp_root"
+test_root="$(mktemp -d "$TMPDIR/test-selfhost.XXXXXX")"
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 check_output="$test_root/selfhost.check.txt"
 image_output="$test_root/selfhost.native.image.json"

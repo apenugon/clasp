@@ -67,24 +67,16 @@ stderr_capture="$test_root/stderr.txt"
 writable_nested_capture="$test_root/nested.txt"
 writable_cache_root="$test_root/writable-cache"
 expected_lock_path="$test_root/.clasp-verify.lock"
+explicit_lock_file="$expected_lock_path"
 mkdir -p "$writable_cache_root"
 fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"
-
-if git -C "$test_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git_common_dir="$(git -C "$test_root" rev-parse --path-format=absolute --git-common-dir)"
-  if [[ -w "$git_common_dir" ]]; then
-    expected_lock_path="$git_common_dir/clasp-verify.lock"
-  else
-    fingerprint="$(printf '%s\n' "$test_root" | cksum | awk '{print $1}')"
-    expected_lock_path="/tmp/clasp-verify-${fingerprint}.lock"
-  fi
-fi
 
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
@@ -97,6 +89,7 @@ IN_NIX_SHELL= \
 XDG_CACHE_HOME="$writable_cache_root" \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
@@ -109,6 +102,7 @@ IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
@@ -120,6 +114,7 @@ IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-selfhost.sh" >/dev/null 2>"$stderr_capture"
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
@@ -135,6 +130,7 @@ CLASP_VERIFY_USE_CURRENT_SHELL=1 \
 CLASP_VERIFY_PARALLEL_JOBS=2 \
 CLASP_VERIFY_PARALLEL_COMMANDS="$parallel_commands" \
 CLASP_VERIFY_SEQUENTIAL_COMMANDS="$sequential_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$parallel_capture_one")" == "parallel-one" ]]
@@ -176,6 +172,7 @@ IN_NIX_SHELL= \
 CLASP_VERIFY_IN_PROGRESS=1 \
 CLASP_VERIFY_ACTIVE_ROOT="$test_root" \
 CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$writable_nested_capture")" == "nested-ok" ]]
@@ -187,6 +184,7 @@ if PATH="$test_root/bin:$PATH" \
   CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
   CLASP_TEST_NIX_MESSAGE='error: unexpected nix failure' \
   CLASP_VERIFY_FALLBACK_COMMANDS=$'printf should-not-run > fallback.txt' \
+  CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
   "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$test_root/unexpected.log"; then
   printf 'verify-all unexpectedly succeeded on an unknown nix failure\n' >&2
   exit 1

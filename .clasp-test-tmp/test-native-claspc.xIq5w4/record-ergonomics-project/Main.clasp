@@ -1,9 +1,0 @@
-module Main
-
-record User = { name : Str, role : Str }
-
-promote : User -> User
-promote user = with user { name = "Grace" }
-
-main : Str
-main = let { name, role } = promote (User { name = "Ada", role = "planner" }) in textJoin ":" [name, role]

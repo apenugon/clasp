@@ -24,10 +24,43 @@
     {
       packages = forAllSystems ({ pkgs, system }:
         let
+          filteredSource =
+            pkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter =
+                path: type:
+                let
+                  pathStr = toString path;
+                  rootStr = toString ./.;
+                  rel =
+                    if pathStr == rootStr then
+                      "."
+                    else
+                      pkgs.lib.removePrefix "${rootStr}/" pathStr;
+                  top =
+                    if rel == "." then
+                      "."
+                    else
+                      builtins.head (pkgs.lib.splitString "/" rel);
+                  generatedTopLevel =
+                    pkgs.lib.hasPrefix ".clasp-" top
+                    || top == "target"
+                    || top == "dist"
+                    || top == "result";
+                  generatedRuntimePath =
+                    rel == "runtime/target"
+                    || pkgs.lib.hasPrefix "runtime/target/" rel;
+                  generatedRootArtifact = rel == "libclasp_runtime.a";
+                in
+                pkgs.lib.cleanSourceFilter path type
+                && !generatedTopLevel
+                && !generatedRuntimePath
+                && !generatedRootArtifact;
+            };
           claspc = pkgs.rustPlatform.buildRustPackage {
             pname = "claspc";
             version = "0.1.0";
-            src = ./.;
+            src = filteredSource;
             cargoRoot = "runtime";
             buildAndTestSubdir = "runtime";
             cargoLock = {
