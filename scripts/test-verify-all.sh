@@ -4,6 +4,12 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_root=""
 bash_bin="$(command -v bash)"
+tmp_root="${TMPDIR:-/tmp}"
+
+if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+  tmp_root="/tmp"
+fi
+export TMPDIR="$tmp_root"
 
 cleanup() {
   rm -rf "${test_root:-}"

@@ -225,3 +225,4 @@ Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1uei
 Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/support-console-app with clasp-native
 Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/release-gate-app with clasp-native
 Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.i1ueiY/lead-app with clasp-native
+verify-all: falling back to sandbox verification because Nix is unavailable in this environment
