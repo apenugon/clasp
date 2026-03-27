@@ -1,0 +1,9 @@
+module Main
+import Shared.User
+import Shared.Render
+
+main : Str
+main = match writeFile "/home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.KT6V2w/imported-output.txt" (renderUser primaryUser) {
+  Ok written -> renderUser primaryUser,
+  Err message -> message
+}

@@ -1,0 +1,3 @@
+[claspc-cache] bundle hit entry=/home/akul_medexfinance_com/clasp/examples/hello.clasp manifest=/tmp/clasp-nix-cache/claspc-native/bundle-cache-v1/71b06b5558144dbb.manifest bundle=/tmp/clasp-nix-cache/claspc-native/bundle-cache-v1/71b06b5558144dbb.bundle
+[claspc-cache] native-image hit path=/tmp/clasp-nix-cache/claspc-native/native-image-cache-v1/8c155491259f89ca.json
+Wrote /home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.KT6V2w/shared-cache-first.native.image.json with clasp-native

@@ -1,0 +1,6 @@
+HTTP/1.1 303 See Other
+Connection: close
+Content-Length: 44
+Content-Type: application/json
+Location: /lead/inbox
+
