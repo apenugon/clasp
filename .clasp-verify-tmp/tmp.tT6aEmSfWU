@@ -1,0 +1,4 @@
+wave: summary-test-3455077
+summary: runs=4 completed=3 incomplete=1 pass-rate=33.3% timeout-rate=33.3% mean-time=700.0s
+family: LG runs=2 completed=1 incomplete=1 pass-rate=0.0% timeout-rate=0.0% mean-time=300.0s
+family: SW runs=2 completed=2 incomplete=0 pass-rate=50.0% timeout-rate=50.0% mean-time=900.0s

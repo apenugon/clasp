@@ -9,6 +9,7 @@ check_root=""
 context_path=""
 air_path=""
 image_path=""
+claspc_bin=""
 
 resolve_entry_path() {
   if [[ -n "$requested_entry" ]]; then
@@ -41,11 +42,12 @@ check_root="$(mktemp -d)"
 context_path="$check_root/context.json"
 air_path="$check_root/air.json"
 image_path="$check_root/native-image.json"
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 
 run_verify() {
   cd "$project_root"
-  claspc check "$entry_path" >/dev/null
-  claspc native-image "$entry_path" -o "$image_path" >/dev/null
+  "$claspc_bin" check "$entry_path" >/dev/null
+  "$claspc_bin" native-image "$entry_path" -o "$image_path" >/dev/null
   cp "$image_path" "$context_path"
   cp "$image_path" "$air_path"
 }

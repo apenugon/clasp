@@ -184,9 +184,9 @@ check_fixture_seed_override() {
   "repo": "repo",
   "prompt": "prompt.md",
   "prepare": [
-    ["python3", "-c", "from pathlib import Path; import os; Path('prepare-seed.txt').write_text(os.environ['CLASP_APP_FIXTURE_SEED'] + '\\n', encoding='utf8')"]
+    ["node", "-e", "const fs = require('node:fs'); fs.writeFileSync('prepare-seed.txt', `${process.env.CLASP_APP_FIXTURE_SEED}\\n`, 'utf8');"]
   ],
-  "verify": ["python3", "-c", "from pathlib import Path; import os, sys; Path('verify-seed.txt').write_text(os.environ['CLASP_APP_FIXTURE_SEED'] + '\\n', encoding='utf8'); sys.exit(0 if os.environ['CLASP_APP_FIXTURE_SEED'] == Path('expected-seed.txt').read_text(encoding='utf8').strip() else 1)"]
+  "verify": ["node", "-e", "const fs = require('node:fs'); fs.writeFileSync('verify-seed.txt', `${process.env.CLASP_APP_FIXTURE_SEED}\\n`, 'utf8'); const expected = fs.readFileSync('expected-seed.txt', 'utf8').trim(); process.exit(process.env.CLASP_APP_FIXTURE_SEED === expected ? 0 : 1);"]
 }
 JSON
 

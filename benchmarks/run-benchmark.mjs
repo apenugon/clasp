@@ -603,10 +603,11 @@ async function runClaspCompilerCommandCapture(command, inputPath, outputPath, en
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `claspc --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
+    `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
+    `"${"$"}claspc_bin" --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
   ].join(" && ");
   return runProcessCapture(
-    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
+    ["bash", "-lc", script],
     env.CLASP_PROJECT_ROOT,
     env
   );
@@ -652,10 +653,11 @@ async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    `claspc ${command} ${shellQuote(inputPath)}`
+    `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
+    `"${"$"}claspc_bin" ${command} ${shellQuote(inputPath)}`
   ].join(" && ");
   return runProcessCapture(
-    ["nix", "develop", env.CLASP_PROJECT_ROOT, "--command", "bash", "-lc", script],
+    ["bash", "-lc", script],
     env.CLASP_PROJECT_ROOT,
     env
   );
