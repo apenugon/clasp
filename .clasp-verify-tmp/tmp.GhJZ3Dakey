@@ -1,0 +1,6 @@
+# Swarm Summary: summary-test-2830744
+| scope | runs | completed | incomplete | pass rate | timeout rate | mean time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| overall | 4 | 3 | 1 | 33.3% | 33.3% | 700.0s |
+| LG | 2 | 1 | 1 | 0.0% | 0.0% | 300.0s |
+| SW | 2 | 2 | 0 | 50.0% | 50.0% | 900.0s |

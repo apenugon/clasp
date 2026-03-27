@@ -2257,7 +2257,7 @@ bash -lc "
   first_run=\$(find \"\$runs_root\" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)
   second_run=\$(find \"\$runs_root\" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
   [[ -f \"\$first_run/verifier-report.json\" ]]
-  grep -F '"verdict": "fail"' \"\$first_run/verifier-report.json\" >/dev/null
+  grep -F '\"verdict\": \"fail\"' \"\$first_run/verifier-report.json\" >/dev/null
   [[ -f \"\$second_run/builder-report.json\" ]]
   [[ -f \"\$second_run/verifier-report.json\" ]]
   [[ -f .clasp-swarm/completed/SW-007 ]]
