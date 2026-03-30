@@ -6,6 +6,8 @@ tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-native-claspc.XXXXXX")"
+export XDG_CACHE_HOME="$test_root/xdg-cache"
+mkdir -p "$XDG_CACHE_HOME"
 server_pid=""
 feedback_loop_live_pid=""
 
@@ -606,6 +608,33 @@ feedback_loop_live_pid=""
 grep -F '"completed":true' "$feedback_loop_live_builder_heartbeat" >/dev/null
 grep -F '"exitCode":0' "$feedback_loop_live_builder_heartbeat" >/dev/null
 grep -F 'pass:2' "$feedback_loop_live_output" >/dev/null
+
+"$claspc_bin" --json check "$project_root/examples/feedback-loop/ProcessDemo.clasp" | grep -F '"status":"ok"' >/dev/null
+feedback_loop_process_demo_state_root="$test_root/feedback-loop-process-demo-state"
+feedback_loop_process_demo_launch_output="$(
+  "$claspc_bin" run "$project_root/examples/feedback-loop/ProcessDemo.clasp" -- "$feedback_loop_process_demo_state_root"
+)"
+printf '%s\n' "$feedback_loop_process_demo_launch_output" | grep -F '"heartbeatPath":"'"$feedback_loop_process_demo_state_root"'/demo.heartbeat.json"' >/dev/null
+printf '%s\n' "$feedback_loop_process_demo_launch_output" | grep -F '"stdoutPath":"'"$feedback_loop_process_demo_state_root"'/demo.stdout.log"' >/dev/null
+for _ in $(seq 1 100); do
+  feedback_loop_process_demo_status_output="$(
+    CLASP_PROCESS_DEMO_COMMAND=status \
+    "$claspc_bin" run "$project_root/examples/feedback-loop/ProcessDemo.clasp" -- "$feedback_loop_process_demo_state_root"
+  )"
+  if printf '%s\n' "$feedback_loop_process_demo_status_output" | grep -F '"running":true' >/dev/null; then
+    break
+  fi
+  sleep 0.02
+done
+printf '%s\n' "$feedback_loop_process_demo_status_output" | grep -F '"heartbeatPath":"'"$feedback_loop_process_demo_state_root"'/demo.heartbeat.json"' >/dev/null
+feedback_loop_process_demo_await_output="$(
+  CLASP_PROCESS_DEMO_COMMAND=await \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/ProcessDemo.clasp" -- "$feedback_loop_process_demo_state_root"
+)"
+printf '%s\n' "$feedback_loop_process_demo_await_output" | grep -F '"completed":true' >/dev/null
+printf '%s\n' "$feedback_loop_process_demo_await_output" | grep -F '"running":false' >/dev/null
+grep -Fx 'process-demo-start' "$feedback_loop_process_demo_state_root/demo.stdout.log" >/dev/null
+grep -Fx 'process-demo-err' "$feedback_loop_process_demo_state_root/demo.stderr.log" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-kernel/Main.clasp" -o "$swarm_kernel_binary"
 [[ -x "$swarm_kernel_binary" ]]

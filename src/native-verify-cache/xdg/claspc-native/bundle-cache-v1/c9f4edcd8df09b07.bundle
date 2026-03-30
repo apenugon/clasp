@@ -1,16 +1,7 @@
 module Main
 
-record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
-record WatchedProcess = {
-  pid : Int,
-  running : Bool,
-  completed : Bool,
-  exitCode : Int,
-  stdoutPath : Str,
-  stderrPath : Str,
-  heartbeatPath : Str,
-  updatedAtMs : Int
-}
+import Process
+
 record CapabilityStatus = {
   name : Str,
   status : Str,
@@ -238,31 +229,15 @@ processResultFromStep step exitCode =
     stderr = readTextOrEmpty step.stderrPath
   }
 
-readWatchedProcess : Str -> Result WatchedProcess
-readWatchedProcess heartbeatPath = match readFile heartbeatPath {
-  Ok raw ->
-    watchedProcessOk (decode WatchedProcess raw),
-  Err message ->
-    watchedProcessError message
-}
-
 spawnStep : StepHandle -> [Str] -> Result WatchedProcess
 spawnStep step command =
-  match spawnCommandJson workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command {
-    Ok raw ->
-      watchedProcessOk (decode WatchedProcess raw),
-    Err message ->
-      watchedProcessError message
-  }
+  spawn (watchedCommandSpec workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
+
+reconcileStep : StepHandle -> Result WatchedProcess
+reconcileStep step = reconcile step.heartbeatPath
 
 awaitStep : StepHandle -> Result WatchedProcess
-awaitStep step =
-  match awaitWatchedProcessJson step.heartbeatPath watchPollMs {
-    Ok raw ->
-      watchedProcessOk (decode WatchedProcess raw),
-    Err message ->
-      watchedProcessError message
-  }
+awaitStep step = await step.heartbeatPath watchPollMs
 
 resumeStep : StepHandle -> ProcessResult
 resumeStep step = match awaitStep step {
@@ -290,6 +265,7 @@ ensureStepReport step command launchingState runningState =
   if fileExists step.reportPath then
     successProcessResult step
   else if fileExists step.heartbeatPath then {
+    let reconciled = reconcileStep step in
     let resumed = resumeStep step in
     if fileExists step.reportPath then
       successProcessResult step
@@ -820,3 +796,102 @@ main =
     encode readLoopState
   else
     resumeLoop readLoopState
+
+-- CLASP_PROJECT_MODULE --
+module Process
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
+
+record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+record CommandSpec = { cwd : Str, command : [Str] }
+
+record WatchedCommandSpec = {
+  cwd : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  watchPollMs : Int,
+  command : [Str]
+}
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+commandSpec : Str -> [Str] -> CommandSpec
+commandSpec cwd command = CommandSpec { cwd = cwd, command = command }
+
+watchedCommandSpec : Str -> Str -> Str -> Str -> Int -> [Str] -> WatchedCommandSpec
+watchedCommandSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs command =
+  WatchedCommandSpec {
+    cwd = cwd,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    watchPollMs = watchPollMs,
+    command = command
+  }
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+watchedProcessResult : Result Str -> Result WatchedProcess
+watchedProcessResult value = match value {
+  Ok raw -> Ok (decode WatchedProcess raw),
+  Err message -> watchedProcessError message
+}
+
+run : CommandSpec -> Result ProcessResult
+run spec = processResult (runCommandRaw spec.cwd spec.command)
+
+spawn : WatchedCommandSpec -> Result WatchedProcess
+spawn spec =
+  watchedProcessResult (
+    spawnCommandRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command
+  )
+
+watch : WatchedCommandSpec -> Result WatchedProcess
+watch spec =
+  watchedProcessResult (
+    watchCommandRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command
+  )
+
+reconcile : Str -> Result WatchedProcess
+reconcile heartbeatPath = watchedProcessResult (reconcileWatchedProcessRaw heartbeatPath)
+
+await : Str -> Int -> Result WatchedProcess
+await heartbeatPath watchPollMs =
+  watchedProcessResult (awaitWatchedProcessRaw heartbeatPath watchPollMs)

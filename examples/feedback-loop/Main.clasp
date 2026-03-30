@@ -1,16 +1,7 @@
 module Main
 
-record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
-record WatchedProcess = {
-  pid : Int,
-  running : Bool,
-  completed : Bool,
-  exitCode : Int,
-  stdoutPath : Str,
-  stderrPath : Str,
-  heartbeatPath : Str,
-  updatedAtMs : Int
-}
+import Process
+
 record CapabilityStatus = {
   name : Str,
   status : Str,
@@ -238,31 +229,15 @@ processResultFromStep step exitCode =
     stderr = readTextOrEmpty step.stderrPath
   }
 
-readWatchedProcess : Str -> Result WatchedProcess
-readWatchedProcess heartbeatPath = match readFile heartbeatPath {
-  Ok raw ->
-    watchedProcessOk (decode WatchedProcess raw),
-  Err message ->
-    watchedProcessError message
-}
-
 spawnStep : StepHandle -> [Str] -> Result WatchedProcess
 spawnStep step command =
-  match spawnCommandJson workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command {
-    Ok raw ->
-      watchedProcessOk (decode WatchedProcess raw),
-    Err message ->
-      watchedProcessError message
-  }
+  spawn (watchedCommandSpec workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
+
+reconcileStep : StepHandle -> Result WatchedProcess
+reconcileStep step = reconcile step.heartbeatPath
 
 awaitStep : StepHandle -> Result WatchedProcess
-awaitStep step =
-  match awaitWatchedProcessJson step.heartbeatPath watchPollMs {
-    Ok raw ->
-      watchedProcessOk (decode WatchedProcess raw),
-    Err message ->
-      watchedProcessError message
-  }
+awaitStep step = await step.heartbeatPath watchPollMs
 
 resumeStep : StepHandle -> ProcessResult
 resumeStep step = match awaitStep step {
@@ -290,6 +265,7 @@ ensureStepReport step command launchingState runningState =
   if fileExists step.reportPath then
     successProcessResult step
   else if fileExists step.heartbeatPath then {
+    let reconciled = reconcileStep step in
     let resumed = resumeStep step in
     if fileExists step.reportPath then
       successProcessResult step

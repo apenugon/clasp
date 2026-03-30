@@ -1,0 +1,67 @@
+module ProcessDemo
+
+import Process
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "feedback-loop-process-demo-state" else pathJoin argv
+
+stdoutPath : Str
+stdoutPath = pathJoin [stateRoot, "demo.stdout.log"]
+
+stderrPath : Str
+stderrPath = pathJoin [stateRoot, "demo.stderr.log"]
+
+heartbeatPath : Str
+heartbeatPath = pathJoin [stateRoot, "demo.heartbeat.json"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+commandName : Str
+commandName = match envVar "CLASP_PROCESS_DEMO_COMMAND" {
+  Ok raw -> raw,
+  Err message -> "launch"
+}
+
+demoCommand : [Str]
+demoCommand = [
+  "bash",
+  "-lc",
+  "printf process-demo-start; >&2 printf process-demo-err; sleep 0.5"
+]
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+spawnDemo : Str
+spawnDemo =
+  match mkdirAll stateRoot {
+    Err message ->
+      errorText message,
+    Ok created ->
+      match spawn (watchedCommandSpec "." stdoutPath stderrPath heartbeatPath watchPollMs demoCommand) {
+        Ok process -> encode process,
+        Err message -> errorText message
+      }
+  }
+
+statusDemo : Str
+statusDemo = match reconcile heartbeatPath {
+  Ok process -> encode process,
+  Err message -> errorText message
+}
+
+awaitDemo : Str
+awaitDemo = match await heartbeatPath watchPollMs {
+  Ok process -> encode process,
+  Err message -> errorText message
+}
+
+main : Str
+main =
+  if commandName == "status" then
+    statusDemo
+  else if commandName == "await" then
+    awaitDemo
+  else
+    spawnDemo

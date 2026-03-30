@@ -1,0 +1,80 @@
+stateRoot : Str
+emptyTexts : [Str]
+emptyCapabilityStatuses : [CapabilityStatus]
+readEnvText : Str -> Str -> Str
+taskFile : Str
+workspaceRoot : Str
+baselineWorkspace : Str
+builderSchemaPath : Str
+verifierSchemaPath : Str
+codexBin : Str
+codexModel : Str
+codexReasoning : Str
+codexSandbox : Str
+watchPollMs : Int
+maxAttempts : Int
+commandName : Str
+feedbackPath : Str
+builderPolicyPath : Str
+verifierPolicyPath : Str
+loopStatePath : Str
+baselineReadyPath : Str
+baselineArchivePath : Str
+builderReportPath : Int -> Str
+builderStdoutPath : Int -> Str
+builderStderrPath : Int -> Str
+verifierReportPath : Int -> Str
+verifierStdoutPath : Int -> Str
+verifierStderrPath : Int -> Str
+builderHeartbeatPath : Int -> Str
+verifierHeartbeatPath : Int -> Str
+processStdoutPath : Str -> Int -> Str
+processStderrPath : Str -> Int -> Str
+processHeartbeatPath : Str -> Int -> Str
+processReportPath : Str -> Int -> Str
+stepHandle : Str -> Int -> StepHandle
+runProcess : Str -> [Str] -> ProcessResult
+readTextOrEmpty : Str -> Str
+watchedProcessOk : WatchedProcess -> Result WatchedProcess
+watchedProcessError : Str -> Result WatchedProcess
+successProcessResult : StepHandle -> ProcessResult
+failedProcessResult : Str -> ProcessResult
+processResultFromStep : StepHandle -> Int -> ProcessResult
+spawnStep : StepHandle -> [Str] -> Result WatchedProcess
+reconcileStep : StepHandle -> Result WatchedProcess
+awaitStep : StepHandle -> Result WatchedProcess
+resumeStep : StepHandle -> ProcessResult
+launchStepAndAwait : StepHandle -> [Str] -> LoopState -> ProcessResult
+ensureStepReport : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
+readVerifierReport : Int -> VerifierReport
+readFeedbackText : Int -> Str
+syntheticFailureReport : Str -> Str -> VerifierReport
+defaultBuilderPolicyText : Str
+defaultVerifierPolicyText : Str
+readPolicyText : Str -> Str -> Str
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicies : Str
+capabilityChecklist : [Str]
+capabilityChecklistText : Str
+builderEscalationText : Int -> Str
+builderFeedbackSection : Int -> Str
+builderPolicySection : Int -> Str
+verifierPolicySection : Int -> Str
+loopState : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> LoopState
+emptyLoopState : LoopState
+writeLoopState : LoopState -> Str
+readLoopState : LoopState
+incrementAttempt : Int -> Int
+codexReasoningConfig : Str
+codexCommand : Str -> Str -> Str -> [Str]
+builderPrompt : Int -> Str
+verifierPrompt : Int -> Str
+ensureBaseline : ProcessResult
+ensureLoopReady : Str
+persistFailureAndContinue : Int -> VerifierReport -> Str
+finishPass : Int -> VerifierReport -> Str
+runVerifierPhase : Int -> Str
+runBuilderPhase : Int -> Str
+runAttempt : Int -> Str
+resumeLoop : LoopState -> Str
+main : Str
