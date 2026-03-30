@@ -1,0 +1,687 @@
+module Main
+
+import Swarm
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record VerifierReport = {
+  verdict : Str,
+  summary : Str,
+  findings : [Str],
+  tests_run : [Str],
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
+}
+
+record LoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  objectiveId : Str,
+  lastBuilderTaskId : Str,
+  lastVerifierTaskId : Str,
+  final : Bool
+}
+
+record StatusView = {
+  state : LoopState,
+  objectiveProjectedStatus : Str,
+  taskCount : Int,
+  allTaskIds : [Str],
+  completedTaskIds : [Str],
+  readyTaskIds : [Str],
+  feedbackSummary : Str
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyCapabilityStatuses : [CapabilityStatus]
+emptyCapabilityStatuses = []
+
+emptyTasks : [SwarmTask]
+emptyTasks = []
+
+record TaskIdSearch = { wanted : Str, found : Bool }
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-feedback-loop-state"
+  else
+    pathJoin argv
+
+swarmStateRoot : SwarmRoot
+swarmStateRoot = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "autonomous-confidence"
+
+objectiveRef : ObjectiveHandle
+objectiveRef = objectiveHandle swarmStateRoot objectiveId
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+taskFile : Str
+taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0012-autonomous-swarm-confidence.md"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+codexBin : Str
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+
+maxAttempts : Int
+maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 20
+}
+
+actorName : Str
+actorName = match envVar "CLASP_SWARM_ACTOR" {
+  Ok raw -> raw,
+  Err message -> "manager"
+}
+
+commandName : Str
+commandName = match envVar "CLASP_LOOP_COMMAND" {
+  Ok raw -> raw,
+  Err message ->
+    match envVar "CLASP_AUTONOMOUS_LOOP_COMMAND" {
+      Ok legacy -> legacy,
+      Err missing -> "run"
+    }
+}
+
+statusPath : Str
+statusPath = pathJoin [stateRootPath, "status.json"]
+
+feedbackPath : Str
+feedbackPath = pathJoin [stateRootPath, "feedback.json"]
+
+builderPolicyPath : Str
+builderPolicyPath = pathJoin [stateRootPath, "builder-policy.md"]
+
+verifierPolicyPath : Str
+verifierPolicyPath = pathJoin [stateRootPath, "verifier-policy.md"]
+
+builderReportPath : Int -> Str
+builderReportPath attempt = pathJoin [stateRootPath, textConcat ["builder-", encode attempt, ".json"]]
+
+verifierReportPath : Int -> Str
+verifierReportPath attempt = pathJoin [stateRootPath, textConcat ["verifier-", encode attempt, ".json"]]
+
+builderTaskId : Int -> Str
+builderTaskId attempt = textConcat ["builder-", encode attempt]
+
+verifierTaskId : Int -> Str
+verifierTaskId attempt = textConcat ["verifier-", encode attempt]
+
+builderHandle : Int -> TaskHandle
+builderHandle attempt = taskHandle swarmStateRoot (builderTaskId attempt) actorName
+
+verifierHandle : Int -> TaskHandle
+verifierHandle attempt = taskHandle swarmStateRoot (verifierTaskId attempt) actorName
+
+defaultBuilderPolicyText : Str
+defaultBuilderPolicyText = textJoin "\n" [
+  "Close whole blocking capability categories rather than single complaint lines.",
+  "Prefer code/runtime/compiler/example/test changes over docs-only movement.",
+  "Use the previous verifier report as the primary steering input for the next attempt.",
+  "Do not broaden backend-native swarm/runtime work into JavaScript-emitter parity unless the frontend compile target actually requires it.",
+  "Treat Compiler.Emit.JavaScript as the frontend/client emitter, not as a backend execution path."
+]
+
+defaultVerifierPolicyText : Str
+defaultVerifierPolicyText = textJoin "\n" [
+  "Judge the whole repository, not only the latest diff.",
+  "Group failures by capability category.",
+  "Do not fail merely because legacy helper scripts remain in the repo if the ordinary-program path is complete and not required.",
+  "Do not demand JavaScript-emitter parity for backend-native swarm/runtime capabilities unless the task explicitly requires frontend/client support."
+]
+
+capabilityChecklistText : Str
+capabilityChecklistText = textJoin "\n" [
+  "- ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes Codex directly from Clasp, and persists durable final state/status in ordinary runtime storage.",
+  "- durable_native_substrate: objective/run/task/event/artifact persistence, DAG edges, projected status, leases, approvals, merge-policy state, tool/process execution, and monitoring/state inspection are durably available.",
+  "- clasp_native_control_api: ordinary Clasp programs can use the orchestration substrate directly without requiring shell wrapper orchestration or external claspc swarm subprocesses as the primary model.",
+  "- orchestration_viability: builder/verifier/planner-style programs are realistically implementable in Clasp itself without obvious missing runtime/control-plane substrate.",
+  "- ergonomics: Dict state, empty lists, polymorphic collections, and record update/destructuring are usable enough for state-heavy orchestration code.",
+  "- verification_gate: scenario-level coverage exists for the ordinary-program loop path and new runtime/workflow/control-plane behavior, and bash scripts/verify-all.sh passes."
+]
+
+readPolicyText : Str -> Str -> Str
+readPolicyText path fallback = match readFile path {
+  Ok raw -> raw,
+  Err message -> fallback
+}
+
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicyFile path fallback =
+  if fileExists path then
+    ""
+  else
+    match writeFile path fallback {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensurePolicies : Str
+ensurePolicies = {
+  let builderError = ensurePolicyFile builderPolicyPath defaultBuilderPolicyText in
+  if builderError != "" then
+    builderError
+  else
+    ensurePolicyFile verifierPolicyPath defaultVerifierPolicyText
+}
+
+readFeedbackText : Str
+readFeedbackText = match readFile feedbackPath {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+builderFeedbackSection : Str
+builderFeedbackSection =
+  if readFeedbackText == "" then
+    "No previous verifier feedback is present yet."
+  else
+    textJoin "\n" [
+      "Verifier feedback from the previous attempt:",
+      readFeedbackText
+    ]
+
+builderPolicySection : Str
+builderPolicySection = textJoin "\n" [
+  textConcat ["Current builder policy from ", builderPolicyPath, ":"],
+  readPolicyText builderPolicyPath defaultBuilderPolicyText
+]
+
+verifierPolicySection : Str
+verifierPolicySection = textJoin "\n" [
+  textConcat ["Current verifier policy from ", verifierPolicyPath, ":"],
+  readPolicyText verifierPolicyPath defaultVerifierPolicyText
+]
+
+builderPrompt : Int -> Str
+builderPrompt attempt = textJoin "\n" [
+  "You are the builder subagent for the Clasp repository.",
+  "Read AGENTS.md first if it exists.",
+  textConcat ["Read the task file at ", taskFile, "."],
+  "Drive the repository toward the full task goal. Prefer coherent capability-closing changes over tiny local patches.",
+  "Work only in the current checkout. Add or update tests. Run the narrowest checks that cover your changes. Do not run bash scripts/verify-all.sh.",
+  "Capability categories to close:",
+  capabilityChecklistText,
+  "Prefer closing at least one whole failing capability category this attempt, not just one complaint line.",
+  builderPolicySection,
+  builderFeedbackSection,
+  "Return JSON matching the provided output schema.",
+  "Include the required feedback object in your final JSON.",
+  textConcat ["Attempt: ", encode attempt]
+]
+
+verifierPrompt : Int -> Str
+verifierPrompt attempt = textJoin "\n" [
+  "You are the verifier subagent for the Clasp repository.",
+  "Read AGENTS.md first if it exists.",
+  textConcat ["Read the task file at ", taskFile, "."],
+  "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
+  verifierPolicySection,
+  textConcat ["Attempt: ", encode attempt]
+]
+
+loopState : Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Bool -> LoopState
+loopState attempt phase verdict completed objective builderTask verifierTask final =
+  LoopState {
+    attempt = attempt,
+    phase = phase,
+    verdict = verdict,
+    completed = completed,
+    objectiveId = objective,
+    lastBuilderTaskId = builderTask,
+    lastVerifierTaskId = verifierTask,
+    final = final
+  }
+
+emptyLoopState : LoopState
+emptyLoopState = loopState 1 "needs-builder" "pending" false objectiveId "" "" false
+
+writeLoopState : LoopState -> Str
+writeLoopState state = match writeFile statusPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+readLoopState : LoopState
+readLoopState = match readFile statusPath {
+  Ok raw -> decode LoopState raw,
+  Err message -> emptyLoopState
+}
+
+incrementAttempt : Int -> Int
+incrementAttempt value =
+  if value == 0 then
+    1
+  else if value == 1 then
+    2
+  else if value == 2 then
+    3
+  else if value == 3 then
+    4
+  else if value == 4 then
+    5
+  else if value == 5 then
+    6
+  else if value == 6 then
+    7
+  else if value == 7 then
+    8
+  else if value == 8 then
+    9
+  else if value == 9 then
+    10
+  else if value == 10 then
+    11
+  else if value == 11 then
+    12
+  else if value == 12 then
+    13
+  else if value == 13 then
+    14
+  else if value == 14 then
+    15
+  else if value == 15 then
+    16
+  else if value == 16 then
+    17
+  else if value == 17 then
+    18
+  else if value == 18 then
+    19
+  else if value == 19 then
+    20
+  else
+    value
+
+syntheticFailureReport : Str -> Str -> VerifierReport
+syntheticFailureReport summary detail =
+  VerifierReport {
+    verdict = "fail",
+    summary = summary,
+    findings = [detail],
+    tests_run = emptyTexts,
+    follow_up = ["Retry the failed step after inspecting the persisted swarm run artifacts."],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+readVerifierReportPath : Str -> VerifierReport
+readVerifierReportPath path = match readFile path {
+  Ok raw -> decode VerifierReport raw,
+  Err message ->
+    syntheticFailureReport
+      (textConcat ["missing verifier report: ", message])
+      message
+}
+
+readVerifierReport : Int -> VerifierReport
+readVerifierReport attempt = readVerifierReportPath (verifierReportPath attempt)
+
+writeFeedback : VerifierReport -> Str
+writeFeedback report = match writeFile feedbackPath (encode report) {
+  Ok written -> "",
+  Err message -> message
+}
+
+objectiveMatches : SwarmObjective -> Bool
+objectiveMatches objective = objective.objectiveId == objectiveId
+
+taskInObjective : SwarmTask -> Bool
+taskInObjective task = task.objectiveId == objectiveId
+
+taskCompleted : SwarmTask -> Bool
+taskCompleted task = task.status == "completed"
+
+taskIdOf : SwarmTask -> Str
+taskIdOf task = task.taskId
+
+objectiveProjectedStatusFrom : Str -> SwarmObjective -> Str
+objectiveProjectedStatusFrom current objective =
+  if objective.objectiveId == objectiveId then
+    objective.projectedStatus
+  else
+    current
+
+taskIdSearch : TaskIdSearch -> SwarmTask -> TaskIdSearch
+taskIdSearch search task =
+  if search.found then
+    search
+  else
+    TaskIdSearch {
+      wanted = search.wanted,
+      found = task.taskId == search.wanted
+    }
+
+taskListHasId : Str -> [SwarmTask] -> Bool
+taskListHasId wanted taskValues =
+  (fold taskIdSearch (TaskIdSearch { wanted = wanted, found = false }) taskValues).found
+
+statusView : LoopState -> StatusView
+statusView state =
+  match objectives swarmStateRoot {
+    Ok objectiveValues ->
+      match tasks swarmStateRoot {
+        Ok taskValues ->
+          let scopedTasks = filter taskInObjective taskValues in
+          let readyTaskIds = match ready objectiveRef {
+            Ok readyTasks -> map taskIdOf readyTasks,
+            Err message -> emptyTexts
+          } in
+          StatusView {
+            state = state,
+            objectiveProjectedStatus = fold objectiveProjectedStatusFrom "missing" objectiveValues,
+            taskCount = length scopedTasks,
+            allTaskIds = map taskIdOf scopedTasks,
+            completedTaskIds = map taskIdOf (filter taskCompleted scopedTasks),
+            readyTaskIds = readyTaskIds,
+            feedbackSummary =
+              if fileExists feedbackPath then
+                (readVerifierReportPath feedbackPath).summary
+              else
+                ""
+          },
+        Err message ->
+          StatusView {
+            state = state,
+            objectiveProjectedStatus = textConcat ["task-error:", message],
+            taskCount = 0,
+            allTaskIds = emptyTexts,
+            completedTaskIds = emptyTexts,
+            readyTaskIds = emptyTexts,
+            feedbackSummary =
+              if fileExists feedbackPath then
+                (readVerifierReportPath feedbackPath).summary
+              else
+                ""
+          }
+      },
+    Err message ->
+      StatusView {
+        state = state,
+        objectiveProjectedStatus = textConcat ["objective-error:", message],
+        taskCount = 0,
+        allTaskIds = emptyTexts,
+        completedTaskIds = emptyTexts,
+        readyTaskIds = emptyTexts,
+        feedbackSummary =
+          if fileExists feedbackPath then
+            (readVerifierReportPath feedbackPath).summary
+          else
+            ""
+      }
+  }
+
+statusOutput : Str
+statusOutput = encode (statusView readLoopState)
+
+codexCommand : Str -> Str -> [Str]
+codexCommand reportPath prompt = [
+  codexBin,
+  "exec",
+  "--cd",
+  workspaceRoot,
+  "-o",
+  reportPath,
+  prompt
+]
+
+builderCommand : Int -> SwarmCommand
+builderCommand attempt = commandSpec "." (codexCommand (builderReportPath attempt) (builderPrompt attempt))
+
+verifierCommand : Int -> SwarmCommand
+verifierCommand attempt = commandSpec "." (codexCommand (verifierReportPath attempt) (verifierPrompt attempt))
+
+ensureLoopReady : Str
+ensureLoopReady =
+  if taskFile == "" then
+    "config-error:missing-task-file"
+  else if workspaceRoot == "" then
+    "config-error:missing-workspace-root"
+  else
+    match mkdirAll stateRootPath {
+      Ok created ->
+        match mkdirAll workspaceRoot {
+          Ok workspaceCreated ->
+            ensurePolicies,
+          Err message ->
+            textConcat ["workspace-root-error:", message]
+        },
+      Err message ->
+        textConcat ["state-root-error:", message]
+    }
+
+ensureObjective : Str
+ensureObjective = match objectives swarmStateRoot {
+  Ok objectiveValues ->
+    if length (filter objectiveMatches objectiveValues) == 0 then
+      match objectiveCreate swarmStateRoot objectiveId "Run the Codex builder/verifier loop directly from ordinary Clasp code on the native swarm substrate." 40 40 {
+        Ok created -> "",
+        Err message -> message
+      }
+    else
+      "",
+  Err message ->
+    match objectiveCreate swarmStateRoot objectiveId "Run the Codex builder/verifier loop directly from ordinary Clasp code on the native swarm substrate." 40 40 {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies = match tasks swarmStateRoot {
+  Ok taskValues ->
+    if taskListHasId taskId taskValues then
+      ""
+    else
+      match taskCreate objectiveRef taskId detail dependencies 1 60000 {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match taskCreate objectiveRef taskId detail dependencies 1 60000 {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+ensureAttemptTasks : Int -> Str
+ensureAttemptTasks attempt = {
+  let objectiveError = ensureObjective in
+  if objectiveError != "" then
+    objectiveError
+  else {
+    let builderId = builderTaskId attempt in
+    let verifierId = verifierTaskId attempt in
+    let builderError =
+      ensureTask
+        builderId
+        (textConcat ["Run builder attempt ", encode attempt, " directly from ordinary Clasp code."])
+        emptyTexts in
+    if builderError != "" then
+      builderError
+    else
+      ensureTask
+        verifierId
+        (textConcat ["Run verifier attempt ", encode attempt, " directly from ordinary Clasp code."])
+        [builderId]
+  }
+}
+
+finalizeWithReport : Int -> Str -> Bool -> VerifierReport -> Str
+finalizeWithReport attempt verdict completed report = {
+  let feedbackError = writeFeedback report in
+  if feedbackError != "" then
+    textConcat ["feedback-error:", feedbackError]
+  else {
+    let finalState =
+      loopState
+        attempt
+        (if completed then "completed" else "failed")
+        verdict
+        completed
+        objectiveId
+        (builderTaskId attempt)
+        (verifierTaskId attempt)
+        true in
+    let stateError = writeLoopState finalState in
+    if stateError != "" then
+      textConcat ["state-error:", stateError]
+    else
+      encode (statusView finalState)
+  }
+}
+
+continueAfterFailure : Int -> VerifierReport -> Str
+continueAfterFailure attempt report = {
+  let feedbackError = writeFeedback report in
+  if feedbackError != "" then
+    textConcat ["feedback-error:", feedbackError]
+  else if attempt == maxAttempts then
+    finalizeWithReport attempt "fail" false report
+  else {
+    let nextAttempt = incrementAttempt attempt in
+    let stateError =
+      writeLoopState
+        (loopState nextAttempt "needs-builder" "retry" false objectiveId (builderTaskId attempt) (verifierTaskId attempt) false) in
+    if stateError != "" then
+      textConcat ["state-error:", stateError]
+    else
+      runAttempt nextAttempt
+  }
+}
+
+verifyTaskReady : Int -> Str
+verifyTaskReady attempt = match ready objectiveRef {
+  Ok readyTasks ->
+    if taskListHasId (verifierTaskId attempt) readyTasks then
+      ""
+    else
+      textConcat ["verifier-not-ready:", verifierTaskId attempt],
+  Err message ->
+    message
+}
+
+runVerifierAttempt : Int -> Str
+runVerifierAttempt attempt = {
+  let stateError =
+    writeLoopState
+      (loopState attempt "verifier-running" "pending" false objectiveId (builderTaskId attempt) (verifierTaskId attempt) false) in
+  if stateError != "" then
+    textConcat ["state-error:", stateError]
+  else
+    match lease (verifierHandle attempt) {
+      Err message ->
+        continueAfterFailure attempt (syntheticFailureReport "verifier lease failed" message),
+      Ok leaseValue ->
+        match verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) {
+          Err message ->
+            continueAfterFailure attempt (syntheticFailureReport "verifier run failed" message),
+          Ok runValue ->
+            match complete (verifierHandle attempt) {
+              Err message ->
+                continueAfterFailure attempt (syntheticFailureReport "verifier completion failed" message),
+              Ok completedValue ->
+                if fileExists (verifierReportPath attempt) then {
+                  let report = readVerifierReport attempt in
+                  if report.verdict == "pass" then
+                    finalizeWithReport attempt "pass" true report
+                  else
+                    continueAfterFailure attempt report
+                } else
+                  continueAfterFailure
+                    attempt
+                    (syntheticFailureReport
+                      "verifier step failed before producing a durable report"
+                      runValue.stderrArtifactPath)
+            }
+        }
+    }
+}
+
+runBuilderAttempt : Int -> Str
+runBuilderAttempt attempt = {
+  let prepError = ensureLoopReady in
+  if prepError != "" then
+    prepError
+  else {
+    let taskError = ensureAttemptTasks attempt in
+    if taskError != "" then
+      textConcat ["task-error:", taskError]
+    else {
+      let stateError =
+        writeLoopState
+          (loopState attempt "builder-running" "pending" false objectiveId (builderTaskId attempt) (verifierTaskId attempt) false) in
+      if stateError != "" then
+        textConcat ["state-error:", stateError]
+      else
+        match lease (builderHandle attempt) {
+          Err message ->
+            continueAfterFailure attempt (syntheticFailureReport "builder lease failed" message),
+          Ok leaseValue ->
+            match toolRun (builderHandle attempt) (builderCommand attempt) {
+              Err message ->
+                continueAfterFailure attempt (syntheticFailureReport "builder run failed" message),
+              Ok runValue ->
+                match complete (builderHandle attempt) {
+                  Err message ->
+                    continueAfterFailure attempt (syntheticFailureReport "builder completion failed" message),
+                  Ok completedValue ->
+                    if fileExists (builderReportPath attempt) then {
+                      let readyError = verifyTaskReady attempt in
+                      if readyError != "" then
+                        continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
+                      else
+                        runVerifierAttempt attempt
+                    } else
+                      continueAfterFailure
+                        attempt
+                        (syntheticFailureReport
+                          "builder step failed before producing a durable report"
+                          runValue.stderrArtifactPath)
+                }
+            }
+        }
+    }
+  }
+}
+
+runAttempt : Int -> Str
+runAttempt attempt =
+  if attempt > maxAttempts then
+    finalizeWithReport attempt "fail" false (syntheticFailureReport "attempt limit reached" "No verifier pass report was produced before the configured attempt limit.")
+  else
+    runBuilderAttempt attempt
+
+resumeLoop : LoopState -> Str
+resumeLoop state =
+  if state.final then
+    encode (statusView state)
+  else
+    runAttempt state.attempt
+
+main : Str
+main =
+  if commandName == "status" then
+    statusOutput
+  else
+    resumeLoop readLoopState

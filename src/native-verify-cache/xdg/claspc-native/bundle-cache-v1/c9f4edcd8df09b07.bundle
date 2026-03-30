@@ -700,7 +700,16 @@ builderPrompt attempt =
   ]
 
 verifierPrompt : Int -> Str
-verifierPrompt attempt = "You are the verifier subagent for the Clasp repository."
+verifierPrompt attempt =
+  textJoin "\n" [
+    "You are the verifier subagent for the Clasp repository.",
+    "Read AGENTS.md first if it exists.",
+    textConcat ["Read the task file at ", taskFile, "."],
+    "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
+    verifierPolicySection attempt,
+    "Run bash scripts/verify-all.sh before sign-off.",
+    textConcat ["Attempt: ", encode attempt]
+  ]
 
 ensureBaseline : ProcessResult
 ensureBaseline =
@@ -858,7 +867,7 @@ runVerifierPhase attempt =
             if promptStateError != "" then
               textConcat ["state-error:", promptStateError]
             else {
-              let verifierCommand = loopCodexCommand verifierStep.reportPath verifierPromptText;
+              let verifierCommand = codexCommand verifierSchemaPath verifierStep.reportPath verifierPromptText;
               let commandStateError =
                 writeLoopState (loopState attempt "verifier-command-ready" "pending" false attempt attempt true false "" false) in
               if commandStateError != "" then
@@ -913,7 +922,7 @@ runBuilderPhase attempt =
           else
             runStepDirect
               builderStep
-              (loopCodexCommand builderStep.reportPath (builderPrompt attempt))
+              (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
               (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
               (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
         if fileExists builderStep.reportPath then

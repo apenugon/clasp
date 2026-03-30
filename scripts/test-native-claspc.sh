@@ -120,6 +120,15 @@ swarm_sqlite_db="$swarm_sqlite_state_root/swarm.db"
 swarm_native_run_state_root="$test_root/swarm-native-run-state"
 swarm_native_binary="$test_root/bin/swarm-native"
 swarm_native_state_root="$test_root/swarm-native-state"
+swarm_feedback_loop_binary="$test_root/bin/swarm-feedback-loop"
+swarm_feedback_loop_state_root="$test_root/swarm-feedback-loop-state"
+swarm_feedback_loop_workspace_root="$test_root/swarm-feedback-loop-workspace"
+swarm_feedback_loop_workspace="$swarm_feedback_loop_workspace_root/workspace.txt"
+swarm_feedback_loop_feedback_path="$swarm_feedback_loop_state_root/feedback.json"
+swarm_feedback_loop_status_output="$test_root/swarm-feedback-loop-status.json"
+swarm_feedback_loop_native_state_root="$test_root/swarm-feedback-loop-native-state"
+swarm_feedback_loop_native_workspace_root="$test_root/swarm-feedback-loop-native-workspace"
+swarm_feedback_loop_native_workspace="$swarm_feedback_loop_native_workspace_root/workspace.txt"
 support_console_binary="$test_root/support-console-app"
 release_gate_binary="$test_root/release-gate-app"
 lead_app_binary="$test_root/lead-app"
@@ -319,6 +328,8 @@ mkdir -p "$feedback_loop_noise_root"
 mkdir -p "$feedback_loop_live_workspace_root"
 mkdir -p "$feedback_loop_fail_workspace_root"
 mkdir -p "$feedback_loop_recovery_workspace_root"
+mkdir -p "$swarm_feedback_loop_workspace_root"
+mkdir -p "$swarm_feedback_loop_native_workspace_root"
 cat >"$feedback_loop_task_file" <<'EOF'
 Make the feedback loop converge after verifier feedback.
 EOF
@@ -333,8 +344,17 @@ report_path=""
 prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    exec)
+      shift
+      ;;
+    --json|--skip-git-repo-check|--ephemeral)
+      shift
+      ;;
     --cd)
       workspace_root="$2"
+      shift 2
+      ;;
+    -m|-c|--sandbox|--output-schema)
       shift 2
       ;;
     -o|--output-last-message)
@@ -630,6 +650,9 @@ wait "$feedback_loop_live_pid"
 feedback_loop_live_pid=""
 grep -F '"completed":true' "$feedback_loop_live_builder_heartbeat" >/dev/null
 grep -F '"exitCode":0' "$feedback_loop_live_builder_heartbeat" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_live_state_root/feedback.json" >/dev/null
+grep -F '"verdict":"fail"' "$feedback_loop_live_state_root/verifier-1.json" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_live_state_root/verifier-2.json" >/dev/null
 grep -F 'pass:2' "$feedback_loop_live_output" >/dev/null
 
 "$claspc_bin" --json check "$project_root/examples/feedback-loop/ProcessDemo.clasp" | grep -F '"status":"ok"' >/dev/null
@@ -1075,6 +1098,72 @@ printf '%s\n' "$swarm_native_output" | grep -F '"kind":"approval_granted","taskI
 printf '%s\n' "$swarm_native_output" | grep -F '"projectedStatus":"completed"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"completedTaskIds":["plan","repair-2"]' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"appbench","status":"completed","action":"objective-complete"' >/dev/null
+
+swarm_feedback_loop_state_root_abs="$test_root_abs/swarm-feedback-loop-state"
+swarm_feedback_loop_workspace_root_abs="$test_root_abs/swarm-feedback-loop-workspace"
+swarm_feedback_loop_workspace_abs="$swarm_feedback_loop_workspace_root_abs/workspace.txt"
+swarm_feedback_loop_feedback_path_abs="$swarm_feedback_loop_state_root_abs/feedback.json"
+swarm_feedback_loop_status_output_abs="$test_root_abs/swarm-feedback-loop-status.json"
+swarm_feedback_loop_native_state_root_abs="$test_root_abs/swarm-feedback-loop-native-state"
+swarm_feedback_loop_native_workspace_root_abs="$test_root_abs/swarm-feedback-loop-native-workspace"
+swarm_feedback_loop_native_workspace_abs="$swarm_feedback_loop_native_workspace_root_abs/workspace.txt"
+
+swarm_feedback_loop_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$swarm_feedback_loop_workspace_root_abs\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$swarm_feedback_loop_state_root_abs"
+)"
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"attempt":2' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"taskCount":4' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"builder-1"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"verifier-2"' >/dev/null
+grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_workspace_abs" >/dev/null
+grep -F '"verdict":"pass"' "$swarm_feedback_loop_feedback_path_abs" >/dev/null
+CLASP_LOOP_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$swarm_feedback_loop_state_root_abs" >"$swarm_feedback_loop_status_output_abs"
+grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"readyTaskIds":[]' "$swarm_feedback_loop_status_output_abs" >/dev/null
+swarm_feedback_loop_objective_status_output="$("$claspc_bin" --json swarm objective status "$swarm_feedback_loop_state_root_abs" autonomous-confidence)"
+printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"taskCount":4' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"taskId":"builder-2"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"taskId":"verifier-2"' >/dev/null
+swarm_feedback_loop_builder_runs_output="$("$claspc_bin" --json swarm runs "$swarm_feedback_loop_state_root_abs" builder-2)"
+printf '%s\n' "$swarm_feedback_loop_builder_runs_output" | grep -F '"role":"tool"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_builder_runs_output" | grep -F '"status":"passed"' >/dev/null
+swarm_feedback_loop_verifier_runs_output="$("$claspc_bin" --json swarm runs "$swarm_feedback_loop_state_root_abs" verifier-2)"
+printf '%s\n' "$swarm_feedback_loop_verifier_runs_output" | grep -F '"role":"verifier"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_verifier_runs_output" | grep -F '"status":"passed"' >/dev/null
+swarm_feedback_loop_builder_artifacts_output="$("$claspc_bin" --json swarm artifacts "$swarm_feedback_loop_state_root_abs" builder-2)"
+printf '%s\n' "$swarm_feedback_loop_builder_artifacts_output" | grep -F '"kind":"stdout"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_builder_artifacts_output" | grep -F '"kind":"stderr"' >/dev/null
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/FeedbackLoop.clasp" -o "$swarm_feedback_loop_binary"
+[[ -x "$swarm_feedback_loop_binary" ]]
+swarm_feedback_loop_native_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$swarm_feedback_loop_native_workspace_root_abs\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs"
+)"
+printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"attempt":2' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
+grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_native_workspace_abs" >/dev/null
+CLASP_LOOP_COMMAND=status "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs" >"$swarm_feedback_loop_status_output_abs.native"
+grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/support-console/Main.clasp" -o "$support_console_binary"
 [[ -x "$support_console_binary" ]]
