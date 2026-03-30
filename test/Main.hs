@@ -16,14 +16,17 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as LT
 import System.Directory
   ( createDirectoryIfMissing
+  , getPermissions
   , doesDirectoryExist
   , doesFileExist
   , makeAbsolute
   , removePathForcibly
+  , setPermissions
   )
+import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>), replaceExtension, takeDirectory)
-import System.Process (CreateProcess (cwd), proc, readCreateProcessWithExitCode, readProcessWithExitCode)
+import System.Process (CreateProcess (cwd, env), proc, readCreateProcessWithExitCode, readProcessWithExitCode)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -6146,6 +6149,122 @@ compileTests =
             assertEqual "implementation" (Just (String "clasp")) (lookupObjectKey "implementation" jsonValue)
             assertBool "expected native ir artifact" nativeExists
             assertBool "expected native image artifact" imageExists
+    , testCase "claspc run executes the ordinary native feedback loop and leaves durable swarm state" $
+        withProjectFiles "ordinary-native-feedback-loop" [] $ \root -> do
+          let fakeCodexPath = root </> "fake-codex"
+              stateRoot = root </> "state"
+              statusPath = stateRoot </> "status.json"
+              feedbackPath = stateRoot </> "feedback.json"
+              builderReportPath = stateRoot </> "builder-1.json"
+              verifierReportPath = stateRoot </> "verifier-1.json"
+          TIO.writeFile fakeCodexPath ordinaryNativeFeedbackLoopFakeCodexScript
+          permissions <- getPermissions fakeCodexPath
+          setPermissions fakeCodexPath (permissions {executable = True})
+          workspaceRoot <- makeAbsolute "."
+          taskFilePath <- makeAbsolute ("agents" </> "tasks" </> "0012-autonomous-swarm-confidence.md")
+          let loopEnvOverrides =
+                [ ("CLASP_LOOP_CODEX_BIN_JSON", show fakeCodexPath)
+                , ("CLASP_LOOP_WORKSPACE_JSON", show workspaceRoot)
+                , ("CLASP_LOOP_TASK_FILE_JSON", show taskFilePath)
+                ]
+          (runExitCode, runStdout, runStderr) <-
+            runClaspcWithEnv loopEnvOverrides ["run", "examples/swarm-native/FeedbackLoop.clasp", "--", stateRoot]
+          case runExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected ordinary native feedback loop run to succeed:\n" <> runStdout <> runStderr)
+            ExitSuccess ->
+              pure ()
+          runValue <- case eitherDecodeStrictText (T.pack runStdout) of
+            Left decodeErr ->
+              assertFailure ("expected feedback loop output to be valid JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "run verdict" (Just (String "pass")) (lookupObjectKey "verdict" =<< (lookupObjectKey "state" runValue))
+          assertEqual "run phase" (Just (String "completed")) (lookupObjectKey "phase" =<< (lookupObjectKey "state" runValue))
+          assertEqual "run feedback summary" (Just (String "loop passed")) (lookupObjectKey "feedbackSummary" runValue)
+          statusExists <- doesFileExist statusPath
+          feedbackExists <- doesFileExist feedbackPath
+          builderReportExists <- doesFileExist builderReportPath
+          verifierReportExists <- doesFileExist verifierReportPath
+          assertBool "expected durable status record" statusExists
+          assertBool "expected durable feedback record" feedbackExists
+          assertBool "expected durable builder report" builderReportExists
+          assertBool "expected durable verifier report" verifierReportExists
+          persistedStatus <- TIO.readFile statusPath
+          persistedFeedback <- TIO.readFile feedbackPath
+          statusValue <- case eitherDecodeStrictText persistedStatus of
+            Left decodeErr ->
+              assertFailure ("expected persisted status JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          feedbackValue <- case eitherDecodeStrictText persistedFeedback of
+            Left decodeErr ->
+              assertFailure ("expected persisted feedback JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "persisted attempt" (Just (Number 1)) (lookupObjectKey "attempt" statusValue)
+          assertEqual "persisted final state" (Just (Bool True)) (lookupObjectKey "final" statusValue)
+          assertEqual "persisted feedback verdict" (Just (String "pass")) (lookupObjectKey "verdict" feedbackValue)
+          (statusExitCode, statusStdout, statusStderr) <-
+            runClaspcWithEnv
+              (("CLASP_LOOP_COMMAND", "status") : loopEnvOverrides)
+              ["run", "examples/swarm-native/FeedbackLoop.clasp", "--", stateRoot]
+          case statusExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected feedback loop status command to succeed:\n" <> statusStdout <> statusStderr)
+            ExitSuccess ->
+              pure ()
+          statusOutputValue <- case eitherDecodeStrictText (T.pack statusStdout) of
+            Left decodeErr ->
+              assertFailure ("expected feedback loop status output JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "status task count" (Just (Number 2)) (lookupObjectKey "taskCount" statusOutputValue)
+          assertEqual "status projected status" (Just (String "completed")) (lookupObjectKey "objectiveProjectedStatus" statusOutputValue)
+          (summaryExitCode, summaryStdout, summaryStderr) <- runClaspc ["--json", "swarm", "summary", stateRoot]
+          case summaryExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected swarm summary after ordinary loop run to succeed:\n" <> summaryStdout <> summaryStderr)
+            ExitSuccess ->
+              pure ()
+          summaryValue <- case eitherDecodeStrictText (T.pack summaryStdout) of
+            Left decodeErr ->
+              assertFailure ("expected swarm summary JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "completed task ids" (Just ["builder-1", "verifier-1"]) (lookupObjectTextArray "completedTaskIds" summaryValue)
+          (runsExitCode, runsStdout, runsStderr) <- runClaspc ["--json", "swarm", "runs", stateRoot, "builder-1"]
+          case runsExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected durable swarm runs to be queryable after ordinary loop run:\n" <> runsStdout <> runsStderr)
+            ExitSuccess ->
+              pure ()
+          runsValue <- case eitherDecodeStrictText (T.pack runsStdout) of
+            Left decodeErr ->
+              assertFailure ("expected durable swarm runs JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          case runsValue of
+            Array runsArray ->
+              assertBool "expected at least one persisted builder run" (not (null (toList runsArray)))
+            other ->
+              assertFailure ("expected persisted swarm runs array, got " <> show other)
+          (artifactsExitCode, artifactsStdout, artifactsStderr) <- runClaspc ["--json", "swarm", "artifacts", stateRoot, "verifier-1"]
+          case artifactsExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected durable swarm artifacts to be queryable after ordinary loop run:\n" <> artifactsStdout <> artifactsStderr)
+            ExitSuccess ->
+              pure ()
+          artifactsValue <- case eitherDecodeStrictText (T.pack artifactsStdout) of
+            Left decodeErr ->
+              assertFailure ("expected durable swarm artifacts JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          case artifactsValue of
+            Array artifactArray ->
+              assertEqual "expected verifier stdout/stderr artifacts" 2 (length artifactArray)
+            other ->
+              assertFailure ("expected persisted swarm artifacts array, got " <> show other)
     , testCase "hosted native tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let embeddedIrPath = root </> "Fake.native.ir"
@@ -8566,11 +8685,34 @@ runNodeScript script = do
       assertFailure ("node script failed:\n" <> stderrText)
 
 runClaspc :: [String] -> IO (ExitCode, String, String)
-runClaspc args =
-  readProcessWithExitCode
-    "claspc"
-    args
+runClaspc = runClaspcWithEnv []
+
+runClaspcWithEnv :: [(String, String)] -> [String] -> IO (ExitCode, String, String)
+runClaspcWithEnv overrides args = do
+  claspcBin <- resolveClaspcBinary
+  baseEnv <- getEnvironment
+  readCreateProcessWithExitCode
+    ((proc claspcBin args) {env = Just (applyEnvOverrides overrides baseEnv)})
     ""
+
+resolveClaspcBinary :: IO FilePath
+resolveClaspcBinary = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "bash"
+      ["scripts/resolve-claspc.sh"]
+      ""
+  case exitCode of
+    ExitSuccess ->
+      pure (head (lines stdoutText))
+    ExitFailure _ ->
+      assertFailure ("failed to resolve claspc binary:\n" <> stderrText)
+
+applyEnvOverrides :: [(String, String)] -> [(String, String)] -> [(String, String)]
+applyEnvOverrides overrides baseEnv =
+  overrides <> filter (\(name, _) -> not (name `elem` overrideNames)) baseEnv
+  where
+    overrideNames = fmap fst overrides
 
 runHostedNativeTool :: FilePath -> String -> Maybe String -> FilePath -> IO Text
 runHostedNativeTool imagePath exportName inputArg outputPath =
@@ -8623,6 +8765,21 @@ lookupObjectText key value =
       Just textValue
     _ ->
       Nothing
+
+lookupObjectTextArray :: Text -> Value -> Maybe [Text]
+lookupObjectTextArray key value =
+  case lookupObjectKey key value of
+    Just (Array values) ->
+      mapM valueText (toList values)
+    _ ->
+      Nothing
+  where
+    valueText item =
+      case item of
+        String textValue ->
+          Just textValue
+        _ ->
+          Nothing
 
 objectHasTextField :: [(Text, Text)] -> Value -> Bool
 objectHasTextField expectedFields value =
@@ -8683,6 +8840,44 @@ cleanupProjectDir :: FilePath -> IO ()
 cleanupProjectDir root = do
   exists <- doesDirectoryExist root
   when exists (removePathForcibly root)
+
+ordinaryNativeFeedbackLoopFakeCodexScript :: Text
+ordinaryNativeFeedbackLoopFakeCodexScript =
+  T.unlines
+    [ "#!/usr/bin/env bash"
+    , "set -euo pipefail"
+    , ""
+    , "output_path=''"
+    , "while [[ $# -gt 0 ]]; do"
+    , "  case \"$1\" in"
+    , "    -o)"
+    , "      output_path=\"$2\""
+    , "      shift 2"
+    , "      ;;"
+    , "    *)"
+    , "      shift"
+    , "      ;;"
+    , "  esac"
+    , "done"
+    , ""
+    , "if [[ -z \"$output_path\" ]]; then"
+    , "  echo 'missing -o output path' >&2"
+    , "  exit 1"
+    , "fi"
+    , ""
+    , "mkdir -p \"$(dirname \"$output_path\")\""
+    , "base_name=\"$(basename \"$output_path\")\""
+    , ""
+    , "if [[ \"$base_name\" == verifier-* ]]; then"
+    , "  cat > \"$output_path\" <<'JSON'"
+    , "{\"verdict\":\"pass\",\"summary\":\"loop passed\",\"findings\":[],\"tests_run\":[\"ordinary-program-loop\"],\"follow_up\":[],\"capability_statuses\":[{\"name\":\"ordinary_program_execution\",\"status\":\"pass\",\"evidence\":[\"claspc run examples/swarm-native/FeedbackLoop.clasp\"],\"blocking_gaps\":[],\"required_closure\":[]}]}"
+    , "JSON"
+    , "else"
+    , "  cat > \"$output_path\" <<'JSON'"
+    , "{\"summary\":\"builder ok\",\"files_touched\":[\"examples/swarm-native/FeedbackLoop.clasp\"],\"tests_run\":[\"ordinary-program-loop\"],\"residual_risks\":[],\"feedback\":{\"summary\":\"loop builder completed\",\"ergonomics\":[],\"follow_ups\":[],\"warnings\":[]}}"
+    , "JSON"
+    , "fi"
+    ]
 
 normalizeConstructors :: [ConstructorDecl] -> [ConstructorDecl]
 normalizeConstructors =
