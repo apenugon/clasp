@@ -916,7 +916,7 @@ runBuilderPhase attempt =
           if watchModeEnabled then
             ensureStepReport
               builderStep
-              (loopCodexCommand builderStep.reportPath (builderPrompt attempt))
+              (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
               (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
               (loopState attempt "builder-running" "pending" false attempt 0 true false "" false)
           else
