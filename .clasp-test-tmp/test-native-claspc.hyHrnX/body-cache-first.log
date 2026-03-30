@@ -1,0 +1,7 @@
+[claspc-cache] bundle miss entry=/home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-project/Main.clasp reason=missing-files
+[claspc-cache] native-image miss path=.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-root/claspc-native/native-image-cache-v1/b2c311751c9eb68d.json
+[claspc-cache] build-plan miss path=.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-root/claspc-native/native-image-build-plan-cache-v2/3be7c1e33370a99c.cache
+[claspc-cache] decl-module miss module=Shared.User path=.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-root/claspc-native/native-image-decl-module-cache-v1/9621d2f631cdaf14.json
+[claspc-cache] decl-module miss module=Shared.Render path=.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-root/claspc-native/native-image-decl-module-cache-v1/7956693103ad684c.json
+[claspc-cache] decl-module miss module=Main path=.clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-root/claspc-native/native-image-decl-module-cache-v1/5f8d62d6b8143dc6.json
+Wrote .clasp-test-tmp/test-native-claspc.hyHrnX/body-cache-first.native.image.json with clasp-native

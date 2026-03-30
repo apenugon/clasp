@@ -5,17 +5,27 @@
   "required": [
     "schemaVersion",
     "generatedAt",
+    "backendTarget",
+    "mode",
     "compileBenchmarks",
     "runtimeBenchmarks"
   ],
   "properties": {
     "schemaVersion": {
       "type": "integer",
-      "const": 1
+      "const": 2
     },
     "generatedAt": {
       "type": "string",
       "format": "date-time"
+    },
+    "backendTarget": {
+      "type": "string",
+      "const": "native"
+    },
+    "mode": {
+      "type": "string",
+      "const": "native-only"
     },
     "environment": {
       "type": "object"
@@ -24,14 +34,20 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["workload", "input", "jsBun", "native", "deltaMs", "nativeSpeedupVsJs"],
+        "required": ["workload", "input", "samples", "native"],
         "properties": {
           "workload": { "type": "string" },
           "input": { "type": "string" },
-          "jsBun": { "type": "object" },
-          "native": { "type": "object" },
-          "deltaMs": { "type": "integer" },
-          "nativeSpeedupVsJs": { "type": "number" }
+          "samples": { "type": "integer" },
+          "native": {
+            "type": "object",
+            "required": ["command", "samplesMs", "medianMs"],
+            "properties": {
+              "command": { "type": "array", "items": { "type": "string" } },
+              "samplesMs": { "type": "array", "items": { "type": "integer" } },
+              "medianMs": { "type": "integer" }
+            }
+          }
         }
       }
     },
@@ -39,14 +55,22 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["workload", "input", "jsBun", "native", "deltaMs", "nativeSpeedupVsJs"],
+        "required": ["workload", "input", "iterations", "samples", "native"],
         "properties": {
           "workload": { "type": "string" },
           "input": { "type": "string" },
-          "jsBun": { "type": "object" },
-          "native": { "type": "object" },
-          "deltaMs": { "type": "integer" },
-          "nativeSpeedupVsJs": { "type": "number" }
+          "iterations": { "type": "integer" },
+          "samples": { "type": "integer" },
+          "native": {
+            "type": "object",
+            "required": ["command", "samplesMs", "medianMs", "checksum"],
+            "properties": {
+              "command": { "type": "array", "items": { "type": "string" } },
+              "samplesMs": { "type": "array", "items": { "type": "integer" } },
+              "medianMs": { "type": "integer" },
+              "checksum": { "type": "integer" }
+            }
+          }
         }
       }
     }

@@ -1,0 +1,30 @@
+module Main
+
+import Process
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "state" else pathJoin argv
+
+stdout1 : Str
+stdout1 = pathJoin [stateRoot, "one.stdout"]
+
+stderr1 : Str
+stderr1 = pathJoin [stateRoot, "one.stderr"]
+
+heartbeat1 : Str
+heartbeat1 = pathJoin [stateRoot, "one.heartbeat.json"]
+
+stdout2 : Str
+stdout2 = pathJoin [stateRoot, "two.stdout"]
+
+stderr2 : Str
+stderr2 = pathJoin [stateRoot, "two.stderr"]
+
+heartbeat2 : Str
+heartbeat2 = pathJoin [stateRoot, "two.heartbeat.json"]
+
+pollMs : Int
+pollMs = 25
+
+cmd1 : [Str]
+cmd1 = ["bash", "-lc", "printf first > 

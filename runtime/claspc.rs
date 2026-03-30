@@ -844,6 +844,14 @@ fn split_decl_name_chunks(decl_names: &[String], max_jobs: usize) -> Vec<String>
         .collect()
 }
 
+fn count_decl_names(decl_names_text: &str) -> usize {
+    decl_names_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count()
+}
+
 fn should_fallback_to_monolithic_decls(error: &str) -> bool {
     error.contains("runtime failed to execute native compiler export")
 }
@@ -973,6 +981,13 @@ fn execute_parallel_module_decl_section_export(
     let mut decl_sections = vec![constructor_decls.to_owned()];
     if decl_plan.modules.is_empty() {
         return merge_json_arrays(&decl_sections);
+    }
+    if decl_plan
+        .modules
+        .iter()
+        .any(|module_entry| count_decl_names(&module_entry.decl_names_text) >= monolithic_decl_threshold())
+    {
+        return execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT, &bundle_build.bundle);
     }
 
     for chunk in decl_plan.modules.chunks(max_jobs.max(1)) {
@@ -1304,10 +1319,10 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_project_module_postorder, conservative_module_interface_fingerprint, merge_json_arrays,
-        native_image_cache_dir, plan_incremental_project_summary, read_cached_native_image,
-        split_decl_name_chunks, write_cached_native_image, ProjectBundleBuild, ProjectBundleModule,
-        PROJECT_BUNDLE_SEPARATOR,
+        collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
+        merge_json_arrays, native_image_cache_dir, plan_incremental_project_summary,
+        read_cached_native_image, split_decl_name_chunks, write_cached_native_image, ProjectBundleBuild,
+        ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -1339,6 +1354,11 @@ mod tests {
                 "epsilon".to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn count_decl_names_ignores_empty_lines() {
+        assert_eq!(count_decl_names("alpha\n\n beta \n\n gamma\n"), 3);
     }
 
     #[test]

@@ -9,7 +9,7 @@ function parseArgs(argv) {
     const key = argv[index];
     const value = argv[index + 1];
     if (!key?.startsWith("--") || value === undefined) {
-      throw new Error("usage: bun benchmarks/backend/runtime-bench.mjs --workload <id> --iterations <count> --input <path>");
+      throw new Error("usage: node benchmarks/backend/runtime-bench.mjs --workload <id> --iterations <count> --input <path>");
     }
     options[key.slice(2)] = value;
   }
@@ -53,7 +53,7 @@ async function main() {
   const inputPath = options.input;
 
   if (!workload || !Number.isFinite(iterations) || iterations <= 0 || !inputPath) {
-    throw new Error("usage: bun benchmarks/backend/runtime-bench.mjs --workload <id> --iterations <count> --input <path>");
+    throw new Error("usage: node benchmarks/backend/runtime-bench.mjs --workload <id> --iterations <count> --input <path>");
   }
 
   const inputText = await readFile(inputPath, "utf8");

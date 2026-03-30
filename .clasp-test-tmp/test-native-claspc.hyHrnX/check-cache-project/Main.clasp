@@ -1,0 +1,7 @@
+module Main
+
+import Shared.User
+import Shared.Render
+
+main : Str
+main = renderUser defaultUser

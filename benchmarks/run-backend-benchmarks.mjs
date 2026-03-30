@@ -141,8 +141,10 @@ async function main() {
   }
 
   const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
+    backendTarget: "native",
+    mode: "native-only",
     environment,
     compileBenchmarks: compileResults,
     runtimeBenchmarks: runtimeResults
@@ -265,16 +267,8 @@ async function buildNativeRuntimeHarness() {
 
 async function runCompileBenchmark(workload, samples, warmupRuns) {
   const inputPath = path.join(projectRoot, workload.input);
-  const jsOutput = path.join(distRoot, `${workload.id}.js`);
   const nativeOutput = path.join(distRoot, `${workload.id}.native.ir`);
   const claspcBin = resolveClaspcBinary();
-  const jsCommand = [
-    claspcBin,
-    "compile",
-    inputPath,
-    "-o",
-    jsOutput
-  ];
   const nativeCommand = [
     claspcBin,
     "native",
@@ -283,9 +277,6 @@ async function runCompileBenchmark(workload, samples, warmupRuns) {
     nativeOutput
   ];
 
-  const jsBun = await benchmarkCommand(jsCommand, samples, warmupRuns, async () => {
-    await rm(jsOutput, { force: true });
-  });
   const native = await benchmarkCommand(nativeCommand, samples, warmupRuns, async () => {
     await rm(nativeOutput, { force: true });
   });
@@ -293,18 +284,12 @@ async function runCompileBenchmark(workload, samples, warmupRuns) {
   return {
     workload: workload.id,
     input: workload.input,
-    jsBun: {
-      command: jsCommand,
-      samplesMs: jsBun.samplesMs,
-      medianMs: jsBun.medianMs
-    },
     native: {
       command: nativeCommand,
       samplesMs: native.samplesMs,
       medianMs: native.medianMs
     },
-    deltaMs: native.medianMs - jsBun.medianMs,
-    nativeSpeedupVsJs: roundRatio(jsBun.medianMs / native.medianMs)
+    samples: samples
   };
 }
 
@@ -316,16 +301,6 @@ async function runRuntimeBenchmark(
   nativeHarnessPath
 ) {
   const inputPath = path.join(projectRoot, workload.input);
-  const jsCommand = [
-    "bun",
-    path.join(projectRoot, "benchmarks", "backend", "runtime-bench.mjs"),
-    "--workload",
-    workload.id,
-    "--iterations",
-    String(iterations),
-    "--input",
-    inputPath
-  ];
   const nativeCommand = [
     nativeHarnessPath,
     workload.id,
@@ -333,33 +308,19 @@ async function runRuntimeBenchmark(
     inputPath
   ];
 
-  const jsBun = await benchmarkJsonCommand(jsCommand, samples, warmupRuns);
   const native = await benchmarkJsonCommand(nativeCommand, samples, warmupRuns);
-
-  if (jsBun.output.checksum !== native.output.checksum) {
-    throw new Error(
-      `runtime workload ${workload.id} produced mismatched checksums (${jsBun.output.checksum} vs ${native.output.checksum})`
-    );
-  }
 
   return {
     workload: workload.id,
     input: workload.input,
     iterations,
-    jsBun: {
-      command: jsCommand,
-      samplesMs: jsBun.samplesMs,
-      medianMs: jsBun.medianMs,
-      checksum: jsBun.output.checksum
-    },
     native: {
       command: nativeCommand,
       samplesMs: native.samplesMs,
       medianMs: native.medianMs,
       checksum: native.output.checksum
     },
-    deltaMs: native.medianMs - jsBun.medianMs,
-    nativeSpeedupVsJs: roundRatio(jsBun.medianMs / native.medianMs)
+    samples: samples
   };
 }
 
@@ -459,22 +420,18 @@ function parsePositiveNumber(value, label) {
   return parsed;
 }
 
-function roundRatio(value) {
-  return Number(value.toFixed(3));
-}
-
 function printSummary(result, outputPath) {
   console.log("Compile benchmarks");
   for (const benchmark of result.compileBenchmarks) {
     console.log(
-      `  ${benchmark.workload}: js/bun ${benchmark.jsBun.medianMs}ms, native ${benchmark.native.medianMs}ms, nativeSpeedupVsJs ${benchmark.nativeSpeedupVsJs}`
+      `  ${benchmark.workload}: native ${benchmark.native.medianMs}ms`
     );
   }
 
   console.log("Runtime benchmarks");
   for (const benchmark of result.runtimeBenchmarks) {
     console.log(
-      `  ${benchmark.workload}: js/bun ${benchmark.jsBun.medianMs}ms, native ${benchmark.native.medianMs}ms, nativeSpeedupVsJs ${benchmark.nativeSpeedupVsJs}`
+      `  ${benchmark.workload}: native ${benchmark.native.medianMs}ms, checksum ${benchmark.native.checksum}`
     );
   }
 

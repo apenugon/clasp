@@ -1,0 +1,4 @@
+verifier:start:1
+diff:start:1
+diff:write-ok:1
+verifier:after-diff:1

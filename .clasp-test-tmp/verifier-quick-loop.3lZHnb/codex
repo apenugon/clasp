@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+output_file=""
+workspace_root="."
+for ((i=1;i<=$#;i++)); do
+  arg="${!i}"
+  next=$((i+1))
+  case "$arg" in
+    --cd) workspace_root="${!next}" ;;
+    -o|--output-last-message) output_file="${!next}" ;;
+  esac
+done
+prompt="${*: -1}"
+workspace_file="$workspace_root/workspace.txt"
+if [[ "$prompt" == *"You are the builder subagent"* ]]; then
+  if [[ "$prompt" == *"Verifier feedback from the previous attempt:"* ]]; then
+    printf '%s
+' 'fixed-after-feedback' > "$workspace_file"
+  else
+    printf '%s
+' 'first-attempt' > "$workspace_file"
+  fi
+  cat > "$output_file" <<'JSON'
+{"summary":"builder report","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"use verifier feedback","ergonomics":["ordinary loop works"],"follow_ups":["keep direct codex invocation"],"warnings":[]}}
+JSON
+  exit 0
+fi
+if [[ "$prompt" == *"You are the verifier subagent"* ]]; then
+  if [[ "$(cat "$workspace_file")" == "fixed-after-feedback" ]]; then
+    cat > "$output_file" <<'JSON'
+{"verdict":"pass","summary":"accepted","findings":[],"tests_run":["fake verifier"],"follow_up":[],"capability_statuses":[{"name":"ordinary_program_execution","status":"pass","evidence":["ordinary loop run"],"blocking_gaps":[],"required_closure":[]},{"name":"durable_native_substrate","status":"pass","evidence":["n/a for fixture"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["n/a for fixture"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"pass","evidence":["n/a for fixture"],"blocking_gaps":[],"required_closure":[]},{"name":"ergonomics","status":"pass","evidence":["n/a for fixture"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"pass","evidence":["n/a for fixture"],"blocking_gaps":[],"required_closure":[]}]}
+JSON
+  else
+    cat > "$output_file" <<'JSON'
+{"verdict":"fail","summary":"needs feedback","findings":["workspace.txt still first-attempt"],"tests_run":["fake verifier"],"follow_up":["use verifier feedback"],"capability_statuses":[{"name":"ordinary_program_execution","status":"fail","evidence":[],"blocking_gaps":["first pass fails by design"],"required_closure":["retry"]},{"name":"durable_native_substrate","status":"fail","evidence":[],"blocking_gaps":["n/a for fixture"],"required_closure":[]},{"name":"clasp_native_control_api","status":"fail","evidence":[],"blocking_gaps":["n/a for fixture"],"required_closure":[]},{"name":"orchestration_viability","status":"fail","evidence":[],"blocking_gaps":["n/a for fixture"],"required_closure":[]},{"name":"ergonomics","status":"fail","evidence":[],"blocking_gaps":["n/a for fixture"],"required_closure":[]},{"name":"verification_gate","status":"fail","evidence":[],"blocking_gaps":["n/a for fixture"],"required_closure":[]}]}
+JSON
+  fi
+  exit 0
+fi
+exit 1

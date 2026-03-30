@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+output_file=""
+workspace=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) output_file="$2"; shift 2 ;;
+    --cd) workspace="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+prompt="$(cat)"
+if [[ "$prompt" == *"You are the builder subagent"* ]]; then
+  if [[ "$prompt" == *"Verifier feedback from the previous attempt:"* ]]; then
+    printf '%s\n' 'fixed-after-feedback' > "$workspace/workspace.txt"
+  else
+    printf '%s\n' 'first-attempt' > "$workspace/workspace.txt"
+  fi
+  cat > "$output_file" <<'JSON'
+{"summary":"stub builder report","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[]}
+JSON
+  exit 0
+fi
+if [[ "$prompt" == *"You are the verifier subagent"* ]]; then
+  if [[ "$(< "$workspace/workspace.txt")" == "fixed-after-feedback" ]]; then
+    cat > "$output_file" <<'JSON'
+{"verdict":"pass","summary":"accepted","findings":[],"tests_run":["fake verifier check"],"follow_up":[],"capability_statuses":[]}
+JSON
+  else
+    cat > "$output_file" <<'JSON'
+{"verdict":"fail","summary":"needs fix","findings":["workspace.txt still has first-attempt content"],"tests_run":["fake verifier check"],"follow_up":["use verifier feedback"],"capability_statuses":[]}
+JSON
+  fi
+  exit 0
+fi
+printf 'unexpected prompt\n' >&2
+exit 1

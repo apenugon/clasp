@@ -1,0 +1,2 @@
+[claspc-cache] bundle miss entry=/home/akul_medexfinance_com/clasp/.clasp-test-tmp/repro-native-export.IBJGwx/Main.clasp reason=missing-files
+[claspc-cache] source-export miss export=checkProjectText path=/home/akul_medexfinance_com/clasp/.clasp-test-tmp/repro-native-export.IBJGwx/xdg/claspc-native/source-export-cache-v1/d4aa8ef85f1c815b.cache

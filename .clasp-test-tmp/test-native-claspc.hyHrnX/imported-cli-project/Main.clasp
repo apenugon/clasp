@@ -1,0 +1,9 @@
+module Main
+import Shared.User
+import Shared.Render
+
+main : Str
+main = match writeFile ".clasp-test-tmp/test-native-claspc.hyHrnX/imported-output.txt" (renderUser primaryUser) {
+  Ok written -> renderUser primaryUser,
+  Err message -> message
+}

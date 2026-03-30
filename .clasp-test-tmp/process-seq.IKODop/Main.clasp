@@ -1,0 +1,60 @@
+module Main
+
+import Process
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "state" else pathJoin argv
+
+stdout1 : Str
+stdout1 = pathJoin [stateRoot, "one.stdout"]
+
+stderr1 : Str
+stderr1 = pathJoin [stateRoot, "one.stderr"]
+
+heartbeat1 : Str
+heartbeat1 = pathJoin [stateRoot, "one.heartbeat.json"]
+
+stdout2 : Str
+stdout2 = pathJoin [stateRoot, "two.stdout"]
+
+stderr2 : Str
+stderr2 = pathJoin [stateRoot, "two.stderr"]
+
+heartbeat2 : Str
+heartbeat2 = pathJoin [stateRoot, "two.heartbeat.json"]
+
+pollMs : Int
+pollMs = 25
+
+cmdA : [Str]
+cmdA = ["bash", "-lc", "printf first; >&2 printf first-err; sleep 0.05"]
+
+cmdB : [Str]
+cmdB = ["bash", "-lc", "printf second; >&2 printf second-err; sleep 0.05"]
+
+fail : Str -> Str
+fail message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> fail message,
+    Ok made ->
+      match spawn (watchedCommandSpec "." stdout1 stderr1 heartbeat1 pollMs cmdA) {
+        Err message -> fail message,
+        Ok launched1 ->
+          match await heartbeat1 pollMs {
+            Err message -> fail message,
+            Ok finished1 ->
+              match spawn (watchedCommandSpec "." stdout2 stderr2 heartbeat2 pollMs cmdB) {
+                Err message -> fail message,
+                Ok launched2 ->
+                  match await heartbeat2 pollMs {
+                    Err message -> fail message,
+                    Ok finished2 ->
+                      textConcat [encode finished1, "|", encode finished2]
+                  }
+              }
+          }
+      }
+  }

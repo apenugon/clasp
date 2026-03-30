@@ -2,10 +2,11 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+tmp_root="${CLASP_TEST_TMPDIR:-.clasp-test-tmp}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-native-claspc.XXXXXX")"
+test_root_abs="$(cd "$test_root" && pwd -P)"
 export XDG_CACHE_HOME="$test_root/xdg-cache"
 mkdir -p "$XDG_CACHE_HOME"
 server_pid=""
@@ -80,13 +81,19 @@ record_ergonomics_project_dir="$test_root/record-ergonomics-project"
 record_ergonomics_project_path="$record_ergonomics_project_dir/Main.clasp"
 record_ergonomics_binary="$test_root/record-ergonomics-app"
 polymorphism_binary="$test_root/polymorphism-app"
+feedback_loop_binary="$test_root/feedback-loop-app"
+feedback_loop_process_demo_binary="$test_root/feedback-loop-process-demo-app"
 feedback_loop_codex_bin="$test_root/codex"
 feedback_loop_task_file="$test_root/feedback-loop-task.md"
 feedback_loop_state_root="$test_root/feedback-loop-state"
 feedback_loop_workspace_root="$test_root/feedback-loop-workspace"
 feedback_loop_workspace="$feedback_loop_workspace_root/workspace.txt"
+feedback_loop_noise_root="$feedback_loop_workspace_root/.clasp-test-tmp"
+feedback_loop_noise_path="$feedback_loop_noise_root/noise.txt"
 feedback_loop_first_verifier_path="$feedback_loop_state_root/verifier-1.json"
 feedback_loop_feedback_path="$feedback_loop_state_root/feedback.json"
+feedback_loop_first_diff_path="$feedback_loop_state_root/changes-1.diff"
+feedback_loop_second_diff_path="$feedback_loop_state_root/changes-2.diff"
 feedback_loop_live_state_root="$test_root/feedback-loop-live-state"
 feedback_loop_live_workspace_root="$test_root/feedback-loop-live-workspace"
 feedback_loop_live_builder_stdout="$feedback_loop_live_state_root/builder-1.stdout.jsonl"
@@ -308,12 +315,14 @@ main = let { name, role } = promote (User { name = "Ada", role = "planner" }) in
 EOF
 
 mkdir -p "$feedback_loop_workspace_root"
+mkdir -p "$feedback_loop_noise_root"
 mkdir -p "$feedback_loop_live_workspace_root"
 mkdir -p "$feedback_loop_fail_workspace_root"
 mkdir -p "$feedback_loop_recovery_workspace_root"
 cat >"$feedback_loop_task_file" <<'EOF'
 Make the feedback loop converge after verifier feedback.
 EOF
+printf '%s\n' 'transient-noise' >"$feedback_loop_noise_path"
 
 cat >"$feedback_loop_codex_bin" <<'EOF'
 #!/usr/bin/env bash
@@ -515,6 +524,8 @@ polymorphism_output="$("$polymorphism_binary")"
 printf '%s\n' "$polymorphism_output" | grep -Fx 'ok|true|true|true' >/dev/null
 
 "$claspc_bin" --json check "$project_root/examples/feedback-loop/Main.clasp" | grep -F '"status":"ok"' >/dev/null
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/feedback-loop/Main.clasp" -o "$feedback_loop_binary"
+[[ -x "$feedback_loop_binary" ]]
 feedback_loop_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$feedback_loop_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$feedback_loop_task_file\"" \
@@ -526,6 +537,18 @@ printf '%s\n' "$feedback_loop_output" | grep -Fx 'pass:2' >/dev/null
 grep -Fx 'fixed-after-feedback' "$feedback_loop_workspace" >/dev/null
 grep -F '"verdict":"fail"' "$feedback_loop_first_verifier_path" >/dev/null
 grep -F '"verdict":"pass"' "$feedback_loop_feedback_path" >/dev/null
+test -f "$feedback_loop_first_diff_path"
+test -f "$feedback_loop_second_diff_path"
+grep -F 'workspace.txt' "$feedback_loop_first_diff_path" >/dev/null
+grep -F 'workspace.txt' "$feedback_loop_second_diff_path" >/dev/null
+if grep -F '.clasp-test-tmp' "$feedback_loop_first_diff_path" >/dev/null; then
+  printf 'feedback loop diff unexpectedly included transient directories\n' >&2
+  exit 1
+fi
+if grep -F '.clasp-test-tmp' "$feedback_loop_second_diff_path" >/dev/null; then
+  printf 'feedback loop diff unexpectedly included transient directories on retry\n' >&2
+  exit 1
+fi
 feedback_loop_status_output="$(
   CLASP_LOOP_COMMAND=status \
   "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$feedback_loop_state_root"
@@ -610,6 +633,8 @@ grep -F '"exitCode":0' "$feedback_loop_live_builder_heartbeat" >/dev/null
 grep -F 'pass:2' "$feedback_loop_live_output" >/dev/null
 
 "$claspc_bin" --json check "$project_root/examples/feedback-loop/ProcessDemo.clasp" | grep -F '"status":"ok"' >/dev/null
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/feedback-loop/ProcessDemo.clasp" -o "$feedback_loop_process_demo_binary"
+[[ -x "$feedback_loop_process_demo_binary" ]]
 feedback_loop_process_demo_state_root="$test_root/feedback-loop-process-demo-state"
 feedback_loop_process_demo_launch_output="$(
   "$claspc_bin" run "$project_root/examples/feedback-loop/ProcessDemo.clasp" -- "$feedback_loop_process_demo_state_root"
@@ -635,6 +660,69 @@ printf '%s\n' "$feedback_loop_process_demo_await_output" | grep -F '"completed":
 printf '%s\n' "$feedback_loop_process_demo_await_output" | grep -F '"running":false' >/dev/null
 grep -Fx 'process-demo-start' "$feedback_loop_process_demo_state_root/demo.stdout.log" >/dev/null
 grep -Fx 'process-demo-err' "$feedback_loop_process_demo_state_root/demo.stderr.log" >/dev/null
+
+feedback_loop_native_state_root="$test_root/feedback-loop-native-state"
+feedback_loop_native_workspace_root="$test_root/feedback-loop-native-workspace"
+feedback_loop_native_workspace="$feedback_loop_native_workspace_root/workspace.txt"
+feedback_loop_native_feedback_path="$feedback_loop_native_state_root/feedback.json"
+feedback_loop_native_first_diff_path="$feedback_loop_native_state_root/changes-1.diff"
+feedback_loop_native_status_output="$test_root/feedback-loop-native-status.json"
+mkdir -p "$feedback_loop_native_workspace_root"
+feedback_loop_native_state_root_abs="$test_root_abs/feedback-loop-native-state"
+feedback_loop_native_workspace_root_abs="$test_root_abs/feedback-loop-native-workspace"
+feedback_loop_native_workspace_abs="$feedback_loop_native_workspace_root_abs/workspace.txt"
+feedback_loop_native_feedback_path_abs="$feedback_loop_native_state_root_abs/feedback.json"
+feedback_loop_native_first_diff_path_abs="$feedback_loop_native_state_root_abs/changes-1.diff"
+feedback_loop_native_status_output_abs="$test_root_abs/feedback-loop-native-status.json"
+feedback_loop_native_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$feedback_loop_native_workspace_root_abs\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  "$feedback_loop_binary" "$feedback_loop_native_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_native_output" | grep -Fx 'pass:2' >/dev/null
+grep -Fx 'fixed-after-feedback' "$feedback_loop_native_workspace_abs" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_native_feedback_path_abs" >/dev/null
+test -f "$feedback_loop_native_first_diff_path_abs"
+grep -F 'workspace.txt' "$feedback_loop_native_first_diff_path_abs" >/dev/null
+if grep -F '.clasp-test-tmp' "$feedback_loop_native_first_diff_path_abs" >/dev/null; then
+  printf 'feedback loop native diff unexpectedly included transient directories\n' >&2
+  exit 1
+fi
+CLASP_LOOP_COMMAND=status "$feedback_loop_binary" "$feedback_loop_native_state_root_abs" >"$feedback_loop_native_status_output_abs"
+grep -F '"attempt":2' "$feedback_loop_native_status_output_abs" >/dev/null
+grep -F '"phase":"completed"' "$feedback_loop_native_status_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_native_status_output_abs" >/dev/null
+grep -F '"builderRuns":2' "$feedback_loop_native_status_output_abs" >/dev/null
+grep -F '"verifierRuns":2' "$feedback_loop_native_status_output_abs" >/dev/null
+grep -F '"final":true' "$feedback_loop_native_status_output_abs" >/dev/null
+
+feedback_loop_process_demo_native_state_root="$test_root/feedback-loop-process-demo-native-state"
+feedback_loop_process_demo_native_state_root_abs="$test_root_abs/feedback-loop-process-demo-native-state"
+feedback_loop_process_demo_native_output="$(
+  "$feedback_loop_process_demo_binary" "$feedback_loop_process_demo_native_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_process_demo_native_output" | grep -F '"heartbeatPath":"'"$feedback_loop_process_demo_native_state_root_abs"'/demo.heartbeat.json"' >/dev/null
+printf '%s\n' "$feedback_loop_process_demo_native_output" | grep -F '"stdoutPath":"'"$feedback_loop_process_demo_native_state_root_abs"'/demo.stdout.log"' >/dev/null
+for _ in $(seq 1 100); do
+  feedback_loop_process_demo_native_status_output="$(
+    CLASP_PROCESS_DEMO_COMMAND=status \
+    "$feedback_loop_process_demo_binary" "$feedback_loop_process_demo_native_state_root_abs"
+  )"
+  if printf '%s\n' "$feedback_loop_process_demo_native_status_output" | grep -F '"running":true' >/dev/null; then
+    break
+  fi
+  sleep 0.02
+done
+feedback_loop_process_demo_native_await_output="$(
+  CLASP_PROCESS_DEMO_COMMAND=await \
+  "$feedback_loop_process_demo_binary" "$feedback_loop_process_demo_native_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_process_demo_native_await_output" | grep -F '"completed":true' >/dev/null
+printf '%s\n' "$feedback_loop_process_demo_native_await_output" | grep -F '"running":false' >/dev/null
+grep -Fx 'process-demo-start' "$feedback_loop_process_demo_native_state_root_abs/demo.stdout.log" >/dev/null
+grep -Fx 'process-demo-err' "$feedback_loop_process_demo_native_state_root_abs/demo.stderr.log" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-kernel/Main.clasp" -o "$swarm_kernel_binary"
 [[ -x "$swarm_kernel_binary" ]]

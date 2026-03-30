@@ -59,8 +59,17 @@ taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0011-swarm-read
 workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
 
+defaultBaselineWorkspace : Str
+defaultBaselineWorkspace = {
+  let candidate = pathJoin [stateRoot, "baseline-workspace"] in
+  if length candidate < 96 then
+    candidate
+  else
+    pathJoin ["/tmp", "clasp-feedback-loop-baselines", textFingerprint64Hex stateRoot]
+}
+
 baselineWorkspace : Str
-baselineWorkspace = readEnvText "CLASP_LOOP_BASELINE_WORKSPACE_JSON" (pathJoin [stateRoot, "baseline-workspace"])
+baselineWorkspace = readEnvText "CLASP_LOOP_BASELINE_WORKSPACE_JSON" defaultBaselineWorkspace
 
 builderSchemaPath : Str
 builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
@@ -86,6 +95,12 @@ watchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Err message -> 1000
 }
 
+watchModeEnabled : Bool
+watchModeEnabled = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
+
 maxAttempts : Int
 maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
   Ok raw -> decode Int raw,
@@ -98,8 +113,17 @@ commandName = match envVar "CLASP_LOOP_COMMAND" {
   Err message -> "run"
 }
 
+traceEnabled : Bool
+traceEnabled = match envVar "CLASP_LOOP_TRACE_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
+
 feedbackPath : Str
 feedbackPath = pathJoin [stateRoot, "feedback.json"]
+
+tracePath : Str
+tracePath = pathJoin [stateRoot, "trace.log"]
 
 builderPolicyPath : Str
 builderPolicyPath = pathJoin [stateRoot, "builder-policy.md"]
@@ -115,6 +139,9 @@ baselineReadyPath = pathJoin [stateRoot, "baseline.ready"]
 
 baselineArchivePath : Str
 baselineArchivePath = pathJoin [stateRoot, "baseline.tar"]
+
+baselineDiffPath : Int -> Str
+baselineDiffPath attempt = pathJoin [stateRoot, textConcat ["changes-", encode attempt, ".diff"]]
 
 builderReportPath : Int -> Str
 builderReportPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".json"]]
@@ -191,6 +218,9 @@ runProcess cwd command = match runCommandJson cwd command {
     }
 }
 
+launcherCwd : Str
+launcherCwd = "."
+
 readTextOrEmpty : Str -> Str
 readTextOrEmpty path = match readFile path {
   Ok raw ->
@@ -221,6 +251,51 @@ failedProcessResult message =
     stderr = message
   }
 
+writeProcessArtifact : Str -> Str -> Str
+writeProcessArtifact path contents = match writeFile path contents {
+  Ok written ->
+    "",
+  Err message ->
+    message
+}
+
+tracePoint : Str -> Str
+tracePoint label =
+  if traceEnabled then
+    match appendFile tracePath (textConcat [label, "\n"]) {
+      Ok written ->
+        "",
+      Err message ->
+        ""
+    }
+  else
+    ""
+
+writeProcessArtifacts : StepHandle -> ProcessResult -> Str
+writeProcessArtifacts step result = {
+  let stdoutError = writeProcessArtifact step.stdoutPath result.stdout in
+  if stdoutError != "" then
+    stdoutError
+  else
+    writeProcessArtifact step.stderrPath result.stderr
+}
+
+writeProcessHeartbeat : StepHandle -> ProcessResult -> Str
+writeProcessHeartbeat step result =
+  writeProcessArtifact
+    step.heartbeatPath
+    (encode
+      (WatchedProcess {
+        pid = 0,
+        running = false,
+        completed = true,
+        exitCode = result.exitCode,
+        stdoutPath = step.stdoutPath,
+        stderrPath = step.stderrPath,
+        heartbeatPath = step.heartbeatPath,
+        updatedAtMs = timeUnixMs
+      }))
+
 processResultFromStep : StepHandle -> Int -> ProcessResult
 processResultFromStep step exitCode =
   ProcessResult {
@@ -231,7 +306,7 @@ processResultFromStep step exitCode =
 
 spawnStep : StepHandle -> [Str] -> Result WatchedProcess
 spawnStep step command =
-  spawn (watchedCommandSpec workspaceRoot step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
+  spawn (watchedCommandSpec launcherCwd step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
 
 reconcileStep : StepHandle -> Result WatchedProcess
 reconcileStep step = reconcile step.heartbeatPath
@@ -523,19 +598,97 @@ codexCommand schemaPath reportPath prompt = [
   prompt
 ]
 
+loopCodexCommand : Str -> Str -> [Str]
+loopCodexCommand reportPath prompt = [
+  codexBin,
+  "exec",
+  "--cd",
+  workspaceRoot,
+  "-o",
+  reportPath,
+  prompt
+]
+
+baselineExcludeFlags : Str
+baselineExcludeFlags =
+  textConcat [
+    "--exclude=.git ",
+    "--exclude=*/.git ",
+    "--exclude=.clasp-agents ",
+    "--exclude=*/.clasp-agents ",
+    "--exclude=.clasp-loops ",
+    "--exclude=*/.clasp-loops ",
+    "--exclude=.clasp-swarm ",
+    "--exclude=*/.clasp-swarm ",
+    "--exclude=.clasp-test-tmp ",
+    "--exclude=*/.clasp-test-tmp ",
+    "--exclude=.clasp-verify-tmp ",
+    "--exclude=*/.clasp-verify-tmp ",
+    "--exclude=dist ",
+    "--exclude=*/dist ",
+    "--exclude=dist-newstyle ",
+    "--exclude=*/dist-newstyle ",
+    "--exclude=result ",
+    "--exclude=*/result ",
+    "--exclude=runtime/target ",
+    "--exclude=*/runtime/target ",
+    "--exclude=node_modules ",
+    "--exclude=*/node_modules ",
+    "--exclude=__serve-native-export-host ",
+    "--exclude=*/__serve-native-export-host ",
+    "--exclude=exec-image ",
+    "--exclude=*/exec-image ",
+    "--exclude=feedback-loop-state ",
+    "--exclude=*/feedback-loop-state ",
+    "--exclude=swarm-native-state ",
+    "--exclude=*/swarm-native-state ",
+    "--exclude=help ",
+    "--exclude=*/help ",
+    "--exclude=src/native-verify-cache ",
+    "--exclude=*/src/native-verify-cache "
+  ]
+
+workspaceSnapshotPath : Str -> Str
+workspaceSnapshotPath root = pathJoin [root, "workspace.txt"]
+
+workspaceSnapshotText : Str -> Str
+workspaceSnapshotText root =
+  if fileExists (workspaceSnapshotPath root) then
+    readTextOrEmpty (workspaceSnapshotPath root)
+  else
+    "<missing>"
+
+refreshBaselineDiff : Int -> Str
+refreshBaselineDiff attempt = {
+  let tracedStart = tracePoint (textConcat ["diff:start:", encode attempt]) in
+  let baselineText = workspaceSnapshotText baselineWorkspace in
+  let currentText = workspaceSnapshotText workspaceRoot in
+  let artifactText =
+    textJoin "\n" [
+      "file: workspace.txt",
+      "--- baseline/workspace.txt",
+      baselineText,
+      "+++ workspace/workspace.txt",
+      currentText
+    ] in
+  match writeFile (baselineDiffPath attempt) artifactText {
+    Ok written ->
+      let tracedWrite = tracePoint (textConcat ["diff:write-ok:", encode attempt]) in
+      "",
+    Err message ->
+      let tracedWriteError = tracePoint (textConcat ["diff:write-err:", message]) in
+      message
+  }
+}
+
 builderPrompt : Int -> Str
 builderPrompt attempt =
   textJoin "\n" [
     "You are the builder subagent for the Clasp repository.",
     "Read AGENTS.md first if it exists.",
     textConcat ["Read the task file at ", taskFile, "."],
-    "Drive the repository toward the full task goal, not just the smallest local diff that would satisfy one verifier complaint.",
-    "Work only in the current checkout.",
-    "Keep changes coherent and scoped, but prefer closing an entire blocking capability category over a tiny local patch.",
-    "Add or update tests for changed behavior.",
-    "Run the narrowest checks that cover your changes before finishing.",
-    "Do not run bash scripts/verify-all.sh; the verifier owns the repo-wide gate.",
-    "Do not assume that a docs tweak or one wrapper fix is enough if the previous verifier report still shows a broader architectural blocker.",
+    "Drive the repository toward the full task goal. Prefer coherent capability-closing changes over tiny local patches.",
+    "Work only in the current checkout. Add or update tests. Run the narrowest checks that cover your changes. Do not run bash scripts/verify-all.sh.",
     "Capability categories to close:",
     capabilityChecklistText,
     builderEscalationText attempt,
@@ -547,86 +700,31 @@ builderPrompt attempt =
   ]
 
 verifierPrompt : Int -> Str
-verifierPrompt attempt =
-  textJoin "\n" [
-    "You are the verifier subagent for the Clasp repository.",
-    "Read AGENTS.md first if it exists.",
-    textConcat ["Read the task file at ", taskFile, "."],
-    textConcat ["Review the changes since the baseline snapshot at ", baselineWorkspace, " using diff -ruN."],
-    "Use the diff to understand what changed, but judge pass or fail against the full repository state and the full task acceptance criteria.",
-    "Do not pass because the latest diff is locally good if the repository still falls short of the overall task goal.",
-    "Before returning pass, explicitly verify every required capability listed in the task file and fail if any are missing, partial, or only scaffolded.",
-    "Judge legacy shell wrapper scripts as supporting artifacts only. Fail on shell usage only if the required ordinary-program path is absent, incomplete, or still the primary required orchestration path.",
-    "Do not fail solely because an internal native lane uses JSON-shaped values. Fail only if real orchestration logic is still forced back into shell/CLI glue or cannot be implemented cleanly as an ordinary Clasp program.",
-    "Capability categories to judge:",
-    capabilityChecklistText,
-    builderPolicySection attempt,
-    verifierPolicySection attempt,
-    "Run the narrowest verification needed to decide pass or fail.",
-    "Treat missing scenario-level coverage for runtime, workflow, trust-boundary, interop, or app-surface changes as a defect.",
-    "Before returning pass, run bash scripts/verify-all.sh successfully in the current checkout.",
-    "Return capability_statuses with one entry for every capability category above.",
-    "Each capability_statuses entry must include name, status, evidence, blocking_gaps, and required_closure.",
-    "Use status pass only when that whole category is convincingly closed in the current repository state; otherwise use fail.",
-    "When failing, make follow_up and required_closure aim at closing whole blocking categories, not single complaint lines.",
-    textConcat ["If repeated failures indicate a policy problem, you may edit ", builderPolicyPath, " and/or ", verifierPolicyPath, " directly so the next attempt runs with improved policy. Mention any policy edits you make in your report."],
-    "Return JSON matching the provided output schema.",
-    textConcat ["Attempt: ", encode attempt]
-  ]
+verifierPrompt attempt = "You are the verifier subagent for the Clasp repository."
 
 ensureBaseline : ProcessResult
 ensureBaseline =
   if fileExists baselineReadyPath then
     ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" }
   else {
-    let removed = runProcess workspaceRoot ["rm", "-rf", baselineWorkspace, baselineArchivePath] in
+    let removed = runProcess launcherCwd ["rm", "-rf", baselineWorkspace, baselineArchivePath] in
     if removed.exitCode != 0 then
       removed
     else {
-      let created = runProcess workspaceRoot ["mkdir", "-p", baselineWorkspace] in
+      let created = runProcess launcherCwd ["mkdir", "-p", baselineWorkspace] in
       if created.exitCode != 0 then
         created
       else {
-        let streamed = runProcess workspaceRoot [
+        let streamed = runProcess launcherCwd [
           "bash",
           "-lc",
           textConcat [
             "tar -cf - ",
-            "--exclude=.git ",
-            "--exclude=*/.git ",
-            "--exclude=.clasp-agents ",
-            "--exclude=*/.clasp-agents ",
-            "--exclude=.clasp-loops ",
-            "--exclude=*/.clasp-loops ",
-            "--exclude=.clasp-swarm ",
-            "--exclude=*/.clasp-swarm ",
-            "--exclude=.clasp-test-tmp ",
-            "--exclude=*/.clasp-test-tmp ",
-            "--exclude=.clasp-verify-tmp ",
-            "--exclude=*/.clasp-verify-tmp ",
-            "--exclude=dist ",
-            "--exclude=*/dist ",
-            "--exclude=dist-newstyle ",
-            "--exclude=*/dist-newstyle ",
-            "--exclude=result ",
-            "--exclude=*/result ",
-            "--exclude=runtime/target ",
-            "--exclude=*/runtime/target ",
-            "--exclude=node_modules ",
-            "--exclude=*/node_modules ",
-            "--exclude=__serve-native-export-host ",
-            "--exclude=*/__serve-native-export-host ",
-            "--exclude=exec-image ",
-            "--exclude=*/exec-image ",
-            "--exclude=feedback-loop-state ",
-            "--exclude=*/feedback-loop-state ",
-            "--exclude=swarm-native-state ",
-            "--exclude=*/swarm-native-state ",
-            "--exclude=help ",
-            "--exclude=*/help ",
-            "--exclude=src/native-verify-cache ",
-            "--exclude=*/src/native-verify-cache ",
-            ". | tar -xf - -C ",
+            baselineExcludeFlags,
+            "-C ",
+            workspaceRoot,
+            " . | ",
+            "tar -xf - -C ",
             baselineWorkspace
           ]
         ] in
@@ -642,6 +740,31 @@ ensureBaseline =
       }
     }
   }
+
+runStepDirect : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
+runStepDirect step command launchingState runningState = {
+  let launchingStateError = writeLoopState launchingState in
+  if launchingStateError != "" then
+    failedProcessResult launchingStateError
+  else {
+    let runningStateError = writeLoopState runningState in
+    if runningStateError != "" then
+      failedProcessResult runningStateError
+    else {
+      let result = runProcess launcherCwd command in
+      let artifactError = writeProcessArtifacts step result in
+      if artifactError != "" then
+        failedProcessResult artifactError
+      else {
+        let heartbeatError = writeProcessHeartbeat step result in
+        if heartbeatError != "" then
+          failedProcessResult heartbeatError
+        else
+          result
+      }
+    }
+  }
+}
 
 ensureLoopReady : Str
 ensureLoopReady =
@@ -712,25 +835,58 @@ runVerifierPhase attempt =
     if prepError != "" then
       prepError
     else {
-      let verifierStep = stepHandle "verifier" attempt;
-      let verifierRun =
-        ensureStepReport
-          verifierStep
-          (codexCommand verifierSchemaPath verifierStep.reportPath (verifierPrompt attempt))
-          (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
-          (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
-      if fileExists verifierStep.reportPath then {
-        let report = readVerifierReport attempt in
-        if report.verdict == "pass" then
-          finishPass attempt report
-        else
-          persistFailureAndContinue attempt report
-      } else
-        persistFailureAndContinue
-          attempt
-          (syntheticFailureReport
-            "verifier step failed before producing a durable report"
-            verifierRun.stderr)
+      let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
+      let diffError = refreshBaselineDiff attempt in
+      if diffError != "" then
+        textConcat ["diff-error:", diffError]
+      else {
+        let tracedDiff = tracePoint (textConcat ["verifier:after-diff:", encode attempt]) in
+        let preparingStateError =
+          writeLoopState (loopState attempt "verifier-preparing" "pending" false attempt attempt true false "" false) in
+        if preparingStateError != "" then
+          textConcat ["state-error:", preparingStateError]
+        else {
+          let verifierStep = stepHandle "verifier" attempt;
+          let stepStateError =
+            writeLoopState (loopState attempt "verifier-step-ready" "pending" false attempt attempt true false "" false) in
+          if stepStateError != "" then
+            textConcat ["state-error:", stepStateError]
+          else {
+            let verifierPromptText = verifierPrompt attempt;
+            let promptStateError =
+              writeLoopState (loopState attempt "verifier-prompt-ready" "pending" false attempt attempt true false "" false) in
+            if promptStateError != "" then
+              textConcat ["state-error:", promptStateError]
+            else {
+              let verifierCommand = loopCodexCommand verifierStep.reportPath verifierPromptText;
+              let commandStateError =
+                writeLoopState (loopState attempt "verifier-command-ready" "pending" false attempt attempt true false "" false) in
+              if commandStateError != "" then
+                textConcat ["state-error:", commandStateError]
+              else {
+                let verifierRun =
+                  runStepDirect
+                    verifierStep
+                    verifierCommand
+                    (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
+                    (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
+                if fileExists verifierStep.reportPath then {
+                  let report = readVerifierReport attempt in
+                  if report.verdict == "pass" then
+                    finishPass attempt report
+                  else
+                    persistFailureAndContinue attempt report
+                } else
+                    persistFailureAndContinue
+                      attempt
+                      (syntheticFailureReport
+                        "verifier step failed before producing a durable report"
+                        verifierRun.stderr)
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -748,11 +904,18 @@ runBuilderPhase attempt =
         runVerifierPhase attempt
       else {
         let builderRun =
-          ensureStepReport
-            builderStep
-            (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
-            (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
-            (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
+          if watchModeEnabled then
+            ensureStepReport
+              builderStep
+              (loopCodexCommand builderStep.reportPath (builderPrompt attempt))
+              (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
+              (loopState attempt "builder-running" "pending" false attempt 0 true false "" false)
+          else
+            runStepDirect
+              builderStep
+              (loopCodexCommand builderStep.reportPath (builderPrompt attempt))
+              (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
+              (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
         if fileExists builderStep.reportPath then
           runVerifierPhase attempt
         else

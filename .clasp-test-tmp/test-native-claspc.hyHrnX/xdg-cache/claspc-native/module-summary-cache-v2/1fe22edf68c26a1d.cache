@@ -1,0 +1,10 @@
+renderLandingPage : InboxSnapshot -> Page
+renderInboxPage : InboxSnapshot -> Page
+renderLeadPage : LeadRecord -> Page
+intakeForm : View
+intakeSection : View
+inboxLinks : InboxSnapshot -> View
+priorityView : LeadPriority -> View
+segmentView : LeadSegment -> View
+reviewStatusView : LeadRecord -> View
+reviewForm : LeadRecord -> View

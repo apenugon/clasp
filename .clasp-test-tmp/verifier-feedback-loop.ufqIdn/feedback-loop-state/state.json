@@ -1,0 +1,1 @@
+{"attempt":10,"phase":"failed","verdict":"fail","completed":false,"builderRuns":10,"verifierRuns":10,"healthy":false,"needsAttention":true,"attentionReason":"builder step failed before producing a durable report","final":true}

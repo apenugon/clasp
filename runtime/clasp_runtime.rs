@@ -6545,6 +6545,30 @@ fn create_truncated_output_file(path: &str) -> Result<File, String> {
     File::create(path).map_err(|err| err.to_string())
 }
 
+fn resolve_process_program(program: &str, child_cwd: &str) -> String {
+    let candidate = Path::new(program);
+    if !program.contains('/') && !program.starts_with('.') {
+        return program.to_owned();
+    }
+    if !candidate.is_relative() {
+        return program.to_owned();
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        let current_dir_candidate = current_dir.join(candidate);
+        if current_dir_candidate.exists() {
+            return current_dir_candidate.to_string_lossy().into_owned();
+        }
+    }
+
+    let child_dir_candidate = Path::new(child_cwd).join(candidate);
+    if child_dir_candidate.exists() {
+        return child_dir_candidate.to_string_lossy().into_owned();
+    }
+
+    program.to_owned()
+}
+
 fn watched_process_status_json(
     pid: u32,
     running: bool,
@@ -6593,7 +6617,8 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
 
     let stdout_file = create_truncated_output_file(stdout_path)?;
     let stderr_file = create_truncated_output_file(stderr_path)?;
-    let mut child = ProcessCommand::new(&watched_command[0])
+    let resolved_program = resolve_process_program(&watched_command[0], cwd);
+    let mut child = ProcessCommand::new(&resolved_program)
         .args(&watched_command[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -6656,7 +6681,8 @@ fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, Stri
 
     let stdout_file = create_truncated_output_file(&stdout_path)?;
     let stderr_file = create_truncated_output_file(&stderr_path)?;
-    let mut child = ProcessCommand::new(&watched_command[0])
+    let resolved_program = resolve_process_program(&watched_command[0], cwd);
+    let mut child = ProcessCommand::new(&resolved_program)
         .args(&watched_command[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -8383,6 +8409,75 @@ mod tests {
             let _ = std::fs::remove_file(stdout_path);
             let _ = std::fs::remove_file(stderr_path);
             let _ = std::fs::remove_file(heartbeat_path);
+        }
+    }
+
+    #[test]
+    fn spawn_command_json_resolves_relative_programs_from_launcher_cwd() {
+        unsafe {
+            let launcher_cwd = std::env::current_dir().expect("expected launcher cwd");
+            let temp_root = launcher_cwd.join(".clasp-test-tmp").join(format!(
+                "clasp-spawn-relative-{}",
+                std::process::id()
+            ));
+            let child_cwd_dir = temp_root.join("workspace");
+            std::fs::create_dir_all(&child_cwd_dir).expect("expected child cwd creation");
+            let script_path = temp_root.join("tools").join("spawn-relative.sh");
+            let stdout_path = temp_root.join("stdout.log");
+            let stderr_path = temp_root.join("stderr.log");
+            let heartbeat_path = temp_root.join("heartbeat.json");
+            std::fs::create_dir_all(script_path.parent().expect("expected parent dir"))
+                .expect("expected script dir creation");
+            std::fs::write(&script_path, b"#!/bin/sh\nprintf relative-spawn\\n\n")
+                .expect("expected relative spawn script write");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected relative spawn script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions)
+                .expect("expected relative spawn script permissions");
+
+            let relative_script = script_path
+                .strip_prefix(&launcher_cwd)
+                .expect("expected test script under launcher cwd")
+                .to_string_lossy()
+                .into_owned();
+            let cwd = build_runtime_string(child_cwd_dir.to_string_lossy().as_bytes());
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(relative_script.as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let spawned = clasp_rt_spawn_command_json(cwd, stdout_rt, stderr_rt, heartbeat_rt, poll_ms, command);
+            assert!((*spawned).is_ok, "expected spawn to succeed for repo-relative program path");
+
+            let awaited = clasp_rt_await_watched_process_json(heartbeat_rt, poll_ms);
+            assert!((*awaited).is_ok, "expected awaited spawn to succeed");
+            let awaited_payload = String::from_utf8_lossy(string_bytes((*awaited).value)).into_owned();
+            let awaited_json: serde_json::Value =
+                serde_json::from_str(&awaited_payload).expect("expected valid awaited heartbeat");
+            assert_eq!(awaited_json["completed"].as_bool(), Some(true));
+            assert_eq!(awaited_json["exitCode"].as_i64(), Some(0));
+
+            let streamed_stdout = std::fs::read_to_string(&stdout_path).expect("expected relative spawn stdout");
+            assert!(streamed_stdout.contains("relative-spawn"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), spawned as *mut ClaspRtHeader);
+            release_header(null_mut(), awaited as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+            let _ = std::fs::remove_file(stdout_path);
+            let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+            let _ = std::fs::remove_dir_all(temp_root);
         }
     }
 

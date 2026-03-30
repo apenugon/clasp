@@ -1,0 +1,1 @@
+[{"kind": "global", "name": "defaultUser", "body": {"kind": "record", "recordName": "User", "fields": [{"name": "name", "value": {"kind": "string", "value": "planner"}}]}}]

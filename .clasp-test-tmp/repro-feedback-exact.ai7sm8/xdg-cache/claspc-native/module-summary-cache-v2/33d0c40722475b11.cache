@@ -1,0 +1,11 @@
+processResultError : Str -> Result ProcessResult
+watchedProcessError : Str -> Result WatchedProcess
+commandSpec : Str -> [Str] -> CommandSpec
+watchedCommandSpec : Str -> Str -> Str -> Str -> Int -> [Str] -> WatchedCommandSpec
+processResult : (Result Str) -> Result ProcessResult
+watchedProcessResult : (Result Str) -> Result WatchedProcess
+run : CommandSpec -> Result ProcessResult
+spawn : WatchedCommandSpec -> Result WatchedProcess
+watch : WatchedCommandSpec -> Result WatchedProcess
+reconcile : Str -> Result WatchedProcess
+await : Str -> Int -> Result WatchedProcess

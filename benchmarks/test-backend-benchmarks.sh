@@ -16,12 +16,21 @@ node "$project_root/benchmarks/run-backend-benchmarks.mjs" \
   --output "$output_path" >/dev/null
 
 test -f "$output_path"
-grep -Fq '"schemaVersion": 1' "$output_path"
+grep -Fq '"schemaVersion": 2' "$output_path"
+grep -Fq '"backendTarget": "native"' "$output_path"
+grep -Fq '"mode": "native-only"' "$output_path"
 grep -Fq '"workload": "compiler-parser"' "$output_path"
 grep -Fq '"workload": "compiler-source-text"' "$output_path"
 grep -Fq '"workload": "boundary-transport"' "$output_path"
-grep -Fq '"nativeSpeedupVsJs"' "$output_path"
 grep -Fq '"checksum"' "$output_path"
+if grep -Fq '"jsBun"' "$output_path"; then
+  echo "unexpected JS backend benchmark fields remain in native-only output" >&2
+  exit 1
+fi
+if grep -Fq '"nativeSpeedupVsJs"' "$output_path"; then
+  echo "unexpected JS comparison metric remains in native-only output" >&2
+  exit 1
+fi
 
 node --input-type=module <<'EOF' "$output_path"
 import { readFileSync } from "node:fs";
@@ -38,12 +47,20 @@ if (result.runtimeBenchmarks.length !== 2) {
 }
 
 for (const benchmark of [...result.compileBenchmarks, ...result.runtimeBenchmarks]) {
-  if (benchmark.jsBun.samplesMs.length !== 1 || benchmark.native.samplesMs.length !== 1) {
-    throw new Error(`expected one sample per backend for ${benchmark.workload}`);
+  if (benchmark.native.samplesMs.length !== 1) {
+    throw new Error(`expected one native sample for ${benchmark.workload}`);
   }
+}
 
-  if (typeof benchmark.nativeSpeedupVsJs !== "number") {
-    throw new Error(`expected numeric nativeSpeedupVsJs for ${benchmark.workload}`);
+for (const benchmark of result.compileBenchmarks) {
+  if (benchmark.native.command[1] !== "native") {
+    throw new Error(`expected native compile command for ${benchmark.workload}`);
+  }
+}
+
+for (const benchmark of result.runtimeBenchmarks) {
+  if (typeof benchmark.native.checksum !== "number") {
+    throw new Error(`expected native checksum for ${benchmark.workload}`);
   }
 }
 EOF

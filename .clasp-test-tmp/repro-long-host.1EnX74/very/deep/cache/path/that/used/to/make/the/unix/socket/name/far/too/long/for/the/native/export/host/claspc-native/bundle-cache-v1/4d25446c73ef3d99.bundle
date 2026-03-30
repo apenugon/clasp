@@ -1,0 +1,17 @@
+module Main
+import Shared.User
+import Shared.Render
+main : Str
+main = renderUser primaryUser
+
+-- CLASP_PROJECT_MODULE --
+module Shared.User
+record User = { name : Str, role : Str }
+primaryUser : User
+primaryUser = User { name = "Ada", role = "planner" }
+
+-- CLASP_PROJECT_MODULE --
+module Shared.Render
+import Shared.User
+renderUser : User -> Str
+renderUser user = textJoin ":" [user.name, user.role]

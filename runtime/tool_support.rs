@@ -26,6 +26,7 @@ pub const PROJECT_BUNDLE_SEPARATOR: &str = "\n-- CLASP_PROJECT_MODULE --\n";
 const PROJECT_BUNDLE_CACHE_VERSION: &str = "bundle-cache-v1";
 const NATIVE_EXPORT_HOST_VERSION: &str = "export-host-v1";
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
+const DEFAULT_SHORT_HOST_ROOT: &str = "/tmp/clasp-native-export-host";
 const NATIVE_EXPORT_HOST_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(test)]
@@ -435,11 +436,28 @@ fn native_export_host_socket_path(image_path_text: &str) -> Option<PathBuf> {
     let current_exe_bytes = fs::read(current_exe).ok()?;
     let image_bytes = fs::read(image_path_text).ok()?;
     let host_key = stable_fingerprint_bytes(&[current_exe_bytes, image_bytes].concat());
-    Some(native_export_host_dir().join(format!("{host_key}.sock")))
+    let file_name = format!("{host_key}.sock");
+    let primary_path = native_export_host_dir().join(&file_name);
+    if unix_socket_path_is_short_enough(&primary_path) {
+        Some(primary_path)
+    } else {
+        let cache_root_key = stable_fingerprint_text(&native_export_host_dir().display().to_string());
+        Some(short_native_export_host_dir(&cache_root_key).join(file_name))
+    }
 }
 
 fn native_export_host_lock_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("sock.lock")
+}
+
+fn unix_socket_path_is_short_enough(path: &Path) -> bool {
+    path.as_os_str().as_encoded_bytes().len() < 104
+}
+
+fn short_native_export_host_dir(cache_root_key: &str) -> PathBuf {
+    PathBuf::from(DEFAULT_SHORT_HOST_ROOT)
+        .join(NATIVE_EXPORT_HOST_VERSION)
+        .join(cache_root_key)
 }
 
 fn write_host_frame(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), String> {
@@ -559,7 +577,18 @@ fn native_export_host_failures() -> &'static Mutex<HashSet<String>> {
     NATIVE_EXPORT_HOST_FAILURES.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+fn compiler_native_image_is_stateful(image_path_text: &str) -> bool {
+    Path::new(image_path_text)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".compiler.native.image.json"))
+        .unwrap_or(false)
+}
+
 fn should_bypass_native_export_host(image_path_text: &str, export_name: &str) -> bool {
+    if compiler_native_image_is_stateful(image_path_text) {
+        return true;
+    }
     let key = native_export_host_failure_key(image_path_text, export_name);
     native_export_host_failures()
         .lock()
@@ -1684,6 +1713,51 @@ mod tests {
             "/tmp/compiler-b.native.image.json",
             "nativeImageProjectModuleDeclsText"
         ));
+    }
+
+    #[test]
+    fn compiler_images_bypass_the_native_export_host() {
+        assert!(super::should_bypass_native_export_host(
+            "/tmp/embedded.compiler.native.image.json",
+            "checkProjectText"
+        ));
+        assert!(super::should_bypass_native_export_host(
+            "/tmp/stage1.compiler.native.image.json",
+            "nativeImageProjectBuildPlanText"
+        ));
+        assert!(!super::should_bypass_native_export_host(
+            "/tmp/embedded.native.image.json",
+            "checkProjectText"
+        ));
+    }
+
+    #[test]
+    fn native_export_host_socket_path_falls_back_to_short_root_for_long_cache_paths() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("long-host-cache");
+        let image_root = unique_test_root("long-host-image");
+        let mut deep_cache_root = cache_root.clone();
+        for _ in 0..8 {
+            deep_cache_root = deep_cache_root.join("deep-cache-segment");
+        }
+        fs::create_dir_all(&deep_cache_root).expect("create deep cache root");
+        fs::create_dir_all(&image_root).expect("create image root");
+        std::env::set_var("XDG_CACHE_HOME", &deep_cache_root);
+
+        let image_path = image_root.join("compiler.native.image.json");
+        fs::write(&image_path, "{\"module\":\"Main\"}").expect("write image");
+
+        let socket_path = super::native_export_host_socket_path(image_path.to_str().expect("utf8 image path"))
+            .expect("socket path");
+        let short_root = PathBuf::from(super::DEFAULT_SHORT_HOST_ROOT)
+            .join(super::NATIVE_EXPORT_HOST_VERSION);
+
+        assert!(socket_path.starts_with(&short_root));
+        assert!(super::unix_socket_path_is_short_enough(&socket_path));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+        let _ = fs::remove_dir_all(image_root);
     }
 
     #[test]

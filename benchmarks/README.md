@@ -7,7 +7,7 @@ The goal is to measure whether AI coding harnesses perform better on realistic s
 ## Layout
 
 - `run-benchmark.mjs`: task preparation and verification runner
-- `run-backend-benchmarks.mjs`: JS/Bun versus native backend compile-time and runtime comparison runner
+- `run-backend-benchmarks.mjs`: native-only backend compile-time and runtime benchmark runner
 - `run-codex-harness.sh` / `run-claude-harness.sh`: harness wrappers for repeated runs
 - `run-codex-series.sh` / `run-claude-series.sh`: repeated-run helpers for mirrored task families
 - `result-schema.json`: result record format
@@ -350,16 +350,17 @@ bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-1
 ```
 
-Run the backend compile-time and runtime comparison between the current JS/Bun path and the native backend runtime bundle:
+Run the native-only backend compile-time and runtime benchmark lane:
 
 ```sh
 node benchmarks/run-backend-benchmarks.mjs
 ```
 
-The backend benchmark writes a machine-readable JSON report under `benchmarks/results/backend/`. It currently measures:
+The backend benchmark writes a machine-readable JSON report under `benchmarks/results/backend/`. It measures:
 
-- compile time for `claspc compile` versus `claspc native` on `examples/compiler-parser.clasp` and `src/Main.clasp`
-- runtime throughput for compiler-text and boundary-transport workloads using `bun` versus the Rust native runtime bundle in `runtime/clasp_runtime.rs`
+- native backend compile time for `claspc native` on `examples/compiler-parser.clasp` and `src/Main.clasp`
+- native runtime throughput and output checksum for compiler-text and boundary-transport workloads through the Rust native runtime bundle in `runtime/clasp_runtime.rs`
+- native-only backend acceptance data, without treating backend-emitted JavaScript as a supported comparison target
 
 For faster local smoke checks, reduce the sample counts and runtime iterations:
 

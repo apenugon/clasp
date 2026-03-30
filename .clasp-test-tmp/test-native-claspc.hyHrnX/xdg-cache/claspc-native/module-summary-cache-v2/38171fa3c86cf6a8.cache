@@ -1,0 +1,20 @@
+currentCustomer : SupportCustomer
+supportSession : AuthSession
+supportTenantId : AuthSession -> Str
+previewTicket : TicketDraft -> TicketPreview
+publishedCustomer : Empty -> SupportCustomer
+dashboard : Empty -> Page
+headlineView : View
+introView : View
+tenantView : View
+previewForm : View
+previewSection : View
+dashboardLinks : View
+dashboardContent : View
+dashboardBody : View
+previewResultPage : TicketDraft -> Page
+renderPreviewPage : TicketPreview -> Page
+previewBody : TicketPreview -> View
+customerExportPage : Empty -> Page
+renderCustomerExportPage : SupportCustomer -> Page
+customerExportBody : SupportCustomer -> View
