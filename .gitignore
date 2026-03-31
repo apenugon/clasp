@@ -24,4 +24,6 @@ benchmarks/workspaces/*
 !benchmarks/workspaces/.gitkeep
 /.clasp-agents/
 /.clasp-swarm/
+/.clasp-test-tmp/
+/.clasp-verify-tmp/
 runtime/target/

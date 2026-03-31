@@ -43,8 +43,33 @@ case "$export_name" in
   nativeProjectText)
     printf 'native ir\n' > "$output_path"
     ;;
-  nativeImageProjectText)
-    printf '{"image":"rebuilt"}\n' > "$output_path"
+  nativeImageProjectBuildPlanText)
+    cat > "$output_path" <<'PLAN'
+Main
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+["main"]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+[{"name":"main"}]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"abi":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"runtime":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"compatibility":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+[]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+ctx
+-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --
+Main
+-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --
+main
+-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --
+iface-main
+PLAN
+    ;;
+  nativeImageProjectModuleDeclsText)
+    printf '[{"kind":"global","name":"main"}]\n' > "$output_path"
     ;;
   checkProjectText)
     printf 'checked project\n' > "$output_path"
@@ -79,10 +104,17 @@ CLASPC_BIN="$test_root/bin/fake-claspc" \
 CLASP_TEST_FAKE_CLASPC_LOG="$fast_log" \
 "$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
 
-grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json main' "$fast_log" >/dev/null
-grep -F -- '--json check '"$test_root"'/examples/feedback-loop/Main.clasp' "$fast_log" >/dev/null
-if grep -F 'nativeImageProjectText' "$fast_log" >/dev/null; then
+grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json checkProjectText --project-entry='"$test_root"'/src/native-verify/fast-project/Main.clasp' "$fast_log" >/dev/null
+if grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json main' "$fast_log" >/dev/null; then
+  printf 'fast hosted verify unexpectedly executed the broad promoted snapshot\n' >&2
+  exit 1
+fi
+if grep -F 'nativeImageProject' "$fast_log" >/dev/null; then
   printf 'fast hosted verify unexpectedly rebuilt the native image\n' >&2
+  exit 1
+fi
+if grep -F -- '--json check '"$test_root"'/src/CompilerMain.clasp' "$fast_log" >/dev/null; then
+  printf 'fast hosted verify unexpectedly executed the direct compiler check\n' >&2
   exit 1
 fi
 
@@ -94,5 +126,5 @@ CLASP_TEST_FAKE_CLASPC_LOG="$full_log" \
 CLASP_NATIVE_VERIFY_MODE=full \
 "$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
 
-grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectText' "$full_log" >/dev/null
-grep -F 'exec-image '"$test_root"'/src/embedded.verify.native.image.json main' "$full_log" >/dev/null
+grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json nativeImageProjectBuildPlanText' "$full_log" >/dev/null
+grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Main' "$full_log" >/dev/null

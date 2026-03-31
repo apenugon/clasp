@@ -43,14 +43,16 @@ grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/d
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
+grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'verify_mode="${CLASP_NATIVE_VERIFY_MODE:-fast}"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'if [[ "$verify_mode" == "full" ]]; then' "$test_root/src/scripts/verify.sh" >/dev/null
-grep -F '"promotedSnapshotExecutes":true' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F '"promotedCompilerFixtureCheckExecutes":true' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'acquire_verify_lock()' "$test_root/src/scripts/verify.sh" >/dev/null
-grep -F 'nativeImageProjectText' "$test_root/src/scripts/verify.sh" >/dev/null
-grep -F 'fast_verify_source_path="${CLASP_NATIVE_VERIFY_SOURCE_INPUT:-$project_root/examples/feedback-loop/Main.clasp}"' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'nativeImageProjectBuildPlanText' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'nativeImageProjectModuleDeclsText' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/scripts/verify.sh" >/dev/null
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash
@@ -65,13 +67,14 @@ chmod +x "$test_root/bin/nix"
 fallback_capture="$test_root/fallback.txt"
 env_capture="$test_root/nix-env.txt"
 lock_capture="$test_root/lock-path.txt"
+tmpdir_capture="$test_root/tmpdir.txt"
 stderr_capture="$test_root/stderr.txt"
 writable_nested_capture="$test_root/nested.txt"
 writable_cache_root="$test_root/writable-cache"
 expected_lock_path="$test_root/.clasp-verify.lock"
 explicit_lock_file="$expected_lock_path"
 mkdir -p "$writable_cache_root"
-fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"
+fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"$'\nprintf %s "$TMPDIR" > '"$tmpdir_capture"
 
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
@@ -84,8 +87,9 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$env_capture")" == "/tmp/clasp-nix-cache" ]]
 [[ "$(< "$lock_capture")" == "$expected_lock_path" ]]
+[[ "$(< "$tmpdir_capture")" == "$tmp_root" ]]
 
-rm -f "$fallback_capture" "$env_capture" "$lock_capture"
+rm -f "$fallback_capture" "$env_capture" "$lock_capture" "$tmpdir_capture"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME="$writable_cache_root" \
@@ -97,6 +101,7 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$env_capture")" == "$writable_cache_root" ]]
 [[ "$(< "$lock_capture")" == "$expected_lock_path" ]]
+[[ "$(< "$tmpdir_capture")" == "$tmp_root" ]]
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
@@ -153,7 +158,7 @@ cp "$project_root/scripts/verify-all.sh" "$git_test_root/scripts/verify-all.sh"
 chmod a-w "$git_test_root/.git"
 chmod_restore_needed=1
 trap 'if [[ "${chmod_restore_needed:-0}" == "1" && -d "$git_test_root/.git" ]]; then chmod u+w "$git_test_root/.git" >/dev/null 2>&1 || true; fi; rm -rf "${test_root:-}"' EXIT
-rm -f "$fallback_capture" "$env_capture" "$lock_capture"
+rm -f "$fallback_capture" "$env_capture" "$lock_capture" "$tmpdir_capture"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME="$writable_cache_root" \
@@ -222,8 +227,33 @@ case "$export_name" in
   nativeProjectText)
     printf 'native ir\n' > "$output_path"
     ;;
-  nativeImageProjectText)
-    printf '{"image":"rebuilt"}\n' > "$output_path"
+  nativeImageProjectBuildPlanText)
+    cat > "$output_path" <<'PLAN'
+Main
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+["main"]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+[{"name":"main"}]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"abi":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"runtime":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+{"compatibility":"ok"}
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+[]
+-- CLASP_NATIVE_IMAGE_PLAN_FIELD --
+ctx
+-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --
+Main
+-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --
+main
+-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --
+iface-main
+PLAN
+    ;;
+  nativeImageProjectModuleDeclsText)
+    printf '[{"kind":"global","name":"main"}]\n' > "$output_path"
     ;;
   checkProjectText)
     printf 'checked project\n' > "$output_path"
@@ -258,10 +288,17 @@ CLASPC_BIN="$test_root/bin/fake-claspc" \
 CLASP_TEST_FAKE_CLASPC_LOG="$fast_log" \
 "$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
 
-grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json main' "$fast_log" >/dev/null
-grep -F -- '--json check '"$test_root"'/examples/feedback-loop/Main.clasp' "$fast_log" >/dev/null
-if grep -F 'nativeImageProjectText' "$fast_log" >/dev/null; then
+grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json checkProjectText --project-entry='"$test_root"'/src/native-verify/fast-project/Main.clasp' "$fast_log" >/dev/null
+if grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json main' "$fast_log" >/dev/null; then
+  printf 'fast hosted verify unexpectedly executed the broad promoted snapshot\n' >&2
+  exit 1
+fi
+if grep -F 'nativeImageProject' "$fast_log" >/dev/null; then
   printf 'fast hosted verify unexpectedly rebuilt the native image\n' >&2
+  exit 1
+fi
+if grep -F -- '--json check '"$test_root"'/src/CompilerMain.clasp' "$fast_log" >/dev/null; then
+  printf 'fast hosted verify unexpectedly executed the direct compiler check\n' >&2
   exit 1
 fi
 
@@ -273,5 +310,5 @@ CLASP_TEST_FAKE_CLASPC_LOG="$full_log" \
 CLASP_NATIVE_VERIFY_MODE=full \
 "$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
 
-grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectText' "$full_log" >/dev/null
-grep -F 'exec-image '"$test_root"'/src/embedded.verify.native.image.json main' "$full_log" >/dev/null
+grep -F 'exec-image '"$test_root"'/src/embedded.native.image.json nativeImageProjectBuildPlanText' "$full_log" >/dev/null
+grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Main' "$full_log" >/dev/null

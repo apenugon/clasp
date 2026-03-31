@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-native-runtime-bootstrap.XXXXXX")"

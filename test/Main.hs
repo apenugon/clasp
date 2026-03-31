@@ -5203,11 +5203,20 @@ compileTests =
           "expected hosted verify script to rebuild via nativeProjectText"
           ("nativeProjectText" `T.isInfixOf` verifyScript)
         assertBool
-          "expected hosted verify script to rebuild via nativeImageProjectText"
-          ("nativeImageProjectText" `T.isInfixOf` verifyScript)
+          "expected hosted verify script to compare native images via build plans"
+          ("nativeImageProjectBuildPlanText" `T.isInfixOf` verifyScript)
         assertBool
-          "expected fast hosted verify loop to execute the native check command directly"
-          ("--json check \"$project_root/src/Main.clasp\"" `T.isInfixOf` verifyScript)
+          "expected hosted verify script to compare native image module decls incrementally"
+          ("nativeImageProjectModuleDeclsText" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected fast hosted verify loop to run the promoted compiler image against the tiny fixture project"
+          ("fast_verify_fixture_root=\"$verify_root/fast-project\"" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected fast hosted verify loop to run the promoted compiler image against the fixture entrypoint"
+          ("checkProjectText \"$fast_verify_project_entry_arg\"" `T.isInfixOf` verifyScript)
+        assertBool
+          "expected fast hosted verify loop to avoid the extra direct compiler check"
+          (not ("--json check \"$project_root/src/CompilerMain.clasp\"" `T.isInfixOf` verifyScript))
         assertBool
           "expected hosted verify script to seed project rebuilds from the smaller compiler image"
           ("embedded.compiler.native.image.json" `T.isInfixOf` verifyScript)
@@ -5232,6 +5241,9 @@ compileTests =
         assertBool
           "expected dedicated selfhost verification to retain the full hosted loop"
           ("CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh" `T.isInfixOf` verifySelfhostScript)
+        assertBool
+          "expected dedicated selfhost verification to exercise incremental full verify scenarios"
+          ("bash scripts/test-selfhost-incremental-full-verify.sh" `T.isInfixOf` verifySelfhostScript)
         assertBool
           "expected top-level verify-all to defer hosted verification to the native hosted loop"
           (not ("cabal run claspc -- check src/Main.clasp" `T.isInfixOf` verifyAllScript))

@@ -4,6 +4,7 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 selfhost_parallel_verify_commands=$'
 bash scripts/test-selfhost.sh
+bash scripts/test-selfhost-incremental-full-verify.sh
 bash scripts/test-native-claspc.sh
 CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh
 '

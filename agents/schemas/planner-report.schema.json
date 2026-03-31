@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clasp Planner Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "objectiveSummary",
+    "strategy",
+    "tasks",
+    "testsRun",
+    "residualRisks"
+  ],
+  "properties": {
+    "objectiveSummary": { "type": "string" },
+    "strategy": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId",
+          "detail",
+          "dependencies",
+          "taskPrompt"
+        ],
+        "properties": {
+          "taskId": { "type": "string" },
+          "detail": { "type": "string" },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "taskPrompt": { "type": "string" }
+        }
+      }
+    },
+    "testsRun": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "residualRisks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

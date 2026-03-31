@@ -1576,6 +1576,124 @@ renderUser value = [value]
     }
 
     #[test]
+    fn source_export_cache_path_changes_for_same_length_bundle_edits() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("source-export-cache-path");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        let original_bundle = "module Main\nmain : Str\nmain = \"hello\"\n";
+        let changed_bundle = "module Main\nmain : Str\nmain = \"hullo\"\n";
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+
+        assert_eq!(original_bundle.len(), changed_bundle.len());
+        assert_eq!(
+            super::source_export_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                "checkSourceText",
+                original_bundle,
+            ),
+            super::source_export_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                "checkSourceText",
+                original_bundle,
+            )
+        );
+        assert_ne!(
+            super::source_export_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                "checkSourceText",
+                original_bundle,
+            ),
+            super::source_export_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                "checkSourceText",
+                changed_bundle,
+            )
+        );
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn module_summary_cache_path_changes_for_same_length_source_fingerprint_edits() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("module-summary-cache-path");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        let original_source = "module Main\nmain : Str\nmain = \"hello\"\n";
+        let changed_source = "module Main\nmain : Str\nmain = \"hullo\"\n";
+        let original_bundle_build = ProjectBundleBuild {
+            bundle: original_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(original_source),
+                import_module_names: vec![],
+            }],
+        };
+        let changed_bundle_build = ProjectBundleBuild {
+            bundle: changed_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(changed_source),
+                import_module_names: vec![],
+            }],
+        };
+        let interface_fingerprints = std::collections::HashMap::from([(
+            "Main".to_owned(),
+            "iface-main".to_owned(),
+        )]);
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+
+        assert_eq!(original_source.len(), changed_source.len());
+        assert_eq!(
+            super::module_summary_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &original_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            ),
+            super::module_summary_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &original_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            )
+        );
+        assert_ne!(
+            super::module_summary_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &original_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            ),
+            super::module_summary_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &changed_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            )
+        );
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn cache_root_defaults_to_shared_cache_path() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         std::env::remove_var("XDG_CACHE_HOME");

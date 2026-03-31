@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp_root="${CLASP_TEST_TMPDIR:-.clasp-test-tmp}"
+tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-native-claspc.XXXXXX")"
@@ -11,6 +11,7 @@ export XDG_CACHE_HOME="$test_root/xdg-cache"
 mkdir -p "$XDG_CACHE_HOME"
 server_pid=""
 feedback_loop_live_pid=""
+goal_manager_live_pid=""
 
 cleanup() {
   if [[ -n "$server_pid" ]]; then
@@ -20,6 +21,10 @@ cleanup() {
   if [[ -n "$feedback_loop_live_pid" ]]; then
     kill "$feedback_loop_live_pid" >/dev/null 2>&1 || true
     wait "$feedback_loop_live_pid" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$goal_manager_live_pid" ]]; then
+    kill "$goal_manager_live_pid" >/dev/null 2>&1 || true
+    wait "$goal_manager_live_pid" >/dev/null 2>&1 || true
   fi
   rm -rf "$test_root"
 }
@@ -32,6 +37,68 @@ stop_server() {
     wait "$server_pid" >/dev/null 2>&1 || true
     server_pid=""
   fi
+}
+
+wait_for_path_contains() {
+  local path="$1"
+  local pattern="$2"
+  local live_pid="${3:-}"
+  local attempts="${4:-300}"
+  local sleep_seconds="${5:-0.05}"
+  local attempt
+
+  for attempt in $(seq 1 "$attempts"); do
+    if [[ -f "$path" ]] && grep -F "$pattern" "$path" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ -n "$live_pid" ]] && ! kill -0 "$live_pid" >/dev/null 2>&1; then
+      break
+    fi
+    sleep "$sleep_seconds"
+  done
+
+  echo "timed out waiting for '$pattern' in $path" >&2
+  if [[ -f "$path" ]]; then
+    sed -n '1,40p' "$path" >&2 || true
+  fi
+  return 1
+}
+
+native_export_host_socket_path() {
+  local claspc_path="$1"
+  local image_path="$2"
+  local cache_root="$3"
+
+  node - "$claspc_path" "$image_path" "$cache_root" <<'EOF'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const [claspcPath, imagePath, cacheRoot] = process.argv.slice(2);
+
+function stableFingerprint(buffer) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of buffer) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
+const hostKey = stableFingerprint(Buffer.concat([
+  fs.readFileSync(claspcPath),
+  fs.readFileSync(imagePath),
+]));
+const nativeDir = path.join(cacheRoot, 'claspc-native', 'export-host-v1');
+const fileName = `${hostKey}.sock`;
+let socketPath = path.join(nativeDir, fileName);
+
+if (Buffer.byteLength(socketPath) >= 104) {
+  const cacheRootKey = stableFingerprint(Buffer.from(nativeDir));
+  socketPath = path.join('/tmp/clasp-native-export-host', 'export-host-v1', cacheRootKey, fileName);
+}
+
+process.stdout.write(`${socketPath}\n`);
+EOF
 }
 
 build_root="$project_root/runtime"
@@ -60,6 +127,9 @@ source_export_first_output="$test_root/source-export-first.txt"
 source_export_second_output="$test_root/source-export-second.txt"
 source_export_first_log="$test_root/source-export-first.log"
 source_export_second_log="$test_root/source-export-second.log"
+stale_host_cache_root="$test_root/stale-host-cache-root"
+stale_host_output="$test_root/stale-host-output.txt"
+stale_host_log="$test_root/stale-host.log"
 body_cache_project_dir="$test_root/body-cache-project"
 body_cache_project_path="$body_cache_project_dir/Main.clasp"
 body_cache_first_image="$test_root/body-cache-first.native.image.json"
@@ -129,6 +199,19 @@ swarm_feedback_loop_status_output="$test_root/swarm-feedback-loop-status.json"
 swarm_feedback_loop_native_state_root="$test_root/swarm-feedback-loop-native-state"
 swarm_feedback_loop_native_workspace_root="$test_root/swarm-feedback-loop-native-workspace"
 swarm_feedback_loop_native_workspace="$swarm_feedback_loop_native_workspace_root/workspace.txt"
+goal_manager_binary="$test_root/bin/swarm-goal-manager"
+goal_manager_state_root="$test_root/swarm-goal-manager-state"
+goal_manager_workspace_root="$test_root/swarm-goal-manager-workspace"
+goal_manager_workspace="$goal_manager_workspace_root/workspace.txt"
+goal_manager_feedback_path="$goal_manager_state_root/feedback.json"
+goal_manager_status_output="$test_root/swarm-goal-manager-status.json"
+goal_manager_native_state_root="$test_root/swarm-goal-manager-native-state"
+goal_manager_native_workspace_root="$test_root/swarm-goal-manager-native-workspace"
+goal_manager_native_workspace="$goal_manager_native_workspace_root/workspace.txt"
+goal_manager_live_state_root="$test_root/swarm-goal-manager-live-state"
+goal_manager_live_workspace_root="$test_root/swarm-goal-manager-live-workspace"
+goal_manager_live_output="$test_root/swarm-goal-manager-live-output.txt"
+goal_manager_live_status_output="$test_root/swarm-goal-manager-live-status.json"
 support_console_binary="$test_root/support-console-app"
 release_gate_binary="$test_root/release-gate-app"
 lead_app_binary="$test_root/lead-app"
@@ -376,8 +459,30 @@ fi
 workspace_path="$workspace_root/workspace.txt"
 feedback_path="$(dirname "$report_path")/feedback.json"
 builder_policy_path="$(dirname "$report_path")/builder-policy.md"
+planner_mode="${CLASP_TEST_FAKE_PLANNER_MODE:-default}"
 
-if [[ "$prompt" == *"builder subagent"* ]]; then
+if [[ "$prompt" == *"planner subagent"* ]]; then
+  printf '{"phase":"planner-start"}\n'
+  printf 'planner-progress\n' >&2
+  sleep 0.3
+  if [[ "$planner_mode" == "cycle" ]]; then
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with a cyclic planner DAG.","strategy":"Return an invalid cyclic plan so the goal manager has to reject it before spawning work.","tasks":[{"taskId":"cycle-a","detail":"First cyclic task.","dependencies":["cycle-b"],"taskPrompt":"This task participates in a cycle."},{"taskId":"cycle-b","detail":"Second cyclic task.","dependencies":["cycle-a"],"taskPrompt":"This task participates in a cycle."}],"testsRun":["planned-with-fake-codex"],"residualRisks":[]}
+JSON
+  elif [[ "$planner_mode" == "reserved-dependency" ]]; then
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with an invalid planner dependency.","strategy":"Return a planner report that incorrectly depends on the reserved planner task.","tasks":[{"taskId":"stabilize-loop","detail":"Stabilize the ordinary Clasp feedback loop manager path.","dependencies":["planner"],"taskPrompt":"Strengthen the ordinary Clasp loop path so it remains durable and easy to inspect."}],"testsRun":["planned-with-fake-codex"],"residualRisks":[]}
+JSON
+  elif [[ "$planner_mode" == "replan" ]]; then
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with a replanned task DAG.","strategy":"Ignore stale planner state and produce a fresh bounded task graph.","tasks":[{"taskId":"refresh-plan","detail":"Refresh the planner-managed ordinary loop path after planner inputs change.","dependencies":[],"taskPrompt":"Refresh the ordinary loop plan after planner inputs change and keep the execution path durable."},{"taskId":"close-gap","detail":"Close the remaining verification gap after the replanned ordinary loop task lands.","dependencies":["refresh-plan"],"taskPrompt":"Close the remaining verification gap after replanning the ordinary loop path."}],"testsRun":["planned-with-fake-codex","replanned-after-input-change"],"residualRisks":[]}
+JSON
+  else
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with a planner-managed task DAG.","strategy":"Stabilize the ordinary loop first, then tighten verification and substrate confidence.","tasks":[{"taskId":"stabilize-loop","detail":"Stabilize the ordinary Clasp feedback loop manager path.","dependencies":[],"taskPrompt":"Strengthen the ordinary Clasp loop path so it remains durable and easy to inspect."},{"taskId":"tighten-verify","detail":"Tighten verification and substrate inspection after the loop is stable.","dependencies":["stabilize-loop"],"taskPrompt":"Tighten verification coverage and substrate inspection once the ordinary loop path is stable."}],"testsRun":["planned-with-fake-codex"],"residualRisks":[]}
+JSON
+  fi
+elif [[ "$prompt" == *"builder subagent"* ]]; then
   printf '{"phase":"builder-start"}\n'
   printf 'builder-progress\n' >&2
   sleep 0.3
@@ -503,6 +608,38 @@ XDG_CACHE_HOME="$source_export_cache_root" CLASP_NATIVE_TRACE_CACHE=1 "$claspc_b
 XDG_CACHE_HOME="$source_export_cache_root" CLASP_NATIVE_TRACE_CACHE=1 "$claspc_bin" exec-image "$project_root/src/embedded.native.image.json" checkProjectText "--project-entry=$imported_cli_project_path" "$source_export_second_output" >/dev/null 2>"$source_export_second_log"
 cmp -s "$source_export_first_output" "$source_export_second_output"
 grep -F '[claspc-cache] source-export hit export=checkProjectText path=' "$source_export_second_log" >/dev/null
+
+rm -rf "$stale_host_cache_root"
+mkdir -p "$stale_host_cache_root"
+stale_host_socket_path="$(native_export_host_socket_path "$claspc_bin" "$project_root/src/embedded.native.image.json" "$stale_host_cache_root")"
+stale_host_lock_path="${stale_host_socket_path}.lock"
+mkdir -p "$(dirname "$stale_host_socket_path")"
+node - "$stale_host_socket_path" <<'EOF' &
+const fs = require('node:fs');
+const net = require('node:net');
+
+const socketPath = process.argv[2];
+fs.rmSync(socketPath, { force: true });
+const server = net.createServer();
+server.listen(socketPath, () => {});
+setInterval(() => {}, 1000);
+EOF
+stale_host_pid=$!
+for _ in $(seq 1 100); do
+  if [[ -S "$stale_host_socket_path" ]]; then
+    break
+  fi
+  sleep 0.01
+done
+[[ -S "$stale_host_socket_path" ]]
+kill -9 "$stale_host_pid" >/dev/null 2>&1 || true
+wait "$stale_host_pid" >/dev/null 2>&1 || true
+: >"$stale_host_lock_path"
+env XDG_CACHE_HOME="$stale_host_cache_root" CLASP_NATIVE_TRACE_HOST=1 \
+  timeout 25 "$claspc_bin" exec-image "$project_root/src/embedded.native.image.json" checkProjectText "--project-entry=$imported_cli_project_path" "$stale_host_output" >/dev/null 2>"$stale_host_log"
+cmp -s "$source_export_first_output" "$stale_host_output"
+grep -F '[claspc-host] cleared stale host lock socket=' "$stale_host_log" >/dev/null
+grep -F '[claspc-host] cleared orphaned host socket socket=' "$stale_host_log" >/dev/null
 
 rm -rf "$body_cache_root"
 mkdir -p "$body_cache_root"
@@ -643,9 +780,9 @@ for _ in $(seq 1 300); do
   sleep 0.05
 done
 kill -0 "$feedback_loop_live_pid" >/dev/null 2>&1
-grep -F 'builder-start' "$feedback_loop_live_builder_stdout" >/dev/null
-grep -F 'builder-progress' "$feedback_loop_live_builder_stderr" >/dev/null
-grep -F '"pid":' "$feedback_loop_live_builder_heartbeat" >/dev/null
+wait_for_path_contains "$feedback_loop_live_builder_stdout" 'builder-start' "$feedback_loop_live_pid"
+wait_for_path_contains "$feedback_loop_live_builder_stderr" 'builder-progress' "$feedback_loop_live_pid"
+wait_for_path_contains "$feedback_loop_live_builder_heartbeat" '"pid":' "$feedback_loop_live_pid"
 wait "$feedback_loop_live_pid"
 feedback_loop_live_pid=""
 grep -F '"completed":true' "$feedback_loop_live_builder_heartbeat" >/dev/null
@@ -1164,6 +1301,209 @@ CLASP_LOOP_COMMAND=status "$swarm_feedback_loop_binary" "$swarm_feedback_loop_na
 grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+
+goal_manager_state_root_abs="$test_root_abs/swarm-goal-manager-state"
+goal_manager_workspace_root_abs="$test_root_abs/swarm-goal-manager-workspace"
+goal_manager_workspace_abs="$goal_manager_workspace_root_abs/workspace.txt"
+goal_manager_feedback_path_abs="$goal_manager_state_root_abs/feedback.json"
+goal_manager_status_output_abs="$test_root_abs/swarm-goal-manager-status.json"
+goal_manager_native_state_root_abs="$test_root_abs/swarm-goal-manager-native-state"
+goal_manager_native_workspace_root_abs="$test_root_abs/swarm-goal-manager-native-workspace"
+goal_manager_native_workspace_abs="$goal_manager_native_workspace_root_abs/workspace.txt"
+goal_manager_live_state_root_abs="$test_root_abs/swarm-goal-manager-live-state"
+goal_manager_live_workspace_root_abs="$test_root_abs/swarm-goal-manager-live-workspace"
+goal_manager_live_output_abs="$test_root_abs/swarm-goal-manager-live-output.txt"
+goal_manager_live_status_output_abs="$test_root_abs/swarm-goal-manager-live-status.json"
+goal_manager_budget_fail_state_root_abs="$test_root_abs/swarm-goal-manager-budget-fail-state"
+goal_manager_cycle_fail_state_root_abs="$test_root_abs/swarm-goal-manager-cycle-fail-state"
+goal_manager_reserved_dep_fail_state_root_abs="$test_root_abs/swarm-goal-manager-reserved-dep-fail-state"
+goal_manager_replan_state_root_abs="$test_root_abs/swarm-goal-manager-replan-state"
+goal_manager_replan_workspace_root_abs="$test_root_abs/swarm-goal-manager-replan-workspace"
+goal_manager_replan_workspace_abs="$goal_manager_replan_workspace_root_abs/workspace.txt"
+
+"$claspc_bin" --json check "$project_root/examples/swarm-native/GoalManager.clasp" | grep -F '"status":"ok"' >/dev/null
+goal_manager_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"objectiveId":"improve-clasp"' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"plannerSummary":"Improve Clasp with a planner-managed task DAG."' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"plannedTaskIds":["stabilize-loop","tighten-verify"]' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"allTaskIds":["planner","stabilize-loop","tighten-verify"]' >/dev/null
+printf '%s\n' "$goal_manager_output" | grep -F '"completedTaskIds":["planner","stabilize-loop","tighten-verify"]' >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_workspace_abs" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_feedback_path_abs" >/dev/null
+grep -F '"objectiveSummary":"Improve Clasp with a planner-managed task DAG."' "$goal_manager_state_root_abs/planner-1.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_state_root_abs/loop-stabilize-loop/feedback.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_state_root_abs/loop-tighten-verify/feedback.json" >/dev/null
+grep -F 'stabilize-loop' "$goal_manager_state_root_abs/task-stabilize-loop.md" >/dev/null
+grep -F 'tighten-verify' "$goal_manager_state_root_abs/task-tighten-verify.md" >/dev/null
+grep -F '"valid":true' "$goal_manager_state_root_abs/plan-validation.json" >/dev/null
+CLASP_MANAGER_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_state_root_abs" >"$goal_manager_status_output_abs"
+grep -F '"phase":"completed"' "$goal_manager_status_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_status_output_abs" >/dev/null
+grep -F '"plannedTaskIds":["stabilize-loop","tighten-verify"]' "$goal_manager_status_output_abs" >/dev/null
+goal_manager_objective_status_output="$("$claspc_bin" --json swarm objective status "$goal_manager_state_root_abs" improve-clasp)"
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"objectiveId":"improve-clasp"' >/dev/null
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"taskCount":3' >/dev/null
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"taskId":"planner"' >/dev/null
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"taskId":"stabilize-loop"' >/dev/null
+printf '%s\n' "$goal_manager_objective_status_output" | grep -F '"taskId":"tighten-verify"' >/dev/null
+goal_manager_runs_output="$("$claspc_bin" --json swarm runs "$goal_manager_state_root_abs" stabilize-loop)"
+printf '%s\n' "$goal_manager_runs_output" | grep -F '"role":"tool"' >/dev/null
+printf '%s\n' "$goal_manager_runs_output" | grep -F '"status":"passed"' >/dev/null
+goal_manager_artifacts_output="$("$claspc_bin" --json swarm artifacts "$goal_manager_state_root_abs" stabilize-loop)"
+printf '%s\n' "$goal_manager_artifacts_output" | grep -F '"kind":"stdout"' >/dev/null
+printf '%s\n' "$goal_manager_artifacts_output" | grep -F '"kind":"stderr"' >/dev/null
+
+goal_manager_budget_fail_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='0' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_budget_fail_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_budget_fail_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$goal_manager_budget_fail_output" | grep -F '"verdict":"fail"' >/dev/null
+grep -F '"summary":"planner validation failed"' "$goal_manager_budget_fail_state_root_abs/feedback.json" >/dev/null
+grep -F '"code":"planned-task-budget"' "$goal_manager_budget_fail_state_root_abs/plan-validation.json" >/dev/null
+grep -F '"valid":false' "$goal_manager_budget_fail_state_root_abs/plan-validation.json" >/dev/null
+
+goal_manager_reserved_dep_fail_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='reserved-dependency' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_reserved_dep_fail_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_reserved_dep_fail_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$goal_manager_reserved_dep_fail_output" | grep -F '"verdict":"fail"' >/dev/null
+printf '%s\n' "$goal_manager_reserved_dep_fail_output" | grep -F '"allTaskIds":["planner"]' >/dev/null
+grep -F '"summary":"planner validation failed"' "$goal_manager_reserved_dep_fail_state_root_abs/feedback.json" >/dev/null
+grep -F '"code":"reserved-dependency"' "$goal_manager_reserved_dep_fail_state_root_abs/plan-validation.json" >/dev/null
+grep -F '"valid":false' "$goal_manager_reserved_dep_fail_state_root_abs/plan-validation.json" >/dev/null
+if grep -F 'no ready task matched' "$goal_manager_reserved_dep_fail_state_root_abs/feedback.json" >/dev/null; then
+  echo "goal manager should fail with planner validation details before ready-task fallback" >&2
+  exit 1
+fi
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/GoalManager.clasp" -o "$goal_manager_binary"
+[[ -x "$goal_manager_binary" ]]
+goal_manager_native_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_native_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  "$goal_manager_binary" "$goal_manager_native_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_native_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_native_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$goal_manager_native_output" | grep -F '"plannedTaskIds":["stabilize-loop","tighten-verify"]' >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_native_workspace_abs" >/dev/null
+grep -F '"valid":true' "$goal_manager_native_state_root_abs/plan-validation.json" >/dev/null
+CLASP_MANAGER_COMMAND=status "$goal_manager_binary" "$goal_manager_native_state_root_abs" >"$goal_manager_status_output_abs.native"
+grep -F '"phase":"completed"' "$goal_manager_status_output_abs.native" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_status_output_abs.native" >/dev/null
+
+goal_manager_live_builder_heartbeat_abs="$goal_manager_live_state_root_abs/loop-stabilize-loop/builder-1.heartbeat.json"
+goal_manager_live_child_state_abs="$goal_manager_live_state_root_abs/loop-stabilize-loop/state.json"
+CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_live_workspace_root_abs\"" \
+CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+CLASP_MANAGER_MAX_TASKS_JSON='2' \
+CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_live_state_root_abs" >"$goal_manager_live_output_abs" 2>&1 &
+goal_manager_live_pid=$!
+for _ in $(seq 1 300); do
+  if [[ -f "$goal_manager_live_builder_heartbeat_abs" && -f "$goal_manager_live_child_state_abs" ]]; then
+    break
+  fi
+  if ! kill -0 "$goal_manager_live_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+kill -0 "$goal_manager_live_pid" >/dev/null 2>&1
+wait_for_path_contains "$goal_manager_live_builder_heartbeat_abs" '"running":true' "$goal_manager_live_pid"
+wait_for_path_contains "$goal_manager_live_child_state_abs" '"phase":"builder-running"' "$goal_manager_live_pid"
+for _ in $(seq 1 300); do
+  CLASP_MANAGER_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_live_state_root_abs" >"$goal_manager_live_status_output_abs"
+  if grep -F '"phase":"task-running"' "$goal_manager_live_status_output_abs" >/dev/null 2>&1 \
+    && grep -F '"activeTaskId":"stabilize-loop"' "$goal_manager_live_status_output_abs" >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "$goal_manager_live_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+grep -F '"phase":"task-running"' "$goal_manager_live_status_output_abs" >/dev/null
+grep -F '"activeTaskId":"stabilize-loop"' "$goal_manager_live_status_output_abs" >/dev/null
+wait "$goal_manager_live_pid"
+goal_manager_live_pid=""
+grep -F '"phase":"completed"' "$goal_manager_live_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_live_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_live_state_root_abs/feedback.json" >/dev/null
+
+goal_manager_cycle_fail_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='cycle' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_native_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  "$goal_manager_binary" "$goal_manager_cycle_fail_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_cycle_fail_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$goal_manager_cycle_fail_output" | grep -F '"verdict":"fail"' >/dev/null
+grep -F '"summary":"planner validation failed"' "$goal_manager_cycle_fail_state_root_abs/feedback.json" >/dev/null
+grep -F '"code":"dependency-cycle"' "$goal_manager_cycle_fail_state_root_abs/plan-validation.json" >/dev/null
+grep -F '"valid":false' "$goal_manager_cycle_fail_state_root_abs/plan-validation.json" >/dev/null
+
+mkdir -p "$goal_manager_replan_state_root_abs"
+cat >"$goal_manager_replan_state_root_abs/planner-1.json" <<'JSON'
+{"objectiveSummary":"Stale planner report should be ignored.","strategy":"This planner report is stale and should not be reused.","tasks":[{"taskId":"stale-task","detail":"Do not run this stale task.","dependencies":[],"taskPrompt":"This stale task should never be materialized."}],"testsRun":["stale-plan"],"residualRisks":[]}
+JSON
+cat >"$goal_manager_replan_state_root_abs/planner-input.json" <<'JSON'
+{"fingerprint":"stale-fingerprint","goalText":"Old goal","plannerPolicy":"Old planner policy","schemaPath":"old.schema.json","workspaceRoot":"old-workspace"}
+JSON
+
+goal_manager_replan_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='replan' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_replan_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  CLASP_MANAGER_PLANNER_POLICY_JSON='"Prefer replanning when planner inputs change."' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_replan_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_replan_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_replan_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$goal_manager_replan_output" | grep -F '"plannerSummary":"Improve Clasp with a replanned task DAG."' >/dev/null
+printf '%s\n' "$goal_manager_replan_output" | grep -F '"plannedTaskIds":["refresh-plan","close-gap"]' >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_replan_workspace_abs" >/dev/null
+grep -F '"objectiveSummary":"Improve Clasp with a replanned task DAG."' "$goal_manager_replan_state_root_abs/planner-1.json" >/dev/null
+grep -F '"taskId":"refresh-plan"' "$goal_manager_replan_state_root_abs/planner-1.json" >/dev/null
+grep -F '"plannerPolicy":"Prefer replanning when planner inputs change."' "$goal_manager_replan_state_root_abs/planner-input.json" >/dev/null
+if grep -F '"fingerprint":"stale-fingerprint"' "$goal_manager_replan_state_root_abs/planner-input.json" >/dev/null; then
+  echo "goal manager should refresh planner input fingerprints after replanning" >&2
+  exit 1
+fi
+grep -F '"valid":true' "$goal_manager_replan_state_root_abs/plan-validation.json" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/support-console/Main.clasp" -o "$support_console_binary"
 [[ -x "$support_console_binary" ]]

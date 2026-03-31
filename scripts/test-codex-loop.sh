@@ -18,8 +18,16 @@ runtime_dir="$project_dir/runtime"
 mkdir -p \
   "$project_dir/scripts" \
   "$project_dir/agents/schemas" \
+  "$project_dir/examples/swarm-native" \
   "$project_dir/tools" \
   "$workspace_dir"
+
+cat > "$project_dir/examples/swarm-native/FeedbackLoop.clasp" <<'EOF'
+module Main
+
+main : Str
+main = ""
+EOF
 
 cp \
   "$project_root/scripts/clasp-builder.sh" \
@@ -28,6 +36,7 @@ cp \
   "$project_root/scripts/clasp-codex-loop-start.sh" \
   "$project_root/scripts/clasp-codex-loop-status.sh" \
   "$project_root/scripts/clasp-codex-loop-stop.sh" \
+  "$project_root/scripts/resolve-claspc.sh" \
   "$project_root/scripts/clasp-swarm-common.sh" \
   "$project_root/scripts/clasp-verifier.sh" \
   "$project_dir/scripts/"
@@ -42,6 +51,7 @@ chmod +x \
   "$project_dir/scripts/clasp-codex-loop-start.sh" \
   "$project_dir/scripts/clasp-codex-loop-status.sh" \
   "$project_dir/scripts/clasp-codex-loop-stop.sh" \
+  "$project_dir/scripts/resolve-claspc.sh" \
   "$project_dir/scripts/clasp-verifier.sh"
 
 cat > "$project_dir/task.md" <<'EOF'
@@ -133,6 +143,7 @@ chmod +x "$project_dir/tools/codex"
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \
     CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    CLASP_CODEX_LOOP_MODE=legacy \
     CLASP_CODEX_LOOP_MAX_ATTEMPTS=3 \
     bash scripts/clasp-codex-loop.sh task.md "$workspace_dir" "$runtime_dir" >/dev/null
 )
@@ -145,6 +156,76 @@ latest_verifier_report="$(
   find "$runtime_dir/runs" -name verifier-report.json | sort | tail -n 1
 )"
 [[ "$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.verdict);' "$latest_verifier_report")" == "pass" ]]
+
+cat > "$project_dir/tools/fake-claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+log_path="$(cd "$(dirname "$0")/.." && pwd)/native-claspc.log"
+printf '%s\n' "$*" >> "$log_path"
+
+if [[ "$1" != "run" ]]; then
+  echo "unexpected fake-claspc command: $*" >&2
+  exit 1
+fi
+
+runtime_dir="${@: -1}"
+workspace="$(node -p 'JSON.parse(process.env.CLASP_LOOP_WORKSPACE_JSON)')"
+mkdir -p "$runtime_dir"
+printf 'native-loop\n' > "$workspace/app.txt"
+cat > "$runtime_dir/builder-1.json" <<'JSON'
+{
+  "summary": "native builder report",
+  "files_touched": ["app.txt"],
+  "tests_run": ["native wrapper"],
+  "residual_risks": []
+}
+JSON
+cat > "$runtime_dir/verifier-1.json" <<'JSON'
+{
+  "verdict": "pass",
+  "summary": "native verifier accepted the workspace",
+  "findings": [],
+  "tests_run": ["native wrapper"],
+  "follow_up": []
+}
+JSON
+cp "$runtime_dir/verifier-1.json" "$runtime_dir/feedback.json"
+cat > "$runtime_dir/status.json" <<'JSON'
+{
+  "attempt": 1,
+  "phase": "completed",
+  "verdict": "pass",
+  "completed": true,
+  "objectiveId": "autonomous-confidence",
+  "lastBuilderTaskId": "builder-1",
+  "lastVerifierTaskId": "verifier-1",
+  "final": true
+}
+JSON
+EOF
+chmod +x "$project_dir/tools/fake-claspc"
+
+workspace_dir_native="$project_dir/workspace-native"
+runtime_dir_native="$project_dir/runtime-native"
+mkdir -p "$workspace_dir_native"
+cat > "$workspace_dir_native/app.txt" <<'EOF'
+initial
+EOF
+
+(
+  cd "$project_dir"
+  PATH="$project_dir/tools:$PATH" \
+    CLASP_CODEX_LOOP_MODE=native \
+    CLASPC_BIN="$project_dir/tools/fake-claspc" \
+    bash scripts/clasp-codex-loop.sh task.md "$workspace_dir_native" "$runtime_dir_native" >/dev/null
+)
+
+[[ "$(< "$workspace_dir_native/app.txt")" == "native-loop" ]]
+grep -F 'run '"$project_dir"'/examples/swarm-native/FeedbackLoop.clasp -- '"$runtime_dir_native" "$project_dir/native-claspc.log" >/dev/null
+[[ -f "$runtime_dir_native/runs/attempt1/builder-report.json" ]]
+[[ -f "$runtime_dir_native/runs/attempt1/verifier-report.json" ]]
+[[ "$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.verdict);' "$runtime_dir_native/feedback.json")" == "pass" ]]
 
 cat > "$project_dir/tools/timeout" <<'EOF'
 #!/usr/bin/env bash
@@ -165,6 +246,7 @@ EOF
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \
     CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    CLASP_CODEX_LOOP_MODE=legacy \
     CLASP_CODEX_LOOP_MAX_ATTEMPTS=3 \
     bash scripts/clasp-codex-loop.sh task.md "$workspace_dir_2" "$runtime_dir_2" >/dev/null
 )
@@ -272,6 +354,7 @@ EOF
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \
     CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    CLASP_CODEX_LOOP_MODE=legacy \
     CLASP_CODEX_LOOP_MAX_ATTEMPTS=3 \
     bash scripts/clasp-codex-loop.sh task.md "$workspace_dir_3" "$runtime_dir_3" >/dev/null
 )
@@ -374,6 +457,7 @@ EOF
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \
     CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    CLASP_CODEX_LOOP_MODE=legacy \
     CLASP_CODEX_LOOP_MAX_ATTEMPTS=3 \
     bash scripts/clasp-codex-loop.sh task.md "$workspace_dir_4" "$runtime_dir_4" >/dev/null
 )

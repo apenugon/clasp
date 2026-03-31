@@ -5,23 +5,23 @@ project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 
 compiler_root="$project_root/src"
 embedded_native_path="$compiler_root/embedded.native.image.json"
 embedded_compiler_native_path="$compiler_root/embedded.compiler.native.image.json"
-embedded_verify_ir_path="$compiler_root/embedded.verify.ir"
-embedded_verify_native_path="$compiler_root/embedded.verify.native.image.json"
 verify_root="$compiler_root/native-verify"
 verify_cache_root="$compiler_root/native-verify-cache"
 reset_verify_cache="${CLASP_NATIVE_VERIFY_RESET_CACHE:-0}"
 verify_mode="${CLASP_NATIVE_VERIFY_MODE:-fast}"
-fast_verify_source_path="${CLASP_NATIVE_VERIFY_SOURCE_INPUT:-$project_root/examples/feedback-loop/Main.clasp}"
 verify_lock_file="${CLASP_NATIVE_VERIFY_LOCK_FILE:-$compiler_root/.native-verify.lock}"
 verify_lock_dir="${verify_lock_file}.d"
 verify_lock_owner=0
+native_image_plan_field_separator=$'\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n'
+native_image_decl_plan_field_separator=$'\n-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --\n'
+native_image_decl_module_separator=$'\n-- CLASP_NATIVE_IMAGE_DECL_MODULE --\n'
+native_image_decl_module_field_separator=$'\n-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --\n'
 
 cleanup() {
   rm -rf "$verify_root"
   if [[ "$reset_verify_cache" == "1" ]]; then
     rm -rf "$verify_cache_root"
   fi
-  rm -f "$embedded_verify_ir_path" "$embedded_verify_native_path"
   release_verify_lock
 }
 
@@ -80,6 +80,176 @@ run_native_check() {
   claspc_bin="$(resolve_native_claspc_bin)"
   XDG_CACHE_HOME="$verify_cache_root/xdg" \
     "$claspc_bin" --json check "$input_path" >"$output_path"
+}
+
+module_decl_cache_path() {
+  local module_name="$1"
+
+  printf '%s\n' "$verify_cache_root/full-native-image/module-decls/${module_name//./__}.json"
+}
+
+parse_native_image_build_plan() {
+  local build_plan_path="$1"
+  local output_path="$2"
+
+  node - "$build_plan_path" "$output_path" <<'JS'
+const fs = require("node:fs");
+
+const buildPlanPath = process.argv[2];
+const outputPath = process.argv[3];
+const fieldSeparator = "\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n";
+const declPlanFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_PLAN_FIELD --\n";
+const declModuleSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE --\n";
+const declModuleFieldSeparator = "\n-- CLASP_NATIVE_IMAGE_DECL_MODULE_FIELD --\n";
+
+const text = fs.readFileSync(buildPlanPath, "utf8");
+const fields = text.split(fieldSeparator);
+if (fields.length !== 8) {
+  throw new Error(`expected 8 native image build plan fields in ${buildPlanPath}, found ${fields.length}`);
+}
+const declPlanFields = fields[7].split(declPlanFieldSeparator);
+if (declPlanFields.length !== 2) {
+  throw new Error(`expected 2 decl plan fields in ${buildPlanPath}, found ${declPlanFields.length}`);
+}
+const modules = declPlanFields[1].trim() === ""
+  ? []
+  : declPlanFields[1].split(declModuleSeparator).filter(Boolean).map((entry) => {
+      const moduleFields = entry.split(declModuleFieldSeparator);
+      if (moduleFields.length !== 3) {
+        throw new Error(`expected 3 module decl fields in ${buildPlanPath}, found ${moduleFields.length}`);
+      }
+      return {
+        moduleName: moduleFields[0],
+        declNamesText: moduleFields[1],
+        interfaceFingerprint: moduleFields[2],
+      };
+    });
+
+fs.writeFileSync(
+  outputPath,
+  JSON.stringify(
+    {
+      moduleName: fields[0],
+      exportsText: fields[1],
+      entrypointsText: fields[2],
+      abiText: fields[3],
+      runtimeText: fields[4],
+      compatibilityText: fields[5],
+      constructorDeclsText: fields[6],
+      declPlanText: fields[7],
+      declContextFingerprint: declPlanFields[0],
+      modules,
+    },
+    null,
+    2,
+  ),
+);
+JS
+}
+
+compute_incremental_verify_modules() {
+  local current_plan_json="$1"
+  local previous_plan_json="$2"
+  local current_decl_dir="$3"
+  local cache_root="$4"
+  local output_path="$5"
+
+  node - "$project_root" "$current_plan_json" "$previous_plan_json" "$current_decl_dir" "$cache_root" "$output_path" <<'JS'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const projectRoot = process.argv[2];
+const currentPlanPath = process.argv[3];
+const previousPlanPath = process.argv[4];
+const currentDeclDir = process.argv[5];
+const cacheRoot = process.argv[6];
+const outputPath = process.argv[7];
+
+const currentPlan = JSON.parse(fs.readFileSync(currentPlanPath, "utf8"));
+const previousPlan = fs.existsSync(previousPlanPath)
+  ? JSON.parse(fs.readFileSync(previousPlanPath, "utf8"))
+  : null;
+
+const previousModules = new Map((previousPlan?.modules ?? []).map((entry) => [entry.moduleName, entry]));
+const reverseImports = new Map();
+for (const moduleEntry of currentPlan.modules) {
+  reverseImports.set(moduleEntry.moduleName, []);
+}
+
+for (const moduleEntry of currentPlan.modules) {
+  const modulePath = path.join(projectRoot, "src", ...moduleEntry.moduleName.split(".")) + ".clasp";
+  let imports = [];
+  if (fs.existsSync(modulePath)) {
+    imports = fs
+      .readFileSync(modulePath, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("import "))
+      .map((line) => line.slice("import ".length).trim())
+      .filter(Boolean);
+  }
+  for (const imported of imports) {
+    if (!reverseImports.has(imported)) {
+      reverseImports.set(imported, []);
+    }
+    reverseImports.get(imported).push(moduleEntry.moduleName);
+  }
+}
+
+const dirty = new Set();
+for (const moduleEntry of currentPlan.modules) {
+  const currentDeclPath = path.join(currentDeclDir, `${moduleEntry.moduleName}.json`);
+  const previousDeclPath = path.join(cacheRoot, "full-native-image", "module-decls", `${moduleEntry.moduleName.replace(/\./g, "__")}.json`);
+  const currentDeclText = fs.existsSync(currentDeclPath) ? fs.readFileSync(currentDeclPath, "utf8") : null;
+  const previousDeclText = fs.existsSync(previousDeclPath) ? fs.readFileSync(previousDeclPath, "utf8") : null;
+  const previousEntry = previousModules.get(moduleEntry.moduleName);
+  if (!previousEntry || currentDeclText === null || previousDeclText === null || currentDeclText !== previousDeclText) {
+    dirty.add(moduleEntry.moduleName);
+  }
+  if (!previousEntry || previousEntry.interfaceFingerprint !== moduleEntry.interfaceFingerprint) {
+    dirty.add(moduleEntry.moduleName);
+    const queue = [...(reverseImports.get(moduleEntry.moduleName) ?? [])];
+    while (queue.length > 0) {
+      const dependent = queue.shift();
+      if (dirty.has(dependent)) {
+        continue;
+      }
+      dirty.add(dependent);
+      for (const next of reverseImports.get(dependent) ?? []) {
+        queue.push(next);
+      }
+    }
+  }
+}
+
+const ordered = currentPlan.modules.map((entry) => entry.moduleName).filter((name) => dirty.has(name));
+fs.writeFileSync(outputPath, ordered.join("\n"));
+JS
+}
+
+refresh_full_verify_cache() {
+  local current_plan_json="$1"
+  local current_decl_dir="$2"
+
+  mkdir -p "$verify_cache_root/full-native-image/module-decls"
+  cp "$current_plan_json" "$verify_cache_root/full-native-image/build-plan.json"
+
+  node - "$verify_cache_root/full-native-image/module-decls" "$current_plan_json" <<'JS'
+const fs = require("node:fs");
+const cacheDir = process.argv[2];
+const plan = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const keep = new Set(plan.modules.map((entry) => `${entry.moduleName.replace(/\./g, "__")}.json`));
+for (const entry of fs.readdirSync(cacheDir, { withFileTypes: true })) {
+  if (entry.isFile() && !keep.has(entry.name)) {
+    fs.rmSync(`${cacheDir}/${entry.name}`, { force: true });
+  }
+}
+JS
+
+  while IFS= read -r module_name || [[ -n "$module_name" ]]; do
+    [[ -z "$module_name" ]] && continue
+    cp "$current_decl_dir/$module_name.json" "$(module_decl_cache_path "$module_name")"
+  done < <(node -e 'const fs = require("node:fs"); const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); for (const entry of plan.modules) console.log(entry.moduleName);' "$current_plan_json")
 }
 
 default_parallel_jobs() {
@@ -243,9 +413,19 @@ JS
 
 run_verify() {
   local parallel_jobs="${CLASP_NATIVE_VERIFY_JOBS:-$(default_parallel_jobs)}"
-  local project_entry_arg="--project-entry=$project_root/src/Main.clasp"
-  local rebuild_commands=""
+  local full_verify_project_entry_arg="--project-entry=$project_root/src/Main.clasp"
+  local fast_verify_fixture_root="$verify_root/fast-project"
+  local fast_verify_entry_path="$fast_verify_fixture_root/Main.clasp"
+  local fast_verify_project_entry_arg="--project-entry=$fast_verify_entry_path"
   local export_commands=""
+  local promoted_build_plan_path="$verify_root/promoted.source.native-image.build-plan.txt"
+  local rebuilt_build_plan_path="$verify_root/rebuilt.source.native-image.build-plan.txt"
+  local promoted_build_plan_json="$verify_root/promoted.source.native-image.build-plan.json"
+  local previous_build_plan_json="$verify_cache_root/full-native-image/build-plan.json"
+  local promoted_module_decl_root="$verify_root/promoted.source.native-image.decls"
+  local rebuilt_module_decl_root="$verify_root/rebuilt.source.native-image.decls"
+  local incremental_modules_path="$verify_root/rebuilt.source.native-image.changed-modules.txt"
+  local incremental_module_count="0"
   local verify_summary=""
 
   case "$verify_mode" in
@@ -258,61 +438,77 @@ run_verify() {
   esac
 
   cd "$project_root"
-  if [[ "$verify_mode" == "full" ]]; then
-    append_parallel_command rebuild_commands run_native_export "$embedded_compiler_native_path" nativeProjectText "$project_entry_arg" "$embedded_verify_ir_path"
-    append_parallel_command rebuild_commands run_native_export "$embedded_compiler_native_path" nativeImageProjectText "$project_entry_arg" "$embedded_verify_native_path"
-  fi
-  run_parallel_commands "$rebuild_commands" "$parallel_jobs"
   mkdir -p "$verify_root"
 
+  if [[ "$verify_mode" == "fast" ]]; then
+    mkdir -p "$fast_verify_fixture_root"
+    cat > "$fast_verify_entry_path" <<'EOF'
+module Main
+
+import Helper
+
+main : Str
+main = helper "fast-verify"
+EOF
+    cat > "$fast_verify_fixture_root/Helper.clasp" <<'EOF'
+module Helper
+
+helper : Str -> Str
+helper value = value
+EOF
+  fi
+
   if [[ "$verify_mode" == "full" ]]; then
-    assert_json_equal "$embedded_native_path" "$embedded_verify_native_path"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" main "$verify_root/promoted.snapshot.json"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" main "$verify_root/rebuilt.snapshot.json"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" checkEntrypoint "$verify_root/promoted.check.txt"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" checkEntrypoint "$verify_root/rebuilt.check.txt"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" explainEntrypoint "$verify_root/promoted.explain.txt"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" explainEntrypoint "$verify_root/rebuilt.explain.txt"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" compileEntrypoint "$verify_root/promoted.compile.mjs"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" compileEntrypoint "$verify_root/rebuilt.compile.mjs"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" nativeEntrypoint "$verify_root/promoted.native.ir"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" nativeEntrypoint "$verify_root/rebuilt.native.ir"
-    append_parallel_command export_commands run_native_export "$embedded_native_path" nativeImageEntrypoint "$verify_root/promoted.native.image.json"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" nativeImageEntrypoint "$verify_root/rebuilt.native.image.json"
-    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" checkProjectText "$project_entry_arg" "$verify_root/promoted.source.check.txt"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" checkProjectText "$project_entry_arg" "$verify_root/rebuilt.source.check.txt"
-    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" checkCoreProjectText "$project_entry_arg" "$verify_root/promoted.source.check-core.json"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" checkCoreProjectText "$project_entry_arg" "$verify_root/rebuilt.source.check-core.json"
-    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" compileProjectText "$project_entry_arg" "$verify_root/promoted.source.compile.mjs"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" compileProjectText "$project_entry_arg" "$verify_root/rebuilt.source.compile.mjs"
-    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" nativeProjectText "$project_entry_arg" "$verify_root/promoted.source.native.ir"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" nativeProjectText "$project_entry_arg" "$verify_root/rebuilt.source.native.ir"
-    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" nativeImageProjectText "$project_entry_arg" "$verify_root/promoted.source.native.image.json"
-    append_parallel_command export_commands run_native_export "$embedded_verify_native_path" nativeImageProjectText "$project_entry_arg" "$verify_root/rebuilt.source.native.image.json"
+    append_parallel_command export_commands run_native_export "$embedded_native_path" checkProjectText "$full_verify_project_entry_arg" "$verify_root/promoted.source.check.txt"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" checkProjectText "$full_verify_project_entry_arg" "$verify_root/rebuilt.source.check.txt"
+    append_parallel_command export_commands run_native_export "$embedded_native_path" checkCoreProjectText "$full_verify_project_entry_arg" "$verify_root/promoted.source.check-core.json"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" checkCoreProjectText "$full_verify_project_entry_arg" "$verify_root/rebuilt.source.check-core.json"
+    append_parallel_command export_commands run_native_export "$embedded_native_path" compileProjectText "$full_verify_project_entry_arg" "$verify_root/promoted.source.compile.mjs"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" compileProjectText "$full_verify_project_entry_arg" "$verify_root/rebuilt.source.compile.mjs"
+    append_parallel_command export_commands run_native_export "$embedded_native_path" nativeProjectText "$full_verify_project_entry_arg" "$verify_root/promoted.source.native.ir"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" nativeProjectText "$full_verify_project_entry_arg" "$verify_root/rebuilt.source.native.ir"
+    append_parallel_command export_commands run_native_export "$embedded_native_path" nativeImageProjectBuildPlanText "$full_verify_project_entry_arg" "$promoted_build_plan_path"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" nativeImageProjectBuildPlanText "$full_verify_project_entry_arg" "$rebuilt_build_plan_path"
   else
-    append_parallel_command export_commands run_native_export "$embedded_native_path" main "$verify_root/promoted.snapshot.json"
-    append_parallel_command export_commands run_native_check "$fast_verify_source_path" "$verify_root/promoted.source.check.json"
+    append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" checkProjectText "$fast_verify_project_entry_arg" "$verify_root/promoted.compiler.check.txt"
   fi
 
   run_parallel_commands "$export_commands" "$parallel_jobs"
 
   if [[ "$verify_mode" == "full" ]]; then
-    cmp -s "$verify_root/promoted.snapshot.json" "$verify_root/rebuilt.snapshot.json"
-    cmp -s "$verify_root/promoted.check.txt" "$verify_root/rebuilt.check.txt"
-    cmp -s "$verify_root/promoted.explain.txt" "$verify_root/rebuilt.explain.txt"
-    cmp -s "$verify_root/promoted.compile.mjs" "$verify_root/rebuilt.compile.mjs"
-    cmp -s "$verify_root/promoted.native.ir" "$verify_root/rebuilt.native.ir"
-    assert_json_equal "$verify_root/promoted.native.image.json" "$verify_root/rebuilt.native.image.json"
     cmp -s "$verify_root/promoted.source.check.txt" "$verify_root/rebuilt.source.check.txt"
     cmp -s "$verify_root/promoted.source.check-core.json" "$verify_root/rebuilt.source.check-core.json"
     cmp -s "$verify_root/promoted.source.compile.mjs" "$verify_root/rebuilt.source.compile.mjs"
     cmp -s "$verify_root/promoted.source.native.ir" "$verify_root/rebuilt.source.native.ir"
-    assert_json_equal "$verify_root/promoted.source.native.image.json" "$verify_root/rebuilt.source.native.image.json"
-    verify_summary='{"mode":"full","nativeSeedMatchesPromoted":true,"nativeCheckMatchesPromoted":true,"nativeExplainMatchesPromoted":true,"nativeCompileMatchesPromoted":true,"nativeIrMatchesPromoted":true,"nativeImageMatchesPromoted":true,"nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageMatchesPromoted":true}'
+    cmp -s "$promoted_build_plan_path" "$rebuilt_build_plan_path"
+    parse_native_image_build_plan "$promoted_build_plan_path" "$promoted_build_plan_json"
+    mkdir -p "$promoted_module_decl_root" "$rebuilt_module_decl_root"
+    export_commands=""
+    while IFS= read -r module_name || [[ -n "$module_name" ]]; do
+      [[ -z "$module_name" ]] && continue
+      append_parallel_command export_commands run_native_export "$embedded_native_path" nativeImageProjectModuleDeclsText "$full_verify_project_entry_arg" "$module_name" "$promoted_module_decl_root/$module_name.json"
+    done < <(node -e 'const fs = require("node:fs"); const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); for (const entry of plan.modules) console.log(entry.moduleName);' "$promoted_build_plan_json")
+    run_parallel_commands "$export_commands" "$parallel_jobs"
+    compute_incremental_verify_modules "$promoted_build_plan_json" "$previous_build_plan_json" "$promoted_module_decl_root" "$verify_cache_root" "$incremental_modules_path"
+    incremental_module_count="$(grep -cve '^$' "$incremental_modules_path" || true)"
+
+    export_commands=""
+    while IFS= read -r module_name || [[ -n "$module_name" ]]; do
+      [[ -z "$module_name" ]] && continue
+      append_parallel_command export_commands run_native_export "$embedded_compiler_native_path" nativeImageProjectModuleDeclsText "$full_verify_project_entry_arg" "$module_name" "$rebuilt_module_decl_root/$module_name.json"
+    done < "$incremental_modules_path"
+    run_parallel_commands "$export_commands" "$parallel_jobs"
+
+    while IFS= read -r module_name || [[ -n "$module_name" ]]; do
+      [[ -z "$module_name" ]] && continue
+      cmp -s "$promoted_module_decl_root/$module_name.json" "$rebuilt_module_decl_root/$module_name.json"
+    done < "$incremental_modules_path"
+
+    refresh_full_verify_cache "$promoted_build_plan_json" "$promoted_module_decl_root"
+    verify_summary="{\"mode\":\"full\",\"nativeSourceCheckMatchesPromoted\":true,\"nativeSourceCheckCoreMatchesPromoted\":true,\"nativeSourceCompileMatchesPromoted\":true,\"nativeSourceIrMatchesPromoted\":true,\"nativeSourceImageBuildPlanMatchesPromoted\":true,\"nativeSourceChangedModuleDeclsMatchPromoted\":true,\"nativeSourceChangedModuleCount\":$incremental_module_count}"
   else
-    test -s "$verify_root/promoted.snapshot.json"
-    grep -F '"status":"ok","command":"check"' "$verify_root/promoted.source.check.json" >/dev/null
-    verify_summary='{"mode":"fast","promotedSnapshotExecutes":true,"promotedSourceCheckExecutes":true}'
+    test -s "$verify_root/promoted.compiler.check.txt"
+    verify_summary='{"mode":"fast","promotedCompilerFixtureCheckExecutes":true}'
   fi
 
   printf '%s\n' "$verify_summary"
@@ -325,9 +521,9 @@ fi
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
   if [[ "$verify_mode" == "full" ]]; then
-    run_verify | tail -n 1 | grep -F '"mode":"full","nativeSeedMatchesPromoted":true,"nativeCheckMatchesPromoted":true,"nativeExplainMatchesPromoted":true,"nativeCompileMatchesPromoted":true,"nativeIrMatchesPromoted":true,"nativeImageMatchesPromoted":true,"nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageMatchesPromoted":true'
+    run_verify | tail -n 1 | grep -F '"mode":"full","nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageBuildPlanMatchesPromoted":true,"nativeSourceChangedModuleDeclsMatchPromoted":true'
   else
-    run_verify | tail -n 1 | grep -F '"mode":"fast","promotedSnapshotExecutes":true,"promotedSourceCheckExecutes":true'
+    run_verify | tail -n 1 | grep -F '"mode":"fast","promotedCompilerFixtureCheckExecutes":true'
   fi
 else
   nix develop "$project_root" --command bash -lc "

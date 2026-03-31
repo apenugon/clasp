@@ -1001,6 +1001,64 @@ impl Drop for NativeExportHost {
     }
 }
 
+fn write_native_export_host_lock_metadata(lock_path: &Path, lock_file: &mut fs::File) -> Result<(), String> {
+    lock_file
+        .write_all(std::process::id().to_string().as_bytes())
+        .map_err(|err| {
+            format!(
+                "failed to write native export host lock metadata `{}`: {err}",
+                lock_path.display()
+            )
+        })
+}
+
+fn native_export_host_lock_owner_pid(lock_path: &Path) -> Option<u32> {
+    fs::read_to_string(lock_path).ok()?.trim().parse::<u32>().ok()
+}
+
+fn process_appears_alive(pid: u32) -> bool {
+    PathBuf::from("/proc").join(pid.to_string()).exists()
+}
+
+fn clear_native_export_host_path(path: &Path) -> bool {
+    fs::remove_file(path).is_ok()
+}
+
+fn recover_stale_native_export_host_state(socket_path: &Path, lock_path: &Path) -> bool {
+    let lock_owner_alive = native_export_host_lock_owner_pid(lock_path)
+        .map(process_appears_alive)
+        .unwrap_or(false);
+    let mut recovered = false;
+
+    if lock_path.exists() && !lock_owner_alive {
+        if clear_native_export_host_path(lock_path) {
+            recovered = true;
+            trace_native_host(&format!(
+                "cleared stale host lock socket={} lock={}",
+                socket_path.display(),
+                lock_path.display()
+            ));
+        }
+    }
+
+    if socket_path.exists() && (!lock_path.exists() || recovered) {
+        match UnixStream::connect(socket_path) {
+            Ok(stream) => drop(stream),
+            Err(err) => {
+                if clear_native_export_host_path(socket_path) {
+                    recovered = true;
+                    trace_native_host(&format!(
+                        "cleared orphaned host socket socket={} reason={err}",
+                        socket_path.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    recovered
+}
+
 fn wait_for_native_export_host(socket_path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
@@ -1012,6 +1070,27 @@ fn wait_for_native_export_host(socket_path: &Path) -> Result<(), String> {
     Err(format!(
         "timed out waiting for native export host socket `{}`",
         socket_path.display()
+    ))
+}
+
+fn wait_for_native_export_host_startup(socket_path: &Path, lock_path: &Path) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if recover_stale_native_export_host_state(socket_path, lock_path) {
+            return Ok(());
+        }
+        if socket_path.exists() {
+            return Ok(());
+        }
+        if !lock_path.exists() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Err(format!(
+        "timed out waiting for native export host startup socket=`{}` lock=`{}`",
+        socket_path.display(),
+        lock_path.display()
     ))
 }
 
@@ -1067,12 +1146,20 @@ fn execute_native_export_via_host(
                 return read_host_response(&mut stream)?;
             }
             Err(err) => {
+                recover_stale_native_export_host_state(&socket_path, &lock_path);
                 match fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(&lock_path)
                 {
-                    Ok(lock_file) => {
+                    Ok(mut lock_file) => {
+                        if let Err(message) =
+                            write_native_export_host_lock_metadata(&lock_path, &mut lock_file)
+                        {
+                            drop(lock_file);
+                            let _ = fs::remove_file(&lock_path);
+                            return Err(message);
+                        }
                         trace_native_host(&format!(
                             "starting host image={} socket={} reason={err}",
                             image_path_text,
@@ -1084,7 +1171,7 @@ fn execute_native_export_via_host(
                         spawn_result?;
                     }
                     Err(lock_err) if lock_err.kind() == ErrorKind::AlreadyExists => {
-                        wait_for_native_export_host(&socket_path)?;
+                        wait_for_native_export_host_startup(&socket_path, &lock_path)?;
                     }
                     Err(lock_err) => {
                         return Err(format!(
@@ -1518,6 +1605,7 @@ mod tests {
         project_bundle_cache_dir, project_bundle_cache_key, PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
+    use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1527,6 +1615,14 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-tool-support-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    fn unique_short_socket_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("cts-{name}-{}-{stamp}", std::process::id()))
     }
 
     #[test]
@@ -1729,6 +1825,40 @@ mod tests {
             "/tmp/embedded.native.image.json",
             "checkProjectText"
         ));
+    }
+
+    #[test]
+    fn stale_native_export_host_state_recovers_empty_lock_and_orphaned_socket() {
+        let root = unique_short_socket_root("stale");
+        fs::create_dir_all(&root).expect("create host state root");
+        let socket_path = root.join("host.sock");
+        let lock_path = super::native_export_host_lock_path(&socket_path);
+
+        let listener = UnixListener::bind(&socket_path).expect("bind stale socket");
+        drop(listener);
+        fs::write(&lock_path, "").expect("write stale lock");
+
+        assert!(socket_path.exists());
+        assert!(lock_path.exists());
+        assert!(super::recover_stale_native_export_host_state(&socket_path, &lock_path));
+        assert!(!socket_path.exists());
+        assert!(!lock_path.exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_native_export_host_state_keeps_live_lock_owner() {
+        let root = unique_short_socket_root("live");
+        fs::create_dir_all(&root).expect("create host lock root");
+        let socket_path = root.join("host.sock");
+        let lock_path = super::native_export_host_lock_path(&socket_path);
+        fs::write(&lock_path, std::process::id().to_string()).expect("write live lock");
+
+        assert!(!super::recover_stale_native_export_host_state(&socket_path, &lock_path));
+        assert!(lock_path.exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

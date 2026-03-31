@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-verify_tmp_root="${CLASP_VERIFY_TMPDIR:-$project_root/.clasp-verify-tmp}"
+verify_tmp_root="${CLASP_VERIFY_TMPDIR:-${TMPDIR:-/tmp}}"
 nix_config_features='experimental-features = nix-command flakes'
 readonly_nix_cache_root="/tmp/clasp-nix-cache"
 verify_label="${CLASP_VERIFY_LABEL:-verify-all}"

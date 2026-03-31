@@ -103,6 +103,23 @@ prepare_verifier_workspace() {
   copy_workspace "$builder_workspace" "$verifier_workspace"
 }
 
+loop_timeout_seconds() {
+  local total=0
+
+  if [[ "$builder_timeout_seconds" =~ ^[0-9]+$ ]]; then
+    total=$((total + builder_timeout_seconds))
+  fi
+  if [[ "$verifier_timeout_seconds" =~ ^[0-9]+$ ]]; then
+    total=$((total + verifier_timeout_seconds))
+  fi
+
+  if (( total == 0 )); then
+    printf '0\n'
+  else
+    printf '%s\n' $((total * retry_limit))
+  fi
+}
+
 mark_completed() {
   local task_id="$1"
   local stamp="$2"
@@ -401,110 +418,74 @@ while :; do
     fi
 
     printf '%s\n' "$task_id" > "$current_task_file"
-    feedback_file=""
-    attempt=1
+    run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_dir="$runs_root/$run_stamp-$task_id-attempt1"
+    mkdir -p "$run_dir"
 
-    while (( attempt <= retry_limit )); do
-      run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-      run_dir="$runs_root/$run_stamp-$task_id-attempt$attempt"
-      mkdir -p "$run_dir"
+    loop_feedback="$run_dir/feedback.json"
+    loop_status=0
+    loop_timeout="$(loop_timeout_seconds)"
 
-      builder_report="$run_dir/builder-report.json"
-      builder_log="$run_dir/builder-log.jsonl"
-      verifier_report="$run_dir/verifier-report.json"
-      verifier_log="$run_dir/verifier-log.jsonl"
+    reset_builder_workspace
+    run_with_timeout "$loop_timeout" \
+      env CLASP_CODEX_LOOP_MAX_ATTEMPTS="$retry_limit" \
+      bash "$project_root/scripts/clasp-codex-loop.sh" \
+      "$task_file" \
+      "$builder_workspace" \
+      "$run_dir" || loop_status=$?
 
-      if run_with_timeout "$builder_timeout_seconds" \
-        bash "$project_root/scripts/clasp-builder.sh" \
-        "$task_file" \
-        "$builder_workspace" \
-        "$builder_report" \
-        "$builder_log" \
-        "${feedback_file:-}"; then
-        :
-      else
-        builder_exit="$?"
-        write_failure_report \
-          "$verifier_report" \
-          "Builder subagent infrastructure failed before verification could run." \
-          "$builder_log" \
-          "$task_id" \
-          "builder" \
-          "$builder_exit"
-        feedback_file="$verifier_report"
-        attempt=$((attempt + 1))
-        reset_builder_workspace
-        continue
-      fi
+    verifier_report="$run_dir/verifier-report.json"
+    if [[ ! -f "$loop_feedback" && -f "$verifier_report" ]]; then
+      loop_feedback="$verifier_report"
+    fi
 
-      prepare_verifier_workspace
-
-      if run_with_timeout "$verifier_timeout_seconds" \
-        bash "$project_root/scripts/clasp-verifier.sh" \
-        "$task_file" \
-        "$verifier_workspace" \
-        "$snapshot_workspace" \
+    if [[ ! -f "$loop_feedback" ]]; then
+      write_failure_report \
         "$verifier_report" \
-        "$verifier_log"; then
-        :
-      else
-        verifier_exit="$?"
-        write_failure_report \
-          "$verifier_report" \
-          "Verifier subagent infrastructure failed before a verdict was produced." \
-          "$verifier_log" \
-          "$task_id" \
-          "verifier" \
-          "$verifier_exit"
-        feedback_file="$verifier_report"
-        attempt=$((attempt + 1))
-        reset_builder_workspace
-        continue
+        "Codex loop infrastructure failed before a durable verdict was produced." \
+        "$run_dir/loop.log" \
+        "$task_id" \
+        "loop" \
+        "$loop_status"
+      loop_feedback="$verifier_report"
+    fi
+
+    verdict="$(verdict_of "$loop_feedback")"
+
+    if [[ "$verdict" == "pass" ]]; then
+      if workspace_dirty; then
+        copy_workspace "$builder_workspace" "$snapshot_workspace"
+        date -u +%Y-%m-%dT%H:%M:%SZ > "$snapshot_workspace/.snapshot-ready"
       fi
 
-      verdict="$(verdict_of "$verifier_report")"
-
-      if [[ "$verdict" == "pass" ]]; then
-        if workspace_dirty; then
-          copy_workspace "$builder_workspace" "$snapshot_workspace"
-          date -u +%Y-%m-%dT%H:%M:%SZ > "$snapshot_workspace/.snapshot-ready"
-        fi
-
-        mark_completed "$task_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        clear_blocked "$(base_task_id_of "$task_id")"
-        clear_workaround_state "$task_id"
-        tasks_completed_this_run=$((tasks_completed_this_run + 1))
-        made_progress_this_scan=1
-        break
-      fi
-
-      feedback_file="$verifier_report"
-      attempt=$((attempt + 1))
-    done
-
-    if [[ "$attempt" -gt "$retry_limit" ]]; then
-      mark_blocked "$task_id" "$feedback_file"
-      archive_builder_workspace "$run_dir/failed-builder-workspace"
-      reset_builder_workspace
-
-      if is_workaround_task "$task_id"; then
-        echo "workaround task $task_id blocked after $retry_limit attempts; continuing to later tasks" >&2
-        continue
-      fi
-
-      if create_workaround_task "$task_file" "$feedback_file" >/dev/null; then
-        echo "task $task_id blocked after $retry_limit attempts; generated workaround and continuing" >&2
-        restart_scan=1
-        break
-      else
-        echo "task $task_id blocked after $retry_limit attempts; workaround budget exhausted, continuing" >&2
+      mark_completed "$task_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      clear_blocked "$(base_task_id_of "$task_id")"
+      clear_workaround_state "$task_id"
+      tasks_completed_this_run=$((tasks_completed_this_run + 1))
+      made_progress_this_scan=1
+      if (( max_tasks > 0 && tasks_completed_this_run >= max_tasks )); then
+        break 2
       fi
       continue
     fi
 
-    if (( max_tasks > 0 && tasks_completed_this_run >= max_tasks )); then
-      break 2
+    mark_blocked "$task_id" "$loop_feedback"
+    archive_builder_workspace "$run_dir/failed-builder-workspace"
+    reset_builder_workspace
+
+    if is_workaround_task "$task_id"; then
+      echo "workaround task $task_id blocked after $retry_limit attempts; continuing to later tasks" >&2
+      continue
     fi
+
+    if create_workaround_task "$task_file" "$loop_feedback" >/dev/null; then
+      echo "task $task_id blocked after $retry_limit attempts; generated workaround and continuing" >&2
+      restart_scan=1
+      break
+    else
+      echo "task $task_id blocked after $retry_limit attempts; workaround budget exhausted, continuing" >&2
+    fi
+    continue
   done < <(task_file_list)
 
   if (( restart_scan )); then

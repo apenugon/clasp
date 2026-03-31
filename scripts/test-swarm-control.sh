@@ -179,6 +179,7 @@ make_autopilot_test_project() {
 
   mkdir -p "$project_dir/scripts" "$project_dir/tools" "$project_dir/agents/tasks" "$project_dir/verifier-state"
   cp "$project_root/scripts/clasp-autopilot.sh" "$project_dir/scripts/clasp-autopilot.sh"
+  cp "$project_root/scripts/clasp-codex-loop.sh" "$project_dir/scripts/clasp-codex-loop.sh"
   printf '%s\n' "$scenario" > "$project_dir/scenario"
 
   cat > "$project_dir/scripts/clasp-builder.sh" <<'EOF'
@@ -280,6 +281,7 @@ EOF
 
   chmod +x \
     "$project_dir/scripts/clasp-autopilot.sh" \
+    "$project_dir/scripts/clasp-codex-loop.sh" \
     "$project_dir/scripts/clasp-builder.sh" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/tools/flock"
