@@ -2678,4 +2678,17 @@ function posixJoin(...segments) {
   return segments.join("/");
 }
 
-await main();
+const invokedAsScript =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+
+if (invokedAsScript) {
+  await main();
+}
+
+export {
+  buildBenchmarkSuiteComparisons,
+  loadResults,
+  matchesSummaryFilter,
+  publicAppBenchmark
+};

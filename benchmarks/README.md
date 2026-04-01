@@ -316,6 +316,13 @@ bash benchmarks/run-codex-series.sh app 5 public-app-1 gpt-5.4
 node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes public-app-1
 ```
 
+Run the machine-readable public-app benchmark signal that the ordinary Clasp goal manager can consume:
+
+```sh
+CLASP_ALLOW_BOOTSTRAP_RECOVERY=true \
+  node benchmarks/run-public-app-signal.mjs --count 1 --notes public-app-live
+```
+
 Run the mirrored repeated `lead-segment` series for both languages:
 
 ```sh

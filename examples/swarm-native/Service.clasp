@@ -1,0 +1,109 @@
+module Service
+
+foreign upgradeCommandRaw : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str = "upgradeCommandJson"
+
+record ServiceStatus = {
+  serviceRoot : Str,
+  serviceId : Str,
+  generation : Int,
+  status : Str,
+  ownerPid : Int,
+  heartbeatPath : Str,
+  transactionPath : Str,
+  snapshotPath : Str,
+  exitCode : Int,
+  updatedAtMs : Int
+}
+
+record ServiceUpgradeTransaction = {
+  serviceRoot : Str,
+  serviceId : Str,
+  generation : Int,
+  phase : Str,
+  committed : Bool,
+  rolledBack : Bool,
+  reason : Str,
+  servicePath : Str,
+  transactionPath : Str,
+  snapshotPath : Str,
+  heartbeatPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  candidatePid : Int,
+  exitCode : Int,
+  updatedAtMs : Int
+}
+
+record ServiceUpgradeSpec = {
+  cwd : Str,
+  serviceRoot : Str,
+  serviceId : Str,
+  snapshotText : Str,
+  readyPath : Str,
+  readyContains : Str,
+  watchPollMs : Int,
+  readyPollMs : Int,
+  readyTimeoutMs : Int,
+  commitGraceMs : Int,
+  command : [Str]
+}
+
+serviceStatusPath : Str -> Str
+serviceStatusPath serviceRoot = pathJoin [serviceRoot, "service.json"]
+
+serviceStatusError : Str -> Result ServiceStatus
+serviceStatusError message = Err message
+
+serviceStatusFromRaw : Result Str -> Result ServiceStatus
+serviceStatusFromRaw value = match value {
+  Ok raw -> Ok (decode ServiceStatus raw),
+  Err message -> serviceStatusError message
+}
+
+serviceUpgradeError : Str -> Result ServiceUpgradeTransaction
+serviceUpgradeError message = Err message
+
+serviceUpgradeFromRaw : Result Str -> Result ServiceUpgradeTransaction
+serviceUpgradeFromRaw value = match value {
+  Ok raw -> Ok (decode ServiceUpgradeTransaction raw),
+  Err message -> serviceUpgradeError message
+}
+
+serviceUpgradeSpec : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> ServiceUpgradeSpec
+serviceUpgradeSpec cwd serviceRoot serviceId snapshotText readyPath readyContains watchPollMs readyPollMs readyTimeoutMs commitGraceMs command =
+  ServiceUpgradeSpec {
+    cwd = cwd,
+    serviceRoot = serviceRoot,
+    serviceId = serviceId,
+    snapshotText = snapshotText,
+    readyPath = readyPath,
+    readyContains = readyContains,
+    watchPollMs = watchPollMs,
+    readyPollMs = readyPollMs,
+    readyTimeoutMs = readyTimeoutMs,
+    commitGraceMs = commitGraceMs,
+    command = command
+  }
+
+readServiceStatus : Str -> Result ServiceStatus
+readServiceStatus serviceRoot = match readFile (serviceStatusPath serviceRoot) {
+  Ok raw -> serviceStatusFromRaw (Ok raw),
+  Err message -> serviceStatusError message
+}
+
+upgradeService : ServiceUpgradeSpec -> Result ServiceUpgradeTransaction
+upgradeService spec =
+  serviceUpgradeFromRaw (
+    upgradeCommandRaw
+      spec.cwd
+      spec.serviceRoot
+      spec.serviceId
+      spec.snapshotText
+      spec.readyPath
+      spec.readyContains
+      spec.watchPollMs
+      spec.readyPollMs
+      spec.readyTimeoutMs
+      spec.commitGraceMs
+      spec.command
+  )

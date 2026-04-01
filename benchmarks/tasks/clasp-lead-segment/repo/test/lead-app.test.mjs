@@ -1,25 +1,21 @@
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-
-async function request(port, routePath, init = {}) {
-  return fetch(`http://127.0.0.1:${port}${routePath}`, init);
-}
-
-const projectRoot = process.env.CLASP_PROJECT_ROOT;
-const binaryPath = process.env.CLASP_BENCH_BINARY;
-
-if (!projectRoot || !binaryPath) {
-  throw new Error("CLASP_PROJECT_ROOT and CLASP_BENCH_BINARY are required");
-}
-
-const {
+import {
   collectTexts,
   firstFormAction,
   formBody,
   formFieldNames,
   withNativeServer,
-} = await import(pathToFileURL(path.join(projectRoot, "benchmarks/native-http-test.mjs")).href);
+} from "./native-http-test.mjs";
+
+async function request(port, routePath, init = {}) {
+  return fetch(`http://127.0.0.1:${port}${routePath}`, init);
+}
+
+const binaryPath = process.env.CLASP_BENCH_BINARY;
+
+if (!binaryPath) {
+  throw new Error("CLASP_BENCH_BINARY is required");
+}
 
 function decodePage(responseText) {
   return JSON.parse(responseText);
@@ -32,7 +28,7 @@ await withNativeServer(binaryPath, async ({ port }) => {
   assert.equal(landingPage.kind, "page");
   assert.equal(landingPage.title, "Lead inbox");
   assert.equal(firstFormAction(landingPage.body), "/leads");
-  assert.deepEqual(formFieldNames(landingPage.body), ["company", "contact", "budget"]);
+  assert.deepEqual(formFieldNames(landingPage.body), ["company", "contact", "budget", "segment"]);
 
   const created = await request(port, "/leads", {
     method: "POST",

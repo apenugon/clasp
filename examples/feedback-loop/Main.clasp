@@ -37,6 +37,14 @@ record StepHandle = {
   stderrPath : Str,
   heartbeatPath : Str
 }
+record LoopUpgradeSnapshot = { state : LoopState, feedback : Str }
+record LoopUpgradeRestoreRecord = {
+  serviceRoot : Str,
+  serviceId : Str,
+  generation : Int,
+  transactionPath : Str,
+  snapshot : LoopUpgradeSnapshot
+}
 
 stateRoot : Str
 stateRoot = if textJoin "" argv == "" then "feedback-loop-state" else pathJoin argv
@@ -50,6 +58,18 @@ emptyCapabilityStatuses = []
 readEnvText : Str -> Str -> Str
 readEnvText name fallback = match envVar name {
   Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> decode Int raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> decode [Str] raw,
   Err message -> fallback
 }
 
@@ -90,10 +110,7 @@ codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
 
 watchPollMs : Int
-watchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
-  Ok raw -> decode Int raw,
-  Err message -> 1000
-}
+watchPollMs = readEnvInt "CLASP_LOOP_WATCH_POLL_MS_JSON" 1000
 
 watchModeEnabled : Bool
 watchModeEnabled = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
@@ -102,16 +119,73 @@ watchModeEnabled = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
 }
 
 maxAttempts : Int
-maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
-  Ok raw -> decode Int raw,
-  Err message -> 20
-}
+maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
 
 commandName : Str
 commandName = match envVar "CLASP_LOOP_COMMAND" {
   Ok raw -> raw,
   Err message -> "run"
 }
+
+readySignalPath : Str
+readySignalPath = readEnvText "CLASP_LOOP_READY_PATH_JSON" ""
+
+readySignalText : Str
+readySignalText = readEnvText "CLASP_LOOP_READY_TEXT_JSON" "ready"
+
+handoffCommandList : [Str]
+handoffCommandList = readEnvTextList "CLASP_LOOP_HANDOFF_COMMAND_JSON" emptyTexts
+
+handoffReadyPath : Str
+handoffReadyPath = readEnvText "CLASP_LOOP_HANDOFF_READY_PATH_JSON" ""
+
+handoffReadyContains : Str
+handoffReadyContains = readEnvText "CLASP_LOOP_HANDOFF_READY_CONTAINS_JSON" "ready"
+
+handoffReadyPollMs : Int
+handoffReadyPollMs = readEnvInt "CLASP_LOOP_HANDOFF_READY_POLL_MS_JSON" 50
+
+handoffReadyTimeoutMs : Int
+handoffReadyTimeoutMs = readEnvInt "CLASP_LOOP_HANDOFF_READY_TIMEOUT_MS_JSON" 10000
+
+serviceRoot : Str
+serviceRoot = readEnvText "CLASP_LOOP_SERVICE_ROOT_JSON" (pathJoin [stateRoot, "service"])
+
+serviceId : Str
+serviceId = readEnvText "CLASP_LOOP_SERVICE_ID_JSON" "feedback-loop"
+
+upgradeCommandList : [Str]
+upgradeCommandList = readEnvTextList "CLASP_LOOP_UPGRADE_COMMAND_JSON" emptyTexts
+
+upgradeReadyPath : Str
+upgradeReadyPath = readEnvText "CLASP_LOOP_UPGRADE_READY_PATH_JSON" ""
+
+upgradeReadyContains : Str
+upgradeReadyContains = readEnvText "CLASP_LOOP_UPGRADE_READY_CONTAINS_JSON" "ready"
+
+upgradeReadyPollMs : Int
+upgradeReadyPollMs = readEnvInt "CLASP_LOOP_UPGRADE_READY_POLL_MS_JSON" 50
+
+upgradeReadyTimeoutMs : Int
+upgradeReadyTimeoutMs = readEnvInt "CLASP_LOOP_UPGRADE_READY_TIMEOUT_MS_JSON" 10000
+
+upgradeCommitGraceMs : Int
+upgradeCommitGraceMs = readEnvInt "CLASP_LOOP_UPGRADE_COMMIT_GRACE_MS_JSON" 250
+
+restoreSnapshotPath : Str
+restoreSnapshotPath = readEnvText "CLASP_RT_UPGRADE_SNAPSHOT_PATH_JSON" ""
+
+restoreServiceRoot : Str
+restoreServiceRoot = readEnvText "CLASP_RT_UPGRADE_SERVICE_ROOT_JSON" ""
+
+restoreServiceId : Str
+restoreServiceId = readEnvText "CLASP_RT_UPGRADE_SERVICE_ID_JSON" ""
+
+restoreTransactionPath : Str
+restoreTransactionPath = readEnvText "CLASP_RT_UPGRADE_TRANSACTION_PATH_JSON" ""
+
+restoreGeneration : Int
+restoreGeneration = readEnvInt "CLASP_RT_UPGRADE_GENERATION_JSON" 0
 
 traceEnabled : Bool
 traceEnabled = match envVar "CLASP_LOOP_TRACE_JSON" {
@@ -166,6 +240,18 @@ builderHeartbeatPath attempt = pathJoin [stateRoot, textConcat ["builder-", enco
 
 verifierHeartbeatPath : Int -> Str
 verifierHeartbeatPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".heartbeat.json"]]
+
+handoffStdoutPath : Str
+handoffStdoutPath = pathJoin [stateRoot, "handoff.stdout.log"]
+
+handoffStderrPath : Str
+handoffStderrPath = pathJoin [stateRoot, "handoff.stderr.log"]
+
+handoffHeartbeatPath : Str
+handoffHeartbeatPath = pathJoin [stateRoot, "handoff.heartbeat.json"]
+
+restoredSnapshotPath : Str
+restoredSnapshotPath = pathJoin [stateRoot, "restored-snapshot.json"]
 
 processStdoutPath : Str -> Int -> Str
 processStdoutPath prefix attempt =
@@ -439,6 +525,18 @@ ensurePolicies = {
     ensurePolicyFile verifierPolicyPath defaultVerifierPolicyText
 }
 
+signalLoopReady : Str
+signalLoopReady =
+  if readySignalPath == "" then
+    ""
+  else
+    match writeFile readySignalPath readySignalText {
+      Ok written ->
+        "",
+      Err message ->
+        message
+    }
+
 capabilityChecklist : [Str]
 capabilityChecklist = [
   "ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes Codex directly from Clasp, and persists durable final state/status in ordinary runtime storage.",
@@ -527,6 +625,62 @@ readLoopState = match readFile loopStatePath {
   Err message ->
     emptyLoopState
 }
+
+currentUpgradeSnapshot : LoopUpgradeSnapshot
+currentUpgradeSnapshot =
+  LoopUpgradeSnapshot {
+    state = readLoopState,
+    feedback = readTextOrEmpty feedbackPath
+  }
+
+restoreSnapshotIfNeeded : Str
+restoreSnapshotIfNeeded =
+  if restoreSnapshotPath == "" then
+    ""
+  else if fileExists loopStatePath then
+    ""
+  else
+    match readFile restoreSnapshotPath {
+      Err message ->
+        textConcat ["restore-read-error:", message],
+      Ok raw ->
+        let snapshot = decode LoopUpgradeSnapshot raw in
+        let stateError = writeLoopState snapshot.state in
+        if stateError != "" then
+          textConcat ["restore-state-error:", stateError]
+        else {
+          let feedbackError =
+            if snapshot.feedback == "" then
+              ""
+            else
+              match writeFile feedbackPath snapshot.feedback {
+                Ok written ->
+                  "",
+                Err message ->
+                  message
+              } in
+          if feedbackError != "" then
+            textConcat ["restore-feedback-error:", feedbackError]
+          else
+            match
+              writeFile
+                restoredSnapshotPath
+                (encode
+                  (LoopUpgradeRestoreRecord {
+                    serviceRoot = restoreServiceRoot,
+                    serviceId = restoreServiceId,
+                    generation = restoreGeneration,
+                    transactionPath = restoreTransactionPath,
+                    snapshot = snapshot
+                  }))
+            {
+              Ok written ->
+                "",
+              Err message ->
+                textConcat ["restore-marker-error:", message]
+            }
+        }
+    }
 
 incrementAttempt : Int -> Int
 incrementAttempt value =
@@ -786,15 +940,25 @@ ensureLoopReady =
       Err message ->
         textConcat ["state-root-error:", message],
       Ok created ->
-        let baselineResult = ensureBaseline in
-        if baselineResult.exitCode != 0 then
-          textConcat ["baseline-error:", baselineResult.stderr]
+        let restoreError = restoreSnapshotIfNeeded in
+        if restoreError != "" then
+          restoreError
         else {
-          let policyError = ensurePolicies in
-          if policyError != "" then
-            textConcat ["policy-error:", policyError]
-          else
-            ""
+          let baselineResult = ensureBaseline in
+          if baselineResult.exitCode != 0 then
+            textConcat ["baseline-error:", baselineResult.stderr]
+          else {
+            let policyError = ensurePolicies in
+            if policyError != "" then
+              textConcat ["policy-error:", policyError]
+            else {
+              let readyError = signalLoopReady in
+              if readyError != "" then
+                textConcat ["ready-error:", readyError]
+              else
+                ""
+            }
+          }
         }
     }
   }
@@ -940,6 +1104,74 @@ runBuilderPhase attempt =
 runAttempt : Int -> Str
 runAttempt attempt = runBuilderPhase attempt
 
+runLoopHandoff : Str
+runLoopHandoff =
+  match mkdirAll stateRoot {
+    Err message ->
+      textConcat ["error:", message],
+    Ok created ->
+      if textJoin "" handoffCommandList == "" then
+        "error:missing-handoff-command"
+      else if handoffReadyPath == "" then
+        "error:missing-handoff-ready-path"
+      else
+        match
+          handoff (
+            handoffCommandSpec
+              launcherCwd
+              handoffStdoutPath
+              handoffStderrPath
+              handoffHeartbeatPath
+              watchPollMs
+              handoffReadyPath
+              handoffReadyContains
+              handoffReadyPollMs
+              handoffReadyTimeoutMs
+              handoffCommandList
+          )
+        {
+          Ok process -> encode process,
+          Err message -> textConcat ["error:", message]
+        }
+  }
+
+runLoopUpgrade : Str
+runLoopUpgrade = {
+  let prepError = ensureLoopReady in
+  if prepError != "" then
+    prepError
+  else if textJoin "" upgradeCommandList == "" then
+    "error:missing-upgrade-command"
+  else if serviceRoot == "" then
+    "error:missing-service-root"
+  else if serviceId == "" then
+    "error:missing-service-id"
+  else if upgradeReadyPath == "" then
+    "error:missing-upgrade-ready-path"
+  else
+    match
+      upgrade (
+        upgradeCommandSpec
+          launcherCwd
+          serviceRoot
+          serviceId
+          (encode currentUpgradeSnapshot)
+          upgradeReadyPath
+          upgradeReadyContains
+          watchPollMs
+          upgradeReadyPollMs
+          upgradeReadyTimeoutMs
+          upgradeCommitGraceMs
+          upgradeCommandList
+      )
+    {
+      Ok transaction ->
+        encode transaction,
+      Err message ->
+        textConcat ["error:", message]
+    }
+}
+
 resumeLoop : LoopState -> Str
 resumeLoop state =
   if state.final then
@@ -966,5 +1198,9 @@ main : Str
 main =
   if commandName == "status" then
     encode readLoopState
+  else if commandName == "handoff" then
+    runLoopHandoff
+  else if commandName == "upgrade" then
+    runLoopUpgrade
   else
     resumeLoop readLoopState

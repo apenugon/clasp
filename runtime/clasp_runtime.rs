@@ -13,7 +13,7 @@ use std::process::{Command as ProcessCommand, Stdio};
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CLASP_RT_LAYOUT_STRING: u32 = 1;
 const CLASP_RT_LAYOUT_BYTES: u32 = 2;
@@ -2932,6 +2932,42 @@ fn interpret_runtime_binding(
         ("awaitWatchedProcessJson", 2) => unsafe {
             clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
         },
+        ("awaitWatchedProcessTimeoutJson", 3) => unsafe {
+            clasp_rt_await_watched_process_timeout_json(
+                args[0] as *mut ClaspRtString,
+                args[1],
+                args[2],
+            ) as *mut ClaspRtHeader
+        },
+        ("handoffCommandJson", 10) => unsafe {
+            clasp_rt_handoff_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5] as *mut ClaspRtString,
+                args[6] as *mut ClaspRtString,
+                args[7],
+                args[8],
+                args[9],
+            ) as *mut ClaspRtHeader
+        },
+        ("upgradeCommandJson", 11) => unsafe {
+            clasp_rt_upgrade_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4] as *mut ClaspRtString,
+                args[5] as *mut ClaspRtString,
+                args[6],
+                args[7],
+                args[8],
+                args[9],
+                args[10],
+            ) as *mut ClaspRtHeader
+        },
         ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3077,6 +3113,42 @@ fn interpret_builtin_runtime_binding(
         ("awaitWatchedProcessJson", 2) => unsafe {
             clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
         },
+        ("awaitWatchedProcessTimeoutJson", 3) => unsafe {
+            clasp_rt_await_watched_process_timeout_json(
+                args[0] as *mut ClaspRtString,
+                args[1],
+                args[2],
+            ) as *mut ClaspRtHeader
+        },
+        ("handoffCommandJson", 10) => unsafe {
+            clasp_rt_handoff_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5] as *mut ClaspRtString,
+                args[6] as *mut ClaspRtString,
+                args[7],
+                args[8],
+                args[9],
+            ) as *mut ClaspRtHeader
+        },
+        ("upgradeCommandJson", 11) => unsafe {
+            clasp_rt_upgrade_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4] as *mut ClaspRtString,
+                args[5] as *mut ClaspRtString,
+                args[6],
+                args[7],
+                args[8],
+                args[9],
+                args[10],
+            ) as *mut ClaspRtHeader
+        },
         ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3170,6 +3242,9 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "watchCommandJson"
             | "reconcileWatchedProcessJson"
             | "awaitWatchedProcessJson"
+            | "awaitWatchedProcessTimeoutJson"
+            | "handoffCommandJson"
+            | "upgradeCommandJson"
             | "sleepMs"
             | "writeFile"
             | "appendFile"
@@ -6754,6 +6829,100 @@ fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, Stri
     Ok(initial)
 }
 
+fn spawn_watched_process_with_env_json(
+    cwd: &str,
+    stdout_path: &str,
+    stderr_path: &str,
+    heartbeat_path: &str,
+    poll_ms: u64,
+    extra_env: &[(String, String)],
+    watched_command: &[String],
+) -> Result<String, String> {
+    if watched_command.is_empty() {
+        return Err("missing_watch_command".to_owned());
+    }
+
+    let stdout_file = create_truncated_output_file(stdout_path)?;
+    let stderr_file = create_truncated_output_file(stderr_path)?;
+    let resolved_program = resolve_process_program(&watched_command[0], cwd);
+    let mut command = ProcessCommand::new(&resolved_program);
+    command
+        .args(&watched_command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let pid = child.id();
+
+    let stdout_path = stdout_path.to_owned();
+    let stderr_path = stderr_path.to_owned();
+    let heartbeat_path = heartbeat_path.to_owned();
+    let initial = watched_process_status_json(
+        pid,
+        true,
+        false,
+        -1,
+        &stdout_path,
+        &stderr_path,
+        &heartbeat_path,
+    );
+    write_watched_process_heartbeat(&heartbeat_path, &initial)?;
+
+    thread::spawn(move || loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let payload = watched_process_status_json(
+                    pid,
+                    false,
+                    true,
+                    exit_code,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                break;
+            }
+            Ok(None) => {
+                let payload = watched_process_status_json(
+                    pid,
+                    true,
+                    false,
+                    -1,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                thread::sleep(Duration::from_millis(poll_ms));
+            }
+            Err(err) => {
+                if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&stderr_path) {
+                    let _ = writeln!(file, "{err}");
+                }
+                let payload = watched_process_status_json(
+                    pid,
+                    false,
+                    true,
+                    -1,
+                    &stdout_path,
+                    &stderr_path,
+                    &heartbeat_path,
+                );
+                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
+                break;
+            }
+        }
+    });
+
+    Ok(initial)
+}
+
 fn watched_process_exists(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -6867,6 +7036,741 @@ fn await_watched_process_json(heartbeat_path: &str, poll_ms: u64) -> Result<Stri
         }
 
         return reconcile_watched_process_json(heartbeat_path);
+    }
+}
+
+fn await_watched_process_timeout_json(
+    heartbeat_path: &str,
+    poll_ms: u64,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    let clamped = poll_ms.max(50);
+    let started = Instant::now();
+    loop {
+        let (payload, decoded) = read_watched_process_payload(heartbeat_path)?;
+        let running = decoded
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let completed = decoded
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if completed || !running {
+            return Ok(payload);
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms) {
+            return Err("timeout".to_owned());
+        }
+        let pid = decoded
+            .get("pid")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            .max(0) as u32;
+        if watched_process_exists(pid) {
+            let remaining_ms = timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+            let sleep_ms = clamped.min(remaining_ms.max(1));
+            thread::sleep(Duration::from_millis(sleep_ms));
+            continue;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+        let (refreshed_payload, refreshed) = read_watched_process_payload(heartbeat_path)?;
+        let refreshed_running = refreshed
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let refreshed_completed = refreshed
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if refreshed_completed || !refreshed_running {
+            return Ok(refreshed_payload);
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms) {
+            return Err("timeout".to_owned());
+        }
+
+        return reconcile_watched_process_json(heartbeat_path);
+    }
+}
+
+fn ready_marker_matches(ready_path: &str, ready_contains: &str) -> Result<bool, String> {
+    match fs::read_to_string(ready_path) {
+        Ok(contents) => {
+            if ready_contains.is_empty() {
+                Ok(!contents.trim().is_empty())
+            } else {
+                Ok(contents.contains(ready_contains))
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn upgrade_phase_is_final(phase: &str) -> bool {
+    matches!(phase, "committed" | "completed" | "rolled_back" | "failed")
+}
+
+fn read_json_file(path: &str) -> Result<serde_json::Value, String> {
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    serde_json::from_str(&text).map_err(|err| format!("invalid json `{path}`: {err}"))
+}
+
+fn write_json_file_atomic(path: &str, value: &serde_json::Value) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    let temp_path = format!("{path}.tmp");
+    fs::write(&temp_path, value.to_string().as_bytes()).map_err(|err| err.to_string())?;
+    fs::rename(&temp_path, path).map_err(|err| err.to_string())
+}
+
+fn json_string_field(value: &serde_json::Value, key: &str) -> Result<String, String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("missing or invalid string field `{key}`"))
+}
+
+fn json_i64_field(value: &serde_json::Value, key: &str) -> Result<i64, String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| format!("missing or invalid integer field `{key}`"))
+}
+
+fn json_string_list_field(value: &serde_json::Value, key: &str) -> Result<Vec<String>, String> {
+    let Some(items) = value.get(key).and_then(serde_json::Value::as_array) else {
+        return Err(format!("missing or invalid string-list field `{key}`"));
+    };
+    let mut rendered = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(text) = item.as_str() else {
+            return Err(format!("invalid string-list item in `{key}`"));
+        };
+        rendered.push(text.to_owned());
+    }
+    Ok(rendered)
+}
+
+fn remove_file_if_exists(path: &str) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn service_status_json(
+    service_root: &str,
+    service_id: &str,
+    generation: i64,
+    status: &str,
+    owner_pid: i64,
+    heartbeat_path: &str,
+    transaction_path: &str,
+    snapshot_path: &str,
+    exit_code: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "serviceRoot": service_root,
+        "serviceId": service_id,
+        "generation": generation,
+        "status": status,
+        "ownerPid": owner_pid,
+        "heartbeatPath": heartbeat_path,
+        "transactionPath": transaction_path,
+        "snapshotPath": snapshot_path,
+        "exitCode": exit_code,
+        "updatedAtMs": runtime_time_unix_ms(),
+    })
+}
+
+fn upgrade_transaction_json(
+    service_root: &str,
+    service_id: &str,
+    generation: i64,
+    phase: &str,
+    committed: bool,
+    rolled_back: bool,
+    reason: &str,
+    service_path: &str,
+    transaction_path: &str,
+    snapshot_path: &str,
+    heartbeat_path: &str,
+    stdout_path: &str,
+    stderr_path: &str,
+    candidate_pid: i64,
+    exit_code: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "serviceRoot": service_root,
+        "serviceId": service_id,
+        "generation": generation,
+        "phase": phase,
+        "committed": committed,
+        "rolledBack": rolled_back,
+        "reason": reason,
+        "servicePath": service_path,
+        "transactionPath": transaction_path,
+        "snapshotPath": snapshot_path,
+        "heartbeatPath": heartbeat_path,
+        "stdoutPath": stdout_path,
+        "stderrPath": stderr_path,
+        "candidatePid": candidate_pid,
+        "exitCode": exit_code,
+        "updatedAtMs": runtime_time_unix_ms(),
+    })
+}
+
+fn clear_stale_upgrade_lock(lock_path: &str) -> Result<(), String> {
+    if !Path::new(lock_path).exists() {
+        return Ok(());
+    }
+    let Ok(lock_value) = read_json_file(lock_path) else {
+        return Ok(());
+    };
+    let Some(transaction_path) = lock_value
+        .get("transactionPath")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let Ok(transaction_value) = read_json_file(transaction_path) else {
+        return Ok(());
+    };
+    let Some(phase) = transaction_value.get("phase").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+    if upgrade_phase_is_final(phase) {
+        remove_file_if_exists(lock_path)?;
+    }
+    Ok(())
+}
+
+fn upgrade_wait_result(transaction_path: &str, timeout_ms: u64) -> Result<String, String> {
+    let started = Instant::now();
+    loop {
+        if Path::new(transaction_path).exists() {
+            let payload = fs::read_to_string(transaction_path).map_err(|err| err.to_string())?;
+            if !payload.trim().is_empty() {
+                let decoded: serde_json::Value = serde_json::from_str(&payload)
+                    .map_err(|err| format!("invalid upgrade transaction heartbeat: {err}"))?;
+                let phase = decoded
+                    .get("phase")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                if phase == "committed" || phase == "completed" {
+                    return Ok(payload);
+                }
+                if phase == "rolled_back" || phase == "failed" {
+                    let reason = decoded
+                        .get("reason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("upgrade failed");
+                    return Err(format!("upgrade_rolled_back:{reason}"));
+                }
+            }
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms.max(1)) {
+            return Err("upgrade_wait_timeout".to_owned());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn run_upgrade_supervisor_from_config(config_path: &str) -> Result<(), String> {
+    let config = read_json_file(config_path)?;
+    let cwd = json_string_field(&config, "cwd")?;
+    let service_root = json_string_field(&config, "serviceRoot")?;
+    let service_id = json_string_field(&config, "serviceId")?;
+    let service_path = json_string_field(&config, "servicePath")?;
+    let lock_path = json_string_field(&config, "lockPath")?;
+    let transaction_path = json_string_field(&config, "transactionPath")?;
+    let snapshot_path = json_string_field(&config, "snapshotPath")?;
+    let stdout_path = json_string_field(&config, "stdoutPath")?;
+    let stderr_path = json_string_field(&config, "stderrPath")?;
+    let heartbeat_path = json_string_field(&config, "heartbeatPath")?;
+    let ready_path = json_string_field(&config, "readyPath")?;
+    let ready_contains = json_string_field(&config, "readyContains")?;
+    let watch_poll_ms = json_i64_field(&config, "watchPollMs")?.max(50) as u64;
+    let ready_poll_ms = json_i64_field(&config, "readyPollMs")?.max(10) as u64;
+    let ready_timeout_ms = json_i64_field(&config, "readyTimeoutMs")?.max(1) as u64;
+    let commit_grace_ms = json_i64_field(&config, "commitGraceMs")?.max(0) as u64;
+    let generation = json_i64_field(&config, "generation")?;
+    let command = json_string_list_field(&config, "command")?;
+
+    let rollback = |reason: &str, candidate_pid: i64, exit_code: i64| -> Result<(), String> {
+        let payload = upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "rolled_back",
+            false,
+            true,
+            reason,
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            candidate_pid,
+            exit_code,
+        );
+        write_json_file_atomic(&transaction_path, &payload)?;
+        remove_file_if_exists(&lock_path)
+    };
+
+    remove_file_if_exists(&ready_path)?;
+    write_json_file_atomic(
+        &transaction_path,
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "spawning",
+            false,
+            false,
+            "",
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            0,
+            -1,
+        ),
+    )?;
+
+    let child_env = vec![
+        (
+            "CLASP_RT_UPGRADE_SNAPSHOT_PATH_JSON".to_owned(),
+            json_string_literal(&snapshot_path),
+        ),
+        (
+            "CLASP_RT_UPGRADE_SERVICE_ROOT_JSON".to_owned(),
+            json_string_literal(&service_root),
+        ),
+        (
+            "CLASP_RT_UPGRADE_SERVICE_ID_JSON".to_owned(),
+            json_string_literal(&service_id),
+        ),
+        (
+            "CLASP_RT_UPGRADE_TRANSACTION_PATH_JSON".to_owned(),
+            json_string_literal(&transaction_path),
+        ),
+        (
+            "CLASP_RT_UPGRADE_GENERATION_JSON".to_owned(),
+            generation.to_string(),
+        ),
+    ];
+    let initial_payload = spawn_watched_process_with_env_json(
+        &cwd,
+        &stdout_path,
+        &stderr_path,
+        &heartbeat_path,
+        watch_poll_ms,
+        &child_env,
+        &command,
+    )?;
+    let initial: serde_json::Value = serde_json::from_str(&initial_payload)
+        .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+    let candidate_pid = initial
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    write_json_file_atomic(
+        &transaction_path,
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "waiting-ready",
+            false,
+            false,
+            "",
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            candidate_pid,
+            -1,
+        ),
+    )?;
+
+    let started = Instant::now();
+    loop {
+        let reconciled_payload = reconcile_watched_process_json(&heartbeat_path)?;
+        let reconciled: serde_json::Value = serde_json::from_str(&reconciled_payload)
+            .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+        let running = reconciled
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let completed = reconciled
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if completed || !running {
+            let exit_code = reconciled
+                .get("exitCode")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1);
+            return rollback(
+                &format!("candidate exited before ready:{exit_code}"),
+                candidate_pid,
+                exit_code,
+            );
+        }
+        if ready_marker_matches(&ready_path, &ready_contains)? {
+            break;
+        }
+        if started.elapsed() >= Duration::from_millis(ready_timeout_ms) {
+            return rollback("candidate ready timeout", candidate_pid, -1);
+        }
+        let remaining_ms = ready_timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+        thread::sleep(Duration::from_millis(ready_poll_ms.min(remaining_ms.max(1))));
+    }
+
+    write_json_file_atomic(
+        &transaction_path,
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "ready",
+            false,
+            false,
+            "",
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            candidate_pid,
+            -1,
+        ),
+    )?;
+
+    if commit_grace_ms > 0 {
+        match await_watched_process_timeout_json(&heartbeat_path, watch_poll_ms, commit_grace_ms) {
+            Err(message) if message == "timeout" => {}
+            Ok(payload) => {
+                let final_state: serde_json::Value = serde_json::from_str(&payload)
+                    .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+                let exit_code = final_state
+                    .get("exitCode")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(-1);
+                return rollback(
+                    &format!("candidate exited during commit grace:{exit_code}"),
+                    candidate_pid,
+                    exit_code,
+                );
+            }
+            Err(message) => return rollback(&message, candidate_pid, -1),
+        }
+    }
+
+    write_json_file_atomic(
+        &service_path,
+        &service_status_json(
+            &service_root,
+            &service_id,
+            generation,
+            "active",
+            candidate_pid,
+            &heartbeat_path,
+            &transaction_path,
+            &snapshot_path,
+            -1,
+        ),
+    )?;
+    write_json_file_atomic(
+        &transaction_path,
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "committed",
+            true,
+            false,
+            "",
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            candidate_pid,
+            -1,
+        ),
+    )?;
+    remove_file_if_exists(&lock_path)?;
+
+    let final_payload = await_watched_process_json(&heartbeat_path, watch_poll_ms)?;
+    let final_state: serde_json::Value = serde_json::from_str(&final_payload)
+        .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+    let exit_code = final_state
+        .get("exitCode")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(-1);
+    let final_status = if exit_code == 0 { "completed" } else { "failed" };
+    write_json_file_atomic(
+        &service_path,
+        &service_status_json(
+            &service_root,
+            &service_id,
+            generation,
+            final_status,
+            candidate_pid,
+            &heartbeat_path,
+            &transaction_path,
+            &snapshot_path,
+            exit_code,
+        ),
+    )?;
+    write_json_file_atomic(
+        &transaction_path,
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "completed",
+            true,
+            false,
+            "",
+            &service_path,
+            &transaction_path,
+            &snapshot_path,
+            &heartbeat_path,
+            &stdout_path,
+            &stderr_path,
+            candidate_pid,
+            exit_code,
+        ),
+    )
+}
+
+pub fn clasp_rt_run_upgrade_supervisor_command(config_path: &str) -> Result<(), String> {
+    run_upgrade_supervisor_from_config(config_path)
+}
+
+fn upgrade_command_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 10 {
+        return Err("invalid_upgrade_command".to_owned());
+    }
+
+    let service_root = args[0].clone();
+    let service_id = args[1].clone();
+    let snapshot_text = args[2].clone();
+    let ready_path = args[3].clone();
+    let ready_contains = args[4].clone();
+    let watch_poll_ms = args[5]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let ready_poll_ms = args[6]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_poll_ms".to_owned())?
+        .max(10);
+    let ready_timeout_ms = args[7]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_timeout_ms".to_owned())?
+        .max(1);
+    let commit_grace_ms = args[8]
+        .parse::<u64>()
+        .map_err(|_| "invalid_commit_grace_ms".to_owned())?;
+    let command = args[9..].to_vec();
+
+    if service_root.is_empty() {
+        return Err("missing_upgrade_service_root".to_owned());
+    }
+    if service_id.is_empty() {
+        return Err("missing_upgrade_service_id".to_owned());
+    }
+    if ready_path.is_empty() {
+        return Err("missing_upgrade_ready_path".to_owned());
+    }
+    if command.is_empty() {
+        return Err("missing_upgrade_command".to_owned());
+    }
+
+    let service_root_path = Path::new(&service_root).to_path_buf();
+    fs::create_dir_all(&service_root_path).map_err(|err| err.to_string())?;
+    let service_path = service_root_path.join("service.json");
+    let lock_path = service_root_path.join("upgrade.lock");
+    clear_stale_upgrade_lock(&lock_path.to_string_lossy())?;
+    let current_generation = read_json_file(&service_path.to_string_lossy())
+        .ok()
+        .and_then(|value| value.get("generation").and_then(serde_json::Value::as_i64))
+        .unwrap_or(0);
+    let generation = current_generation + 1;
+    let transaction_id = format!("tx-{}-{}", runtime_time_unix_ms(), std::process::id());
+    let transaction_root = service_root_path.join("transactions").join(&transaction_id);
+    fs::create_dir_all(&transaction_root).map_err(|err| err.to_string())?;
+    let transaction_path = transaction_root.join("transaction.json");
+    let config_path = transaction_root.join("config.json");
+    let snapshot_path = transaction_root.join("snapshot.json");
+    let stdout_path = transaction_root.join("candidate.stdout.log");
+    let stderr_path = transaction_root.join("candidate.stderr.log");
+    let heartbeat_path = transaction_root.join("candidate.heartbeat.json");
+
+    let lock_payload = serde_json::json!({
+        "transactionPath": transaction_path.display().to_string(),
+        "createdAtMs": runtime_time_unix_ms(),
+    });
+    write_json_file_atomic(&lock_path.to_string_lossy(), &lock_payload)?;
+    fs::write(&snapshot_path, snapshot_text.as_bytes()).map_err(|err| err.to_string())?;
+    write_json_file_atomic(
+        &transaction_path.to_string_lossy(),
+        &upgrade_transaction_json(
+            &service_root,
+            &service_id,
+            generation,
+            "preparing",
+            false,
+            false,
+            "",
+            &service_path.to_string_lossy(),
+            &transaction_path.to_string_lossy(),
+            &snapshot_path.to_string_lossy(),
+            &heartbeat_path.to_string_lossy(),
+            &stdout_path.to_string_lossy(),
+            &stderr_path.to_string_lossy(),
+            0,
+            -1,
+        ),
+    )?;
+
+    let config_payload = serde_json::json!({
+        "cwd": cwd,
+        "serviceRoot": service_root,
+        "serviceId": service_id,
+        "servicePath": service_path.display().to_string(),
+        "lockPath": lock_path.display().to_string(),
+        "transactionPath": transaction_path.display().to_string(),
+        "snapshotPath": snapshot_path.display().to_string(),
+        "stdoutPath": stdout_path.display().to_string(),
+        "stderrPath": stderr_path.display().to_string(),
+        "heartbeatPath": heartbeat_path.display().to_string(),
+        "readyPath": ready_path,
+        "readyContains": ready_contains,
+        "watchPollMs": watch_poll_ms as i64,
+        "readyPollMs": ready_poll_ms as i64,
+        "readyTimeoutMs": ready_timeout_ms as i64,
+        "commitGraceMs": commit_grace_ms as i64,
+        "generation": generation,
+        "command": command,
+    });
+    write_json_file_atomic(&config_path.to_string_lossy(), &config_payload)?;
+
+    let current_exe =
+        env::current_exe().map_err(|err| format!("failed to resolve current executable: {err}"))?;
+    let mut supervisor = ProcessCommand::new(current_exe);
+    supervisor
+        .arg("__clasp-upgrade-supervisor")
+        .arg(config_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null());
+    if env::var("CLASP_RT_TRACE_UPGRADE").is_ok() {
+        supervisor.stderr(Stdio::inherit());
+    } else {
+        supervisor.stderr(Stdio::null());
+    }
+    supervisor
+        .spawn()
+        .map_err(|err| format!("failed to spawn upgrade supervisor: {err}"))?;
+
+    let wait_timeout_ms = ready_timeout_ms
+        .saturating_add(commit_grace_ms)
+        .saturating_add(5000);
+    upgrade_wait_result(&transaction_path.to_string_lossy(), wait_timeout_ms)
+}
+
+fn handoff_watched_process_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 9 {
+        return Err("invalid_handoff_command".to_owned());
+    }
+
+    let stdout_path = args[0].clone();
+    let stderr_path = args[1].clone();
+    let heartbeat_path = args[2].clone();
+    let watch_poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let ready_path = args[4].clone();
+    let ready_contains = args[5].clone();
+    let ready_poll_ms = args[6]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_poll_ms".to_owned())?
+        .max(10);
+    let ready_timeout_ms = args[7]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_timeout_ms".to_owned())?
+        .max(1);
+    let handoff_command = args[8..].to_vec();
+
+    if ready_path.is_empty() {
+        return Err("missing_handoff_ready_path".to_owned());
+    }
+    if handoff_command.is_empty() {
+        return Err("missing_handoff_command".to_owned());
+    }
+
+    match fs::remove_file(&ready_path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.to_string()),
+    }
+
+    let mut spawn_args = vec![
+        stdout_path,
+        stderr_path,
+        heartbeat_path.clone(),
+        watch_poll_ms.to_string(),
+    ];
+    spawn_args.extend(handoff_command);
+    let _initial = spawn_watched_process_json(cwd, &spawn_args)?;
+    let started = Instant::now();
+
+    loop {
+        let reconciled_payload = reconcile_watched_process_json(&heartbeat_path)?;
+        let reconciled: serde_json::Value = serde_json::from_str(&reconciled_payload)
+            .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+        let running = reconciled
+            .get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let completed = reconciled
+            .get("completed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if completed || !running {
+            let exit_code = reconciled
+                .get("exitCode")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1);
+            return Err(format!("handoff_process_exited_before_ready:{exit_code}"));
+        }
+
+        if ready_marker_matches(&ready_path, &ready_contains)? {
+            return Ok(reconciled_payload);
+        }
+
+        if started.elapsed() >= Duration::from_millis(ready_timeout_ms) {
+            return Err("handoff_ready_timeout".to_owned());
+        }
+
+        let remaining_ms = ready_timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+        thread::sleep(Duration::from_millis(ready_poll_ms.min(remaining_ms.max(1))));
     }
 }
 
@@ -8140,6 +9044,146 @@ pub unsafe extern "C" fn clasp_rt_await_watched_process_json(
     }
 }
 
+pub unsafe extern "C" fn clasp_rt_await_watched_process_timeout_json(
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+    timeout_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let timeout_ms_value = match clasp_rt_int_arg(timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    match await_watched_process_timeout_json(
+        &heartbeat_path_string,
+        poll_ms_value.max(0) as u64,
+        timeout_ms_value.max(0) as u64,
+    ) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_handoff_command_json(
+    cwd: *mut ClaspRtString,
+    stdout_path: *mut ClaspRtString,
+    stderr_path: *mut ClaspRtString,
+    heartbeat_path: *mut ClaspRtString,
+    watch_poll_ms: *mut ClaspRtHeader,
+    ready_path: *mut ClaspRtString,
+    ready_contains: *mut ClaspRtString,
+    ready_poll_ms: *mut ClaspRtHeader,
+    ready_timeout_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let stdout_path_string = String::from_utf8_lossy(string_bytes(stdout_path)).into_owned();
+    let stderr_path_string = String::from_utf8_lossy(string_bytes(stderr_path)).into_owned();
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let ready_path_string = String::from_utf8_lossy(string_bytes(ready_path)).into_owned();
+    let ready_contains_string = String::from_utf8_lossy(string_bytes(ready_contains)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let watch_poll_ms_value = match clasp_rt_int_arg(watch_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_poll_ms_value = match clasp_rt_int_arg(ready_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_timeout_ms_value = match clasp_rt_int_arg(ready_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+
+    let mut args = vec![
+        stdout_path_string,
+        stderr_path_string,
+        heartbeat_path_string,
+        watch_poll_ms_value.to_string(),
+        ready_path_string,
+        ready_contains_string,
+        ready_poll_ms_value.to_string(),
+        ready_timeout_ms_value.to_string(),
+    ];
+    args.extend(command_values);
+    match handoff_watched_process_json(&cwd_string, &args) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_upgrade_command_json(
+    cwd: *mut ClaspRtString,
+    service_root: *mut ClaspRtString,
+    service_id: *mut ClaspRtString,
+    snapshot_text: *mut ClaspRtString,
+    ready_path: *mut ClaspRtString,
+    ready_contains: *mut ClaspRtString,
+    watch_poll_ms: *mut ClaspRtHeader,
+    ready_poll_ms: *mut ClaspRtHeader,
+    ready_timeout_ms: *mut ClaspRtHeader,
+    commit_grace_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let service_root_string = String::from_utf8_lossy(string_bytes(service_root)).into_owned();
+    let service_id_string = String::from_utf8_lossy(string_bytes(service_id)).into_owned();
+    let snapshot_text_string = String::from_utf8_lossy(string_bytes(snapshot_text)).into_owned();
+    let ready_path_string = String::from_utf8_lossy(string_bytes(ready_path)).into_owned();
+    let ready_contains_string = String::from_utf8_lossy(string_bytes(ready_contains)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let watch_poll_ms_value = match clasp_rt_int_arg(watch_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_poll_ms_value = match clasp_rt_int_arg(ready_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_timeout_ms_value = match clasp_rt_int_arg(ready_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let commit_grace_ms_value = match clasp_rt_int_arg(commit_grace_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+
+    let mut args = vec![
+        service_root_string,
+        service_id_string,
+        snapshot_text_string,
+        ready_path_string,
+        ready_contains_string,
+        watch_poll_ms_value.to_string(),
+        ready_poll_ms_value.to_string(),
+        ready_timeout_ms_value.to_string(),
+        commit_grace_ms_value.to_string(),
+    ];
+    args.extend(command_values);
+    match upgrade_command_json(&cwd_string, &args) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
 pub unsafe extern "C" fn clasp_rt_sleep_ms(
     delay_ms: *mut ClaspRtHeader,
 ) -> *mut ClaspRtResultString {
@@ -8557,6 +9601,250 @@ mod tests {
             release_header(null_mut(), result as *mut ClaspRtHeader);
             let _ = std::fs::remove_file(heartbeat_path);
         }
+    }
+
+    #[test]
+    fn await_watched_process_timeout_json_times_out_running_process() {
+        unsafe {
+            let temp_root = std::env::temp_dir().join(format!(
+                "clasp-await-watch-timeout-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&temp_root).expect("expected timeout temp root");
+            let script_path = temp_root.join("sleep.sh");
+            let stdout_path = temp_root.join("stdout.log");
+            let stderr_path = temp_root.join("stderr.log");
+            let heartbeat_path = temp_root.join("heartbeat.json");
+            std::fs::write(&script_path, b"#!/bin/sh\nsleep 1\nprintf delayed\\n")
+                .expect("expected timeout test script write");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected timeout test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected timeout test script permissions");
+
+            let cwd = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let timeout_ms = build_runtime_int(100) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let spawned = clasp_rt_spawn_command_json(cwd, stdout_rt, stderr_rt, heartbeat_rt, poll_ms, command);
+            assert!((*spawned).is_ok);
+
+            let awaited =
+                clasp_rt_await_watched_process_timeout_json(heartbeat_rt, poll_ms, timeout_ms);
+            assert!(!(*awaited).is_ok);
+            let payload = String::from_utf8_lossy(string_bytes((*awaited).value)).into_owned();
+            assert_eq!(payload, "timeout");
+
+            let reconciled = clasp_rt_reconcile_watched_process_json(heartbeat_rt);
+            assert!((*reconciled).is_ok);
+            let reconciled_payload = String::from_utf8_lossy(string_bytes((*reconciled).value)).into_owned();
+            let reconciled_json: serde_json::Value =
+                serde_json::from_str(&reconciled_payload).expect("expected valid reconciled heartbeat");
+            assert_eq!(reconciled_json["running"].as_bool(), Some(true));
+            assert_eq!(reconciled_json["completed"].as_bool(), Some(false));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), timeout_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), spawned as *mut ClaspRtHeader);
+            release_header(null_mut(), awaited as *mut ClaspRtHeader);
+            release_header(null_mut(), reconciled as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+            let _ = std::fs::remove_file(stdout_path);
+            let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+            let _ = std::fs::remove_dir_all(temp_root);
+        }
+    }
+
+    #[test]
+    fn handoff_command_json_waits_for_successor_ready_marker() {
+        unsafe {
+            let temp_root = std::env::temp_dir().join(format!(
+                "clasp-handoff-command-json-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&temp_root).expect("expected handoff temp root");
+            let script_path = temp_root.join("handoff.sh");
+            let stdout_path = temp_root.join("stdout.log");
+            let stderr_path = temp_root.join("stderr.log");
+            let heartbeat_path = temp_root.join("heartbeat.json");
+            let ready_path = temp_root.join("ready.txt");
+            std::fs::write(
+                &script_path,
+                format!(
+                    "#!/bin/sh\nsleep 0.1\nprintf ready > {}\nprintf handoff-start\\n\nsleep 0.3\nprintf handoff-finish\\n\n",
+                    ready_path.display()
+                ),
+            )
+            .expect("expected handoff script write");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected handoff script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions)
+                .expect("expected handoff script permissions");
+
+            let cwd = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let ready_rt = build_runtime_string(ready_path.to_string_lossy().as_bytes());
+            let ready_contains_rt = build_runtime_string(b"ready");
+            let watch_poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let ready_poll_ms = build_runtime_int(25) as *mut ClaspRtHeader;
+            let ready_timeout_ms = build_runtime_int(1000) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let handed_off = clasp_rt_handoff_command_json(
+                cwd,
+                stdout_rt,
+                stderr_rt,
+                heartbeat_rt,
+                watch_poll_ms,
+                ready_rt,
+                ready_contains_rt,
+                ready_poll_ms,
+                ready_timeout_ms,
+                command,
+            );
+            assert!((*handed_off).is_ok);
+            let handed_off_payload = String::from_utf8_lossy(string_bytes((*handed_off).value)).into_owned();
+            let handed_off_json: serde_json::Value =
+                serde_json::from_str(&handed_off_payload).expect("expected valid handoff heartbeat");
+            assert_eq!(handed_off_json["running"].as_bool(), Some(true));
+            assert_eq!(handed_off_json["completed"].as_bool(), Some(false));
+            assert_eq!(
+                std::fs::read_to_string(&ready_path).expect("expected ready marker"),
+                "ready"
+            );
+
+            let awaited = clasp_rt_await_watched_process_json(heartbeat_rt, watch_poll_ms);
+            assert!((*awaited).is_ok);
+            let awaited_payload = String::from_utf8_lossy(string_bytes((*awaited).value)).into_owned();
+            let awaited_json: serde_json::Value =
+                serde_json::from_str(&awaited_payload).expect("expected valid awaited heartbeat");
+            assert_eq!(awaited_json["completed"].as_bool(), Some(true));
+            assert_eq!(awaited_json["exitCode"].as_i64(), Some(0));
+
+            let streamed_stdout = std::fs::read_to_string(&stdout_path).expect("expected handoff stdout");
+            assert!(streamed_stdout.contains("handoff-start"));
+            assert!(streamed_stdout.contains("handoff-finish"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), ready_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), ready_contains_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), watch_poll_ms);
+            release_header(null_mut(), ready_poll_ms);
+            release_header(null_mut(), ready_timeout_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), handed_off as *mut ClaspRtHeader);
+            release_header(null_mut(), awaited as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+            let _ = std::fs::remove_file(stdout_path);
+            let _ = std::fs::remove_file(stderr_path);
+            let _ = std::fs::remove_file(heartbeat_path);
+            let _ = std::fs::remove_file(ready_path);
+            let _ = std::fs::remove_dir_all(temp_root);
+        }
+    }
+
+    #[test]
+    fn upgrade_supervisor_commits_service_identity_and_monitors_exit() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-upgrade-supervisor-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected upgrade temp root");
+        let service_root = temp_root.join("service");
+        let transaction_root = service_root.join("transactions").join("tx-1");
+        std::fs::create_dir_all(&transaction_root).expect("expected transaction root");
+        let script_path = temp_root.join("candidate.sh");
+        let env_capture_path = temp_root.join("candidate.env");
+        let ready_path = temp_root.join("ready.txt");
+        let snapshot_path = transaction_root.join("snapshot.json");
+        let stdout_path = transaction_root.join("candidate.stdout.log");
+        let stderr_path = transaction_root.join("candidate.stderr.log");
+        let heartbeat_path = transaction_root.join("candidate.heartbeat.json");
+        let transaction_path = transaction_root.join("transaction.json");
+        let service_path = service_root.join("service.json");
+        let lock_path = service_root.join("upgrade.lock");
+        let config_path = transaction_root.join("config.json");
+        std::fs::write(&snapshot_path, "{\"attempt\":1}").expect("expected snapshot write");
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$CLASP_RT_UPGRADE_SERVICE_ID_JSON\" > {}\nsleep 0.05\nprintf ready > {}\nsleep 0.05\nprintf done\\n\n",
+                env_capture_path.display(),
+                ready_path.display()
+            ),
+        )
+        .expect("expected upgrade script write");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("expected upgrade script metadata")
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("expected executable upgrade script permissions");
+
+        let config = serde_json::json!({
+            "cwd": temp_root.display().to_string(),
+            "serviceRoot": service_root.display().to_string(),
+            "serviceId": "feedback-loop-service",
+            "servicePath": service_path.display().to_string(),
+            "lockPath": lock_path.display().to_string(),
+            "transactionPath": transaction_path.display().to_string(),
+            "snapshotPath": snapshot_path.display().to_string(),
+            "stdoutPath": stdout_path.display().to_string(),
+            "stderrPath": stderr_path.display().to_string(),
+            "heartbeatPath": heartbeat_path.display().to_string(),
+            "readyPath": ready_path.display().to_string(),
+            "readyContains": "ready",
+            "watchPollMs": 50,
+            "readyPollMs": 25,
+            "readyTimeoutMs": 1000,
+            "commitGraceMs": 25,
+            "generation": 1,
+            "command": [script_path.display().to_string()],
+        });
+        std::fs::write(&config_path, config.to_string()).expect("expected config write");
+
+        run_upgrade_supervisor_from_config(config_path.to_str().expect("config path text"))
+            .expect("expected supervisor run");
+
+        let transaction: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&transaction_path).expect("transaction text"))
+                .expect("transaction json");
+        let service: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&service_path).expect("service text"))
+                .expect("service json");
+        let captured_service_id =
+            std::fs::read_to_string(&env_capture_path).expect("captured service id env");
+
+        assert_eq!(transaction["phase"].as_str(), Some("completed"));
+        assert_eq!(transaction["committed"].as_bool(), Some(true));
+        assert_eq!(transaction["exitCode"].as_i64(), Some(0));
+        assert_eq!(service["status"].as_str(), Some("completed"));
+        assert_eq!(service["generation"].as_i64(), Some(1));
+        assert_eq!(captured_service_id, "\"feedback-loop-service\"");
+        assert!(!lock_path.exists(), "expected supervisor to release upgrade lock");
+
+        let _ = std::fs::remove_dir_all(temp_root);
     }
 
     #[test]

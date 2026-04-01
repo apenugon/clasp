@@ -154,6 +154,8 @@ polymorphism_binary="$test_root/polymorphism-app"
 feedback_loop_binary="$test_root/feedback-loop-app"
 feedback_loop_process_demo_binary="$test_root/feedback-loop-process-demo-app"
 feedback_loop_codex_bin="$test_root/codex"
+feedback_loop_benchmark_bin="$test_root/fake-benchmark"
+feedback_loop_slow_benchmark_bin="$test_root/fake-benchmark-slow"
 feedback_loop_task_file="$test_root/feedback-loop-task.md"
 feedback_loop_state_root="$test_root/feedback-loop-state"
 feedback_loop_workspace_root="$test_root/feedback-loop-workspace"
@@ -180,6 +182,13 @@ feedback_loop_recovery_feedback_path="$feedback_loop_recovery_state_root/feedbac
 feedback_loop_recovery_builder_stdout="$feedback_loop_recovery_state_root/builder-2.stdout.jsonl"
 feedback_loop_recovery_builder_stderr="$feedback_loop_recovery_state_root/builder-2.stderr.log"
 feedback_loop_recovery_builder_heartbeat="$feedback_loop_recovery_state_root/builder-2.heartbeat.json"
+feedback_loop_handoff_state_root="$test_root/feedback-loop-handoff-state"
+feedback_loop_handoff_child_state_root="$test_root/feedback-loop-handoff-child-state"
+feedback_loop_handoff_child_workspace_root="$test_root/feedback-loop-handoff-child-workspace"
+feedback_loop_handoff_child_workspace="$feedback_loop_handoff_child_workspace_root/workspace.txt"
+feedback_loop_handoff_child_ready_path="$feedback_loop_handoff_child_state_root/loop.ready"
+feedback_loop_handoff_output="$test_root/feedback-loop-handoff-output.txt"
+feedback_loop_upgrade_child_workspace_root="$test_root/feedback-loop-upgrade-child-workspace"
 swarm_kernel_binary="$test_root/swarm-kernel"
 swarm_state_root="$test_root/swarm/state"
 swarm_event_log="$swarm_state_root/events.jsonl"
@@ -411,8 +420,13 @@ mkdir -p "$feedback_loop_noise_root"
 mkdir -p "$feedback_loop_live_workspace_root"
 mkdir -p "$feedback_loop_fail_workspace_root"
 mkdir -p "$feedback_loop_recovery_workspace_root"
+mkdir -p "$feedback_loop_handoff_child_workspace_root"
+mkdir -p "$feedback_loop_upgrade_child_workspace_root"
 mkdir -p "$swarm_feedback_loop_workspace_root"
 mkdir -p "$swarm_feedback_loop_native_workspace_root"
+mkdir -p "$goal_manager_workspace_root"
+mkdir -p "$goal_manager_native_workspace_root"
+mkdir -p "$goal_manager_live_workspace_root"
 cat >"$feedback_loop_task_file" <<'EOF'
 Make the feedback loop converge after verifier feedback.
 EOF
@@ -464,7 +478,7 @@ planner_mode="${CLASP_TEST_FAKE_PLANNER_MODE:-default}"
 if [[ "$prompt" == *"planner subagent"* ]]; then
   printf '{"phase":"planner-start"}\n'
   printf 'planner-progress\n' >&2
-  sleep 0.3
+  sleep "${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.3}"
   if [[ "$planner_mode" == "cycle" ]]; then
     cat >"$report_path" <<'JSON'
 {"objectiveSummary":"Improve Clasp with a cyclic planner DAG.","strategy":"Return an invalid cyclic plan so the goal manager has to reject it before spawning work.","tasks":[{"taskId":"cycle-a","detail":"First cyclic task.","dependencies":["cycle-b"],"taskPrompt":"This task participates in a cycle."},{"taskId":"cycle-b","detail":"Second cyclic task.","dependencies":["cycle-a"],"taskPrompt":"This task participates in a cycle."}],"testsRun":["planned-with-fake-codex"],"residualRisks":[]}
@@ -477,6 +491,24 @@ JSON
     cat >"$report_path" <<'JSON'
 {"objectiveSummary":"Improve Clasp with a replanned task DAG.","strategy":"Ignore stale planner state and produce a fresh bounded task graph.","tasks":[{"taskId":"refresh-plan","detail":"Refresh the planner-managed ordinary loop path after planner inputs change.","dependencies":[],"taskPrompt":"Refresh the ordinary loop plan after planner inputs change and keep the execution path durable."},{"taskId":"close-gap","detail":"Close the remaining verification gap after the replanned ordinary loop task lands.","dependencies":["refresh-plan"],"taskPrompt":"Close the remaining verification gap after replanning the ordinary loop path."}],"testsRun":["planned-with-fake-codex","replanned-after-input-change"],"residualRisks":[]}
 JSON
+  elif [[ "$planner_mode" == "parallel-ready" ]]; then
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with parallel bounded branches.","strategy":"Run two independent bounded branches at the same time so the manager has to fan out child loops.","tasks":[{"taskId":"stabilize-loop","detail":"Stabilize the ordinary Clasp feedback loop manager path.","dependencies":[],"taskPrompt":"Strengthen the ordinary Clasp loop path so it remains durable and easy to inspect."},{"taskId":"tighten-verify","detail":"Tighten verification and substrate inspection in parallel.","dependencies":[],"taskPrompt":"Tighten verification coverage and substrate inspection as a parallel improvement branch."}],"testsRun":["planned-with-fake-codex","parallel-ready-plan"],"residualRisks":[]}
+JSON
+  elif [[ "$planner_mode" == "parallel-branch-failure" ]]; then
+    cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Improve Clasp with speculative parallel branches.","strategy":"Run two parallel improvement branches so the manager can keep going even if one branch fails.","tasks":[{"taskId":"winning-branch","detail":"Land the bounded improvement branch that should converge.","dependencies":[],"taskPrompt":"Close the winning bounded improvement branch and converge it through the ordinary feedback loop."},{"taskId":"failing-branch","detail":"Try a speculative branch that is expected to fail verification.","dependencies":[],"taskPrompt":"Attempt the speculative branch even though it is expected to fail verification so the manager can keep exploring other branches."}],"testsRun":["planned-with-fake-codex","parallel-branch-failure"],"residualRisks":[]}
+JSON
+  elif [[ "$planner_mode" == "benchmark-replan" ]]; then
+    if [[ "$prompt" == *"Current wave: 2 of"* ]]; then
+      cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Finish the remaining AppBench closure wave.","strategy":"Use the benchmark checkpoint from wave 1 to close the remaining gap with one more bounded wave.","tasks":[{"taskId":"benchmark-finish","detail":"Close the remaining benchmark gap.","dependencies":[],"taskPrompt":"Finish the remaining bounded improvement wave so the benchmark target can pass."}],"testsRun":["planned-with-fake-codex","benchmark-replanned"],"residualRisks":[]}
+JSON
+    else
+      cat >"$report_path" <<'JSON'
+{"objectiveSummary":"Reduce the AppBench gap with an initial wave.","strategy":"Start with one bounded implementation wave, then re-check the benchmark before deciding whether to continue.","tasks":[{"taskId":"benchmark-gap","detail":"Close the first benchmark gap.","dependencies":[],"taskPrompt":"Make the first bounded improvement wave toward beating the benchmark target."}],"testsRun":["planned-with-fake-codex","benchmark-wave-1"],"residualRisks":[]}
+JSON
+    fi
   else
     cat >"$report_path" <<'JSON'
 {"objectiveSummary":"Improve Clasp with a planner-managed task DAG.","strategy":"Stabilize the ordinary loop first, then tighten verification and substrate confidence.","tasks":[{"taskId":"stabilize-loop","detail":"Stabilize the ordinary Clasp feedback loop manager path.","dependencies":[],"taskPrompt":"Strengthen the ordinary Clasp loop path so it remains durable and easy to inspect."},{"taskId":"tighten-verify","detail":"Tighten verification and substrate inspection after the loop is stable.","dependencies":["stabilize-loop"],"taskPrompt":"Tighten verification coverage and substrate inspection once the ordinary loop path is stable."}],"testsRun":["planned-with-fake-codex"],"residualRisks":[]}
@@ -485,7 +517,7 @@ JSON
 elif [[ "$prompt" == *"builder subagent"* ]]; then
   printf '{"phase":"builder-start"}\n'
   printf 'builder-progress\n' >&2
-  sleep 0.3
+  sleep "${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.3}"
   content="first-attempt"
   if [[ -f "$feedback_path" && "$prompt" == *"Verifier feedback from the previous attempt:"* && "$prompt" == *"force-close-category"* ]]; then
     content="fixed-after-feedback"
@@ -497,12 +529,16 @@ JSON
 elif [[ "$prompt" == *"verifier subagent"* ]]; then
   printf '{"phase":"verifier-start"}\n'
   printf 'verifier-progress\n' >&2
-  sleep 0.3
+  sleep "${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.3}"
   content=""
   if [[ -f "$workspace_path" ]]; then
     content="$(cat "$workspace_path")"
   fi
-  if [[ "$content" == "fixed-after-feedback" ]]; then
+  if [[ "$prompt" == *"task-failing-branch.md"* ]]; then
+    cat >"$report_path" <<'JSON'
+{"verdict":"fail","summary":"speculative branch should not land","findings":["This branch intentionally fails so the manager has to keep going with other branches."],"tests_run":["speculative branch review"],"follow_up":["Keep the successful parallel branches moving and let the benchmark checkpoint decide whether another wave is needed."],"capability_statuses":[{"name":"ordinary_program_execution","status":"fail","evidence":["speculative branch stayed red"],"blocking_gaps":["this branch does not converge"],"required_closure":["Use another branch or a later wave instead of landing this task."]},{"name":"durable_native_substrate","status":"pass","evidence":["failure is deliberate, not a substrate crash"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["manager can consume this structured verifier failure"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"pass","evidence":["manager should continue after this failed branch"],"blocking_gaps":[],"required_closure":[]},{"name":"ergonomics","status":"pass","evidence":["fixture does not model ergonomic blockers"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"fail","evidence":["branch is intentionally non-landing"],"blocking_gaps":["speculative branch should stay out of the landing set"],"required_closure":["Let another branch or another wave carry the benchmark target."]}]}
+JSON
+  elif [[ "$content" == "fixed-after-feedback" ]]; then
     cat >"$report_path" <<'JSON'
 {"verdict":"pass","summary":"feedback loop converged","findings":[],"tests_run":["workspace converged"],"follow_up":[],"capability_statuses":[{"name":"ordinary_program_execution","status":"pass","evidence":["workspace converged after verifier feedback"],"blocking_gaps":[],"required_closure":[]},{"name":"durable_native_substrate","status":"pass","evidence":["test fixture does not model substrate gaps"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["feedback loop prompt included previous verifier feedback directly"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"pass","evidence":["ordinary loop completed end to end"],"blocking_gaps":[],"required_closure":[]},{"name":"ergonomics","status":"pass","evidence":["test fixture did not expose ergonomic blockers"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"pass","evidence":["workspace converged"],"blocking_gaps":[],"required_closure":[]}]}
 JSON
@@ -518,6 +554,62 @@ else
 fi
 EOF
 chmod +x "$feedback_loop_codex_bin"
+
+cat >"$feedback_loop_benchmark_bin" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${CLASP_TEST_FAKE_BENCHMARK_MODE:-replan-pass}"
+counter_root="${CLASP_MANAGER_STATE_ROOT:-$PWD}"
+counter_path="${counter_root}/.clasp-fake-benchmark-count"
+mkdir -p "$counter_root"
+count=0
+if [[ -f "$counter_path" ]]; then
+  count="$(cat "$counter_path")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$counter_path"
+
+case "$mode" in
+  replan-pass)
+    if [[ "$count" -eq 1 ]]; then
+      cat <<'JSON'
+{"suite":"appbench","summary":"AppBench target still unmet after wave 1.","passed":true,"meetsTarget":false,"scoreName":"timeToGreenMs","scoreValue":140,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+    else
+      cat <<'JSON'
+{"suite":"appbench","summary":"AppBench target met after wave 2.","passed":true,"meetsTarget":true,"scoreName":"timeToGreenMs","scoreValue":110,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+    fi
+    ;;
+  always-fail)
+    cat <<'JSON'
+{"suite":"appbench","summary":"AppBench target is still unmet after the allowed waves.","passed":true,"meetsTarget":false,"scoreName":"timeToGreenMs","scoreValue":145,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+    ;;
+  already-pass)
+    cat <<'JSON'
+{"suite":"appbench","summary":"AppBench target is already met.","passed":true,"meetsTarget":true,"scoreName":"timeToGreenMs","scoreValue":100,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+    ;;
+  *)
+    printf 'unknown fake benchmark mode: %s\n' "$mode" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$feedback_loop_benchmark_bin"
+
+cat >"$feedback_loop_slow_benchmark_bin" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+sleep "${CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS:-5}"
+cat <<'JSON'
+{"suite":"appbench","summary":"slow benchmark eventually finished.","passed":true,"meetsTarget":true,"scoreName":"timeToGreenMs","scoreValue":100,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+EOF
+chmod +x "$feedback_loop_slow_benchmark_bin"
 
 [[ -x "$claspc_bin" ]]
 
@@ -857,6 +949,126 @@ grep -F '"verdict":"pass"' "$feedback_loop_native_status_output_abs" >/dev/null
 grep -F '"builderRuns":2' "$feedback_loop_native_status_output_abs" >/dev/null
 grep -F '"verifierRuns":2' "$feedback_loop_native_status_output_abs" >/dev/null
 grep -F '"final":true' "$feedback_loop_native_status_output_abs" >/dev/null
+
+feedback_loop_handoff_state_root_abs="$test_root_abs/feedback-loop-handoff-state"
+feedback_loop_handoff_child_state_root_abs="$test_root_abs/feedback-loop-handoff-child-state"
+feedback_loop_handoff_child_workspace_root_abs="$test_root_abs/feedback-loop-handoff-child-workspace"
+feedback_loop_handoff_child_workspace_abs="$feedback_loop_handoff_child_workspace_root_abs/workspace.txt"
+feedback_loop_handoff_child_ready_path_abs="$feedback_loop_handoff_child_state_root_abs/loop.ready"
+feedback_loop_handoff_output="$(
+  CLASP_LOOP_COMMAND=handoff \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$feedback_loop_handoff_child_workspace_root_abs\"" \
+  CLASP_LOOP_READY_PATH_JSON="\"$feedback_loop_handoff_child_ready_path_abs\"" \
+  CLASP_LOOP_HANDOFF_READY_PATH_JSON="\"$feedback_loop_handoff_child_ready_path_abs\"" \
+  CLASP_LOOP_HANDOFF_READY_CONTAINS_JSON='"ready"' \
+  CLASP_LOOP_HANDOFF_READY_TIMEOUT_MS_JSON='5000' \
+  CLASP_LOOP_HANDOFF_COMMAND_JSON="[\"env\",\"CLASP_LOOP_COMMAND=run\",\"$feedback_loop_binary\",\"$feedback_loop_handoff_child_state_root_abs\"]" \
+  "$feedback_loop_binary" "$feedback_loop_handoff_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_handoff_output" | grep -F '"heartbeatPath":"'"$feedback_loop_handoff_state_root_abs"'/handoff.heartbeat.json"' >/dev/null
+printf '%s\n' "$feedback_loop_handoff_output" | grep -F '"running":true' >/dev/null
+for _ in $(seq 1 300); do
+  if [[ -f "$feedback_loop_handoff_child_ready_path_abs" ]] \
+    && [[ -f "$feedback_loop_handoff_child_state_root_abs/feedback.json" ]] \
+    && grep -F '"verdict":"pass"' "$feedback_loop_handoff_child_state_root_abs/feedback.json" >/dev/null 2>&1 \
+    && [[ -f "$feedback_loop_handoff_child_workspace_abs" ]] \
+    && grep -Fx 'fixed-after-feedback' "$feedback_loop_handoff_child_workspace_abs" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+grep -Fx 'ready' "$feedback_loop_handoff_child_ready_path_abs" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_handoff_child_state_root_abs/feedback.json" >/dev/null
+grep -Fx 'fixed-after-feedback' "$feedback_loop_handoff_child_workspace_abs" >/dev/null
+grep -F '"heartbeatPath":"'"$feedback_loop_handoff_state_root_abs"'/handoff.heartbeat.json"' <<<"$feedback_loop_handoff_output" >/dev/null
+
+feedback_loop_upgrade_state_root_abs="$test_root_abs/feedback-loop-upgrade-state"
+feedback_loop_upgrade_child_state_root_abs="$test_root_abs/feedback-loop-upgrade-child-state"
+feedback_loop_upgrade_child_workspace_root_abs="$test_root_abs/feedback-loop-upgrade-child-workspace"
+feedback_loop_upgrade_child_workspace_abs="$feedback_loop_upgrade_child_workspace_root_abs/workspace.txt"
+feedback_loop_upgrade_child_ready_path_abs="$feedback_loop_upgrade_child_state_root_abs/loop.ready"
+feedback_loop_upgrade_child_restored_path_abs="$feedback_loop_upgrade_child_state_root_abs/restored-snapshot.json"
+feedback_loop_upgrade_service_root_abs="$test_root_abs/feedback-loop-upgrade-service"
+feedback_loop_upgrade_command_json="$(
+  node -e 'console.log(JSON.stringify(process.argv.slice(1)))' \
+    env \
+    CLASP_LOOP_COMMAND=run \
+    "CLASP_LOOP_CODEX_BIN_JSON=\"$test_root_abs/codex\"" \
+    "CLASP_LOOP_TASK_FILE_JSON=\"$test_root_abs/feedback-loop-task.md\"" \
+    "CLASP_LOOP_WORKSPACE_JSON=\"$feedback_loop_upgrade_child_workspace_root_abs\"" \
+    "CLASP_LOOP_READY_PATH_JSON=\"$feedback_loop_upgrade_child_ready_path_abs\"" \
+    CLASP_LOOP_MAX_ATTEMPTS_JSON=2 \
+    "$feedback_loop_binary" \
+    "$feedback_loop_upgrade_child_state_root_abs"
+)"
+feedback_loop_upgrade_output="$(
+  CLASP_LOOP_COMMAND=upgrade \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$feedback_loop_upgrade_child_workspace_root_abs\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  CLASP_LOOP_SERVICE_ROOT_JSON="\"$feedback_loop_upgrade_service_root_abs\"" \
+  CLASP_LOOP_SERVICE_ID_JSON='"feedback-loop-service"' \
+  CLASP_LOOP_UPGRADE_READY_PATH_JSON="\"$feedback_loop_upgrade_child_ready_path_abs\"" \
+  CLASP_LOOP_UPGRADE_READY_CONTAINS_JSON='"ready"' \
+  CLASP_LOOP_UPGRADE_COMMIT_GRACE_MS_JSON='100' \
+  CLASP_LOOP_UPGRADE_COMMAND_JSON="$feedback_loop_upgrade_command_json" \
+  "$feedback_loop_binary" "$feedback_loop_upgrade_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_upgrade_output" | grep -F '"phase":"committed"' >/dev/null
+printf '%s\n' "$feedback_loop_upgrade_output" | grep -F '"committed":true' >/dev/null
+for _ in $(seq 1 300); do
+  if [[ -f "$feedback_loop_upgrade_service_root_abs/service.json" ]] \
+    && grep -F '"status":"completed"' "$feedback_loop_upgrade_service_root_abs/service.json" >/dev/null 2>&1 \
+    && [[ -f "$feedback_loop_upgrade_child_state_root_abs/feedback.json" ]] \
+    && grep -F '"verdict":"pass"' "$feedback_loop_upgrade_child_state_root_abs/feedback.json" >/dev/null 2>&1 \
+    && [[ -f "$feedback_loop_upgrade_child_restored_path_abs" ]] \
+    && [[ -f "$feedback_loop_upgrade_child_workspace_abs" ]] \
+    && grep -Fx 'fixed-after-feedback' "$feedback_loop_upgrade_child_workspace_abs" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+grep -Fx 'fixed-after-feedback' "$feedback_loop_upgrade_child_workspace_abs" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_upgrade_child_state_root_abs/feedback.json" >/dev/null
+grep -F '"serviceId":"feedback-loop-service"' "$feedback_loop_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"status":"completed"' "$feedback_loop_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"generation":1' "$feedback_loop_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"serviceRoot":"'"$feedback_loop_upgrade_service_root_abs"'"' "$feedback_loop_upgrade_child_restored_path_abs" >/dev/null
+grep -F '"serviceId":"feedback-loop-service"' "$feedback_loop_upgrade_child_restored_path_abs" >/dev/null
+grep -F '"generation":1' "$feedback_loop_upgrade_child_restored_path_abs" >/dev/null
+feedback_loop_upgrade_transaction_path_abs="$(find "$feedback_loop_upgrade_service_root_abs/transactions" -name transaction.json | head -n 1)"
+test -n "$feedback_loop_upgrade_transaction_path_abs"
+grep -F '"phase":"completed"' "$feedback_loop_upgrade_transaction_path_abs" >/dev/null
+grep -F '"committed":true' "$feedback_loop_upgrade_transaction_path_abs" >/dev/null
+grep -F '"exitCode":0' "$feedback_loop_upgrade_transaction_path_abs" >/dev/null
+
+feedback_loop_upgrade_rollback_state_root_abs="$test_root_abs/feedback-loop-upgrade-rollback-state"
+feedback_loop_upgrade_rollback_child_state_root_abs="$test_root_abs/feedback-loop-upgrade-rollback-child-state"
+feedback_loop_upgrade_rollback_service_root_abs="$test_root_abs/feedback-loop-upgrade-rollback-service"
+feedback_loop_upgrade_rollback_command_json="$(
+  printf '[\"env\",\"CLASP_LOOP_COMMAND=status\",\"%s\",\"%s\"]' \
+    "$feedback_loop_binary" \
+    "$feedback_loop_upgrade_rollback_child_state_root_abs"
+)"
+feedback_loop_upgrade_rollback_output="$(
+  CLASP_LOOP_COMMAND=upgrade \
+  CLASP_LOOP_SERVICE_ROOT_JSON="\"$feedback_loop_upgrade_rollback_service_root_abs\"" \
+  CLASP_LOOP_SERVICE_ID_JSON='"feedback-loop-service"' \
+  CLASP_LOOP_UPGRADE_READY_PATH_JSON="\"$feedback_loop_upgrade_rollback_child_state_root_abs/loop.ready\"" \
+  CLASP_LOOP_UPGRADE_READY_CONTAINS_JSON='"ready"' \
+  CLASP_LOOP_UPGRADE_READY_TIMEOUT_MS_JSON='500' \
+  CLASP_LOOP_UPGRADE_COMMAND_JSON="$feedback_loop_upgrade_rollback_command_json" \
+  "$feedback_loop_binary" "$feedback_loop_upgrade_rollback_state_root_abs"
+)"
+printf '%s\n' "$feedback_loop_upgrade_rollback_output" | grep -F 'error:upgrade_rolled_back:' >/dev/null
+feedback_loop_upgrade_rollback_transaction_path_abs="$(find "$feedback_loop_upgrade_rollback_service_root_abs/transactions" -name transaction.json | head -n 1)"
+test -n "$feedback_loop_upgrade_rollback_transaction_path_abs"
+grep -F '"phase":"rolled_back"' "$feedback_loop_upgrade_rollback_transaction_path_abs" >/dev/null
+grep -F '"rolledBack":true' "$feedback_loop_upgrade_rollback_transaction_path_abs" >/dev/null
+[[ ! -f "$feedback_loop_upgrade_rollback_service_root_abs/service.json" ]]
 
 feedback_loop_process_demo_native_state_root="$test_root/feedback-loop-process-demo-native-state"
 feedback_loop_process_demo_native_state_root_abs="$test_root_abs/feedback-loop-process-demo-native-state"
@@ -1314,12 +1526,36 @@ goal_manager_live_state_root_abs="$test_root_abs/swarm-goal-manager-live-state"
 goal_manager_live_workspace_root_abs="$test_root_abs/swarm-goal-manager-live-workspace"
 goal_manager_live_output_abs="$test_root_abs/swarm-goal-manager-live-output.txt"
 goal_manager_live_status_output_abs="$test_root_abs/swarm-goal-manager-live-status.json"
+goal_manager_parallel_live_state_root_abs="$test_root_abs/swarm-goal-manager-parallel-live-state"
+goal_manager_parallel_live_workspace_root_abs="$test_root_abs/swarm-goal-manager-parallel-live-workspace"
+goal_manager_parallel_live_output_abs="$test_root_abs/swarm-goal-manager-parallel-live-output.txt"
+goal_manager_parallel_live_status_output_abs="$test_root_abs/swarm-goal-manager-parallel-live-status.json"
 goal_manager_budget_fail_state_root_abs="$test_root_abs/swarm-goal-manager-budget-fail-state"
 goal_manager_cycle_fail_state_root_abs="$test_root_abs/swarm-goal-manager-cycle-fail-state"
 goal_manager_reserved_dep_fail_state_root_abs="$test_root_abs/swarm-goal-manager-reserved-dep-fail-state"
 goal_manager_replan_state_root_abs="$test_root_abs/swarm-goal-manager-replan-state"
 goal_manager_replan_workspace_root_abs="$test_root_abs/swarm-goal-manager-replan-workspace"
 goal_manager_replan_workspace_abs="$goal_manager_replan_workspace_root_abs/workspace.txt"
+goal_manager_benchmark_state_root_abs="$test_root_abs/swarm-goal-manager-benchmark-state"
+goal_manager_benchmark_workspace_root_abs="$test_root_abs/swarm-goal-manager-benchmark-workspace"
+goal_manager_benchmark_workspace_abs="$goal_manager_benchmark_workspace_root_abs/workspace.txt"
+goal_manager_parallel_benchmark_state_root_abs="$test_root_abs/swarm-goal-manager-parallel-benchmark-state"
+goal_manager_parallel_benchmark_workspace_root_abs="$test_root_abs/swarm-goal-manager-parallel-benchmark-workspace"
+goal_manager_parallel_benchmark_workspace_abs="$goal_manager_parallel_benchmark_workspace_root_abs/workspace.txt"
+goal_manager_benchmark_fail_state_root_abs="$test_root_abs/swarm-goal-manager-benchmark-fail-state"
+goal_manager_benchmark_fail_workspace_root_abs="$test_root_abs/swarm-goal-manager-benchmark-fail-workspace"
+goal_manager_benchmark_timeout_state_root_abs="$test_root_abs/swarm-goal-manager-benchmark-timeout-state"
+goal_manager_benchmark_timeout_workspace_root_abs="$test_root_abs/swarm-goal-manager-benchmark-timeout-workspace"
+
+mkdir -p "$goal_manager_workspace_root_abs"
+mkdir -p "$goal_manager_native_workspace_root_abs"
+mkdir -p "$goal_manager_live_workspace_root_abs"
+mkdir -p "$goal_manager_parallel_live_workspace_root_abs"
+mkdir -p "$goal_manager_replan_workspace_root_abs"
+mkdir -p "$goal_manager_benchmark_workspace_root_abs"
+mkdir -p "$goal_manager_parallel_benchmark_workspace_root_abs"
+mkdir -p "$goal_manager_benchmark_fail_workspace_root_abs"
+mkdir -p "$goal_manager_benchmark_timeout_workspace_root_abs"
 
 "$claspc_bin" --json check "$project_root/examples/swarm-native/GoalManager.clasp" | grep -F '"status":"ok"' >/dev/null
 goal_manager_output="$(
@@ -1338,13 +1574,17 @@ printf '%s\n' "$goal_manager_output" | grep -F '"plannedTaskIds":["stabilize-loo
 printf '%s\n' "$goal_manager_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
 printf '%s\n' "$goal_manager_output" | grep -F '"allTaskIds":["planner","stabilize-loop","tighten-verify"]' >/dev/null
 printf '%s\n' "$goal_manager_output" | grep -F '"completedTaskIds":["planner","stabilize-loop","tighten-verify"]' >/dev/null
-grep -Fx 'fixed-after-feedback' "$goal_manager_workspace_abs" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_state_root_abs/workspace-stabilize-loop/workspace.txt" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_state_root_abs/workspace-tighten-verify/workspace.txt" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_feedback_path_abs" >/dev/null
 grep -F '"objectiveSummary":"Improve Clasp with a planner-managed task DAG."' "$goal_manager_state_root_abs/planner-1.json" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_state_root_abs/loop-stabilize-loop/feedback.json" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_state_root_abs/loop-tighten-verify/feedback.json" >/dev/null
 grep -F 'stabilize-loop' "$goal_manager_state_root_abs/task-stabilize-loop.md" >/dev/null
 grep -F 'tighten-verify' "$goal_manager_state_root_abs/task-tighten-verify.md" >/dev/null
+grep -F '"taskId":"stabilize-loop"' "$goal_manager_state_root_abs/mailbox.json" >/dev/null
+grep -F '"taskId":"tighten-verify"' "$goal_manager_state_root_abs/mailbox.json" >/dev/null
+grep -F 'Shared swarm mailbox context:' "$goal_manager_state_root_abs/task-stabilize-loop.md" >/dev/null
 grep -F '"valid":true' "$goal_manager_state_root_abs/plan-validation.json" >/dev/null
 CLASP_MANAGER_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_state_root_abs" >"$goal_manager_status_output_abs"
 grep -F '"phase":"completed"' "$goal_manager_status_output_abs" >/dev/null
@@ -1411,11 +1651,80 @@ goal_manager_native_output="$(
 printf '%s\n' "$goal_manager_native_output" | grep -F '"phase":"completed"' >/dev/null
 printf '%s\n' "$goal_manager_native_output" | grep -F '"verdict":"pass"' >/dev/null
 printf '%s\n' "$goal_manager_native_output" | grep -F '"plannedTaskIds":["stabilize-loop","tighten-verify"]' >/dev/null
-grep -Fx 'fixed-after-feedback' "$goal_manager_native_workspace_abs" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_native_state_root_abs/workspace-stabilize-loop/workspace.txt" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_native_state_root_abs/workspace-tighten-verify/workspace.txt" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_native_state_root_abs/loop-stabilize-loop/feedback.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_native_state_root_abs/loop-tighten-verify/feedback.json" >/dev/null
 grep -F '"valid":true' "$goal_manager_native_state_root_abs/plan-validation.json" >/dev/null
 CLASP_MANAGER_COMMAND=status "$goal_manager_binary" "$goal_manager_native_state_root_abs" >"$goal_manager_status_output_abs.native"
 grep -F '"phase":"completed"' "$goal_manager_status_output_abs.native" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_status_output_abs.native" >/dev/null
+
+goal_manager_upgrade_state_root_abs="$test_root_abs/swarm-goal-manager-upgrade-state"
+goal_manager_upgrade_workspace_root_abs="$test_root_abs/swarm-goal-manager-upgrade-workspace"
+goal_manager_upgrade_ready_path_abs="$goal_manager_upgrade_state_root_abs/manager.ready"
+goal_manager_upgrade_service_root_abs="$test_root_abs/swarm-goal-manager-upgrade-service"
+goal_manager_upgrade_restored_path_abs="$goal_manager_upgrade_state_root_abs/restored-snapshot.json"
+goal_manager_upgrade_service_status_output_abs="$test_root_abs/swarm-goal-manager-upgrade-service-status.json"
+mkdir -p "$goal_manager_upgrade_workspace_root_abs"
+goal_manager_upgrade_command_json="$(
+  node -e 'console.log(JSON.stringify(process.argv.slice(1)))' \
+    env \
+    CLASP_MANAGER_COMMAND=run \
+    "CLASP_LOOP_CODEX_BIN_JSON=\"$test_root_abs/codex\"" \
+    "CLASP_LOOP_WORKSPACE_JSON=\"$goal_manager_upgrade_workspace_root_abs\"" \
+    "CLASP_MANAGER_CLASPC_BIN_JSON=\"$claspc_bin\"" \
+    "CLASP_MANAGER_GOAL_JSON=\"Improve Clasp autonomously.\"" \
+    CLASP_MANAGER_MAX_TASKS_JSON=2 \
+    CLASP_LOOP_WATCH_POLL_MS_JSON=50 \
+    "CLASP_MANAGER_READY_PATH_JSON=\"$goal_manager_upgrade_ready_path_abs\"" \
+    "$goal_manager_binary" \
+    "$goal_manager_upgrade_state_root_abs"
+)"
+goal_manager_upgrade_output="$(
+  CLASP_MANAGER_COMMAND=upgrade \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_upgrade_workspace_root_abs\"" \
+  CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
+  CLASP_MANAGER_SERVICE_ROOT_JSON="\"$goal_manager_upgrade_service_root_abs\"" \
+  CLASP_MANAGER_SERVICE_ID_JSON='"goal-manager-service"' \
+  CLASP_MANAGER_UPGRADE_READY_PATH_JSON="\"$goal_manager_upgrade_ready_path_abs\"" \
+  CLASP_MANAGER_UPGRADE_READY_CONTAINS_JSON='"ready"' \
+  CLASP_MANAGER_UPGRADE_READY_TIMEOUT_MS_JSON='5000' \
+  CLASP_MANAGER_UPGRADE_COMMIT_GRACE_MS_JSON='100' \
+  CLASP_MANAGER_UPGRADE_COMMAND_JSON="$goal_manager_upgrade_command_json" \
+  "$goal_manager_binary" "$goal_manager_upgrade_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_upgrade_output" | grep -F '"phase":"committed"' >/dev/null
+printf '%s\n' "$goal_manager_upgrade_output" | grep -F '"committed":true' >/dev/null
+for _ in $(seq 1 600); do
+  if [[ -f "$goal_manager_upgrade_service_root_abs/service.json" ]] \
+    && grep -F '"status":"completed"' "$goal_manager_upgrade_service_root_abs/service.json" >/dev/null 2>&1 \
+    && [[ -f "$goal_manager_upgrade_state_root_abs/feedback.json" ]] \
+    && grep -F '"verdict":"pass"' "$goal_manager_upgrade_state_root_abs/feedback.json" >/dev/null 2>&1 \
+    && [[ -f "$goal_manager_upgrade_restored_path_abs" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+wait_for_path_contains "$goal_manager_upgrade_state_root_abs/feedback.json" '"verdict":"pass"'
+wait_for_path_contains "$goal_manager_upgrade_service_root_abs/service.json" '"serviceId":"goal-manager-service"'
+wait_for_path_contains "$goal_manager_upgrade_service_root_abs/service.json" '"status":"completed"'
+wait_for_path_contains "$goal_manager_upgrade_service_root_abs/service.json" '"generation":1'
+wait_for_path_contains "$goal_manager_upgrade_restored_path_abs" '"serviceRoot":"'"$goal_manager_upgrade_service_root_abs"'"'
+wait_for_path_contains "$goal_manager_upgrade_restored_path_abs" '"serviceId":"goal-manager-service"'
+wait_for_path_contains "$goal_manager_upgrade_restored_path_abs" '"generation":1'
+grep -F '"serviceId":"goal-manager-service"' "$goal_manager_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"status":"completed"' "$goal_manager_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"generation":1' "$goal_manager_upgrade_service_root_abs/service.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_upgrade_state_root_abs/feedback.json" >/dev/null
+grep -F '"serviceRoot":"'"$goal_manager_upgrade_service_root_abs"'"' "$goal_manager_upgrade_restored_path_abs" >/dev/null
+grep -F '"serviceId":"goal-manager-service"' "$goal_manager_upgrade_restored_path_abs" >/dev/null
+grep -F '"generation":1' "$goal_manager_upgrade_restored_path_abs" >/dev/null
+CLASP_MANAGER_COMMAND=service-status "$goal_manager_binary" "$goal_manager_upgrade_state_root_abs" >"$goal_manager_upgrade_service_status_output_abs"
+wait_for_path_contains "$goal_manager_upgrade_service_status_output_abs" '"serviceId":"goal-manager-service"'
+wait_for_path_contains "$goal_manager_upgrade_service_status_output_abs" '"status":"completed"'
+grep -F '"serviceId":"goal-manager-service"' "$goal_manager_upgrade_service_status_output_abs" >/dev/null
+grep -F '"status":"completed"' "$goal_manager_upgrade_service_status_output_abs" >/dev/null
 
 goal_manager_live_builder_heartbeat_abs="$goal_manager_live_state_root_abs/loop-stabilize-loop/builder-1.heartbeat.json"
 goal_manager_live_child_state_abs="$goal_manager_live_state_root_abs/loop-stabilize-loop/state.json"
@@ -1458,6 +1767,51 @@ grep -F '"phase":"completed"' "$goal_manager_live_output_abs" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_live_output_abs" >/dev/null
 grep -F '"verdict":"pass"' "$goal_manager_live_state_root_abs/feedback.json" >/dev/null
 
+goal_manager_parallel_live_stabilize_heartbeat_abs="$goal_manager_parallel_live_state_root_abs/loop-stabilize-loop/builder-1.heartbeat.json"
+goal_manager_parallel_live_tighten_heartbeat_abs="$goal_manager_parallel_live_state_root_abs/loop-tighten-verify/builder-1.heartbeat.json"
+goal_manager_parallel_live_stabilize_state_abs="$goal_manager_parallel_live_state_root_abs/loop-stabilize-loop/state.json"
+goal_manager_parallel_live_tighten_state_abs="$goal_manager_parallel_live_state_root_abs/loop-tighten-verify/state.json"
+CLASP_TEST_FAKE_PLANNER_MODE='parallel-ready' \
+CLASP_TEST_FAKE_CODEX_SLEEP_SECS='1' \
+CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_parallel_live_workspace_root_abs\"" \
+CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+CLASP_MANAGER_GOAL_JSON='"Improve Clasp with parallel bounded branches."' \
+CLASP_MANAGER_MAX_TASKS_JSON='2' \
+CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON='2' \
+CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_parallel_live_state_root_abs" >"$goal_manager_parallel_live_output_abs" 2>&1 &
+goal_manager_parallel_live_pid=$!
+for _ in $(seq 1 300); do
+  if [[ -f "$goal_manager_parallel_live_stabilize_heartbeat_abs" && -f "$goal_manager_parallel_live_tighten_heartbeat_abs" && -f "$goal_manager_parallel_live_stabilize_state_abs" && -f "$goal_manager_parallel_live_tighten_state_abs" ]]; then
+    break
+  fi
+  if ! kill -0 "$goal_manager_parallel_live_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+kill -0 "$goal_manager_parallel_live_pid" >/dev/null 2>&1
+wait_for_path_contains "$goal_manager_parallel_live_stabilize_heartbeat_abs" '"running":true' "$goal_manager_parallel_live_pid"
+wait_for_path_contains "$goal_manager_parallel_live_tighten_heartbeat_abs" '"running":true' "$goal_manager_parallel_live_pid"
+for _ in $(seq 1 300); do
+  CLASP_MANAGER_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_parallel_live_state_root_abs" >"$goal_manager_parallel_live_status_output_abs"
+  if grep -F '"phase":"task-running"' "$goal_manager_parallel_live_status_output_abs" >/dev/null 2>&1 \
+    && grep -F '"activeTaskIds":["stabilize-loop","tighten-verify"]' "$goal_manager_parallel_live_status_output_abs" >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "$goal_manager_parallel_live_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+grep -F '"phase":"task-running"' "$goal_manager_parallel_live_status_output_abs" >/dev/null
+grep -F '"activeTaskIds":["stabilize-loop","tighten-verify"]' "$goal_manager_parallel_live_status_output_abs" >/dev/null
+wait "$goal_manager_parallel_live_pid"
+goal_manager_parallel_live_pid=""
+grep -F '"phase":"completed"' "$goal_manager_parallel_live_output_abs" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_parallel_live_output_abs" >/dev/null
+
 goal_manager_cycle_fail_output="$(
   CLASP_TEST_FAKE_PLANNER_MODE='cycle' \
   CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
@@ -1495,15 +1849,113 @@ printf '%s\n' "$goal_manager_replan_output" | grep -F '"phase":"completed"' >/de
 printf '%s\n' "$goal_manager_replan_output" | grep -F '"verdict":"pass"' >/dev/null
 printf '%s\n' "$goal_manager_replan_output" | grep -F '"plannerSummary":"Improve Clasp with a replanned task DAG."' >/dev/null
 printf '%s\n' "$goal_manager_replan_output" | grep -F '"plannedTaskIds":["refresh-plan","close-gap"]' >/dev/null
-grep -Fx 'fixed-after-feedback' "$goal_manager_replan_workspace_abs" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_replan_state_root_abs/workspace-refresh-plan/workspace.txt" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_replan_state_root_abs/workspace-close-gap/workspace.txt" >/dev/null
 grep -F '"objectiveSummary":"Improve Clasp with a replanned task DAG."' "$goal_manager_replan_state_root_abs/planner-1.json" >/dev/null
 grep -F '"taskId":"refresh-plan"' "$goal_manager_replan_state_root_abs/planner-1.json" >/dev/null
 grep -F '"plannerPolicy":"Prefer replanning when planner inputs change."' "$goal_manager_replan_state_root_abs/planner-input.json" >/dev/null
+grep -F '"mailboxSummary":"' "$goal_manager_replan_state_root_abs/planner-input.json" >/dev/null
 if grep -F '"fingerprint":"stale-fingerprint"' "$goal_manager_replan_state_root_abs/planner-input.json" >/dev/null; then
   echo "goal manager should refresh planner input fingerprints after replanning" >&2
   exit 1
 fi
 grep -F '"valid":true' "$goal_manager_replan_state_root_abs/plan-validation.json" >/dev/null
+
+goal_manager_benchmark_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_BENCHMARK_MODE='replan-pass' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_benchmark_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target for Clasp."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='1' \
+  CLASP_MANAGER_MAX_WAVES_JSON='2' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$feedback_loop_benchmark_bin\"]" \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_benchmark_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_benchmark_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_output" | grep -F '"plannedTaskIds":["wave-2-benchmark-finish"]' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_output" | grep -F '"benchmarkSummary":"AppBench target met after wave 2."' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_output" | grep -F '"benchmarkTargetMet":true' >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_benchmark_state_root_abs/workspace-benchmark-gap/workspace.txt" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_benchmark_state_root_abs/workspace-wave-2-benchmark-finish/workspace.txt" >/dev/null
+grep -F '"summary":"AppBench target still unmet after wave 1."' "$goal_manager_benchmark_state_root_abs/benchmark-1.json" >/dev/null
+grep -F '"meetsTarget":false' "$goal_manager_benchmark_state_root_abs/benchmark-1.json" >/dev/null
+grep -F '"summary":"AppBench target met after wave 2."' "$goal_manager_benchmark_state_root_abs/benchmark-2.json" >/dev/null
+grep -F '"meetsTarget":true' "$goal_manager_benchmark_state_root_abs/benchmark-2.json" >/dev/null
+grep -F '"source":"benchmark"' "$goal_manager_benchmark_state_root_abs/mailbox.json" >/dev/null
+grep -F 'AppBench target still unmet after wave 1.' "$goal_manager_benchmark_state_root_abs/mailbox.json" >/dev/null
+grep -F '"objectiveSummary":"Finish the remaining AppBench closure wave."' "$goal_manager_benchmark_state_root_abs/planner-2.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_benchmark_state_root_abs/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_benchmark_state_root_abs/loop-wave-2-benchmark-finish/feedback.json" >/dev/null
+goal_manager_benchmark_objective_status_output="$("$claspc_bin" --json swarm objective status "$goal_manager_benchmark_state_root_abs" improve-clasp)"
+printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"taskId":"planner-2"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"taskId":"wave-2-benchmark-finish"' >/dev/null
+
+goal_manager_parallel_benchmark_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='parallel-branch-failure' \
+  CLASP_TEST_FAKE_BENCHMARK_MODE='already-pass' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_parallel_benchmark_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target with speculative parallel branches."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON='2' \
+  CLASP_MANAGER_MAX_WAVES_JSON='2' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$feedback_loop_benchmark_bin\"]" \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_parallel_benchmark_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_parallel_benchmark_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_parallel_benchmark_output" | grep -F '"verdict":"pass"' >/dev/null
+printf '%s\n' "$goal_manager_parallel_benchmark_output" | grep -F '"benchmarkTargetMet":true' >/dev/null
+printf '%s\n' "$goal_manager_parallel_benchmark_output" | grep -F '"plannedTaskIds":["winning-branch","failing-branch"]' >/dev/null
+grep -F '"summary":"AppBench target is already met."' "$goal_manager_parallel_benchmark_state_root_abs/benchmark-1.json" >/dev/null
+grep -F '"verdict":"pass"' "$goal_manager_parallel_benchmark_state_root_abs/loop-winning-branch/feedback.json" >/dev/null
+grep -F '"verdict":"fail"' "$goal_manager_parallel_benchmark_state_root_abs/loop-failing-branch/feedback.json" >/dev/null
+grep -Fx 'fixed-after-feedback' "$goal_manager_parallel_benchmark_state_root_abs/workspace-winning-branch/workspace.txt" >/dev/null
+
+goal_manager_benchmark_fail_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_BENCHMARK_MODE='always-fail' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_benchmark_fail_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target for Clasp."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='1' \
+  CLASP_MANAGER_MAX_WAVES_JSON='2' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$feedback_loop_benchmark_bin\"]" \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_benchmark_fail_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_benchmark_fail_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_fail_output" | grep -F '"verdict":"fail"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_fail_output" | grep -F '"benchmarkTargetMet":false' >/dev/null
+grep -F '"summary":"benchmark target not met"' "$goal_manager_benchmark_fail_state_root_abs/feedback.json" >/dev/null
+grep -F '"summary":"AppBench target is still unmet after the allowed waves."' "$goal_manager_benchmark_fail_state_root_abs/benchmark-2.json" >/dev/null
+grep -F '"meetsTarget":false' "$goal_manager_benchmark_fail_state_root_abs/benchmark-latest.json" >/dev/null
+
+goal_manager_benchmark_timeout_output="$(
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS='5' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_benchmark_timeout_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target for Clasp."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='1' \
+  CLASP_MANAGER_MAX_WAVES_JSON='2' \
+  CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON='100' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$feedback_loop_slow_benchmark_bin\"]" \
+  "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.clasp" -- "$goal_manager_benchmark_timeout_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_benchmark_timeout_output" | grep -F '"phase":"failed"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_timeout_output" | grep -F '"verdict":"fail"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_timeout_output" | grep -F '"benchmarkTargetMet":false' >/dev/null
+grep -F '"summary":"benchmark command timed out"' "$goal_manager_benchmark_timeout_state_root_abs/feedback.json" >/dev/null
+grep -F 'Benchmark command exceeded 100ms.' "$goal_manager_benchmark_timeout_state_root_abs/feedback.json" >/dev/null
+grep -F '"phase":"failed"' "$goal_manager_benchmark_timeout_state_root_abs/status.json" >/dev/null
+grep -F '"benchmarkRuns":0' "$goal_manager_benchmark_timeout_state_root_abs/status.json" >/dev/null
+grep -F '"running":true' "$goal_manager_benchmark_timeout_state_root_abs/benchmark-1.heartbeat.json" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/support-console/Main.clasp" -o "$support_console_binary"
 [[ -x "$support_console_binary" ]]

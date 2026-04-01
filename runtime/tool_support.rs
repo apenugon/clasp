@@ -17,9 +17,9 @@ use clasp_runtime::{
     clasp_rt_activate_native_module_image, clasp_rt_call_native_dispatch, clasp_rt_call_native_route_json,
     clasp_rt_init,
     clasp_rt_json_from_string, clasp_rt_native_image_module_name, clasp_rt_native_image_validate,
-    clasp_rt_native_module_image_free, clasp_rt_native_module_image_load, clasp_rt_read_file, clasp_rt_release,
-    clasp_rt_retain, clasp_rt_shutdown, clasp_rt_string_from_utf8, ClaspRtHeader, ClaspRtJson,
-    ClaspRtNativeModuleImage, ClaspRtResultString, ClaspRtRuntime, ClaspRtString,
+    clasp_rt_native_module_image_free, clasp_rt_native_module_image_load, clasp_rt_release, clasp_rt_retain,
+    clasp_rt_shutdown, clasp_rt_string_from_utf8, ClaspRtHeader, ClaspRtJson, ClaspRtNativeModuleImage,
+    ClaspRtResultString, ClaspRtRuntime, ClaspRtString,
 };
 
 pub const PROJECT_BUNDLE_SEPARATOR: &str = "\n-- CLASP_PROJECT_MODULE --\n";
@@ -28,6 +28,8 @@ const NATIVE_EXPORT_HOST_VERSION: &str = "export-host-v1";
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 const DEFAULT_SHORT_HOST_ROOT: &str = "/tmp/clasp-native-export-host";
 const NATIVE_EXPORT_HOST_STACK_BYTES: usize = 64 * 1024 * 1024;
+const NATIVE_IMAGE_READ_RETRY_ATTEMPTS: usize = 10;
+const NATIVE_IMAGE_READ_RETRY_DELAY_MS: u64 = 25;
 
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -585,6 +587,20 @@ fn compiler_native_image_is_stateful(image_path_text: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn read_native_image_text(image_path_text: &str) -> Result<String, String> {
+    for attempt in 0..NATIVE_IMAGE_READ_RETRY_ATTEMPTS {
+        match fs::read_to_string(image_path_text) {
+            Ok(image_text) => return Ok(image_text),
+            Err(err) if err.kind() == ErrorKind::NotFound && attempt + 1 < NATIVE_IMAGE_READ_RETRY_ATTEMPTS => {
+                thread::sleep(Duration::from_millis(NATIVE_IMAGE_READ_RETRY_DELAY_MS));
+            }
+            Err(_) => return Err("failed to read native compiler image".to_owned()),
+        }
+    }
+
+    Err("failed to read native compiler image".to_owned())
+}
+
 fn should_bypass_native_export_host(image_path_text: &str, export_name: &str) -> bool {
     if compiler_native_image_is_stateful(image_path_text) {
         return true;
@@ -862,7 +878,6 @@ pub fn project_declares_backend_surface(source: &str) -> bool {
 struct NativeExportHost {
     runtime: ClaspRtRuntime,
     image_path: *mut ClaspRtString,
-    image_read_result: *mut ClaspRtResultString,
     image: *mut ClaspRtJson,
     module_name_result: *mut ClaspRtResultString,
     module_name: *mut ClaspRtString,
@@ -873,12 +888,10 @@ impl NativeExportHost {
         release(&mut self.runtime, self.module_name as *mut ClaspRtHeader);
         release(&mut self.runtime, self.module_name_result as *mut ClaspRtHeader);
         release(&mut self.runtime, self.image as *mut ClaspRtHeader);
-        release(&mut self.runtime, self.image_read_result as *mut ClaspRtHeader);
         release(&mut self.runtime, self.image_path as *mut ClaspRtHeader);
         self.module_name = null_mut();
         self.module_name_result = null_mut();
         self.image = null_mut();
-        self.image_read_result = null_mut();
         self.image_path = null_mut();
         clasp_rt_shutdown(&mut self.runtime);
     }
@@ -887,7 +900,6 @@ impl NativeExportHost {
         let mut host = NativeExportHost {
             runtime: mem::zeroed(),
             image_path: null_mut(),
-            image_read_result: null_mut(),
             image: null_mut(),
             module_name_result: null_mut(),
             module_name: null_mut(),
@@ -899,12 +911,12 @@ impl NativeExportHost {
             let image_path_c =
                 CString::new(image_path_text).map_err(|_| "image path contains interior NUL byte".to_owned())?;
             host.image_path = clasp_rt_string_from_utf8(image_path_c.as_ptr());
-            host.image_read_result = clasp_rt_read_file(host.image_path);
-            if host.image_read_result.is_null() || !(*host.image_read_result).is_ok {
-                return Err("failed to read native compiler image".to_owned());
-            }
-
-            host.image = clasp_rt_json_from_string((*host.image_read_result).value);
+            let image_text = read_native_image_text(image_path_text)?;
+            let image_text_c =
+                CString::new(image_text.as_str()).map_err(|_| "native compiler image contains interior NUL byte".to_owned())?;
+            let image_text_value = clasp_rt_string_from_utf8(image_text_c.as_ptr());
+            host.image = clasp_rt_json_from_string(image_text_value);
+            release(&mut host.runtime, image_text_value as *mut ClaspRtHeader);
             if !clasp_rt_native_image_validate(host.image) {
                 return Err("runtime rejected native compiler image".to_owned());
             }
@@ -1311,7 +1323,6 @@ unsafe fn execute_native_export_from_image_path_args_local(
     let export_start = Instant::now();
     let mut runtime: ClaspRtRuntime = mem::zeroed();
     let mut image_path: *mut ClaspRtString = null_mut();
-    let mut image_read_result: *mut ClaspRtResultString = null_mut();
     let mut image: *mut ClaspRtJson = null_mut();
     let mut module_name_result: *mut ClaspRtResultString = null_mut();
     let mut loaded_image: *mut ClaspRtNativeModuleImage = null_mut();
@@ -1328,12 +1339,12 @@ unsafe fn execute_native_export_from_image_path_args_local(
         let image_path_c =
             CString::new(image_path_text).map_err(|_| "image path contains interior NUL byte".to_owned())?;
         image_path = clasp_rt_string_from_utf8(image_path_c.as_ptr());
-        image_read_result = clasp_rt_read_file(image_path);
-        if image_read_result.is_null() || !(*image_read_result).is_ok {
-            return Err("failed to read native compiler image".to_owned());
-        }
-
-        image = clasp_rt_json_from_string((*image_read_result).value);
+        let image_text = read_native_image_text(image_path_text)?;
+        let image_text_c =
+            CString::new(image_text.as_str()).map_err(|_| "native compiler image contains interior NUL byte".to_owned())?;
+        let image_text_value = clasp_rt_string_from_utf8(image_text_c.as_ptr());
+        image = clasp_rt_json_from_string(image_text_value);
+        release(&mut runtime, image_text_value as *mut ClaspRtHeader);
         if !clasp_rt_native_image_validate(image) {
             return Err("runtime rejected native compiler image".to_owned());
         }
@@ -1408,7 +1419,6 @@ unsafe fn execute_native_export_from_image_path_args_local(
     release(&mut runtime, module_name as *mut ClaspRtHeader);
     release(&mut runtime, module_name_result as *mut ClaspRtHeader);
     release(&mut runtime, image as *mut ClaspRtHeader);
-    release(&mut runtime, image_read_result as *mut ClaspRtHeader);
     release(&mut runtime, image_path as *mut ClaspRtHeader);
     clasp_rt_shutdown(&mut runtime);
     trace_native_timing(&format!(
@@ -1825,6 +1835,27 @@ mod tests {
             "/tmp/embedded.native.image.json",
             "checkProjectText"
         ));
+    }
+
+    #[test]
+    fn read_native_image_text_retries_transient_missing_file() {
+        let root = unique_test_root("native-image-read-retry");
+        fs::create_dir_all(&root).expect("create retry root");
+        let image_path = root.join("embedded.compiler.native.image.json");
+        let image_path_for_writer = image_path.clone();
+
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            fs::write(&image_path_for_writer, "{\"module\":\"Main\"}").expect("write delayed native image");
+        });
+
+        let image_text =
+            super::read_native_image_text(image_path.to_str().expect("utf8 image path")).expect("read retried image");
+        writer.join().expect("join delayed image writer");
+
+        assert_eq!(image_text, "{\"module\":\"Main\"}");
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

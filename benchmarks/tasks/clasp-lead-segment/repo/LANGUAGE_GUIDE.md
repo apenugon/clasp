@@ -20,6 +20,9 @@ Start there before touching the verification harness.
 - `test/lead-app.test.mjs`
   - packaged-native acceptance scaffolding
   - validates HTTP behavior against the generated binary
+- `test/native-http-test.mjs`
+  - task-local native server helper shared by the acceptance checks
+  - keeps the benchmark repo self-contained instead of importing parent-repo test glue
 - `scripts/verify.sh`
   - compiles the workspace to a native binary
   - runs the acceptance test with `CLASP_BENCH_BINARY`

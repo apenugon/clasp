@@ -512,6 +512,30 @@ printf '%s\n' "$public_app_summary_output" | grep -Fq '    throughputDeltaPct: 3
 printf '%s\n' "$public_app_summary_output" | grep -Fq '    tokenDelta: -115'
 printf '%s\n' "$public_app_summary_output" | grep -Fq '    uncachedTokenDelta: -100'
 
+public_app_signal_output="$(
+  node "$project_root/benchmarks/run-public-app-signal.mjs" \
+    --skip-run true \
+    --notes public-app \
+    --harness codex \
+    --model gpt-5.4
+)"
+printf '%s\n' "$public_app_signal_output" | grep -Fq '"suite":"main-public-app-comparison"'
+printf '%s\n' "$public_app_signal_output" | grep -Fq '"passed":true'
+printf '%s\n' "$public_app_signal_output" | grep -Fq '"meetsTarget":true'
+printf '%s\n' "$public_app_signal_output" | grep -Fq '"scoreName":"throughputDeltaPct"'
+printf '%s\n' "$public_app_signal_output" | grep -Fq '"scoreValue":38'
+
+missing_public_app_signal_output="$(
+  node "$project_root/benchmarks/run-public-app-signal.mjs" \
+    --skip-run true \
+    --notes does-not-exist \
+    --harness codex \
+    --model gpt-5.4
+)"
+printf '%s\n' "$missing_public_app_signal_output" | grep -Fq '"passed":false'
+printf '%s\n' "$missing_public_app_signal_output" | grep -Fq '"meetsTarget":false'
+printf '%s\n' "$missing_public_app_signal_output" | grep -Fq 'did not produce a full Clasp vs TypeScript comparison'
+
 durable_workflow_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \
     --task-id clasp-durable-workflow \

@@ -12,5 +12,5 @@ Preferred workflow:
 
 1. Read `test/lead-app.test.mjs`.
 2. Update the shared lead contract and rendering surface first.
-3. Update the local server logic only if the shared-contract change requires it.
+3. Leave `src/server/main.ts` alone unless the shared-contract change reveals a real route-plumbing bug.
 4. Rerun `bash scripts/verify.sh`.

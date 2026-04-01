@@ -234,6 +234,7 @@ check_product_only_clasp_solution() {
     exit 1
   fi
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+  assert_files_match "$workspace/test/native-http-test.mjs" "$task_root/test/native-http-test.mjs"
 }
 
 check_product_only_typescript_solution() {
@@ -244,9 +245,6 @@ check_product_only_typescript_solution() {
   run_benchmark_prepare "$task_id" "$workspace" >/dev/null
 
   cp "$project_root/examples/lead-app-ts/src/shared/lead.ts" "$workspace/src/shared/lead.ts"
-  cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$workspace/src/server/main.ts"
-  cp "$project_root/examples/lead-app-ts/src/server/store.ts" "$workspace/src/server/store.ts"
-  cp "$project_root/examples/lead-app-ts/src/server/runtime-modules.d.ts" "$workspace/src/server/runtime-modules.d.ts"
 
   run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
 
@@ -394,7 +392,9 @@ check_fixture_seed_override
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'const binaryPath = process.env.CLASP_BENCH_BINARY;'
-assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'withNativeServer(binaryPath'
+assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'from "./native-http-test.mjs";'
+assert_not_contains "$clasp_workspace/test/lead-app.test.mjs" 'CLASP_PROJECT_ROOT'
+assert_file_exists "$clasp_workspace/test/native-http-test.mjs"
 if [[ -e "$clasp_workspace/server.mjs" ]]; then
   echo "expected clasp-lead-segment workspace to omit server.mjs" >&2
   exit 1
@@ -408,7 +408,9 @@ assert_not_contains "$clasp_workspace/Shared/Lead.clasp" "LeadSegment"
 ts_workspace="$workspace_root/ts-lead-segment"
 assert_contains "$ts_workspace/test/lead-app.test.mjs" 'import { createServer } from "../dist/server/main.js";'
 assert_not_contains "$ts_workspace/src/shared/lead.ts" "LeadSegment"
-assert_not_contains "$ts_workspace/src/server/main.ts" "segment:"
+assert_contains "$ts_workspace/src/server/main.ts" "createStoredLeadRecord"
+assert_contains "$ts_workspace/src/server/main.ts" "loadInboxSnapshot"
+assert_not_contains "$ts_workspace/src/server/main.ts" 'leadId: `lead-${leads.length + 1}`'
 
 ts_persistence_workspace="$workspace_root/ts-lead-persistence"
 assert_contains "$ts_persistence_workspace/test/lead-app.test.mjs" 'lead app schema version 999 is incompatible with expected version 1'

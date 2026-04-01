@@ -150,6 +150,85 @@ export function decodeLeadRecord(text: string): LeadRecord {
   };
 }
 
+export function createSeedLeads(): LeadRecord[] {
+  return [
+    {
+      leadId: "lead-2",
+      company: "Northwind Studio",
+      contact: "Morgan Lee",
+      summary:
+        "Northwind Studio is ready for a design-system migration this quarter.",
+      priority: "medium",
+      followUpRequired: true,
+      reviewStatus: "reviewed",
+      reviewNote: "Confirmed budget window and asked for a migration timeline."
+    },
+    {
+      leadId: "lead-1",
+      company: "Acme Labs",
+      contact: "Jordan Kim",
+      summary:
+        "Acme Labs is exploring an internal AI pilot for support operations.",
+      priority: "high",
+      followUpRequired: true,
+      reviewStatus: "new",
+      reviewNote: ""
+    }
+  ];
+}
+
+export function createStoredLeadRecord(
+  leads: LeadRecord[],
+  intake: LeadIntake,
+  summary: LeadSummary
+): LeadRecord {
+  const stored = decodeLeadRecord(
+    JSON.stringify({
+      leadId: `lead-${leads.length + 1}`,
+      company: intake.company,
+      contact: intake.contact,
+      summary: summary.summary,
+      priority: summary.priority,
+      followUpRequired: summary.followUpRequired,
+      reviewStatus: "new",
+      reviewNote: ""
+    })
+  );
+
+  leads.unshift(stored);
+  return stored;
+}
+
+export function loadInboxSnapshot(leads: LeadRecord[]): InboxSnapshot {
+  return {
+    headline: "Priority inbox",
+    primaryLeadLabel: leadLabel(leads[0]),
+    secondaryLeadLabel: leadLabel(leads[1] ?? leads[0])
+  };
+}
+
+export function requireLead(leads: LeadRecord[], index: number): LeadRecord {
+  const lead = leads[index] ?? leads[0];
+  if (!lead) {
+    throw new Error("lead store is empty");
+  }
+  return lead;
+}
+
+export function reviewLeadRecord(
+  leads: LeadRecord[],
+  review: LeadReview
+): LeadRecord {
+  const lead = leads.find((candidate) => candidate.leadId === review.leadId);
+  if (!lead) {
+    throw new Error(`Unknown lead: ${review.leadId}`);
+  }
+
+  lead.reviewStatus = "reviewed";
+  lead.reviewNote = review.note;
+  return lead;
+}
+
 export function encodePage(title: string, body: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>${body}</body></html>`;
 }

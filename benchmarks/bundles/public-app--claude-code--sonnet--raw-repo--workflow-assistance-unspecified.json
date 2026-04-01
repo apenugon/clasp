@@ -106,8 +106,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 26295,
-      "sha256": "2b6603ed4ab8e5f3ec13fa604a185ba9f1885fefce46431de946dae39e4e60f4"
+      "size": 26526,
+      "sha256": "0e462f4b941c60e17a250815200e0fe2f2d7f96095e867beca1be18bdf4eca3c"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -116,8 +116,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 87091,
-      "sha256": "a080583d8cabf6110dfb8de4244cb98f8085c373a2415b992392b0b3b75260d3"
+      "size": 87358,
+      "sha256": "d473c9e8178662bbd3f96b9b5aba4609f652d1e0990ad1c7366048936de08aa4"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -311,8 +311,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/LANGUAGE_GUIDE.md",
-      "size": 2377,
-      "sha256": "b5ee086f76fc918ff89b35cf50f65276091e18e78707ec5d2f05c4475126a167"
+      "size": 2562,
+      "sha256": "a816ba51afb3aa78b2eb351b17e3fd990cfe2c54074efb47433300bed04a1b8b"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Main.clasp",
@@ -321,8 +321,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh",
-      "size": 631,
-      "sha256": "e4fad4de021aac7b56fb466a9f8d40e662ccf6ca8796c5e24a187cd740e20ea8"
+      "size": 698,
+      "sha256": "56e66ca4838467ced0b44c100811223503a0bbc76f55e033d6a885deedc4133e"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp",
@@ -331,8 +331,13 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/test/lead-app.test.mjs",
-      "size": 5188,
-      "sha256": "91fa8cd01f2664fd78ae06b1544a67a5b439d828487b89d504e39db6d0627a05"
+      "size": 4971,
+      "sha256": "c1a21707247f89fba3ad754e787dcf613b1da60142927d93620f0f2ead597963"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-segment/repo/test/native-http-test.mjs",
+      "size": 3649,
+      "sha256": "1d88cf7b193572c6dd20023c109e625255a6e33e7dbcfa0c22b167bbb53f8847"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/task.json",
@@ -511,8 +516,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/prompt.oracle.md",
-      "size": 2045,
-      "sha256": "821055ace65cc008c5b0d1518956c8c659f6f505e39a4b750907e7ce43c44769"
+      "size": 2018,
+      "sha256": "2c467a2456eeb36518f1ecbd41133393df18227bc898d12a9db49c06229c60ff"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/prompt.raw.md",
@@ -526,8 +531,28 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/AGENTS.md",
-      "size": 761,
-      "sha256": "135f16a77e255b4ad0f36d60e1317300e58b39fff1f63509853e0cac7d6b2c74"
+      "size": 785,
+      "sha256": "7695a585e80b0e1df78824aa64f6bd864d4f659750bba37c1732639a7fb15500"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-segment/repo/dist/server/dev.js",
+      "size": 746,
+      "sha256": "2b704f96580dea9bd3433e19c3c779dac711d821d623b500b86de5dc88dfbd1e"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-segment/repo/dist/server/main.js",
+      "size": 1960,
+      "sha256": "dd49886ce4d51f5254696b22be0382ae1e9bbf582a5a426cfd9d532ec3442691"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-segment/repo/dist/server/runtime.js",
+      "size": 1475,
+      "sha256": "be4177bb7c6374a4334ddf56bad955bd398eaf947944aab435fc6dd778af8db9"
+    },
+    {
+      "path": "benchmarks/tasks/ts-lead-segment/repo/dist/shared/lead.js",
+      "size": 7423,
+      "sha256": "fc659462cac99bb4890280dde92539b385f3d5b15dcff3f655370ba01338ec12"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/package.json",
@@ -546,8 +571,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/src/server/main.ts",
-      "size": 4035,
-      "sha256": "5cb568c57f8645c9afeaf93bbcc570b3bd4ada48b40cc334861e43835dff3aa7"
+      "size": 2239,
+      "sha256": "3c575d3c45be7bac872a8562f8e392e2a54f18dcb35b19613861b819299d4e09"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/src/server/runtime.ts",
@@ -556,8 +581,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/src/shared/lead.ts",
-      "size": 6469,
-      "sha256": "706965ad0657d8c401d98d1dff82446cfea0f5455566378bdd3c40f8a8bd1c2e"
+      "size": 8452,
+      "sha256": "b9dd0eebf5e3a182bd6e431a61619dfed43eab43e91175f45328c14b94497e1b"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/test/lead-app.test.mjs",

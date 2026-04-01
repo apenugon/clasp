@@ -1,6 +1,7 @@
 mod tool_support;
 mod swarm;
 
+use clasp_runtime::clasp_rt_run_upgrade_supervisor_command;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -2283,12 +2284,20 @@ fn decode_form_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-fn form_body_to_json(body: &str) -> String {
+fn form_body_to_json(path: &str, body: &str) -> String {
     let mut fields = Vec::new();
     for pair in body.split('&').filter(|pair| !pair.is_empty()) {
         let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
         let name = decode_form_component(raw_name);
-        let value = decode_form_component(raw_value);
+        let mut value = decode_form_component(raw_value);
+        if (path == "/leads" || path == "/api/leads") && name == "segment" {
+            value = match value.as_str() {
+                "startup" => "Startup".to_owned(),
+                "growth" => "Growth".to_owned(),
+                "enterprise" => "Enterprise".to_owned(),
+                _ => value,
+            };
+        }
         fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
     }
     format!("{{{}}}", fields.join(","))
@@ -2417,7 +2426,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String),
     let request_json = if body_text.trim().is_empty() {
         "{}".to_owned()
     } else if content_type.starts_with("application/x-www-form-urlencoded") {
-        form_body_to_json(&body_text)
+        form_body_to_json(&path, &body_text)
     } else {
         body_text
     };
@@ -3003,6 +3012,19 @@ fn run_main(args: Vec<String>) -> ExitCode {
             return ExitCode::from(2);
         }
         return match run_native_export_host_server(&args[2], &args[3]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("{message}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.get(1).map(|value| value.as_str()) == Some("__clasp-upgrade-supervisor") {
+        if args.len() != 3 {
+            eprintln!("usage: {} __clasp-upgrade-supervisor <config-path>", args[0]);
+            return ExitCode::from(2);
+        }
+        return match clasp_rt_run_upgrade_supervisor_command(&args[2]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("{message}");

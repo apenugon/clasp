@@ -12,7 +12,7 @@ Implement lead segments end to end.
 ## Working Guidance
 
 - This task is intentionally local to the workspace.
-- The exact app-owned edit surfaces for this TypeScript variant are `src/shared/lead.ts` and `src/server/main.ts`.
+- The exact app-owned edit surface for this TypeScript variant is `src/shared/lead.ts`.
 - `test/lead-app.test.mjs` is verification scaffolding, not the intended product edit surface for this task.
 - Do not inspect the parent repo unless `bash scripts/verify.sh` exposes a benchmark harness or language-runtime bug rather than an app bug.
 - The intended app-level fix is to express the constraint in the shared schema and thread it through the existing server-rendered flow.
