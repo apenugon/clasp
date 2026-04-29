@@ -1086,12 +1086,12 @@ bash -n \
   "$project_root/scripts/clasp-swarm-stop.sh" \
   "$project_root/scripts/clasp-verifier.sh"
 
-rg -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "$project_root/scripts/clasp-builder.sh"
-rg -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-builder.sh"
-! rg -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-builder.sh"
-rg -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "$project_root/scripts/clasp-verifier.sh"
-rg -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
-! rg -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
+grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "$project_root/scripts/clasp-builder.sh"
+grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-builder.sh"
+! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-builder.sh"
+grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "$project_root/scripts/clasp-verifier.sh"
+grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
+! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
 
 bash -lc "
   set -euo pipefail

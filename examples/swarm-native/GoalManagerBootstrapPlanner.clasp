@@ -1,0 +1,96 @@
+module GoalManagerBootstrapPlanner
+
+import GoalManagerMailboxSummary
+import GoalManagerPlannerMemory
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import Swarm
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath prompt = [
+  codexBin,
+  "exec",
+  "--json",
+  "--cd",
+  managerProjectRoot,
+  "-m",
+  codexModel,
+  "-c",
+  codexReasoningConfig,
+  "--skip-git-repo-check",
+  "--sandbox",
+  codexSandbox,
+  "--ephemeral",
+  "--output-schema",
+  schemaPath,
+  "-o",
+  reportPath,
+  prompt
+]
+
+plannerBenchmarkContextFor : Int -> Str -> Str
+plannerBenchmarkContextFor wave benchmarkSummary =
+  if benchmarkEnabled then
+    if benchmarkSummary == "" then
+      textJoin "\n" [
+        "Benchmark target is enabled for this manager.",
+        textConcat ["Current wave: ", encode wave, " of ", encode maxWaves],
+        "No benchmark checkpoint exists yet. Plan the first bounded wave toward beating the benchmark target."
+      ]
+    else
+      textJoin "\n" [
+        "Benchmark target is enabled for this manager.",
+        textConcat ["Current wave: ", encode wave, " of ", encode maxWaves],
+        textConcat ["Latest benchmark summary: ", benchmarkSummary],
+        "If the target is still unmet, plan the next bounded wave specifically to improve the benchmark."
+      ]
+  else
+    textConcat ["Current wave: ", encode wave, " of ", encode maxWaves]
+
+plannerPromptFor : Int -> Str -> Str
+plannerPromptFor wave benchmarkSummary =
+  textJoin "\n" [
+    "You are the planner subagent for the Clasp repository.",
+    "Read AGENTS.md first if it exists.",
+    "Plan the next bounded tasks needed to improve Clasp autonomously.",
+    plannerBenchmarkContextFor wave benchmarkSummary,
+    "High-level goal:",
+    goalText,
+    "Current planner policy:",
+    plannerPolicyText,
+    "Current shared swarm mailbox context:",
+    mailboxSummaryText wave,
+    "Current cross-wave memory:",
+    plannerMemoryTextFor wave,
+    "Current prioritized backlog:",
+    plannerBacklogTextFor wave,
+    "Do not assume a fixed role taxonomy beyond the minimal substrate already present. Let coordination patterns emerge from the work and the shared mailbox.",
+    "Use focused verification for ordinary implementation branches. Reserve full verify-all for signoff, verifyall, or integration closure tasks, and treat verifier timeouts as first-class planner input.",
+    "If prior failed branches have recoverableDiff details, plan from those artifacts instead of rediscovering the same work from scratch.",
+    "Return JSON matching the planner schema.",
+    textConcat ["Plan 1-", encode maxTaskLoops, " bounded tasks with explicit dependencies and task prompts."],
+    "Each planned task must include an explicit role and a coordinationFocus list.",
+    "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."
+  ]
+
+plannerCommandFor : Int -> Str -> SwarmCommand
+plannerCommandFor wave benchmarkSummary =
+  commandSpec
+    managerProjectRoot
+    (append
+      [
+        "bash",
+        "-lc",
+        textJoin "\n" [
+          "if [ \"$1\" -le 0 ]; then",
+          "  exec \"${@:2}\"",
+          "fi",
+          "seconds=$(( ($1 + 999) / 1000 ))",
+          "duration=\"${seconds}s\"",
+          "exec timeout \"$duration\" \"${@:2}\" < /dev/null"
+        ],
+        "planner-timeout",
+        encode plannerTimeoutMs
+      ]
+      (codexCommand resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptFor wave benchmarkSummary)))

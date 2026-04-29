@@ -10,6 +10,7 @@ cc_bin="${CC:-cc}"
 cargo_bin="${CARGO:-cargo}"
 rustc_bin="${RUSTC:-rustc}"
 rust_runtime_lib="$project_root/runtime/target/debug/libclasp_runtime.a"
+fallback_rust_runtime_lib="$project_root/libclasp_runtime.a"
 node_bin="${NODE:-node}"
 nix_reentry="${CLASP_NATIVE_RUNTIME_NIX_REENTRY:-0}"
 
@@ -19,8 +20,24 @@ cleanup() {
 
 trap cleanup EXIT
 
+native_runtime_artifacts_ready() {
+  if [[ ! -x "$project_root/runtime/target/debug/claspc" ]]; then
+    return 1
+  fi
+
+  if [[ -f "$rust_runtime_lib" ]]; then
+    return 0
+  fi
+
+  [[ -f "$fallback_rust_runtime_lib" ]]
+}
+
 maybe_enter_nix_shell() {
   if command -v "$rustc_bin" >/dev/null 2>&1 && command -v "$cargo_bin" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if native_runtime_artifacts_ready; then
     return 0
   fi
 
@@ -32,7 +49,7 @@ maybe_enter_nix_shell() {
     return 0
   fi
 
-  nix develop "$project_root" --command bash -lc "
+  nix develop "path:$project_root" --command bash -lc "
     set -euo pipefail
     cd \"$project_root\"
     export CLASP_PROJECT_ROOT=\"$project_root\"
@@ -44,6 +61,10 @@ maybe_enter_nix_shell() {
 
 maybe_enter_nix_shell
 
+if [[ ! -f "$rust_runtime_lib" && -f "$fallback_rust_runtime_lib" ]]; then
+  rust_runtime_lib="$fallback_rust_runtime_lib"
+fi
+
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 export CLASPC_BIN="$claspc_bin"
 
@@ -53,8 +74,7 @@ harness_path="$test_root/test-native-image"
 hello_ir_path="$test_root/hello.native.ir"
 hello_image_path="${hello_ir_path%.*}.image.json"
 hello_structured_image_path="$test_root/hello.structured.native.image.json"
-parser_ir_path="$test_root/compiler-parser.native.ir"
-parser_image_path="${parser_ir_path%.*}.image.json"
+parser_image_path="$test_root/compiler-parser.native.image.json"
 parser_structured_image_path="$test_root/compiler-parser.structured.native.image.json"
 hosted_image_path="$project_root/src/embedded.native.image.json"
 hosted_structured_image_path="$test_root/compiler-hosted.structured.native.image.json"
@@ -117,19 +137,23 @@ EOF
   "$claspc_bin" native-image examples/durable-workflow/Main.clasp -o "$image_path" --json >/dev/null
   "$claspc_bin" native examples/hello.clasp -o "$hello_ir_path" --json >/dev/null
   "$claspc_bin" native-image examples/hello.clasp -o "$hello_image_path" --json >/dev/null
-  "$claspc_bin" native examples/compiler-parser.clasp -o "$parser_ir_path" --json >/dev/null
-  "$claspc_bin" native-image examples/compiler-parser.clasp -o "$parser_image_path" --json >/dev/null
   "$claspc_bin" native examples/durable-workflow/Main.clasp -o "$hosted_durable_ir_path" --json >/dev/null
   "$claspc_bin" native-image examples/durable-workflow/Main.clasp -o "$hosted_durable_image_path" --json >/dev/null
   "$claspc_bin" native "$route_project_path" -o "$route_ir_path" --json >/dev/null
   "$claspc_bin" native-image "$route_project_path" -o "$route_image_path" --json >/dev/null
 )
 
+CLASP_PROJECT_ROOT="$project_root" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$hosted_image_path" \
+  nativeImageSourceText \
+  "$project_root/examples/compiler-parser.clasp" \
+  "$parser_image_path"
+
 [[ -f "$ir_path" ]]
 [[ -f "$image_path" ]]
 [[ -f "$hello_ir_path" ]]
 [[ -f "$hello_image_path" ]]
-[[ -f "$parser_ir_path" ]]
 [[ -f "$parser_image_path" ]]
 [[ -f "$hosted_image_path" ]]
 [[ -f "$hosted_durable_ir_path" ]]
@@ -203,18 +227,23 @@ incompatiblePayload.compatibility.acceptedPreviousFingerprints = ["native-compat
 writeJson(incompatibleOutputPath, incompatiblePayload);
 NODE
 
-cargo build --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib >/dev/null
+if command -v "$cargo_bin" >/dev/null 2>&1; then
+  cargo build --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib >/dev/null
+fi
 [[ -f "$rust_runtime_lib" ]]
 
-rust_native_libs="$(
-  cargo rustc --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib -- --print native-static-libs 2>&1 >/dev/null |
-    sed -n 's/^note: native-static-libs: //p' |
-    tail -n 1
-)"
-
 rust_link_args=()
-if [[ -n "$rust_native_libs" ]]; then
-  read -r -a rust_link_args <<<"$rust_native_libs"
+if command -v "$cargo_bin" >/dev/null 2>&1; then
+  rust_native_libs="$(
+    cargo rustc --quiet --manifest-path "$project_root/runtime/Cargo.toml" --lib -- --print native-static-libs 2>&1 >/dev/null |
+      sed -n 's/^note: native-static-libs: //p' |
+      tail -n 1
+  )"
+  if [[ -n "$rust_native_libs" ]]; then
+    read -r -a rust_link_args <<<"$rust_native_libs"
+  fi
+else
+  rust_link_args=(-lm)
 fi
 
 "$cc_bin" \

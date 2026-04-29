@@ -20,18 +20,25 @@
         "additionalProperties": false,
         "required": [
           "taskId",
+          "role",
           "detail",
           "dependencies",
-          "taskPrompt"
+          "taskPrompt",
+          "coordinationFocus"
         ],
         "properties": {
           "taskId": { "type": "string" },
+          "role": { "type": "string" },
           "detail": { "type": "string" },
           "dependencies": {
             "type": "array",
             "items": { "type": "string" }
           },
-          "taskPrompt": { "type": "string" }
+          "taskPrompt": { "type": "string" },
+          "coordinationFocus": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
         }
       }
     },

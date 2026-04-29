@@ -1,0 +1,21 @@
+module Process
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+
+record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+record CommandSpec = { cwd : Str, command : [Str] }
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+commandSpec : Str -> [Str] -> CommandSpec
+commandSpec cwd command = CommandSpec { cwd = cwd, command = command }
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+run : CommandSpec -> Result ProcessResult
+run spec = processResult (runCommandRaw spec.cwd spec.command)

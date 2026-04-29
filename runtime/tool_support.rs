@@ -587,6 +587,44 @@ fn compiler_native_image_is_stateful(image_path_text: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn compiler_native_export_can_use_host(export_name: &str) -> bool {
+    matches!(
+        export_name,
+        "checkSourceText"
+            | "explainSourceText"
+            | "compileSourceText"
+            | "airSourceText"
+            | "contextSourceText"
+            | "nativeSourceText"
+            | "nativeImageSourceText"
+            | "checkCoreSourceText"
+            | "checkProjectText"
+            | "checkProjectModuleSummaryText"
+            | "explainProjectText"
+            | "airProjectText"
+            | "contextProjectText"
+            | "compileProjectText"
+            | "nativeProjectText"
+            | "nativeImageProjectText"
+            | "nativeImageProjectPlanText"
+            | "nativeImageProjectBuildPlanText"
+            | "nativeImageSourceModuleInterfaceFingerprintText"
+            | "nativeImageProjectModuleText"
+            | "nativeImageProjectExportsText"
+            | "nativeImageProjectEntrypointsText"
+            | "nativeImageProjectAbiText"
+            | "nativeImageProjectRuntimeText"
+            | "nativeImageProjectCompatibilityText"
+            | "nativeImageProjectDeclsText"
+            | "nativeImageProjectConstructorDeclsText"
+            | "nativeImageProjectDeclNamesText"
+            | "nativeImageProjectDeclModulePlanText"
+            | "nativeImageProjectModuleDeclsText"
+            | "nativeImageProjectNamedDeclsText"
+            | "checkCoreProjectText"
+    )
+}
+
 fn read_native_image_text(image_path_text: &str) -> Result<String, String> {
     for attempt in 0..NATIVE_IMAGE_READ_RETRY_ATTEMPTS {
         match fs::read_to_string(image_path_text) {
@@ -602,7 +640,9 @@ fn read_native_image_text(image_path_text: &str) -> Result<String, String> {
 }
 
 fn should_bypass_native_export_host(image_path_text: &str, export_name: &str) -> bool {
-    if compiler_native_image_is_stateful(image_path_text) {
+    if compiler_native_image_is_stateful(image_path_text)
+        && !compiler_native_export_can_use_host(export_name)
+    {
         return true;
     }
     let key = native_export_host_failure_key(image_path_text, export_name);
@@ -982,7 +1022,11 @@ impl NativeExportHost {
                 owned_dispatch_args.len(),
             );
             if dispatch_value.is_null() {
-                return Err("runtime failed to execute native compiler export".to_owned());
+                return Err(format!(
+                    "runtime failed to execute native compiler export `{}` via persistent host with {} argument(s)",
+                    export_name,
+                    source_args.len()
+                ));
             }
 
             Ok(string_bytes(dispatch_value as *mut ClaspRtString).to_vec())
@@ -1398,7 +1442,12 @@ unsafe fn execute_native_export_from_image_path_args_local(
             owned_dispatch_args.len(),
         );
         if dispatch_value.is_null() {
-            return Err("runtime failed to execute native compiler export".to_owned());
+            return Err(format!(
+                "runtime failed to execute native compiler export `{}` from image `{}` with {} argument(s)",
+                export_name,
+                image_path_text,
+                source_args.len()
+            ));
         }
         trace_native_timing(&format!(
             "export={} phase=dispatch ms={} argc={}",
@@ -1819,17 +1868,40 @@ mod tests {
             "/tmp/compiler-b.native.image.json",
             "nativeImageProjectModuleDeclsText"
         ));
+
+        let compiler_image_path = "/tmp/compiler-failure.compiler.native.image.json";
+        assert!(!super::should_bypass_native_export_host(
+            compiler_image_path,
+            "checkProjectText"
+        ));
+        super::record_native_export_host_failure(compiler_image_path, "checkProjectText");
+        assert!(super::should_bypass_native_export_host(
+            compiler_image_path,
+            "checkProjectText"
+        ));
+        assert!(!super::should_bypass_native_export_host(
+            compiler_image_path,
+            "nativeImageProjectBuildPlanText"
+        ));
     }
 
     #[test]
-    fn compiler_images_bypass_the_native_export_host() {
-        assert!(super::should_bypass_native_export_host(
+    fn compiler_images_use_the_native_export_host_for_pure_compiler_exports() {
+        assert!(!super::should_bypass_native_export_host(
             "/tmp/embedded.compiler.native.image.json",
             "checkProjectText"
         ));
-        assert!(super::should_bypass_native_export_host(
+        assert!(!super::should_bypass_native_export_host(
+            "/tmp/embedded.compiler.native.image.json",
+            "checkProjectModuleSummaryText"
+        ));
+        assert!(!super::should_bypass_native_export_host(
             "/tmp/stage1.compiler.native.image.json",
             "nativeImageProjectBuildPlanText"
+        ));
+        assert!(super::should_bypass_native_export_host(
+            "/tmp/stage1.compiler.native.image.json",
+            "main"
         ));
         assert!(!super::should_bypass_native_export_host(
             "/tmp/embedded.native.image.json",

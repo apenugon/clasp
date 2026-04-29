@@ -25,7 +25,8 @@ run_verify() {
 
   lead_create_json="$("$binary_path" route POST /api/leads '{"company":"SynthSpeak API","contact":"Ava Stone","budget":25000,"segment":"Growth"}')"
   printf '%s\n' "$lead_create_json" | grep -F '"leadId":"lead-3"' >/dev/null
-  printf '%s\n' "$lead_create_json" | grep -F '"priority":{"$tag":"Medium"}' >/dev/null
+  printf '%s\n' "$lead_create_json" | grep -F '"priority":"medium"' >/dev/null
+  printf '%s\n' "$lead_create_json" | grep -F '"segment":"growth"' >/dev/null
 
   lead_server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
   lead_server_addr="127.0.0.1:$lead_server_port"

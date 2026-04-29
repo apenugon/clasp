@@ -1,0 +1,225 @@
+module GoalManagerPrelude
+
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+materializeTaskId : Int -> Str -> Str
+materializeTaskId wave taskIdValue =
+  if benchmarkEnabled then
+    if wave == 1 then
+      taskIdValue
+    else
+      textConcat ["wave-", encode wave, "-", taskIdValue]
+  else
+    taskIdValue
+
+objectiveRef : ObjectiveHandle
+objectiveRef = objectiveHandle swarmStateRoot objectiveId
+
+plannerHandleForWave : Int -> TaskHandle
+plannerHandleForWave wave = taskHandle swarmStateRoot (plannerTaskIdForWave wave) actorName
+
+statusPath : Str
+statusPath = pathJoin [stateRootPath, "status.json"]
+
+feedbackPath : Str
+feedbackPath = pathJoin [stateRootPath, "feedback.json"]
+
+serviceReadyPath : Str
+serviceReadyPath = pathJoin [stateRootPath, "service.ready"]
+
+restoredSnapshotPath : Str
+restoredSnapshotPath = pathJoin [stateRootPath, "restored-snapshot.json"]
+
+serviceRootRecordPath : Str
+serviceRootRecordPath = pathJoin [stateRootPath, "service-root.txt"]
+
+serviceIdRecordPath : Str
+serviceIdRecordPath = pathJoin [stateRootPath, "service-id.txt"]
+
+projectRootRecordPath : Str
+projectRootRecordPath = pathJoin [stateRootPath, "project-root.txt"]
+
+mailboxPath : Str
+mailboxPath = pathJoin [stateRootPath, "mailbox.json"]
+
+plannerReportPathFor : Int -> Str
+plannerReportPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".json"]]
+
+plannerInputPath : Str
+plannerInputPath = pathJoin [stateRootPath, "planner-input.json"]
+
+planValidationPath : Str
+planValidationPath = pathJoin [stateRootPath, "plan-validation.json"]
+
+benchmarkLatestPath : Str
+benchmarkLatestPath = pathJoin [stateRootPath, "benchmark-latest.json"]
+
+benchmarkCheckpointPathFor : Int -> Str
+benchmarkCheckpointPathFor wave = pathJoin [stateRootPath, textConcat ["benchmark-", encode wave, ".json"]]
+
+benchmarkStdoutPathFor : Int -> Str
+benchmarkStdoutPathFor wave = pathJoin [stateRootPath, textConcat ["benchmark-", encode wave, ".stdout.txt"]]
+
+benchmarkStderrPathFor : Int -> Str
+benchmarkStderrPathFor wave = pathJoin [stateRootPath, textConcat ["benchmark-", encode wave, ".stderr.txt"]]
+
+benchmarkHeartbeatPathFor : Int -> Str
+benchmarkHeartbeatPathFor wave = pathJoin [stateRootPath, textConcat ["benchmark-", encode wave, ".heartbeat.json"]]
+
+plannerPolicyPath : Str
+plannerPolicyPath = pathJoin [stateRootPath, "planner-policy.md"]
+
+defaultPlannerPolicyText : Str
+defaultPlannerPolicyText = textJoin "\n" [
+  "Decompose the high-level goal into 1-3 bounded implementation tasks.",
+  "Prefer compiler/runtime/language changes over docs-only work.",
+  "Keep dependencies explicit and acyclic.",
+  "Each planned task should be specific enough to hand directly to a builder/verifier loop.",
+  "Do not assume a fixed named agent taxonomy beyond the minimal substrate. Let coordination patterns emerge from task structure and the shared mailbox."
+]
+
+plannerPolicyText : Str
+plannerPolicyText = match envVar "CLASP_MANAGER_PLANNER_POLICY_JSON" {
+  Ok raw -> decode Str raw,
+  Err message ->
+    if fileExists plannerPolicyPath then
+      match readFile plannerPolicyPath {
+        Ok policyText -> policyText,
+        Err readMessage -> defaultPlannerPolicyText
+      }
+    else
+      defaultPlannerPolicyText
+}
+
+codexReasoningConfig : Str
+codexReasoningConfig = textConcat ["model_reasoning_effort=\"", codexReasoning, "\""]
+
+traceEnabled : Bool
+traceEnabled = match envVar "CLASP_MANAGER_TRACE_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
+
+tracePath : Str
+tracePath = pathJoin [stateRootPath, "trace.log"]
+
+appendManagerTrace : Str -> Str
+appendManagerTrace label =
+  if traceEnabled then
+    match appendFile tracePath (textConcat [label, "\n"]) {
+      Ok written -> "",
+      Err message -> message
+    }
+  else
+    ""
+
+appendBootstrapTrace : Str -> Str
+appendBootstrapTrace label = {
+  let stateRootError = match mkdirAll stateRootPath {
+    Ok created -> "",
+    Err message -> message
+  } in
+  if stateRootError != "" then
+    stateRootError
+  else
+    appendManagerTrace label
+}
+
+taskReportStateRoot : Str -> Str
+taskReportStateRoot taskId = pathJoin [stateRootPath, textConcat ["loop-", taskId]]
+
+taskWorkspaceRoot : Str -> Str
+taskWorkspaceRoot taskId = pathJoin [taskWorkspaceBaseRoot, textConcat ["workspace-", taskId]]
+
+taskWorkspaceAliasPath : Str -> Str
+taskWorkspaceAliasPath taskId = pathJoin [stateRootPath, textConcat ["workspace-", taskId]]
+
+taskWorkspaceReadyPath : Str -> Str
+taskWorkspaceReadyPath taskId = pathJoin [taskWorkspaceRoot taskId, ".workspace-ready"]
+
+taskPromptPath : Str -> Str
+taskPromptPath taskId = pathJoin [stateRootPath, textConcat ["task-", taskId, ".md"]]
+
+taskFeedbackPath : Str -> Str
+taskFeedbackPath taskId = pathJoin [taskReportStateRoot taskId, "feedback.json"]
+
+taskBuilderReportPath : Str -> Int -> Str
+taskBuilderReportPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["builder-", encode attempt, ".json"]]
+
+taskStatusPath : Str -> Str
+taskStatusPath taskId = pathJoin [taskReportStateRoot taskId, "state.json"]
+
+taskProcessStdoutPath : Str -> Str
+taskProcessStdoutPath taskId = pathJoin [taskReportStateRoot taskId, "loop.stdout.log"]
+
+taskProcessStderrPath : Str -> Str
+taskProcessStderrPath taskId = pathJoin [taskReportStateRoot taskId, "loop.stderr.log"]
+
+taskProcessHeartbeatPath : Str -> Str
+taskProcessHeartbeatPath taskId = pathJoin [taskReportStateRoot taskId, "loop.process.heartbeat.json"]
+
+taskBuilderHeartbeatPath : Str -> Int -> Str
+taskBuilderHeartbeatPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["builder-", encode attempt, ".heartbeat.json"]]
+
+taskVerifierHeartbeatPath : Str -> Int -> Str
+taskVerifierHeartbeatPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["verifier-", encode attempt, ".heartbeat.json"]]
+
+taskHandleFor : Str -> TaskHandle
+taskHandleFor taskId = taskHandle swarmStateRoot taskId actorName
+
+workspaceCloneExcludeFlags : Str
+workspaceCloneExcludeFlags =
+  textConcat [
+    "--exclude=.git ",
+    "--exclude=*/.git ",
+    "--exclude=.clasp-agents ",
+    "--exclude=*/.clasp-agents ",
+    "--exclude=.clasp-loops ",
+    "--exclude=*/.clasp-loops ",
+    "--exclude=.clasp-swarm ",
+    "--exclude=*/.clasp-swarm ",
+    "--exclude=.clasp-test-tmp ",
+    "--exclude=*/.clasp-test-tmp ",
+    "--exclude=.clasp-verify-tmp ",
+    "--exclude=*/.clasp-verify-tmp ",
+    "--exclude=dist ",
+    "--exclude=*/dist ",
+    "--exclude=dist-newstyle ",
+    "--exclude=*/dist-newstyle ",
+    "--exclude=result ",
+    "--exclude=*/result ",
+    "--exclude=runtime/target ",
+    "--exclude=*/runtime/target ",
+    "--exclude=node_modules ",
+    "--exclude=*/node_modules ",
+    "--exclude=__serve-native-export-host ",
+    "--exclude=*/__serve-native-export-host ",
+    "--exclude=exec-image ",
+    "--exclude=*/exec-image ",
+    "--exclude=feedback-loop-state ",
+    "--exclude=*/feedback-loop-state ",
+    "--exclude=swarm-native-state ",
+    "--exclude=*/swarm-native-state ",
+    "--exclude=help ",
+    "--exclude=*/help ",
+    "--exclude=src/native-verify-cache ",
+    "--exclude=*/src/native-verify-cache "
+  ]
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+runCommand : Str -> [Str] -> Result ProcessResult
+runCommand cwd command = processResult (runCommandRaw cwd command)

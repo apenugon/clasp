@@ -1,0 +1,151 @@
+module GoalManagerBenchmarkRuntime
+
+import GoalManagerCounters
+import GoalManagerWatch
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointError message = Err message
+
+readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
+readBenchmarkCheckpointPath path = match readFile path {
+  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Err message -> benchmarkCheckpointError message
+}
+
+latestBenchmarkSummaryText : Str
+latestBenchmarkSummaryText = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.summary,
+  Err message -> ""
+}
+
+latestBenchmarkTargetMet : Bool
+latestBenchmarkTargetMet = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.meetsTarget,
+  Err message -> false
+}
+
+writeBenchmarkCheckpoint : BenchmarkCheckpoint -> Str
+writeBenchmarkCheckpoint checkpoint = {
+  let checkpointText = encode checkpoint in
+  match writeFile (benchmarkCheckpointPathFor checkpoint.wave) checkpointText {
+    Ok written ->
+      match writeFile benchmarkLatestPath checkpointText {
+        Ok latestWritten -> "",
+        Err message -> message
+      },
+    Err message -> message
+  }
+}
+
+readProcessOutputText : Str -> Str
+readProcessOutputText path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+benchmarkResultFromProcess : WatchedProcess -> ProcessResult
+benchmarkResultFromProcess process =
+  ProcessResult {
+    exitCode = process.exitCode,
+    stdout = readProcessOutputText process.stdoutPath,
+    stderr = readProcessOutputText process.stderrPath
+  }
+
+benchmarkCommandArgs : Int -> Int -> [Str]
+benchmarkCommandArgs wave benchmarkRuns =
+  append
+    [
+      "env",
+      textConcat ["CLASP_MANAGER_STATE_ROOT=", stateRootPath],
+      textConcat ["CLASP_MANAGER_PROJECT_ROOT=", managerProjectRoot],
+      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", workspaceRoot],
+      textConcat ["CLASP_MANAGER_BENCHMARK_WAVE=", encode wave],
+      textConcat ["CLASP_MANAGER_BENCHMARK_RUNS=", encode benchmarkRuns]
+    ]
+    benchmarkCommand
+
+pollWatchedProcess : Str -> Int -> Int -> Result WatchedProcess
+pollWatchedProcess heartbeatPath pollMs remainingMs =
+  match reconcileWatchedProcess heartbeatPath {
+    Err message ->
+      watchedProcessError message,
+    Ok process ->
+      if process.completed then
+        Ok process
+      else if process.running == false then
+        Ok process
+      else if remainingMs <= 0 then
+        watchedProcessError "timeout"
+      else {
+        let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+        match sleepMsValue sleepDelay {
+          Ok slept ->
+            pollWatchedProcess heartbeatPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+          Err message ->
+            watchedProcessError message
+        }
+      }
+  }
+
+benchmarkHeartbeatCompleted : Str -> Bool
+benchmarkHeartbeatCompleted heartbeatRaw = (decode WatchedProcess heartbeatRaw).completed
+
+benchmarkHeartbeatRunning : Str -> Bool
+benchmarkHeartbeatRunning heartbeatRaw = (decode WatchedProcess heartbeatRaw).running
+
+benchmarkHeartbeatSucceeded : Str -> Bool
+benchmarkHeartbeatSucceeded heartbeatRaw = (decode WatchedProcess heartbeatRaw).exitCode == 0
+
+pollBenchmarkResult : Str -> Str -> Str -> Int -> Int -> Result ProcessResult
+pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
+  if fileExists heartbeatPath then
+    match readFile heartbeatPath {
+      Err message -> processResultError message,
+      Ok heartbeatRaw ->
+        let process = decode WatchedProcess heartbeatRaw in
+        if process.completed then
+          Ok (ProcessResult { exitCode = process.exitCode, stdout = readProcessOutputText stdoutPath, stderr = readProcessOutputText stderrPath })
+        else if process.running == false then
+          Ok (ProcessResult { exitCode = process.exitCode, stdout = readProcessOutputText stdoutPath, stderr = readProcessOutputText stderrPath })
+        else if remainingMs <= 0 then
+          processResultError "timeout"
+        else {
+          let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+          match sleepMsValue sleepDelay {
+            Ok slept ->
+              pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+            Err message ->
+              processResultError message
+          }
+        }
+    }
+  else if remainingMs <= 0 then
+    processResultError "timeout"
+  else {
+    let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+    match sleepMsValue sleepDelay {
+      Ok slept -> pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+      Err message -> processResultError message
+    }
+  }
+
+runBenchmarkCommand : Int -> Int -> Result ProcessResult
+runBenchmarkCommand wave benchmarkRuns =
+  match spawnWatchedProcess
+    benchmarkCwd
+    (benchmarkStdoutPathFor wave)
+    (benchmarkStderrPathFor wave)
+    (benchmarkHeartbeatPathFor wave)
+    benchmarkWatchPollMs
+    (benchmarkCommandArgs wave benchmarkRuns) {
+    Err message ->
+      processResultError message,
+    Ok launched ->
+      pollBenchmarkResult launched.heartbeatPath launched.stdoutPath launched.stderrPath benchmarkWatchPollMs benchmarkTimeoutMs
+  }

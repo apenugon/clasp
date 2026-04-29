@@ -1,0 +1,227 @@
+module Main
+
+record LegalAssistantUser = {
+  userId : Str,
+  email : Str,
+  displayName : Str
+}
+
+record LegalDocumentMetadata = {
+  documentId : Str,
+  ownerUserId : Str,
+  title : Str,
+  version : Int,
+  status : Str
+}
+
+record LegalChatTurn = {
+  conversationId : Str,
+  turnId : Str,
+  authorUserId : Str,
+  role : Str,
+  body : Str,
+  referencedDocumentIds : [Str]
+}
+
+record LegalAssistantState = {
+  users : [LegalAssistantUser],
+  documents : [LegalDocumentMetadata],
+  chatTurns : [LegalChatTurn]
+}
+
+record StorageSnapshot = {
+  success : Bool,
+  command : Str,
+  error : Str,
+  statePath : Str,
+  userCount : Int,
+  documentCount : Int,
+  chatTurnCount : Int,
+  knownUserIds : [Str],
+  latestDocumentId : Str,
+  latestDocumentStatus : Str,
+  latestChatRole : Str,
+  latestOwnerEmail : Str,
+  latestReferencedDocumentIds : [Str]
+}
+
+emptyUsers : [LegalAssistantUser]
+emptyUsers = []
+
+emptyDocuments : [LegalDocumentMetadata]
+emptyDocuments = []
+
+emptyChatTurns : [LegalChatTurn]
+emptyChatTurns = []
+
+emptyUserIndex : Dict Str Str
+emptyUserIndex = dictEmpty
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+stateRoot : Str
+stateRoot = readEnvText "CLASP_LEGAL_STORAGE_ROOT_JSON" "legal-assistant-storage-state"
+
+commandName : Str
+commandName = readEnvText "CLASP_LEGAL_STORAGE_COMMAND_JSON" "snapshot"
+
+statePath : Str
+statePath = pathJoin [stateRoot, "assistant-state.json"]
+
+seedUser : LegalAssistantUser
+seedUser = LegalAssistantUser {
+  userId = "user-1",
+  email = "ada@northwind.example",
+  displayName = "Ada Lovelace"
+}
+
+seedDocument : LegalDocumentMetadata
+seedDocument = LegalDocumentMetadata {
+  documentId = "doc-1",
+  ownerUserId = "user-1",
+  title = "Service Agreement",
+  version = 1,
+  status = "uploaded"
+}
+
+emptyDocument : LegalDocumentMetadata
+emptyDocument = LegalDocumentMetadata {
+  documentId = "",
+  ownerUserId = "",
+  title = "",
+  version = 0,
+  status = ""
+}
+
+emptyChatTurn : LegalChatTurn
+emptyChatTurn = LegalChatTurn {
+  conversationId = "",
+  turnId = "",
+  authorUserId = "",
+  role = "",
+  body = "",
+  referencedDocumentIds = []
+}
+
+userQuestionTurn : LegalAssistantUser -> LegalChatTurn
+userQuestionTurn user = {
+  let { userId, displayName } = user in
+  LegalChatTurn {
+    conversationId = "conv-1",
+    turnId = "turn-1",
+    authorUserId = userId,
+    role = "user",
+    body = textConcat ["Question from ", displayName, " about the uploaded agreement."],
+    referencedDocumentIds = [seedDocument.documentId]
+  }
+}
+
+indexedDocument : LegalDocumentMetadata
+indexedDocument = with seedDocument {
+  documentId = "doc-2",
+  version = 2,
+  status = "indexed"
+}
+
+assistantAnswerTurn : LegalAssistantUser -> LegalChatTurn
+assistantAnswerTurn user =
+  LegalChatTurn {
+    conversationId = "conv-1",
+    turnId = "turn-2",
+    authorUserId = user.userId,
+    role = "assistant",
+    body = "Indexed the agreement and prepared the first answer draft.",
+    referencedDocumentIds = [indexedDocument.documentId]
+  }
+
+emptyState : LegalAssistantState
+emptyState = LegalAssistantState {
+  users = emptyUsers,
+  documents = emptyDocuments,
+  chatTurns = emptyChatTurns
+}
+
+bootstrapState : LegalAssistantState
+bootstrapState = LegalAssistantState {
+  users = [seedUser],
+  documents = [seedDocument],
+  chatTurns = [userQuestionTurn seedUser]
+}
+
+loadState : LegalAssistantState
+loadState =
+  if fileExists statePath then
+    match readFile statePath {
+      Ok raw -> decode LegalAssistantState raw,
+      Err message -> emptyState
+    }
+  else
+    emptyState
+
+appendIndexedState : LegalAssistantState -> LegalAssistantState
+appendIndexedState state = with state {
+  documents = append state.documents [indexedDocument],
+  chatTurns = append state.chatTurns [assistantAnswerTurn seedUser]
+}
+
+rememberUserEmail : Dict Str Str -> LegalAssistantUser -> Dict Str Str
+rememberUserEmail emails user = dictSet user.userId user.email emails
+
+latestDocumentStep : LegalDocumentMetadata -> LegalDocumentMetadata -> LegalDocumentMetadata
+latestDocumentStep current document = document
+
+latestChatTurnStep : LegalChatTurn -> LegalChatTurn -> LegalChatTurn
+latestChatTurnStep current turn = turn
+
+userIds : LegalAssistantUser -> Str
+userIds user = user.userId
+
+snapshotFor : Bool -> Str -> Str -> LegalAssistantState -> StorageSnapshot
+snapshotFor success command error state = {
+  let latestDocument = fold latestDocumentStep emptyDocument state.documents in
+  let latestChatTurn = fold latestChatTurnStep emptyChatTurn state.chatTurns in
+  let userEmails = fold rememberUserEmail emptyUserIndex state.users in
+  let ownerEmail = match dictGet latestDocument.ownerUserId userEmails {
+    Ok email -> email,
+    Err message -> ""
+  } in
+  StorageSnapshot {
+    success = success,
+    command = command,
+    error = error,
+    statePath = statePath,
+    userCount = length state.users,
+    documentCount = length state.documents,
+    chatTurnCount = length state.chatTurns,
+    knownUserIds = map userIds state.users,
+    latestDocumentId = latestDocument.documentId,
+    latestDocumentStatus = latestDocument.status,
+    latestChatRole = latestChatTurn.role,
+    latestOwnerEmail = ownerEmail,
+    latestReferencedDocumentIds = latestChatTurn.referencedDocumentIds
+  }
+}
+
+persistAndSnapshot : Str -> LegalAssistantState -> StorageSnapshot
+persistAndSnapshot command state =
+  match mkdirAll stateRoot {
+    Err message -> snapshotFor false command message state,
+    Ok created ->
+      match writeFile statePath (encode state) {
+        Ok written -> snapshotFor true command "" state,
+        Err message -> snapshotFor false command message state
+      }
+  }
+
+main : Str
+main =
+  if commandName == "bootstrap" then
+    encode (persistAndSnapshot "bootstrap" bootstrapState)
+  else if commandName == "append" then
+    encode (persistAndSnapshot "append" (appendIndexedState loadState))
+  else
+    encode (snapshotFor true "snapshot" "" loadState)

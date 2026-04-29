@@ -22,7 +22,8 @@ const taskSetAliases = {
     "clasp-lead-segment",
     "ts-lead-segment",
     "clasp-external-adaptation",
-    "ts-external-adaptation"
+    "ts-external-adaptation",
+    "clasp-legal-assistant-appbench"
   ],
   "control-plane": [
     "clasp-control-plane",
@@ -226,6 +227,9 @@ const publicAppBenchmark = {
       leftTaskId: "clasp-external-adaptation",
       rightTaskId: "ts-external-adaptation"
     }
+  ],
+  checkpointTaskIds: [
+    "clasp-legal-assistant-appbench"
   ],
   leftLabel: "clasp",
   rightLabel: "ts"
@@ -1249,6 +1253,10 @@ function printBenchmarkSuiteComparisons(comparisons) {
     console.log(`    mode: ${comparison.mode}`);
     console.log(`    workflowAssistance: ${comparison.workflowAssistance}`);
     console.log(`    taskPairs: ${comparison.taskPairs}`);
+    if (comparison.checkpointTasks > 0) {
+      console.log(`    checkpointTasks: ${comparison.checkpointTasks}`);
+      console.log(`    checkpointCompletedTasks: ${comparison.checkpointCompletedTasks}/${comparison.checkpointTasks}`);
+    }
     console.log(
       `    ${buildComparisonMetricKey(comparison.leftLabel, "CompletedTasks")}: ${comparison.left.completedTasks}/${comparison.taskPairs}`
     );
@@ -1290,8 +1298,12 @@ function printBenchmarkSuiteComparisons(comparisons) {
 }
 
 function buildBenchmarkSuiteComparisons(results, benchmark) {
+  const checkpointTaskIds = benchmark.checkpointTaskIds ?? [];
   const relevantTaskIds = new Set(
-    benchmark.taskPairs.flatMap((pair) => [pair.leftTaskId, pair.rightTaskId])
+    [
+      ...benchmark.taskPairs.flatMap((pair) => [pair.leftTaskId, pair.rightTaskId]),
+      ...checkpointTaskIds
+    ]
   );
   const relevant = results.filter((result) => relevantTaskIds.has(result.taskId));
   const grouped = groupBy(relevant, (result) => {
@@ -1307,6 +1319,7 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
     const byTask = groupBy(groupResults, (result) => result.taskId);
     const leftTaskSummaries = [];
     const rightTaskSummaries = [];
+    const checkpointSummaries = [];
 
     for (const pair of benchmark.taskPairs) {
       const leftResults = byTask.get(pair.leftTaskId);
@@ -1322,7 +1335,21 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
       rightTaskSummaries.push(summarizeGroup(rightResults));
     }
 
+    for (const checkpointTaskId of checkpointTaskIds) {
+      const checkpointResults = byTask.get(checkpointTaskId);
+
+      if (!checkpointResults) {
+        checkpointSummaries.length = 0;
+        break;
+      }
+
+      checkpointSummaries.push(summarizeGroup(checkpointResults));
+    }
+
     if (leftTaskSummaries.length !== benchmark.taskPairs.length) {
+      continue;
+    }
+    if (checkpointSummaries.length !== checkpointTaskIds.length) {
       continue;
     }
 
@@ -1336,6 +1363,8 @@ function buildBenchmarkSuiteComparisons(results, benchmark) {
       workflowAssistance: workflowAssistance || "unspecified",
       series: series || "(all-runs)",
       taskPairs: benchmark.taskPairs.length,
+      checkpointTasks: checkpointTaskIds.length,
+      checkpointCompletedTasks: checkpointSummaries.filter((summary) => summary.timeToGreenMs !== "n/a").length,
       leftLabel: benchmark.leftLabel,
       rightLabel: benchmark.rightLabel,
       left,
@@ -1869,7 +1898,7 @@ function assertDefaultBenchmarkPathSupported(task, options) {
 }
 
 function requiresBootstrapRecovery(task) {
-  return task.language === "clasp";
+  return task.language === "clasp" && task.defaultBenchmarkPath !== true;
 }
 
 function allowsBootstrapRecovery(options) {

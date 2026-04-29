@@ -1,0 +1,152 @@
+module GoalManagerTaskStatusRuntime
+
+import GoalManagerWatch
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+childLoopUsesVerifierHeartbeat : Str -> Bool
+childLoopUsesVerifierHeartbeat phase =
+  if phase == "verifier-preparing" then
+    true
+  else if phase == "verifier-step-ready" then
+    true
+  else if phase == "verifier-prompt-ready" then
+    true
+  else if phase == "verifier-command-ready" then
+    true
+  else if phase == "verifier-launching" then
+    true
+  else
+    phase == "verifier-running"
+
+childLoopHeartbeatPath : Str -> ChildLoopState -> Str
+childLoopHeartbeatPath taskId state =
+  if childLoopUsesVerifierHeartbeat state.phase then
+    taskVerifierHeartbeatPath taskId state.attempt
+  else
+    taskBuilderHeartbeatPath taskId state.attempt
+
+childLoopLaunchState : Str -> Result WatchedProcess
+childLoopLaunchState taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    reconcileWatchedProcess (taskProcessHeartbeatPath taskId)
+  else
+    watchedProcessError "missing launch heartbeat"
+
+childLoopLaunchRunning : Str -> Bool
+childLoopLaunchRunning taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        process.completed == false
+      else
+        false,
+    Err message ->
+      false
+  }
+
+childLoopLaunchCompleted : Str -> Bool
+childLoopLaunchCompleted taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        false
+      else
+        process.completed,
+    Err message ->
+      false
+  }
+
+childLoopLaunchPending : Str -> Bool
+childLoopLaunchPending taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    if childLoopReportReady taskId then
+      false
+    else
+      childLoopLaunchRunning taskId
+  else
+    false
+
+childLoopTerminal : Str -> Bool
+childLoopTerminal taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          true
+        else
+          state.completed,
+      Err message ->
+        false
+    }
+  else
+    false
+
+childLoopReportReady : Str -> Bool
+childLoopReportReady taskId =
+  if fileExists (taskFeedbackPath taskId) then
+    if fileExists (taskStatusPath taskId) then
+      if childLoopTerminal taskId then
+        true
+      else if fileExists (taskProcessHeartbeatPath taskId) then
+        childLoopLaunchCompleted taskId
+      else
+        false
+    else
+      true
+  else
+    false
+
+settleChildLoopReportReady : Str -> Int -> Bool
+settleChildLoopReportReady taskId remainingPolls =
+  if childLoopReportReady taskId then
+    true
+  else if remainingPolls <= 0 then
+    false
+  else
+    match sleepMsValue childLoopWatchPollMs {
+      Ok slept ->
+        settleChildLoopReportReady taskId (decrementManagerCounter remainingPolls),
+      Err message ->
+        false
+    }
+
+childLoopRunning : Str -> Bool
+childLoopRunning taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          false
+        else if state.completed then
+          false
+        else {
+          let heartbeatPath = childLoopHeartbeatPath taskId state in
+          if fileExists heartbeatPath then
+            match reconcileWatchedProcess heartbeatPath {
+              Ok process ->
+                if process.running then
+                  process.completed == false
+                else
+                  false,
+              Err message ->
+                if fileExists (taskProcessHeartbeatPath taskId) then
+                  childLoopLaunchRunning taskId
+                else
+                  false
+            }
+          else if fileExists (taskProcessHeartbeatPath taskId) then
+            childLoopLaunchRunning taskId
+          else
+            false
+        },
+      Err message ->
+        false
+    }
+  else if fileExists (taskProcessHeartbeatPath taskId) then
+    childLoopLaunchRunning taskId
+  else
+    false

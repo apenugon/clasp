@@ -5,6 +5,7 @@ import Compiler.CheckedCore
 import Compiler.Emit.JavaScript
 import Compiler.Lower
 import Compiler.Project
+import Compiler.SemanticArtifacts
 
 frontendDriverSourceLoweredDecls : Str -> [LowerDeclText]
 frontendDriverSourceLoweredDecls source = lowerModule (sourceModule source)
@@ -26,6 +27,12 @@ frontendDriverExplainSourceText source = renderModuleSummary (sourceModule sourc
 
 frontendDriverCompileSourceText : Str -> Str
 frontendDriverCompileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else emitFrontendModule (sourceModule source) (frontendDriverSourceLoweredDecls source)
+
+frontendDriverAirSourceText : Str -> Str
+frontendDriverAirSourceText source = renderAirSourceText source
+
+frontendDriverContextSourceText : Str -> Str
+frontendDriverContextSourceText source = renderContextSourceText source
 
 frontendDriverCheckCoreSourceText : Str -> Str
 frontendDriverCheckCoreSourceText source = checkedCoreSourceJson source
@@ -53,6 +60,12 @@ frontendDriverCheckProjectModuleSummaryText bundle importedSummaryText = if fron
 
 frontendDriverExplainProjectText : Str -> Str
 frontendDriverExplainProjectText bundle = frontendDriverCheckProjectText bundle
+
+frontendDriverAirProjectText : Str -> Str
+frontendDriverAirProjectText bundle = renderAirProjectText bundle
+
+frontendDriverContextProjectText : Str -> Str
+frontendDriverContextProjectText bundle = renderContextProjectText bundle
 
 frontendDriverCompileProjectText : Str -> Str
 frontendDriverCompileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else if frontendDriverProjectBundleIsSingleSourceModule bundle then emitFrontendModule (frontendDriverProjectBundleSourceModule bundle) (lowerModule (frontendDriverProjectBundleSourceModule bundle)) else match resolveProjectBundle bundle {

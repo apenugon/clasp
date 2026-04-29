@@ -1,1 +1,0 @@
-[{"kind": "global", "name": "main", "body": {"kind": "call", "callee": {"kind": "local", "name": "renderUser"}, "args": [{"kind": "local", "name": "defaultUser"}]}}]

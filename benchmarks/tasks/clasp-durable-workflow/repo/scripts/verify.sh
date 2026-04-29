@@ -6,7 +6,7 @@ project_root="${CLASP_PROJECT_ROOT:?CLASP_PROJECT_ROOT is required}"
 
 mkdir -p "$workspace_root/build" "$workspace_root/state"
 
-nix develop "$project_root" --command bash -lc "
+bash "$project_root/benchmarks/run-in-nix-or-current.sh" "$project_root" bash -lc "
   set -euo pipefail
   cd \"$project_root\"
   claspc compile \"$workspace_root/Main.clasp\" -o \"$workspace_root/build/Main.js\" --compiler=bootstrap

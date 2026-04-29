@@ -1,5 +1,0 @@
-file: workspace.txt
---- baseline/workspace.txt
-<missing>
-+++ workspace/workspace.txt
-first-attempt

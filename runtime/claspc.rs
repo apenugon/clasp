@@ -1,7 +1,7 @@
 mod tool_support;
 mod swarm;
 
-use clasp_runtime::clasp_rt_run_upgrade_supervisor_command;
+use clasp_runtime::{clasp_rt_run_service_supervisor_command, clasp_rt_run_upgrade_supervisor_command};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -10,6 +10,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ use tool_support::{
 
 const EMBEDDED_NATIVE_IMAGE: &str = include_str!("../src/stage1.native.image.json");
 const EMBEDDED_COMPILER_NATIVE_IMAGE: &str = include_str!("../src/stage1.compiler.native.image.json");
+const PROMOTED_COMPILER_MODULE_SUMMARY_CACHE: &str =
+    include_str!("../src/stage1.compiler.module-summary-cache-v2.json");
 const EMBEDDED_IMAGE_MARKER: &[u8] = b"CLASP_EMBEDDED_IMAGE_V1\0";
 const NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
 const CLASPC_MAIN_STACK_BYTES: usize = 64 * 1024 * 1024;
@@ -93,8 +96,41 @@ const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cac
 const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v1";
 const MODULE_SUMMARY_CACHE_VERSION: &str = "module-summary-cache-v2";
 const SOURCE_EXPORT_CACHE_VERSION: &str = "source-export-cache-v1";
+const RUN_BINARY_CACHE_VERSION: &str = "run-binary-cache-v2";
 const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 128;
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
+
+static PROMOTED_MODULE_SUMMARY_ENTRIES: OnceLock<HashMap<String, PromotedModuleSummaryEntry>> =
+    OnceLock::new();
+
+#[derive(Clone)]
+struct PromotedModuleSummaryEntry {
+    source_fingerprint: String,
+    summary: String,
+    decl_fingerprints: HashMap<String, String>,
+}
+
+struct ModuleSummaryCacheHit {
+    summary: String,
+    validated_for_current_source: bool,
+    decl_fingerprints: Option<HashMap<String, String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModuleValidationDeclSegment {
+    name: String,
+    source: String,
+    fingerprint: String,
+    annotated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModuleValidationSource {
+    module_header: String,
+    imports: Vec<String>,
+    interface_blocks: Vec<String>,
+    declarations: Vec<ModuleValidationDeclSegment>,
+}
 
 struct NativeImageSections {
     module_name: String,
@@ -476,11 +512,17 @@ fn conservative_module_interface_fingerprint(source: &str) -> String {
     let mut rendered_lines = Vec::new();
     let mut annotated_names = HashSet::new();
     let mut block_depth: isize = 0;
+    let mut skip_body_depth: isize = 0;
     let mut fallback_to_full_source = false;
 
     for raw_line in source.lines() {
         let trimmed = raw_line.trim();
         if trimmed.is_empty() {
+            continue;
+        }
+
+        if skip_body_depth > 0 {
+            skip_body_depth += brace_delta(trimmed);
             continue;
         }
 
@@ -535,6 +577,7 @@ fn conservative_module_interface_fingerprint(source: &str) -> String {
                 fallback_to_full_source = true;
                 break;
             }
+            skip_body_depth = brace_delta(trimmed).max(0);
             continue;
         }
 
@@ -557,6 +600,297 @@ fn source_module_conservative_interface_fingerprint(module: &ProjectBundleModule
         )
     })?;
     Ok(conservative_module_interface_fingerprint(&source))
+}
+
+fn top_level_source_line(raw_line: &str) -> bool {
+    !raw_line.starts_with(' ') && !raw_line.starts_with('\t')
+}
+
+fn validation_interface_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword,
+        "record"
+            | "type"
+            | "foreign"
+            | "hosted"
+            | "guide"
+            | "policy"
+            | "projection"
+            | "role"
+            | "agent"
+            | "workflow"
+            | "route"
+            | "hook"
+            | "toolserver"
+            | "tool"
+            | "verifier"
+            | "mergegate"
+    )
+}
+
+fn capture_interface_block(lines: &[&str], start_index: usize) -> (String, usize) {
+    let mut captured = vec![lines[start_index].trim_end().to_owned()];
+    let mut depth = brace_delta(lines[start_index]);
+    let mut index = start_index + 1;
+    if depth <= 0 {
+        return (captured.join("\n"), index);
+    }
+
+    while index < lines.len() {
+        let raw_line = lines[index];
+        captured.push(raw_line.trim_end().to_owned());
+        depth += brace_delta(raw_line);
+        index += 1;
+        if depth <= 0 {
+            break;
+        }
+    }
+
+    (captured.join("\n"), index)
+}
+
+fn capture_declaration_block(lines: &[&str], start_index: usize) -> (String, usize) {
+    let mut captured = vec![lines[start_index].trim_end().to_owned()];
+    let mut depth = brace_delta(lines[start_index]);
+    let mut index = start_index + 1;
+
+    while index < lines.len() {
+        let raw_line = lines[index];
+        let trimmed = raw_line.trim();
+        if depth <= 0 && !trimmed.is_empty() && top_level_source_line(raw_line) {
+            break;
+        }
+        captured.push(raw_line.trim_end().to_owned());
+        depth += brace_delta(raw_line);
+        index += 1;
+    }
+
+    (captured.join("\n").trim_end().to_owned(), index)
+}
+
+fn parse_module_validation_source(source: &str) -> Option<ModuleValidationSource> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut module_header = String::new();
+    let mut imports = Vec::new();
+    let mut interface_blocks = Vec::new();
+    let mut declarations = Vec::new();
+    let mut pending_annotation: Option<String> = None;
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let raw_line = lines[index];
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            index += 1;
+            continue;
+        }
+        if !top_level_source_line(raw_line) {
+            index += 1;
+            continue;
+        }
+
+        if trimmed.starts_with("module ") {
+            module_header = trimmed.to_owned();
+            pending_annotation = None;
+            index += 1;
+            continue;
+        }
+
+        if trimmed.starts_with("import ") {
+            imports.push(trimmed.to_owned());
+            pending_annotation = None;
+            index += 1;
+            continue;
+        }
+
+        if let Some(signature_name) = top_level_signature_name(trimmed) {
+            if signature_name.is_empty() {
+                return None;
+            }
+            pending_annotation = Some(trimmed.to_owned());
+            index += 1;
+            continue;
+        }
+
+        let keyword = leading_keyword(trimmed);
+        if validation_interface_keyword(keyword) {
+            if pending_annotation.is_some() {
+                return None;
+            }
+            let (block, next_index) = capture_interface_block(&lines, index);
+            interface_blocks.push(block);
+            index = next_index;
+            continue;
+        }
+
+        if let Some(name) = top_level_definition_name(trimmed) {
+            let (definition_source, next_index) = capture_declaration_block(&lines, index);
+            let annotated = pending_annotation.is_some();
+            let source = match pending_annotation.take() {
+                Some(annotation) => format!("{annotation}\n{definition_source}"),
+                None => definition_source,
+            };
+            declarations.push(ModuleValidationDeclSegment {
+                name,
+                fingerprint: stable_fingerprint_text(&source),
+                source,
+                annotated,
+            });
+            index = next_index;
+            continue;
+        }
+
+        return None;
+    }
+
+    if module_header.is_empty() {
+        None
+    } else {
+        Some(ModuleValidationSource {
+            module_header,
+            imports,
+            interface_blocks,
+            declarations,
+        })
+    }
+}
+
+fn module_validation_decl_fingerprints(source: &str) -> Option<HashMap<String, String>> {
+    let parsed = parse_module_validation_source(source)?;
+    Some(
+        parsed
+            .declarations
+            .into_iter()
+            .map(|decl| (decl.name, decl.fingerprint))
+            .collect(),
+    )
+}
+
+fn module_source_from_scoped_bundle(scoped_bundle: &str, module_name: &str) -> Option<String> {
+    for source in scoped_bundle.split(PROJECT_BUNDLE_SEPARATOR) {
+        if source.trim().is_empty() {
+            continue;
+        }
+        let Some(parsed_module_name) = parse_module_name_from_source(source) else {
+            continue;
+        };
+        if parsed_module_name == module_name {
+            return Some(source.trim().to_owned());
+        }
+    }
+    None
+}
+
+fn parse_module_name_from_source(source: &str) -> Option<String> {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(module_body) = trimmed.strip_prefix("module ") {
+            let header = module_body
+                .split_once(" with ")
+                .map(|(name, _)| name)
+                .unwrap_or(module_body)
+                .trim();
+            let module_name = header.split_whitespace().next().unwrap_or("").trim();
+            if module_name.is_empty() {
+                return None;
+            }
+            return Some(module_name.to_owned());
+        }
+        return None;
+    }
+    None
+}
+
+fn replace_module_source_in_scoped_bundle(
+    scoped_bundle: &str,
+    module_name: &str,
+    replacement_source: &str,
+) -> Option<String> {
+    let mut replaced = false;
+    let mut sources = Vec::new();
+    for source in scoped_bundle.split(PROJECT_BUNDLE_SEPARATOR) {
+        if source.trim().is_empty() {
+            continue;
+        }
+        let parsed_module_name = parse_module_name_from_source(source)?;
+        if parsed_module_name == module_name {
+            sources.push(replacement_source.to_owned());
+            replaced = true;
+        } else {
+            sources.push(source.trim().to_owned());
+        }
+    }
+    if replaced {
+        Some(sources.join(PROJECT_BUNDLE_SEPARATOR))
+    } else {
+        None
+    }
+}
+
+fn reduced_validation_source_for_changed_decls(
+    parsed: &ModuleValidationSource,
+    changed_decl_names: &[String],
+) -> Option<String> {
+    let changed: HashSet<&str> = changed_decl_names.iter().map(String::as_str).collect();
+    let mut lines = Vec::new();
+    lines.push(parsed.module_header.clone());
+    lines.extend(parsed.imports.iter().cloned());
+    if !parsed.interface_blocks.is_empty() {
+        lines.push(String::new());
+        lines.extend(parsed.interface_blocks.iter().cloned());
+    }
+    for decl in &parsed.declarations {
+        if changed.contains(decl.name.as_str()) {
+            if !decl.annotated {
+                return None;
+            }
+            lines.push(String::new());
+            lines.push(decl.source.clone());
+        }
+    }
+    Some(lines.join("\n"))
+}
+
+fn changed_decl_validation_bundle(
+    scoped_bundle: &str,
+    module_name: &str,
+    cached_decl_fingerprints: &HashMap<String, String>,
+) -> Option<(String, Vec<String>, HashMap<String, String>)> {
+    let module_source = module_source_from_scoped_bundle(scoped_bundle, module_name)?;
+    let parsed = parse_module_validation_source(&module_source)?;
+    let current_decl_fingerprints = parsed
+        .declarations
+        .iter()
+        .map(|decl| (decl.name.clone(), decl.fingerprint.clone()))
+        .collect::<HashMap<_, _>>();
+
+    if current_decl_fingerprints.len() != cached_decl_fingerprints.len() {
+        return None;
+    }
+    for name in cached_decl_fingerprints.keys() {
+        if !current_decl_fingerprints.contains_key(name) {
+            return None;
+        }
+    }
+
+    let mut changed_decl_names = Vec::new();
+    for decl in &parsed.declarations {
+        let cached_fingerprint = cached_decl_fingerprints.get(&decl.name)?;
+        if cached_fingerprint != &decl.fingerprint {
+            if !decl.annotated {
+                return None;
+            }
+            changed_decl_names.push(decl.name.clone());
+        }
+    }
+
+    let validation_source = reduced_validation_source_for_changed_decls(&parsed, &changed_decl_names)?;
+    let validation_bundle =
+        replace_module_source_in_scoped_bundle(scoped_bundle, module_name, &validation_source)?;
+    Some((validation_bundle, changed_decl_names, current_decl_fingerprints))
 }
 
 fn project_bundle_module<'a>(
@@ -1504,6 +1838,32 @@ renderUser user = textJoin ":" [user.name, "operator"]
     }
 
     #[test]
+    fn conservative_module_interface_fingerprint_skips_annotated_block_bodies() {
+        let original = r#"
+module Main
+
+renderUser : Str -> Str
+renderUser user = {
+  let label = "planner";
+  textJoin ":" [user, label]
+}
+"#;
+        let changed = r#"
+module Main
+
+renderUser : Str -> Str
+renderUser user = {
+  let label = "operator";
+  textJoin ":" [user, label]
+}
+"#;
+        assert_eq!(
+            conservative_module_interface_fingerprint(original),
+            conservative_module_interface_fingerprint(changed)
+        );
+    }
+
+    #[test]
     fn conservative_module_interface_fingerprint_changes_when_signature_changes() {
         let original = r#"
 module Main
@@ -1521,6 +1881,56 @@ renderUser value = [value]
             conservative_module_interface_fingerprint(original),
             conservative_module_interface_fingerprint(changed)
         );
+    }
+
+    #[test]
+    fn module_validation_fingerprints_identify_changed_annotated_decl() {
+        let original = r#"
+module Main
+
+record User = {
+  name : Str,
+}
+
+renderUser : User -> Str
+renderUser user = textJoin ":" [user.name, "planner"]
+
+keep : Str
+keep = "stable"
+"#;
+        let changed = r#"
+module Main
+
+record User = {
+  name : Str,
+}
+
+renderUser : User -> Str
+renderUser user = textJoin ":" [user.name, "operator"]
+
+keep : Str
+keep = "stable"
+"#;
+        let cached = super::module_validation_decl_fingerprints(original).expect("original decl fingerprints");
+        let scoped = changed.to_owned();
+        let (validation_bundle, changed_names, current) =
+            super::changed_decl_validation_bundle(&scoped, "Main", &cached).expect("validation bundle");
+
+        assert_eq!(changed_names, vec!["renderUser".to_owned()]);
+        assert_ne!(cached.get("renderUser"), current.get("renderUser"));
+        assert!(validation_bundle.contains("record User = {"));
+        assert!(validation_bundle.contains("renderUser : User -> Str"));
+        assert!(validation_bundle.contains("\"operator\""));
+        assert!(!validation_bundle.contains("keep = \"stable\""));
+    }
+
+    #[test]
+    fn module_validation_fingerprints_reject_changed_unannotated_decl() {
+        let original = "module Main\n\nmain = \"hello\"\n";
+        let changed = "module Main\n\nmain = \"hullo\"\n";
+        let cached = super::module_validation_decl_fingerprints(original).expect("original decl fingerprints");
+
+        assert!(super::changed_decl_validation_bundle(changed, "Main", &cached).is_none());
     }
 
     #[test]
@@ -1577,6 +1987,56 @@ renderUser value = [value]
     }
 
     #[test]
+    fn promoted_module_summary_cache_parses_valid_entries() {
+        let entries = super::parse_promoted_module_summary_entries(
+            r#"{
+              "cacheVersion": "module-summary-cache-v2",
+              "summaries": [
+                {"cacheKey": "alpha.cache", "sourceFingerprint": "src-alpha", "declFingerprints": {"main": "decl-main"}, "summary": "main : Str"},
+                {"cacheKey": "ignored.cache"},
+                {"summary": "missing key"}
+              ]
+            }"#,
+        );
+
+        assert_eq!(entries.len(), 1);
+        let entry = entries.get("alpha.cache").expect("alpha entry");
+        assert_eq!(entry.source_fingerprint, "src-alpha");
+        assert_eq!(entry.summary, "main : Str");
+        assert_eq!(entry.decl_fingerprints.get("main").map(String::as_str), Some("decl-main"));
+    }
+
+    #[test]
+    fn promoted_module_summary_cache_populates_runtime_cache() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        std::env::remove_var("CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE");
+        let cache_root = unique_test_root("promoted-module-summary-cache");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        let entries = super::promoted_module_summary_entries();
+        let (cache_key, expected_summary) = entries
+            .iter()
+            .next()
+            .expect("promoted module summary seed should not be empty");
+        let cache_path = cache_root.join(cache_key);
+
+        let summary = super::read_promoted_module_summary(
+            &cache_path,
+            "Test.Module",
+            &expected_summary.source_fingerprint,
+        )
+        .expect("promoted module summary");
+
+        assert_eq!(&summary.summary, &expected_summary.summary);
+        assert!(summary.validated_for_current_source);
+        assert_eq!(
+            fs::read_to_string(&cache_path).expect("promoted summary written to cache"),
+            expected_summary.summary
+        );
+
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn source_export_cache_path_changes_for_same_length_bundle_edits() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("source-export-cache-path");
@@ -1619,7 +2079,7 @@ renderUser value = [value]
     }
 
     #[test]
-    fn module_summary_cache_path_changes_for_same_length_source_fingerprint_edits() {
+    fn module_summary_cache_path_ignores_validated_annotated_body_only_edits() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("module-summary-cache-path");
         std::env::set_var("XDG_CACHE_HOME", &cache_root);
@@ -1671,7 +2131,7 @@ renderUser value = [value]
                 &interface_fingerprints,
             )
         );
-        assert_ne!(
+        assert_eq!(
             super::module_summary_cache_path(
                 image_path.to_str().expect("utf8 path"),
                 &original_bundle_build,
@@ -1681,6 +2141,24 @@ renderUser value = [value]
                 &interface_fingerprints,
             ),
             super::module_summary_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &changed_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            )
+        );
+        assert_ne!(
+            super::module_summary_validation_cache_path(
+                image_path.to_str().expect("utf8 path"),
+                &original_bundle_build,
+                "Main",
+                &[],
+                "",
+                &interface_fingerprints,
+            ),
+            super::module_summary_validation_cache_path(
                 image_path.to_str().expect("utf8 path"),
                 &changed_bundle_build,
                 "Main",
@@ -1725,6 +2203,56 @@ renderUser value = [value]
         std::env::remove_var("XDG_CACHE_HOME");
         let _ = fs::remove_dir_all(cache_root);
     }
+
+    fn unused_test_pid() -> u32 {
+        let mut candidate = 900_000u32;
+        while PathBuf::from(format!("/proc/{candidate}")).exists() {
+            candidate += 1;
+        }
+        candidate
+    }
+
+    #[test]
+    fn cache_lock_recovers_dead_owner_lock() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("cache-lock-dead-owner");
+        let cache_path = cache_root.join("artifact.bin");
+        let lock_path = cache_path.with_extension("lock");
+        fs::create_dir_all(cache_root.as_path()).expect("create cache root");
+        fs::write(&lock_path, unused_test_pid().to_string()).expect("write stale owner lock");
+
+        let lock = super::CacheLock::acquire(&cache_path, "run-binary").expect("recover dead-owner lock");
+        assert!(lock.acquired());
+        assert_eq!(
+            fs::read_to_string(&lock_path).expect("read recovered lock"),
+            std::process::id().to_string()
+        );
+
+        drop(lock);
+        assert!(!lock_path.exists());
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn cache_lock_recovers_legacy_empty_lock() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("cache-lock-empty");
+        let cache_path = cache_root.join("artifact.bin");
+        let lock_path = cache_path.with_extension("lock");
+        fs::create_dir_all(cache_root.as_path()).expect("create cache root");
+        fs::write(&lock_path, "").expect("write legacy empty lock");
+
+        let lock = super::CacheLock::acquire(&cache_path, "run-binary").expect("recover empty lock");
+        assert!(lock.acquired());
+        assert_eq!(
+            fs::read_to_string(&lock_path).expect("read recovered lock"),
+            std::process::id().to_string()
+        );
+
+        drop(lock);
+        assert!(!lock_path.exists());
+        let _ = fs::remove_dir_all(cache_root);
+    }
 }
 
 fn cache_root() -> PathBuf {
@@ -1753,6 +2281,10 @@ fn source_export_cache_dir() -> PathBuf {
 
 fn module_summary_cache_dir() -> PathBuf {
     cache_root().join(MODULE_SUMMARY_CACHE_VERSION)
+}
+
+fn run_binary_cache_dir() -> PathBuf {
+    cache_root().join(RUN_BINARY_CACHE_VERSION)
 }
 
 fn native_image_cache_path(image_path: &str, bundle: &str) -> Option<PathBuf> {
@@ -1794,6 +2326,13 @@ fn source_export_cache_path(image_path: &str, export_name: &str, bundle: &str) -
     Some(source_export_cache_dir().join(format!("{cache_key}.cache")))
 }
 
+fn run_binary_cache_path(current_exe: &Path, image_path: &str, bundle: &str) -> Option<PathBuf> {
+    let launcher_bytes = fs::read(current_exe).ok()?;
+    let image_bytes = fs::read(image_path).ok()?;
+    let cache_key = stable_fingerprint_parts(&[&launcher_bytes, &image_bytes, bundle.as_bytes()]);
+    Some(run_binary_cache_dir().join(cache_key))
+}
+
 fn module_summary_cache_path(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
@@ -1803,7 +2342,8 @@ fn module_summary_cache_path(
     interface_fingerprints: &HashMap<String, String>,
 ) -> Option<PathBuf> {
     let image_bytes = fs::read(image_path).ok()?;
-    let module = project_bundle_module(bundle_build, module_name)?;
+    project_bundle_module(bundle_build, module_name)?;
+    let module_interface_fingerprint = interface_fingerprints.get(module_name)?;
     let mut imported_interface_fingerprints = Vec::new();
     for imported_module_name in imported_module_names {
         imported_interface_fingerprints.push(interface_fingerprints.get(imported_module_name)?);
@@ -1812,7 +2352,7 @@ fn module_summary_cache_path(
     let mut parts: Vec<&[u8]> = vec![
         &image_bytes,
         module_name.as_bytes(),
-        module.source_fingerprint.as_bytes(),
+        module_interface_fingerprint.as_bytes(),
         imported_summaries_text.as_bytes(),
     ];
     for imported_module_name in imported_module_names {
@@ -1824,6 +2364,177 @@ fn module_summary_cache_path(
 
     let cache_key = stable_fingerprint_parts(&parts);
     Some(module_summary_cache_dir().join(format!("{cache_key}.cache")))
+}
+
+fn module_summary_validation_cache_path(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+) -> Option<PathBuf> {
+    let image_bytes = fs::read(image_path).ok()?;
+    let module = project_bundle_module(bundle_build, module_name)?;
+    let module_interface_fingerprint = interface_fingerprints.get(module_name)?;
+    let mut imported_interface_fingerprints = Vec::new();
+    for imported_module_name in imported_module_names {
+        imported_interface_fingerprints.push(interface_fingerprints.get(imported_module_name)?);
+    }
+
+    let mut parts: Vec<&[u8]> = vec![
+        &image_bytes,
+        module_name.as_bytes(),
+        module.source_fingerprint.as_bytes(),
+        module_interface_fingerprint.as_bytes(),
+        imported_summaries_text.as_bytes(),
+    ];
+    for imported_module_name in imported_module_names {
+        parts.push(imported_module_name.as_bytes());
+    }
+    for fingerprint in imported_interface_fingerprints {
+        parts.push(fingerprint.as_bytes());
+    }
+
+    let cache_key = stable_fingerprint_parts(&parts);
+    Some(module_summary_cache_dir().join(format!("{cache_key}.validated")))
+}
+
+fn module_summary_decl_fingerprints_cache_path(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+) -> Option<PathBuf> {
+    module_summary_cache_path(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    )
+    .map(|path| module_summary_decl_fingerprints_cache_path_from_summary_path(&path))
+}
+
+fn parse_decl_fingerprints_value(value: Option<&serde_json::Value>) -> HashMap<String, String> {
+    let mut fingerprints = HashMap::new();
+    let Some(object) = value.and_then(serde_json::Value::as_object) else {
+        return fingerprints;
+    };
+    for (name, fingerprint_value) in object {
+        if let Some(fingerprint) = fingerprint_value.as_str() {
+            fingerprints.insert(name.clone(), fingerprint.to_owned());
+        }
+    }
+    fingerprints
+}
+
+fn parse_decl_fingerprints_json(text: &str) -> Option<HashMap<String, String>> {
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    Some(parse_decl_fingerprints_value(Some(&value)))
+}
+
+fn render_decl_fingerprints_json(fingerprints: &HashMap<String, String>) -> Vec<u8> {
+    let mut object = serde_json::Map::new();
+    let mut names = fingerprints.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+    for name in names {
+        if let Some(fingerprint) = fingerprints.get(&name) {
+            object.insert(name, serde_json::Value::String(fingerprint.clone()));
+        }
+    }
+    let value = serde_json::Value::Object(object);
+    serde_json::to_vec_pretty(&value).unwrap_or_else(|_| b"{}".to_vec())
+}
+
+fn module_summary_decl_fingerprints_cache_path_from_summary_path(cache_path: &Path) -> PathBuf {
+    cache_path.with_extension("decls.json")
+}
+
+fn write_decl_fingerprints_to_summary_cache_path(
+    cache_path: &Path,
+    decl_fingerprints: &HashMap<String, String>,
+) {
+    if decl_fingerprints.is_empty() {
+        return;
+    }
+    let decl_cache_path = module_summary_decl_fingerprints_cache_path_from_summary_path(cache_path);
+    let _ = atomic_write(&decl_cache_path, &render_decl_fingerprints_json(decl_fingerprints));
+}
+
+fn read_decl_fingerprints_from_summary_cache_path(cache_path: &Path) -> Option<HashMap<String, String>> {
+    let decl_cache_path = module_summary_decl_fingerprints_cache_path_from_summary_path(cache_path);
+    let text = fs::read_to_string(decl_cache_path).ok()?;
+    parse_decl_fingerprints_json(&text)
+}
+
+fn parse_promoted_module_summary_entries(cache_text: &str) -> HashMap<String, PromotedModuleSummaryEntry> {
+    let mut entries = HashMap::new();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(cache_text) else {
+        return entries;
+    };
+    let Some(summary_entries) = value.get("summaries").and_then(serde_json::Value::as_array) else {
+        return entries;
+    };
+
+    for entry in summary_entries {
+        let Some(cache_key) = entry.get("cacheKey").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(source_fingerprint) = entry.get("sourceFingerprint").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(summary) = entry.get("summary").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let decl_fingerprints = parse_decl_fingerprints_value(entry.get("declFingerprints"));
+        entries.insert(
+            cache_key.to_owned(),
+            PromotedModuleSummaryEntry {
+                source_fingerprint: source_fingerprint.to_owned(),
+                summary: summary.to_owned(),
+                decl_fingerprints,
+            },
+        );
+    }
+    entries
+}
+
+fn promoted_module_summary_entries() -> &'static HashMap<String, PromotedModuleSummaryEntry> {
+    PROMOTED_MODULE_SUMMARY_ENTRIES
+        .get_or_init(|| parse_promoted_module_summary_entries(PROMOTED_COMPILER_MODULE_SUMMARY_CACHE))
+}
+
+fn read_promoted_module_summary(
+    cache_path: &Path,
+    module_name: &str,
+    module_source_fingerprint: &str,
+) -> Option<ModuleSummaryCacheHit> {
+    if env::var("CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE").is_ok() {
+        return None;
+    }
+    let cache_key = cache_path.file_name()?.to_str()?;
+    let entry = promoted_module_summary_entries().get(cache_key)?.clone();
+    let validated_for_current_source = entry.source_fingerprint == module_source_fingerprint;
+    let cache_status = if validated_for_current_source {
+        "promoted hit"
+    } else {
+        "promoted unvalidated-hit"
+    };
+    trace_native_cache(&format!(
+        "module-summary {} module={} key={}",
+        cache_status, module_name, cache_key
+    ));
+    let _ = atomic_write(cache_path, entry.summary.as_bytes());
+    write_decl_fingerprints_to_summary_cache_path(cache_path, &entry.decl_fingerprints);
+    Some(ModuleSummaryCacheHit {
+        summary: entry.summary,
+        validated_for_current_source,
+        decl_fingerprints: Some(entry.decl_fingerprints),
+    })
 }
 
 fn read_cached_native_image(image_path: &str, bundle: &str) -> Option<Vec<u8>> {
@@ -1951,8 +2662,17 @@ fn read_cached_module_summary(
     imported_module_names: &[String],
     imported_summaries_text: &str,
     interface_fingerprints: &HashMap<String, String>,
-) -> Option<String> {
+) -> Option<ModuleSummaryCacheHit> {
     let cache_path = module_summary_cache_path(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    )?;
+    let module_source_fingerprint = project_bundle_module(bundle_build, module_name)?.source_fingerprint.as_str();
+    let validation_cache_path = module_summary_validation_cache_path(
         image_path,
         bundle_build,
         module_name,
@@ -1962,14 +2682,41 @@ fn read_cached_module_summary(
     )?;
     match fs::read_to_string(&cache_path) {
         Ok(text) => {
+            let validated_for_current_source = validation_cache_path.is_file();
+            let cache_status = if validated_for_current_source {
+                "hit"
+            } else {
+                "unvalidated-hit"
+            };
+            let decl_fingerprints = read_decl_fingerprints_from_summary_cache_path(&cache_path);
             trace_native_cache(&format!(
-                "module-summary hit module={} path={}",
+                "module-summary {} module={} path={}",
+                cache_status,
                 module_name,
                 cache_path.display()
             ));
-            Some(text)
+            Some(ModuleSummaryCacheHit {
+                summary: text,
+                validated_for_current_source,
+                decl_fingerprints,
+            })
         }
         Err(_) => {
+            if let Some(hit) =
+                read_promoted_module_summary(&cache_path, module_name, module_source_fingerprint)
+            {
+                if hit.validated_for_current_source {
+                    write_cached_module_summary_validation(
+                        image_path,
+                        bundle_build,
+                        module_name,
+                        imported_module_names,
+                        imported_summaries_text,
+                        interface_fingerprints,
+                    );
+                }
+                return Some(hit);
+            }
             trace_native_cache(&format!(
                 "module-summary miss module={} path={}",
                 module_name,
@@ -1980,14 +2727,35 @@ fn read_cached_module_summary(
     }
 }
 
+fn trace_validated_module_summary_hit(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+) {
+    if let Some(cache_path) = module_summary_cache_path(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    ) {
+        trace_native_cache(&format!(
+            "module-summary validated-hit module={} path={}",
+            module_name,
+            cache_path.display()
+        ));
+    }
+}
+
 fn write_cached_native_image(image_path: &str, bundle: &str, image_bytes: &[u8]) {
     let Some(cache_path) = native_image_cache_path(image_path, bundle) else {
         return;
     };
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(cache_path, image_bytes);
+    let _ = atomic_write(&cache_path, image_bytes);
 }
 
 fn write_cached_native_image_decl_module(
@@ -2005,10 +2773,7 @@ fn write_cached_native_image_decl_module(
     ) else {
         return;
     };
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(cache_path, decl_text);
+    let _ = atomic_write(&cache_path, decl_text.as_bytes());
 }
 
 fn write_cached_native_image_build_plan(
@@ -2049,20 +2814,14 @@ fn write_cached_native_image_build_plan(
         NATIVE_IMAGE_BUILD_PLAN_CACHE_SEPARATOR,
         module_entries.join(NATIVE_IMAGE_BUILD_PLAN_CACHE_MODULE_SEPARATOR)
     );
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(cache_path, cache_text);
+    let _ = atomic_write(&cache_path, cache_text.as_bytes());
 }
 
 fn write_cached_source_export(image_path: &str, export_name: &str, bundle: &str, output: &[u8]) {
     let Some(cache_path) = source_export_cache_path(image_path, export_name, bundle) else {
         return;
     };
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(cache_path, output);
+    let _ = atomic_write(&cache_path, output);
 }
 
 fn write_cached_module_summary(
@@ -2084,10 +2843,87 @@ fn write_cached_module_summary(
     ) else {
         return;
     };
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
+    let _ = atomic_write(&cache_path, output.as_bytes());
+    write_cached_module_summary_validation(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    );
+}
+
+fn write_cached_module_summary_validation(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+) {
+    let Some(cache_path) = module_summary_validation_cache_path(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    ) else {
+        return;
+    };
+    let _ = atomic_write(&cache_path, b"ok");
+}
+
+fn write_cached_module_summary_decl_fingerprints(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+    decl_fingerprints: &HashMap<String, String>,
+) {
+    if decl_fingerprints.is_empty() {
+        return;
     }
-    let _ = fs::write(cache_path, output);
+    let Some(cache_path) = module_summary_decl_fingerprints_cache_path(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+    ) else {
+        return;
+    };
+    let _ = atomic_write(&cache_path, &render_decl_fingerprints_json(decl_fingerprints));
+}
+
+fn write_cached_module_summary_decl_fingerprints_from_scoped_bundle(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    module_name: &str,
+    imported_module_names: &[String],
+    imported_summaries_text: &str,
+    interface_fingerprints: &HashMap<String, String>,
+    scoped_bundle: &str,
+) {
+    let Some(module_source) = module_source_from_scoped_bundle(scoped_bundle, module_name) else {
+        return;
+    };
+    let Some(decl_fingerprints) = module_validation_decl_fingerprints(&module_source) else {
+        return;
+    };
+    write_cached_module_summary_decl_fingerprints(
+        image_path,
+        bundle_build,
+        module_name,
+        imported_module_names,
+        imported_summaries_text,
+        interface_fingerprints,
+        &decl_fingerprints,
+    );
 }
 
 fn embedded_image_path(file_name: &str, image_text: &str) -> Result<PathBuf, String> {
@@ -2100,7 +2936,7 @@ fn embedded_image_path(file_name: &str, image_text: &str) -> Result<PathBuf, Str
         Err(_) => true,
     };
     if needs_write {
-        fs::write(&embedded_path, image_text).map_err(|err| {
+        atomic_write(&embedded_path, image_text.as_bytes()).map_err(|err| {
             format!(
                 "failed to prepare embedded native compiler image `{}`: {err}",
                 embedded_path.display()
@@ -2144,9 +2980,44 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     ensure_parent_dir(path)?;
-    fs::write(path, bytes).map_err(|err| format!("failed to write `{}`: {err}", path.display()))
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("clasp-write");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos();
+    let temp_path = path.with_file_name(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
+
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::File::create(&temp_path)
+            .map_err(|err| format!("failed to create temp file `{}`: {err}", temp_path.display()))?;
+        file.write_all(bytes)
+            .map_err(|err| format!("failed to write temp file `{}`: {err}", temp_path.display()))?;
+        file.sync_all()
+            .map_err(|err| format!("failed to flush temp file `{}`: {err}", temp_path.display()))?;
+        fs::rename(&temp_path, path).map_err(|err| {
+            format!(
+                "failed to move temp file `{}` into `{}`: {err}",
+                temp_path.display(),
+                path.display()
+            )
+        })
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    write_result
+}
+
+fn write_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    atomic_write(path, bytes)
 }
 
 fn default_backend_binary_path(input_path: &Path) -> PathBuf {
@@ -2200,6 +3071,134 @@ fn write_backend_binary(output_path: &Path, image_bytes: &[u8]) -> Result<(), St
         .map_err(|err| format!("failed to reopen `{}` for app image append: {err}", output_path.display()))?;
     file.write_all(&appended_image(image_bytes))
         .map_err(|err| format!("failed to append app image to `{}`: {err}", output_path.display()))
+}
+
+fn write_backend_binary_atomic(output_path: &Path, image_bytes: &[u8]) -> Result<(), String> {
+    ensure_parent_dir(output_path)?;
+    let file_name = output_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("claspc-run");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos();
+    let temp_path = output_path.with_file_name(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
+    let write_result = write_backend_binary(&temp_path, image_bytes)
+        .and_then(|_| {
+            fs::rename(&temp_path, output_path).map_err(|err| {
+                format!(
+                    "failed to move temp backend binary `{}` into `{}`: {err}",
+                    temp_path.display(),
+                    output_path.display()
+                )
+            })
+        });
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+struct CacheLock {
+    path: PathBuf,
+}
+
+impl CacheLock {
+    fn current_pid_text() -> String {
+        std::process::id().to_string()
+    }
+
+    fn process_is_alive(pid: u32) -> bool {
+        PathBuf::from(format!("/proc/{pid}")).exists()
+    }
+
+    fn lock_owner_pid(lock_path: &Path) -> Option<u32> {
+        fs::read_to_string(lock_path)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u32>().ok())
+    }
+
+    fn legacy_empty_lock(lock_path: &Path) -> bool {
+        fs::metadata(lock_path).map(|meta| meta.len() == 0).unwrap_or(false)
+    }
+
+    fn recover_stale_lock(lock_path: &Path, cache_path: &Path, label: &str) -> bool {
+        if let Some(pid) = Self::lock_owner_pid(lock_path) {
+            if !Self::process_is_alive(pid) {
+                trace_native_cache(&format!(
+                    "{label} stale-owner pid={} path={}",
+                    pid,
+                    cache_path.display()
+                ));
+                let _ = fs::remove_file(lock_path);
+                return true;
+            }
+            return false;
+        }
+
+        if Self::legacy_empty_lock(lock_path) {
+            trace_native_cache(&format!("{label} stale-empty path={}", cache_path.display()));
+            let _ = fs::remove_file(lock_path);
+            return true;
+        }
+
+        false
+    }
+
+    fn acquire(cache_path: &Path, label: &str) -> Result<Self, String> {
+        let lock_path = cache_path.with_extension("lock");
+        ensure_parent_dir(&lock_path)?;
+        loop {
+            if cache_path.is_file() {
+                trace_native_cache(&format!("{label} hit path={}", cache_path.display()));
+                return Ok(Self { path: PathBuf::new() });
+            }
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(mut handle) => {
+                    if let Err(err) = handle.write_all(Self::current_pid_text().as_bytes()) {
+                        let _ = fs::remove_file(&lock_path);
+                        return Err(format!(
+                            "failed to initialize cache lock `{}`: {err}",
+                            lock_path.display()
+                        ));
+                    }
+                    trace_native_cache(&format!("{label} build path={}", cache_path.display()));
+                    return Ok(Self { path: lock_path });
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if Self::recover_stale_lock(&lock_path, cache_path, label) {
+                        continue;
+                    }
+                    trace_native_cache(&format!("{label} wait path={}", cache_path.display()));
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(err) => {
+                    return Err(format!(
+                        "failed to create cache lock `{}`: {err}",
+                        lock_path.display()
+                    ))
+                }
+            }
+        }
+    }
+
+    fn acquired(&self) -> bool {
+        !self.path.as_os_str().is_empty()
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        if self.acquired() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn read_embedded_image_from_executable() -> Result<Option<String>, String> {
@@ -2289,14 +3288,22 @@ fn form_body_to_json(path: &str, body: &str) -> String {
     for pair in body.split('&').filter(|pair| !pair.is_empty()) {
         let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
         let name = decode_form_component(raw_name);
-        let mut value = decode_form_component(raw_value);
+        let value = decode_form_component(raw_value);
+        if (path == "/leads" || path == "/api/leads") && name == "budget" {
+            if let Ok(parsed) = value.parse::<i64>() {
+                fields.push(format!("{}:{parsed}", json_string(&name)));
+                continue;
+            }
+        }
         if (path == "/leads" || path == "/api/leads") && name == "segment" {
-            value = match value.as_str() {
+            let value = match value.as_str() {
                 "startup" => "Startup".to_owned(),
                 "growth" => "Growth".to_owned(),
                 "enterprise" => "Enterprise".to_owned(),
                 _ => value,
             };
+            fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
+            continue;
         }
         fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
     }
@@ -2326,6 +3333,18 @@ fn normalize_native_request_json(path: &str, request_json: &str) -> String {
 
 fn native_route_error_http_response(path: &str, request_json: &str, message: &str) -> (String, Vec<u8>) {
     if message == "invalid_route_request_payload" {
+        if path == "/leads" && request_json.contains("\"budget\":") {
+            if parse_json_text_field(request_json, "budget").is_some() {
+                return (
+                    "400 Bad Request".to_owned(),
+                    b"budget must be an integer".to_vec(),
+                );
+            }
+            return (
+                "400 Bad Request".to_owned(),
+                b"segment must be one of: startup, growth, enterprise".to_vec(),
+            );
+        }
         if path == "/api/leads" && parse_json_text_field(request_json, "budget").is_some() {
             return (
                 "400 Bad Request".to_owned(),
@@ -2342,6 +3361,20 @@ fn native_route_error_http_response(path: &str, request_json: &str, message: &st
         return (
             "400 Bad Request".to_owned(),
             format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+        );
+    }
+
+    if path == "/leads"
+        && (message == "priority must be one of: low, medium, high"
+            || message == "segment must be one of: startup, growth, enterprise")
+    {
+        return ("502 Bad Gateway".to_owned(), message.as_bytes().to_vec());
+    }
+
+    if path == "/lead/summary" && message == "priority must be one of: low, medium, high" {
+        return (
+            "502 Bad Gateway".to_owned(),
+            b"{\"error\":\"route_dispatch_failed\"}".to_vec(),
         );
     }
 
@@ -2686,6 +3719,58 @@ fn execute_project_module_summary_export(
     )
 }
 
+fn append_cached_module_summary_to_imports(imported_summaries_text: &str, cached_summary: &str) -> String {
+    match (imported_summaries_text.trim().is_empty(), cached_summary.trim().is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => cached_summary.to_owned(),
+        (false, true) => imported_summaries_text.to_owned(),
+        (false, false) => format!("{imported_summaries_text}\n{cached_summary}"),
+    }
+}
+
+fn try_execute_decl_granular_module_summary_validation(
+    embedded_path_text: &str,
+    module_name: &str,
+    module_plan: &IncrementalProjectSummaryModulePlan,
+    imported_summaries_text: &str,
+    cached: &ModuleSummaryCacheHit,
+) -> Result<Option<String>, String> {
+    let Some(cached_decl_fingerprints) = cached.decl_fingerprints.as_ref() else {
+        return Ok(None);
+    };
+    if cached_decl_fingerprints.is_empty() {
+        return Ok(None);
+    }
+
+    let Some((validation_bundle, changed_decl_names, _current_decl_fingerprints)) =
+        changed_decl_validation_bundle(&module_plan.scoped_bundle, module_name, cached_decl_fingerprints)
+    else {
+        return Ok(None);
+    };
+
+    if changed_decl_names.is_empty() {
+        return Ok(Some(cached.summary.clone()));
+    }
+
+    trace_native_cache(&format!(
+        "module-summary decl-validation module={} changed={}",
+        module_name,
+        changed_decl_names.join(",")
+    ));
+    let validation_imports =
+        append_cached_module_summary_to_imports(imported_summaries_text, &cached.summary);
+    let validation_output = execute_project_module_summary_export(
+        embedded_path_text,
+        &validation_bundle,
+        &validation_imports,
+    )?;
+    if validation_output.strip_prefix("ERROR:").is_some() {
+        return Ok(Some(validation_output));
+    }
+
+    Ok(Some(cached.summary.clone()))
+}
+
 fn execute_incremental_project_summary(
     embedded_path_text: &str,
     bundle_build: &ProjectBundleBuild,
@@ -2716,7 +3801,54 @@ fn execute_incremental_project_summary(
             &imported_summaries_text,
             &interface_fingerprints,
         ) {
-            cached
+            if cached.validated_for_current_source {
+                cached.summary
+            } else {
+                let validation_output = match try_execute_decl_granular_module_summary_validation(
+                    embedded_path_text,
+                    module_name,
+                    module_plan,
+                    &imported_summaries_text,
+                    &cached,
+                )? {
+                    Some(output) => output,
+                    None => execute_project_module_summary_export(
+                        embedded_path_text,
+                        &module_plan.scoped_bundle,
+                        &imported_summaries_text,
+                    )?,
+                };
+                if validation_output.strip_prefix("ERROR:").is_some() {
+                    validation_output
+                } else {
+                    write_cached_module_summary_validation(
+                        embedded_path_text,
+                        bundle_build,
+                        module_name,
+                        &module_plan.imported_module_order,
+                        &imported_summaries_text,
+                        &interface_fingerprints,
+                    );
+                    write_cached_module_summary_decl_fingerprints_from_scoped_bundle(
+                        embedded_path_text,
+                        bundle_build,
+                        module_name,
+                        &module_plan.imported_module_order,
+                        &imported_summaries_text,
+                        &interface_fingerprints,
+                        &module_plan.scoped_bundle,
+                    );
+                    trace_validated_module_summary_hit(
+                        embedded_path_text,
+                        bundle_build,
+                        module_name,
+                        &module_plan.imported_module_order,
+                        &imported_summaries_text,
+                        &interface_fingerprints,
+                    );
+                    cached.summary
+                }
+            }
         } else {
             let output = execute_project_module_summary_export(
                 embedded_path_text,
@@ -2732,6 +3864,17 @@ fn execute_incremental_project_summary(
                 &interface_fingerprints,
                 &output,
             );
+            if output.strip_prefix("ERROR:").is_none() {
+                write_cached_module_summary_decl_fingerprints_from_scoped_bundle(
+                    embedded_path_text,
+                    bundle_build,
+                    module_name,
+                    &module_plan.imported_module_order,
+                    &imported_summaries_text,
+                    &interface_fingerprints,
+                    &module_plan.scoped_bundle,
+                );
+            }
             output
         };
 
@@ -2998,8 +4141,11 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
 }
 
 fn run_backend_binary(binary_path: &Path, program_args: &[String]) -> Result<ExitCode, String> {
+    let executable_path_json = serde_json::to_string(&binary_path.display().to_string())
+        .map_err(|err| format!("failed to encode backend binary path: {err}"))?;
     let status = std::process::Command::new(binary_path)
         .args(program_args)
+        .env("CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON", executable_path_json)
         .status()
         .map_err(|err| format!("failed to run {}: {err}", binary_path.display()))?;
     Ok(exit_code_from_status(status))
@@ -3025,6 +4171,19 @@ fn run_main(args: Vec<String>) -> ExitCode {
             return ExitCode::from(2);
         }
         return match clasp_rt_run_upgrade_supervisor_command(&args[2]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("{message}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.get(1).map(|value| value.as_str()) == Some("__clasp-service-supervisor") {
+        if args.len() != 3 {
+            eprintln!("usage: {} __clasp-service-supervisor <config-path>", args[0]);
+            return ExitCode::from(2);
+        }
+        return match clasp_rt_run_service_supervisor_command(&args[2]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("{message}");
@@ -3142,26 +4301,59 @@ fn run_main(args: Vec<String>) -> ExitCode {
             if options.json {
                 return fail("`claspc run` does not support --json", true);
             }
-            let output_path = options
-                .output_path
-                .clone()
-                .unwrap_or_else(|| temporary_backend_binary_path(&options.input_path));
-            let embedded_path_text = embedded_path.to_string_lossy();
-            let output_bytes = match execute_parallel_native_image_export(&embedded_path_text, &bundle_build) {
-                Ok(output_bytes) => output_bytes,
-                Err(message) => return fail(&message, false),
+            let current_exe = match env::current_exe() {
+                Ok(path) => path,
+                Err(message) => return fail(&format!("failed to resolve current claspc binary: {message}"), false),
             };
-            if let Err(message) = write_backend_binary(&output_path, &output_bytes) {
-                return fail(&message, false);
+            let output_path = if let Some(path) = options.output_path.clone() {
+                path
+            } else {
+                match run_binary_cache_path(&current_exe, &embedded_path.to_string_lossy(), bundle) {
+                    Some(path) => path,
+                    None => temporary_backend_binary_path(&options.input_path),
+                }
+            };
+
+            let needs_build = if options.output_path.is_some() {
+                true
+            } else {
+                !output_path.is_file()
+            };
+
+            if needs_build {
+                let _cache_lock = if options.output_path.is_none() {
+                    match CacheLock::acquire(&output_path, "run-binary") {
+                        Ok(lock) => lock,
+                        Err(message) => return fail(&message, false),
+                    }
+                } else {
+                    CacheLock { path: PathBuf::new() }
+                };
+
+                let should_build = options.output_path.is_some() || !output_path.is_file();
+                if should_build {
+                    let embedded_path_text = embedded_path.to_string_lossy();
+                    let output_bytes = match execute_parallel_native_image_export(&embedded_path_text, &bundle_build) {
+                        Ok(output_bytes) => output_bytes,
+                        Err(message) => return fail(&message, false),
+                    };
+                    let write_result = if options.output_path.is_some() {
+                        write_backend_binary(&output_path, &output_bytes)
+                    } else {
+                        write_backend_binary_atomic(&output_path, &output_bytes)
+                    };
+                    if let Err(message) = write_result {
+                        return fail(&message, false);
+                    }
+                }
+            } else {
+                trace_native_cache(&format!("run-binary hit path={}", output_path.display()));
             }
-            let exit_code = match run_backend_binary(&output_path, &options.program_args) {
+
+            match run_backend_binary(&output_path, &options.program_args) {
                 Ok(exit_code) => exit_code,
-                Err(message) => return fail(&message, false),
-            };
-            if options.output_path.is_none() {
-                let _ = fs::remove_file(&output_path);
+                Err(message) => fail(&message, false),
             }
-            exit_code
         }
         Command::Native => run_build(
             &options,

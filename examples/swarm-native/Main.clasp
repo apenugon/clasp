@@ -44,6 +44,15 @@ planningTaskId = "plan"
 repairTaskId : Str
 repairTaskId = "repair-2"
 
+objectiveDeadlineAtMs : Int
+objectiveDeadlineAtMs = 4102444800000
+
+planningDeadlineAtMs : Int
+planningDeadlineAtMs = 4102444200000
+
+repairDeadlineAtMs : Int
+repairDeadlineAtMs = 4102444500000
+
 mailboxLimit : Int
 mailboxLimit = 5
 
@@ -82,11 +91,11 @@ errorText message = textConcat ["error:", message]
 
 main : Str
 main =
-  match objectiveCreate stateRoot objectiveId "Run a planner/builder/verifier loop directly from ordinary Clasp code over the native swarm substrate." 6 6 {
+  match objectiveCreateWithDeadline stateRoot objectiveId "Run a planner/builder/verifier loop directly from ordinary Clasp code over the native swarm substrate." 6 6 objectiveDeadlineAtMs {
     Ok objectiveCreateValue ->
-      match taskCreate objectiveRef planningTaskId "Plan the repair work and unblock the execution DAG." [] 1 60000 {
+      match taskCreateWithDeadline objectiveRef planningTaskId "Plan the repair work and unblock the execution DAG." [] 1 planningDeadlineAtMs 60000 {
         Ok planningTaskCreateValue ->
-          match taskCreate objectiveRef repairTaskId "Run the repair, verification, approval, and mergegate path." [planningTaskId] 2 60000 {
+          match taskCreateWithDeadline objectiveRef repairTaskId "Run the repair, verification, approval, and mergegate path." [planningTaskId] 2 repairDeadlineAtMs 60000 {
             Ok repairTaskCreateValue ->
               match policySet repairRef "trunk" ["merge-ready"] ["native-smoke"] {
                 Ok policyValue ->

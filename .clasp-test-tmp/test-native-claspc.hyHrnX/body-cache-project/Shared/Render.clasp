@@ -1,6 +1,0 @@
-module Shared.Render
-
-import Shared.User
-
-renderUser : User -> Str
-renderUser user = user.name

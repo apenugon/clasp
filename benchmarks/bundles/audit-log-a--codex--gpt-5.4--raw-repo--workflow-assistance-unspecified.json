@@ -62,8 +62,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 87358,
-      "sha256": "d473c9e8178662bbd3f96b9b5aba4609f652d1e0990ad1c7366048936de08aa4"
+      "size": 88425,
+      "sha256": "75ea903f044db48726387aa4ae3d0f1ca53815020c936bf31ad54c1fe49b7f71"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -107,8 +107,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-audit-log/repo/scripts/verify.sh",
-      "size": 881,
-      "sha256": "57cdf36de3640c6f2bb1261162e60e8fbadb639451e93cb22307f8781cf96ce6"
+      "size": 916,
+      "sha256": "d8264f36d2596870caac1fcbd837fd2c990f2d62f812e07be6a8cbb5f396faac"
     },
     {
       "path": "benchmarks/tasks/clasp-audit-log/repo/test/audit-log.test.mjs",

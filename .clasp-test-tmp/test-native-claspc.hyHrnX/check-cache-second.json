@@ -1,1 +1,0 @@
-{"status":"ok","command":"check","input":".clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-project/Main.clasp","implementation":"clasp-native","summary":"defaultUser : User\nrenderUser : User -> Str\nmain : Str"}

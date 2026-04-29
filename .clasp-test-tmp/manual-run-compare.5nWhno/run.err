@@ -1,3 +1,0 @@
-[claspc-timing] export=main phase=load_activate ms=57 argc=0
-[claspc-timing] export=main phase=dispatch ms=14 argc=0
-[claspc-timing] export=main phase=total ms=71 argc=0

@@ -131,6 +131,7 @@ write_result "2026-03-01T10-11-05.000Z--clasp-lead-segment--codex.json" "clasp-l
 write_result "2026-03-01T10-11-06.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:06.000Z" 210000 155 140 true 0
 write_result "2026-03-01T10-11-07.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:07.000Z" 150000 140 130 true 0
 write_result "2026-03-01T10-11-08.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:08.000Z" 240000 175 160 true 0
+write_result "2026-03-01T10-11-09.000Z--clasp-legal-assistant-appbench--codex.json" "clasp-legal-assistant-appbench" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:09.000Z" 300000 210 190 true 0
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 write_result "2026-03-01T10-12-05.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:05.000Z" 80 90 82 true 0
@@ -273,244 +274,246 @@ cat >"$planning_durable_result_path" <<EOF
 EOF
 
 summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes remediation-a)"
-printf '%s\n' "$summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
-printf '%s\n' "$summary_output" | grep -Fq '  mode: raw-repo'
-printf '%s\n' "$summary_output" | grep -Fq '  workflowAssistance: unspecified'
-printf '%s\n' "$summary_output" | grep -Fq '  series: remediation-a'
-printf '%s\n' "$summary_output" | grep -Fq '  passRate: 50%'
-printf '%s\n' "$summary_output" | grep -Fq '  timeToGreenMs: 300'
-printf '%s\n' "$summary_output" | grep -Fq '  medianDiscoveryMs: 30'
-printf '%s\n' "$summary_output" | grep -Fq '  medianFirstEditMs: 75'
-printf '%s\n' "$summary_output" | grep -Fq '  medianFirstVerifyMs: 120'
-printf '%s\n' "$summary_output" | grep -Fq '  medianPhaseTimeToGreenMs: 150'
-printf '%s\n' "$summary_output" | grep -Fq $'ts-lead-segment\tcodex\tgpt-5.4'
-printf '%s\n' "$summary_output" | grep -Fq '  passRate: 100%'
-printf '%s\n' "$summary_output" | grep -Fq '  timeToGreenMs: 150'
-printf '%s\n' "$summary_output" | grep -Fq 'lead-segment-comparison'
-printf '%s\n' "$summary_output" | grep -Fq $'  codex\tgpt-5.4\tremediation-a'
-printf '%s\n' "$summary_output" | grep -Fq '    mode: raw-repo'
-printf '%s\n' "$summary_output" | grep -Fq '    passRateDeltaPct: -50'
-printf '%s\n' "$summary_output" | grep -Fq '    timeToGreenDeltaMs: 150'
-printf '%s\n' "$summary_output" | grep -Fq '    tokenDelta: -25'
-printf '%s\n' "$summary_output" | grep -Fq '    uncachedTokenDelta: -25'
+grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4' <<<"$summary_output"
+grep -Fq '  mode: raw-repo' <<<"$summary_output"
+grep -Fq '  workflowAssistance: unspecified' <<<"$summary_output"
+grep -Fq '  series: remediation-a' <<<"$summary_output"
+grep -Fq '  passRate: 50%' <<<"$summary_output"
+grep -Fq '  timeToGreenMs: 300' <<<"$summary_output"
+grep -Fq '  medianDiscoveryMs: 30' <<<"$summary_output"
+grep -Fq '  medianFirstEditMs: 75' <<<"$summary_output"
+grep -Fq '  medianFirstVerifyMs: 120' <<<"$summary_output"
+grep -Fq '  medianPhaseTimeToGreenMs: 150' <<<"$summary_output"
+grep -Fq $'ts-lead-segment\tcodex\tgpt-5.4' <<<"$summary_output"
+grep -Fq '  passRate: 100%' <<<"$summary_output"
+grep -Fq '  timeToGreenMs: 150' <<<"$summary_output"
+grep -Fq 'lead-segment-comparison' <<<"$summary_output"
+grep -Fq $'  codex\tgpt-5.4\tremediation-a' <<<"$summary_output"
+grep -Fq '    mode: raw-repo' <<<"$summary_output"
+grep -Fq '    passRateDeltaPct: -50' <<<"$summary_output"
+grep -Fq '    timeToGreenDeltaMs: 150' <<<"$summary_output"
+grep -Fq '    tokenDelta: -25' <<<"$summary_output"
+grep -Fq '    uncachedTokenDelta: -25' <<<"$summary_output"
 
 air_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes air-a)"
-printf '%s\n' "$air_summary_output" | grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4'
-printf '%s\n' "$air_summary_output" | grep -Fq '  workflowAssistance: raw-text'
-printf '%s\n' "$air_summary_output" | grep -Fq '  workflowAssistance: compiler-owned-air'
-printf '%s\n' "$air_summary_output" | grep -Fq 'air-planning-comparison'
-printf '%s\n' "$air_summary_output" | grep -Fq $'  clasp-lead-segment\tcodex\tgpt-5.4\tair-a'
-printf '%s\n' "$air_summary_output" | grep -Fq '    mode: raw-repo'
-printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextWorkflowAssistance: raw-text'
-printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirWorkflowAssistance: compiler-owned-air'
-printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextPassRate: 50%'
-printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirPassRate: 100%'
-printf '%s\n' "$air_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$air_summary_output" | grep -Fq '    rawTextTimeToGreenMs: 390'
-printf '%s\n' "$air_summary_output" | grep -Fq '    compilerOwnedAirTimeToGreenMs: 90'
-printf '%s\n' "$air_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
-printf '%s\n' "$air_summary_output" | grep -Fq '    tokenDelta: -40'
-printf '%s\n' "$air_summary_output" | grep -Fq '    uncachedTokenDelta: -37'
+grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4' <<<"$air_summary_output"
+grep -Fq '  workflowAssistance: raw-text' <<<"$air_summary_output"
+grep -Fq '  workflowAssistance: compiler-owned-air' <<<"$air_summary_output"
+grep -Fq 'air-planning-comparison' <<<"$air_summary_output"
+grep -Fq $'  clasp-lead-segment\tcodex\tgpt-5.4\tair-a' <<<"$air_summary_output"
+grep -Fq '    mode: raw-repo' <<<"$air_summary_output"
+grep -Fq '    rawTextWorkflowAssistance: raw-text' <<<"$air_summary_output"
+grep -Fq '    compilerOwnedAirWorkflowAssistance: compiler-owned-air' <<<"$air_summary_output"
+grep -Fq '    rawTextPassRate: 50%' <<<"$air_summary_output"
+grep -Fq '    compilerOwnedAirPassRate: 100%' <<<"$air_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$air_summary_output"
+grep -Fq '    rawTextTimeToGreenMs: 390' <<<"$air_summary_output"
+grep -Fq '    compilerOwnedAirTimeToGreenMs: 90' <<<"$air_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -300' <<<"$air_summary_output"
+grep -Fq '    tokenDelta: -40' <<<"$air_summary_output"
+grep -Fq '    uncachedTokenDelta: -37' <<<"$air_summary_output"
 
 priority_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes priority-a)"
-printf '%s\n' "$priority_summary_output" | grep -Fq $'clasp-lead-priority\tcodex\tgpt-5.4'
-printf '%s\n' "$priority_summary_output" | grep -Fq $'ts-lead-priority\tcodex\tgpt-5.4'
-printf '%s\n' "$priority_summary_output" | grep -Fq 'lead-priority-comparison'
-printf '%s\n' "$priority_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpriority-a'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    timeToGreenDeltaMs: -190'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    tokenDelta: -3'
-printf '%s\n' "$priority_summary_output" | grep -Fq '    uncachedTokenDelta: -3'
+grep -Fq $'clasp-lead-priority\tcodex\tgpt-5.4' <<<"$priority_summary_output"
+grep -Fq $'ts-lead-priority\tcodex\tgpt-5.4' <<<"$priority_summary_output"
+grep -Fq 'lead-priority-comparison' <<<"$priority_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tpriority-a' <<<"$priority_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$priority_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$priority_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$priority_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -190' <<<"$priority_summary_output"
+grep -Fq '    tokenDelta: -3' <<<"$priority_summary_output"
+grep -Fq '    uncachedTokenDelta: -3' <<<"$priority_summary_output"
 
 rejection_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes rejection-a)"
-printf '%s\n' "$rejection_summary_output" | grep -Fq $'clasp-lead-rejection\tcodex\tgpt-5.4'
-printf '%s\n' "$rejection_summary_output" | grep -Fq $'ts-lead-rejection\tcodex\tgpt-5.4'
-printf '%s\n' "$rejection_summary_output" | grep -Fq 'lead-rejection-comparison'
-printf '%s\n' "$rejection_summary_output" | grep -Fq $'  codex\tgpt-5.4\trejection-a'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    passRateDeltaPct: 0'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    timeToGreenDeltaMs: -70'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    tokenDelta: -23'
-printf '%s\n' "$rejection_summary_output" | grep -Fq '    uncachedTokenDelta: -28'
+grep -Fq $'clasp-lead-rejection\tcodex\tgpt-5.4' <<<"$rejection_summary_output"
+grep -Fq $'ts-lead-rejection\tcodex\tgpt-5.4' <<<"$rejection_summary_output"
+grep -Fq 'lead-rejection-comparison' <<<"$rejection_summary_output"
+grep -Fq $'  codex\tgpt-5.4\trejection-a' <<<"$rejection_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$rejection_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$rejection_summary_output"
+grep -Fq '    passRateDeltaPct: 0' <<<"$rejection_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -70' <<<"$rejection_summary_output"
+grep -Fq '    tokenDelta: -23' <<<"$rejection_summary_output"
+grep -Fq '    uncachedTokenDelta: -28' <<<"$rejection_summary_output"
 
 containment_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes containment-a)"
-printf '%s\n' "$containment_summary_output" | grep -Fq $'clasp-control-plane\tcodex\tgpt-5.4'
-printf '%s\n' "$containment_summary_output" | grep -Fq $'ts-control-plane\tcodex\tgpt-5.4'
-printf '%s\n' "$containment_summary_output" | grep -Fq 'control-plane-comparison'
-printf '%s\n' "$containment_summary_output" | grep -Fq $'  codex\tgpt-5.4\tcontainment-a'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    tsPassRate: 0%'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    tokenDelta: -35'
-printf '%s\n' "$containment_summary_output" | grep -Fq '    uncachedTokenDelta: -40'
+grep -Fq $'clasp-control-plane\tcodex\tgpt-5.4' <<<"$containment_summary_output"
+grep -Fq $'ts-control-plane\tcodex\tgpt-5.4' <<<"$containment_summary_output"
+grep -Fq 'control-plane-comparison' <<<"$containment_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tcontainment-a' <<<"$containment_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$containment_summary_output"
+grep -Fq '    tsPassRate: 0%' <<<"$containment_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$containment_summary_output"
+grep -Fq '    timeToGreenDeltaMs: n/a' <<<"$containment_summary_output"
+grep -Fq '    tokenDelta: -35' <<<"$containment_summary_output"
+grep -Fq '    uncachedTokenDelta: -40' <<<"$containment_summary_output"
 
 authorization_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes authorization-data-access-a)"
-printf '%s\n' "$authorization_summary_output" | grep -Fq $'clasp-authorization-data-access\tcodex\tgpt-5.4'
-printf '%s\n' "$authorization_summary_output" | grep -Fq $'ts-authorization-data-access\tcodex\tgpt-5.4'
-printf '%s\n' "$authorization_summary_output" | grep -Fq 'authorization-data-access-comparison'
-printf '%s\n' "$authorization_summary_output" | grep -Fq $'  codex\tgpt-5.4\tauthorization-data-access-a'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    timeToGreenDeltaMs: -255'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    tokenDelta: -67'
-printf '%s\n' "$authorization_summary_output" | grep -Fq '    uncachedTokenDelta: -62'
+grep -Fq $'clasp-authorization-data-access\tcodex\tgpt-5.4' <<<"$authorization_summary_output"
+grep -Fq $'ts-authorization-data-access\tcodex\tgpt-5.4' <<<"$authorization_summary_output"
+grep -Fq 'authorization-data-access-comparison' <<<"$authorization_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tauthorization-data-access-a' <<<"$authorization_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$authorization_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$authorization_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$authorization_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -255' <<<"$authorization_summary_output"
+grep -Fq '    tokenDelta: -67' <<<"$authorization_summary_output"
+grep -Fq '    uncachedTokenDelta: -62' <<<"$authorization_summary_output"
 
 objective_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes objective-a)"
-printf '%s\n' "$objective_summary_output" | grep -Fq $'clasp-external-adaptation\tcodex\tgpt-5.4'
-printf '%s\n' "$objective_summary_output" | grep -Fq $'ts-external-adaptation\tcodex\tgpt-5.4'
-printf '%s\n' "$objective_summary_output" | grep -Fq 'external-adaptation-comparison'
-printf '%s\n' "$objective_summary_output" | grep -Fq $'  codex\tgpt-5.4\tobjective-a'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    tsPassRate: 100%'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    passRateDeltaPct: -50'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    timeToGreenDeltaMs: 100'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    tokenDelta: -15'
-printf '%s\n' "$objective_summary_output" | grep -Fq '    uncachedTokenDelta: -15'
+grep -Fq $'clasp-external-adaptation\tcodex\tgpt-5.4' <<<"$objective_summary_output"
+grep -Fq $'ts-external-adaptation\tcodex\tgpt-5.4' <<<"$objective_summary_output"
+grep -Fq 'external-adaptation-comparison' <<<"$objective_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tobjective-a' <<<"$objective_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$objective_summary_output"
+grep -Fq '    tsPassRate: 100%' <<<"$objective_summary_output"
+grep -Fq '    passRateDeltaPct: -50' <<<"$objective_summary_output"
+grep -Fq '    timeToGreenDeltaMs: 100' <<<"$objective_summary_output"
+grep -Fq '    tokenDelta: -15' <<<"$objective_summary_output"
+grep -Fq '    uncachedTokenDelta: -15' <<<"$objective_summary_output"
 
 python_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes py-escalation)"
-printf '%s\n' "$python_summary_output" | grep -Fq $'py-agent-escalation\tcodex\tgpt-5.4'
-printf '%s\n' "$python_summary_output" | grep -Fq '  series: py-escalation'
-printf '%s\n' "$python_summary_output" | grep -Fq '  runs: 2'
-printf '%s\n' "$python_summary_output" | grep -Fq '  passRate: 50%'
-printf '%s\n' "$python_summary_output" | grep -Fq '  timeToGreenMs: 200'
-printf '%s\n' "$python_summary_output" | grep -Fq '  medianDurationMs: 100'
-printf '%s\n' "$python_summary_output" | grep -Fq '  medianTokens: 120'
-printf '%s\n' "$python_summary_output" | grep -Fq '  medianUncachedTokens: 103'
+grep -Fq $'py-agent-escalation\tcodex\tgpt-5.4' <<<"$python_summary_output"
+grep -Fq '  series: py-escalation' <<<"$python_summary_output"
+grep -Fq '  runs: 2' <<<"$python_summary_output"
+grep -Fq '  passRate: 50%' <<<"$python_summary_output"
+grep -Fq '  timeToGreenMs: 200' <<<"$python_summary_output"
+grep -Fq '  medianDurationMs: 100' <<<"$python_summary_output"
+grep -Fq '  medianTokens: 120' <<<"$python_summary_output"
+grep -Fq '  medianUncachedTokens: 103' <<<"$python_summary_output"
 
 syntax_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes syntax-a)"
-printf '%s\n' "$syntax_summary_output" | grep -Fq $'clasp-syntax-compact\tcodex\tgpt-5.4'
-printf '%s\n' "$syntax_summary_output" | grep -Fq $'clasp-syntax-verbose\tcodex\tgpt-5.4'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '  series: syntax-a'
-printf '%s\n' "$syntax_summary_output" | grep -Fq 'syntax-form-comparison'
-printf '%s\n' "$syntax_summary_output" | grep -Fq $'  codex\tgpt-5.4\tsyntax-a'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactPassRate: 100%'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    verbosePassRate: 50%'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactTimeToGreenMs: 80'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseTimeToGreenMs: 210'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    timeToGreenDeltaMs: -130'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    compactMedianTokens: 89'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    verboseMedianTokens: 125'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    tokenDelta: -36'
-printf '%s\n' "$syntax_summary_output" | grep -Fq '    uncachedTokenDelta: -32'
+grep -Fq $'clasp-syntax-compact\tcodex\tgpt-5.4' <<<"$syntax_summary_output"
+grep -Fq $'clasp-syntax-verbose\tcodex\tgpt-5.4' <<<"$syntax_summary_output"
+grep -Fq '  series: syntax-a' <<<"$syntax_summary_output"
+grep -Fq 'syntax-form-comparison' <<<"$syntax_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tsyntax-a' <<<"$syntax_summary_output"
+grep -Fq '    compactPassRate: 100%' <<<"$syntax_summary_output"
+grep -Fq '    verbosePassRate: 50%' <<<"$syntax_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$syntax_summary_output"
+grep -Fq '    compactTimeToGreenMs: 80' <<<"$syntax_summary_output"
+grep -Fq '    verboseTimeToGreenMs: 210' <<<"$syntax_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -130' <<<"$syntax_summary_output"
+grep -Fq '    compactMedianTokens: 89' <<<"$syntax_summary_output"
+grep -Fq '    verboseMedianTokens: 125' <<<"$syntax_summary_output"
+grep -Fq '    tokenDelta: -36' <<<"$syntax_summary_output"
+grep -Fq '    uncachedTokenDelta: -32' <<<"$syntax_summary_output"
 
 compiler_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes compiler-a)"
-printf '%s\n' "$compiler_summary_output" | grep -Fq $'clasp-compiler-maintenance\tcodex\tgpt-5.4'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  series: compiler-a'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  runs: 2'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  passRate: 50%'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  timeToGreenMs: 480'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianDurationMs: 240'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianTokens: 175'
-printf '%s\n' "$compiler_summary_output" | grep -Fq '  medianUncachedTokens: 145'
+grep -Fq $'clasp-compiler-maintenance\tcodex\tgpt-5.4' <<<"$compiler_summary_output"
+grep -Fq '  series: compiler-a' <<<"$compiler_summary_output"
+grep -Fq '  runs: 2' <<<"$compiler_summary_output"
+grep -Fq '  passRate: 50%' <<<"$compiler_summary_output"
+grep -Fq '  timeToGreenMs: 480' <<<"$compiler_summary_output"
+grep -Fq '  medianDurationMs: 240' <<<"$compiler_summary_output"
+grep -Fq '  medianTokens: 175' <<<"$compiler_summary_output"
+grep -Fq '  medianUncachedTokens: 145' <<<"$compiler_summary_output"
 
 interop_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes interop-a)"
-printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-npm-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-npm-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-python-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-python-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'clasp-rust-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'ts-rust-interop\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_summary_output" | grep -Fq 'npm-interop-comparison'
-printf '%s\n' "$interop_summary_output" | grep -Fq 'python-interop-comparison'
-printf '%s\n' "$interop_summary_output" | grep -Fq 'rust-interop-comparison'
-printf '%s\n' "$interop_summary_output" | grep -Fq $'  codex\tgpt-5.4\tinterop-a'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -140'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -37'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -33'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -130'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -60'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -55'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tsPassRate: 100%'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    timeToGreenDeltaMs: -65'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    tokenDelta: -57'
-printf '%s\n' "$interop_summary_output" | grep -Fq '    uncachedTokenDelta: -52'
+grep -Fq $'clasp-npm-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq $'ts-npm-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq $'clasp-python-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq $'ts-python-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq $'clasp-rust-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq $'ts-rust-interop\tcodex\tgpt-5.4' <<<"$interop_summary_output"
+grep -Fq 'npm-interop-comparison' <<<"$interop_summary_output"
+grep -Fq 'python-interop-comparison' <<<"$interop_summary_output"
+grep -Fq 'rust-interop-comparison' <<<"$interop_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tinterop-a' <<<"$interop_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$interop_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$interop_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -140' <<<"$interop_summary_output"
+grep -Fq '    tokenDelta: -37' <<<"$interop_summary_output"
+grep -Fq '    uncachedTokenDelta: -33' <<<"$interop_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$interop_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$interop_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -130' <<<"$interop_summary_output"
+grep -Fq '    tokenDelta: -60' <<<"$interop_summary_output"
+grep -Fq '    uncachedTokenDelta: -55' <<<"$interop_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$interop_summary_output"
+grep -Fq '    tsPassRate: 100%' <<<"$interop_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -65' <<<"$interop_summary_output"
+grep -Fq '    tokenDelta: -57' <<<"$interop_summary_output"
+grep -Fq '    uncachedTokenDelta: -52' <<<"$interop_summary_output"
 
 interop_boundary_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes interop-boundary-a)"
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'clasp-interop-boundary\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'ts-interop-boundary\tcodex\tgpt-5.4'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq 'interop-boundary-comparison'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq $'  codex\tgpt-5.4\tinterop-boundary-a'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    timeToGreenDeltaMs: -185'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    tokenDelta: -50'
-printf '%s\n' "$interop_boundary_summary_output" | grep -Fq '    uncachedTokenDelta: -47'
+grep -Fq $'clasp-interop-boundary\tcodex\tgpt-5.4' <<<"$interop_boundary_summary_output"
+grep -Fq $'ts-interop-boundary\tcodex\tgpt-5.4' <<<"$interop_boundary_summary_output"
+grep -Fq 'interop-boundary-comparison' <<<"$interop_boundary_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tinterop-boundary-a' <<<"$interop_boundary_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$interop_boundary_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$interop_boundary_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$interop_boundary_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -185' <<<"$interop_boundary_summary_output"
+grep -Fq '    tokenDelta: -50' <<<"$interop_boundary_summary_output"
+grep -Fq '    uncachedTokenDelta: -47' <<<"$interop_boundary_summary_output"
 
 mixed_stack_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes mixed-stack-a)"
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq 'mixed-stack-semantic-layer-comparison'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq $'  codex\tgpt-5.4\tmixed-stack-a'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    taskPairs: 4'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspCompletedTasks: 4/4'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsCompletedTasks: 4/4'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspRunPassRate: 88%'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsRunPassRate: 63%'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    passRateDeltaPct: 25'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspSuiteTimeToGreenMs: 440'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsSuiteTimeToGreenMs: 960'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    timeToGreenDeltaMs: -520'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspSuiteMedianTokens: 469'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsSuiteMedianTokens: 673'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    claspFeatureThroughputPerHour: 32727.27'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tsFeatureThroughputPerHour: 15000'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    throughputDeltaPct: 118'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    tokenDelta: -204'
-printf '%s\n' "$mixed_stack_summary_output" | grep -Fq '    uncachedTokenDelta: -187'
+grep -Fq 'mixed-stack-semantic-layer-comparison' <<<"$mixed_stack_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tmixed-stack-a' <<<"$mixed_stack_summary_output"
+grep -Fq '    taskPairs: 4' <<<"$mixed_stack_summary_output"
+grep -Fq '    claspCompletedTasks: 4/4' <<<"$mixed_stack_summary_output"
+grep -Fq '    tsCompletedTasks: 4/4' <<<"$mixed_stack_summary_output"
+grep -Fq '    claspRunPassRate: 88%' <<<"$mixed_stack_summary_output"
+grep -Fq '    tsRunPassRate: 63%' <<<"$mixed_stack_summary_output"
+grep -Fq '    passRateDeltaPct: 25' <<<"$mixed_stack_summary_output"
+grep -Fq '    claspSuiteTimeToGreenMs: 440' <<<"$mixed_stack_summary_output"
+grep -Fq '    tsSuiteTimeToGreenMs: 960' <<<"$mixed_stack_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -520' <<<"$mixed_stack_summary_output"
+grep -Fq '    claspSuiteMedianTokens: 469' <<<"$mixed_stack_summary_output"
+grep -Fq '    tsSuiteMedianTokens: 673' <<<"$mixed_stack_summary_output"
+grep -Fq '    claspFeatureThroughputPerHour: 32727.27' <<<"$mixed_stack_summary_output"
+grep -Fq '    tsFeatureThroughputPerHour: 15000' <<<"$mixed_stack_summary_output"
+grep -Fq '    throughputDeltaPct: 118' <<<"$mixed_stack_summary_output"
+grep -Fq '    tokenDelta: -204' <<<"$mixed_stack_summary_output"
+grep -Fq '    uncachedTokenDelta: -187' <<<"$mixed_stack_summary_output"
 
 secret_handling_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes secret-handling-a)"
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'clasp-secret-handling\tcodex\tgpt-5.4'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'ts-secret-handling\tcodex\tgpt-5.4'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq 'secret-handling-comparison'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq $'  codex\tgpt-5.4\tsecret-handling-a'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    timeToGreenDeltaMs: -230'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    tokenDelta: -58'
-printf '%s\n' "$secret_handling_summary_output" | grep -Fq '    uncachedTokenDelta: -53'
+grep -Fq $'clasp-secret-handling\tcodex\tgpt-5.4' <<<"$secret_handling_summary_output"
+grep -Fq $'ts-secret-handling\tcodex\tgpt-5.4' <<<"$secret_handling_summary_output"
+grep -Fq 'secret-handling-comparison' <<<"$secret_handling_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tsecret-handling-a' <<<"$secret_handling_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$secret_handling_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$secret_handling_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$secret_handling_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -230' <<<"$secret_handling_summary_output"
+grep -Fq '    tokenDelta: -58' <<<"$secret_handling_summary_output"
+grep -Fq '    uncachedTokenDelta: -53' <<<"$secret_handling_summary_output"
 
 audit_log_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes audit-log-a)"
-printf '%s\n' "$audit_log_summary_output" | grep -Fq $'clasp-audit-log\tcodex\tgpt-5.4'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq $'ts-audit-log\tcodex\tgpt-5.4'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq 'audit-log-comparison'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq $'  codex\tgpt-5.4\taudit-log-a'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    passRateDeltaPct: 50'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    tokenDelta: -65'
-printf '%s\n' "$audit_log_summary_output" | grep -Fq '    uncachedTokenDelta: -60'
+grep -Fq $'clasp-audit-log\tcodex\tgpt-5.4' <<<"$audit_log_summary_output"
+grep -Fq $'ts-audit-log\tcodex\tgpt-5.4' <<<"$audit_log_summary_output"
+grep -Fq 'audit-log-comparison' <<<"$audit_log_summary_output"
+grep -Fq $'  codex\tgpt-5.4\taudit-log-a' <<<"$audit_log_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$audit_log_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$audit_log_summary_output"
+grep -Fq '    passRateDeltaPct: 50' <<<"$audit_log_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -300' <<<"$audit_log_summary_output"
+grep -Fq '    tokenDelta: -65' <<<"$audit_log_summary_output"
+grep -Fq '    uncachedTokenDelta: -60' <<<"$audit_log_summary_output"
 
 public_app_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes public-app)"
-printf '%s\n' "$public_app_summary_output" | grep -Fq 'main-public-app-comparison'
-printf '%s\n' "$public_app_summary_output" | grep -Fq $'  codex\tgpt-5.4\tpublic-app'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    taskPairs: 4'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspCompletedTasks: 4/4'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsCompletedTasks: 4/4'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspRunPassRate: 100%'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsRunPassRate: 100%'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    passRateDeltaPct: 0'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspSuiteTimeToGreenMs: 630000'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsSuiteTimeToGreenMs: 870000'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    timeToGreenDeltaMs: -240000'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspSuiteMedianTokens: 550'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsSuiteMedianTokens: 665'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    claspFeatureThroughputPerHour: 22.86'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tsFeatureThroughputPerHour: 16.55'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    throughputDeltaPct: 38'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    tokenDelta: -115'
-printf '%s\n' "$public_app_summary_output" | grep -Fq '    uncachedTokenDelta: -100'
+grep -Fq 'main-public-app-comparison' <<<"$public_app_summary_output"
+grep -Fq $'  codex\tgpt-5.4\tpublic-app' <<<"$public_app_summary_output"
+grep -Fq '    taskPairs: 4' <<<"$public_app_summary_output"
+grep -Fq '    checkpointTasks: 1' <<<"$public_app_summary_output"
+grep -Fq '    checkpointCompletedTasks: 1/1' <<<"$public_app_summary_output"
+grep -Fq '    claspCompletedTasks: 4/4' <<<"$public_app_summary_output"
+grep -Fq '    tsCompletedTasks: 4/4' <<<"$public_app_summary_output"
+grep -Fq '    claspRunPassRate: 100%' <<<"$public_app_summary_output"
+grep -Fq '    tsRunPassRate: 100%' <<<"$public_app_summary_output"
+grep -Fq '    passRateDeltaPct: 0' <<<"$public_app_summary_output"
+grep -Fq '    claspSuiteTimeToGreenMs: 630000' <<<"$public_app_summary_output"
+grep -Fq '    tsSuiteTimeToGreenMs: 870000' <<<"$public_app_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -240000' <<<"$public_app_summary_output"
+grep -Fq '    claspSuiteMedianTokens: 550' <<<"$public_app_summary_output"
+grep -Fq '    tsSuiteMedianTokens: 665' <<<"$public_app_summary_output"
+grep -Fq '    claspFeatureThroughputPerHour: 22.86' <<<"$public_app_summary_output"
+grep -Fq '    tsFeatureThroughputPerHour: 16.55' <<<"$public_app_summary_output"
+grep -Fq '    throughputDeltaPct: 38' <<<"$public_app_summary_output"
+grep -Fq '    tokenDelta: -115' <<<"$public_app_summary_output"
+grep -Fq '    uncachedTokenDelta: -100' <<<"$public_app_summary_output"
 
 public_app_signal_output="$(
   node "$project_root/benchmarks/run-public-app-signal.mjs" \
@@ -519,11 +522,11 @@ public_app_signal_output="$(
     --harness codex \
     --model gpt-5.4
 )"
-printf '%s\n' "$public_app_signal_output" | grep -Fq '"suite":"main-public-app-comparison"'
-printf '%s\n' "$public_app_signal_output" | grep -Fq '"passed":true'
-printf '%s\n' "$public_app_signal_output" | grep -Fq '"meetsTarget":true'
-printf '%s\n' "$public_app_signal_output" | grep -Fq '"scoreName":"throughputDeltaPct"'
-printf '%s\n' "$public_app_signal_output" | grep -Fq '"scoreValue":38'
+grep -Fq '"suite":"main-public-app-comparison"' <<<"$public_app_signal_output"
+grep -Fq '"passed":true' <<<"$public_app_signal_output"
+grep -Fq '"meetsTarget":true' <<<"$public_app_signal_output"
+grep -Fq '"scoreName":"throughputDeltaPct"' <<<"$public_app_signal_output"
+grep -Fq '"scoreValue":38' <<<"$public_app_signal_output"
 
 missing_public_app_signal_output="$(
   node "$project_root/benchmarks/run-public-app-signal.mjs" \
@@ -532,9 +535,9 @@ missing_public_app_signal_output="$(
     --harness codex \
     --model gpt-5.4
 )"
-printf '%s\n' "$missing_public_app_signal_output" | grep -Fq '"passed":false'
-printf '%s\n' "$missing_public_app_signal_output" | grep -Fq '"meetsTarget":false'
-printf '%s\n' "$missing_public_app_signal_output" | grep -Fq 'did not produce a full Clasp vs TypeScript comparison'
+grep -Fq '"passed":false' <<<"$missing_public_app_signal_output"
+grep -Fq '"meetsTarget":false' <<<"$missing_public_app_signal_output"
+grep -Fq 'did not produce a full Clasp vs TypeScript comparison' <<<"$missing_public_app_signal_output"
 
 durable_workflow_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \
@@ -542,35 +545,35 @@ durable_workflow_summary_output="$(
     --harness scenario \
     --model deterministic
 )"
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq $'clasp-durable-workflow\tscenario\tdeterministic'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  runs: 1'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  passRate: 100%'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  timeToGreenMs: 784'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianDurationMs: 784'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianTokens: 0'
-printf '%s\n' "$durable_workflow_summary_output" | grep -Fq '  medianUncachedTokens: 0'
+grep -Fq $'clasp-durable-workflow\tscenario\tdeterministic' <<<"$durable_workflow_summary_output"
+grep -Fq '  runs: 1' <<<"$durable_workflow_summary_output"
+grep -Fq '  passRate: 100%' <<<"$durable_workflow_summary_output"
+grep -Fq '  timeToGreenMs: 784' <<<"$durable_workflow_summary_output"
+grep -Fq '  medianDurationMs: 784' <<<"$durable_workflow_summary_output"
+grep -Fq '  medianTokens: 0' <<<"$durable_workflow_summary_output"
+grep -Fq '  medianUncachedTokens: 0' <<<"$durable_workflow_summary_output"
 
 planning_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes planning-a)"
-printf '%s\n' "$planning_summary_output" | grep -Fq 'agent-planning-scorecard'
-printf '%s\n' "$planning_summary_output" | grep -Fq $'  obligation-discharge-guidance\tcodex\tgpt-5.4\tplanning-a'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: authorization-data-access-comparison'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: -200'
-printf '%s\n' "$planning_summary_output" | grep -Fq $'  semantic-memory-freshness\tcodex\tgpt-5.4\tplanning-a'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: air-planning-comparison'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    rawTextPassRate: 50%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    compilerOwnedAirPassRate: 100%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: -300'
-printf '%s\n' "$planning_summary_output" | grep -Fq $'  parallel-agent-lease-coordination\tcodex\tgpt-5.4\tplanning-a'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceBenchmark: control-plane-comparison'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    tsPassRate: 0%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
-printf '%s\n' "$planning_summary_output" | grep -Fq $'  cheapest-valid-path-planning\tcodex\tgpt-5.4\tplanning-a'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    sourceTask: clasp-compiler-maintenance'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    passRate: 50%'
-printf '%s\n' "$planning_summary_output" | grep -Fq '    timeToGreenMs: 420'
+grep -Fq 'agent-planning-scorecard' <<<"$planning_summary_output"
+grep -Fq $'  obligation-discharge-guidance\tcodex\tgpt-5.4\tplanning-a' <<<"$planning_summary_output"
+grep -Fq '    sourceBenchmark: authorization-data-access-comparison' <<<"$planning_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$planning_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$planning_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -200' <<<"$planning_summary_output"
+grep -Fq $'  semantic-memory-freshness\tcodex\tgpt-5.4\tplanning-a' <<<"$planning_summary_output"
+grep -Fq '    sourceBenchmark: air-planning-comparison' <<<"$planning_summary_output"
+grep -Fq '    rawTextPassRate: 50%' <<<"$planning_summary_output"
+grep -Fq '    compilerOwnedAirPassRate: 100%' <<<"$planning_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -300' <<<"$planning_summary_output"
+grep -Fq $'  parallel-agent-lease-coordination\tcodex\tgpt-5.4\tplanning-a' <<<"$planning_summary_output"
+grep -Fq '    sourceBenchmark: control-plane-comparison' <<<"$planning_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$planning_summary_output"
+grep -Fq '    tsPassRate: 0%' <<<"$planning_summary_output"
+grep -Fq '    timeToGreenDeltaMs: n/a' <<<"$planning_summary_output"
+grep -Fq $'  cheapest-valid-path-planning\tcodex\tgpt-5.4\tplanning-a' <<<"$planning_summary_output"
+grep -Fq '    sourceTask: clasp-compiler-maintenance' <<<"$planning_summary_output"
+grep -Fq '    passRate: 50%' <<<"$planning_summary_output"
+grep -Fq '    timeToGreenMs: 420' <<<"$planning_summary_output"
 
 planning_rollback_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \
@@ -579,43 +582,43 @@ planning_rollback_summary_output="$(
     --model deterministic \
     --notes planning-a
 )"
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq 'agent-planning-scorecard'
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq $'  transactional-edit-rollback\tscenario\tdeterministic\tplanning-a'
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    mode: (unspecified)'
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    sourceTask: clasp-durable-workflow'
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    passRate: 100%'
-printf '%s\n' "$planning_rollback_summary_output" | grep -Fq '    timeToGreenMs: 640'
+grep -Fq 'agent-planning-scorecard' <<<"$planning_rollback_summary_output"
+grep -Fq $'  transactional-edit-rollback\tscenario\tdeterministic\tplanning-a' <<<"$planning_rollback_summary_output"
+grep -Fq '    mode: (unspecified)' <<<"$planning_rollback_summary_output"
+grep -Fq '    sourceTask: clasp-durable-workflow' <<<"$planning_rollback_summary_output"
+grep -Fq '    passRate: 100%' <<<"$planning_rollback_summary_output"
+grep -Fq '    timeToGreenMs: 640' <<<"$planning_rollback_summary_output"
 
 caching_trust_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness codex --model gpt-5.4 --notes cache-trust-a)"
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq 'caching-and-trust-scorecard'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  semantic-proof-or-result-cache-reuse\tcodex\tgpt-5.4\tcache-trust-a'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: authorization-data-access-comparison'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -110'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tokenDelta: -28'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    uncachedTokenDelta: -85'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspMedianCachedInputTokens: 50'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsMedianCachedInputTokens: 10'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    cachedInputTokenDelta: 40'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspMedianCacheReuseRatePct: 50'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsMedianCacheReuseRatePct: 10'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    cacheReuseRateDeltaPct: 40'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  world-snapshot-fidelity\tcodex\tgpt-5.4\tcache-trust-a'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: external-adaptation-comparison'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 100%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -30'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  interference-analysis-quality\tcodex\tgpt-5.4\tcache-trust-a'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: control-plane-comparison'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 50%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 0%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq $'  trusted-computing-base-reporting-clarity\tcodex\tgpt-5.4\tcache-trust-a'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    sourceBenchmark: interop-boundary-comparison'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    tsPassRate: 50%'
-printf '%s\n' "$caching_trust_summary_output" | grep -Fq '    timeToGreenDeltaMs: -205'
+grep -Fq 'caching-and-trust-scorecard' <<<"$caching_trust_summary_output"
+grep -Fq $'  semantic-proof-or-result-cache-reuse\tcodex\tgpt-5.4\tcache-trust-a' <<<"$caching_trust_summary_output"
+grep -Fq '    sourceBenchmark: authorization-data-access-comparison' <<<"$caching_trust_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$caching_trust_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$caching_trust_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -110' <<<"$caching_trust_summary_output"
+grep -Fq '    tokenDelta: -28' <<<"$caching_trust_summary_output"
+grep -Fq '    uncachedTokenDelta: -85' <<<"$caching_trust_summary_output"
+grep -Fq '    claspMedianCachedInputTokens: 50' <<<"$caching_trust_summary_output"
+grep -Fq '    tsMedianCachedInputTokens: 10' <<<"$caching_trust_summary_output"
+grep -Fq '    cachedInputTokenDelta: 40' <<<"$caching_trust_summary_output"
+grep -Fq '    claspMedianCacheReuseRatePct: 50' <<<"$caching_trust_summary_output"
+grep -Fq '    tsMedianCacheReuseRatePct: 10' <<<"$caching_trust_summary_output"
+grep -Fq '    cacheReuseRateDeltaPct: 40' <<<"$caching_trust_summary_output"
+grep -Fq $'  world-snapshot-fidelity\tcodex\tgpt-5.4\tcache-trust-a' <<<"$caching_trust_summary_output"
+grep -Fq '    sourceBenchmark: external-adaptation-comparison' <<<"$caching_trust_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$caching_trust_summary_output"
+grep -Fq '    tsPassRate: 100%' <<<"$caching_trust_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -30' <<<"$caching_trust_summary_output"
+grep -Fq $'  interference-analysis-quality\tcodex\tgpt-5.4\tcache-trust-a' <<<"$caching_trust_summary_output"
+grep -Fq '    sourceBenchmark: control-plane-comparison' <<<"$caching_trust_summary_output"
+grep -Fq '    claspPassRate: 50%' <<<"$caching_trust_summary_output"
+grep -Fq '    tsPassRate: 0%' <<<"$caching_trust_summary_output"
+grep -Fq '    timeToGreenDeltaMs: n/a' <<<"$caching_trust_summary_output"
+grep -Fq $'  trusted-computing-base-reporting-clarity\tcodex\tgpt-5.4\tcache-trust-a' <<<"$caching_trust_summary_output"
+grep -Fq '    sourceBenchmark: interop-boundary-comparison' <<<"$caching_trust_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$caching_trust_summary_output"
+grep -Fq '    tsPassRate: 50%' <<<"$caching_trust_summary_output"
+grep -Fq '    timeToGreenDeltaMs: -205' <<<"$caching_trust_summary_output"
 
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash
@@ -627,12 +630,12 @@ PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFL
 command_log="$(cat "$tmp_bin/nix.log")"
 bundle_manifest="$project_root/benchmarks/bundles/remediation-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-assisted.json"
 synthetic_files+=("$bundle_manifest")
-printf '%s\n' "$command_log" | grep -Fq 'run clasp-lead-segment'
-printf '%s\n' "$command_log" | grep -Fq 'run ts-lead-segment'
-printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-1'
-printf '%s\n' "$command_log" | grep -Fq -- '--notes remediation-a-2'
-printf '%s\n' "$command_log" | grep -Fq -- '--mode raw-repo'
-printf '%s\n' "$command_log" | grep -Fq -- '--bundle-manifest'
+grep -Fq 'run clasp-lead-segment' <<<"$command_log"
+grep -Fq 'run ts-lead-segment' <<<"$command_log"
+grep -Fq -- '--notes remediation-a-1' <<<"$command_log"
+grep -Fq -- '--notes remediation-a-2' <<<"$command_log"
+grep -Fq -- '--mode raw-repo' <<<"$command_log"
+grep -Fq -- '--bundle-manifest' <<<"$command_log"
 node -e '
 const fs = require("node:fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -665,154 +668,156 @@ if (manifest.samples[0].seed === manifest.samples[1].seed) {
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=browser-only bash "$project_root/benchmarks/run-codex-series.sh" control-plane 2 containment-a gpt-5.4
 control_command_log="$(cat "$tmp_bin/nix.log")"
 synthetic_files+=("$project_root/benchmarks/bundles/containment-a--codex--gpt-5.4--raw-repo--workflow-assistance-browser-only.json")
-printf '%s\n' "$control_command_log" | grep -Fq 'run clasp-control-plane'
-printf '%s\n' "$control_command_log" | grep -Fq 'run ts-control-plane'
-printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-1'
-printf '%s\n' "$control_command_log" | grep -Fq -- '--notes containment-a-2'
+grep -Fq 'run clasp-control-plane' <<<"$control_command_log"
+grep -Fq 'run ts-control-plane' <<<"$control_command_log"
+grep -Fq -- '--notes containment-a-1' <<<"$control_command_log"
+grep -Fq -- '--notes containment-a-2' <<<"$control_command_log"
 test -f "$project_root/benchmarks/bundles/containment-a--codex--gpt-5.4--raw-repo--workflow-assistance-browser-only.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" external-adaptation 2 objective-a gpt-5.4
 objective_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$objective_command_log" | grep -Fq 'run clasp-external-adaptation'
-printf '%s\n' "$objective_command_log" | grep -Fq 'run ts-external-adaptation'
-printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-1'
-printf '%s\n' "$objective_command_log" | grep -Fq -- '--notes objective-a-2'
+grep -Fq 'run clasp-external-adaptation' <<<"$objective_command_log"
+grep -Fq 'run ts-external-adaptation' <<<"$objective_command_log"
+grep -Fq -- '--notes objective-a-1' <<<"$objective_command_log"
+grep -Fq -- '--notes objective-a-2' <<<"$objective_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" interop-boundary 2 interop-boundary-a gpt-5.4
 interop_boundary_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run clasp-interop-boundary'
-printf '%s\n' "$interop_boundary_command_log" | grep -Fq 'run ts-interop-boundary'
-printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-1'
-printf '%s\n' "$interop_boundary_command_log" | grep -Fq -- '--notes interop-boundary-a-2'
+grep -Fq 'run clasp-interop-boundary' <<<"$interop_boundary_command_log"
+grep -Fq 'run ts-interop-boundary' <<<"$interop_boundary_command_log"
+grep -Fq -- '--notes interop-boundary-a-1' <<<"$interop_boundary_command_log"
+grep -Fq -- '--notes interop-boundary-a-2' <<<"$interop_boundary_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" mixed-stack-semantic-layer 2 mixed-stack-a gpt-5.4
 mixed_stack_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run clasp-npm-interop'
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run ts-python-interop'
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run clasp-rust-interop'
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq 'run ts-interop-boundary'
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq -- '--notes mixed-stack-a-1'
-printf '%s\n' "$mixed_stack_command_log" | grep -Fq -- '--notes mixed-stack-a-2'
+grep -Fq 'run clasp-npm-interop' <<<"$mixed_stack_command_log"
+grep -Fq 'run ts-python-interop' <<<"$mixed_stack_command_log"
+grep -Fq 'run clasp-rust-interop' <<<"$mixed_stack_command_log"
+grep -Fq 'run ts-interop-boundary' <<<"$mixed_stack_command_log"
+grep -Fq -- '--notes mixed-stack-a-1' <<<"$mixed_stack_command_log"
+grep -Fq -- '--notes mixed-stack-a-2' <<<"$mixed_stack_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" secret-handling 2 secret-handling-a gpt-5.4
 secret_handling_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run clasp-secret-handling'
-printf '%s\n' "$secret_handling_command_log" | grep -Fq 'run ts-secret-handling'
+grep -Fq 'run clasp-secret-handling' <<<"$secret_handling_command_log"
+grep -Fq 'run ts-secret-handling' <<<"$secret_handling_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" audit-log 2 audit-log-a gpt-5.4
 audit_log_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$audit_log_command_log" | grep -Fq 'run clasp-audit-log'
-printf '%s\n' "$audit_log_command_log" | grep -Fq 'run ts-audit-log'
-printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-1'
-printf '%s\n' "$secret_handling_command_log" | grep -Fq -- '--notes secret-handling-a-2'
+grep -Fq 'run clasp-audit-log' <<<"$audit_log_command_log"
+grep -Fq 'run ts-audit-log' <<<"$audit_log_command_log"
+grep -Fq -- '--notes secret-handling-a-1' <<<"$secret_handling_command_log"
+grep -Fq -- '--notes secret-handling-a-2' <<<"$secret_handling_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air bash "$project_root/benchmarks/run-codex-series.sh" agent-planning 2 planning-a gpt-5.4
 agent_planning_command_log="$(cat "$tmp_bin/nix.log")"
 synthetic_files+=("$project_root/benchmarks/bundles/planning-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json")
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-authorization-data-access'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run ts-authorization-data-access'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-lead-segment'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-control-plane'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run ts-control-plane'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-durable-workflow'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq 'run clasp-compiler-maintenance'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq -- '--notes planning-a-1'
-printf '%s\n' "$agent_planning_command_log" | grep -Fq -- '--notes planning-a-2'
+grep -Fq 'run clasp-authorization-data-access' <<<"$agent_planning_command_log"
+grep -Fq 'run ts-authorization-data-access' <<<"$agent_planning_command_log"
+grep -Fq 'run clasp-lead-segment' <<<"$agent_planning_command_log"
+grep -Fq 'run clasp-control-plane' <<<"$agent_planning_command_log"
+grep -Fq 'run ts-control-plane' <<<"$agent_planning_command_log"
+grep -Fq 'run clasp-durable-workflow' <<<"$agent_planning_command_log"
+grep -Fq 'run clasp-compiler-maintenance' <<<"$agent_planning_command_log"
+grep -Fq -- '--notes planning-a-1' <<<"$agent_planning_command_log"
+grep -Fq -- '--notes planning-a-2' <<<"$agent_planning_command_log"
 test -f "$project_root/benchmarks/bundles/planning-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" lead-priority 2 priority-a gpt-5.4
 priority_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$priority_command_log" | grep -Fq 'run clasp-lead-priority'
-printf '%s\n' "$priority_command_log" | grep -Fq 'run ts-lead-priority'
-printf '%s\n' "$priority_command_log" | grep -Fq -- '--notes priority-a-1'
-printf '%s\n' "$priority_command_log" | grep -Fq -- '--notes priority-a-2'
+grep -Fq 'run clasp-lead-priority' <<<"$priority_command_log"
+grep -Fq 'run ts-lead-priority' <<<"$priority_command_log"
+grep -Fq -- '--notes priority-a-1' <<<"$priority_command_log"
+grep -Fq -- '--notes priority-a-2' <<<"$priority_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" lead-rejection 2 rejection-a gpt-5.4
 rejection_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$rejection_command_log" | grep -Fq 'run clasp-lead-rejection'
-printf '%s\n' "$rejection_command_log" | grep -Fq 'run ts-lead-rejection'
-printf '%s\n' "$rejection_command_log" | grep -Fq -- '--notes rejection-a-1'
-printf '%s\n' "$rejection_command_log" | grep -Fq -- '--notes rejection-a-2'
+grep -Fq 'run clasp-lead-rejection' <<<"$rejection_command_log"
+grep -Fq 'run ts-lead-rejection' <<<"$rejection_command_log"
+grep -Fq -- '--notes rejection-a-1' <<<"$rejection_command_log"
+grep -Fq -- '--notes rejection-a-2' <<<"$rejection_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" syntax-form 2 syntax-a gpt-5.4
 syntax_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$syntax_command_log" | grep -Fq 'run clasp-syntax-compact'
-printf '%s\n' "$syntax_command_log" | grep -Fq 'run clasp-syntax-verbose'
-printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
-printf '%s\n' "$syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
+grep -Fq 'run clasp-syntax-compact' <<<"$syntax_command_log"
+grep -Fq 'run clasp-syntax-verbose' <<<"$syntax_command_log"
+grep -Fq -- '--notes syntax-a-1' <<<"$syntax_command_log"
+grep -Fq -- '--notes syntax-a-2' <<<"$syntax_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" app 2 public-app gpt-5.4
 app_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-priority'
-printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-priority'
-printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-rejection'
-printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-rejection'
-printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-lead-segment'
-printf '%s\n' "$app_command_log" | grep -Fq 'run ts-lead-segment'
-printf '%s\n' "$app_command_log" | grep -Fq 'run clasp-external-adaptation'
-printf '%s\n' "$app_command_log" | grep -Fq 'run ts-external-adaptation'
-printf '%s\n' "$app_command_log" | grep -Fq -- '--notes public-app-1'
-printf '%s\n' "$app_command_log" | grep -Fq -- '--notes public-app-2'
+grep -Fq 'run clasp-lead-priority' <<<"$app_command_log"
+grep -Fq 'run ts-lead-priority' <<<"$app_command_log"
+grep -Fq 'run clasp-lead-rejection' <<<"$app_command_log"
+grep -Fq 'run ts-lead-rejection' <<<"$app_command_log"
+grep -Fq 'run clasp-lead-segment' <<<"$app_command_log"
+grep -Fq 'run ts-lead-segment' <<<"$app_command_log"
+grep -Fq 'run clasp-external-adaptation' <<<"$app_command_log"
+grep -Fq 'run ts-external-adaptation' <<<"$app_command_log"
+grep -Fq 'run clasp-legal-assistant-appbench' <<<"$app_command_log"
+grep -Fq -- '--notes public-app-1' <<<"$app_command_log"
+grep -Fq -- '--notes public-app-2' <<<"$app_command_log"
 
 claude_summary_output="$(node "$project_root/benchmarks/run-benchmark.mjs" summarize --harness claude-code --model sonnet --notes claude-a)"
-printf '%s\n' "$claude_summary_output" | grep -Fq $'clasp-lead-priority\tclaude-code\tsonnet'
-printf '%s\n' "$claude_summary_output" | grep -Fq $'ts-lead-priority\tclaude-code\tsonnet'
-printf '%s\n' "$claude_summary_output" | grep -Fq 'lead-priority-comparison'
-printf '%s\n' "$claude_summary_output" | grep -Fq $'  claude-code\tsonnet\tclaude-a'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    claspPassRate: 100%'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    tsPassRate: 0%'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    passRateDeltaPct: 100'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    timeToGreenDeltaMs: n/a'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    tokenDelta: -35'
-printf '%s\n' "$claude_summary_output" | grep -Fq '    uncachedTokenDelta: -50'
+grep -Fq $'clasp-lead-priority\tclaude-code\tsonnet' <<<"$claude_summary_output"
+grep -Fq $'ts-lead-priority\tclaude-code\tsonnet' <<<"$claude_summary_output"
+grep -Fq 'lead-priority-comparison' <<<"$claude_summary_output"
+grep -Fq $'  claude-code\tsonnet\tclaude-a' <<<"$claude_summary_output"
+grep -Fq '    claspPassRate: 100%' <<<"$claude_summary_output"
+grep -Fq '    tsPassRate: 0%' <<<"$claude_summary_output"
+grep -Fq '    passRateDeltaPct: 100' <<<"$claude_summary_output"
+grep -Fq '    timeToGreenDeltaMs: n/a' <<<"$claude_summary_output"
+grep -Fq '    tokenDelta: -35' <<<"$claude_summary_output"
+grep -Fq '    uncachedTokenDelta: -50' <<<"$claude_summary_output"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=raw-text bash "$project_root/benchmarks/run-claude-series.sh" lead-priority 2 claude-a sonnet
 claude_command_log="$(cat "$tmp_bin/nix.log")"
 synthetic_files+=("$project_root/benchmarks/bundles/claude-a--claude-code--sonnet--raw-repo--workflow-assistance-raw-text.json")
-printf '%s\n' "$claude_command_log" | grep -Fq 'run clasp-lead-priority'
-printf '%s\n' "$claude_command_log" | grep -Fq 'run ts-lead-priority'
-printf '%s\n' "$claude_command_log" | grep -Fq -- '--harness claude-code'
-printf '%s\n' "$claude_command_log" | grep -Fq -- '--model sonnet'
-printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-1'
-printf '%s\n' "$claude_command_log" | grep -Fq -- '--notes claude-a-2'
+grep -Fq 'run clasp-lead-priority' <<<"$claude_command_log"
+grep -Fq 'run ts-lead-priority' <<<"$claude_command_log"
+grep -Fq -- '--harness claude-code' <<<"$claude_command_log"
+grep -Fq -- '--model sonnet' <<<"$claude_command_log"
+grep -Fq -- '--notes claude-a-1' <<<"$claude_command_log"
+grep -Fq -- '--notes claude-a-2' <<<"$claude_command_log"
 test -f "$project_root/benchmarks/bundles/claude-a--claude-code--sonnet--raw-repo--workflow-assistance-raw-text.json"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-claude-series.sh" syntax-form 2 syntax-a sonnet
 claude_syntax_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq 'run clasp-syntax-compact'
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq 'run clasp-syntax-verbose'
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--harness claude-code'
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--model sonnet'
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-1'
-printf '%s\n' "$claude_syntax_command_log" | grep -Fq -- '--notes syntax-a-2'
+grep -Fq 'run clasp-syntax-compact' <<<"$claude_syntax_command_log"
+grep -Fq 'run clasp-syntax-verbose' <<<"$claude_syntax_command_log"
+grep -Fq -- '--harness claude-code' <<<"$claude_syntax_command_log"
+grep -Fq -- '--model sonnet' <<<"$claude_syntax_command_log"
+grep -Fq -- '--notes syntax-a-1' <<<"$claude_syntax_command_log"
+grep -Fq -- '--notes syntax-a-2' <<<"$claude_syntax_command_log"
 
 : >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-claude-series.sh" app 2 public-app sonnet
 claude_app_command_log="$(cat "$tmp_bin/nix.log")"
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-priority'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-priority'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-rejection'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-rejection'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-lead-segment'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-lead-segment'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run clasp-external-adaptation'
-printf '%s\n' "$claude_app_command_log" | grep -Fq 'run ts-external-adaptation'
-printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--harness claude-code'
-printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--model sonnet'
-printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--notes public-app-1'
-printf '%s\n' "$claude_app_command_log" | grep -Fq -- '--notes public-app-2'
+grep -Fq 'run clasp-lead-priority' <<<"$claude_app_command_log"
+grep -Fq 'run ts-lead-priority' <<<"$claude_app_command_log"
+grep -Fq 'run clasp-lead-rejection' <<<"$claude_app_command_log"
+grep -Fq 'run ts-lead-rejection' <<<"$claude_app_command_log"
+grep -Fq 'run clasp-lead-segment' <<<"$claude_app_command_log"
+grep -Fq 'run ts-lead-segment' <<<"$claude_app_command_log"
+grep -Fq 'run clasp-external-adaptation' <<<"$claude_app_command_log"
+grep -Fq 'run ts-external-adaptation' <<<"$claude_app_command_log"
+grep -Fq 'run clasp-legal-assistant-appbench' <<<"$claude_app_command_log"
+grep -Fq -- '--harness claude-code' <<<"$claude_app_command_log"
+grep -Fq -- '--model sonnet' <<<"$claude_app_command_log"
+grep -Fq -- '--notes public-app-1' <<<"$claude_app_command_log"
+grep -Fq -- '--notes public-app-2' <<<"$claude_app_command_log"
 
 claude_workspace="$project_root/benchmarks/workspaces/claude-usage-check"
 rm -rf "$claude_workspace"
@@ -946,12 +951,12 @@ tar -xzf "$package_b" -C "$package_dir_b"
 cmp -s "$package_dir_a/benchmarks/package-manifest.json" "$package_dir_b/benchmarks/package-manifest.json"
 
 package_listing="$listing_a"
-printf '%s\n' "$package_listing" | grep -Fq './AGENTS.md'
-printf '%s\n' "$package_listing" | grep -Fq './benchmarks/package-manifest.json'
-printf '%s\n' "$package_listing" | grep -Fq './benchmarks/results/2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json'
-printf '%s\n' "$package_listing" | grep -Fq './benchmarks/results/2026-03-01T10-04-00.000Z--ts-lead-segment--codex.json'
-printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/clasp-lead-segment/task.json'
-printf '%s\n' "$package_listing" | grep -Fq './benchmarks/tasks/ts-lead-segment/task.json'
+grep -Fq './AGENTS.md' <<<"$package_listing"
+grep -Fq './benchmarks/package-manifest.json' <<<"$package_listing"
+grep -Fq './benchmarks/results/2026-03-01T10-01-00.000Z--clasp-lead-segment--codex.json' <<<"$package_listing"
+grep -Fq './benchmarks/results/2026-03-01T10-04-00.000Z--ts-lead-segment--codex.json' <<<"$package_listing"
+grep -Fq './benchmarks/tasks/clasp-lead-segment/task.json' <<<"$package_listing"
+grep -Fq './benchmarks/tasks/ts-lead-segment/task.json' <<<"$package_listing"
 
 manifest_path="$tmp_bin/package-manifest.json"
 cp "$package_dir_a/benchmarks/package-manifest.json" "$manifest_path"

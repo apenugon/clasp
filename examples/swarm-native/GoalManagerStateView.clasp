@@ -1,0 +1,343 @@
+module GoalManagerStateView
+
+import GoalManagerTaskStatusRuntime
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerTaskReportIO
+import GoalManagerTaskSet
+import GoalManagerPlannerMaterialize
+import GoalManagerWatch
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+managerStateFor : Str -> Str -> Bool -> Str -> [Str] -> Int -> Int -> Bool -> ManagerState
+managerStateFor phase verdict completed activeTaskId plannedTaskIds wave benchmarkRuns final =
+  ManagerState {
+    phase = phase,
+    verdict = verdict,
+    completed = completed,
+    objectiveId = objectiveId,
+    plannerTaskId = plannerTaskIdForWave wave,
+    activeTaskId = activeTaskId,
+    plannedTaskIds = plannedTaskIds,
+    wave = wave,
+    benchmarkRuns = benchmarkRuns,
+    final = final
+  }
+
+managerFailureState : [Str] -> Int -> Int -> ManagerState
+managerFailureState plannedTaskIds wave benchmarkRuns =
+  managerStateFor "failed" "fail" false "" plannedTaskIds wave benchmarkRuns true
+
+plannerSummaryOrEmpty : Int -> Str
+plannerSummaryOrEmpty wave = match readPlannerReportForWave wave {
+  Ok report -> report.objectiveSummary,
+  Err message -> ""
+}
+
+statusWaitingReason : Str -> [Str] -> [Str] -> [Str] -> StatusWaitingReason
+statusWaitingReason kind taskIds relatedTaskIds details =
+  StatusWaitingReason {
+    kind = kind,
+    taskIds = taskIds,
+    relatedTaskIds = relatedTaskIds,
+    details = details
+  }
+
+appendUniqueText : [Str] -> Str -> [Str]
+appendUniqueText values value =
+  if value == "" then
+    values
+  else if textListHas value values then
+    values
+  else
+    append values [value]
+
+appendUniqueTexts : [Str] -> [Str] -> [Str]
+appendUniqueTexts values additions = {
+  let mut rendered = values;
+  for value in additions {
+    rendered = appendUniqueText rendered value;
+    rendered
+  };
+  rendered
+}
+
+firstWaitingReasonKind : [StatusWaitingReason] -> Str
+firstWaitingReasonKind reasons = {
+  let mut kind = "";
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else {
+      kind = reason.kind;
+      found = true;
+      found
+    }
+  };
+  kind
+}
+
+firstWaitingReasonTaskIds : [StatusWaitingReason] -> [Str]
+firstWaitingReasonTaskIds reasons = {
+  let mut taskIds = emptyTexts;
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else {
+      taskIds = reason.taskIds;
+      found = true;
+      found
+    }
+  };
+  taskIds
+}
+
+dependencyIdsFromBlocker : Str -> [Str]
+dependencyIdsFromBlocker blocker = match textPrefix blocker "waiting on " {
+  Ok remainder ->
+    if remainder == "" then
+      emptyTexts
+    else
+      textSplit remainder ",",
+  Err message ->
+    emptyTexts
+}
+
+taskDependencyIds : SwarmTask -> [Str]
+taskDependencyIds task = {
+  let mut dependencyIds = emptyTexts;
+  for blocker in task.blockedBy {
+    dependencyIds = appendUniqueTexts dependencyIds (dependencyIdsFromBlocker blocker);
+    dependencyIds
+  };
+  dependencyIds
+}
+
+taskBudgetBlockers : SwarmTask -> [Str]
+taskBudgetBlockers task = {
+  let mut blockers = emptyTexts;
+  for blocker in task.blockedBy {
+    if length (textSplit blocker "budget exhausted") > 1 then {
+      blockers = appendUniqueText blockers blocker;
+      blockers
+    } else if length (textSplit blocker "deadline expired") > 1 then {
+      blockers = appendUniqueText blockers blocker;
+      blockers
+    } else
+      blockers
+  };
+  blockers
+}
+
+trackedTasksForStatus : [SwarmTask] -> [Str] -> [SwarmTask]
+trackedTasksForStatus objectiveTasks plannedTaskIds = {
+  let mut trackedTasks = emptyTasks;
+  for task in objectiveTasks {
+    if length plannedTaskIds == 0 then {
+      trackedTasks = append trackedTasks [task];
+      trackedTasks
+    } else if textListHas task.taskId plannedTaskIds then {
+      trackedTasks = append trackedTasks [task];
+      trackedTasks
+    } else
+      trackedTasks
+  };
+  trackedTasks
+}
+
+plannerWaitingReasons : ManagerState -> [StatusWaitingReason]
+plannerWaitingReasons state =
+  if state.phase == "planner-running" then
+    [statusWaitingReason "planner-execution" [state.plannerTaskId] emptyTexts [textConcat ["wave=", encode state.wave]]]
+  else
+    emptyStatusWaitingReasons
+
+benchmarkWaitingReasons : ManagerState -> [Str] -> [StatusWaitingReason]
+benchmarkWaitingReasons state plannedTaskIds = {
+  let details =
+    if latestBenchmarkSummaryText == "" then
+      [textConcat ["wave=", encode state.wave]]
+    else
+      [textConcat ["wave=", encode state.wave], latestBenchmarkSummaryText] in
+  if state.phase == "benchmark-running" then
+    [statusWaitingReason "benchmark-execution" plannedTaskIds emptyTexts details]
+  else
+    emptyStatusWaitingReasons
+}
+
+dependencyWaitingReasons : [SwarmTask] -> [StatusWaitingReason]
+dependencyWaitingReasons tasks = {
+  let mut taskIds = emptyTexts;
+  let mut relatedTaskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for task in tasks {
+    let dependencyIds = taskDependencyIds task in
+    if length dependencyIds == 0 then
+      details
+    else {
+      taskIds = appendUniqueText taskIds task.taskId;
+      relatedTaskIds = appendUniqueTexts relatedTaskIds dependencyIds;
+      details =
+        appendUniqueText details (textConcat [task.taskId, ":waiting on ", textJoin "," dependencyIds]);
+      details
+    }
+  };
+  if length taskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "task-dependencies" taskIds relatedTaskIds details]
+}
+
+budgetWaitingReasons : [SwarmTask] -> [StatusWaitingReason]
+budgetWaitingReasons tasks = {
+  let mut taskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for task in tasks {
+    let blockers = taskBudgetBlockers task in
+    if length blockers == 0 then
+      details
+    else {
+      taskIds = appendUniqueText taskIds task.taskId;
+      for blocker in blockers {
+        details = appendUniqueText details (textConcat [task.taskId, ":", blocker]);
+        details
+      };
+      details
+    }
+  };
+  if length taskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "task-budget" taskIds emptyTexts details]
+}
+
+childHealthWaitingReasons : [Str] -> [StatusWaitingReason]
+childHealthWaitingReasons taskIds = {
+  let mut unhealthyTaskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for taskId in taskIds {
+    if fileExists (taskStatusPath taskId) then
+      match readChildLoopStatePath (taskStatusPath taskId) {
+        Ok childState ->
+          if childState.final then
+            details
+          else if childState.completed then
+            details
+          else if childState.healthy == false then {
+            unhealthyTaskIds = appendUniqueText unhealthyTaskIds taskId;
+            details =
+              appendUniqueText
+                details
+                (textConcat [taskId, ":phase=", childState.phase, ":attention=", childState.attentionReason]);
+            details
+          } else if childState.needsAttention then {
+            unhealthyTaskIds = appendUniqueText unhealthyTaskIds taskId;
+            details =
+              appendUniqueText
+                details
+                (textConcat [taskId, ":phase=", childState.phase, ":attention=", childState.attentionReason]);
+            details
+          } else
+            details,
+        Err message ->
+          details
+      }
+    else
+      details
+  };
+  if length unhealthyTaskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "child-health" unhealthyTaskIds emptyTexts details]
+}
+
+statusWaitingReasons : ManagerState -> [Str] -> [SwarmTask] -> [StatusWaitingReason]
+statusWaitingReasons state plannedTaskIds trackedTasks =
+  append
+    (append
+      (append
+        (append
+          (plannerWaitingReasons state)
+          (benchmarkWaitingReasons state plannedTaskIds))
+        (dependencyWaitingReasons trackedTasks))
+      (budgetWaitingReasons trackedTasks))
+    (childHealthWaitingReasons
+      (if length plannedTaskIds == 0 then map taskIdOf trackedTasks else plannedTaskIds))
+
+statusView : ManagerState -> StatusView
+statusView state =
+  let plannedTaskIds =
+    match readPlannerReportForWave state.wave {
+      Ok report -> plannerTaskIds (materializePlannerReport state.wave report),
+      Err message -> state.plannedTaskIds
+    } in
+  let activeTaskIds =
+    if length plannedTaskIds == 0 then
+      emptyTexts
+    else {
+      let mut runningIds = emptyTexts;
+      for taskId in plannedTaskIds {
+        if childLoopRunning taskId then {
+          runningIds = append runningIds [taskId];
+          runningIds
+        } else
+          runningIds
+      };
+      runningIds
+    } in
+  match tasks swarmStateRoot {
+    Ok taskValues ->
+      let objectiveTasks = filter taskInObjective taskValues in
+      let trackedTasks = trackedTasksForStatus objectiveTasks plannedTaskIds in
+      let readyTaskIds = match ready objectiveRef {
+        Ok readyTasks -> map taskIdOf readyTasks,
+        Err message -> emptyTexts
+      } in
+      let objectiveProjectedStatus =
+        match objectiveStatus objectiveRef {
+          Ok objectiveValue -> objectiveValue.projectedStatus,
+          Err message -> textConcat ["objective-error:", message]
+        } in
+      let waitingReasons = statusWaitingReasons state plannedTaskIds trackedTasks in
+      StatusView {
+        state = state,
+        plannerSummary = plannerSummaryOrEmpty state.wave,
+        objectiveProjectedStatus = objectiveProjectedStatus,
+        plannedTaskIds = plannedTaskIds,
+        allTaskIds = map taskIdOf objectiveTasks,
+        readyTaskIds = readyTaskIds,
+        activeTaskIds = activeTaskIds,
+        completedTaskIds = map taskIdOf (filter taskCompleted objectiveTasks),
+        failedTaskIds = map taskIdOf (filter taskFailed objectiveTasks),
+        waitingReasons = waitingReasons,
+        primaryWaitingReason = firstWaitingReasonKind waitingReasons,
+        primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
+        benchmarkSummary = latestBenchmarkSummaryText,
+        benchmarkTargetMet = latestBenchmarkTargetMet,
+        feedbackSummary = readFeedbackSummary
+      },
+    Err message ->
+      let waitingReasons = statusWaitingReasons state plannedTaskIds emptyTasks in
+      StatusView {
+        state = state,
+        plannerSummary = plannerSummaryOrEmpty state.wave,
+        objectiveProjectedStatus = textConcat ["task-error:", message],
+        plannedTaskIds = plannedTaskIds,
+        allTaskIds = emptyTexts,
+        readyTaskIds = emptyTexts,
+        activeTaskIds = activeTaskIds,
+        completedTaskIds = emptyTexts,
+        failedTaskIds = emptyTexts,
+        waitingReasons = waitingReasons,
+        primaryWaitingReason = firstWaitingReasonKind waitingReasons,
+        primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
+        benchmarkSummary = latestBenchmarkSummaryText,
+        benchmarkTargetMet = latestBenchmarkTargetMet,
+        feedbackSummary = readFeedbackSummary
+      }
+  }

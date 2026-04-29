@@ -1,0 +1,199 @@
+module GoalManagerBootstrapTasks
+
+import GoalManagerPreludeProject
+import GoalManagerTaskSet
+import GoalManagerPlannerRoles
+import GoalManagerMailboxSummary
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+ensureObjective : Str
+ensureObjective =
+  match objectives swarmStateRoot {
+    Ok values ->
+      if textListHas objectiveId (map objectiveIdOf values) then
+        ""
+      else
+        match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+          Ok created -> "",
+          Err message -> message
+        },
+    Err message ->
+      match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+        Ok created -> "",
+        Err createMessage -> createMessage
+      }
+  }
+
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies =
+  match tasks swarmStateRoot {
+    Ok values ->
+      if taskListHasId taskId values then
+        ""
+      else
+        match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+          Ok created -> "",
+          Err message -> message
+        },
+    Err message ->
+      match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+        Ok created -> "",
+        Err createMessage -> createMessage
+      }
+  }
+
+ensurePlannerTaskFor : Int -> Str
+ensurePlannerTaskFor wave =
+  match tasks swarmStateRoot {
+    Ok values ->
+      if taskListHasId (plannerTaskIdForWave wave) values then
+        ""
+      else
+        match taskCreate
+          objectiveRef
+          (plannerTaskIdForWave wave)
+          (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
+          emptyTexts
+          plannerTaskMaxRuns
+          taskLeaseTimeoutMs {
+          Ok created -> "",
+          Err message -> message
+        },
+    Err message ->
+      match taskCreate
+        objectiveRef
+        (plannerTaskIdForWave wave)
+        (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
+        emptyTexts
+        plannerTaskMaxRuns
+        taskLeaseTimeoutMs {
+        Ok created -> "",
+        Err createMessage -> createMessage
+      }
+  }
+
+ensurePlannedTaskStep : EnsurePlanState -> PlannerTaskSpec -> EnsurePlanState
+ensurePlannedTaskStep state spec =
+  if state.error != "" then
+    state
+  else
+    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
+    EnsurePlanState {
+      error = taskError
+    }
+
+ensurePlannedTasks : PlannerReport -> Str
+ensurePlannedTasks report =
+  (fold ensurePlannedTaskStep (EnsurePlanState { error = "" }) report.tasks).error
+
+plannerTaskCountError : PlannerReport -> Str
+plannerTaskCountError report =
+  if length report.tasks > maxTaskLoops then
+    textConcat [
+      "planned-task-budget: Planner returned ",
+      encode (length report.tasks),
+      " tasks but the configured planner limit is ",
+      encode maxTaskLoops,
+      "."
+    ]
+  else
+    ""
+
+taskPromptText : Int -> PlannerReport -> PlannerTaskSpec -> Str
+taskPromptText wave report spec =
+  textJoin "\n\n" [
+    textConcat ["Goal: ", goalText],
+    textConcat ["Wave: ", encode wave],
+    textConcat ["Task: ", spec.taskId],
+    textConcat ["Assigned role: ", plannerTaskRoleLabel spec],
+    textConcat ["Coordination focus: ", plannerTaskCoordinationSummary spec],
+    textConcat ["Detail: ", spec.detail],
+    textConcat ["Prompt:\n", spec.taskPrompt],
+    textConcat ["Sibling branches:\n", plannerTaskSiblingSummaryText report spec.taskId],
+    textConcat ["Mailbox summary:\n", mailboxSummaryTextForReport wave report],
+    "Make repo changes, verify them, and write a schema-valid builder report."
+  ]
+
+writeTaskPromptFile : Int -> PlannerReport -> PlannerTaskSpec -> Str
+writeTaskPromptFile wave report spec =
+  match writeFile (taskPromptPath spec.taskId) (taskPromptText wave report spec) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+taskVerificationTier : PlannerTaskSpec -> Str
+taskVerificationTier spec =
+  if textIncludes spec.taskId "verifyall" then
+    "full"
+  else if textIncludes spec.taskId "verify-all" then
+    "full"
+  else if textIncludes spec.taskId "signoff" then
+    "full"
+  else if textIncludes spec.taskId "integrated-verification" then
+    "full"
+  else if textIncludes (plannerTaskRoleLabel spec) "verifier" then
+    "full"
+  else
+    "focused"
+
+childLoopCommandArgs : PlannerTaskSpec -> [Str]
+childLoopCommandArgs spec = [
+  "env",
+  "-u",
+  "CLASP_RT_UPGRADE_SNAPSHOT_PATH_JSON",
+  "-u",
+  "CLASP_RT_UPGRADE_SERVICE_ROOT_JSON",
+  "-u",
+  "CLASP_RT_UPGRADE_SERVICE_ID_JSON",
+  "-u",
+  "CLASP_RT_UPGRADE_TRANSACTION_PATH_JSON",
+  "-u",
+  "CLASP_RT_UPGRADE_GENERATION_JSON",
+  "-u",
+  "CLASP_MANAGER_BENCHMARK_COMMAND_JSON",
+  "-u",
+  "CLASP_MANAGER_BENCHMARK_CWD_JSON",
+  "-u",
+  "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON",
+  "-u",
+  "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON",
+  textConcat ["CLASP_LOOP_OBJECTIVE_JSON=", encode spec.taskId],
+  textConcat ["CLASP_LOOP_TASK_JSON=", encode spec.detail],
+  textConcat ["CLASP_LOOP_TASK_FILE_JSON=", encode (taskPromptPath spec.taskId)],
+  textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceRoot spec.taskId)],
+  textConcat ["CLASP_LOOP_STATE_ROOT_JSON=", encode (taskReportStateRoot spec.taskId)],
+  textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
+  textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
+  textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
+  textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
+  textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+  textConcat ["CLASP_LOOP_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
+  textConcat ["CLASP_LOOP_VERIFICATION_TIER_JSON=", encode (taskVerificationTier spec)],
+  textConcat ["CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
+  textConcat ["CLASP_LOOP_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
+  textConcat ["CLASP_LOOP_BASELINE_CACHE_ROOT_JSON=", encode (pathJoin [taskReportStateRoot spec.taskId, "baseline-cache"])],
+  textConcat ["CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
+  textConcat ["XDG_CACHE_HOME=", pathJoin [taskReportStateRoot spec.taskId, "xdg-cache"]],
+  "CLASP_VERIFY_LOCK_TIMEOUT_SECS=30",
+  "CLASP_VERIFY_ON_LOCK_TIMEOUT=run-nested",
+  "CLASP_VERIFY_NESTED_COMMANDS=bash scripts/test-verify-all.sh\nbash scripts/test-task-manifest.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-goal-manager-fast.sh\n",
+  textConcat ["CLASP_VERIFY_LABEL=", textConcat ["swarm-child-verify-", spec.taskId]],
+  textConcat ["CLASP_SWARM_ACTOR=", actorName],
+  textConcat ["CLASP_MANAGER_TASK_ROLE_JSON=", encode (plannerTaskRoleLabel spec)],
+  textConcat ["CLASP_MANAGER_TASK_COORDINATION_JSON=", encode (plannerTaskCoordinationSummary spec)],
+  textConcat ["CLASP_MANAGER_PROJECT_ROOT_JSON=", encode managerProjectRoot],
+  managerClaspcBin,
+  "run",
+  resolvedChildLoopProgramPath,
+  "--",
+  taskReportStateRoot spec.taskId
+]
+
+childLoopCommand : PlannerTaskSpec -> SwarmCommand
+childLoopCommand spec = commandSpec managerProjectRoot (childLoopCommandArgs spec)
+
+taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
+taskLaunchRecordCommand spec = commandSpec managerProjectRoot ["bash", "-lc", textConcat ["echo launch > ", taskWorkspaceAliasPath spec.taskId]]

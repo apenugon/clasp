@@ -1,0 +1,82 @@
+module GoalManagerPreludeProject
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+benchmarkCwd : Str
+benchmarkCwd = readEnvText "CLASP_MANAGER_BENCHMARK_CWD_JSON" managerProjectRoot
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+readTextOrEmpty : Str -> Str
+readTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+currentWorkingDir : Str
+currentWorkingDir = match runCommand "." ["pwd"] {
+  Ok process -> firstTextOrEmpty (textSplit process.stdout "\n"),
+  Err message -> "."
+}
+
+recordedServiceRoot : Str
+recordedServiceRoot = readTextOrEmpty serviceRootRecordPath
+
+recordedServiceId : Str
+recordedServiceId = readTextOrEmpty serviceIdRecordPath
+
+recordedProjectRoot : Str
+recordedProjectRoot = readTextOrEmpty projectRootRecordPath
+
+managerProjectRoot : Str
+managerProjectRoot = {
+  let configured = readEnvText "CLASP_MANAGER_PROJECT_ROOT_JSON" "" in
+  if configured != "" then
+    configured
+  else if recordedProjectRoot != "" then
+    recordedProjectRoot
+  else
+    currentWorkingDir
+}
+
+isAbsolutePath : Str -> Bool
+isAbsolutePath value = match textPrefix value "/" {
+  Ok remainder -> true,
+  Err message -> false
+}
+
+resolveProjectPath : Str -> Str
+resolveProjectPath value =
+  if value == "" then
+    ""
+  else if isAbsolutePath value then
+    value
+  else
+    pathJoin [managerProjectRoot, value]
+
+resolvedPlannerSchemaPath : Str
+resolvedPlannerSchemaPath = resolveProjectPath plannerSchemaPath
+
+resolvedChildLoopProgramPath : Str
+resolvedChildLoopProgramPath = resolveProjectPath childLoopProgramPath
+
+resolvedManagerProgramPath : Str
+resolvedManagerProgramPath = resolveProjectPath managerProgramPath

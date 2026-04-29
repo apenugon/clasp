@@ -1,3 +1,0 @@
-primaryUser : User
-renderUser : User -> Str
-main : Str

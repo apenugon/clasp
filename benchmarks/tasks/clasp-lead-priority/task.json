@@ -3,6 +3,7 @@
   "title": "Add priority hint across shared Clasp schemas, route validation, and LLM-shaped output",
   "suite": "llm-boundary-fullstack",
   "language": "clasp",
+  "defaultBenchmarkPath": true,
   "repo": "repo",
   "entry": "app/Main.clasp",
   "prompt": "prompt.md",

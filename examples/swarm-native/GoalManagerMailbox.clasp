@@ -1,0 +1,283 @@
+module GoalManagerMailbox
+
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkRuntime
+import GoalManagerPreludeProject
+import GoalManagerPlannerIO
+import GoalManagerTaskReportIO
+import GoalManagerMailboxIO
+import GoalManagerCounters
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+
+materializePlannerTask : Int -> PlannerTaskSpec -> PlannerTaskSpec
+materializePlannerTask wave spec = {
+  let mut renderedDependencies = emptyTexts;
+  for dependency in spec.dependencies {
+    renderedDependencies = append renderedDependencies [materializeTaskId wave dependency];
+    renderedDependencies
+  };
+  PlannerTaskSpec {
+    taskId = materializeTaskId wave spec.taskId,
+    role = spec.role,
+    detail = spec.detail,
+    dependencies = renderedDependencies,
+    taskPrompt = spec.taskPrompt,
+    coordinationFocus = spec.coordinationFocus
+  }
+}
+
+materializePlannerReport : Int -> PlannerReport -> PlannerReport
+materializePlannerReport wave report = {
+  let mut renderedTasks = emptyPlannerTasks;
+  for taskSpec in report.tasks {
+    renderedTasks = append renderedTasks [materializePlannerTask wave taskSpec];
+    renderedTasks
+  };
+  PlannerReport {
+    objectiveSummary = report.objectiveSummary,
+    strategy = report.strategy,
+    tasks = renderedTasks,
+    testsRun = report.testsRun,
+    residualRisks = report.residualRisks
+  }
+}
+
+plannerInputFingerprintSourceFor : Int -> Str -> Str
+plannerInputFingerprintSourceFor wave benchmarkSummary =
+  let mailboxSummary = mailboxSummaryText wave in
+  textJoin "\n" [
+    textConcat ["goal:", goalText],
+    textConcat ["planner-policy:", plannerPolicyText],
+    textConcat ["schema-path:", resolvedPlannerSchemaPath],
+    textConcat ["project-root:", managerProjectRoot],
+    textConcat ["workspace-root:", workspaceRoot],
+    textConcat ["wave:", encode wave],
+    textConcat ["benchmark-enabled:", encode benchmarkEnabled],
+    textConcat ["benchmark-summary:", benchmarkSummary],
+    textConcat ["mailbox-summary:", mailboxSummary]
+  ]
+
+plannerInputStateFor : Int -> Str -> PlannerInputState
+plannerInputStateFor wave benchmarkSummary =
+  let mailboxSummary = mailboxSummaryText wave in
+  PlannerInputState {
+    fingerprint = textFingerprint64Hex (plannerInputFingerprintSourceFor wave benchmarkSummary),
+    goalText = goalText,
+    plannerPolicy = plannerPolicyText,
+    schemaPath = resolvedPlannerSchemaPath,
+    workspaceRoot = workspaceRoot,
+    mailboxSummary = mailboxSummary
+  }
+
+taskBuilderMailboxMessages : Int -> PlannerTaskSpec -> [SwarmMailboxMessage]
+taskBuilderMailboxMessages wave spec = {
+  let role = plannerTaskRoleLabel spec in
+  let coordination = plannerTaskCoordinationSummary spec in
+  if fileExists (taskLatestBuilderReportPath spec.taskId) then
+    match taskLatestBuilderReport spec.taskId {
+      Ok builderReport ->
+        [
+          SwarmMailboxMessage {
+            source = textConcat ["builder-report:", role],
+            taskId = spec.taskId,
+            wave = wave,
+            summary = builderReport.summary,
+            details = [textConcat ["coordination=", coordination]]
+          }
+        ],
+      Err message ->
+        emptySwarmMailboxMessages
+    }
+  else
+    emptySwarmMailboxMessages
+}
+
+taskVerifierMailboxMessages : Int -> PlannerTaskSpec -> VerifierReport -> [SwarmMailboxMessage]
+taskVerifierMailboxMessages wave spec report = {
+  let role = plannerTaskRoleLabel spec in
+  let coordination = plannerTaskCoordinationSummary spec in
+  [
+    SwarmMailboxMessage {
+      source = textConcat ["task-report:", role],
+      taskId = spec.taskId,
+      wave = wave,
+      summary = report.summary,
+      details = [textConcat ["coordination=", coordination]]
+    }
+  ]
+}
+
+taskMailboxMessagesForSpec : Int -> PlannerTaskSpec -> [SwarmMailboxMessage]
+taskMailboxMessagesForSpec wave spec = {
+  let builderMessages = taskBuilderMailboxMessages wave spec in
+  let reportMessages =
+    if fileExists (taskFeedbackPath spec.taskId) then
+      taskVerifierMailboxMessages wave spec (readVerifierReportPath (taskFeedbackPath spec.taskId))
+    else
+      emptySwarmMailboxMessages in
+  append builderMessages reportMessages
+}
+
+plannerTaskRoleLabel : PlannerTaskSpec -> Str
+plannerTaskRoleLabel spec =
+  if spec.role == "" then
+    defaultPlannerTaskRole spec.taskId spec.detail
+  else
+    spec.role
+
+plannerTaskCoordinationFocusValues : PlannerTaskSpec -> [Str]
+plannerTaskCoordinationFocusValues spec =
+  if length spec.coordinationFocus == 0 then
+    [plannerTaskRoleLabel spec]
+  else
+    spec.coordinationFocus
+
+plannerTaskCoordinationSummary : PlannerTaskSpec -> Str
+plannerTaskCoordinationSummary spec = textJoin ", " (plannerTaskCoordinationFocusValues spec)
+
+annotatedPlannerTaskDetail : PlannerTaskSpec -> Str
+annotatedPlannerTaskDetail spec =
+  textConcat [
+    "[role=",
+    plannerTaskRoleLabel spec,
+    "; focus=",
+    plannerTaskCoordinationSummary spec,
+    "] ",
+    spec.detail
+  ]
+
+plannerTaskOverviewLine : PlannerTaskSpec -> Str
+plannerTaskOverviewLine spec =
+  textConcat [
+    "- ",
+    spec.taskId,
+    " [role ",
+    plannerTaskRoleLabel spec,
+    "; focus ",
+    plannerTaskCoordinationSummary spec,
+    "]: ",
+    spec.detail
+  ]
+
+plannerTaskSiblingSummaryText : PlannerReport -> Str -> Str
+plannerTaskSiblingSummaryText report taskId = {
+  let mut lines = emptyTexts;
+  for taskSpec in report.tasks {
+    if taskSpec.taskId == taskId then
+      lines
+    else {
+      lines = append lines [plannerTaskOverviewLine taskSpec];
+      lines
+    }
+  };
+  if length lines == 0 then
+    "No sibling branches are planned for this wave."
+  else
+    textJoin "\n" lines
+}
+
+benchmarkCheckpointMessages : Int -> [SwarmMailboxMessage]
+benchmarkCheckpointMessages wave =
+  if wave <= 0 then
+    emptySwarmMailboxMessages
+  else {
+    let previous = benchmarkCheckpointMessages (decrementManagerCounter wave) in
+    if fileExists (benchmarkCheckpointPathFor wave) then
+      match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+        Ok checkpoint ->
+          append previous [
+            SwarmMailboxMessage {
+              source = "benchmark",
+              taskId = "",
+              wave = wave,
+              summary = checkpoint.summary,
+              details = [
+                textConcat ["suite=", checkpoint.suite],
+                textConcat ["score=", checkpoint.scoreName, ":", encode checkpoint.scoreValue],
+                textConcat ["target=", checkpoint.targetName, ":", encode checkpoint.targetValue],
+                textConcat ["meetsTarget=", encode checkpoint.meetsTarget]
+              ]
+            }
+          ],
+        Err message ->
+          previous
+      }
+    else
+      previous
+  }
+
+taskMailboxMessagesForSpecs : Int -> [PlannerTaskSpec] -> [SwarmMailboxMessage]
+taskMailboxMessagesForSpecs wave specs = {
+  let mut rendered = emptySwarmMailboxMessages;
+  for spec in specs {
+    rendered = appendSwarmMailboxMessages rendered (taskMailboxMessagesForSpec wave spec);
+    rendered
+  };
+  rendered
+}
+
+taskMailboxMessagesForCompletedSpec : Int -> PlannerTaskSpec -> VerifierReport -> [SwarmMailboxMessage]
+taskMailboxMessagesForCompletedSpec wave spec report =
+  appendSwarmMailboxMessages
+    (taskBuilderMailboxMessages wave spec)
+    (taskVerifierMailboxMessages wave spec report)
+
+plannerTaskMailboxMessagesForWave : Int -> [SwarmMailboxMessage]
+plannerTaskMailboxMessagesForWave wave =
+  if wave <= 0 then
+    emptySwarmMailboxMessages
+  else if fileExists (plannerReportPathFor wave) then
+    match readPlannerReportForWave wave {
+      Ok report ->
+        taskMailboxMessagesForSpecs wave (materializePlannerReport wave report).tasks,
+      Err message ->
+        emptySwarmMailboxMessages
+    }
+  else
+    emptySwarmMailboxMessages
+
+taskMailboxMessagesAcrossWaves : Int -> [SwarmMailboxMessage]
+taskMailboxMessagesAcrossWaves wave =
+  if wave <= 0 then
+    emptySwarmMailboxMessages
+  else
+    append
+      (taskMailboxMessagesAcrossWaves (decrementManagerCounter wave))
+      (plannerTaskMailboxMessagesForWave wave)
+
+mailboxMessagesForReport : Int -> PlannerReport -> [SwarmMailboxMessage]
+mailboxMessagesForReport wave report =
+  append
+    (benchmarkCheckpointMessages wave)
+    (taskMailboxMessagesForSpecs wave (materializePlannerReport wave report).tasks)
+
+mailboxMessageLine : SwarmMailboxMessage -> Str
+mailboxMessageLine message =
+  if message.taskId == "" then
+    textConcat ["[", message.source, " wave ", encode message.wave, "] ", message.summary]
+  else
+    textConcat ["[", message.source, " ", message.taskId, " wave ", encode message.wave, "] ", message.summary]
+
+mailboxSummaryText : Int -> Str
+mailboxSummaryText wave = {
+  let messages = readMailboxMessagesPath mailboxPath in
+  if length messages == 0 then
+    "No prior swarm mailbox messages are available yet."
+  else
+    textJoin "\n" (map mailboxMessageLine messages)
+}
+
+mailboxSummaryTextForReport : Int -> PlannerReport -> Str
+mailboxSummaryTextForReport wave report = mailboxSummaryText wave
+
+refreshMailbox : Int -> Str
+refreshMailbox wave =
+  writeMailboxMessages
+    (append
+      (benchmarkCheckpointMessages wave)
+      (taskMailboxMessagesAcrossWaves wave))

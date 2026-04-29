@@ -1,4 +1,0 @@
-[claspc-cache] bundle miss entry=/home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-project/Main.clasp reason=signature-changed module=/home/akul_medexfinance_com/clasp/.clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-project/Shared/User.clasp
-[claspc-cache] module-summary miss module=Shared.User path=.clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-root/claspc-native/module-summary-cache-v2/b5525a39f3acb3f5.cache
-[claspc-cache] module-summary hit module=Shared.Render path=.clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-root/claspc-native/module-summary-cache-v2/59bfce1d46844d77.cache
-[claspc-cache] module-summary hit module=Main path=.clasp-test-tmp/test-native-claspc.hyHrnX/check-cache-root/claspc-native/module-summary-cache-v2/43696a725be91900.cache

@@ -1,0 +1,12 @@
+{
+  "id": "clasp-legal-assistant-appbench",
+  "title": "Deliver the AppBench legal-assistant slice as a benchmarkable Clasp app checkpoint",
+  "suite": "legal-assistant-appbench",
+  "language": "clasp",
+  "defaultBenchmarkPath": true,
+  "repo": "repo",
+  "entry": "Main.clasp",
+  "prompt": "prompt.md",
+  "prepare": [],
+  "verify": ["bash", "scripts/verify.sh"]
+}

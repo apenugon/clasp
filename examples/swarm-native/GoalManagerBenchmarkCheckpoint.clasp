@@ -1,0 +1,41 @@
+module GoalManagerBenchmarkCheckpoint
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointError message = Err message
+
+readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
+readBenchmarkCheckpointPath path = match readFile path {
+  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Err message -> benchmarkCheckpointError message
+}
+
+latestBenchmarkSummaryText : Str
+latestBenchmarkSummaryText = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.summary,
+  Err message -> ""
+}
+
+latestBenchmarkTargetMet : Bool
+latestBenchmarkTargetMet = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.meetsTarget,
+  Err message -> false
+}
+
+writeBenchmarkCheckpoint : BenchmarkCheckpoint -> Str
+writeBenchmarkCheckpoint checkpoint = {
+  let checkpointText = encode checkpoint in
+  match writeFile (benchmarkCheckpointPathFor checkpoint.wave) checkpointText {
+    Ok written ->
+      match writeFile benchmarkLatestPath checkpointText {
+        Ok latestWritten -> "",
+        Err message -> message
+      },
+    Err message -> message
+  }
+}

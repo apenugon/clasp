@@ -8,6 +8,11 @@ readonly_nix_cache_root="/tmp/clasp-nix-cache"
 verify_label="${CLASP_VERIFY_LABEL:-verify-all}"
 verify_lock_file="${CLASP_VERIFY_LOCK_FILE:-}"
 verify_lock_owner=0
+verify_lock_timeout_secs="${CLASP_VERIFY_LOCK_TIMEOUT_SECS:-0}"
+verify_lock_timeout_action="${CLASP_VERIFY_ON_LOCK_TIMEOUT:-fail}"
+if ! [[ "$verify_lock_timeout_secs" =~ ^[0-9]+$ ]]; then
+  verify_lock_timeout_secs=0
+fi
 full_parallel_verify_commands=$'
 bash scripts/test-codex-loop.sh
 node benchmarks/run-benchmark.mjs list >/dev/null
@@ -15,6 +20,7 @@ node benchmarks/run-benchmark.mjs list >/dev/null
 full_sequential_verify_commands=$'
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
+bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh
@@ -80,6 +86,7 @@ release_verify_lock() {
 
 acquire_verify_lock() {
   local owner_pid=""
+  local waited_secs=0
 
   mkdir -p "$(dirname "$verify_lock_file")"
 
@@ -90,7 +97,17 @@ acquire_verify_lock() {
       rmdir "$verify_lock_dir" >/dev/null 2>&1 || true
       continue
     fi
+    if (( verify_lock_timeout_secs > 0 && waited_secs >= verify_lock_timeout_secs )); then
+      if [[ "$verify_lock_timeout_action" == "run-nested" ]]; then
+        printf '%s: verify lock busy after %ss; running nested verification\n' "$verify_label" "$waited_secs" >&2
+        run_command_block "$nested_verify_commands"
+        exit 0
+      fi
+      printf '%s: verify lock busy after %ss\n' "$verify_label" "$waited_secs" >&2
+      exit 75
+    fi
     sleep 1
+    waited_secs=$((waited_secs + 1))
   done
 
   printf '%s\n' "$$" > "$verify_lock_dir/pid"
@@ -177,12 +194,19 @@ run_parallel_commands() {
   finish_one_job() {
     local finished_command=""
     local finished_log_path=""
+    local finished_pid=""
 
-    finished_pid=""
     if wait -n -p finished_pid; then
       wait_status=0
     else
       wait_status=$?
+    fi
+    finished_pid="${finished_pid:-}"
+
+    if [[ -z "$finished_pid" ]]; then
+      printf '%s: parallel wait returned without a pid\n' "$verify_label" >&2
+      rm -rf "$temp_root"
+      return 1
     fi
 
     finished_log_path="${pid_to_log[$finished_pid]:-}"
@@ -281,7 +305,7 @@ if nix develop -c bash -lc "
   exit 0
 fi
 
-if grep -Eq 'readonly database|daemon-socket/socket' "$nix_failure_log"; then
+if grep -Eq 'readonly database|daemon-socket/socket|not tracked by Git' "$nix_failure_log"; then
   printf '%s: falling back to sandbox verification because Nix is unavailable in this environment\n' "$verify_label" >&2
   run_command_block "$fallback_commands"
   exit 0

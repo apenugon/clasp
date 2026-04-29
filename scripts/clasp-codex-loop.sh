@@ -219,8 +219,8 @@ run_native_loop() {
     CLASP_LOOP_TASK_FILE_JSON="$(json_quote "$task_file")" \
     CLASP_LOOP_WORKSPACE_JSON="$(json_quote "$workspace")" \
     CLASP_LOOP_CODEX_BIN_JSON="$(json_quote "${CLASP_LOOP_CODEX_BIN:-${CODEX_BIN:-codex}}")" \
-    CLASP_LOOP_CODEX_MODEL_JSON="$(json_quote "${CODEX_MODEL:-gpt-5.4}")" \
-    CLASP_LOOP_CODEX_REASONING_JSON="$(json_quote "${CODEX_REASONING_EFFORT:-medium}")" \
+    CLASP_LOOP_CODEX_MODEL_JSON="$(json_quote "${CODEX_MODEL:-gpt-5.5}")" \
+    CLASP_LOOP_CODEX_REASONING_JSON="$(json_quote "${CODEX_REASONING_EFFORT:-xhigh}")" \
     CLASP_LOOP_CODEX_SANDBOX_JSON="$(json_quote "${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}")" \
     CLASP_LOOP_MAX_ATTEMPTS_JSON="$max_attempts" \
     "$claspc_bin" run "$native_feedback_loop_program" -- "$runtime_dir" >/dev/null

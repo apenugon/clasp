@@ -1,8 +1,0 @@
-module Main
-rawValue : Str
-rawValue = match envVar "TEST_JSON" {
-  Ok raw -> decode Str raw,
-  Err message -> "missing"
-}
-main : Str
-main = rawValue

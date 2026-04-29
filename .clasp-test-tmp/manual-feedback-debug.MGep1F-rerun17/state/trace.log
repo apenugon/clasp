@@ -1,8 +1,0 @@
-verifier:start:1
-diff:start:1
-diff:write-ok:1
-verifier:after-diff:1
-verifier:start:2
-diff:start:2
-diff:write-ok:2
-verifier:after-diff:2

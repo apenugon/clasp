@@ -9,8 +9,11 @@ tmp_root="${TMPDIR:-/tmp}"
 unset CLASP_VERIFY_IN_PROGRESS
 unset CLASP_VERIFY_ACTIVE_ROOT
 unset CLASP_VERIFY_LOCK_HELD
+unset CLASP_VERIFY_LABEL
 unset CLASP_VERIFY_TOPLEVEL_REENTRY
 unset CLASP_VERIFY_USE_CURRENT_SHELL
+unset CLASP_VERIFY_LOCK_TIMEOUT_SECS
+unset CLASP_VERIFY_ON_LOCK_TIMEOUT
 
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
@@ -28,19 +31,25 @@ mkdir -p "$test_root/bin" "$test_root/scripts" "$test_root/src/scripts" "$test_r
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
+cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremental-guard.sh" >/dev/null
 grep -F 'export XDG_CACHE_HOME="$test_root/xdg-cache"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
@@ -48,6 +57,8 @@ grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh"
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'verify_mode="${CLASP_NATIVE_VERIFY_MODE:-fast}"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'if [[ "$verify_mode" == "full" ]]; then' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'verify_output="$(run_verify)"' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F "summary_line=\"\${verify_output##*\$'\n'}\"" "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F '"promotedCompilerFixtureCheckExecutes":true' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'acquire_verify_lock()' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'nativeImageProjectBuildPlanText' "$test_root/src/scripts/verify.sh" >/dev/null
@@ -70,6 +81,7 @@ lock_capture="$test_root/lock-path.txt"
 tmpdir_capture="$test_root/tmpdir.txt"
 stderr_capture="$test_root/stderr.txt"
 writable_nested_capture="$test_root/nested.txt"
+lock_timeout_capture="$test_root/lock-timeout-nested.txt"
 writable_cache_root="$test_root/writable-cache"
 expected_lock_path="$test_root/.clasp-verify.lock"
 explicit_lock_file="$expected_lock_path"
@@ -102,6 +114,19 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$env_capture")" == "$writable_cache_root" ]]
 [[ "$(< "$lock_capture")" == "$expected_lock_path" ]]
 [[ "$(< "$tmpdir_capture")" == "$tmp_root" ]]
+
+rm -f "$fallback_capture" "$stderr_capture"
+PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
+XDG_CACHE_HOME="$writable_cache_root" \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_TEST_NIX_MESSAGE='error: Path ".clasp-task-workspaces/task" in the repository "/repo" is not tracked by Git.' \
+CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$stderr_capture"
+
+[[ "$(< "$fallback_capture")" == "fallback-ok" ]]
+grep -F 'verify-all: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \
@@ -183,6 +208,22 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$writable_nested_capture")" == "nested-ok" ]]
+
+rm -f "$lock_timeout_capture" "$stderr_capture"
+mkdir -p "${explicit_lock_file}.d"
+printf '%s\n' "$$" > "${explicit_lock_file}.d/pid"
+PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+CLASP_VERIFY_LOCK_TIMEOUT_SECS=1 \
+CLASP_VERIFY_ON_LOCK_TIMEOUT=run-nested \
+CLASP_VERIFY_NESTED_COMMANDS=$'printf lock-timeout-nested > '"$lock_timeout_capture" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$stderr_capture"
+rm -f "${explicit_lock_file}.d/pid"
+rmdir "${explicit_lock_file}.d" >/dev/null 2>&1 || true
+
+[[ "$(< "$lock_timeout_capture")" == "lock-timeout-nested" ]]
+grep -F 'verify-all: verify lock busy after 1s; running nested verification' "$stderr_capture" >/dev/null
 
 rm -f "$fallback_capture"
 if PATH="$test_root/bin:$PATH" \

@@ -1,0 +1,78 @@
+module Main
+
+record UploadedDocument = {
+  documentId : Str,
+  filename : Str,
+  mediaType : Str,
+  sizeBytes : Int,
+  contentText : Str
+}
+
+record DocumentHandle = {
+  documentId : Str,
+  filename : Str,
+  mediaType : Str,
+  sizeBytes : Int,
+  excerpt : Str,
+  contentFingerprint : Str
+}
+
+record DocumentReference = {
+  documentId : Str,
+  label : Str,
+  raw : Str
+}
+
+record IngestRequest = {
+  upload : UploadedDocument,
+  prompt : Str
+}
+
+record IngestedDocument = {
+  handle : DocumentHandle,
+  references : [DocumentReference],
+  prompt : Str
+}
+
+type IngestResponse = Accepted IngestedDocument | Rejected Str
+
+foreign documentUploadBoundary : UploadedDocument -> Result DocumentHandle = "documentUploadBoundary"
+foreign documentReferenceBoundary : Str -> Result [DocumentReference] = "documentReferenceBoundary"
+
+ingestRequest : IngestRequest -> IngestResponse
+ingestRequest request =
+  match documentUploadBoundary request.upload {
+    Ok handle ->
+      match documentReferenceBoundary request.prompt {
+        Ok references ->
+          Accepted (IngestedDocument {
+            handle = handle,
+            references = references,
+            prompt = request.prompt
+          }),
+        Err message ->
+          Rejected message
+      },
+    Err message ->
+      Rejected message
+  }
+
+sampleUpload : UploadedDocument
+sampleUpload = UploadedDocument {
+  documentId = "doc-service-agreement",
+  filename = "service-agreement.txt",
+  mediaType = "text/plain",
+  sizeBytes = 0,
+  contentText = "Service agreement renewal terms for the Northwind account."
+}
+
+sampleRequest : IngestRequest
+sampleRequest = IngestRequest {
+  upload = sampleUpload,
+  prompt = "Summarize @document[doc-service-agreement|Service Agreement] for the client."
+}
+
+route ingestRoute = POST "/documents/ingest" IngestRequest -> IngestResponse ingestRequest
+
+main : Str
+main = encode (ingestRequest sampleRequest)

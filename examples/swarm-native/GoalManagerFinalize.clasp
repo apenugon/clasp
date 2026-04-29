@@ -1,0 +1,89 @@
+module GoalManagerFinalize
+
+import GoalManagerStateRuntime
+import GoalManagerStateView
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerTaskReportIO
+import GoalManagerMailboxIO
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+
+taskPassReport : PlannerTaskSpec -> VerifierReport
+taskPassReport spec = readVerifierReportPath (taskFeedbackPath spec.taskId)
+
+managerPassReport : PlannerReport -> VerifierReport
+managerPassReport report =
+  VerifierReport {
+    verdict = "pass",
+    summary =
+      if benchmarkEnabled then
+        if latestBenchmarkSummaryText == "" then
+          textConcat ["goal manager completed: ", report.objectiveSummary]
+        else
+          textConcat ["goal manager completed: ", report.objectiveSummary, " / ", latestBenchmarkSummaryText]
+      else
+        textConcat ["goal manager completed: ", report.objectiveSummary],
+    findings = emptyTexts,
+    tests_run = report.testsRun,
+    follow_up = report.residualRisks,
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+benchmarkFailureReport : BenchmarkCheckpoint -> VerifierReport
+benchmarkFailureReport checkpoint =
+  VerifierReport {
+    verdict = "fail",
+    summary = "benchmark target not met",
+    findings = [checkpoint.summary],
+    tests_run = [textConcat ["benchmark:", checkpoint.suite]],
+    follow_up = [
+      textConcat [
+        "Improve ",
+        checkpoint.scoreName,
+        " from ",
+        encode checkpoint.scoreValue,
+        " to at most ",
+        encode checkpoint.targetValue,
+        "."
+      ]
+    ],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+finalizeWithReport : ManagerState -> VerifierReport -> Str
+finalizeWithReport state report = {
+  let feedbackError = writeFeedback report in
+  if feedbackError != "" then
+    textConcat ["feedback-error:", feedbackError]
+  else {
+    let stateError = writeManagerState state in
+    if stateError != "" then
+      textConcat ["state-error:", stateError]
+    else
+      encode (statusView state)
+  }
+}
+
+checkpointFromSignal : Int -> BenchmarkSignal -> BenchmarkCheckpoint
+checkpointFromSignal wave signal =
+  BenchmarkCheckpoint {
+    wave = wave,
+    suite = signal.suite,
+    summary = signal.summary,
+    passed = signal.passed,
+    meetsTarget = signal.meetsTarget,
+    scoreName = signal.scoreName,
+    scoreValue = signal.scoreValue,
+    targetName = signal.targetName,
+    targetValue = signal.targetValue,
+    command = benchmarkCommand
+  }
+
+plannerFailure : Str -> Str -> Str
+plannerFailure summary detail = {
+  let state = readManagerState in
+  finalizeWithReport
+    (managerStateFor "failed" "fail" false (plannerTaskIdForWave state.wave) emptyTexts state.wave state.benchmarkRuns true)
+    (syntheticFailureReport summary detail)
+}

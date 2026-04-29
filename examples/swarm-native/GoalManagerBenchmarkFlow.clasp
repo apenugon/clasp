@@ -1,0 +1,196 @@
+module GoalManagerBenchmarkFlow
+
+import GoalManagerStateView
+import GoalManagerFinalize
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerBenchmarkCommand
+import GoalManagerTaskReportIO
+import GoalManagerMailboxMessages
+import GoalManagerCounters
+import GoalManagerPlannerMaterialize
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+
+finalizeBenchmarkCheckpoint : PlannerReport -> Int -> Int -> BenchmarkCheckpoint -> Str
+finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint = {
+  let failureState = managerFailureState (plannerTaskIds report) wave benchmarkRuns in
+  let checkpointWriteError = writeBenchmarkCheckpoint checkpoint in
+  if checkpointWriteError != "" then
+    finalizeWithReport failureState (syntheticFailureReport "benchmark checkpoint write failed" checkpointWriteError)
+  else {
+    let mailboxError = refreshMailbox wave in
+    if mailboxError != "" then
+      finalizeWithReport failureState (syntheticFailureReport "mailbox write failed" mailboxError)
+    else {
+      let nextBenchmarkRuns = incrementManagerCounter benchmarkRuns in
+      if checkpoint.meetsTarget then
+        finalizeWithReport
+          (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
+          (managerPassReport report)
+      else if wave < maxWaves then {
+        let nextWave = incrementManagerCounter wave in
+        let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave nextBenchmarkRuns false in
+        let nextStateError = writeManagerState nextState in
+        if nextStateError != "" then
+          finalizeWithReport
+            (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+            (syntheticFailureReport "benchmark replan state write failed" nextStateError)
+        else
+          encode (statusView nextState)
+      } else
+        finalizeWithReport
+          (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+          (benchmarkFailureReport checkpoint)
+    }
+  }
+}
+
+benchmarkCommandFailure : PlannerReport -> Int -> Int -> Str -> Str
+benchmarkCommandFailure report wave benchmarkRuns message =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport "benchmark command failed" message)
+
+benchmarkTimeoutFailure : PlannerReport -> Int -> Int -> Str
+benchmarkTimeoutFailure report wave benchmarkRuns =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport
+      "benchmark command timed out"
+      (textConcat
+        ["Benchmark command exceeded ", encode benchmarkTimeoutMs, "ms. See ", benchmarkHeartbeatPathFor wave, " and ", benchmarkStderrPathFor wave, "."]))
+
+finalizeBenchmarkProcessResult : PlannerReport -> Int -> Int -> ProcessResult -> Str
+finalizeBenchmarkProcessResult report wave benchmarkRuns process =
+  if process.exitCode != 0 then
+    benchmarkCommandFailure report wave benchmarkRuns process.stderr
+  else {
+    let signal = decode BenchmarkSignal process.stdout in
+    let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
+    if trace2 != "" then
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark trace write failed" trace2)
+    else {
+      let checkpoint = checkpointFromSignal wave signal in
+      let trace3 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":checkpoint-created"]) in
+      if trace3 != "" then
+        finalizeWithReport
+          (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+          (syntheticFailureReport "benchmark trace write failed" trace3)
+      else
+        finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
+    }
+  }
+
+runBenchmarkCheckpoint : PlannerReport -> Int -> Int -> Str
+runBenchmarkCheckpoint report wave benchmarkRuns = {
+  let benchmarkState =
+    managerStateFor
+      "benchmark-running"
+      "pending"
+      false
+      ""
+      (plannerTaskIds report)
+      wave
+      benchmarkRuns
+      false in
+  let stateError = writeManagerState benchmarkState in
+  if stateError != "" then
+    finalizeWithReport
+      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+      (syntheticFailureReport "benchmark state write failed" stateError)
+  else {
+    let trace0 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":start"]) in
+    if trace0 != "" then
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark trace write failed" trace0)
+    else
+      match runBenchmarkCommand wave benchmarkRuns {
+        Err message ->
+          if message == "timeout" then
+            benchmarkTimeoutFailure report wave benchmarkRuns
+          else
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark command failed to start" message),
+        Ok process -> {
+          let trace1 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":command-finished"]) in
+          if trace1 != "" then
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark trace write failed" trace1)
+          else
+            finalizeBenchmarkProcessResult report wave benchmarkRuns process
+        }
+  }
+  }
+}
+
+resumeBenchmarkCheckpoint : Int -> Int -> Str
+resumeBenchmarkCheckpoint wave benchmarkRuns =
+  let traceResumeStart =
+    appendManagerTrace
+      (textConcat ["resume-benchmark:start:wave=", encode wave, ":benchmark-runs=", encode benchmarkRuns]) in
+  if traceResumeStart != "" then
+    textConcat ["error:", traceResumeStart]
+  else
+  match readPlannerReportForWave wave {
+    Err message ->
+      plannerFailure "planner report missing during benchmark recovery" message,
+    Ok report ->
+      let traceReport = appendManagerTrace "resume-benchmark:planner-report-ready" in
+      if traceReport != "" then
+        textConcat ["error:", traceReport]
+      else
+      if fileExists (benchmarkCheckpointPathFor wave) then
+        let traceCheckpoint = appendManagerTrace "resume-benchmark:checkpoint-present" in
+        if traceCheckpoint != "" then
+          textConcat ["error:", traceCheckpoint]
+        else
+        match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+          Err message ->
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark checkpoint decode failed" message),
+          Ok checkpoint ->
+            finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
+        }
+      else if fileExists (benchmarkHeartbeatPathFor wave) then
+        let traceHeartbeat = appendManagerTrace "resume-benchmark:heartbeat-present" in
+        if traceHeartbeat != "" then
+          textConcat ["error:", traceHeartbeat]
+        else
+        match awaitWatchedProcessTimeout (benchmarkHeartbeatPathFor wave) benchmarkWatchPollMs benchmarkTimeoutMs {
+          Err message ->
+            if message == "timeout" then
+              match benchmarkTimeoutResultFromStdout wave {
+                Err signalMessage ->
+                  benchmarkTimeoutFailure report wave benchmarkRuns,
+                Ok processResult ->
+                  finalizeBenchmarkProcessResult report wave benchmarkRuns processResult
+              }
+            else
+              finalizeWithReport
+                (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                (syntheticFailureReport "benchmark recovery failed" message),
+          Ok process ->
+            match benchmarkResultFromCompletedProcess wave process {
+              Err signalMessage ->
+                finalizeWithReport
+                  (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                  (syntheticFailureReport "benchmark signal missing" signalMessage),
+              Ok processResult ->
+                finalizeBenchmarkProcessResult report wave benchmarkRuns processResult
+            }
+        }
+      else
+        let traceRestart = appendManagerTrace "resume-benchmark:restarting-benchmark" in
+        if traceRestart != "" then
+          textConcat ["error:", traceRestart]
+        else
+        runBenchmarkCheckpoint report wave benchmarkRuns
+  }

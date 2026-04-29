@@ -325,7 +325,7 @@ function createSeedLeads(): LeadRecord[] {
 }
 
 function openDatabase(databasePath: string): DatabaseHandle {
-  if (typeof Bun !== "undefined") {
+  if (typeof Bun !== "undefined" && Object.prototype.hasOwnProperty.call(Bun, "version")) {
     const { Database } = require("bun:sqlite") as {
       Database: new (location: string) => {
         close(): void;

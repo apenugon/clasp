@@ -1,0 +1,358 @@
+module GoalManagerPlannerBootstrap
+
+import GoalManagerTaskStatusRuntime
+import GoalManagerTaskWorkspaceRuntime
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerBenchmarkCommand
+import GoalManagerPreludeProject
+import GoalManagerTaskReportIO
+import GoalManagerMailboxIO
+import GoalManagerWatch
+import GoalManagerCounters
+import GoalManagerTaskSet
+import GoalManagerPlannerMaterialize
+import GoalManagerPlanValidation
+import GoalManagerPlannerRoles
+import GoalManagerMailboxMessages
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicyFile path contents =
+  if fileExists path then
+    ""
+  else
+    match writeFile path contents {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureProjectRootRecord : Str
+ensureProjectRootRecord =
+  if recordedProjectRoot != "" then
+    ""
+  else
+    match writeFile projectRootRecordPath managerProjectRoot {
+      Ok written -> "",
+        Err message -> message
+    }
+
+ensureRecordedText : Str -> Str -> Str
+ensureRecordedText path value =
+  if value == "" then
+    ""
+  else if readTextOrEmpty path == value then
+    ""
+  else
+    match writeFile path value {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureServiceIdentityRecord : Str
+ensureServiceIdentityRecord = {
+  let serviceRootError = ensureRecordedText serviceRootRecordPath serviceRoot in
+  if serviceRootError != "" then
+    serviceRootError
+  else
+    ensureRecordedText serviceIdRecordPath serviceId
+}
+
+signalManagerReady : Str
+signalManagerReady =
+  if managerReadyPath == "" then
+    ""
+  else
+    match writeFile managerReadyPath managerReadyText {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureManagerReady : Str
+ensureManagerReady =
+  if workspaceRoot == "" then
+    "config-error:missing-workspace-root"
+  else if maxConcurrentChildren < 1 then
+    "config-error:max-concurrent-children-must-be-positive"
+  else if benchmarkEnabled then
+    if maxWaves < 1 then
+      "config-error:benchmark-max-waves-must-be-positive"
+    else if benchmarkCwd == "" then
+      "config-error:missing-benchmark-cwd"
+    else
+      match mkdirAll stateRootPath {
+        Ok created ->
+          let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+          if trace0 != "" then
+            trace0
+          else
+          let traceRestore = appendManagerTrace "bootstrap:restore-check" in
+          if traceRestore != "" then
+            traceRestore
+          else
+          let restoreError = restoreManagerSnapshotIfNeeded in
+          if restoreError != "" then
+            restoreError
+          else
+          let traceProject = appendManagerTrace "bootstrap:project-root-check" in
+          if traceProject != "" then
+            traceProject
+          else
+          let projectRootError = ensureProjectRootRecord in
+          if projectRootError != "" then
+            textConcat ["project-root-error:", projectRootError]
+          else
+            let traceServiceIdentity = appendManagerTrace "bootstrap:service-identity-check" in
+            if traceServiceIdentity != "" then
+              traceServiceIdentity
+            else
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
+            else
+              let traceWorkspace = appendManagerTrace "bootstrap:workspace-root-check" in
+              if traceWorkspace != "" then
+                traceWorkspace
+              else
+              match mkdirAll workspaceRoot {
+                Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
+                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
+                  if tracePolicy != "" then
+                    tracePolicy
+                  else
+                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+                  if policyError != "" then
+                    policyError
+                  else
+                    signalManagerReady,
+                Err message ->
+                  textConcat ["workspace-root-error:", message]
+              },
+        Err message ->
+          textConcat ["state-root-error:", message]
+      }
+  else
+    match mkdirAll stateRootPath {
+      Ok created ->
+        let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+        if trace0 != "" then
+          trace0
+        else
+        let traceRestore = appendManagerTrace "bootstrap:restore-check" in
+        if traceRestore != "" then
+          traceRestore
+        else
+        let restoreError = restoreManagerSnapshotIfNeeded in
+        if restoreError != "" then
+          restoreError
+        else
+          let traceProject = appendManagerTrace "bootstrap:project-root-check" in
+          if traceProject != "" then
+            traceProject
+          else
+          let projectRootError = ensureProjectRootRecord in
+          if projectRootError != "" then
+            textConcat ["project-root-error:", projectRootError]
+          else
+            let traceServiceIdentity = appendManagerTrace "bootstrap:service-identity-check" in
+            if traceServiceIdentity != "" then
+              traceServiceIdentity
+            else
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
+            else
+              let traceWorkspace = appendManagerTrace "bootstrap:workspace-root-check" in
+              if traceWorkspace != "" then
+                traceWorkspace
+              else
+              match mkdirAll workspaceRoot {
+                Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
+                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
+                  if tracePolicy != "" then
+                    tracePolicy
+                  else
+                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+                  if policyError != "" then
+                    policyError
+                  else
+                    signalManagerReady,
+                Err message ->
+                  textConcat ["workspace-root-error:", message]
+              },
+      Err message ->
+        textConcat ["state-root-error:", message]
+    }
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath prompt = [
+  codexBin,
+  "exec",
+  "--json",
+  "--cd",
+  workspaceRoot,
+  "-m",
+  codexModel,
+  "-c",
+  codexReasoningConfig,
+  "--skip-git-repo-check",
+  "--sandbox",
+  codexSandbox,
+  "--ephemeral",
+  "--output-schema",
+  schemaPath,
+  "-o",
+  reportPath,
+  prompt
+]
+
+plannerBenchmarkContextFor : Int -> Str -> Str
+plannerBenchmarkContextFor wave benchmarkSummary =
+  if benchmarkEnabled then
+    if benchmarkSummary == "" then
+      textJoin "\n" [
+        "Benchmark target is enabled for this manager.",
+        textConcat ["Current wave: ", encode wave, " of ", encode maxWaves],
+        "No benchmark checkpoint exists yet. Plan the first bounded wave toward beating the benchmark target."
+      ]
+    else
+      textJoin "\n" [
+        "Benchmark target is enabled for this manager.",
+        textConcat ["Current wave: ", encode wave, " of ", encode maxWaves],
+        textConcat ["Latest benchmark summary: ", benchmarkSummary],
+        "Plan the next bounded wave to close the remaining gap."
+      ]
+  else
+    "Benchmark target is disabled for this manager. Plan a bounded wave against the repo blueprint only."
+
+plannerPromptFor : Int -> Str -> Str
+plannerPromptFor wave benchmarkSummary =
+  textJoin "\n\n" [
+    textConcat ["Goal: ", goalText],
+    plannerBenchmarkContextFor wave benchmarkSummary,
+    textConcat ["Wave: ", encode wave],
+    textConcat ["Workspace root: ", workspaceRoot],
+    textConcat ["Mailbox summary:\n", mailboxSummaryText wave],
+    textConcat ["Planner policy:\n", plannerPolicyText],
+    "Return only schema-valid JSON."
+  ]
+
+plannerCommandFor : Int -> Str -> SwarmCommand
+plannerCommandFor wave benchmarkSummary =
+  commandSpec managerProjectRoot (codexCommand resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptFor wave benchmarkSummary))
+
+ensureObjective : Str
+ensureObjective =
+  if textListHas objectiveId (map objectiveIdOf (match objectives swarmStateRoot { Ok values -> values, Err message -> [] })) then
+    ""
+  else
+    match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+      Ok created -> "",
+      Err message -> message
+    }
+
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies =
+  if taskListHasId taskId (match tasks swarmStateRoot { Ok values -> values, Err message -> [] }) then
+    ""
+  else
+    match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+      Ok created -> "",
+      Err message -> message
+    }
+
+ensurePlannerTaskFor : Int -> Str
+ensurePlannerTaskFor wave =
+  ensureTask (plannerTaskIdForWave wave) (textConcat ["planner wave ", encode wave]) emptyTexts
+
+ensurePlannedTaskStep : EnsurePlanState -> PlannerTaskSpec -> EnsurePlanState
+ensurePlannedTaskStep state spec =
+  if state.error != "" then
+    state
+  else
+    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
+    EnsurePlanState {
+      error = taskError,
+      report = state.report
+    }
+
+ensurePlannedTasks : PlannerReport -> Str
+ensurePlannedTasks report =
+  (fold ensurePlannedTaskStep (EnsurePlanState { error = "", report = report }) report.tasks).error
+
+plannerTaskCountError : PlannerReport -> Str
+plannerTaskCountError report =
+  if length report.tasks > maxTaskLoops then
+    textConcat [
+      "planned-task-budget: Planner returned ",
+      encode (length report.tasks),
+      " tasks but the configured planner limit is ",
+      encode maxTaskLoops,
+      "."
+    ]
+  else
+    ""
+
+taskPromptText : Int -> PlannerReport -> PlannerTaskSpec -> Str
+taskPromptText wave report spec =
+  textJoin "\n\n" [
+    textConcat ["Goal: ", goalText],
+    textConcat ["Wave: ", encode wave],
+    textConcat ["Task: ", spec.taskId],
+    textConcat ["Assigned role: ", plannerTaskRoleLabel spec],
+    textConcat ["Coordination focus: ", plannerTaskCoordinationSummary spec],
+    textConcat ["Detail: ", spec.detail],
+    textConcat ["Prompt:\n", spec.taskPrompt],
+    textConcat ["Sibling branches:\n", plannerTaskSiblingSummaryText report spec.taskId],
+    textConcat ["Mailbox summary:\n", mailboxSummaryTextForReport wave report],
+    "Make repo changes, verify them, and write a schema-valid builder report."
+  ]
+
+writeTaskPromptFile : Int -> PlannerReport -> PlannerTaskSpec -> Str
+writeTaskPromptFile wave report spec =
+  match writeFile (taskPromptPath spec.taskId) (taskPromptText wave report spec) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+childLoopCommandArgs : PlannerTaskSpec -> [Str]
+childLoopCommandArgs spec = [
+  "env",
+  textConcat ["CLASP_LOOP_OBJECTIVE_JSON=", encode spec.taskId],
+  textConcat ["CLASP_LOOP_TASK_JSON=", encode spec.detail],
+  textConcat ["CLASP_LOOP_PROMPT_PATH_JSON=", encode (taskPromptPath spec.taskId)],
+  textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceRoot spec.taskId)],
+  textConcat ["CLASP_LOOP_STATE_ROOT_JSON=", encode (taskReportStateRoot spec.taskId)],
+  textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
+  textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
+  textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
+  textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
+  textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+  textConcat ["CLASP_LOOP_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
+  textConcat ["CLASP_SWARM_ACTOR=", actorName],
+  textConcat ["CLASP_MANAGER_TASK_ROLE_JSON=", encode (plannerTaskRoleLabel spec)],
+  textConcat ["CLASP_MANAGER_TASK_COORDINATION_JSON=", encode (plannerTaskCoordinationSummary spec)],
+  managerClaspcBin,
+  "run",
+  resolvedChildLoopProgramPath,
+  "--",
+  taskReportStateRoot spec.taskId
+]
+
+childLoopCommand : PlannerTaskSpec -> SwarmCommand
+childLoopCommand spec = commandSpec managerProjectRoot (childLoopCommandArgs spec)
+
+taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
+taskLaunchRecordCommand spec = commandSpec managerProjectRoot ["bash", "-lc", textConcat ["echo launch > ", taskWorkspaceAliasPath spec.taskId]]

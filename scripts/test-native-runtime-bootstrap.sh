@@ -55,6 +55,13 @@ CLASPC_BIN="$test_root/bin/fake-claspc" \
 CLASP_TEST_NATIVE_RUNTIME_NIX_LOG="$nix_log" \
 "$bash_bin" "$test_root/scripts/test-native-runtime.sh" >/dev/null
 
-grep -F "develop $test_root --command bash -lc" "$nix_log" >/dev/null
+grep -F "develop path:$test_root --command bash -lc" "$nix_log" >/dev/null
 grep -F 'if [[ "$nix_reentry" == "1" ]]; then' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'native_runtime_artifacts_ready()' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'rust_link_args=(-lm)' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'return 0' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'nativeImageSourceText' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+if grep -F '"$claspc_bin" native-image examples/compiler-parser.clasp' "$test_root/scripts/test-native-runtime.sh" >/dev/null 2>&1; then
+  printf 'test-native-runtime bootstrap unexpectedly compiles compiler-parser native images directly\n' >&2
+  exit 1
+fi

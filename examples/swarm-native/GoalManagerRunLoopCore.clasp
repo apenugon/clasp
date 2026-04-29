@@ -1,0 +1,490 @@
+module GoalManagerRunLoopCore
+
+import GoalManagerBootstrapSetup
+import GoalManagerBootstrapPlanner
+import GoalManagerBootstrapTasks
+import GoalManagerStateView
+import GoalManagerFinalize
+import GoalManagerTaskExecutionHelpers
+import GoalManagerTaskExecutionRuntime
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerBenchmarkCommand
+import GoalManagerPreludeProject
+import GoalManagerTaskReportIO
+import GoalManagerMailboxIO
+import GoalManagerWatch
+import GoalManagerCounters
+import GoalManagerPlannerMaterialize
+import GoalManagerPlanValidation
+import GoalManagerPlannerRoles
+import GoalManagerMailboxMessages
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+finalizeBenchmarkCheckpoint : PlannerReport -> Int -> Int -> BenchmarkCheckpoint -> Str
+finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint = {
+  let failureState = managerFailureState (plannerTaskIds report) wave benchmarkRuns in
+  let checkpointWriteError = writeBenchmarkCheckpoint checkpoint in
+  if checkpointWriteError != "" then
+    finalizeWithReport failureState (syntheticFailureReport "benchmark checkpoint write failed" checkpointWriteError)
+  else {
+    let mailboxError = refreshMailbox wave in
+    if mailboxError != "" then
+      finalizeWithReport failureState (syntheticFailureReport "mailbox write failed" mailboxError)
+    else {
+      let nextBenchmarkRuns = incrementManagerCounter benchmarkRuns in
+      if checkpoint.meetsTarget then
+        finalizeWithReport
+          (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
+          (managerPassReport report)
+      else if wave < maxWaves then {
+        let nextWave = incrementManagerCounter wave in
+        let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave nextBenchmarkRuns false in
+        let nextStateError = writeManagerState nextState in
+        if nextStateError != "" then
+          finalizeWithReport
+            (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+            (syntheticFailureReport "benchmark replan state write failed" nextStateError)
+        else
+          runPlanner
+      } else
+        finalizeWithReport
+          (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+          (benchmarkFailureReport checkpoint)
+    }
+  }
+}
+
+benchmarkCommandFailure : PlannerReport -> Int -> Int -> Str -> Str
+benchmarkCommandFailure report wave benchmarkRuns message =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport "benchmark command failed" message)
+
+benchmarkTimeoutFailure : PlannerReport -> Int -> Int -> Str
+benchmarkTimeoutFailure report wave benchmarkRuns =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport
+      "benchmark command timed out"
+      (textConcat
+        ["Benchmark command exceeded ", encode benchmarkTimeoutMs, "ms. See ", benchmarkHeartbeatPathFor wave, " and ", benchmarkStderrPathFor wave, "."]))
+
+finalizeBenchmarkProcessResult : PlannerReport -> Int -> Int -> ProcessResult -> Str
+finalizeBenchmarkProcessResult report wave benchmarkRuns process =
+  if process.exitCode != 0 then
+    benchmarkCommandFailure report wave benchmarkRuns process.stderr
+  else {
+    let signal = decode BenchmarkSignal process.stdout in
+    let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
+    if trace2 != "" then
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark trace write failed" trace2)
+    else {
+      let checkpoint = checkpointFromSignal wave signal in
+      let trace3 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":checkpoint-created"]) in
+      if trace3 != "" then
+        finalizeWithReport
+          (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+          (syntheticFailureReport "benchmark trace write failed" trace3)
+      else
+        finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
+    }
+  }
+
+runBenchmarkCheckpoint : PlannerReport -> Int -> Int -> Str
+runBenchmarkCheckpoint report wave benchmarkRuns = {
+  let benchmarkState =
+    managerStateFor
+      "benchmark-running"
+      "pending"
+      false
+      ""
+      (plannerTaskIds report)
+      wave
+      benchmarkRuns
+      false in
+  let stateError = writeManagerState benchmarkState in
+  if stateError != "" then
+    finalizeWithReport
+      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+      (syntheticFailureReport "benchmark state write failed" stateError)
+  else {
+    let trace0 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":start"]) in
+    if trace0 != "" then
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark trace write failed" trace0)
+    else
+      match runBenchmarkCommand wave benchmarkRuns {
+        Err message ->
+          if message == "timeout" then
+            benchmarkTimeoutFailure report wave benchmarkRuns
+          else
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark command failed to start" message),
+        Ok process -> {
+          let trace1 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":command-finished"]) in
+          if trace1 != "" then
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark trace write failed" trace1)
+          else
+            finalizeBenchmarkProcessResult report wave benchmarkRuns process
+        }
+  }
+  }
+}
+
+resumeBenchmarkCheckpoint : Int -> Int -> Str
+resumeBenchmarkCheckpoint wave benchmarkRuns =
+  let traceResumeStart =
+    appendManagerTrace
+      (textConcat ["resume-benchmark:start:wave=", encode wave, ":benchmark-runs=", encode benchmarkRuns]) in
+  if traceResumeStart != "" then
+    textConcat ["error:", traceResumeStart]
+  else
+  match readPlannerReportForWave wave {
+    Err message ->
+      plannerFailure "planner report missing during benchmark recovery" message,
+    Ok report ->
+      let traceReport = appendManagerTrace "resume-benchmark:planner-report-ready" in
+      if traceReport != "" then
+        textConcat ["error:", traceReport]
+      else
+      if fileExists (benchmarkCheckpointPathFor wave) then
+        let traceCheckpoint = appendManagerTrace "resume-benchmark:checkpoint-present" in
+        if traceCheckpoint != "" then
+          textConcat ["error:", traceCheckpoint]
+        else
+        match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+          Err message ->
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark checkpoint decode failed" message),
+          Ok checkpoint ->
+            finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
+        }
+      else if fileExists (benchmarkHeartbeatPathFor wave) then
+        let traceHeartbeat = appendManagerTrace "resume-benchmark:heartbeat-present" in
+        if traceHeartbeat != "" then
+          textConcat ["error:", traceHeartbeat]
+        else
+        match readFile (benchmarkHeartbeatPathFor wave) {
+          Err message ->
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark heartbeat read failed" message),
+          Ok heartbeatRaw ->
+            if benchmarkHeartbeatCompleted heartbeatRaw then
+              let traceCompleted = appendManagerTrace "resume-benchmark:heartbeat-completed" in
+              if traceCompleted != "" then
+                textConcat ["error:", traceCompleted]
+              else
+                finalizeBenchmarkProcessResult
+                  report
+                  wave
+                  benchmarkRuns
+                  (ProcessResult {
+                    exitCode = if benchmarkHeartbeatSucceeded heartbeatRaw then 0 else 1,
+                    stdout = readProcessOutputText (benchmarkStdoutPathFor wave),
+                    stderr = readProcessOutputText (benchmarkStderrPathFor wave)
+                  })
+            else
+              let traceAwait = appendManagerTrace "resume-benchmark:await-existing-heartbeat" in
+              if traceAwait != "" then
+                textConcat ["error:", traceAwait]
+              else
+              match pollBenchmarkResult
+                (benchmarkHeartbeatPathFor wave)
+                (benchmarkStdoutPathFor wave)
+                (benchmarkStderrPathFor wave)
+                benchmarkWatchPollMs
+                benchmarkTimeoutMs {
+                Err message ->
+                  if message == "timeout" then
+                    benchmarkTimeoutFailure report wave benchmarkRuns
+                  else
+                    finalizeWithReport
+                      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                      (syntheticFailureReport "benchmark await failed" message),
+                Ok processResult ->
+                  let traceAwaitFinished = appendManagerTrace "resume-benchmark:await-finished" in
+                  if traceAwaitFinished != "" then
+                    textConcat ["error:", traceAwaitFinished]
+                  else
+                    finalizeBenchmarkProcessResult report wave benchmarkRuns processResult
+              }
+        }
+      else
+        let traceRestart = appendManagerTrace "resume-benchmark:restarting-benchmark" in
+        if traceRestart != "" then
+          textConcat ["error:", traceRestart]
+        else
+        runBenchmarkCheckpoint report wave benchmarkRuns
+  }
+
+resumeCurrentWave : ManagerState -> Str
+resumeCurrentWave state =
+  if fileExists (plannerReportPathFor state.wave) then
+    continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
+  else
+    finalizeWithReport
+      (managerFailureState state.plannedTaskIds state.wave state.benchmarkRuns)
+      (syntheticFailureReport
+        "planner report missing during task recovery"
+        (textConcat ["Missing planner report for wave ", encode state.wave, " while resuming task execution."]))
+
+resumePlannerWave : ManagerState -> Str
+resumePlannerWave state =
+  if fileExists (plannerReportPathFor state.wave) then
+    continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
+  else
+    runPlanner
+
+runPlanner : Str
+runPlanner = {
+  let state = readManagerState in
+  let wave = state.wave in
+  let benchmarkSummary = latestBenchmarkSummaryText in
+  let reusablePlannerReport = plannerReportReusableFor wave benchmarkSummary in
+  let trace0 = appendBootstrapTrace (textConcat ["run-planner:wave-", encode wave, ":start"]) in
+  if trace0 != "" then
+    plannerFailure "manager bootstrap trace failed" trace0
+  else
+  let prepError = ensureManagerReady in
+  if prepError != "" then
+    plannerFailure "manager setup failed" prepError
+  else {
+    let trace1 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":manager-ready"]) in
+    if trace1 != "" then
+      plannerFailure "manager trace write failed" trace1
+    else {
+    let objectiveError = ensureObjective in
+    if objectiveError != "" then
+      plannerFailure "objective creation failed" objectiveError
+    else {
+      let trace2 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":objective-ready"]) in
+      if trace2 != "" then
+        plannerFailure "manager trace write failed" trace2
+      else {
+      let plannerTaskError = ensurePlannerTaskFor wave in
+      if plannerTaskError != "" then
+        plannerFailure "planner task creation failed" plannerTaskError
+      else {
+        let trace3 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":planner-task-ready"]) in
+        if trace3 != "" then
+          plannerFailure "manager trace write failed" trace3
+        else {
+        let plannerState =
+          managerStateFor "planner-running" "pending" false (plannerTaskIdForWave wave) emptyTexts wave state.benchmarkRuns false in
+        let stateError = writeManagerState plannerState in
+        if stateError != "" then
+          plannerFailure "planner state write failed" stateError
+        else if reusablePlannerReport then
+          {
+            let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":reuse-existing-report"]) in
+            if traceError != "" then
+              plannerFailure "manager trace write failed" traceError
+            else
+              continueWithPlan
+          }
+        else
+          match lease (plannerHandleForWave wave) {
+            Err message ->
+              plannerFailure "planner lease failed" message,
+            Ok leaseValue ->
+              match toolRun (plannerHandleForWave wave) (plannerCommandFor wave benchmarkSummary) {
+                Err message ->
+                  plannerFailure "planner run failed" message,
+                Ok runValue ->
+                  if fileExists (plannerReportPathFor wave) then
+                    match complete (plannerHandleForWave wave) {
+                      Err message ->
+                        plannerFailure "planner completion failed" message,
+                      Ok completedValue -> {
+                        let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
+                        if traceError != "" then
+                          plannerFailure "manager trace write failed" traceError
+                        else
+                          continueWithPlan
+                      }
+                    }
+                  else {
+                    let failed = fail (plannerHandleForWave wave) in
+                    plannerFailure "planner step failed before producing a durable report" runValue.stderrArtifactPath
+                  }
+              }
+          }
+      }
+    }
+  }
+    }
+      }
+    }
+}
+
+continueWithPlanResolved : Int -> Int -> Str -> Result PlannerReport -> Str
+continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
+  match reportResult {
+  Err message ->
+    plannerFailure "planner report decode failed" message,
+  Ok rawReport -> {
+    let trace0 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:start"]) in
+    if trace0 != "" then
+      plannerFailure "manager trace write failed" trace0
+    else {
+    let mailboxError = refreshMailbox wave in
+    if mailboxError != "" then
+      plannerFailure "mailbox write failed" mailboxError
+    else {
+    let validation = validatePlannerReport rawReport in
+    let trace1 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:validated"]) in
+    if trace1 != "" then
+      plannerFailure "manager trace write failed" trace1
+    else {
+    let report = materializePlannerReport wave rawReport in
+    let trace2 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:materialized"]) in
+    if trace2 != "" then
+      plannerFailure "manager trace write failed" trace2
+    else {
+    let failureState = managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true in
+    let validationWriteError = writePlanValidation validation in
+    if validationWriteError != "" then
+      finalizeWithReport failureState (syntheticFailureReport "plan validation write failed" validationWriteError)
+    else {
+      let trace3 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:validation-written"]) in
+      if trace3 != "" then
+        plannerFailure "manager trace write failed" trace3
+      else {
+      if validation.valid == false then
+        finalizeWithReport failureState (planValidationFailureReport validation)
+      else {
+        let plannerInputWriteError = writePlannerInputState (plannerInputStateFor wave benchmarkSummary) in
+        if plannerInputWriteError != "" then
+          finalizeWithReport failureState (syntheticFailureReport "planner input state write failed" plannerInputWriteError)
+        else {
+          let trace4 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:planner-input-written"]) in
+          if trace4 != "" then
+            plannerFailure "manager trace write failed" trace4
+          else {
+          let ensureTasksError = ensurePlannedTasks report in
+          if ensureTasksError != "" then
+            finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
+          else
+            {
+              let trace5 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:tasks-ready"]) in
+              if trace5 != "" then
+                plannerFailure "manager trace write failed" trace5
+              else
+                executeReadyTasks report wave benchmarkRuns
+            }
+          }
+        }
+      }
+      }
+    }
+  }
+  }
+    }
+    }
+  }
+}
+
+continueWithPlan : Str
+continueWithPlan = {
+  let state = readManagerState in
+  continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
+}
+
+executeReadyTasks : PlannerReport -> Int -> Int -> Str
+executeReadyTasks report wave benchmarkRuns = {
+  let plannedIds = plannerTaskIds report in
+  let failureState = managerStateFor "failed" "fail" false "" plannedIds wave benchmarkRuns true in
+  let mailboxError = refreshMailbox wave in
+  if mailboxError != "" then
+    finalizeWithReport failureState (syntheticFailureReport "mailbox write failed" mailboxError)
+  else
+  match tasks swarmStateRoot {
+    Err message ->
+      finalizeWithReport failureState (syntheticFailureReport "task lookup failed" message),
+    Ok rawTaskValues -> {
+      let objectiveTasks = filter taskInObjective rawTaskValues in
+      let reconciliation = reconcilePlannedTasks report wave objectiveTasks in
+      if reconciliation.error != "" then
+        finalizeWithReport failureState (syntheticFailureReport "planned task reconciliation failed" reconciliation.error)
+      else
+        match tasks swarmStateRoot {
+          Err message ->
+            finalizeWithReport failureState (syntheticFailureReport "task refresh failed" message),
+          Ok refreshedRawTaskValues ->
+            let refreshedTasks = filter taskInObjective refreshedRawTaskValues in
+            match ready objectiveRef {
+              Err message ->
+                finalizeWithReport failureState (syntheticFailureReport "ready queue lookup failed" message),
+              Ok readyTasks -> {
+                let launched = launchReadyTasks report wave refreshedTasks readyTasks reconciliation.runningTaskIds in
+                if launched.error != "" then
+                  finalizeWithReport failureState (syntheticFailureReport "planned task launch failed" launched.error)
+                else {
+                  let runningState =
+                    managerStateFor
+                      "task-running"
+                      "pending"
+                      false
+                      (firstTextOrEmpty launched.activeTaskIds)
+                      plannedIds
+                      wave
+                      benchmarkRuns
+                      false in
+                  let stateError = writeManagerState runningState in
+                  if stateError != "" then
+                    finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
+                  else if length launched.activeTaskIds > 0 then
+                    match sleepMsValue childLoopWatchPollMs {
+                      Err message ->
+                        finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
+                      Ok slept ->
+                        executeReadyTasks report wave benchmarkRuns
+                    }
+                  else
+                    match tasks swarmStateRoot {
+                      Err message ->
+                        finalizeWithReport failureState (syntheticFailureReport "final task refresh failed" message),
+                      Ok finalRawTaskValues -> {
+                        let finalTasks = filter taskInObjective finalRawTaskValues;
+                        let finalStatus = finalPlannedTaskStatus report finalTasks readyTasks plannedIds in
+                        if benchmarkEnabled then
+                          runBenchmarkCheckpoint report wave benchmarkRuns
+                        else if length finalStatus.completedIds == length report.tasks then
+                          finalizeWithReport
+                            (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
+                            (managerPassReport report)
+                        else if length finalStatus.failedIds > 0 then
+                          finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
+                        else
+                          if length finalStatus.pendingLaunchIds > 0 then
+                            match sleepMsValue childLoopWatchPollMs {
+                              Err message ->
+                                finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
+                              Ok slept ->
+                                executeReadyTasks report wave benchmarkRuns
+                            }
+                          else if length finalStatus.readyPlannedIds > 0 then
+                            executeReadyTasks report wave benchmarkRuns
+                          else
+                            finalizeWithReport failureState (plannedTaskStalledReport report)
+                      }
+                    }
+                }
+              }
+            }
+        }
+    }
+  }
+}

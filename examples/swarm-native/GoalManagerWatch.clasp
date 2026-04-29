@@ -1,0 +1,46 @@
+module GoalManagerWatch
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+watchedProcessResult : Result Str -> Result WatchedProcess
+watchedProcessResult value = match value {
+  Ok raw -> Ok (decode WatchedProcess raw),
+  Err message -> watchedProcessError message
+}
+
+readWatchedProcessPath : Str -> Result WatchedProcess
+readWatchedProcessPath path = match readFile path {
+  Ok raw -> Ok (decode WatchedProcess raw),
+  Err message -> watchedProcessError message
+}
+
+awaitWatchedProcessTimeout : Str -> Int -> Int -> Result WatchedProcess
+awaitWatchedProcessTimeout heartbeatPath pollMs timeoutMs =
+  watchedProcessResult (awaitWatchedProcessTimeoutRaw heartbeatPath pollMs timeoutMs)
+
+reconcileWatchedProcess : Str -> Result WatchedProcess
+reconcileWatchedProcess heartbeatPath =
+  watchedProcessResult (reconcileWatchedProcessRaw heartbeatPath)
+
+spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result WatchedProcess
+spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
+  watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
+
+sleepMsValue : Int -> Result Str
+sleepMsValue delayMs = sleepMsRaw delayMs
+
+childLoopStateError : Str -> Result ChildLoopState
+childLoopStateError message = Err message
+
+readChildLoopStatePath : Str -> Result ChildLoopState
+readChildLoopStatePath path = match readFile path {
+  Ok raw -> Ok (decode ChildLoopState raw),
+  Err message -> childLoopStateError message
+}

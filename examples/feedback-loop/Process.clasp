@@ -5,6 +5,7 @@ foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
+foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
 foreign handoffCommandRaw : Str -> Str -> Str -> Str -> Int -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "handoffCommandJson"
 foreign upgradeCommandRaw : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str = "upgradeCommandJson"
 
@@ -183,6 +184,10 @@ reconcile heartbeatPath = watchedProcessResult (reconcileWatchedProcessRaw heart
 await : Str -> Int -> Result WatchedProcess
 await heartbeatPath watchPollMs =
   watchedProcessResult (awaitWatchedProcessRaw heartbeatPath watchPollMs)
+
+awaitTimeout : Str -> Int -> Int -> Result WatchedProcess
+awaitTimeout heartbeatPath watchPollMs timeoutMs =
+  watchedProcessResult (awaitWatchedProcessTimeoutRaw heartbeatPath watchPollMs timeoutMs)
 
 handoff : HandoffCommandSpec -> Result WatchedProcess
 handoff spec =

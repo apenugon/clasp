@@ -8,35 +8,36 @@ results_root="$project_root/benchmarks/results"
 mkdir -p "$workspace_root"
 
 list_output="$(node "$project_root/benchmarks/run-benchmark.mjs" list)"
-printf '%s\n' "$list_output" | grep -q '^ts-lead-segment[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-lead-persistence[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-lead-segment[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-lead-rejection[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-lead-rejection[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-control-plane[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-control-plane[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^py-agent-escalation[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-durable-workflow[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-workflow-correctness[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-external-adaptation[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-external-adaptation[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-npm-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-npm-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-python-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-python-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-rust-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-rust-interop[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-interop-boundary[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-interop-boundary[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-secret-handling[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-secret-handling[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-authorization-data-access[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-authorization-data-access[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-audit-log[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^ts-audit-log[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-compiler-maintenance[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-syntax-compact[[:space:]]'
-printf '%s\n' "$list_output" | grep -q '^clasp-syntax-verbose[[:space:]]'
+grep -q '^ts-lead-segment[[:space:]]' <<<"$list_output"
+grep -q '^ts-lead-persistence[[:space:]]' <<<"$list_output"
+grep -q '^clasp-lead-segment[[:space:]]' <<<"$list_output"
+grep -q '^ts-lead-rejection[[:space:]]' <<<"$list_output"
+grep -q '^clasp-lead-rejection[[:space:]]' <<<"$list_output"
+grep -q '^ts-control-plane[[:space:]]' <<<"$list_output"
+grep -q '^clasp-control-plane[[:space:]]' <<<"$list_output"
+grep -q '^py-agent-escalation[[:space:]]' <<<"$list_output"
+grep -q '^clasp-durable-workflow[[:space:]]' <<<"$list_output"
+grep -q '^clasp-workflow-correctness[[:space:]]' <<<"$list_output"
+grep -q '^clasp-external-adaptation[[:space:]]' <<<"$list_output"
+grep -q '^clasp-legal-assistant-appbench[[:space:]]' <<<"$list_output"
+grep -q '^ts-external-adaptation[[:space:]]' <<<"$list_output"
+grep -q '^clasp-npm-interop[[:space:]]' <<<"$list_output"
+grep -q '^ts-npm-interop[[:space:]]' <<<"$list_output"
+grep -q '^clasp-python-interop[[:space:]]' <<<"$list_output"
+grep -q '^ts-python-interop[[:space:]]' <<<"$list_output"
+grep -q '^clasp-rust-interop[[:space:]]' <<<"$list_output"
+grep -q '^ts-rust-interop[[:space:]]' <<<"$list_output"
+grep -q '^clasp-interop-boundary[[:space:]]' <<<"$list_output"
+grep -q '^ts-interop-boundary[[:space:]]' <<<"$list_output"
+grep -q '^clasp-secret-handling[[:space:]]' <<<"$list_output"
+grep -q '^ts-secret-handling[[:space:]]' <<<"$list_output"
+grep -q '^clasp-authorization-data-access[[:space:]]' <<<"$list_output"
+grep -q '^ts-authorization-data-access[[:space:]]' <<<"$list_output"
+grep -q '^clasp-audit-log[[:space:]]' <<<"$list_output"
+grep -q '^ts-audit-log[[:space:]]' <<<"$list_output"
+grep -q '^clasp-compiler-maintenance[[:space:]]' <<<"$list_output"
+grep -q '^clasp-syntax-compact[[:space:]]' <<<"$list_output"
+grep -q '^clasp-syntax-verbose[[:space:]]' <<<"$list_output"
 
 check_incomplete_task() {
   local task_id="$1"
@@ -154,7 +155,7 @@ run_clasp_backend_static_verify() {
 }
 
 check_default_clasp_benchmark_path_requires_recovery() {
-  local task_id="clasp-lead-segment"
+  local task_id="clasp-secret-handling"
   local workspace="$workspace_root/$task_id-default-blocked"
   local output
 
@@ -163,7 +164,25 @@ check_default_clasp_benchmark_path_requires_recovery() {
     return 1
   fi
 
-  printf '%s\n' "$output" | grep -Fq 'rerun with --allow-bootstrap-recovery true'
+  grep -Fq 'rerun with --allow-bootstrap-recovery true' <<<"$output"
+}
+
+check_default_public_app_benchmark_path_supported() {
+  local bundle_path="$workspace_root/public-app-default-path.bundle.json"
+
+  rm -f "$bundle_path"
+  node "$project_root/benchmarks/run-benchmark.mjs" freeze app \
+    --count 1 \
+    --notes default-path-check \
+    --output "$bundle_path" >/dev/null
+
+  assert_file_exists "$bundle_path"
+  assert_contains "$bundle_path" '"taskSelection": "app"'
+  assert_contains "$bundle_path" '"taskId": "clasp-lead-priority"'
+  assert_contains "$bundle_path" '"taskId": "clasp-lead-rejection"'
+  assert_contains "$bundle_path" '"taskId": "clasp-lead-segment"'
+  assert_contains "$bundle_path" '"taskId": "clasp-external-adaptation"'
+  assert_contains "$bundle_path" '"taskId": "clasp-legal-assistant-appbench"'
 }
 
 check_fixture_seed_override() {
@@ -290,15 +309,15 @@ check_oracle_prompt_mode() {
   local ts_prepare_output
 
   clasp_prepare_output="$(run_benchmark_prepare clasp-lead-segment "$clasp_workspace" --mode oracle --allow-bootstrap-recovery true)"
-  printf '%s\n' "$clasp_prepare_output" | grep -Fq 'Prompt: '
-  printf '%s\n' "$clasp_prepare_output" | grep -Fq 'benchmarks/tasks/clasp-lead-segment/prompt.oracle.md'
+  grep -Fq 'Prompt: ' <<<"$clasp_prepare_output"
+  grep -Fq 'benchmarks/tasks/clasp-lead-segment/prompt.oracle.md' <<<"$clasp_prepare_output"
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$clasp_workspace/Shared/Lead.clasp"
   run_clasp_backend_static_verify "$clasp_workspace"
 
   ts_prepare_output="$(node "$project_root/benchmarks/run-benchmark.mjs" prepare ts-lead-segment --mode oracle --workspace "$ts_workspace")"
-  printf '%s\n' "$ts_prepare_output" | grep -Fq 'Prompt: '
-  printf '%s\n' "$ts_prepare_output" | grep -Fq 'benchmarks/tasks/ts-lead-segment/prompt.oracle.md'
+  grep -Fq 'Prompt: ' <<<"$ts_prepare_output"
+  grep -Fq 'benchmarks/tasks/ts-lead-segment/prompt.oracle.md' <<<"$ts_prepare_output"
 }
 
 check_persistence_prompt_modes() {
@@ -311,16 +330,16 @@ check_persistence_prompt_modes() {
   local latest_result
 
   raw_output="$(run_benchmark_prepare ts-lead-persistence "$raw_workspace" --mode raw-repo)"
-  printf '%s\n' "$raw_output" | grep -Fq 'Prompt: '
-  printf '%s\n' "$raw_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.raw.md'
+  grep -Fq 'Prompt: ' <<<"$raw_output"
+  grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.raw.md' <<<"$raw_output"
 
   hinted_output="$(run_benchmark_prepare ts-lead-persistence "$hinted_workspace" --mode file-hinted)"
-  printf '%s\n' "$hinted_output" | grep -Fq 'Prompt: '
-  printf '%s\n' "$hinted_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.file-hinted.md'
+  grep -Fq 'Prompt: ' <<<"$hinted_output"
+  grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.file-hinted.md' <<<"$hinted_output"
 
   oracle_output="$(run_benchmark_prepare ts-lead-persistence "$oracle_workspace" --mode oracle)"
-  printf '%s\n' "$oracle_output" | grep -Fq 'Prompt: '
-  printf '%s\n' "$oracle_output" | grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.oracle.md'
+  grep -Fq 'Prompt: ' <<<"$oracle_output"
+  grep -Fq 'benchmarks/tasks/ts-lead-persistence/prompt.oracle.md' <<<"$oracle_output"
 
   cp "$project_root/examples/lead-app-ts/src/server/main.ts" "$oracle_workspace/src/server/main.ts"
   cp "$project_root/examples/lead-app-ts/src/server/store.ts" "$oracle_workspace/src/server/store.ts"
@@ -342,7 +361,7 @@ check_nested_clasp_benchmark_prep() {
   local task_id="clasp-lead-priority"
   local workspace="$workspace_root/$task_id"
 
-  run_benchmark_prepare "$task_id" "$workspace" --allow-bootstrap-recovery true >/dev/null
+  run_benchmark_prepare "$task_id" "$workspace" >/dev/null
 
   assert_file_exists "$workspace/benchmark-prep/Main.context.json"
   assert_file_exists "$workspace/benchmark-prep/Main.air.json"
@@ -358,6 +377,7 @@ check_nested_clasp_benchmark_prep() {
 }
 
 check_default_clasp_benchmark_path_requires_recovery
+check_default_public_app_benchmark_path_supported
 check_incomplete_task ts-lead-segment
 check_incomplete_task ts-lead-persistence
 check_incomplete_task clasp-lead-segment

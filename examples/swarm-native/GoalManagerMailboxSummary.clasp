@@ -1,0 +1,52 @@
+module GoalManagerMailboxSummary
+
+import GoalManagerMailboxIO
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+
+mailboxMessageLine : SwarmMailboxMessage -> Str
+mailboxMessageLine message =
+  if message.taskId == "" then
+    textConcat ["[", message.source, " wave ", encode message.wave, "] ", message.summary]
+  else
+    textConcat ["[", message.source, " ", message.taskId, " wave ", encode message.wave, "] ", message.summary]
+
+mailboxMessageLines : SwarmMailboxMessage -> [Str]
+mailboxMessageLines message = {
+  let mut rendered = [mailboxMessageLine message];
+  for detail in message.details {
+    if detail == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat ["  - ", detail]];
+      rendered
+    }
+  };
+  rendered
+}
+
+renderMailboxMessages : [SwarmMailboxMessage] -> [Str]
+renderMailboxMessages messages = {
+  let mut rendered = emptyTexts;
+  for message in messages {
+    rendered = append rendered (mailboxMessageLines message);
+    rendered
+  };
+  rendered
+}
+
+mailboxSummaryText : Int -> Str
+mailboxSummaryText wave =
+  if fileExists mailboxPath then {
+    let messages = readMailboxMessagesPath mailboxPath in
+    if length messages == 0 then
+      "No prior swarm mailbox messages are available yet."
+    else
+      textJoin "\n" (renderMailboxMessages messages)
+  }
+  else
+    "No prior swarm mailbox messages are available yet."
+
+mailboxSummaryTextForReport : Int -> PlannerReport -> Str
+mailboxSummaryTextForReport wave report = mailboxSummaryText wave

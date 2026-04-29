@@ -1,0 +1,66 @@
+module GoalManagerPlannerRoles
+
+import GoalManagerPlannerIO
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+plannerTaskRoleLabel : PlannerTaskSpec -> Str
+plannerTaskRoleLabel spec =
+  if spec.role == "" then
+    defaultPlannerTaskRole spec.taskId spec.detail
+  else
+    spec.role
+
+plannerTaskCoordinationFocusValues : PlannerTaskSpec -> [Str]
+plannerTaskCoordinationFocusValues spec =
+  if length spec.coordinationFocus == 0 then
+    [plannerTaskRoleLabel spec]
+  else
+    spec.coordinationFocus
+
+plannerTaskCoordinationSummary : PlannerTaskSpec -> Str
+plannerTaskCoordinationSummary spec = textJoin ", " (plannerTaskCoordinationFocusValues spec)
+
+annotatedPlannerTaskDetail : PlannerTaskSpec -> Str
+annotatedPlannerTaskDetail spec =
+  textConcat [
+    "[role=",
+    plannerTaskRoleLabel spec,
+    "; focus=",
+    plannerTaskCoordinationSummary spec,
+    "] ",
+    spec.detail
+  ]
+
+plannerTaskOverviewLine : PlannerTaskSpec -> Str
+plannerTaskOverviewLine spec =
+  textConcat [
+    "- ",
+    spec.taskId,
+    " [role ",
+    plannerTaskRoleLabel spec,
+    "; focus ",
+    plannerTaskCoordinationSummary spec,
+    "]: ",
+    spec.detail
+  ]
+
+plannerTaskSiblingSummaryText : PlannerReport -> Str -> Str
+plannerTaskSiblingSummaryText report taskId = {
+  let mut lines = emptyTexts;
+  for taskSpec in report.tasks {
+    if taskSpec.taskId == taskId then
+      lines
+    else {
+      lines = append lines [plannerTaskOverviewLine taskSpec];
+      lines
+    }
+  };
+  if length lines == 0 then
+    "No sibling branches are planned for this wave."
+  else
+    textJoin "\n" lines
+}

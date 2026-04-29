@@ -1,0 +1,201 @@
+module GoalManagerBootstrapSetup
+
+import GoalManagerStateRuntime
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicyFile path contents =
+  if fileExists path then
+    ""
+  else
+    match writeFile path contents {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureProjectRootRecord : Str
+ensureProjectRootRecord =
+  if recordedProjectRoot != "" then
+    ""
+  else
+    match writeFile projectRootRecordPath managerProjectRoot {
+      Ok written -> "",
+        Err message -> message
+    }
+
+ensureRecordedText : Str -> Str -> Str
+ensureRecordedText path value =
+  if value == "" then
+    ""
+  else if readTextOrEmpty path == value then
+    ""
+  else
+    match writeFile path value {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureServiceIdentityRecord : Str
+ensureServiceIdentityRecord = {
+  let serviceRootError = ensureRecordedText serviceRootRecordPath serviceRoot in
+  if serviceRootError != "" then
+    serviceRootError
+  else
+    ensureRecordedText serviceIdRecordPath serviceId
+}
+
+signalManagerReady : Str
+signalManagerReady =
+  if managerReadyPath == "" then
+    ""
+  else
+    match writeFile managerReadyPath managerReadyText {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensureManagerReady : Str
+ensureManagerReady =
+  if workspaceRoot == "" then
+    "config-error:missing-workspace-root"
+  else if maxTaskLoops < 1 then
+    "config-error:max-tasks-must-be-positive"
+  else if plannerTaskMaxRuns < 1 then
+    "config-error:planner-max-runs-must-be-positive"
+  else if childMaxAttempts < 1 then
+    "config-error:child-max-attempts-must-be-positive"
+  else if maxConcurrentChildren < 1 then
+    "config-error:max-concurrent-children-must-be-positive"
+  else if objectiveTaskBudget < configuredObjectiveBudgetFloor then
+    textConcat [
+      "config-error:objective-task-budget-too-small:configured=",
+      encode objectiveTaskBudget,
+      ":required=",
+      encode configuredObjectiveBudgetFloor
+    ]
+  else if objectiveRunBudget < configuredObjectiveBudgetFloor then
+    textConcat [
+      "config-error:objective-run-budget-too-small:configured=",
+      encode objectiveRunBudget,
+      ":required=",
+      encode configuredObjectiveBudgetFloor
+    ]
+  else if benchmarkEnabled then
+    if maxWaves < 1 then
+      "config-error:benchmark-max-waves-must-be-positive"
+    else if benchmarkCwd == "" then
+      "config-error:missing-benchmark-cwd"
+    else
+      match mkdirAll stateRootPath {
+        Ok created ->
+          let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+          if trace0 != "" then
+            trace0
+          else
+          let traceRestore = appendManagerTrace "bootstrap:restore-check" in
+          if traceRestore != "" then
+            traceRestore
+          else
+          let restoreError = restoreManagerSnapshotIfNeeded in
+          if restoreError != "" then
+            restoreError
+          else
+          let traceProject = appendManagerTrace "bootstrap:project-root-check" in
+          if traceProject != "" then
+            traceProject
+          else
+          let projectRootError = ensureProjectRootRecord in
+          if projectRootError != "" then
+            textConcat ["project-root-error:", projectRootError]
+          else
+            let traceServiceIdentity = appendManagerTrace "bootstrap:service-identity-check" in
+            if traceServiceIdentity != "" then
+              traceServiceIdentity
+            else
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
+            else
+              let traceWorkspace = appendManagerTrace "bootstrap:workspace-root-check" in
+              if traceWorkspace != "" then
+                traceWorkspace
+              else
+              match mkdirAll workspaceRoot {
+                Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
+                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
+                  if tracePolicy != "" then
+                    tracePolicy
+                  else
+                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+                  if policyError != "" then
+                    policyError
+                  else
+                    signalManagerReady,
+                Err message ->
+                  textConcat ["workspace-root-error:", message]
+              },
+        Err message ->
+          textConcat ["state-root-error:", message]
+      }
+  else
+    match mkdirAll stateRootPath {
+      Ok created ->
+        let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+        if trace0 != "" then
+          trace0
+        else
+        let traceRestore = appendManagerTrace "bootstrap:restore-check" in
+        if traceRestore != "" then
+          traceRestore
+        else
+        let restoreError = restoreManagerSnapshotIfNeeded in
+        if restoreError != "" then
+          restoreError
+        else
+          let traceProject = appendManagerTrace "bootstrap:project-root-check" in
+          if traceProject != "" then
+            traceProject
+          else
+          let projectRootError = ensureProjectRootRecord in
+          if projectRootError != "" then
+            textConcat ["project-root-error:", projectRootError]
+          else
+            let traceServiceIdentity = appendManagerTrace "bootstrap:service-identity-check" in
+            if traceServiceIdentity != "" then
+              traceServiceIdentity
+            else
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
+            else
+              let traceWorkspace = appendManagerTrace "bootstrap:workspace-root-check" in
+              if traceWorkspace != "" then
+                traceWorkspace
+              else
+              match mkdirAll workspaceRoot {
+                Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
+                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
+                  if tracePolicy != "" then
+                    tracePolicy
+                  else
+                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+                  if policyError != "" then
+                    policyError
+                  else
+                    signalManagerReady,
+                Err message ->
+                  textConcat ["workspace-root-error:", message]
+              },
+      Err message ->
+        textConcat ["state-root-error:", message]
+    }

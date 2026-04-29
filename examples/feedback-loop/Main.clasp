@@ -101,10 +101,10 @@ codexBin : Str
 codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.4"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
 
 codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
@@ -117,6 +117,21 @@ watchModeEnabled = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Ok raw -> true,
   Err message -> false
 }
+
+verificationTier : Str
+verificationTier = readEnvText "CLASP_LOOP_VERIFICATION_TIER_JSON" "focused"
+
+focusedVerifyCommands : [Str]
+focusedVerifyCommands = readEnvTextList "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON" emptyTexts
+
+fullVerifyCommand : Str
+fullVerifyCommand = readEnvText "CLASP_LOOP_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
+
+focusedVerifierTimeoutMs : Int
+focusedVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FOCUSED_VERIFIER_TIMEOUT_MS_JSON" 480000
+
+fullVerifierTimeoutMs : Int
+fullVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FULL_VERIFIER_TIMEOUT_MS_JSON" 0
 
 maxAttempts : Int
 maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
@@ -408,6 +423,54 @@ resumeStep step = match awaitStep step {
     failedProcessResult message
 }
 
+terminateWatchedProcess : WatchedProcess -> Str
+terminateWatchedProcess process =
+  if process.pid < 1 then
+    ""
+  else {
+    let killed = runProcess launcherCwd [
+      "bash",
+      "-lc",
+      textConcat [
+        "kill -TERM ",
+        encode process.pid,
+        " 2>/dev/null || true; pkill -TERM -P ",
+        encode process.pid,
+        " 2>/dev/null || true"
+      ]
+    ] in
+    if killed.exitCode == 0 then
+      ""
+    else
+      killed.stderr
+  }
+
+resumeStepWithTimeout : StepHandle -> Int -> ProcessResult
+resumeStepWithTimeout step timeoutMs =
+  if timeoutMs < 1 then
+    resumeStep step
+  else
+    match awaitTimeout step.heartbeatPath watchPollMs timeoutMs {
+      Ok process ->
+        processResultFromStep step process.exitCode,
+      Err message ->
+        let reconciled = reconcileStep step in
+        let killed = match reconciled {
+          Ok process -> terminateWatchedProcess process,
+          Err reconcileMessage -> reconcileMessage
+        } in
+        ProcessResult {
+          exitCode = 124,
+          stdout = readTextOrEmpty step.stdoutPath,
+          stderr = textJoin "\n" [
+            textConcat ["timed out after ", encode timeoutMs, "ms"],
+            message,
+            killed,
+            readTextOrEmpty step.stderrPath
+          ]
+        }
+    }
+
 launchStepAndAwait : StepHandle -> [Str] -> LoopState -> ProcessResult
 launchStepAndAwait step command runningState =
   match spawnStep step command {
@@ -419,6 +482,19 @@ launchStepAndAwait step command runningState =
         failedProcessResult stateError
       else
         resumeStep step
+  }
+
+launchStepAndAwaitWithTimeout : StepHandle -> [Str] -> LoopState -> Int -> ProcessResult
+launchStepAndAwaitWithTimeout step command runningState timeoutMs =
+  match spawnStep step command {
+    Err message ->
+      failedProcessResult message,
+    Ok process ->
+      let stateError = writeLoopState runningState in
+      if stateError != "" then
+        failedProcessResult stateError
+      else
+        resumeStepWithTimeout step timeoutMs
   }
 
 ensureStepReport : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
@@ -438,6 +514,30 @@ ensureStepReport step command launchingState runningState =
       failedProcessResult launchingStateError
     else {
       let launched = launchStepAndAwait step command runningState in
+      if fileExists step.reportPath then
+        successProcessResult step
+      else
+        launched
+    }
+  }
+
+ensureStepReportWithTimeout : StepHandle -> [Str] -> LoopState -> LoopState -> Int -> ProcessResult
+ensureStepReportWithTimeout step command launchingState runningState timeoutMs =
+  if fileExists step.reportPath then
+    successProcessResult step
+  else if fileExists step.heartbeatPath then {
+    let reconciled = reconcileStep step in
+    let resumed = resumeStepWithTimeout step timeoutMs in
+    if fileExists step.reportPath then
+      successProcessResult step
+    else
+      resumed
+  } else {
+    let launchingStateError = writeLoopState launchingState in
+    if launchingStateError != "" then
+      failedProcessResult launchingStateError
+    else {
+      let launched = launchStepAndAwaitWithTimeout step command runningState timeoutMs in
       if fileExists step.reportPath then
         successProcessResult step
       else
@@ -591,6 +691,47 @@ verifierPolicySection attempt =
     textConcat ["Current verifier policy from ", verifierPolicyPath, ":"],
     readPolicyText verifierPolicyPath defaultVerifierPolicyText
   ]
+
+isFullVerificationTier : Bool
+isFullVerificationTier =
+  if verificationTier == "full" then
+    true
+  else
+    false
+
+verifierTimeoutMs : Int
+verifierTimeoutMs =
+  if isFullVerificationTier then
+    fullVerifierTimeoutMs
+  else
+    focusedVerifierTimeoutMs
+
+focusedVerifyCommandText : Str
+focusedVerifyCommandText =
+  if length focusedVerifyCommands == 0 then
+    "- No focused commands were supplied. Run the narrowest task-specific checks you can justify."
+  else
+    textConcat ["- ", textJoin "\n- " focusedVerifyCommands]
+
+verifierVerificationInstructions : Str
+verifierVerificationInstructions =
+  if isFullVerificationTier then
+    textJoin "\n" [
+      "Verification tier: full.",
+      textConcat ["Run the full signoff command before reporting pass: ", fullVerifyCommand],
+      "If full signoff fails or times out, return a fail report with the failing surface and the last useful output.",
+      textConcat ["Verifier timeout budget ms: ", encode verifierTimeoutMs, " (0 means no loop-enforced timeout)."]
+    ]
+  else
+    textJoin "\n" [
+      "Verification tier: focused.",
+      "Do not run `bash scripts/verify-all.sh` for this focused branch. Full verify-all is reserved for integration/signoff tasks.",
+      "Run bounded task-focused checks and return a durable verifier report even if confidence is incomplete.",
+      "Prefer fast, local evidence over broad repository-wide signoff; classify any skipped slow checks as follow-up.",
+      textConcat ["Verifier timeout budget ms: ", encode verifierTimeoutMs, "."],
+      "Focused verification commands supplied by the manager:",
+      focusedVerifyCommandText
+    ]
 
 loopState : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> LoopState
 loopState attempt phase verdict completed builderRuns verifierRuns healthy needsAttention attentionReason final =
@@ -774,16 +915,30 @@ baselineExcludeFlags =
     "--exclude=*/.clasp-loops ",
     "--exclude=.clasp-swarm ",
     "--exclude=*/.clasp-swarm ",
+    "--exclude=.clasp-task-workspaces ",
+    "--exclude=*/.clasp-task-workspaces ",
     "--exclude=.clasp-test-tmp ",
     "--exclude=*/.clasp-test-tmp ",
     "--exclude=.clasp-verify-tmp ",
     "--exclude=*/.clasp-verify-tmp ",
+    "--exclude=.codex ",
+    "--exclude=*/.codex ",
+    "--exclude=benchmarks/bundles ",
+    "--exclude=*/benchmarks/bundles ",
+    "--exclude=benchmarks/results ",
+    "--exclude=*/benchmarks/results ",
+    "--exclude=benchmarks/workspaces ",
+    "--exclude=*/benchmarks/workspaces ",
     "--exclude=dist ",
     "--exclude=*/dist ",
     "--exclude=dist-newstyle ",
     "--exclude=*/dist-newstyle ",
+    "--exclude=libclasp_runtime.a ",
+    "--exclude=*/libclasp_runtime.a ",
     "--exclude=result ",
     "--exclude=*/result ",
+    "--exclude=run ",
+    "--exclude=*/run ",
     "--exclude=runtime/target ",
     "--exclude=*/runtime/target ",
     "--exclude=node_modules ",
@@ -796,8 +951,14 @@ baselineExcludeFlags =
     "--exclude=*/feedback-loop-state ",
     "--exclude=swarm-native-state ",
     "--exclude=*/swarm-native-state ",
+    "--exclude=trap ",
+    "--exclude=*/trap ",
     "--exclude=help ",
     "--exclude=*/help ",
+    "--exclude=--help ",
+    "--exclude=*/--help ",
+    "--exclude=workspace.txt ",
+    "--exclude=*/workspace.txt ",
     "--exclude=src/native-verify-cache ",
     "--exclude=*/src/native-verify-cache "
   ]
@@ -861,7 +1022,7 @@ verifierPrompt attempt =
     textConcat ["Read the task file at ", taskFile, "."],
     "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
     verifierPolicySection attempt,
-    "Run bash scripts/verify-all.sh before sign-off.",
+    verifierVerificationInstructions,
     textConcat ["Attempt: ", encode attempt]
   ]
 
@@ -1038,11 +1199,19 @@ runVerifierPhase attempt =
                 textConcat ["state-error:", commandStateError]
               else {
                 let verifierRun =
-                  runStepDirect
-                    verifierStep
-                    verifierCommand
-                    (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
-                    (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
+                  if watchModeEnabled then
+                    ensureStepReportWithTimeout
+                      verifierStep
+                      verifierCommand
+                      (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
+                      (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false)
+                      verifierTimeoutMs
+                  else
+                    runStepDirect
+                      verifierStep
+                      verifierCommand
+                      (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
+                      (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
                 if fileExists verifierStep.reportPath then {
                   let report = readVerifierReport attempt in
                   if report.verdict == "pass" then

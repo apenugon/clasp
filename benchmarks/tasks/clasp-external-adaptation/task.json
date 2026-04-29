@@ -3,6 +3,7 @@
   "title": "Repair bounded external-objective adaptation in the Clasp lead demo",
   "suite": "external-objective-adaptation",
   "language": "clasp",
+  "defaultBenchmarkPath": true,
   "repo": "repo",
   "entry": "Main.clasp",
   "prompt": "prompt.md",

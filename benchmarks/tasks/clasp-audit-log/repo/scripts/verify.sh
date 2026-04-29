@@ -21,7 +21,7 @@ run_verify() {
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
   run_verify
 else
-  nix develop "$project_root" --command bash -lc "
+  bash "$project_root/benchmarks/run-in-nix-or-current.sh" "$project_root" bash -lc "
     set -euo pipefail
     export CLASP_PROJECT_ROOT=\"$project_root\"
     export CLASP_BENCHMARK_WORKSPACE=\"$workspace_root\"

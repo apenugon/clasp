@@ -1,0 +1,47 @@
+module GoalManagerMailboxIO
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+readMailboxMessagesPath : Str -> [SwarmMailboxMessage]
+readMailboxMessagesPath path = match readFile path {
+  Ok raw -> decode [SwarmMailboxMessage] raw,
+  Err message -> emptySwarmMailboxMessages
+}
+
+writeMailboxMessages : [SwarmMailboxMessage] -> Str
+writeMailboxMessages messages = match writeFile mailboxPath (encode messages) {
+  Ok written -> "",
+  Err message -> message
+}
+
+appendMailboxMessages : [SwarmMailboxMessage] -> Str
+appendMailboxMessages messages =
+  if length messages == 0 then
+    ""
+  else
+    writeMailboxMessages (append (readMailboxMessagesPath mailboxPath) messages)
+
+appendSwarmMailboxMessages : [SwarmMailboxMessage] -> [SwarmMailboxMessage] -> [SwarmMailboxMessage]
+appendSwarmMailboxMessages left right = append left right
+
+writeFeedback : VerifierReport -> Str
+writeFeedback report = match writeFile feedbackPath (encode report) {
+  Ok written -> "",
+  Err message -> message
+}
+
+writePlanValidation : PlanValidationResult -> Str
+writePlanValidation result = match writeFile planValidationPath (encode result) {
+  Ok written -> "",
+  Err message -> message
+}
+
+writePlannerInputState : PlannerInputState -> Str
+writePlannerInputState state = match writeFile plannerInputPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}

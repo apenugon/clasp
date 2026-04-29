@@ -1,0 +1,46 @@
+module GoalManagerPlannerMaterialize
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+plannerTaskIdOf : PlannerTaskSpec -> Str
+plannerTaskIdOf task = task.taskId
+
+plannerTaskIds : PlannerReport -> [Str]
+plannerTaskIds report = map plannerTaskIdOf report.tasks
+
+materializePlannerTask : Int -> PlannerTaskSpec -> PlannerTaskSpec
+materializePlannerTask wave spec = {
+  let mut renderedDependencies = emptyTexts;
+  for dependency in spec.dependencies {
+    renderedDependencies = append renderedDependencies [materializeTaskId wave dependency];
+    renderedDependencies
+  };
+  PlannerTaskSpec {
+    taskId = materializeTaskId wave spec.taskId,
+    role = spec.role,
+    detail = spec.detail,
+    dependencies = renderedDependencies,
+    taskPrompt = spec.taskPrompt,
+    coordinationFocus = spec.coordinationFocus
+  }
+}
+
+materializePlannerReport : Int -> PlannerReport -> PlannerReport
+materializePlannerReport wave report = {
+  let mut renderedTasks = emptyPlannerTasks;
+  for taskSpec in report.tasks {
+    renderedTasks = append renderedTasks [materializePlannerTask wave taskSpec];
+    renderedTasks
+  };
+  PlannerReport {
+    objectiveSummary = report.objectiveSummary,
+    strategy = report.strategy,
+    tasks = renderedTasks,
+    testsRun = report.testsRun,
+    residualRisks = report.residualRisks
+  }
+}

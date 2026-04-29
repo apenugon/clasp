@@ -1,0 +1,349 @@
+module GoalManagerConfig
+
+import GoalManagerCounters
+import GoalManagerTypes
+import Swarm
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
+foreign sleepMsRaw : Int -> Result Str = "sleepMs"
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-goal-manager-state"
+  else
+    pathJoin argv
+
+swarmStateRoot : SwarmRoot
+swarmStateRoot = swarmRoot stateRootPath
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> decode [Str] raw,
+  Err message -> fallback
+}
+
+readEnvBool : Str -> Bool -> Bool
+readEnvBool name fallback = match envVar name {
+  Ok raw -> decode Bool raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> decode Int raw,
+  Err message -> fallback
+}
+
+goalText : Str
+goalText =
+  readEnvText
+    "CLASP_MANAGER_GOAL_JSON"
+    "Improve Clasp by planning bounded native compiler/runtime/language tasks and closing them with ordinary Clasp loops."
+
+objectiveId : Str
+objectiveId = readEnvText "CLASP_MANAGER_OBJECTIVE_ID_JSON" "improve-clasp"
+
+managerProgramPath : Str
+managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.clasp"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+taskWorkspaceBaseRoot : Str
+taskWorkspaceBaseRoot =
+  readEnvText
+    "CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON"
+    (pathJoin ["/tmp", textConcat ["clasp-goal-manager-workspaces-", textFingerprint64Hex stateRootPath]])
+
+codexBin : Str
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+
+managerClaspcBin : Str
+managerClaspcBin = readEnvText "CLASP_MANAGER_CLASPC_BIN_JSON" "claspc"
+
+currentExecutablePath : Str
+currentExecutablePath = readEnvText "CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON" ""
+
+childLoopProgramPath : Str
+childLoopProgramPath = readEnvText "CLASP_MANAGER_CHILD_LOOP_JSON" "examples/feedback-loop/Main.clasp"
+
+plannerSchemaPath : Str
+plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
+
+codexModel : Str
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.4"
+
+codexReasoning : Str
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
+
+codexSandbox : Str
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
+
+childLoopWatchPollMs : Int
+childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 1000
+}
+
+maxTaskLoops : Int
+maxTaskLoops = match envVar "CLASP_MANAGER_MAX_TASKS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 4
+}
+
+plannerTaskMaxRuns : Int
+plannerTaskMaxRuns = readEnvInt "CLASP_MANAGER_PLANNER_MAX_RUNS_JSON" 3
+
+plannerTimeoutMs : Int
+plannerTimeoutMs = readEnvInt "CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON" 300000
+
+benchmarkCommand : [Str]
+benchmarkCommand = match envVar "CLASP_MANAGER_BENCHMARK_COMMAND_JSON" {
+  Ok raw -> decode [Str] raw,
+  Err message -> emptyTexts
+}
+
+benchmarkEnabled : Bool
+benchmarkEnabled = length benchmarkCommand > 0
+
+benchmarkWatchPollMs : Int
+benchmarkWatchPollMs = match envVar "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 250
+}
+
+benchmarkTimeoutMs : Int
+benchmarkTimeoutMs = match envVar "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 3600000
+}
+
+maxWaves : Int
+maxWaves = match envVar "CLASP_MANAGER_MAX_WAVES_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 1
+}
+
+configuredPlannerWaveCount : Int
+configuredPlannerWaveCount =
+  if benchmarkEnabled then
+    if maxWaves < 1 then
+      1
+    else
+      maxWaves
+  else
+    1
+
+configuredObjectiveBudgetFloor : Int
+configuredObjectiveBudgetFloor =
+  repeatAdd configuredPlannerWaveCount (incrementManagerCounter maxTaskLoops)
+
+objectiveTaskBudget : Int
+objectiveTaskBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 64
+}
+
+objectiveRunBudget : Int
+objectiveRunBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 64
+}
+
+taskLeaseTimeoutMs : Int
+taskLeaseTimeoutMs = match envVar "CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 3600000
+}
+
+childMaxAttempts : Int
+childMaxAttempts = match envVar "CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 3
+}
+
+childReportSettlePolls : Int
+childReportSettlePolls = readEnvInt "CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON" 3
+
+maxConcurrentChildren : Int
+maxConcurrentChildren = match envVar "CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 2
+}
+
+taskWorkspaceCacheMaxMb : Int
+taskWorkspaceCacheMaxMb = readEnvInt "CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON" 4096
+
+taskBaselineCacheMaxMb : Int
+taskBaselineCacheMaxMb = readEnvInt "CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON" 2048
+
+feedbackLoopBaselineCacheMaxMb : Int
+feedbackLoopBaselineCacheMaxMb = readEnvInt "CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON" 768
+
+childLoopBaselineCacheTotalMaxMb : Int
+childLoopBaselineCacheTotalMaxMb = readEnvInt "CLASP_MANAGER_CHILD_LOOP_BASELINE_CACHE_TOTAL_MAX_MB_JSON" 1024
+
+childLoopXdgCacheTotalMaxMb : Int
+childLoopXdgCacheTotalMaxMb = readEnvInt "CLASP_MANAGER_CHILD_LOOP_XDG_CACHE_TOTAL_MAX_MB_JSON" 512
+
+managerArtifactsCacheMaxMb : Int
+managerArtifactsCacheMaxMb = readEnvInt "CLASP_MANAGER_ARTIFACTS_CACHE_MAX_MB_JSON" 1024
+
+managerXdgCacheMaxMb : Int
+managerXdgCacheMaxMb = readEnvInt "CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON" 1024
+
+childFocusedVerifyCommands : Str
+childFocusedVerifyCommands =
+  readEnvText
+    "CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON"
+    "bash scripts/test-goal-manager-fast.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-task-manifest.sh"
+
+childFullVerifyCommand : Str
+childFullVerifyCommand = readEnvText "CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
+
+taskFailureLogTailBytes : Int
+taskFailureLogTailBytes = readEnvInt "CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON" 12000
+
+retainFailedTaskWorkspaces : Bool
+retainFailedTaskWorkspaces = readEnvBool "CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON" false
+
+mailboxLimit : Int
+mailboxLimit = 6
+
+actorName : Str
+actorName = match envVar "CLASP_SWARM_ACTOR" {
+  Ok raw -> raw,
+  Err message -> "manager"
+}
+
+commandName : Str
+commandName = match envVar "CLASP_MANAGER_COMMAND" {
+  Ok raw -> raw,
+  Err message ->
+    match envVar "CLASP_LOOP_COMMAND" {
+      Ok legacy -> legacy,
+      Err missing -> "run"
+    }
+}
+
+managerReadyPath : Str
+managerReadyPath = readEnvText "CLASP_MANAGER_READY_PATH_JSON" ""
+
+managerReadyText : Str
+managerReadyText = readEnvText "CLASP_MANAGER_READY_TEXT_JSON" "ready"
+
+configuredServiceRoot : Str
+configuredServiceRoot =
+  match envVar "CLASP_MANAGER_SERVICE_ROOT_JSON" {
+    Ok raw -> decode Str raw,
+    Err message ->
+      match envVar "CLASP_RT_SERVICE_ROOT_JSON" {
+        Ok raw -> decode Str raw,
+        Err missing -> ""
+      }
+  }
+
+serviceRoot : Str
+serviceRoot =
+  if configuredServiceRoot != "" then
+    configuredServiceRoot
+  else
+    pathJoin [stateRootPath, "service"]
+
+configuredServiceId : Str
+configuredServiceId =
+  match envVar "CLASP_MANAGER_SERVICE_ID_JSON" {
+    Ok raw -> decode Str raw,
+    Err message ->
+      match envVar "CLASP_RT_SERVICE_ID_JSON" {
+        Ok raw -> decode Str raw,
+        Err missing -> ""
+      }
+  }
+
+serviceId : Str
+serviceId =
+  if configuredServiceId != "" then
+    configuredServiceId
+  else
+    "goal-manager"
+
+serviceRestartDelayMs : Int
+serviceRestartDelayMs = match envVar "CLASP_MANAGER_SERVICE_RESTART_DELAY_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 250
+}
+
+runningUnderServiceSupervisor : Bool
+runningUnderServiceSupervisor = match envVar "CLASP_RT_SERVICE_SUPERVISED_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
+
+upgradeCommandList : [Str]
+upgradeCommandList = readEnvTextList "CLASP_MANAGER_UPGRADE_COMMAND_JSON" emptyTexts
+
+upgradeReadyPath : Str
+upgradeReadyPath = readEnvText "CLASP_MANAGER_UPGRADE_READY_PATH_JSON" ""
+
+upgradeReadyContains : Str
+upgradeReadyContains = readEnvText "CLASP_MANAGER_UPGRADE_READY_CONTAINS_JSON" "ready"
+
+upgradeReadyPollMs : Int
+upgradeReadyPollMs = match envVar "CLASP_MANAGER_UPGRADE_READY_POLL_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 50
+}
+
+upgradeReadyTimeoutMs : Int
+upgradeReadyTimeoutMs = match envVar "CLASP_MANAGER_UPGRADE_READY_TIMEOUT_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 10000
+}
+
+upgradeCommitGraceMs : Int
+upgradeCommitGraceMs = match envVar "CLASP_MANAGER_UPGRADE_COMMIT_GRACE_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 250
+}
+
+restoreSnapshotPath : Str
+restoreSnapshotPath = readEnvText "CLASP_RT_UPGRADE_SNAPSHOT_PATH_JSON" ""
+
+restoreServiceRoot : Str
+restoreServiceRoot = readEnvText "CLASP_RT_UPGRADE_SERVICE_ROOT_JSON" ""
+
+restoreServiceId : Str
+restoreServiceId = readEnvText "CLASP_RT_UPGRADE_SERVICE_ID_JSON" ""
+
+restoreTransactionPath : Str
+restoreTransactionPath = readEnvText "CLASP_RT_UPGRADE_TRANSACTION_PATH_JSON" ""
+
+restoreGeneration : Int
+restoreGeneration = match envVar "CLASP_RT_UPGRADE_GENERATION_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 0
+}
+
+plannerTaskId : Str
+plannerTaskId = "planner"
+
+plannerTaskIdForWave : Int -> Str
+plannerTaskIdForWave wave =
+  if benchmarkEnabled then
+    if wave == 1 then
+      plannerTaskId
+    else
+      textConcat ["planner-", encode wave]
+  else
+    plannerTaskId

@@ -3,6 +3,7 @@
   "title": "Add lead segment across the clickable Clasp inbox app",
   "suite": "clickable-lead-inbox",
   "language": "clasp",
+  "defaultBenchmarkPath": true,
   "repo": "repo",
   "entry": "Main.clasp",
   "prompt": "prompt.md",

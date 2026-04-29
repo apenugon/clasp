@@ -952,6 +952,74 @@ fn insert_objective(
     })
 }
 
+fn widened_limit(existing: i64, requested: i64) -> i64 {
+    if existing <= 0 || requested <= 0 {
+        existing
+    } else {
+        existing.max(requested)
+    }
+}
+
+fn ensure_objective(
+    connection: &Connection,
+    objective_id: &str,
+    detail: &str,
+    max_tasks: i64,
+    max_runs: i64,
+    deadline_at_ms: i64,
+) -> Result<SwarmObjectiveRecord, String> {
+    let Some(existing) = load_objective(connection, objective_id)? else {
+        return insert_objective(connection, objective_id, detail, max_tasks, max_runs, deadline_at_ms);
+    };
+    let next_detail = if detail.is_empty() {
+        existing.detail.clone()
+    } else {
+        detail.to_owned()
+    };
+    let next_max_tasks = widened_limit(existing.max_tasks, max_tasks);
+    let next_max_runs = widened_limit(existing.max_runs, max_runs);
+    let next_deadline_at_ms = widened_limit(existing.deadline_at_ms, deadline_at_ms);
+    if next_detail == existing.detail
+        && next_max_tasks == existing.max_tasks
+        && next_max_runs == existing.max_runs
+        && next_deadline_at_ms == existing.deadline_at_ms
+    {
+        return Ok(existing);
+    }
+    let updated_at_ms = now_ms();
+    connection
+        .execute(
+            "
+            UPDATE swarm_objectives
+            SET detail = ?2,
+                max_tasks = ?3,
+                max_runs = ?4,
+                deadline_at_ms = ?5,
+                updated_at_ms = ?6
+            WHERE objective_id = ?1
+            ",
+            params![
+                objective_id,
+                next_detail,
+                next_max_tasks,
+                next_max_runs,
+                next_deadline_at_ms,
+                updated_at_ms
+            ],
+        )
+        .map_err(|err| format!("failed to update swarm objective `{objective_id}`: {err}"))?;
+    Ok(SwarmObjectiveRecord {
+        objective_id: existing.objective_id,
+        detail: next_detail,
+        status: existing.status,
+        max_tasks: next_max_tasks,
+        max_runs: next_max_runs,
+        deadline_at_ms: next_deadline_at_ms,
+        created_at_ms: existing.created_at_ms,
+        updated_at_ms,
+    })
+}
+
 fn load_task_spec(connection: &Connection, task_id: &str) -> Result<Option<SwarmTaskSpecRecord>, String> {
     connection
         .query_row(
@@ -1261,6 +1329,106 @@ fn lease_is_expired(task: &SwarmTaskState, spec: Option<&SwarmTaskSpecRecord>, a
         return true;
     }
     at_ms.saturating_sub(task_last_lease_activity_at_ms(task)) >= timeout_ms
+}
+
+fn lease_ownership_is_expired(task: &SwarmTaskState, spec: Option<&SwarmTaskSpecRecord>, at_ms: i64) -> bool {
+    let timeout_ms = spec
+        .map(|value| value.lease_timeout_ms)
+        .unwrap_or(DEFAULT_LEASE_TIMEOUT_MS);
+    if timeout_ms <= 0 {
+        return true;
+    }
+    let activity_at_ms = if task.status == "leased" || task.status == "active" {
+        task_last_lease_activity_at_ms(task)
+    } else {
+        task.updated_at_ms
+    };
+    at_ms.saturating_sub(activity_at_ms) >= timeout_ms
+}
+
+fn require_active_lease_owner(
+    connection: &Connection,
+    task_id: &str,
+    actor: &str,
+    action: &str,
+    at_ms: i64,
+) -> Result<(SwarmTaskState, Option<SwarmTaskSpecRecord>), String> {
+    let Some(task) = load_task_state(connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    let spec = load_task_spec(connection, task_id)?;
+    if task.status != "leased" && task.status != "active" {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: no active lease is held"
+        ));
+    }
+    if lease_is_expired(&task, spec.as_ref(), at_ms) {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: lease held by `{}` expired",
+            task.lease_actor
+        ));
+    }
+    if task.lease_actor.as_str() != actor {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: active lease is owned by `{}`",
+            task.lease_actor
+        ));
+    }
+    Ok((task, spec))
+}
+
+fn require_unexpired_lease_owner(
+    connection: &Connection,
+    task_id: &str,
+    actor: &str,
+    action: &str,
+    at_ms: i64,
+) -> Result<(SwarmTaskState, Option<SwarmTaskSpecRecord>), String> {
+    let Some(task) = load_task_state(connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    let spec = load_task_spec(connection, task_id)?;
+    if task.lease_actor.is_empty() {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: no lease owner is recorded"
+        ));
+    }
+    if task.status != "leased" && task.status != "active" && task.status != "completed" {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: lease ownership is not valid for status `{}`",
+            task.status
+        ));
+    }
+    if lease_ownership_is_expired(&task, spec.as_ref(), at_ms) {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: lease held by `{}` expired",
+            task.lease_actor
+        ));
+    }
+    if task.lease_actor.as_str() != actor {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: lease is owned by `{}`",
+            task.lease_actor
+        ));
+    }
+    Ok((task, spec))
+}
+
+fn require_manager_actor(
+    connection: &Connection,
+    task_id: &str,
+    actor: &str,
+    action: &str,
+) -> Result<(), String> {
+    if actor != "manager" {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: actor `{actor}` is not a swarm manager"
+        ));
+    }
+    if load_task_state(connection, task_id)?.is_none() {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    }
+    Ok(())
 }
 
 fn unfinished_dependency_ids(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
@@ -2018,8 +2186,20 @@ fn objectives_json(connection: &Connection) -> Result<Value, String> {
 fn objective_status_json(connection: &Connection, objective_id: &str) -> Result<Value, String> {
     let Some(objective) = load_objective(connection, objective_id)? else {
         return Ok(json!({
-            "objectiveId": objective_id,
-            "status": "missing",
+            "objective": {
+                "objectiveId": objective_id,
+                "detail": "",
+                "status": "missing",
+                "projectedStatus": "missing",
+                "maxTasks": 0,
+                "maxRuns": 0,
+                "deadlineAtMs": 0,
+                "createdAtMs": 0,
+                "updatedAtMs": 0,
+                "taskCount": 0,
+                "runCount": 0,
+            },
+            "projectedStatus": "missing",
             "tasks": [],
         }));
     };
@@ -2605,17 +2785,13 @@ fn run_native_command(
     cwd: &Path,
     command: &[String],
 ) -> Result<SwarmRunRecord, String> {
-    if load_task_state(connection, task_id)?.is_none() {
-        let _ = record_swarm_event(
-            connection,
-            "task_created",
-            task_id,
-            actor,
-            "Auto-created task for native run.",
-            json!({ "source": "native-run" }),
-        )?;
-    }
-    if let Some(spec) = load_task_spec(connection, task_id)? {
+    let at_ms = now_ms();
+    let (_, spec) = if role == "verifier" {
+        require_unexpired_lease_owner(connection, task_id, actor, &format!("run {role} `{name}`"), at_ms)?
+    } else {
+        require_active_lease_owner(connection, task_id, actor, &format!("run {role} `{name}`"), at_ms)?
+    };
+    if let Some(spec) = spec {
         if deadline_expired(spec.deadline_at_ms, now_ms()) {
             return Err(format!("swarm task `{task_id}` missed its deadline"));
         }
@@ -3032,17 +3208,32 @@ fn execute_event_command(
     explicit_detail: &Option<String>,
 ) -> Result<Value, String> {
     let (paths, mut connection) = open_swarm_connection(root)?;
+    let at_ms = now_ms();
     if kind == "lease_acquired" {
         let Some(task) = load_task_state(&connection, task_id)? else {
             return Err(format!("unknown swarm task `{task_id}`"));
         };
-        let (ready, lease_expired, blocked, _, _) = task_ready_state(&connection, &task, now_ms())?;
+        let (ready, lease_expired, blocked, _, _) = task_ready_state(&connection, &task, at_ms)?;
         if !ready {
             return Err(format!("swarm task `{task_id}` is not ready: {}", blocked.join("; ")));
         }
         if (task.status == "leased" || task.status == "active") && !lease_expired {
             return Err(format!("swarm task `{task_id}` already has an active lease"));
         }
+    } else if kind == "lease_released" {
+        let _ = require_active_lease_owner(&connection, task_id, actor, "release its lease", at_ms)?;
+    } else if kind == "worker_heartbeat" {
+        let _ = require_active_lease_owner(&connection, task_id, actor, "record a heartbeat", at_ms)?;
+    } else if kind == "task_completed" {
+        let _ = require_active_lease_owner(&connection, task_id, actor, "complete", at_ms)?;
+    } else if kind == "task_failed" {
+        let _ = require_active_lease_owner(&connection, task_id, actor, "fail", at_ms)?;
+    } else if kind == "task_requeued" {
+        require_manager_actor(&connection, task_id, actor, "requeue")?;
+    } else if kind == "task_stopped" {
+        require_manager_actor(&connection, task_id, actor, "stop")?;
+    } else if kind == "task_resumed" {
+        require_manager_actor(&connection, task_id, actor, "resume")?;
     }
     let detail = explicit_detail
         .clone()
@@ -3052,7 +3243,7 @@ fn execute_event_command(
         task_id: task_id.to_owned(),
         actor: actor.to_owned(),
         detail,
-        at_ms: now_ms(),
+        at_ms,
         payload_json: "{}".to_owned(),
     };
     let task = append_event(&mut connection, &event)?;
@@ -3166,10 +3357,7 @@ fn execute_objective_create(
     deadline_at_ms: i64,
 ) -> Result<Value, String> {
     let (_paths, connection) = open_swarm_connection(root)?;
-    if let Ok(Some(_)) = load_objective(&connection, objective_id) {
-        return Err(format!("swarm objective `{objective_id}` already exists"));
-    }
-    let objective = insert_objective(&connection, objective_id, detail, max_tasks, max_runs, deadline_at_ms)?;
+    let objective = ensure_objective(&connection, objective_id, detail, max_tasks, max_runs, deadline_at_ms)?;
     objective_json(&connection, &objective)
 }
 
@@ -3664,13 +3852,24 @@ pub fn builtin_swarm_objective_create(
     max_tasks: i64,
     max_runs: i64,
 ) -> Result<String, String> {
+    builtin_swarm_objective_create_with_deadline(root, objective_id, detail, max_tasks, max_runs, 0)
+}
+
+pub fn builtin_swarm_objective_create_with_deadline(
+    root: &str,
+    objective_id: &str,
+    detail: &str,
+    max_tasks: i64,
+    max_runs: i64,
+    deadline_at_ms: i64,
+) -> Result<String, String> {
     render_builtin_json(execute_objective_create(
         Path::new(root),
         objective_id,
         detail,
         max_tasks,
         max_runs,
-        0,
+        deadline_at_ms,
     )?)
 }
 
@@ -3696,6 +3895,28 @@ pub fn builtin_swarm_task_create(
     max_runs: i64,
     lease_timeout_ms: i64,
 ) -> Result<String, String> {
+    builtin_swarm_task_create_with_deadline(
+        root,
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        0,
+        lease_timeout_ms,
+    )
+}
+
+pub fn builtin_swarm_task_create_with_deadline(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    deadline_at_ms: i64,
+    lease_timeout_ms: i64,
+) -> Result<String, String> {
     render_builtin_json(execute_task_create(
         Path::new(root),
         objective_id,
@@ -3703,7 +3924,7 @@ pub fn builtin_swarm_task_create(
         detail,
         dependencies,
         max_runs,
-        0,
+        deadline_at_ms,
         lease_timeout_ms,
     )?)
 }
@@ -3951,7 +4172,9 @@ mod tests {
         let root = unique_root("mergegate");
         let root_text = root.to_string_lossy().to_string();
         let bootstrap_args = vec!["claspc".to_owned(), "swarm".to_owned(), "bootstrap".to_owned(), root_text.clone(), "repair".to_owned()];
+        let lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "repair".to_owned()];
         assert_eq!(maybe_run_swarm(&bootstrap_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&lease_args), Some(ExitCode::SUCCESS));
 
         let verifier_args = vec![
             "claspc".to_owned(),
@@ -4007,6 +4230,7 @@ mod tests {
         let lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "repair".to_owned()];
         let stop_args = vec!["claspc".to_owned(), "swarm".to_owned(), "stop".to_owned(), root_text.clone(), "repair".to_owned()];
         let resume_args = vec!["claspc".to_owned(), "swarm".to_owned(), "resume".to_owned(), root_text.clone(), "repair".to_owned()];
+        let tool_lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "repair".to_owned()];
         let tool_args = vec![
             "claspc".to_owned(),
             "swarm".to_owned(),
@@ -4018,6 +4242,7 @@ mod tests {
             "-lc".to_owned(),
             "printf ok; >&2 printf err".to_owned(),
         ];
+        let release_args = vec!["claspc".to_owned(), "swarm".to_owned(), "release".to_owned(), root_text.clone(), "repair".to_owned()];
         let tail_args = vec![
             "claspc".to_owned(),
             "swarm".to_owned(),
@@ -4045,7 +4270,9 @@ mod tests {
         assert_eq!(maybe_run_swarm(&lease_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&stop_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&resume_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&tool_lease_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&tool_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&release_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&approve_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&tail_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&runs_args), Some(ExitCode::SUCCESS));
@@ -4146,6 +4373,33 @@ mod tests {
             "--max-runs".to_owned(),
             "1".to_owned(),
         ];
+        let inspect_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "task".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "appbench".to_owned(),
+            "inspect".to_owned(),
+            "--detail".to_owned(),
+            "Inspect an independent benchmark angle".to_owned(),
+            "--max-runs".to_owned(),
+            "1".to_owned(),
+        ];
+        let extend_objective_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "objective".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "appbench".to_owned(),
+            "--detail".to_owned(),
+            "Beat appbench with another autonomous wave".to_owned(),
+            "--max-tasks".to_owned(),
+            "3".to_owned(),
+            "--max-runs".to_owned(),
+            "3".to_owned(),
+        ];
         let ready_args = vec!["claspc".to_owned(), "swarm".to_owned(), "ready".to_owned(), root_text.clone(), "appbench".to_owned()];
         let lease_plan_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "plan".to_owned()];
         let complete_plan_args = vec!["claspc".to_owned(), "swarm".to_owned(), "complete".to_owned(), root_text.clone(), "plan".to_owned()];
@@ -4167,12 +4421,15 @@ mod tests {
         assert_eq!(maybe_run_swarm(&objective_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&plan_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&repair_args), Some(ExitCode::SUCCESS));
+        assert_ne!(maybe_run_swarm(&inspect_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&extend_objective_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&inspect_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&ready_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&lease_plan_args), Some(ExitCode::SUCCESS));
-        assert_eq!(maybe_run_swarm(&complete_plan_args), Some(ExitCode::SUCCESS));
-        assert_eq!(maybe_run_swarm(&objective_status_args), Some(ExitCode::SUCCESS));
         assert_eq!(maybe_run_swarm(&run_plan_args), Some(ExitCode::SUCCESS));
         assert_ne!(maybe_run_swarm(&run_plan_again_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&complete_plan_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&objective_status_args), Some(ExitCode::SUCCESS));
 
         let paths = runtime_paths(&root);
         let connection = Connection::open(paths.db_path).expect("open sqlite db");
@@ -4181,6 +4438,11 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM swarm_objectives WHERE objective_id = 'appbench'", [], |row| row.get(0))
             .expect("count objectives");
         assert_eq!(objective_count, 1);
+
+        let objective_max_tasks: i64 = connection
+            .query_row("SELECT max_tasks FROM swarm_objectives WHERE objective_id = 'appbench'", [], |row| row.get(0))
+            .expect("objective max tasks");
+        assert_eq!(objective_max_tasks, 3);
 
         let dependency_count: i64 = connection
             .query_row(
@@ -4203,6 +4465,76 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'plan'", [], |row| row.get(0))
             .expect("count plan runs");
         assert_eq!(plan_run_count, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_builtin_deadline_creation_persists_objective_and_task_limits() {
+        let root = unique_root("builtin-deadlines");
+        let root_text = root.to_string_lossy().to_string();
+        let objective_deadline = 4_102_444_800_000i64;
+        let task_deadline = 4_102_444_200_000i64;
+
+        let objective_text = super::builtin_swarm_objective_create_with_deadline(
+            &root_text,
+            "loop",
+            "deadline-aware objective",
+            4,
+            8,
+            objective_deadline,
+        )
+        .expect("create objective with deadline");
+        let objective_json: serde_json::Value =
+            serde_json::from_str(&objective_text).expect("decode objective json");
+        assert_eq!(
+            objective_json.get("deadlineAtMs").and_then(|value| value.as_i64()),
+            Some(objective_deadline)
+        );
+
+        let task_text = super::builtin_swarm_task_create_with_deadline(
+            &root_text,
+            "loop",
+            "repair",
+            "deadline-aware task",
+            &["plan".to_owned()],
+            3,
+            task_deadline,
+            25_000,
+        )
+        .expect("create task with deadline");
+        let task_json: serde_json::Value = serde_json::from_str(&task_text).expect("decode task json");
+        assert_eq!(
+            task_json.get("deadlineAtMs").and_then(|value| value.as_i64()),
+            Some(task_deadline)
+        );
+        assert_eq!(
+            task_json.get("objectiveDeadlineAtMs").and_then(|value| value.as_i64()),
+            Some(objective_deadline)
+        );
+        assert_eq!(
+            task_json.get("leaseTimeoutMs").and_then(|value| value.as_i64()),
+            Some(25_000)
+        );
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let persisted_objective_deadline: i64 = connection
+            .query_row(
+                "SELECT deadline_at_ms FROM swarm_objectives WHERE objective_id = 'loop'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("objective deadline");
+        let persisted_task_deadline: i64 = connection
+            .query_row(
+                "SELECT deadline_at_ms FROM swarm_task_specs WHERE task_id = 'repair'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("task deadline");
+        assert_eq!(persisted_objective_deadline, objective_deadline);
+        assert_eq!(persisted_task_deadline, task_deadline);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -4329,6 +4661,16 @@ mod tests {
                 "merge-ready".to_owned(),
                 "--require-verifier".to_owned(),
                 "native-smoke".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
             ]),
             Some(ExitCode::SUCCESS)
         );
@@ -4469,6 +4811,37 @@ mod tests {
     }
 
     #[test]
+    fn swarm_objective_status_missing_returns_typed_shape() {
+        let root = unique_root("missing-objective-status");
+        let (_paths, connection) = super::open_swarm_connection(&root).expect("open sqlite db");
+        let objective_status = super::objective_status_json(&connection, "missing").expect("missing objective status");
+
+        assert_eq!(
+            objective_status
+                .get("objective")
+                .and_then(|value| value.get("objectiveId"))
+                .and_then(|value| value.as_str()),
+            Some("missing")
+        );
+        assert_eq!(
+            objective_status
+                .get("objective")
+                .and_then(|value| value.get("status"))
+                .and_then(|value| value.as_str()),
+            Some("missing")
+        );
+        assert_eq!(
+            objective_status
+                .get("projectedStatus")
+                .and_then(|value| value.as_str()),
+            Some("missing")
+        );
+        assert_eq!(objective_status.get("tasks"), Some(&json!([])));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn swarm_summary_projects_dict_backed_fields_for_sqlite_state() {
         let root = unique_root("summary");
         let root_text = root.to_string_lossy().to_string();
@@ -4518,6 +4891,16 @@ mod tests {
                 "claspc".to_owned(),
                 "swarm".to_owned(),
                 "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
                 root_text.clone(),
                 "repair".to_owned(),
             ]),

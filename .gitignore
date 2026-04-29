@@ -24,6 +24,17 @@ benchmarks/workspaces/*
 !benchmarks/workspaces/.gitkeep
 /.clasp-agents/
 /.clasp-swarm/
+/.clasp-task-workspaces/
+/.clasp-task-baselines/
 /.clasp-test-tmp/
 /.clasp-verify-tmp/
+/.codex
+/--help/
+/run/
+/trap
+/builder-policy.md
+/builder.policy
+/status/.clasp-loops/
+/runtime/.clasp-test-tmp/
 runtime/target/
+/benchmarks/tasks/ts-lead-segment/repo/node_modules/

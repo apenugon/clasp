@@ -1,0 +1,316 @@
+module GoalManagerTypes
+
+import Swarm
+
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+record PlannerTaskSpec = {
+  taskId : Str,
+  role : Str,
+  detail : Str,
+  dependencies : [Str],
+  taskPrompt : Str,
+  coordinationFocus : [Str]
+}
+
+record PlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannerTaskSpec],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record LegacyPlannerTaskSpec = {
+  taskId : Str,
+  detail : Str,
+  dependencies : [Str],
+  taskPrompt : Str
+}
+
+record LegacyPlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [LegacyPlannerTaskSpec],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record VerifierReport = {
+  verdict : Str,
+  summary : Str,
+  findings : [Str],
+  tests_run : [Str],
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
+}
+
+record BuilderFeedback = {
+  summary : Str,
+  ergonomics : [Str],
+  follow_ups : [Str],
+  warnings : [Str]
+}
+
+record BuilderReport = {
+  summary : Str,
+  files_touched : [Str],
+  tests_run : [Str],
+  residual_risks : [Str],
+  feedback : BuilderFeedback
+}
+
+record SwarmMailboxMessage = {
+  source : Str,
+  taskId : Str,
+  wave : Int,
+  summary : Str,
+  details : [Str]
+}
+
+record BenchmarkSignal = {
+  suite : Str,
+  summary : Str,
+  passed : Bool,
+  meetsTarget : Bool,
+  scoreName : Str,
+  scoreValue : Int,
+  targetName : Str,
+  targetValue : Int
+}
+
+record BenchmarkCheckpoint = {
+  wave : Int,
+  suite : Str,
+  summary : Str,
+  passed : Bool,
+  meetsTarget : Bool,
+  scoreName : Str,
+  scoreValue : Int,
+  targetName : Str,
+  targetValue : Int,
+  command : [Str]
+}
+
+record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+
+record ManagerState = {
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  objectiveId : Str,
+  plannerTaskId : Str,
+  activeTaskId : Str,
+  plannedTaskIds : [Str],
+  wave : Int,
+  benchmarkRuns : Int,
+  final : Bool
+}
+
+record ManagerUpgradeSnapshot = {
+  state : ManagerState,
+  feedback : Str,
+  projectRoot : Str
+}
+
+record ManagerUpgradeRestoreRecord = {
+  serviceRoot : Str,
+  serviceId : Str,
+  generation : Int,
+  transactionPath : Str,
+  projectRoot : Str,
+  snapshot : ManagerUpgradeSnapshot
+}
+
+record StatusWaitingReason = {
+  kind : Str,
+  taskIds : [Str],
+  relatedTaskIds : [Str],
+  details : [Str]
+}
+
+record StatusView = {
+  state : ManagerState,
+  plannerSummary : Str,
+  objectiveProjectedStatus : Str,
+  plannedTaskIds : [Str],
+  allTaskIds : [Str],
+  readyTaskIds : [Str],
+  activeTaskIds : [Str],
+  completedTaskIds : [Str],
+  failedTaskIds : [Str],
+  waitingReasons : [StatusWaitingReason],
+  primaryWaitingReason : Str,
+  primaryWaitingTaskIds : [Str],
+  benchmarkSummary : Str,
+  benchmarkTargetMet : Bool,
+  feedbackSummary : Str
+}
+
+record TextSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record PlannerTaskPick = {
+  readyTasks : [SwarmTask],
+  found : Bool,
+  spec : PlannerTaskSpec
+}
+
+record TaskStatusLookup = {
+  wanted : Str,
+  found : Bool,
+  status : Str
+}
+
+record EnsurePlanState = {
+  error : Str
+}
+
+record PlanValidationIssue = {
+  code : Str,
+  taskId : Str,
+  detail : Str
+}
+
+record PlanValidationResult = {
+  valid : Bool,
+  issues : [PlanValidationIssue],
+  plannedTaskCount : Int,
+  plannerTaskLimit : Int,
+  objectiveTaskBudget : Int,
+  objectiveRunBudget : Int,
+  cycleBlockedTaskIds : [Str]
+}
+
+record PlanValidationFoldState = {
+  issues : [PlanValidationIssue],
+  seenTaskIds : [Str],
+  knownTaskIds : [Str]
+}
+
+record DependencyIssueState = {
+  issues : [PlanValidationIssue],
+  taskId : Str,
+  knownTaskIds : [Str]
+}
+
+record DependencyCheck = {
+  resolvedTaskIds : [Str],
+  allResolved : Bool
+}
+
+record CyclePartitionState = {
+  remaining : [PlannerTaskSpec],
+  resolvedTaskIds : [Str],
+  progressed : Bool
+}
+
+record PlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str,
+  mailboxSummary : Str
+}
+
+record PlannedTaskReconcileResult = {
+  error : Str,
+  runningTaskIds : [Str]
+}
+
+record PlannedTaskLaunchResult = {
+  error : Str,
+  activeTaskIds : [Str]
+}
+
+record PlannedTaskFinalStatus = {
+  completedIds : [Str],
+  failedIds : [Str],
+  readyPlannedIds : [Str],
+  pendingLaunchIds : [Str]
+}
+
+record LegacyPlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str
+}
+
+record ChildLoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  builderRuns : Int,
+  verifierRuns : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  final : Bool
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyCapabilityStatuses : [CapabilityStatus]
+emptyCapabilityStatuses = []
+
+emptyStatusWaitingReasons : [StatusWaitingReason]
+emptyStatusWaitingReasons = []
+
+emptyPlanValidationIssues : [PlanValidationIssue]
+emptyPlanValidationIssues = []
+
+emptyTasks : [SwarmTask]
+emptyTasks = []
+
+emptyPlannerTasks : [PlannerTaskSpec]
+emptyPlannerTasks = []
+
+emptyPlannerTaskSpec : PlannerTaskSpec
+emptyPlannerTaskSpec = PlannerTaskSpec {
+  taskId = "",
+  role = "",
+  detail = "",
+  dependencies = emptyTexts,
+  taskPrompt = "",
+  coordinationFocus = emptyTexts
+}
+
+emptyBenchmarkSignal : BenchmarkSignal
+emptyBenchmarkSignal =
+  BenchmarkSignal {
+    suite = "",
+    summary = "",
+    passed = false,
+    meetsTarget = false,
+    scoreName = "",
+    scoreValue = 0,
+    targetName = "",
+    targetValue = 0
+  }
+
+emptySwarmMailboxMessages : [SwarmMailboxMessage]
+emptySwarmMailboxMessages = []

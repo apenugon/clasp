@@ -15,9 +15,11 @@ foreign swarmSummaryRaw : Str -> Result Str = "swarmSummaryJson"
 foreign swarmReadyRaw : Str -> Str -> Result Str = "swarmReadyJson"
 foreign swarmManagerNextRaw : Str -> Str -> Result Str = "swarmManagerNextJson"
 foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmObjectiveCreateWithDeadlineRaw : Str -> Str -> Str -> Int -> Int -> Int -> Result Str = "swarmObjectiveCreateWithDeadlineJson"
 foreign swarmObjectiveStatusRaw : Str -> Str -> Result Str = "swarmObjectiveStatusJson"
 foreign swarmObjectivesRaw : Str -> Result Str = "swarmObjectivesJson"
 foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineJson"
 foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
 foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
 foreign swarmVerifierRunRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmVerifierRunJson"
@@ -181,6 +183,9 @@ record ReviewStepResult = {
   mergeDecision : SwarmMergeDecision,
   mailbox : SwarmMailbox
 }
+
+noDeadlineAtMs : Int
+noDeadlineAtMs = 0
 
 swarmRoot : Str -> SwarmRoot
 swarmRoot path = SwarmRoot { path = path }
@@ -394,7 +399,11 @@ managerNext handle = managerActionResult (swarmManagerNextRaw handle.root.path h
 
 objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
 objectiveCreate root objectiveId detail maxTasks maxRuns =
-  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+  objectiveCreateWithDeadline root objectiveId detail maxTasks maxRuns noDeadlineAtMs
+
+objectiveCreateWithDeadline : SwarmRoot -> Str -> Str -> Int -> Int -> Int -> Result SwarmObjective
+objectiveCreateWithDeadline root objectiveId detail maxTasks maxRuns deadlineAtMs =
+  objectiveResult (swarmObjectiveCreateWithDeadlineRaw root.path objectiveId detail maxTasks maxRuns deadlineAtMs)
 
 objectiveStatus : ObjectiveHandle -> Result SwarmObjectiveStatus
 objectiveStatus handle = objectiveStatusResult (swarmObjectiveStatusRaw handle.root.path handle.objectiveId)
@@ -404,7 +413,11 @@ objectives root = objectiveListResult (swarmObjectivesRaw root.path)
 
 taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
 taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
-  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+  taskCreateWithDeadline handle taskId detail dependencies maxRuns noDeadlineAtMs leaseTimeoutMs
+
+taskCreateWithDeadline : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithDeadline handle taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs =
+  taskResult (swarmTaskCreateWithDeadlineRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs)
 
 tasks : SwarmRoot -> Result [SwarmTask]
 tasks root = taskListResult (swarmTasksRaw root.path)

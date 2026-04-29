@@ -2,13 +2,14 @@
 
 ## Scope
 
-This slice narrows the default self-hosted verify loop instead of trying to solve the full cold self-hosted rebuild in one pass.
+This slice narrows the default self-hosted verify loop and adds promoted module-summary seeding for unchanged promoted compiler sources.
 
 The hot paths still under active pressure are:
 
 - `runtime/target/debug/claspc --json check src/CompilerMain.clasp`
 - `runtime/target/debug/claspc exec-image src/embedded.compiler.native.image.json checkProjectText --project-entry=src/CompilerMain.clasp ...`
 - `runtime/target/debug/claspc exec-image src/embedded.compiler.native.image.json nativeImageProjectText --project-entry=src/Main.clasp ...`
+- `runtime/target/debug/claspc --json check src/Main.clasp`
 - `env CLASP_NATIVE_VERIFY_MODE=fast bash src/scripts/verify.sh`
 - `env CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh`
 
@@ -25,6 +26,9 @@ runtime/target/debug/claspc --json check src/CompilerMain.clasp
 
 - `full` keeps the promotion-equivalence loop, including the self-hosted native-image rebuild and promoted-vs-rebuilt comparisons.
 - The scenario check in `scripts/test-selfhost-verify-mode-split.sh` proves that `fast` avoids `nativeImageProjectText`, while `full` still exercises it.
+- The native CLI now embeds `src/stage1.compiler.module-summary-cache-v2.json`, a promoted module-summary seed for the `src/Main.clasp` self-host import closure.
+- `scripts/generate-promoted-module-summary-cache.mjs --check` verifies that the promoted seed is reproducible from the current promoted compiler image and source closure.
+- `scripts/test-selfhost.sh` now checks a fresh-cache `src/Main.clasp` check and requires promoted module-summary hits for `Compiler.Ast`, `Compiler.Emit.JavaScript`, and `Main`.
 
 ## Measured Timings
 
@@ -47,6 +51,18 @@ These numbers come from the real self-hosted commands in this checkout. The `ver
 - Concrete workflow delta:
   the new default `fast` loop removes the `nativeImageProjectText` step from the default path and narrows the direct CLI check to `src/CompilerMain.clasp`, so it avoids at least `167s` of extra self-hosted wall-clock on this host before counting the rest of `full` mode's promoted-vs-rebuilt comparison work.
 
+Latest promoted-cache capture date: `2026-04-29` (UTC).
+
+These numbers come from the iteration-speed builder/verifier loop rooted at `.clasp-loops/iteration-speed-gpt55-xhigh-hostpass`.
+
+- Before promoted module-summary seeding:
+  `timeout 120s claspc --json check src/Main.clasp` exited with status `124`.
+- After promoted module-summary seeding:
+  `timeout 120s env XDG_CACHE_HOME=<fresh> CLASP_NATIVE_TRACE_CACHE=1 ./runtime/target/debug/claspc --json check src/Main.clasp` completed in about `0.31s`.
+- The verifier observed `18` promoted module-summary hits, including `Compiler.Ast`, `Compiler.Emit.JavaScript`, and `Main`.
+- The same verifier pass ran `bash scripts/verify-all.sh` successfully.
+- The incremental native probe still reports roughly `10.9s` cold check/native-image paths for the small measured project, with body-change paths around `0.26s` to `0.30s`.
+
 ## Structural Win
 
 The old default loop rebuilt a fresh hosted native image even in `fast` mode before it did any lighter checks.
@@ -58,9 +74,18 @@ The new split removes that rebuild from the default path:
 
 That is a real workflow win for repeated compiler edits because the default path no longer pays the full hosted image rebuild up front.
 
+The promoted module-summary seed is a second structural win: a fresh checkout or fresh cache can hydrate normal module-summary cache entries for unchanged promoted self-host modules without re-running the slow semantic checker for those modules. This specifically addresses the verifier-blocking `src/Main.clasp` check path.
+
+The gate for this behavior is permanent in the normal verification path:
+
+- `scripts/verify-all.sh` runs `bash scripts/test-selfhost.sh`
+- `scripts/test-selfhost.sh` runs `node scripts/generate-promoted-module-summary-cache.mjs --check`
+- `scripts/test-selfhost.sh` checks fresh-cache `src/Main.clasp`
+- `scripts/test-selfhost.sh` requires promoted hits for `Compiler.Ast`, `Compiler.Emit.JavaScript`, and `Main`
+
 ## Limits
 
-- The timing numbers above are lower bounds because both exact hot-path commands were still running when I stopped the capture on this host.
-- The direct self-hosted `src/CompilerMain.clasp` check is still a dominant cost center on this host, and the full verify loop still pays for `nativeImageProjectText` on `src/Main.clasp`.
-- The remaining bottleneck is still the native self-hosted compiler work itself, especially the cold `src/CompilerMain.clasp` check and the cold `nativeImageProjectText` rebuild for the broader `src/Main.clasp` surface.
-- If the next slice wants a stronger acceptance story, it should attack invalidation boundaries or persisted semantic caches now that the smaller dedicated compiler entrypoint is in place.
+- The March timing numbers are lower bounds because both exact hot-path commands were still running when I stopped the capture on this host.
+- The promoted seed is a strong win for unchanged promoted self-host modules. It is not a full solution for arbitrary edits to large compiler modules.
+- If a large seeded module changes, its source fingerprint changes and the current checker can still fall back to expensive semantic work for that module.
+- The next speed slice should attack true cold semantic checking for edited large modules, especially `Compiler.Ast`, `Compiler.Checker`, `Compiler.Emit.JavaScript`, `Compiler.Project`, and `Compiler.SemanticArtifacts`.

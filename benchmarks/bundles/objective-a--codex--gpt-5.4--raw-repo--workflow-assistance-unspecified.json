@@ -62,8 +62,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 87358,
-      "sha256": "d473c9e8178662bbd3f96b9b5aba4609f652d1e0990ad1c7366048936de08aa4"
+      "size": 88425,
+      "sha256": "75ea903f044db48726387aa4ae3d0f1ca53815020c936bf31ad54c1fe49b7f71"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -117,8 +117,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/scripts/verify.sh",
-      "size": 384,
-      "sha256": "0448a6c683641d909e7833fae8ac82163bbe3b1418503601b8383378d815d4c4"
+      "size": 598,
+      "sha256": "0cc17a7da3614b5ef0b51efddd5d9a30a39cb03ee533c4820927e87451cd859c"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/Shared/Lead.clasp",
@@ -137,8 +137,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/task.json",
-      "size": 317,
-      "sha256": "f7632dba39f5facbcffe0878a8eb6b30928ffc3092520d5fb905c28806d26826"
+      "size": 349,
+      "sha256": "227d282df2d96b93448635c7f51affd622291ead74660bbd796a32f6db7b14ac"
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/prompt.md",
@@ -162,8 +162,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/repo/scripts/verify.sh",
-      "size": 204,
-      "sha256": "740a80549768456bba7369cc2932cff09c0ae5fdafb1967948138291d3ff5d9a"
+      "size": 302,
+      "sha256": "9b7839793c07b2401ee67866efa197132153dc9fc1508b4bf74742587899db93"
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/repo/src/objective.ts",

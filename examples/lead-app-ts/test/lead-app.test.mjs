@@ -85,7 +85,7 @@ async function withPersistentDatabase(callback) {
 }
 
 function openDatabase(databasePath) {
-  if (typeof Bun !== "undefined") {
+  if (typeof Bun !== "undefined" && Object.prototype.hasOwnProperty.call(Bun, "version")) {
     const { Database } = require("bun:sqlite");
     return new Database(databasePath);
   }

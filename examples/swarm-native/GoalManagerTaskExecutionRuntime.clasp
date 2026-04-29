@@ -1,0 +1,328 @@
+module GoalManagerTaskExecutionRuntime
+
+import GoalManagerFinalize
+import GoalManagerTaskExecutionHelpers
+import GoalManagerTaskStatusRuntime
+import GoalManagerTaskSet
+import GoalManagerMailboxMessages
+import GoalManagerCounters
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+reconcilePlannedTasks : PlannerReport -> Int -> [SwarmTask] -> PlannedTaskReconcileResult
+reconcilePlannedTasks report wave objectiveTasks = {
+  let mut schedulerError = "";
+  let mut runningTaskIds = emptyTexts;
+  for spec in report.tasks {
+    let taskStatus = taskStatusFor objectiveTasks spec.taskId in
+    let reportReady = childLoopReportReady spec.taskId in
+    let loopRunning = childLoopRunning spec.taskId in
+    let launchHeartbeatExists = fileExists (taskProcessHeartbeatPath spec.taskId) in
+    let launchRunning =
+      if launchHeartbeatExists then
+        childLoopLaunchRunning spec.taskId
+      else
+        false in
+    let launchCompleted =
+      if launchHeartbeatExists then
+        childLoopLaunchCompleted spec.taskId
+      else
+        false in
+    let traceError =
+      appendManagerTrace
+        (textConcat [
+          "reconcile-planned-task:",
+          spec.taskId,
+          ":status=",
+          taskStatus,
+          ":report-ready=",
+          encode reportReady,
+          ":loop-running=",
+          encode loopRunning,
+          ":launch-heartbeat=",
+          encode launchHeartbeatExists,
+          ":launch-running=",
+          encode launchRunning,
+          ":launch-completed=",
+          encode launchCompleted
+        ]) in
+    if traceError != "" then
+      {
+        schedulerError = traceError;
+        schedulerError
+      }
+    else if reportReady then {
+      let childReport = taskPassReport spec in
+      let taskError =
+        if childReport.verdict == "pass" then
+          if taskStatus == "completed" then
+            ""
+          else
+            completePlannedTask spec
+        else if taskStatus == "failed" then
+          ""
+        else if childLoopMissingDurableReport childReport then
+          retryChildLoopMissingReport spec childReport
+        else
+          recordPlannedTaskFailure spec childReport in
+      let mailboxWriteError =
+        if taskError != "" then
+          ""
+        else if taskStatusIsTerminal taskStatus then
+          ""
+        else
+          appendMailboxMessages (taskMailboxMessagesForCompletedSpec wave spec childReport) in
+      if taskError != "" then
+        {
+          schedulerError = taskError;
+          schedulerError
+        }
+      else if mailboxWriteError != "" then
+        {
+          schedulerError = mailboxWriteError;
+          schedulerError
+        }
+      else
+        schedulerError
+    } else if loopRunning then {
+      runningTaskIds = append runningTaskIds [spec.taskId];
+      schedulerError
+    } else if launchHeartbeatExists then {
+      if launchRunning then {
+        runningTaskIds = append runningTaskIds [spec.taskId];
+        schedulerError
+      } else if launchCompleted then {
+        let settled = settleChildLoopReportReady spec.taskId childReportSettlePolls in
+        if settled then
+          schedulerError
+        else {
+          let taskError =
+            if taskStatus == "failed" then
+              ""
+            else
+              retryChildLoopMissingReport spec (childLoopMissingReport spec) in
+          if taskError != "" then
+            {
+              schedulerError = taskError;
+              schedulerError
+            }
+          else
+            schedulerError
+        }
+      } else {
+        let taskError =
+          if taskStatus == "failed" then
+            ""
+          else
+            retryChildLoopMissingLaunchHeartbeat
+              wave
+              report
+              spec
+              (childLoopMissingLaunchHeartbeatReport spec) in
+        if taskError != "" then
+          {
+            schedulerError = taskError;
+            schedulerError
+          }
+        else
+          schedulerError
+      }
+    } else if taskStatus == "leased" then {
+      let taskError =
+        retryChildLoopMissingLaunchHeartbeat
+          wave
+          report
+          spec
+          (childLoopMissingLaunchHeartbeatReport spec) in
+      if taskError != "" then
+        {
+          schedulerError = taskError;
+          schedulerError
+        }
+      else
+        schedulerError
+    } else if taskStatus == "active" then {
+      let taskError =
+        retryChildLoopMissingLaunchHeartbeat
+          wave
+          report
+          spec
+          (childLoopMissingLaunchHeartbeatReport spec) in
+      if taskError != "" then
+        {
+          schedulerError = taskError;
+          schedulerError
+        }
+      else
+        schedulerError
+    }
+    else
+      schedulerError
+  };
+  PlannedTaskReconcileResult {
+    error = schedulerError,
+    runningTaskIds = runningTaskIds
+  }
+}
+
+launchReadyTasks : PlannerReport -> Int -> [SwarmTask] -> [SwarmTask] -> [Str] -> PlannedTaskLaunchResult
+launchReadyTasks report wave refreshedTasks readyTasks runningTaskIds = {
+  let mut activeTaskIds = runningTaskIds;
+  let mut launchSlots = subtractManagerCounters maxConcurrentChildren (length runningTaskIds);
+  let mut launchError = "";
+  for spec in report.tasks {
+    let taskStatus = taskStatusFor refreshedTasks spec.taskId in
+    let launchHeartbeatExists = fileExists (taskProcessHeartbeatPath spec.taskId) in
+    let reportReady = childLoopReportReady spec.taskId in
+    let taskReady = taskListHasId spec.taskId readyTasks in
+    let alreadyActive = textListHas spec.taskId activeTaskIds in
+    let traceError =
+      appendManagerTrace
+        (textConcat [
+          "launch-planned-task:",
+          spec.taskId,
+          ":status=",
+          taskStatus,
+          ":ready=",
+          encode taskReady,
+          ":already-active=",
+          encode alreadyActive,
+          ":launch-heartbeat=",
+          encode launchHeartbeatExists,
+          ":report-ready=",
+          encode reportReady,
+          ":launch-slots=",
+          encode launchSlots
+        ]) in
+    if traceError != "" then
+      {
+        launchError = traceError;
+        launchError
+      }
+    else if launchError != "" then
+      launchError
+    else if launchSlots == 0 then
+      launchError
+    else if taskStatusIsTerminal taskStatus then
+      launchError
+    else if alreadyActive then
+      launchError
+    else if launchHeartbeatExists then
+      launchError
+    else if reportReady then
+      launchError
+    else if taskReady then {
+      let taskError = launchReadyTask wave report spec in
+      if taskError != "" then
+        {
+          launchError = taskError;
+          launchError
+        }
+      else
+        {
+          activeTaskIds = append activeTaskIds [spec.taskId];
+          launchSlots = decrementManagerCounter launchSlots;
+          launchError
+        }
+    } else if taskStatus == "leased" then {
+      let taskError =
+        retryChildLoopMissingLaunchHeartbeat
+          wave
+          report
+          spec
+          (childLoopMissingLaunchHeartbeatReport spec) in
+      if taskError != "" then
+        {
+          launchError = taskError;
+          launchError
+        }
+      else
+        {
+          activeTaskIds = append activeTaskIds [spec.taskId];
+          launchSlots = decrementManagerCounter launchSlots;
+          launchError
+        }
+    } else if taskStatus == "active" then {
+      let taskError =
+        retryChildLoopMissingLaunchHeartbeat
+          wave
+          report
+          spec
+          (childLoopMissingLaunchHeartbeatReport spec) in
+      if taskError != "" then
+        {
+          launchError = taskError;
+          launchError
+        }
+      else
+        {
+          activeTaskIds = append activeTaskIds [spec.taskId];
+          launchSlots = decrementManagerCounter launchSlots;
+          launchError
+        }
+    } else
+      launchError
+  };
+  let launchReturnTrace =
+    appendManagerTrace
+      (textConcat
+        [
+          "launch-ready:return:error=",
+          launchError,
+          ":active=",
+          encode (length activeTaskIds)
+        ]) in
+  PlannedTaskLaunchResult {
+    error = launchError,
+    activeTaskIds = activeTaskIds
+  }
+}
+
+finalPlannedTaskStatus : PlannerReport -> [SwarmTask] -> [SwarmTask] -> [Str] -> PlannedTaskFinalStatus
+finalPlannedTaskStatus report finalTasks readyTasks plannedIds = {
+  let mut completedIds = emptyTexts;
+  let mut failedIds = emptyTexts;
+  for spec in report.tasks {
+    let taskStatus = taskStatusFor finalTasks spec.taskId in
+    if taskStatus == "completed" then {
+      completedIds = append completedIds [spec.taskId];
+      completedIds
+    } else if taskStatus == "failed" then {
+      failedIds = append failedIds [spec.taskId];
+      failedIds
+    } else
+      completedIds
+  };
+  let mut readyPlannedIds = emptyTexts;
+  for readyTask in readyTasks {
+    let readyTaskId = taskIdOf readyTask in
+    if textListHas readyTaskId plannedIds then {
+      readyPlannedIds = append readyPlannedIds [readyTaskId];
+      readyPlannedIds
+    } else
+      readyPlannedIds
+  };
+  let mut pendingLaunchIds = emptyTexts;
+  for spec in report.tasks {
+    let taskStatus = taskStatusFor finalTasks spec.taskId in
+    if taskStatusIsTerminal taskStatus then
+      pendingLaunchIds
+    else if taskStatus == "leased" || taskStatus == "active" then {
+      pendingLaunchIds = append pendingLaunchIds [spec.taskId];
+      pendingLaunchIds
+    } else if childLoopLaunchPending spec.taskId then {
+      pendingLaunchIds = append pendingLaunchIds [spec.taskId];
+      pendingLaunchIds
+    } else
+      pendingLaunchIds
+  };
+  PlannedTaskFinalStatus {
+    completedIds = completedIds,
+    failedIds = failedIds,
+    readyPlannedIds = readyPlannedIds,
+    pendingLaunchIds = pendingLaunchIds
+  }
+}

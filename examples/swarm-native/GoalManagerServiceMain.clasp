@@ -1,0 +1,321 @@
+module GoalManagerServiceMain
+
+import GoalManagerBootstrapSetup
+import GoalManagerBenchmarkFlow
+import GoalManagerPlannerFlow
+import GoalManagerStateView
+import GoalManagerStateRuntime
+import GoalManagerPreludeProject
+import GoalManagerWatch
+import GoalManagerPrelude
+import GoalManagerConfig
+import Service
+
+serviceStatusOutput : Str
+serviceStatusOutput =
+  if recordedServiceRoot != "" then
+    if fileExists (serviceStatusPath recordedServiceRoot) then
+      match readServiceStatus recordedServiceRoot {
+        Ok service -> encode service,
+        Err message -> readTextOrEmpty (serviceStatusPath recordedServiceRoot)
+      }
+    else if fileExists (serviceStatusPath serviceRoot) then
+      match readServiceStatus serviceRoot {
+        Ok service -> encode service,
+        Err message -> readTextOrEmpty (serviceStatusPath serviceRoot)
+      }
+    else
+      "error:missing-service-status"
+  else if fileExists (serviceStatusPath serviceRoot) then
+    match readServiceStatus serviceRoot {
+      Ok service -> encode service,
+      Err message -> readTextOrEmpty (serviceStatusPath serviceRoot)
+    }
+  else
+    "error:missing-service-status"
+
+recoverManagedService : ServiceStatus -> Str
+recoverManagedService service = {
+  let state = readManagerState in
+  if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if service.status == "completed" then
+    resumeManager
+  else {
+    let traceRecovery =
+      appendManagerTrace
+        (textConcat
+          [
+            "service-final-before-manager-final:status=",
+            service.status,
+            ":wave=",
+            encode state.wave,
+            ":benchmark-runs=",
+            encode state.benchmarkRuns
+          ]) in
+    if traceRecovery != "" then
+      textConcat ["error:", traceRecovery]
+    else
+      runManagedServiceBootstrap
+  }
+}
+
+managerServiceEnvArgs : [Str]
+managerServicePassthroughEnvArgs : [Str]
+managerServicePassthroughEnvArgs = {
+  let mut rendered = emptyTexts;
+  for name in [
+    "CLASP_TEST_FAKE_PLANNER_MODE",
+    "CLASP_TEST_FAKE_CODEX_SLEEP_SECS",
+    "CLASP_TEST_FAKE_BENCHMARK_MODE",
+    "CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS"
+  ] {
+    match envVar name {
+      Ok raw ->
+        rendered = append rendered [textConcat [name, "=", raw]],
+      Err message ->
+        rendered
+    };
+    rendered
+  };
+  rendered
+}
+
+managerServiceEnvArgs =
+  append [
+    textConcat ["CLASP_MANAGER_GOAL_JSON=", encode goalText],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode objectiveId],
+    textConcat ["CLASP_MANAGER_PROGRAM_JSON=", encode managerProgramPath],
+    textConcat ["CLASP_MANAGER_PROJECT_ROOT_JSON=", encode managerProjectRoot],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_JSON=", encode childLoopProgramPath],
+    textConcat ["CLASP_MANAGER_PLANNER_SCHEMA_JSON=", encode plannerSchemaPath],
+    textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
+    textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode workspaceRoot],
+    textConcat ["CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON=", encode taskWorkspaceBaseRoot],
+    textConcat ["CLASP_MANAGER_CLASPC_BIN_JSON=", encode managerClaspcBin],
+    textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
+    textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
+    textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
+    textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASP_MANAGER_MAX_TASKS_JSON=", encode maxTaskLoops],
+    textConcat ["CLASP_MANAGER_PLANNER_MAX_RUNS_JSON=", encode plannerTaskMaxRuns],
+    textConcat ["CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON=", encode plannerTimeoutMs],
+    textConcat ["CLASP_MANAGER_MAX_WAVES_JSON=", encode maxWaves],
+    textConcat ["CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON=", encode maxConcurrentChildren],
+    textConcat ["CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
+    textConcat ["CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON=", encode childReportSettlePolls],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON=", encode objectiveTaskBudget],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON=", encode objectiveRunBudget],
+    textConcat ["CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON=", encode taskLeaseTimeoutMs],
+    textConcat ["CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON=", encode taskWorkspaceCacheMaxMb],
+    textConcat ["CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON=", encode taskBaselineCacheMaxMb],
+    textConcat ["CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_BASELINE_CACHE_TOTAL_MAX_MB_JSON=", encode childLoopBaselineCacheTotalMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_XDG_CACHE_TOTAL_MAX_MB_JSON=", encode childLoopXdgCacheTotalMaxMb],
+    textConcat ["CLASP_MANAGER_ARTIFACTS_CACHE_MAX_MB_JSON=", encode managerArtifactsCacheMaxMb],
+    textConcat ["CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON=", encode managerXdgCacheMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
+    textConcat ["CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
+    textConcat ["CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON=", encode taskFailureLogTailBytes],
+    textConcat ["CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON=", encode retainFailedTaskWorkspaces],
+    textConcat ["CLASP_MANAGER_BENCHMARK_COMMAND_JSON=", encode benchmarkCommand],
+    textConcat ["CLASP_MANAGER_BENCHMARK_CWD_JSON=", encode benchmarkCwd],
+    textConcat ["CLASP_MANAGER_BENCHMARK_POLL_MS_JSON=", encode benchmarkWatchPollMs],
+    textConcat ["CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON=", encode benchmarkTimeoutMs],
+    textConcat ["CLASP_MANAGER_PLANNER_POLICY_JSON=", encode plannerPolicyText],
+    textConcat ["CLASP_MANAGER_TRACE_JSON=", encode traceEnabled],
+    textConcat ["CLASP_MANAGER_SERVICE_ROOT_JSON=", encode serviceRoot],
+    textConcat ["CLASP_MANAGER_SERVICE_ID_JSON=", encode serviceId],
+    textConcat ["CLASP_MANAGER_SERVICE_RESTART_DELAY_MS_JSON=", encode serviceRestartDelayMs],
+    textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
+    textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
+    textConcat ["CLASP_SWARM_ACTOR=", actorName]
+  ] managerServicePassthroughEnvArgs
+
+managerServiceCommandArgs : [Str]
+managerServiceCommandArgs =
+  if currentExecutablePath != "" then
+    append
+      (append ["env"] managerServiceEnvArgs)
+      [currentExecutablePath, stateRootPath]
+  else
+    append
+      (append ["env"] managerServiceEnvArgs)
+      [managerClaspcBin, "run", resolvedManagerProgramPath, "--", stateRootPath]
+
+waitForManagedServiceCompletion : Str
+waitForManagedServiceCompletion = {
+  let state = readManagerState in
+  if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else
+    match readServiceStatus serviceRoot {
+      Ok service ->
+        if service.status == "completed" then
+          recoverManagedService service
+        else if service.status == "failed" then
+          recoverManagedService service
+        else
+          match sleepMsValue childLoopWatchPollMs {
+            Err message -> textConcat ["error:", message],
+            Ok slept -> waitForManagedServiceCompletion
+          },
+      Err message ->
+        match sleepMsValue childLoopWatchPollMs {
+          Err sleepMessage -> textConcat ["error:", sleepMessage],
+          Ok slept -> waitForManagedServiceCompletion
+        }
+    }
+}
+
+runManagedServiceBootstrap : Str
+runManagedServiceBootstrap =
+  match
+    superviseService (
+      serviceSupervisorSpec
+        managerProjectRoot
+        serviceRoot
+        serviceId
+        serviceReadyPath
+        managerReadyText
+        childLoopWatchPollMs
+        upgradeReadyPollMs
+        upgradeReadyTimeoutMs
+        serviceRestartDelayMs
+        managerServiceCommandArgs
+    )
+  {
+    Ok service ->
+      if service.status == "completed" then
+        recoverManagedService service
+      else if service.status == "failed" then
+        recoverManagedService service
+      else
+        waitForManagedServiceCompletion,
+    Err message -> textConcat ["error:", message]
+  }
+
+runManagedServiceResume : Str
+runManagedServiceResume = {
+  let prepError = ensureManagerReady in
+  if prepError != "" then
+    textConcat ["error:", prepError]
+  else {
+    let traceResume = appendManagerTrace "service-resume:start" in
+    if traceResume != "" then
+      textConcat ["error:", traceResume]
+    else
+      resumeManager
+  }
+}
+
+runManagerUpgrade : Str
+runManagerUpgrade = {
+  let prepError = ensureManagerReady in
+  if prepError != "" then
+    prepError
+  else if textJoin "" upgradeCommandList == "" then
+    "error:missing-upgrade-command"
+  else if serviceRoot == "" then
+    "error:missing-service-root"
+  else if serviceId == "" then
+    "error:missing-service-id"
+  else if upgradeReadyPath == "" then
+    "error:missing-upgrade-ready-path"
+  else
+    match
+      upgradeService (
+        serviceUpgradeSpec
+          "."
+          serviceRoot
+          serviceId
+          (encode currentUpgradeSnapshot)
+          upgradeReadyPath
+          upgradeReadyContains
+          childLoopWatchPollMs
+          upgradeReadyPollMs
+          upgradeReadyTimeoutMs
+          upgradeCommitGraceMs
+          upgradeCommandList
+      )
+    {
+      Ok transaction -> encode transaction,
+      Err message -> textConcat ["error:", message]
+    }
+}
+
+statusOutput : Str
+statusOutput = encode (statusView readManagerState)
+
+continueManagedResume : Str -> Str
+continueManagedResume result = {
+  let state = readManagerState in
+  if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if state.phase == "needs-planner" then
+    resumeManager
+  else
+    result
+}
+
+resumeManagerOnce : Str
+resumeManagerOnce = {
+  let state = readManagerState in
+  let traceState =
+    appendManagerTrace
+      (textConcat
+        ["resume-manager:phase=", state.phase, ":wave=", encode state.wave, ":benchmark-runs=", encode state.benchmarkRuns]) in
+  if traceState != "" then
+    textConcat ["error:", traceState]
+  else if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if state.phase == "task-running" then
+    resumeCurrentWave state
+  else if state.phase == "benchmark-running" then
+    resumeBenchmarkCheckpoint state.wave state.benchmarkRuns
+  else if state.phase == "planner-running" then
+    resumePlannerWave state
+  else if state.phase == "needs-planner" then
+    if plannerReportReusableFor state.wave latestBenchmarkSummaryText then
+      continueWithPlan
+    else
+      runPlanner
+  else if length state.plannedTaskIds > 0 then
+    resumeCurrentWave state
+  else if plannerReportReusableFor state.wave latestBenchmarkSummaryText then
+    continueWithPlan
+  else
+    runPlanner
+}
+
+resumeManager : Str
+resumeManager = continueManagedResume resumeManagerOnce
+
+serviceGoalManagerMain : Str
+serviceGoalManagerMain =
+  if commandName == "status" then
+    statusOutput
+  else if commandName == "service-status" then
+    serviceStatusOutput
+  else if commandName == "upgrade" then
+    runManagerUpgrade
+  else if runningUnderServiceSupervisor == false then
+    runManagedServiceBootstrap
+  else
+    runManagedServiceResume

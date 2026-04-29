@@ -1,0 +1,144 @@
+module GoalManagerReportIO
+
+import GoalManagerWatch
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+plannerReportError : Str -> Result PlannerReport
+plannerReportError message = Err message
+
+defaultPlannerTaskRole : Str -> Str -> Str
+defaultPlannerTaskRole taskId detail =
+  if length (textSplit taskId "benchmark") > 1 then
+    "benchmark-operator"
+  else if length (textSplit taskId "verify") > 1 then
+    "verification-closer"
+  else if length (textSplit taskId "planner") > 1 then
+    "planner"
+  else if length (textSplit taskId "loop") > 1 then
+    "control-plane-hardener"
+  else if length (textSplit detail "benchmark") > 1 then
+    "benchmark-operator"
+  else
+    "generalist"
+
+legacyPlannerTaskToCurrent : LegacyPlannerTaskSpec -> PlannerTaskSpec
+legacyPlannerTaskToCurrent task =
+  PlannerTaskSpec {
+    taskId = task.taskId,
+    role = defaultPlannerTaskRole task.taskId task.detail,
+    detail = task.detail,
+    dependencies = task.dependencies,
+    taskPrompt = task.taskPrompt,
+    coordinationFocus = emptyTexts
+  }
+
+legacyPlannerReportToCurrent : LegacyPlannerReport -> PlannerReport
+legacyPlannerReportToCurrent report = {
+  let mut renderedTasks = emptyPlannerTasks;
+  for task in report.tasks {
+    renderedTasks = append renderedTasks [legacyPlannerTaskToCurrent task];
+    renderedTasks
+  };
+  PlannerReport {
+    objectiveSummary = report.objectiveSummary,
+    strategy = report.strategy,
+    tasks = renderedTasks,
+    testsRun = report.testsRun,
+    residualRisks = report.residualRisks
+  }
+}
+
+plannerReportFromRaw : Str -> PlannerReport
+plannerReportFromRaw raw = decode PlannerReport raw
+
+readPlannerReportPath : Str -> Result PlannerReport
+readPlannerReportPath path = match readFile path {
+  Ok raw -> Ok (plannerReportFromRaw raw),
+  Err message -> plannerReportError message
+}
+
+plannerInputStateError : Str -> Result PlannerInputState
+plannerInputStateError message = Err message
+
+legacyPlannerInputStateToCurrent : LegacyPlannerInputState -> PlannerInputState
+legacyPlannerInputStateToCurrent state =
+  PlannerInputState {
+    fingerprint = state.fingerprint,
+    goalText = state.goalText,
+    plannerPolicy = state.plannerPolicy,
+    schemaPath = state.schemaPath,
+    workspaceRoot = state.workspaceRoot,
+    mailboxSummary = ""
+  }
+
+plannerInputStateFromRaw : Str -> PlannerInputState
+plannerInputStateFromRaw raw =
+  if length (textSplit raw "\"mailboxSummary\":") > 1 then
+    decode PlannerInputState raw
+  else
+    legacyPlannerInputStateToCurrent (decode LegacyPlannerInputState raw)
+
+readPlannerInputStatePath : Str -> Result PlannerInputState
+readPlannerInputStatePath path = match readFile path {
+  Ok raw -> Ok (plannerInputStateFromRaw raw),
+  Err message -> plannerInputStateError message
+}
+
+syntheticFailureReport : Str -> Str -> VerifierReport
+syntheticFailureReport summary detail =
+  VerifierReport {
+    verdict = "fail",
+    summary = summary,
+    findings = [detail],
+    tests_run = emptyTexts,
+    follow_up = ["Inspect the failing manager or child loop artifacts and retry the task."],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+readVerifierReportPath : Str -> VerifierReport
+readVerifierReportPath path = match readFile path {
+  Ok raw -> decode VerifierReport raw,
+  Err message ->
+    syntheticFailureReport
+      (textConcat ["missing verifier report: ", message])
+      message
+}
+
+builderFeedbackError : Str -> Result BuilderReport
+builderFeedbackError message = Err message
+
+readBuilderReportPath : Str -> Result BuilderReport
+readBuilderReportPath path = match readFile path {
+  Ok raw -> Ok (decode BuilderReport raw),
+  Err message -> builderFeedbackError message
+}
+
+taskLatestAttempt : Str -> Int
+taskLatestAttempt taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state -> state.attempt,
+      Err message -> 1
+    }
+  else
+    1
+
+taskLatestBuilderReport : Str -> Result BuilderReport
+taskLatestBuilderReport taskId =
+  readBuilderReportPath (taskBuilderReportPath taskId (taskLatestAttempt taskId))
+
+taskLatestBuilderReportPath : Str -> Str
+taskLatestBuilderReportPath taskId =
+  taskBuilderReportPath taskId (taskLatestAttempt taskId)
+
+readFeedbackSummary : Str
+readFeedbackSummary =
+  if fileExists feedbackPath then
+    (readVerifierReportPath feedbackPath).summary
+  else
+    ""

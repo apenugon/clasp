@@ -1,0 +1,115 @@
+module GoalManagerStateRuntime
+
+import GoalManagerPlannerIO
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+writeManagerState : ManagerState -> Str
+writeManagerState state = match writeFile statusPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+emptyManagerState : ManagerState
+emptyManagerState =
+  ManagerState {
+    phase = "needs-planner",
+    verdict = "pending",
+    completed = false,
+    objectiveId = objectiveId,
+    plannerTaskId = plannerTaskIdForWave 1,
+    activeTaskId = "",
+    plannedTaskIds = emptyTexts,
+    wave = 1,
+    benchmarkRuns = 0,
+    final = false
+  }
+
+readManagerStatePath : Str -> ManagerState
+readManagerStatePath path = match readFile path {
+  Ok raw -> decode ManagerState raw,
+  Err message -> emptyManagerState
+}
+
+readManagerState : ManagerState
+readManagerState = readManagerStatePath statusPath
+
+currentUpgradeSnapshot : ManagerUpgradeSnapshot
+currentUpgradeSnapshot =
+  ManagerUpgradeSnapshot {
+    state = readManagerState,
+    feedback = readTextOrEmpty feedbackPath,
+    projectRoot = managerProjectRoot
+  }
+
+restoreManagerSnapshotIfNeeded : Str
+restoreManagerSnapshotIfNeeded =
+  if restoreSnapshotPath == "" then
+    ""
+  else if fileExists restoredSnapshotPath then
+    ""
+  else
+    match readFile restoreSnapshotPath {
+      Err message ->
+        textConcat ["restore-read-error:", message],
+      Ok raw ->
+        let snapshot = decode ManagerUpgradeSnapshot raw in
+        let stateError = writeManagerState snapshot.state in
+        if stateError != "" then
+          textConcat ["restore-state-error:", stateError]
+        else {
+          let feedbackError =
+            if snapshot.feedback == "" then
+              ""
+            else
+              match writeFile feedbackPath snapshot.feedback {
+                Ok written -> "",
+                Err message -> message
+              } in
+          if feedbackError != "" then
+            textConcat ["restore-feedback-error:", feedbackError]
+          else
+            match writeFile serviceRootRecordPath restoreServiceRoot {
+              Err message ->
+                textConcat ["restore-service-root-error:", message],
+              Ok serviceRootWritten ->
+                match writeFile serviceIdRecordPath restoreServiceId {
+                  Err message ->
+                    textConcat ["restore-service-id-error:", message],
+                  Ok serviceIdWritten ->
+                    match writeFile projectRootRecordPath snapshot.projectRoot {
+                      Err message ->
+                        textConcat ["restore-project-root-error:", message],
+                      Ok projectRootWritten ->
+                        match
+                          writeFile
+                            restoredSnapshotPath
+                            (encode
+                              (ManagerUpgradeRestoreRecord {
+                                serviceRoot = restoreServiceRoot,
+                                serviceId = restoreServiceId,
+                                generation = restoreGeneration,
+                                transactionPath = restoreTransactionPath,
+                                projectRoot = snapshot.projectRoot,
+                                snapshot = snapshot
+                              }))
+                        {
+                          Ok written -> "",
+                          Err message ->
+                            textConcat ["restore-marker-error:", message]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+readPlannerReportForWave : Int -> Result PlannerReport
+readPlannerReportForWave wave = readPlannerReportPath (plannerReportPathFor wave)
+
+readPlannerInputState : Result PlannerInputState
+readPlannerInputState = readPlannerInputStatePath plannerInputPath

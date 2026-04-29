@@ -138,28 +138,33 @@ printf '{"image":"compiler"}\n' > "$test_root/src/embedded.compiler.native.image
 
 run_one() {
   local log_path="$1"
+  local output_path="$2"
 
   IN_NIX_SHELL=1 \
   CLASP_PROJECT_ROOT="$test_root" \
   CLASPC_BIN="$test_root/bin/fake-claspc" \
   CLASP_TEST_FAKE_CLASPC_LOG="$log_path" \
   CLASP_NATIVE_VERIFY_MODE=full \
-  "$bash_bin" "$test_root/src/scripts/verify.sh" >/dev/null
+  "$bash_bin" "$test_root/src/scripts/verify.sh" >"$output_path"
 }
 
 first_log="$test_root/full-first.log"
 second_log="$test_root/full-second.log"
 third_log="$test_root/full-third.log"
+first_output="$test_root/full-first.output"
+second_output="$test_root/full-second.output"
+third_output="$test_root/full-third.output"
 
-run_one "$first_log"
+run_one "$first_log" "$first_output"
 
 sed -i 's/"hello"/"hullo"/' "$test_root/src/Helper.clasp"
-run_one "$second_log"
+run_one "$second_log" "$second_output"
 grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Helper' "$second_log" >/dev/null
 if grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Main' "$second_log" >/dev/null; then
   printf 'body-only edit unexpectedly rebuilt Main module decls\n' >&2
   exit 1
 fi
+grep -F '"nativeSourceChangedModules":["Helper"]' "$second_output" >/dev/null
 
 cat > "$test_root/src/Helper.clasp" <<'EOF'
 module Helper
@@ -167,6 +172,7 @@ module Helper
 helper : Int -> Str
 helper value = "hullo"
 EOF
-run_one "$third_log"
+run_one "$third_log" "$third_output"
 grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Helper' "$third_log" >/dev/null
 grep -F 'exec-image '"$test_root"'/src/embedded.compiler.native.image.json nativeImageProjectModuleDeclsText --project-entry='"$test_root"'/src/Main.clasp Main' "$third_log" >/dev/null
+grep -F '"nativeSourceChangedModules":["Helper","Main"]' "$third_output" >/dev/null

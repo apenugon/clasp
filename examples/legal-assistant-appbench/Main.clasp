@@ -1,0 +1,826 @@
+module Main
+
+import Process
+
+record UploadedDocument = {
+  documentId : Str,
+  filename : Str,
+  mediaType : Str,
+  sizeBytes : Int,
+  contentText : Str
+}
+
+record DocumentHandle = {
+  documentId : Str,
+  filename : Str,
+  mediaType : Str,
+  sizeBytes : Int,
+  excerpt : Str,
+  contentFingerprint : Str
+}
+
+record DocumentReference = {
+  documentId : Str,
+  label : Str,
+  raw : Str
+}
+
+record AssistantUser = {
+  userId : Str,
+  email : Str,
+  displayName : Str
+}
+
+record SessionEntry = {
+  authToken : Str,
+  ownerUserId : Str
+}
+
+record StoredDocument = {
+  documentId : Str,
+  ownerUserId : Str,
+  title : Str,
+  filename : Str,
+  mediaType : Str,
+  sizeBytes : Int,
+  contentText : Str,
+  excerpt : Str,
+  contentFingerprint : Str,
+  version : Int,
+  status : Str
+}
+
+record ConversationTurn = {
+  conversationId : Str,
+  turnId : Str,
+  authorUserId : Str,
+  role : Str,
+  body : Str,
+  citationLabels : [Str],
+  citationSourceIds : [Str],
+  toolKinds : [Str],
+  referencedDocumentIds : [Str]
+}
+
+record AssistantState = {
+  users : [AssistantUser],
+  sessions : [SessionEntry],
+  documents : [StoredDocument],
+  turns : [ConversationTurn]
+}
+
+record UploadRequest = {
+  authToken : Str,
+  conversationId : Str,
+  title : Str,
+  upload : UploadedDocument
+}
+
+record AskRequest = {
+  authToken : Str,
+  conversationId : Str,
+  prompt : Str
+}
+
+record UploadOutcome = {
+  state : AssistantState,
+  document : StoredDocument
+}
+
+record SearchResult = {
+  resultId : Str,
+  title : Str,
+  url : Str,
+  summary : Str
+}
+
+record Citation = {
+  kind : Str,
+  sourceId : Str,
+  label : Str,
+  excerpt : Str
+}
+
+record AnswerEnvelope = {
+  answerText : Str,
+  citations : [Citation],
+  citationLabels : [Str],
+  citationSourceIds : [Str],
+  referencedDocumentIds : [Str],
+  retrievedDocumentIds : [Str],
+  toolKinds : [Str]
+}
+
+record CommandResult = {
+  success : Bool,
+  command : Str,
+  error : Str,
+  userId : Str,
+  statePath : Str,
+  searchLogPath : Str,
+  documentCount : Int,
+  chatTurnCount : Int,
+  latestDocumentId : Str,
+  latestDocumentVersion : Int,
+  latestDocumentStatus : Str,
+  latestAnswerText : Str,
+  latestCitationLabels : [Str],
+  latestReferencedDocumentIds : [Str],
+  latestRetrievedDocumentIds : [Str],
+  latestToolKinds : [Str]
+}
+
+foreign documentUploadBoundary : UploadedDocument -> Result DocumentHandle = "documentUploadBoundary"
+foreign documentReferenceBoundary : Str -> Result [DocumentReference] = "documentReferenceBoundary"
+
+emptyUsers : [AssistantUser]
+emptyUsers = []
+
+emptySessions : [SessionEntry]
+emptySessions = []
+
+emptyDocuments : [StoredDocument]
+emptyDocuments = []
+
+emptyTurns : [ConversationTurn]
+emptyTurns = []
+
+emptySearchResults : [SearchResult]
+emptySearchResults = []
+
+emptyCitations : [Citation]
+emptyCitations = []
+
+emptyStrings : [Str]
+emptyStrings = []
+
+emptyDocumentReferences : [DocumentReference]
+emptyDocumentReferences = []
+
+stateResultError : Str -> Result AssistantState
+stateResultError message = Err message
+
+userIdResultError : Str -> Result Str
+userIdResultError message = Err message
+
+uploadOutcomeError : Str -> Result UploadOutcome
+uploadOutcomeError message = Err message
+
+seedUser : AssistantUser
+seedUser = AssistantUser {
+  userId = "user-ada",
+  email = "ada@northwind.example",
+  displayName = "Ada Lovelace"
+}
+
+seedSession : SessionEntry
+seedSession = SessionEntry {
+  authToken = "token-ada",
+  ownerUserId = "user-ada"
+}
+
+emptyState : AssistantState
+emptyState = AssistantState {
+  users = emptyUsers,
+  sessions = emptySessions,
+  documents = emptyDocuments,
+  turns = emptyTurns
+}
+
+bootstrapState : AssistantState
+bootstrapState = AssistantState {
+  users = [seedUser],
+  sessions = [seedSession],
+  documents = emptyDocuments,
+  turns = emptyTurns
+}
+
+emptyDocument : StoredDocument
+emptyDocument = StoredDocument {
+  documentId = "",
+  ownerUserId = "",
+  title = "",
+  filename = "",
+  mediaType = "",
+  sizeBytes = 0,
+  contentText = "",
+  excerpt = "",
+  contentFingerprint = "",
+  version = 0,
+  status = ""
+}
+
+emptyTurn : ConversationTurn
+emptyTurn = ConversationTurn {
+  conversationId = "",
+  turnId = "",
+  authorUserId = "",
+  role = "",
+  body = "",
+  citationLabels = [],
+  citationSourceIds = [],
+  toolKinds = [],
+  referencedDocumentIds = []
+}
+
+emptyAnswer : AnswerEnvelope
+emptyAnswer = AnswerEnvelope {
+  answerText = "",
+  citations = emptyCitations,
+  citationLabels = emptyStrings,
+  citationSourceIds = emptyStrings,
+  referencedDocumentIds = emptyStrings,
+  retrievedDocumentIds = emptyStrings,
+  toolKinds = emptyStrings
+}
+
+fallbackUploadRequest : UploadRequest
+fallbackUploadRequest = UploadRequest {
+  authToken = "",
+  conversationId = "conv-legal-1",
+  title = "",
+  upload = UploadedDocument {
+    documentId = "",
+    filename = "",
+    mediaType = "text/plain",
+    sizeBytes = 0,
+    contentText = ""
+  }
+}
+
+fallbackAskRequest : AskRequest
+fallbackAskRequest = AskRequest {
+  authToken = "",
+  conversationId = "conv-legal-1",
+  prompt = ""
+}
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readUploadRequest : UploadRequest
+readUploadRequest = match envVar "CLASP_LEGAL_APPBENCH_UPLOAD_JSON" {
+  Ok raw -> decode UploadRequest raw,
+  Err message -> fallbackUploadRequest
+}
+
+readAskRequest : AskRequest
+readAskRequest = match envVar "CLASP_LEGAL_APPBENCH_ASK_JSON" {
+  Ok raw -> decode AskRequest raw,
+  Err message -> fallbackAskRequest
+}
+
+stateRoot : Str
+stateRoot = readEnvText "CLASP_LEGAL_APPBENCH_STATE_ROOT_JSON" "legal-assistant-appbench-state"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LEGAL_APPBENCH_WORKSPACE_JSON" "."
+
+commandName : Str
+commandName = readEnvText "CLASP_LEGAL_APPBENCH_COMMAND_JSON" "snapshot"
+
+searchScriptPath : Str
+searchScriptPath =
+  readEnvText
+    "CLASP_LEGAL_APPBENCH_SEARCH_SCRIPT_JSON"
+    (pathJoin [workspaceRoot, "examples", "legal-assistant-appbench", "web-search-fixture.mjs"])
+
+statePath : Str
+statePath = pathJoin [stateRoot, "assistant-state.json"]
+
+searchLogPath : Str
+searchLogPath = pathJoin [stateRoot, "search-log.json"]
+
+incomingUpload : UploadRequest
+incomingUpload = readUploadRequest
+
+incomingAsk : AskRequest
+incomingAsk = readAskRequest
+
+loadState : AssistantState
+loadState =
+  if fileExists statePath then
+    match readFile statePath {
+      Ok raw -> decode AssistantState raw,
+      Err message -> emptyState
+    }
+  else
+    emptyState
+
+persistState : AssistantState -> Result AssistantState
+persistState state =
+  match mkdirAll stateRoot {
+    Err message -> stateResultError message,
+    Ok created ->
+      match writeFile statePath (encode state) {
+        Ok written -> Ok state,
+        Err message -> stateResultError message
+      }
+  }
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+resolveUserId : Str -> [SessionEntry] -> Str
+resolveUserId token sessions = {
+  let mut matched = "";
+  for session in sessions {
+    if matched == "" then {
+      if session.authToken == token then {
+        matched = session.ownerUserId;
+        matched
+      } else {
+        matched
+      }
+    } else {
+      matched
+    }
+  };
+  matched
+}
+
+latestDocument : [StoredDocument] -> StoredDocument
+latestDocument documents = {
+  let mut current = emptyDocument;
+  for document in documents {
+    current = document;
+    current
+  };
+  current
+}
+
+latestTurn : [ConversationTurn] -> ConversationTurn
+latestTurn turns = {
+  let mut current = emptyTurn;
+  for turn in turns {
+    current = turn;
+    current
+  };
+  current
+}
+
+documentVersion : Str -> [StoredDocument] -> Int
+documentVersion documentId documents = {
+  let mut current = 0;
+  for document in documents {
+    if document.documentId == documentId then {
+      current = document.version;
+      current
+    } else {
+      current
+    }
+  };
+  current
+}
+
+replaceDocument : [StoredDocument] -> StoredDocument -> [StoredDocument]
+replaceDocument documents candidate = {
+  let mut replaced = false;
+  let mut updated = [];
+  for document in documents {
+    if document.documentId == candidate.documentId then {
+      updated = append updated [candidate];
+      replaced = true;
+      updated
+    } else {
+      updated = append updated [document];
+      updated
+    }
+  };
+  if replaced then updated else append updated [candidate]
+}
+
+referenceIds : [DocumentReference] -> [Str]
+referenceIds references = {
+  let mut ids = [];
+  for reference in references {
+    ids = append ids [reference.documentId];
+    ids
+  };
+  ids
+}
+
+containsText : [Str] -> Str -> Bool
+containsText values target = {
+  let mut matched = false;
+  for value in values {
+    if matched then {
+      matched
+    } else {
+      if value == target then {
+        matched = true;
+        matched
+      } else {
+        matched
+      }
+    }
+  };
+  matched
+}
+
+textOverlaps : Str -> Str -> Bool
+textOverlaps prompt haystack = {
+  let mut matched = false;
+  for word in textSplit prompt " " {
+    if matched then {
+      matched
+    } else if word == "" then {
+      matched
+    } else if textIncludes haystack word then {
+      matched = true;
+      matched
+    } else {
+      matched
+    }
+  };
+  matched
+}
+
+documentMatchesPrompt : Str -> StoredDocument -> Bool
+documentMatchesPrompt prompt document =
+  if textOverlaps prompt document.contentText then
+    true
+  else
+    textOverlaps prompt document.title
+
+nextVersion : Int -> Int
+nextVersion current =
+  if current == 0 then
+    1
+  else if current == 1 then
+    2
+  else if current == 2 then
+    3
+  else
+    4
+
+selectDocuments : [DocumentReference] -> Str -> [StoredDocument] -> [StoredDocument]
+selectDocuments references prompt documents = {
+  let referencedIds = referenceIds references;
+  let mut explicit = [];
+  let mut related = [];
+  for document in documents {
+    if containsText referencedIds document.documentId then {
+      explicit = append explicit [document];
+      explicit
+    } else if documentMatchesPrompt prompt document then {
+      related = append related [document];
+      related
+    } else {
+      related
+    }
+  };
+  append explicit related
+}
+
+documentCitationLabel : StoredDocument -> Str
+documentCitationLabel document =
+  if document.version > 1 then
+    textConcat [document.title, " v", encode document.version]
+  else
+    document.title
+
+documentCitation : StoredDocument -> Citation
+documentCitation document =
+  Citation {
+    kind = "document",
+    sourceId = document.documentId,
+    label = documentCitationLabel document,
+    excerpt = document.excerpt
+  }
+
+searchCitation : SearchResult -> Citation
+searchCitation result =
+  Citation {
+    kind = "web",
+    sourceId = result.resultId,
+    label = result.title,
+    excerpt = result.summary
+  }
+
+searchResultsForQuery : Str -> [SearchResult]
+searchResultsForQuery query =
+  if textIncludes query "force majeure" then
+    [
+      SearchResult {
+        resultId = "web-delaware-force-majeure",
+        title = "Delaware Force Majeure Update",
+        url = "https://example.test/delaware-force-majeure",
+        summary = "Recent Delaware guidance emphasizes reading the contract text before asserting force majeure."
+      },
+      SearchResult {
+        resultId = "web-contract-remedies",
+        title = "Commercial Contract Remedies Overview",
+        url = "https://example.test/contract-remedies",
+        summary = "Remedy availability turns on notice, cure periods, and explicit limitation clauses."
+      }
+    ]
+  else
+    [
+      SearchResult {
+        resultId = "web-general-contracts",
+        title = "Contract Research Digest",
+        url = "https://example.test/contracts",
+        summary = "Supplemental contract research should be cited separately from internal document retrieval."
+      }
+    ]
+
+processSucceeded : ProcessResult -> Bool
+processSucceeded result = result.exitCode == 0
+
+runSearchTool : Str -> Bool
+runSearchTool query =
+  match run (commandSpec workspaceRoot ["node", searchScriptPath, query, searchLogPath]) {
+    Ok result -> processSucceeded result,
+    Err message ->
+      false
+  }
+
+citationsFor : [StoredDocument] -> [SearchResult] -> [Citation]
+citationsFor documents results = {
+  let mut citations = [];
+  for document in documents {
+    citations = append citations [documentCitation document];
+    citations
+  };
+  let mut finalCitations = citations;
+  let mut addedWeb = false;
+  for result in results {
+    if addedWeb then {
+      finalCitations
+    } else {
+      finalCitations = append finalCitations [searchCitation result];
+      addedWeb = true;
+      finalCitations
+    }
+  };
+  finalCitations
+}
+
+citationLabels : [Citation] -> [Str]
+citationLabels citations = {
+  let mut labels = [];
+  for citation in citations {
+    labels = append labels [citation.label];
+    labels
+  };
+  labels
+}
+
+citationIds : [Citation] -> [Str]
+citationIds citations = {
+  let mut ids = [];
+  for citation in citations {
+    ids = append ids [citation.sourceId];
+    ids
+  };
+  ids
+}
+
+documentIds : [StoredDocument] -> [Str]
+documentIds documents = {
+  let mut ids = [];
+  for document in documents {
+    ids = append ids [document.documentId];
+    ids
+  };
+  ids
+}
+
+renderAnswer : [StoredDocument] -> [SearchResult] -> Str
+renderAnswer documents results = {
+  let primaryDocument = latestDocument documents;
+  let primarySearch = {
+    let mut current = "";
+    let mut seen = false;
+    for result in results {
+      if seen then {
+        current
+      } else {
+        current = result.title;
+        seen = true;
+        current
+      }
+    };
+    current
+  };
+  if primaryDocument.documentId == "" then
+    "No durable document context was retrieved."
+  else if primarySearch == "" then
+    textConcat ["Document retrieval prioritized ", documentCitationLabel primaryDocument, " and produced a cited answer without supplemental web search."]
+  else
+    textConcat ["Document retrieval prioritized ", documentCitationLabel primaryDocument, " and supplemented the answer with web guidance from ", primarySearch, "."]
+}
+
+turnIdFor : Str -> Str -> Str -> Str
+turnIdFor conversationId role body = textConcat ["turn-", textFingerprint64Hex (textConcat [conversationId, role, body])]
+
+systemTurn : Str -> Str -> StoredDocument -> ConversationTurn
+systemTurn conversationId userId document =
+  ConversationTurn {
+    conversationId = conversationId,
+    turnId = turnIdFor conversationId "system" document.documentId,
+    authorUserId = userId,
+    role = "system",
+    body = textConcat ["Document ", document.documentId, " is available at version ", encode document.version, "."],
+    citationLabels = [documentCitationLabel document],
+    citationSourceIds = [document.documentId],
+    toolKinds = ["document-upload"],
+    referencedDocumentIds = [document.documentId]
+  }
+
+userTurn : AskRequest -> Str -> [DocumentReference] -> ConversationTurn
+userTurn request userId references =
+  ConversationTurn {
+    conversationId = request.conversationId,
+    turnId = turnIdFor request.conversationId "user" request.prompt,
+    authorUserId = userId,
+    role = "user",
+    body = request.prompt,
+    citationLabels = emptyStrings,
+    citationSourceIds = emptyStrings,
+    toolKinds = emptyStrings,
+    referencedDocumentIds = referenceIds references
+  }
+
+assistantTurn : AskRequest -> Str -> AnswerEnvelope -> ConversationTurn
+assistantTurn request userId answer =
+  ConversationTurn {
+    conversationId = request.conversationId,
+    turnId = turnIdFor request.conversationId "assistant" answer.answerText,
+    authorUserId = userId,
+    role = "assistant",
+    body = answer.answerText,
+    citationLabels = answer.citationLabels,
+    citationSourceIds = answer.citationSourceIds,
+    toolKinds = answer.toolKinds,
+    referencedDocumentIds = answer.referencedDocumentIds
+  }
+
+uploadDocument : AssistantState -> UploadRequest -> Str -> Result UploadOutcome
+uploadDocument state request userId =
+  match documentUploadBoundary request.upload {
+    Err message -> uploadOutcomeError message,
+    Ok handle -> {
+      let version = nextVersion (documentVersion handle.documentId state.documents);
+      let status = if version > 1 then "replaced" else "uploaded";
+      let title = if request.title == "" then handle.filename else request.title;
+      let document =
+        StoredDocument {
+          documentId = handle.documentId,
+          ownerUserId = userId,
+          title = title,
+          filename = handle.filename,
+          mediaType = handle.mediaType,
+          sizeBytes = handle.sizeBytes,
+          contentText = request.upload.contentText,
+          excerpt = handle.excerpt,
+          contentFingerprint = handle.contentFingerprint,
+          version = version,
+          status = status
+        };
+      let nextState =
+        with state {
+          documents = replaceDocument state.documents document,
+          turns = append state.turns [systemTurn request.conversationId userId document]
+        };
+      Ok (UploadOutcome { state = nextState, document = document })
+    }
+  }
+
+answerFor : AssistantState -> AskRequest -> Str -> [DocumentReference] -> AnswerEnvelope
+answerFor state request userId references = {
+  let selectedDocuments = selectDocuments references request.prompt state.documents;
+  let searchResults =
+    if runSearchTool request.prompt then
+      searchResultsForQuery request.prompt
+    else
+      emptySearchResults;
+  let citations = citationsFor selectedDocuments searchResults;
+  AnswerEnvelope {
+    answerText = renderAnswer selectedDocuments searchResults,
+    citations = citations,
+    citationLabels = citationLabels citations,
+    citationSourceIds = citationIds citations,
+    referencedDocumentIds = referenceIds references,
+    retrievedDocumentIds = documentIds selectedDocuments,
+    toolKinds =
+      if length searchResults > 0 then
+        ["retrieval", "web-search"]
+      else
+        ["retrieval"]
+  }
+}
+
+commandResult : Bool -> Str -> Str -> Str -> AssistantState -> StoredDocument -> AnswerEnvelope -> CommandResult
+commandResult success command error userId state document answer =
+  CommandResult {
+    success = success,
+    command = command,
+    error = error,
+    userId = userId,
+    statePath = statePath,
+    searchLogPath = searchLogPath,
+    documentCount = length state.documents,
+    chatTurnCount = length state.turns,
+    latestDocumentId = document.documentId,
+    latestDocumentVersion = document.version,
+    latestDocumentStatus = document.status,
+    latestAnswerText = answer.answerText,
+    latestCitationLabels = answer.citationLabels,
+    latestReferencedDocumentIds = answer.referencedDocumentIds,
+    latestRetrievedDocumentIds = answer.retrievedDocumentIds,
+    latestToolKinds = answer.toolKinds
+  }
+}
+
+authResult : AssistantState -> Str -> Result Str
+authResult state token = {
+  let userId = resolveUserId token state.sessions;
+  if userId == "" then userIdResultError "authentication failed" else Ok userId
+}
+
+runBootstrap : Str
+runBootstrap =
+  match persistState bootstrapState {
+    Ok state -> encode (commandResult true "bootstrap" "" seedUser.userId state emptyDocument emptyAnswer),
+    Err message -> encode (commandResult false "bootstrap" message "" bootstrapState emptyDocument emptyAnswer)
+  }
+
+runUpload : Str
+runUpload =
+  match authResult loadState incomingUpload.authToken {
+    Err message ->
+      encode (commandResult false "upload" message "" loadState emptyDocument emptyAnswer),
+    Ok userId ->
+      match uploadDocument loadState incomingUpload userId {
+        Err message ->
+          encode (commandResult false "upload" message userId loadState emptyDocument emptyAnswer),
+        Ok next ->
+          match persistState next.state {
+            Ok persisted ->
+              encode (commandResult true "upload" "" userId persisted next.document emptyAnswer),
+            Err message ->
+              encode (commandResult false "upload" message userId next.state next.document emptyAnswer)
+          }
+      }
+  }
+
+runAsk : Str
+runAsk =
+  match authResult loadState incomingAsk.authToken {
+    Err message ->
+      encode (commandResult false "ask" message "" loadState (latestDocument loadState.documents) emptyAnswer),
+    Ok userId ->
+      match documentReferenceBoundary incomingAsk.prompt {
+        Err message ->
+          encode (commandResult false "ask" message userId loadState (latestDocument loadState.documents) emptyAnswer),
+        Ok references ->
+          match persistState
+            (with loadState {
+              turns =
+                append
+                  (append loadState.turns [userTurn incomingAsk userId references])
+                  [assistantTurn incomingAsk userId (answerFor loadState incomingAsk userId references)]
+            }) {
+            Ok persisted ->
+              encode (commandResult true "ask" "" userId persisted (latestDocument persisted.documents) (answerFor loadState incomingAsk userId references)),
+            Err message ->
+              encode (commandResult false "ask" message userId loadState (latestDocument loadState.documents) (answerFor loadState incomingAsk userId references))
+          }
+      }
+  }
+
+runSnapshot : Str
+runSnapshot =
+  encode
+    (commandResult
+      true
+      "snapshot"
+      ""
+      ""
+      loadState
+      (latestDocument loadState.documents)
+      (AnswerEnvelope {
+        answerText = (latestTurn loadState.turns).body,
+        citations = emptyCitations,
+        citationLabels = (latestTurn loadState.turns).citationLabels,
+        citationSourceIds = (latestTurn loadState.turns).citationSourceIds,
+        referencedDocumentIds = (latestTurn loadState.turns).referencedDocumentIds,
+        retrievedDocumentIds = (latestTurn loadState.turns).citationSourceIds,
+        toolKinds = (latestTurn loadState.turns).toolKinds
+      }))
+
+main : Str
+main =
+  if commandName == "bootstrap" then
+    runBootstrap
+  else if commandName == "upload" then
+    runUpload
+  else if commandName == "ask" then
+    runAsk
+  else
+    runSnapshot

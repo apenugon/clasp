@@ -12,6 +12,12 @@ explainSourceText source = frontendDriverExplainSourceText source
 compileSourceText : Str -> Str
 compileSourceText source = frontendDriverCompileSourceText source
 
+airSourceText : Str -> Str
+airSourceText source = frontendDriverAirSourceText source
+
+contextSourceText : Str -> Str
+contextSourceText source = frontendDriverContextSourceText source
+
 nativeSourceText : Str -> Str
 nativeSourceText source = nativeDriverSourceText source
 
@@ -29,6 +35,12 @@ checkProjectModuleSummaryText bundle importedSummaryText = frontendDriverCheckPr
 
 explainProjectText : Str -> Str
 explainProjectText bundle = frontendDriverExplainProjectText bundle
+
+airProjectText : Str -> Str
+airProjectText bundle = frontendDriverAirProjectText bundle
+
+contextProjectText : Str -> Str
+contextProjectText bundle = frontendDriverContextProjectText bundle
 
 compileProjectText : Str -> Str
 compileProjectText bundle = frontendDriverCompileProjectText bundle

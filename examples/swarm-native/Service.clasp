@@ -1,6 +1,19 @@
 module Service
 
 foreign upgradeCommandRaw : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str = "upgradeCommandJson"
+foreign superviseCommandRaw : Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str = "superviseCommandJson"
+foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
 
 record ServiceStatus = {
   serviceRoot : Str,
@@ -48,11 +61,36 @@ record ServiceUpgradeSpec = {
   command : [Str]
 }
 
+record ServiceSupervisorSpec = {
+  cwd : Str,
+  serviceRoot : Str,
+  serviceId : Str,
+  readyPath : Str,
+  readyContains : Str,
+  watchPollMs : Int,
+  readyPollMs : Int,
+  readyTimeoutMs : Int,
+  restartDelayMs : Int,
+  command : [Str]
+}
+
 serviceStatusPath : Str -> Str
 serviceStatusPath serviceRoot = pathJoin [serviceRoot, "service.json"]
 
 serviceStatusError : Str -> Result ServiceStatus
 serviceStatusError message = Err message
+
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+watchedProcessFromRaw : Result Str -> Result WatchedProcess
+watchedProcessFromRaw value = match value {
+  Ok raw -> Ok (decode WatchedProcess raw),
+  Err message -> watchedProcessError message
+}
+
+reconcileWatchedProcess : Str -> Result WatchedProcess
+reconcileWatchedProcess heartbeatPath = watchedProcessFromRaw (reconcileWatchedProcessRaw heartbeatPath)
 
 serviceStatusFromRaw : Result Str -> Result ServiceStatus
 serviceStatusFromRaw value = match value {
@@ -85,9 +123,96 @@ serviceUpgradeSpec cwd serviceRoot serviceId snapshotText readyPath readyContain
     command = command
   }
 
+serviceSupervisorSpec : Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> ServiceSupervisorSpec
+serviceSupervisorSpec cwd serviceRoot serviceId readyPath readyContains watchPollMs readyPollMs readyTimeoutMs restartDelayMs command =
+  ServiceSupervisorSpec {
+    cwd = cwd,
+    serviceRoot = serviceRoot,
+    serviceId = serviceId,
+    readyPath = readyPath,
+    readyContains = readyContains,
+    watchPollMs = watchPollMs,
+    readyPollMs = readyPollMs,
+    readyTimeoutMs = readyTimeoutMs,
+    restartDelayMs = restartDelayMs,
+    command = command
+  }
+
+persistServiceStatus : ServiceStatus -> Result ServiceStatus
+persistServiceStatus status = match writeFile (serviceStatusPath status.serviceRoot) (encode status) {
+  Ok written -> Ok status,
+  Err message -> serviceStatusError message
+}
+
+reconciledServiceStatus : ServiceStatus -> Result ServiceStatus
+reconciledServiceStatus current =
+  if current.status == "completed" then
+    Ok current
+  else if current.status == "failed" then
+    Ok current
+  else if current.heartbeatPath == "" then
+    Ok current
+  else if fileExists current.heartbeatPath == false then
+    persistServiceStatus (
+      ServiceStatus {
+        serviceRoot = current.serviceRoot,
+        serviceId = current.serviceId,
+        generation = current.generation,
+        status = "failed",
+        ownerPid = current.ownerPid,
+        heartbeatPath = current.heartbeatPath,
+        transactionPath = current.transactionPath,
+        snapshotPath = current.snapshotPath,
+        exitCode = 1,
+        updatedAtMs = timeUnixMs
+      }
+    )
+  else
+    match reconcileWatchedProcess current.heartbeatPath {
+      Err message -> serviceStatusError message,
+      Ok watched ->
+        if watched.running then
+          if watched.completed == false then
+            Ok current
+          else
+            persistServiceStatus (
+              ServiceStatus {
+                serviceRoot = current.serviceRoot,
+                serviceId = current.serviceId,
+                generation = current.generation,
+                status = if watched.exitCode == 0 then "completed" else "failed",
+                ownerPid = if watched.pid > 0 then watched.pid else current.ownerPid,
+                heartbeatPath = current.heartbeatPath,
+                transactionPath = current.transactionPath,
+                snapshotPath = current.snapshotPath,
+                exitCode = watched.exitCode,
+                updatedAtMs = timeUnixMs
+              }
+            )
+        else
+          persistServiceStatus (
+            ServiceStatus {
+              serviceRoot = current.serviceRoot,
+              serviceId = current.serviceId,
+              generation = current.generation,
+              status = if watched.exitCode == 0 then "completed" else "failed",
+              ownerPid = if watched.pid > 0 then watched.pid else current.ownerPid,
+              heartbeatPath = current.heartbeatPath,
+              transactionPath = current.transactionPath,
+              snapshotPath = current.snapshotPath,
+              exitCode = watched.exitCode,
+              updatedAtMs = timeUnixMs
+            }
+          )
+    }
+
 readServiceStatus : Str -> Result ServiceStatus
 readServiceStatus serviceRoot = match readFile (serviceStatusPath serviceRoot) {
-  Ok raw -> serviceStatusFromRaw (Ok raw),
+  Ok raw ->
+    match serviceStatusFromRaw (Ok raw) {
+      Ok current -> reconciledServiceStatus current,
+      Err message -> serviceStatusError message
+    },
   Err message -> serviceStatusError message
 }
 
@@ -105,5 +230,21 @@ upgradeService spec =
       spec.readyPollMs
       spec.readyTimeoutMs
       spec.commitGraceMs
+      spec.command
+  )
+
+superviseService : ServiceSupervisorSpec -> Result ServiceStatus
+superviseService spec =
+  serviceStatusFromRaw (
+    superviseCommandRaw
+      spec.cwd
+      spec.serviceRoot
+      spec.serviceId
+      spec.readyPath
+      spec.readyContains
+      spec.watchPollMs
+      spec.readyPollMs
+      spec.readyTimeoutMs
+      spec.restartDelayMs
       spec.command
   )

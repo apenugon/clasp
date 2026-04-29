@@ -1,0 +1,17 @@
+module GoalManagerPlannerReuse
+
+import GoalManagerStateRuntime
+import GoalManagerMailboxMessages
+import GoalManagerPrelude
+
+plannerReportReusableFor : Int -> Str -> Bool
+plannerReportReusableFor wave benchmarkSummary =
+  if refreshMailbox wave != "" then
+    false
+  else if fileExists (plannerReportPathFor wave) then
+    match readPlannerInputState {
+      Ok storedState -> storedState.fingerprint == (plannerInputStateFor wave benchmarkSummary).fingerprint,
+      Err message -> false
+    }
+  else
+    false

@@ -36,5 +36,20 @@ verify_storage_backed_change() {
     --model deterministic >/dev/null
 }
 
+verify_clasp_legal_assistant_checkpoint() {
+  local task_id="clasp-legal-assistant-appbench"
+  local workspace="$workspace_root/$task_id"
+
+  node "$project_root/benchmarks/run-benchmark.mjs" prepare \
+    "$task_id" \
+    --workspace "$workspace" >/dev/null
+  node "$project_root/benchmarks/run-benchmark.mjs" verify \
+    "$task_id" \
+    --workspace "$workspace" \
+    --harness scenario \
+    --model deterministic >/dev/null
+}
+
 verify_clasp_workflow_correctness
 verify_storage_backed_change
+verify_clasp_legal_assistant_checkpoint

@@ -11,7 +11,8 @@
     "clasp-lead-segment",
     "ts-lead-segment",
     "clasp-external-adaptation",
-    "ts-external-adaptation"
+    "ts-external-adaptation",
+    "clasp-legal-assistant-appbench"
   ],
   "harness": "codex",
   "model": "gpt-5.4",
@@ -19,19 +20,19 @@
   "workflowAssistance": "unspecified",
   "sampleCount": 2,
   "seriesLabel": "public-app",
-  "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation",
+  "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench",
   "samples": [
     {
       "sampleIndex": 1,
-      "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation:sample:1",
+      "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench:sample:1",
       "runOrder": [
         {
           "position": 1,
-          "taskId": "ts-lead-segment"
+          "taskId": "clasp-lead-priority"
         },
         {
           "position": 2,
-          "taskId": "clasp-external-adaptation"
+          "taskId": "clasp-lead-segment"
         },
         {
           "position": 3,
@@ -43,57 +44,65 @@
         },
         {
           "position": 5,
-          "taskId": "clasp-lead-priority"
+          "taskId": "clasp-external-adaptation"
         },
         {
           "position": 6,
-          "taskId": "clasp-lead-segment"
+          "taskId": "ts-lead-segment"
         },
         {
           "position": 7,
-          "taskId": "ts-external-adaptation"
+          "taskId": "clasp-legal-assistant-appbench"
         },
         {
           "position": 8,
+          "taskId": "ts-external-adaptation"
+        },
+        {
+          "position": 9,
           "taskId": "ts-lead-priority"
         }
       ]
     },
     {
       "sampleIndex": 2,
-      "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation:sample:2",
+      "seed": "public-app:codex:gpt-5.4:raw-repo:clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench:sample:2",
       "runOrder": [
         {
           "position": 1,
-          "taskId": "clasp-lead-rejection"
-        },
-        {
-          "position": 2,
-          "taskId": "ts-lead-priority"
-        },
-        {
-          "position": 3,
-          "taskId": "ts-lead-segment"
-        },
-        {
-          "position": 4,
-          "taskId": "ts-lead-rejection"
-        },
-        {
-          "position": 5,
-          "taskId": "ts-external-adaptation"
-        },
-        {
-          "position": 6,
           "taskId": "clasp-lead-priority"
         },
         {
+          "position": 2,
+          "taskId": "ts-lead-segment"
+        },
+        {
+          "position": 3,
+          "taskId": "ts-external-adaptation"
+        },
+        {
+          "position": 4,
+          "taskId": "clasp-lead-rejection"
+        },
+        {
+          "position": 5,
+          "taskId": "clasp-legal-assistant-appbench"
+        },
+        {
+          "position": 6,
+          "taskId": "ts-lead-priority"
+        },
+        {
           "position": 7,
-          "taskId": "clasp-lead-segment"
+          "taskId": "clasp-external-adaptation"
         },
         {
           "position": 8,
-          "taskId": "clasp-external-adaptation"
+          "taskId": "clasp-lead-segment"
+        },
+        {
+          "position": 9,
+          "taskId": "ts-lead-rejection"
         }
       ]
     }
@@ -116,8 +125,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 87358,
-      "sha256": "d473c9e8178662bbd3f96b9b5aba4609f652d1e0990ad1c7366048936de08aa4"
+      "size": 88425,
+      "sha256": "75ea903f044db48726387aa4ae3d0f1ca53815020c936bf31ad54c1fe49b7f71"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -171,8 +180,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/scripts/verify.sh",
-      "size": 384,
-      "sha256": "0448a6c683641d909e7833fae8ac82163bbe3b1418503601b8383378d815d4c4"
+      "size": 598,
+      "sha256": "0cc17a7da3614b5ef0b51efddd5d9a30a39cb03ee533c4820927e87451cd859c"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/repo/Shared/Lead.clasp",
@@ -191,8 +200,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/task.json",
-      "size": 317,
-      "sha256": "f7632dba39f5facbcffe0878a8eb6b30928ffc3092520d5fb905c28806d26826"
+      "size": 349,
+      "sha256": "227d282df2d96b93448635c7f51affd622291ead74660bbd796a32f6db7b14ac"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/prompt.md",
@@ -226,8 +235,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/scripts/verify.sh",
-      "size": 640,
-      "sha256": "d7d53796962b080a6c168dde9ce8ef2ede00d7b8cb5b3a8e4a61b005b3a45a64"
+      "size": 675,
+      "sha256": "c42da7f70a59a7b7dcd7ddd8728d0041867c54620896a68382b7432e491211b7"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/repo/test/priority.test.mjs",
@@ -236,8 +245,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-priority/task.json",
-      "size": 327,
-      "sha256": "0949eee2fa65304d36e31dea4e0c578690826a3b835f5ecb0a43c08c5cdb0335"
+      "size": 359,
+      "sha256": "d76c37ab4e9305d9c6bc28756a5348115de4faeb6bc27cfaf69e66131c540d2c"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/prompt.md",
@@ -266,8 +275,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/scripts/verify.sh",
-      "size": 642,
-      "sha256": "ed2dd3c8479d1eb71daca4d0a7c5296ec9377671b07bea1cca37c74426344e0b"
+      "size": 677,
+      "sha256": "6cf63e5386fe7beb7c5093c6789a11364da58f72608820ffe69000221bd7ad95"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/test/priority.test.mjs",
@@ -281,8 +290,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/task.json",
-      "size": 290,
-      "sha256": "e0db80cf7e3116cb02fdec89e42bac33d19f1d8ce54569eec26bd6868311e66a"
+      "size": 322,
+      "sha256": "58039763e97c5d1422caa9231f4758c1493bd8578d7f8ff73a564c140b8a9973"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.md",
@@ -321,8 +330,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh",
-      "size": 698,
-      "sha256": "56e66ca4838467ced0b44c100811223503a0bbc76f55e033d6a885deedc4133e"
+      "size": 733,
+      "sha256": "ea28b9a1d1e85593db536420f407ca06640150590466e7c8492deebffae7dea5"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp",
@@ -341,8 +350,48 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/task.json",
-      "size": 287,
-      "sha256": "a86b83523afe58070174a47a8a0dbada6c2e391745b7afe785926b7113f14372"
+      "size": 319,
+      "sha256": "7756e3881e0b51f056e595129934061d185145f7c4129992670c6781e0b81b9b"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/prompt.md",
+      "size": 1603,
+      "sha256": "6cdaf14f154d54b2889cbec3571339f586d10b8b347a371b160d6674c379bdbf"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/.ignore",
+      "size": 30,
+      "sha256": "63cc0f80820f0824b3d39d04540ef6c49fde9f79aa5a9ee6f1cda83e2ebe8455"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/AGENTS.md",
+      "size": 474,
+      "sha256": "a620c67c7e8be8bb049c1937f73a090ef259ba2372818d26b5fec63da7ad8032"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/Main.clasp",
+      "size": 21884,
+      "sha256": "cb46f426c053bdf782d1d0467cb56305cbab7f8ed8cc92fceee9498b5bab58fa"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/Process.clasp",
+      "size": 697,
+      "sha256": "dff363bad3c389ebdeb9dc3792b9cbb422213dd741f5484633fd86ed29cb54d4"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/scripts/verify.sh",
+      "size": 3648,
+      "sha256": "d1450402b463b0a2a26d6f520d714e5b707a8ab80170dad9b4d0efff0f8f983f"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/repo/web-search-fixture.mjs",
+      "size": 1246,
+      "sha256": "03e1bfa8106142f06d830eea52129cb10e953fea39d1ddc3027aeddd0086ac4f"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-legal-assistant-appbench/task.json",
+      "size": 364,
+      "sha256": "47a809e4fd801c93bf6ac966cd957092073ad45473f108810cfa9d529f9c29c2"
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/prompt.md",
@@ -366,8 +415,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/repo/scripts/verify.sh",
-      "size": 204,
-      "sha256": "740a80549768456bba7369cc2932cff09c0ae5fdafb1967948138291d3ff5d9a"
+      "size": 302,
+      "sha256": "9b7839793c07b2401ee67866efa197132153dc9fc1508b4bf74742587899db93"
     },
     {
       "path": "benchmarks/tasks/ts-external-adaptation/repo/src/objective.ts",
@@ -416,8 +465,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-priority/repo/scripts/verify.sh",
-      "size": 187,
-      "sha256": "a1d11504e43be18432402849cdb75065016a848066157f5bbbe43190837014ab"
+      "size": 305,
+      "sha256": "d489cffbe2ddeab883c3bdff86ac9ba7246ca9e3da38a79674ee22a6f1b5a91b"
     },
     {
       "path": "benchmarks/tasks/ts-lead-priority/repo/src/server/main.ts",
@@ -471,8 +520,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/scripts/verify.sh",
-      "size": 187,
-      "sha256": "a1d11504e43be18432402849cdb75065016a848066157f5bbbe43190837014ab"
+      "size": 305,
+      "sha256": "d489cffbe2ddeab883c3bdff86ac9ba7246ca9e3da38a79674ee22a6f1b5a91b"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/repo/src/server/main.ts",
@@ -561,8 +610,8 @@
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/scripts/verify.sh",
-      "size": 204,
-      "sha256": "740a80549768456bba7369cc2932cff09c0ae5fdafb1967948138291d3ff5d9a"
+      "size": 302,
+      "sha256": "9b7839793c07b2401ee67866efa197132153dc9fc1508b4bf74742587899db93"
     },
     {
       "path": "benchmarks/tasks/ts-lead-segment/repo/src/server/dev.ts",

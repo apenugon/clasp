@@ -317,12 +317,19 @@ run_parallel_commands() {
   finish_one_job() {
     local finished_command=""
     local finished_log_path=""
+    local finished_pid=""
 
-    finished_pid=""
     if wait -n -p finished_pid; then
       wait_status=0
     else
       wait_status=$?
+    fi
+    finished_pid="${finished_pid:-}"
+
+    if [[ -z "$finished_pid" ]]; then
+      printf 'selfhost-native-verify: parallel wait returned without a pid\n' >&2
+      rm -rf "$temp_root"
+      return 1
     fi
 
     finished_log_path="${pid_to_log[$finished_pid]:-}"
@@ -426,6 +433,7 @@ run_verify() {
   local rebuilt_module_decl_root="$verify_root/rebuilt.source.native-image.decls"
   local incremental_modules_path="$verify_root/rebuilt.source.native-image.changed-modules.txt"
   local incremental_module_count="0"
+  local incremental_modules_json="[]"
   local verify_summary=""
 
   case "$verify_mode" in
@@ -491,6 +499,10 @@ EOF
     run_parallel_commands "$export_commands" "$parallel_jobs"
     compute_incremental_verify_modules "$promoted_build_plan_json" "$previous_build_plan_json" "$promoted_module_decl_root" "$verify_cache_root" "$incremental_modules_path"
     incremental_module_count="$(grep -cve '^$' "$incremental_modules_path" || true)"
+    incremental_modules_json="$(
+      node -e 'const fs = require("node:fs"); const modules = fs.readFileSync(process.argv[1], "utf8").split(/\r?\n/).filter(Boolean); process.stdout.write(JSON.stringify(modules));' \
+        "$incremental_modules_path"
+    )"
 
     export_commands=""
     while IFS= read -r module_name || [[ -n "$module_name" ]]; do
@@ -505,7 +517,7 @@ EOF
     done < "$incremental_modules_path"
 
     refresh_full_verify_cache "$promoted_build_plan_json" "$promoted_module_decl_root"
-    verify_summary="{\"mode\":\"full\",\"nativeSourceCheckMatchesPromoted\":true,\"nativeSourceCheckCoreMatchesPromoted\":true,\"nativeSourceCompileMatchesPromoted\":true,\"nativeSourceIrMatchesPromoted\":true,\"nativeSourceImageBuildPlanMatchesPromoted\":true,\"nativeSourceChangedModuleDeclsMatchPromoted\":true,\"nativeSourceChangedModuleCount\":$incremental_module_count}"
+    verify_summary="{\"mode\":\"full\",\"nativeSourceCheckMatchesPromoted\":true,\"nativeSourceCheckCoreMatchesPromoted\":true,\"nativeSourceCompileMatchesPromoted\":true,\"nativeSourceIrMatchesPromoted\":true,\"nativeSourceImageBuildPlanMatchesPromoted\":true,\"nativeSourceChangedModuleDeclsMatchPromoted\":true,\"nativeSourceChangedModuleCount\":$incremental_module_count,\"nativeSourceChangedModules\":$incremental_modules_json}"
   else
     test -s "$verify_root/promoted.compiler.check.txt"
     verify_summary='{"mode":"fast","promotedCompilerFixtureCheckExecutes":true}'
@@ -520,10 +532,14 @@ if [[ "${CLASP_NATIVE_VERIFY_LOCK_HELD:-0}" != "1" ]]; then
 fi
 
 if [[ -n "${IN_NIX_SHELL:-}" ]]; then
+  verify_output="$(run_verify)"
+  printf '%s\n' "$verify_output"
+  summary_line="${verify_output##*$'\n'}"
+
   if [[ "$verify_mode" == "full" ]]; then
-    run_verify | tail -n 1 | grep -F '"mode":"full","nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageBuildPlanMatchesPromoted":true,"nativeSourceChangedModuleDeclsMatchPromoted":true'
+    grep -F '"mode":"full","nativeSourceCheckMatchesPromoted":true,"nativeSourceCheckCoreMatchesPromoted":true,"nativeSourceCompileMatchesPromoted":true,"nativeSourceIrMatchesPromoted":true,"nativeSourceImageBuildPlanMatchesPromoted":true,"nativeSourceChangedModuleDeclsMatchPromoted":true' <<<"$summary_line"
   else
-    run_verify | tail -n 1 | grep -F '"mode":"fast","promotedCompilerFixtureCheckExecutes":true'
+    grep -F '"mode":"fast","promotedCompilerFixtureCheckExecutes":true' <<<"$summary_line"
   fi
 else
   nix develop "$project_root" --command bash -lc "

@@ -1,0 +1,69 @@
+module GoalManagerTaskWorkspaceRuntime
+
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+writeTaskFeedback : Str -> VerifierReport -> Str
+writeTaskFeedback taskId report =
+  match mkdirAll (taskReportStateRoot taskId) {
+    Err message ->
+      message,
+    Ok created ->
+      match writeFile (taskFeedbackPath taskId) (encode report) {
+        Ok written -> "",
+        Err writeMessage -> writeMessage
+      }
+  }
+
+ensureTaskWorkspace : Str -> Str
+ensureTaskWorkspace taskId =
+  if fileExists (taskWorkspaceReadyPath taskId) then
+    ""
+  else {
+    let removed =
+      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+        Ok result -> result,
+        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+      } in
+    if removed.exitCode != 0 then
+      textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
+    else {
+      let created =
+        match runCommand "." ["mkdir", "-p", taskWorkspaceRoot taskId] {
+          Ok result -> result,
+          Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+        } in
+      if created.exitCode != 0 then
+        textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+      else {
+        let copied =
+          match runCommand "." [
+            "bash",
+            "-lc",
+            textConcat [
+              "tar -cf - ",
+              workspaceCloneExcludeFlags,
+              "-C ",
+              workspaceRoot,
+              " . | tar -xf - -C ",
+              taskWorkspaceRoot taskId
+            ]
+          ] {
+            Ok result -> result,
+            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+          } in
+        if copied.exitCode != 0 then
+          textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
+        else
+          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+            Ok written -> "",
+            Err message ->
+              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+          }
+      }
+    }
+  }

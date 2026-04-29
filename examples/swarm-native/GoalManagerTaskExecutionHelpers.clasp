@@ -1,0 +1,242 @@
+module GoalManagerTaskExecutionHelpers
+
+import GoalManagerBootstrapTasks
+import GoalManagerTaskWorkspaceRuntime
+import GoalManagerBenchmarkCommand
+import GoalManagerTaskReportIO
+import GoalManagerWatch
+import GoalManagerCounters
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+plannedTaskFailureReport : [Str] -> VerifierReport
+plannedTaskFailureReport failedTaskIds =
+  syntheticFailureReport
+    "one or more planned tasks failed"
+    (textConcat ["Failed planned tasks: ", textJoin ", " failedTaskIds])
+
+plannedTaskStalledReport : PlannerReport -> VerifierReport
+plannedTaskStalledReport report =
+  syntheticFailureReport
+    "planned task execution stalled"
+    (textConcat ["No running or ready planned task remained for ", report.objectiveSummary, "."])
+
+taskManagerRetryPath : Str -> Str
+taskManagerRetryPath taskId = pathJoin [stateRootPath, textConcat ["child-loop-retries-", taskId, ".json"]]
+
+readChildLoopManagerRetries : Str -> Int
+readChildLoopManagerRetries taskId =
+  if fileExists (taskManagerRetryPath taskId) then
+    match readFile (taskManagerRetryPath taskId) {
+      Ok raw -> decode Int raw,
+      Err message -> 0
+    }
+  else
+    0
+
+writeChildLoopManagerRetries : Str -> Int -> Str
+writeChildLoopManagerRetries taskId retryCount =
+  match writeFile (taskManagerRetryPath taskId) (encode retryCount) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+childLoopMaxManagerRetries : Int
+childLoopMaxManagerRetries =
+  if childMaxAttempts <= 1 then
+    0
+  else
+    decrementManagerCounter childMaxAttempts
+
+childLoopManagerRetryAvailable : Str -> Bool
+childLoopManagerRetryAvailable taskId =
+  readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
+
+resetChildLoopForManagerRetry : Str -> Str
+resetChildLoopForManagerRetry taskId =
+  match runCommand "." [
+    "rm",
+    "-rf",
+    taskReportStateRoot taskId,
+    taskWorkspaceRoot taskId,
+    taskWorkspaceAliasPath taskId
+  ] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode != 0 then
+        process.stderr
+      else
+        ""
+  }
+
+childLoopMissingReport : PlannerTaskSpec -> VerifierReport
+childLoopMissingReport spec =
+  syntheticFailureReport
+    "task child loop finished without a durable report"
+    (readProcessOutputText (taskProcessStderrPath spec.taskId))
+
+childLoopMissingLaunchHeartbeatReport : PlannerTaskSpec -> VerifierReport
+childLoopMissingLaunchHeartbeatReport spec =
+  syntheticFailureReport
+    "task child loop failed to establish a durable launch heartbeat"
+    (readProcessOutputText (taskProcessStderrPath spec.taskId))
+
+childLoopMissingDurableReport : VerifierReport -> Bool
+childLoopMissingDurableReport report =
+  report.summary == "task child loop finished without a durable report"
+
+requeueTaskForManagerRetry : Str -> Str -> Str
+requeueTaskForManagerRetry taskId failureSummary =
+  match retry (taskHandleFor taskId) {
+    Err message ->
+      textConcat [failureSummary, ": ", taskId, ": ", message],
+    Ok retriedValue ->
+      ""
+  }
+
+completePlannedTask : PlannerTaskSpec -> Str
+completePlannedTask spec =
+  match complete (taskHandleFor spec.taskId) {
+    Err message ->
+      textConcat ["task completion failed: ", spec.taskId, ": ", message],
+    Ok completedValue ->
+      match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+        Err message ->
+          textConcat ["task review failed: ", spec.taskId, ": ", message],
+        Ok reviewValue ->
+          ""
+      }
+  }
+
+recordPlannedTaskFailure : PlannerTaskSpec -> VerifierReport -> Str
+recordPlannedTaskFailure spec report = {
+  let feedbackError = writeTaskFeedback spec.taskId report in
+  if feedbackError != "" then
+    textConcat ["task feedback write failed: ", spec.taskId, ": ", feedbackError]
+  else
+    match fail (taskHandleFor spec.taskId) {
+      Err message ->
+        textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
+      Ok failedValue ->
+        ""
+    }
+}
+
+retryChildLoopMissingReport : PlannerTaskSpec -> VerifierReport -> Str
+retryChildLoopMissingReport spec report =
+  if childLoopManagerRetryAvailable spec.taskId == false then
+    recordPlannedTaskFailure spec report
+  else {
+    let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
+    if retryWriteError != "" then
+      textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
+    else {
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-retry:",
+            spec.taskId,
+            ":missing-durable-report:retry=",
+            encode nextRetry
+          ]) in
+      if traceError != "" then
+        traceError
+      else {
+        let resetError = resetChildLoopForManagerRetry spec.taskId in
+        if resetError != "" then
+          textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
+        else {
+          let workspaceError = ensureTaskWorkspace spec.taskId in
+          if workspaceError != "" then
+            textConcat ["task child loop retry workspace setup failed: ", spec.taskId, ": ", workspaceError]
+          else
+            match launchChildLoop spec {
+              Err message ->
+                recordPlannedTaskFailure spec (syntheticFailureReport "task child loop retry failed to start" message),
+              Ok launched ->
+                ""
+            }
+        }
+      }
+    }
+  }
+
+retryChildLoopMissingLaunchHeartbeat : Int -> PlannerReport -> PlannerTaskSpec -> VerifierReport -> Str
+retryChildLoopMissingLaunchHeartbeat wave report spec failureReport =
+  if childLoopManagerRetryAvailable spec.taskId == false then
+    recordPlannedTaskFailure spec failureReport
+  else {
+    let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
+    if retryWriteError != "" then
+      textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
+    else {
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-retry:",
+            spec.taskId,
+            ":missing-launch-heartbeat:retry=",
+            encode nextRetry
+          ]) in
+      if traceError != "" then
+        traceError
+      else {
+        let requeueError =
+          requeueTaskForManagerRetry spec.taskId "task child loop retry requeue failed" in
+        if requeueError != "" then
+          requeueError
+        else {
+          let resetError = resetChildLoopForManagerRetry spec.taskId in
+          if resetError != "" then
+            textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
+          else
+            launchReadyTask wave report spec
+        }
+      }
+    }
+  }
+
+launchReadyTask : Int -> PlannerReport -> PlannerTaskSpec -> Str
+launchReadyTask wave report spec = {
+  let promptError = writeTaskPromptFile wave report spec in
+  if promptError != "" then
+    textConcat ["task prompt write failed: ", spec.taskId, ": ", promptError]
+  else {
+    let workspaceError = ensureTaskWorkspace spec.taskId in
+    if workspaceError != "" then
+      textConcat ["task workspace setup failed: ", spec.taskId, ": ", workspaceError]
+    else
+      match lease (taskHandleFor spec.taskId) {
+        Err message ->
+          recordPlannedTaskFailure spec (syntheticFailureReport "task lease failed" message),
+        Ok leaseValue ->
+          match toolRun (taskHandleFor spec.taskId) (taskLaunchRecordCommand spec) {
+            Err message ->
+              recordPlannedTaskFailure spec (syntheticFailureReport "task launch run failed" message),
+            Ok runValue ->
+              match launchChildLoop spec {
+                Err message ->
+                  recordPlannedTaskFailure spec (syntheticFailureReport "task child loop failed to start" message),
+                Ok launched ->
+                  ""
+              }
+          }
+      }
+  }
+}
+
+launchChildLoop : PlannerTaskSpec -> Result WatchedProcess
+launchChildLoop spec =
+  spawnWatchedProcess
+    managerProjectRoot
+    (taskProcessStdoutPath spec.taskId)
+    (taskProcessStderrPath spec.taskId)
+    (taskProcessHeartbeatPath spec.taskId)
+    childLoopWatchPollMs
+    (childLoopCommandArgs spec)

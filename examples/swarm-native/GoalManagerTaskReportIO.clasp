@@ -1,0 +1,63 @@
+module GoalManagerTaskReportIO
+
+import GoalManagerWatch
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+syntheticFailureReport : Str -> Str -> VerifierReport
+syntheticFailureReport summary detail =
+  VerifierReport {
+    verdict = "fail",
+    summary = summary,
+    findings = [detail],
+    tests_run = emptyTexts,
+    follow_up = ["Inspect the failing manager or child loop artifacts and retry the task."],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+readVerifierReportPath : Str -> VerifierReport
+readVerifierReportPath path = match readFile path {
+  Ok raw -> decode VerifierReport raw,
+  Err message ->
+    syntheticFailureReport
+      (textConcat ["missing verifier report: ", message])
+      message
+}
+
+builderFeedbackError : Str -> Result BuilderReport
+builderFeedbackError message = Err message
+
+readBuilderReportPath : Str -> Result BuilderReport
+readBuilderReportPath path = match readFile path {
+  Ok raw -> Ok (decode BuilderReport raw),
+  Err message -> builderFeedbackError message
+}
+
+taskLatestAttempt : Str -> Int
+taskLatestAttempt taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state -> state.attempt,
+      Err message -> 1
+    }
+  else
+    1
+
+taskLatestBuilderReport : Str -> Result BuilderReport
+taskLatestBuilderReport taskId =
+  readBuilderReportPath (taskBuilderReportPath taskId (taskLatestAttempt taskId))
+
+taskLatestBuilderReportPath : Str -> Str
+taskLatestBuilderReportPath taskId =
+  taskBuilderReportPath taskId (taskLatestAttempt taskId)
+
+readFeedbackSummary : Str
+readFeedbackSummary =
+  if fileExists feedbackPath then
+    (readVerifierReportPath feedbackPath).summary
+  else
+    ""

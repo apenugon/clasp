@@ -37,6 +37,9 @@ record StatusView = {
   allTaskIds : [Str],
   completedTaskIds : [Str],
   readyTaskIds : [Str],
+  approvalCount : Int,
+  mergeDecisionDetail : Str,
+  mergeGateSatisfied : Bool,
   feedbackSummary : Str
 }
 
@@ -81,6 +84,21 @@ workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
 
 codexBin : Str
 codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+
+builderSchemaPath : Str
+builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
+
+verifierSchemaPath : Str
+verifierSchemaPath = readEnvText "CLASP_LOOP_VERIFIER_SCHEMA_JSON" "agents/schemas/verifier-report.schema.json"
+
+codexModel : Str
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
+
+codexReasoning : Str
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
+
+codexSandbox : Str
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
 
 maxAttempts : Int
 maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
@@ -133,6 +151,18 @@ builderHandle attempt = taskHandle swarmStateRoot (builderTaskId attempt) actorN
 
 verifierHandle : Int -> TaskHandle
 verifierHandle attempt = taskHandle swarmStateRoot (verifierTaskId attempt) actorName
+
+approvalName : Str
+approvalName = "merge-ready"
+
+mergegateName : Str
+mergegateName = "autonomous-confidence"
+
+requiredApprovals : [Str]
+requiredApprovals = [approvalName]
+
+requiredVerifiers : [Str]
+requiredVerifiers = [mergegateName]
 
 defaultBuilderPolicyText : Str
 defaultBuilderPolicyText = textJoin "\n" [
@@ -362,6 +392,40 @@ objectiveProjectedStatusFrom current objective =
   else
     current
 
+mergeDecisionDetailFrom : Str -> SwarmEvent -> Str
+mergeDecisionDetailFrom current event =
+  if event.kind == "mergegate_decision" then
+    event.detail
+  else
+    current
+
+statusVerifierTaskId : LoopState -> Str
+statusVerifierTaskId state =
+  if state.lastVerifierTaskId == "" then
+    verifierTaskId state.attempt
+  else
+    state.lastVerifierTaskId
+
+statusApprovalCount : LoopState -> Int
+statusApprovalCount state =
+  if state.lastVerifierTaskId == "" then
+    0
+  else
+    match approvals (taskHandle swarmStateRoot (statusVerifierTaskId state) actorName) {
+      Ok approvalValues -> length approvalValues,
+      Err message -> 0
+    }
+
+statusMergeDecisionDetail : LoopState -> Str
+statusMergeDecisionDetail state =
+  if state.lastVerifierTaskId == "" then
+    ""
+  else
+    match tail (taskHandle swarmStateRoot (statusVerifierTaskId state) actorName) 20 {
+      Ok eventValues -> fold mergeDecisionDetailFrom "" eventValues,
+      Err message -> ""
+    }
+
 taskIdSearch : TaskIdSearch -> SwarmTask -> TaskIdSearch
 taskIdSearch search task =
   if search.found then
@@ -387,13 +451,26 @@ statusView state =
             Ok readyTasks -> map taskIdOf readyTasks,
             Err message -> emptyTexts
           } in
+          let approvalCountValue = statusApprovalCount state in
+          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
+          let projectedStatusValue = fold objectiveProjectedStatusFrom "missing" objectiveValues in
           StatusView {
             state = state,
-            objectiveProjectedStatus = fold objectiveProjectedStatusFrom "missing" objectiveValues,
+            objectiveProjectedStatus = projectedStatusValue,
             taskCount = length scopedTasks,
             allTaskIds = map taskIdOf scopedTasks,
             completedTaskIds = map taskIdOf (filter taskCompleted scopedTasks),
             readyTaskIds = readyTaskIds,
+            approvalCount = approvalCountValue,
+            mergeDecisionDetail = mergeDecisionDetailValue,
+            mergeGateSatisfied =
+              if approvalCountValue == 0 then
+                false
+              else
+                if mergeDecisionDetailValue == "" then
+                  false
+                else
+                  projectedStatusValue == "completed",
             feedbackSummary =
               if fileExists feedbackPath then
                 (readVerifierReportPath feedbackPath).summary
@@ -401,6 +478,8 @@ statusView state =
                 ""
           },
         Err message ->
+          let approvalCountValue = statusApprovalCount state in
+          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
           StatusView {
             state = state,
             objectiveProjectedStatus = textConcat ["task-error:", message],
@@ -408,6 +487,9 @@ statusView state =
             allTaskIds = emptyTexts,
             completedTaskIds = emptyTexts,
             readyTaskIds = emptyTexts,
+            approvalCount = approvalCountValue,
+            mergeDecisionDetail = mergeDecisionDetailValue,
+            mergeGateSatisfied = false,
             feedbackSummary =
               if fileExists feedbackPath then
                 (readVerifierReportPath feedbackPath).summary
@@ -416,6 +498,8 @@ statusView state =
           }
       },
     Err message ->
+      let approvalCountValue = statusApprovalCount state in
+      let mergeDecisionDetailValue = statusMergeDecisionDetail state in
       StatusView {
         state = state,
         objectiveProjectedStatus = textConcat ["objective-error:", message],
@@ -423,6 +507,9 @@ statusView state =
         allTaskIds = emptyTexts,
         completedTaskIds = emptyTexts,
         readyTaskIds = emptyTexts,
+        approvalCount = approvalCountValue,
+        mergeDecisionDetail = mergeDecisionDetailValue,
+        mergeGateSatisfied = false,
         feedbackSummary =
           if fileExists feedbackPath then
             (readVerifierReportPath feedbackPath).summary
@@ -434,22 +521,36 @@ statusView state =
 statusOutput : Str
 statusOutput = encode (statusView readLoopState)
 
-codexCommand : Str -> Str -> [Str]
-codexCommand reportPath prompt = [
+codexReasoningConfig : Str
+codexReasoningConfig = textConcat ["model_reasoning_effort=\"", codexReasoning, "\""]
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath prompt = [
   codexBin,
   "exec",
+  "--json",
   "--cd",
   workspaceRoot,
+  "-m",
+  codexModel,
+  "-c",
+  codexReasoningConfig,
+  "--skip-git-repo-check",
+  "--sandbox",
+  codexSandbox,
+  "--ephemeral",
+  "--output-schema",
+  schemaPath,
   "-o",
   reportPath,
   prompt
 ]
 
 builderCommand : Int -> SwarmCommand
-builderCommand attempt = commandSpec "." (codexCommand (builderReportPath attempt) (builderPrompt attempt))
+builderCommand attempt = commandSpec "." (codexCommand builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
 
 verifierCommand : Int -> SwarmCommand
-verifierCommand attempt = commandSpec "." (codexCommand (verifierReportPath attempt) (verifierPrompt attempt))
+verifierCommand attempt = commandSpec "." (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
 
 ensureLoopReady : Str
 ensureLoopReady =
@@ -570,6 +671,28 @@ continueAfterFailure attempt report = {
   }
 }
 
+finishAfterApproval : Int -> VerifierReport -> Str
+finishAfterApproval attempt report =
+  match policySet (verifierHandle attempt) mergegateName requiredApprovals requiredVerifiers {
+    Err message ->
+      continueAfterFailure attempt (syntheticFailureReport "merge policy setup failed" message),
+    Ok policy ->
+      match approve (verifierHandle attempt) approvalName {
+        Err message ->
+          continueAfterFailure attempt (syntheticFailureReport "approval failed" message),
+        Ok approvalValue ->
+          match mergegateDecide (verifierHandle attempt) mergegateName requiredVerifiers {
+            Err message ->
+              continueAfterFailure attempt (syntheticFailureReport "mergegate decision failed" message),
+            Ok decision ->
+              if decision.verdict == "pass" then
+                finalizeWithReport attempt "pass" true report
+              else
+                continueAfterFailure attempt (syntheticFailureReport "mergegate did not pass" decision.verdict)
+          }
+      }
+  }
+
 verifyTaskReady : Int -> Str
 verifyTaskReady attempt = match ready objectiveRef {
   Ok readyTasks ->
@@ -604,7 +727,7 @@ runVerifierAttempt attempt = {
                 if fileExists (verifierReportPath attempt) then {
                   let report = readVerifierReport attempt in
                   if report.verdict == "pass" then
-                    finalizeWithReport attempt "pass" true report
+                    finishAfterApproval attempt report
                   else
                     continueAfterFailure attempt report
                 } else

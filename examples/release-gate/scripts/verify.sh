@@ -24,7 +24,7 @@ run_verify() {
   claspc --json check examples/release-gate/Main.clasp | grep -F '"status":"ok"' >/dev/null
   env RUSTC=/definitely-missing-rustc claspc compile examples/release-gate/Main.clasp -o "$binary_path" >/dev/null
 
-  "$binary_path" route GET /release/audit '{}' | grep -F '"status":{"$tag":"Pending"}' >/dev/null
+  "$binary_path" route GET /release/audit '{}' | grep -F '"status":"pending"' >/dev/null
 
   release_server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
   release_server_addr="127.0.0.1:$release_server_port"

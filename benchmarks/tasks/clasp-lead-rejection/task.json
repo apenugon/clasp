@@ -3,6 +3,7 @@
   "title": "Reject invalid priority values at a Clasp trust boundary",
   "suite": "trust-boundary",
   "language": "clasp",
+  "defaultBenchmarkPath": true,
   "repo": "repo",
   "prompt": "prompt.md",
   "entry": "app/Main.clasp",

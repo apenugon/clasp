@@ -21,6 +21,10 @@ binary_is_stale() {
     return 0
   fi
 
+  if [[ "$project_root/src/stage1.compiler.module-summary-cache-v2.json" -nt "$binary_path" ]]; then
+    return 0
+  fi
+
   if find "$project_root/runtime" -maxdepth 1 \( -name '*.rs' -o -name 'Cargo.toml' \) -newer "$binary_path" -print -quit | grep -q .; then
     return 0
   fi
@@ -45,7 +49,7 @@ build_local_debug_bin() {
     return 1
   fi
 
-  nix develop "$project_root" --command bash -lc "
+  nix develop "path:$project_root" --command bash -lc "
     set -euo pipefail
     cd \"$project_root\"
     export CLASP_PROJECT_ROOT=\"$project_root\"

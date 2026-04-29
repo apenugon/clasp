@@ -16,15 +16,32 @@ record WatchedProcess = {
 
 record PlannerTaskSpec = {
   taskId : Str,
+  role : Str,
   detail : Str,
   dependencies : [Str],
-  taskPrompt : Str
+  taskPrompt : Str,
+  coordinationFocus : [Str]
 }
 
 record PlannerReport = {
   objectiveSummary : Str,
   strategy : Str,
   tasks : [PlannerTaskSpec],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record LegacyPlannerTaskSpec = {
+  taskId : Str,
+  detail : Str,
+  dependencies : [Str],
+  taskPrompt : Str
+}
+
+record LegacyPlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [LegacyPlannerTaskSpec],
   testsRun : [Str],
   residualRisks : [Str]
 }
@@ -123,6 +140,13 @@ record ManagerUpgradeRestoreRecord = {
   snapshot : ManagerUpgradeSnapshot
 }
 
+record StatusWaitingReason = {
+  kind : Str,
+  taskIds : [Str],
+  relatedTaskIds : [Str],
+  details : [Str]
+}
+
 record StatusView = {
   state : ManagerState,
   plannerSummary : Str,
@@ -133,6 +157,9 @@ record StatusView = {
   activeTaskIds : [Str],
   completedTaskIds : [Str],
   failedTaskIds : [Str],
+  waitingReasons : [StatusWaitingReason],
+  primaryWaitingReason : Str,
+  primaryWaitingTaskIds : [Str],
   benchmarkSummary : Str,
   benchmarkTargetMet : Bool,
   feedbackSummary : Str
@@ -234,6 +261,9 @@ emptyTexts = []
 emptyCapabilityStatuses : [CapabilityStatus]
 emptyCapabilityStatuses = []
 
+emptyStatusWaitingReasons : [StatusWaitingReason]
+emptyStatusWaitingReasons = []
+
 emptyPlanValidationIssues : [PlanValidationIssue]
 emptyPlanValidationIssues = []
 
@@ -246,9 +276,11 @@ emptyPlannerTasks = []
 emptyPlannerTaskSpec : PlannerTaskSpec
 emptyPlannerTaskSpec = PlannerTaskSpec {
   taskId = "",
+  role = "",
   detail = "",
   dependencies = emptyTexts,
-  taskPrompt = ""
+  taskPrompt = "",
+  coordinationFocus = emptyTexts
 }
 
 emptyBenchmarkSignal : BenchmarkSignal
@@ -295,6 +327,18 @@ readEnvTextList name fallback = match envVar name {
   Err message -> fallback
 }
 
+readEnvBool : Str -> Bool -> Bool
+readEnvBool name fallback = match envVar name {
+  Ok raw -> decode Bool raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> decode Int raw,
+  Err message -> fallback
+}
+
 goalText : Str
 goalText =
   readEnvText
@@ -304,6 +348,9 @@ goalText =
 objectiveId : Str
 objectiveId = readEnvText "CLASP_MANAGER_OBJECTIVE_ID_JSON" "improve-clasp"
 
+managerProgramPath : Str
+managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.clasp"
+
 workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
 
@@ -312,6 +359,12 @@ codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
 
 managerClaspcBin : Str
 managerClaspcBin = readEnvText "CLASP_MANAGER_CLASPC_BIN_JSON" "claspc"
+
+currentExecutablePath : Str
+currentExecutablePath = readEnvText "CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON" ""
+
+managerXdgCacheHome : Str
+managerXdgCacheHome = readEnvText "CLASP_MANAGER_XDG_CACHE_HOME_JSON" (pathJoin [stateRootPath, "manager-xdg-cache"])
 
 childLoopProgramPath : Str
 childLoopProgramPath = readEnvText "CLASP_MANAGER_CHILD_LOOP_JSON" "examples/feedback-loop/Main.clasp"
@@ -340,6 +393,12 @@ maxTaskLoops = match envVar "CLASP_MANAGER_MAX_TASKS_JSON" {
   Err message -> 4
 }
 
+plannerTaskMaxRuns : Int
+plannerTaskMaxRuns = readEnvInt "CLASP_MANAGER_PLANNER_MAX_RUNS_JSON" 3
+
+plannerTimeoutMs : Int
+plannerTimeoutMs = readEnvInt "CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON" 300000
+
 benchmarkCommand : [Str]
 benchmarkCommand = match envVar "CLASP_MANAGER_BENCHMARK_COMMAND_JSON" {
   Ok raw -> decode [Str] raw,
@@ -361,23 +420,33 @@ benchmarkWatchPollMs = match envVar "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON" {
 benchmarkTimeoutMs : Int
 benchmarkTimeoutMs = match envVar "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON" {
   Ok raw -> decode Int raw,
-  Err message -> 60000
+  Err message -> 3600000
 }
 
 maxWaves : Int
 maxWaves = match envVar "CLASP_MANAGER_MAX_WAVES_JSON" {
   Ok raw -> decode Int raw,
-  Err message -> 1
+  Err message -> 4
 }
 
-objectiveTaskBudget : Int
-objectiveTaskBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON" {
+configuredPlannerWaveCount : Int
+configuredPlannerWaveCount =
+  if benchmarkEnabled then
+    if maxWaves < 1 then
+      1
+    else
+      maxWaves
+  else
+    1
+
+configuredObjectiveTaskBudget : Int
+configuredObjectiveTaskBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON" {
   Ok raw -> decode Int raw,
   Err message -> 64
 }
 
-objectiveRunBudget : Int
-objectiveRunBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON" {
+configuredObjectiveRunBudget : Int
+configuredObjectiveRunBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON" {
   Ok raw -> decode Int raw,
   Err message -> 64
 }
@@ -394,11 +463,50 @@ childMaxAttempts = match envVar "CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON" {
   Err message -> 3
 }
 
+childReportSettlePolls : Int
+childReportSettlePolls = readEnvInt "CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON" 3
+
 maxConcurrentChildren : Int
 maxConcurrentChildren = match envVar "CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON" {
   Ok raw -> decode Int raw,
   Err message -> 2
 }
+
+taskWorkspaceCacheMaxMb : Int
+taskWorkspaceCacheMaxMb = readEnvInt "CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON" 4096
+
+taskBaselineCacheMaxMb : Int
+taskBaselineCacheMaxMb = readEnvInt "CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON" 2048
+
+feedbackLoopBaselineCacheMaxMb : Int
+feedbackLoopBaselineCacheMaxMb = readEnvInt "CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON" 768
+
+childLoopBaselineCacheTotalMaxMb : Int
+childLoopBaselineCacheTotalMaxMb = readEnvInt "CLASP_MANAGER_CHILD_LOOP_BASELINE_CACHE_TOTAL_MAX_MB_JSON" 1024
+
+childLoopXdgCacheTotalMaxMb : Int
+childLoopXdgCacheTotalMaxMb = readEnvInt "CLASP_MANAGER_CHILD_LOOP_XDG_CACHE_TOTAL_MAX_MB_JSON" 512
+
+managerArtifactsCacheMaxMb : Int
+managerArtifactsCacheMaxMb = readEnvInt "CLASP_MANAGER_ARTIFACTS_CACHE_MAX_MB_JSON" 1024
+
+managerXdgCacheMaxMb : Int
+managerXdgCacheMaxMb = readEnvInt "CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON" 1024
+
+childFocusedVerifyCommands : Str
+childFocusedVerifyCommands =
+  readEnvText
+    "CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON"
+    "bash scripts/test-goal-manager-fast.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-task-manifest.sh"
+
+childFullVerifyCommand : Str
+childFullVerifyCommand = readEnvText "CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
+
+taskFailureLogTailBytes : Int
+taskFailureLogTailBytes = readEnvInt "CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON" 12000
+
+retainFailedTaskWorkspaces : Bool
+retainFailedTaskWorkspaces = readEnvBool "CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON" false
 
 mailboxLimit : Int
 mailboxLimit = 6
@@ -425,11 +533,53 @@ managerReadyPath = readEnvText "CLASP_MANAGER_READY_PATH_JSON" ""
 managerReadyText : Str
 managerReadyText = readEnvText "CLASP_MANAGER_READY_TEXT_JSON" "ready"
 
+configuredServiceRoot : Str
+configuredServiceRoot =
+  match envVar "CLASP_MANAGER_SERVICE_ROOT_JSON" {
+    Ok raw -> decode Str raw,
+    Err message ->
+      match envVar "CLASP_RT_SERVICE_ROOT_JSON" {
+        Ok raw -> decode Str raw,
+        Err missing -> ""
+      }
+  }
+
 serviceRoot : Str
-serviceRoot = readEnvText "CLASP_MANAGER_SERVICE_ROOT_JSON" (pathJoin [stateRootPath, "service"])
+serviceRoot =
+  if configuredServiceRoot != "" then
+    configuredServiceRoot
+  else
+    pathJoin [stateRootPath, "service"]
+
+configuredServiceId : Str
+configuredServiceId =
+  match envVar "CLASP_MANAGER_SERVICE_ID_JSON" {
+    Ok raw -> decode Str raw,
+    Err message ->
+      match envVar "CLASP_RT_SERVICE_ID_JSON" {
+        Ok raw -> decode Str raw,
+        Err missing -> ""
+      }
+  }
 
 serviceId : Str
-serviceId = readEnvText "CLASP_MANAGER_SERVICE_ID_JSON" "goal-manager"
+serviceId =
+  if configuredServiceId != "" then
+    configuredServiceId
+  else
+    "goal-manager"
+
+serviceRestartDelayMs : Int
+serviceRestartDelayMs = match envVar "CLASP_MANAGER_SERVICE_RESTART_DELAY_MS_JSON" {
+  Ok raw -> decode Int raw,
+  Err message -> 250
+}
+
+runningUnderServiceSupervisor : Bool
+runningUnderServiceSupervisor = match envVar "CLASP_RT_SERVICE_SUPERVISED_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
 
 upgradeCommandList : [Str]
 upgradeCommandList = readEnvTextList "CLASP_MANAGER_UPGRADE_COMMAND_JSON" emptyTexts
@@ -481,23 +631,17 @@ plannerTaskId = "planner"
 
 plannerTaskIdForWave : Int -> Str
 plannerTaskIdForWave wave =
-  if benchmarkEnabled then
-    if wave == 1 then
-      plannerTaskId
-    else
-      textConcat ["planner-", encode wave]
-  else
+  if wave == 1 then
     plannerTaskId
+  else
+    textConcat ["planner-", encode wave]
 
 materializeTaskId : Int -> Str -> Str
 materializeTaskId wave taskIdValue =
-  if benchmarkEnabled then
-    if wave == 1 then
-      taskIdValue
-    else
-      textConcat ["wave-", encode wave, "-", taskIdValue]
-  else
+  if wave == 1 then
     taskIdValue
+  else
+    textConcat ["wave-", encode wave, "-", taskIdValue]
 
 objectiveRef : ObjectiveHandle
 objectiveRef = objectiveHandle swarmStateRoot objectiveId
@@ -510,6 +654,9 @@ statusPath = pathJoin [stateRootPath, "status.json"]
 
 feedbackPath : Str
 feedbackPath = pathJoin [stateRootPath, "feedback.json"]
+
+serviceReadyPath : Str
+serviceReadyPath = pathJoin [stateRootPath, "service.ready"]
 
 restoredSnapshotPath : Str
 restoredSnapshotPath = pathJoin [stateRootPath, "restored-snapshot.json"]
@@ -597,11 +744,37 @@ appendManagerTrace label =
   else
     ""
 
+appendBootstrapTrace : Str -> Str
+appendBootstrapTrace label = {
+  let stateRootError = match mkdirAll stateRootPath {
+    Ok created -> "",
+    Err message -> message
+  } in
+  if stateRootError != "" then
+    stateRootError
+  else
+    appendManagerTrace label
+}
+
 taskReportStateRoot : Str -> Str
 taskReportStateRoot taskId = pathJoin [stateRootPath, textConcat ["loop-", taskId]]
 
 taskWorkspaceRoot : Str -> Str
 taskWorkspaceRoot taskId = pathJoin [stateRootPath, textConcat ["workspace-", taskId]]
+
+taskWorkspaceActualRoot : Str -> Str
+taskWorkspaceActualRoot taskId =
+  pathJoin [resolvedWorkspaceRoot, ".clasp-task-workspaces", taskId]
+
+taskWorkspaceCacheRoot : Str
+taskWorkspaceCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-workspaces"]
+
+taskWorkspaceBaselineActualRoot : Str -> Str
+taskWorkspaceBaselineActualRoot taskId =
+  pathJoin [resolvedWorkspaceRoot, ".clasp-task-baselines", taskId]
+
+taskWorkspaceBaselineCacheRoot : Str
+taskWorkspaceBaselineCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-baselines"]
 
 taskWorkspaceReadyPath : Str -> Str
 taskWorkspaceReadyPath taskId = pathJoin [taskWorkspaceRoot taskId, ".workspace-ready"]
@@ -616,6 +789,10 @@ taskBuilderReportPath : Str -> Int -> Str
 taskBuilderReportPath taskId attempt =
   pathJoin [taskReportStateRoot taskId, textConcat ["builder-", encode attempt, ".json"]]
 
+taskDiffPath : Str -> Int -> Str
+taskDiffPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["changes-", encode attempt, ".diff"]]
+
 taskStatusPath : Str -> Str
 taskStatusPath taskId = pathJoin [taskReportStateRoot taskId, "state.json"]
 
@@ -627,6 +804,9 @@ taskProcessStderrPath taskId = pathJoin [taskReportStateRoot taskId, "loop.stder
 
 taskProcessHeartbeatPath : Str -> Str
 taskProcessHeartbeatPath taskId = pathJoin [taskReportStateRoot taskId, "loop.process.heartbeat.json"]
+
+taskManagerRetryPath : Str -> Str
+taskManagerRetryPath taskId = pathJoin [stateRootPath, textConcat ["child-loop-retries-", taskId, ".json"]]
 
 taskBuilderHeartbeatPath : Str -> Int -> Str
 taskBuilderHeartbeatPath taskId attempt =
@@ -650,10 +830,22 @@ workspaceCloneExcludeFlags =
     "--exclude=*/.clasp-loops ",
     "--exclude=.clasp-swarm ",
     "--exclude=*/.clasp-swarm ",
+    "--exclude=.clasp-task-workspaces ",
+    "--exclude=*/.clasp-task-workspaces ",
+    "--exclude=.clasp-task-baselines ",
+    "--exclude=*/.clasp-task-baselines ",
     "--exclude=.clasp-test-tmp ",
     "--exclude=*/.clasp-test-tmp ",
+    "--exclude=.clasp-test-tmp-* ",
+    "--exclude=*/.clasp-test-tmp-* ",
     "--exclude=.clasp-verify-tmp ",
     "--exclude=*/.clasp-verify-tmp ",
+    "--exclude=.clasp-verify-tmp-* ",
+    "--exclude=*/.clasp-verify-tmp-* ",
+    "--exclude=benchmarks/workspaces ",
+    "--exclude=*/benchmarks/workspaces ",
+    "--exclude=benchmarks/results ",
+    "--exclude=*/benchmarks/results ",
     "--exclude=dist ",
     "--exclude=*/dist ",
     "--exclude=dist-newstyle ",
@@ -693,9 +885,54 @@ runCommand cwd command = processResult (runCommandRaw cwd command)
 plannerReportError : Str -> Result PlannerReport
 plannerReportError message = Err message
 
+defaultPlannerTaskRole : Str -> Str -> Str
+defaultPlannerTaskRole taskId detail =
+  if length (textSplit taskId "benchmark") > 1 then
+    "benchmark-operator"
+  else if length (textSplit taskId "verify") > 1 then
+    "verification-closer"
+  else if length (textSplit taskId "planner") > 1 then
+    "planner"
+  else if length (textSplit taskId "loop") > 1 then
+    "control-plane-hardener"
+  else if length (textSplit detail "benchmark") > 1 then
+    "benchmark-operator"
+  else
+    "generalist"
+
+legacyPlannerTaskToCurrent : LegacyPlannerTaskSpec -> PlannerTaskSpec
+legacyPlannerTaskToCurrent task =
+  PlannerTaskSpec {
+    taskId = task.taskId,
+    role = defaultPlannerTaskRole task.taskId task.detail,
+    detail = task.detail,
+    dependencies = task.dependencies,
+    taskPrompt = task.taskPrompt,
+    coordinationFocus = emptyTexts
+  }
+
+legacyPlannerReportToCurrent : LegacyPlannerReport -> PlannerReport
+legacyPlannerReportToCurrent report = {
+  let mut renderedTasks = emptyPlannerTasks;
+  for task in report.tasks {
+    renderedTasks = append renderedTasks [legacyPlannerTaskToCurrent task];
+    renderedTasks
+  };
+  PlannerReport {
+    objectiveSummary = report.objectiveSummary,
+    strategy = report.strategy,
+    tasks = renderedTasks,
+    testsRun = report.testsRun,
+    residualRisks = report.residualRisks
+  }
+}
+
+plannerReportFromRaw : Str -> PlannerReport
+plannerReportFromRaw raw = decode PlannerReport raw
+
 readPlannerReportPath : Str -> Result PlannerReport
 readPlannerReportPath path = match readFile path {
-  Ok raw -> Ok (decode PlannerReport raw),
+  Ok raw -> Ok (plannerReportFromRaw raw),
   Err message -> plannerReportError message
 }
 
@@ -799,6 +1036,13 @@ writeMailboxMessages messages = match writeFile mailboxPath (encode messages) {
   Err message -> message
 }
 
+appendMailboxMessages : [SwarmMailboxMessage] -> Str
+appendMailboxMessages messages =
+  if length messages == 0 then
+    ""
+  else
+    writeMailboxMessages (append (readMailboxMessagesPath mailboxPath) messages)
+
 writeFeedback : VerifierReport -> Str
 writeFeedback report = match writeFile feedbackPath (encode report) {
   Ok written -> "",
@@ -832,6 +1076,9 @@ currentWorkingDir = match runCommand "." ["pwd"] {
 recordedServiceRoot : Str
 recordedServiceRoot = readTextOrEmpty serviceRootRecordPath
 
+recordedServiceId : Str
+recordedServiceId = readTextOrEmpty serviceIdRecordPath
+
 recordedProjectRoot : Str
 recordedProjectRoot = readTextOrEmpty projectRootRecordPath
 
@@ -861,11 +1108,45 @@ resolveProjectPath value =
   else
     pathJoin [managerProjectRoot, value]
 
+resolveWorkspacePath : Str -> Str
+resolveWorkspacePath value =
+  if value == "" then
+    ""
+  else if isAbsolutePath value then
+    value
+  else
+    pathJoin [currentWorkingDir, value]
+
+resolvedWorkspaceRoot : Str
+resolvedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+
 resolvedPlannerSchemaPath : Str
 resolvedPlannerSchemaPath = resolveProjectPath plannerSchemaPath
 
 resolvedChildLoopProgramPath : Str
 resolvedChildLoopProgramPath = resolveProjectPath childLoopProgramPath
+
+resolvedManagerProgramPath : Str
+resolvedManagerProgramPath = resolveProjectPath managerProgramPath
+
+defaultProjectClaspcPath : Str
+defaultProjectClaspcPath = pathJoin [managerProjectRoot, "runtime/target/debug/claspc"]
+
+resolvedManagerClaspcBin : Str
+resolvedManagerClaspcBin =
+  if managerClaspcBin == "" then
+    defaultProjectClaspcPath
+  else if isAbsolutePath managerClaspcBin then
+    managerClaspcBin
+  else if managerClaspcBin == "claspc" then
+    if fileExists defaultProjectClaspcPath then
+      defaultProjectClaspcPath
+    else
+      managerClaspcBin
+  else if length (textSplit managerClaspcBin "/") > 1 then
+    resolveProjectPath managerClaspcBin
+  else
+    managerClaspcBin
 
 readFeedbackSummary : Str
 readFeedbackSummary =
@@ -887,6 +1168,91 @@ taskLatestAttempt taskId =
 taskLatestBuilderReport : Str -> Result BuilderReport
 taskLatestBuilderReport taskId =
   readBuilderReportPath (taskBuilderReportPath taskId (taskLatestAttempt taskId))
+
+taskLatestBuilderReportPath : Str -> Str
+taskLatestBuilderReportPath taskId =
+  taskBuilderReportPath taskId (taskLatestAttempt taskId)
+
+taskLatestDiffPath : Str -> Str
+taskLatestDiffPath taskId =
+  taskDiffPath taskId (taskLatestAttempt taskId)
+
+taskPromotionDiffPath : Str -> Str
+taskPromotionDiffPath taskId =
+  pathJoin [taskReportStateRoot taskId, "promotion-recoverable.diff"]
+
+taskPromotionConflictPath : Str -> Str
+taskPromotionConflictPath taskId =
+  pathJoin [taskReportStateRoot taskId, "promotion-conflict.marker"]
+
+taskRecoverableDiffDetails : Str -> [Str]
+taskRecoverableDiffDetails taskId =
+  if fileExists (taskLatestDiffPath taskId) then
+    [
+      textConcat ["recoverableDiff=", taskLatestDiffPath taskId],
+      "recoverableDiffKind=child-loop",
+      "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+    ]
+  else
+    emptyTexts
+
+plannerTaskRoleLabel : PlannerTaskSpec -> Str
+plannerTaskRoleLabel spec =
+  if spec.role == "" then
+    defaultPlannerTaskRole spec.taskId spec.detail
+  else
+    spec.role
+
+plannerTaskCoordinationFocusValues : PlannerTaskSpec -> [Str]
+plannerTaskCoordinationFocusValues spec =
+  if length spec.coordinationFocus == 0 then
+    [plannerTaskRoleLabel spec]
+  else
+    spec.coordinationFocus
+
+plannerTaskCoordinationSummary : PlannerTaskSpec -> Str
+plannerTaskCoordinationSummary spec = textJoin ", " (plannerTaskCoordinationFocusValues spec)
+
+annotatedPlannerTaskDetail : PlannerTaskSpec -> Str
+annotatedPlannerTaskDetail spec =
+  textConcat [
+    "[role=",
+    plannerTaskRoleLabel spec,
+    "; focus=",
+    plannerTaskCoordinationSummary spec,
+    "] ",
+    spec.detail
+  ]
+
+plannerTaskOverviewLine : PlannerTaskSpec -> Str
+plannerTaskOverviewLine spec =
+  textConcat [
+    "- ",
+    spec.taskId,
+    " [role ",
+    plannerTaskRoleLabel spec,
+    "; focus ",
+    plannerTaskCoordinationSummary spec,
+    "]: ",
+    spec.detail
+  ]
+
+plannerTaskSiblingSummaryText : PlannerReport -> Str -> Str
+plannerTaskSiblingSummaryText report taskId = {
+  let mut lines = emptyTexts;
+  for taskSpec in report.tasks {
+    if taskSpec.taskId == taskId then
+      lines
+    else {
+      lines = append lines [plannerTaskOverviewLine taskSpec];
+      lines
+    }
+  };
+  if length lines == 0 then
+    "No sibling branches are planned for this wave."
+  else
+    textJoin "\n" lines
+}
 
 benchmarkCheckpointMessages : Int -> [SwarmMailboxMessage]
 benchmarkCheckpointMessages wave =
@@ -918,42 +1284,156 @@ benchmarkCheckpointMessages wave =
       previous
   }
 
-taskMailboxMessages : [SwarmTask] -> [SwarmMailboxMessage]
-taskMailboxMessages taskValues = {
-  let mut rendered = emptySwarmMailboxMessages;
-  for task in taskValues {
-    if fileExists (taskFeedbackPath task.taskId) then {
-      let report = readVerifierReportPath (taskFeedbackPath task.taskId);
-      rendered =
-        append rendered [
-          SwarmMailboxMessage {
-            source = "task-report",
-            taskId = task.taskId,
-            wave = 0,
-            summary = report.summary,
-            details =
-              append
-                (if report.verdict == "pass" then emptyTexts else report.findings)
-                report.follow_up
-          }
-        ];
+appendOptionalMailboxDetail : [Str] -> Str -> Str -> [Str]
+appendOptionalMailboxDetail details prefix value =
+  if value == "" then
+    details
+  else
+    append details [textConcat [prefix, value]]
+
+appendPrefixedMailboxDetails : [Str] -> Str -> [Str] -> [Str]
+appendPrefixedMailboxDetails details prefix values = {
+  let mut rendered = details;
+  for value in values {
+    if value == "" then
       rendered
-    } else
+    else {
+      rendered = append rendered [textConcat [prefix, value]];
       rendered
+    }
   };
   rendered
 }
 
-mailboxMessagesForWave : Int -> [SwarmMailboxMessage]
-mailboxMessagesForWave wave = {
-  let benchmarkMessages = benchmarkCheckpointMessages wave in
-  match tasks swarmStateRoot {
-    Ok taskValues ->
-      append benchmarkMessages (taskMailboxMessages taskValues),
-    Err message ->
-      benchmarkMessages
-  }
+appendCapabilityMailboxDetails : [Str] -> [CapabilityStatus] -> [Str]
+appendCapabilityMailboxDetails details statuses = {
+  let mut rendered = details;
+  for status in statuses {
+    rendered = append rendered [textConcat ["capability=", status.name, ":", status.status]];
+    rendered
+  };
+  rendered
 }
+
+builderReportMailboxDetails : PlannerTaskSpec -> BuilderReport -> [Str]
+builderReportMailboxDetails spec report = {
+  let mut details = [textConcat ["coordination=", plannerTaskCoordinationSummary spec]];
+  details = appendPrefixedMailboxDetails details "file=" report.files_touched;
+  details = appendPrefixedMailboxDetails details "test=" report.tests_run;
+  details = appendPrefixedMailboxDetails details "risk=" report.residual_risks;
+  details = appendOptionalMailboxDetail details "feedback=" report.feedback.summary;
+  details = appendPrefixedMailboxDetails details "ergonomics=" report.feedback.ergonomics;
+  details = appendPrefixedMailboxDetails details "follow-up=" report.feedback.follow_ups;
+  details = appendPrefixedMailboxDetails details "warning=" report.feedback.warnings;
+  details = append details (taskRecoverableDiffDetails spec.taskId);
+  details
+}
+
+verifierReportMailboxDetails : PlannerTaskSpec -> VerifierReport -> [Str]
+verifierReportMailboxDetails spec report = {
+  let mut details = [
+    textConcat ["coordination=", plannerTaskCoordinationSummary spec],
+    textConcat ["verdict=", report.verdict]
+  ];
+  details = appendPrefixedMailboxDetails details "finding=" report.findings;
+  details = appendPrefixedMailboxDetails details "test=" report.tests_run;
+  details = appendPrefixedMailboxDetails details "follow-up=" report.follow_up;
+  details = appendCapabilityMailboxDetails details report.capability_statuses;
+  details = append details (taskRecoverableDiffDetails spec.taskId);
+  details
+}
+
+taskBuilderMailboxMessages : Int -> PlannerTaskSpec -> [SwarmMailboxMessage]
+taskBuilderMailboxMessages wave spec = {
+  let role = plannerTaskRoleLabel spec in
+  if fileExists (taskLatestBuilderReportPath spec.taskId) then
+    match taskLatestBuilderReport spec.taskId {
+      Ok builderReport ->
+        [
+          SwarmMailboxMessage {
+            source = textConcat ["builder-report:", role],
+            taskId = spec.taskId,
+            wave = wave,
+            summary = builderReport.summary,
+            details = builderReportMailboxDetails spec builderReport
+          }
+        ],
+      Err message ->
+        emptySwarmMailboxMessages
+    }
+  else
+    emptySwarmMailboxMessages
+}
+
+taskVerifierMailboxMessages : Int -> PlannerTaskSpec -> VerifierReport -> [SwarmMailboxMessage]
+taskVerifierMailboxMessages wave spec report = {
+  let role = plannerTaskRoleLabel spec in
+  [
+    SwarmMailboxMessage {
+      source = textConcat ["task-report:", role],
+      taskId = spec.taskId,
+      wave = wave,
+      summary = report.summary,
+      details = verifierReportMailboxDetails spec report
+    }
+  ]
+}
+
+taskMailboxMessagesForSpec : Int -> PlannerTaskSpec -> [SwarmMailboxMessage]
+taskMailboxMessagesForSpec wave spec = {
+  let builderMessages = taskBuilderMailboxMessages wave spec in
+  let reportMessages =
+    if fileExists (taskFeedbackPath spec.taskId) then
+      taskVerifierMailboxMessages wave spec (readVerifierReportPath (taskFeedbackPath spec.taskId))
+    else
+      emptySwarmMailboxMessages in
+  append builderMessages reportMessages
+}
+
+taskMailboxMessagesForSpecs : Int -> [PlannerTaskSpec] -> [SwarmMailboxMessage]
+taskMailboxMessagesForSpecs wave specs = {
+  let mut rendered = emptySwarmMailboxMessages;
+  for spec in specs {
+    rendered = append rendered (taskMailboxMessagesForSpec wave spec);
+    rendered
+  };
+  rendered
+}
+
+taskMailboxMessagesForCompletedSpec : Int -> PlannerTaskSpec -> VerifierReport -> [SwarmMailboxMessage]
+taskMailboxMessagesForCompletedSpec wave spec report =
+  append
+    (taskBuilderMailboxMessages wave spec)
+    (taskVerifierMailboxMessages wave spec report)
+
+plannerTaskMailboxMessagesForWave : Int -> [SwarmMailboxMessage]
+plannerTaskMailboxMessagesForWave wave =
+  if wave <= 0 then
+    emptySwarmMailboxMessages
+  else if fileExists (plannerReportPathFor wave) then
+    match readPlannerReportForWave wave {
+      Ok report ->
+        taskMailboxMessagesForSpecs wave (materializePlannerReport wave report).tasks,
+      Err message ->
+        emptySwarmMailboxMessages
+    }
+  else
+    emptySwarmMailboxMessages
+
+taskMailboxMessagesAcrossWaves : Int -> [SwarmMailboxMessage]
+taskMailboxMessagesAcrossWaves wave =
+  if wave <= 0 then
+    emptySwarmMailboxMessages
+  else
+    append
+      (taskMailboxMessagesAcrossWaves (decrementManagerCounter wave))
+      (plannerTaskMailboxMessagesForWave wave)
+
+mailboxMessagesForReport : Int -> PlannerReport -> [SwarmMailboxMessage]
+mailboxMessagesForReport wave report =
+  append
+    (benchmarkCheckpointMessages wave)
+    (taskMailboxMessagesForSpecs wave (materializePlannerReport wave report).tasks)
 
 mailboxMessageLine : SwarmMailboxMessage -> Str
 mailboxMessageLine message =
@@ -962,17 +1442,50 @@ mailboxMessageLine message =
   else
     textConcat ["[", message.source, " ", message.taskId, " wave ", encode message.wave, "] ", message.summary]
 
-mailboxSummaryText : Int -> Str
-mailboxSummaryText wave = {
-  let messages = mailboxMessagesForWave wave in
-  if length messages == 0 then
-    "No prior swarm mailbox messages are available yet."
-  else
-    textJoin "\n" (map mailboxMessageLine messages)
+mailboxMessageLines : SwarmMailboxMessage -> [Str]
+mailboxMessageLines message = {
+  let mut rendered = [mailboxMessageLine message];
+  for detail in message.details {
+    if detail == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat ["  - ", detail]];
+      rendered
+    }
+  };
+  rendered
 }
 
+renderMailboxMessages : [SwarmMailboxMessage] -> [Str]
+renderMailboxMessages messages = {
+  let mut rendered = emptyTexts;
+  for message in messages {
+    rendered = append rendered (mailboxMessageLines message);
+    rendered
+  };
+  rendered
+}
+
+mailboxSummaryText : Int -> Str
+mailboxSummaryText wave =
+  if fileExists mailboxPath then
+    let messages = readMailboxMessagesPath mailboxPath in
+    if length messages == 0 then
+      "No prior swarm mailbox messages are available yet."
+    else
+      textJoin "\n" (renderMailboxMessages messages)
+  else
+    "No prior swarm mailbox messages are available yet."
+
+mailboxSummaryTextForReport : Int -> PlannerReport -> Str
+mailboxSummaryTextForReport wave report = mailboxSummaryText wave
+
 refreshMailbox : Int -> Str
-refreshMailbox wave = writeMailboxMessages (mailboxMessagesForWave wave)
+refreshMailbox wave =
+  writeMailboxMessages
+    (append
+      (benchmarkCheckpointMessages wave)
+      (taskMailboxMessagesAcrossWaves wave))
 
 childLoopUsesVerifierHeartbeat : Str -> Bool
 childLoopUsesVerifierHeartbeat phase =
@@ -1003,12 +1516,49 @@ childLoopLaunchState taskId =
   else
     watchedProcessError "missing launch heartbeat"
 
+childLoopPhaseHeartbeatCompleted : Str -> Bool
+childLoopPhaseHeartbeatCompleted taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          true
+        else if state.completed then
+          true
+        else {
+          let heartbeatPath = childLoopHeartbeatPath taskId state in
+          if fileExists heartbeatPath then
+            match reconcileWatchedProcess heartbeatPath {
+              Ok process ->
+                if process.running then
+                  false
+                else
+                  process.completed,
+              Err message ->
+                false
+            }
+          else
+            false
+        },
+      Err message ->
+        false
+    }
+  else
+    false
+
+childLoopLaunchHeartbeatStale : WatchedProcess -> Bool
+childLoopLaunchHeartbeatStale process =
+  process.updatedAtMs == 0
+
 childLoopLaunchRunning : Str -> Bool
 childLoopLaunchRunning taskId =
   match childLoopLaunchState taskId {
     Ok process ->
       if process.running then
-        process.completed == false
+        if childLoopLaunchHeartbeatStale process then
+          childLoopPhaseHeartbeatCompleted taskId == false
+        else
+          process.completed == false
       else
         false,
     Err message ->
@@ -1020,12 +1570,27 @@ childLoopLaunchCompleted taskId =
   match childLoopLaunchState taskId {
     Ok process ->
       if process.running then
-        false
+        if childLoopLaunchHeartbeatStale process then
+          childLoopPhaseHeartbeatCompleted taskId
+        else
+          false
+      else if process.completed then
+        true
       else
-        process.completed,
+        childLoopPhaseHeartbeatCompleted taskId,
     Err message ->
-      false
+      childLoopPhaseHeartbeatCompleted taskId
   }
+
+childLoopLaunchPending : Str -> Bool
+childLoopLaunchPending taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    if childLoopReportReady taskId then
+      false
+    else
+      childLoopLaunchRunning taskId
+  else
+    false
 
 childLoopTerminal : Str -> Bool
 childLoopTerminal taskId =
@@ -1056,6 +1621,20 @@ childLoopReportReady taskId =
       true
   else
     false
+
+settleChildLoopReportReady : Str -> Int -> Bool
+settleChildLoopReportReady taskId remainingPolls =
+  if childLoopReportReady taskId then
+    true
+  else if remainingPolls <= 0 then
+    false
+  else
+    match sleepMsValue childLoopWatchPollMs {
+      Ok slept ->
+        settleChildLoopReportReady taskId (decrementManagerCounter remainingPolls),
+      Err message ->
+        false
+    }
 
 childLoopRunning : Str -> Bool
 childLoopRunning taskId =
@@ -1106,53 +1685,651 @@ writeTaskFeedback taskId report =
       }
   }
 
-ensureTaskWorkspace : Str -> Str
-ensureTaskWorkspace taskId =
-  if fileExists (taskWorkspaceReadyPath taskId) then
+readChildLoopManagerRetries : Str -> Int
+readChildLoopManagerRetries taskId =
+  if fileExists (taskManagerRetryPath taskId) then
+    match readFile (taskManagerRetryPath taskId) {
+      Ok raw -> decode Int raw,
+      Err message -> 0
+    }
+  else
+    0
+
+writeChildLoopManagerRetries : Str -> Int -> Str
+writeChildLoopManagerRetries taskId retryCount =
+  match writeFile (taskManagerRetryPath taskId) (encode retryCount) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+childLoopMaxManagerRetries : Int
+childLoopMaxManagerRetries =
+  if childMaxAttempts <= 1 then
+    0
+  else
+    decrementManagerCounter childMaxAttempts
+
+childLoopManagerRetryAvailable : Str -> Bool
+childLoopManagerRetryAvailable taskId =
+  readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
+
+resetChildLoopForManagerRetry : Str -> Str
+resetChildLoopForManagerRetry taskId =
+  match runCommand "." [
+    "rm",
+    "-rf",
+    taskReportStateRoot taskId,
+    taskWorkspaceRoot taskId,
+    taskWorkspaceActualRoot taskId,
+    taskWorkspaceBaselineActualRoot taskId
+  ] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode != 0 then
+        process.stderr
+      else
+        ""
+  }
+
+childLoopMissingDurableReport : VerifierReport -> Bool
+childLoopMissingDurableReport report =
+  report.summary == "task child loop finished without a durable report"
+
+cachePruneDoneTrace : Str -> Str
+cachePruneDoneTrace root = {
+  let traceDone = appendManagerTrace (textConcat ["cache-prune:done:", root]) in
+  if traceDone != "" then
+    traceDone
+  else
     ""
+}
+
+intResultError : Str -> Result Int
+intResultError message = Err message
+
+textResultError : Str -> Result Str
+textResultError message = Err message
+
+cacheDirectoryUsedMb : Str -> Result Int
+cacheDirectoryUsedMb root =
+  match runCommand "." ["du", "-sm", root] {
+    Err message ->
+      intResultError message,
+    Ok process ->
+      if process.exitCode != 0 then
+        intResultError process.stderr
+      else {
+        let firstLine = firstTextOrEmpty (textSplit process.stdout "\n") in
+        let firstColumn = firstTextOrEmpty (textSplit firstLine "\t") in
+        Ok (decode Int firstColumn)
+      }
+  }
+
+cachePruneCandidate : Str -> Str -> Result Str
+cachePruneCandidate root keepName =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    textJoin "\n" [
+      "find \"$1\" -mindepth 1 -maxdepth 1 ! -name \"$2\" -printf '%T@ %p\\n' | sort -n | while IFS= read -r row; do",
+      "  path=\"${row#* }\"",
+      "  name=\"$(basename \"$path\")\"",
+      "  state=\"$3/loop-$name/state.json\"",
+      "  if [ -f \"$state\" ] && grep -Eq '\"final\"[[:space:]]*:[[:space:]]*false' \"$state\"; then",
+      "    continue",
+      "  fi",
+      "  printf '%s\\n' \"$path\"",
+      "  exit 0",
+      "done"
+    ],
+    "cache-prune-candidate",
+    root,
+    keepName,
+    stateRootPath
+  ] {
+    Err message ->
+      textResultError message,
+    Ok process ->
+      if process.exitCode != 0 then
+        textResultError process.stderr
+      else
+        Ok (firstTextOrEmpty (textSplit process.stdout "\n"))
+  }
+
+pruneCacheDirectoryLoop : Str -> Int -> Str -> Int -> Str
+pruneCacheDirectoryLoop root maxMb keepName attempts =
+  if attempts > 128 then
+    textConcat ["cache prune exceeded iteration budget: ", root]
+  else
+    match cacheDirectoryUsedMb root {
+      Err message ->
+        message,
+      Ok usedMb ->
+        if usedMb <= maxMb then
+          cachePruneDoneTrace root
+        else
+          match cachePruneCandidate root keepName {
+            Err message ->
+              message,
+            Ok candidate ->
+              if candidate == "" then
+                cachePruneDoneTrace root
+              else
+                match runCommand "." ["rm", "-rf", candidate] {
+                  Err message ->
+                    message,
+                  Ok removed ->
+                    if removed.exitCode != 0 then
+                      removed.stderr
+                    else
+                      pruneCacheDirectoryLoop root maxMb keepName (incrementManagerCounter attempts)
+                }
+          }
+    }
+
+pruneCacheDirectory : Str -> Int -> Str -> Str
+pruneCacheDirectory root maxMb keepName = {
+  let traceStart = appendManagerTrace (textConcat ["cache-prune:start:", root, ":max=", encode maxMb, ":keep=", keepName]) in
+  if traceStart != "" then
+    traceStart
+  else if maxMb <= 0 then
+    ""
+  else
+    match runCommand "." ["mkdir", "-p", root] {
+      Err message ->
+        message,
+      Ok created ->
+        if created.exitCode != 0 then
+          created.stderr
+        else
+          pruneCacheDirectoryLoop root maxMb keepName 0
+    }
+}
+
+childLoopNamedCacheUsedMb : Str -> Result Int
+childLoopNamedCacheUsedMb cacheName =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    textJoin "\n" [
+      "state_root=\"$1\"",
+      "cache_name=\"$2\"",
+      "find \"$state_root\" -mindepth 2 -maxdepth 2 -type d -name \"$cache_name\" -exec du -sm {} + 2>/dev/null | awk '{sum += $1} END {print sum + 0}'"
+    ],
+    "child-loop-cache-used",
+    stateRootPath,
+    cacheName
+  ] {
+    Err message ->
+      intResultError message,
+    Ok process ->
+      if process.exitCode != 0 then
+        intResultError process.stderr
+      else {
+        let firstLine = firstTextOrEmpty (textSplit process.stdout "\n") in
+        Ok (decode Int firstLine)
+      }
+  }
+
+childLoopNamedCachePruneCandidate : Str -> Result Str
+childLoopNamedCachePruneCandidate cacheName =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    textJoin "\n" [
+      "state_root=\"$1\"",
+      "cache_name=\"$2\"",
+      "find \"$state_root\" -mindepth 2 -maxdepth 2 -type d -name \"$cache_name\" -printf '%T@ %p\\n' 2>/dev/null | sort -n | while IFS= read -r row; do",
+      "  path=\"${row#* }\"",
+      "  loop_dir=\"${path%/$cache_name}\"",
+      "  state=\"$loop_dir/state.json\"",
+      "  if [ -f \"$state\" ] && grep -Eq '\"final\"[[:space:]]*:[[:space:]]*false' \"$state\"; then",
+      "    continue",
+      "  fi",
+      "  printf '%s\\n' \"$path\"",
+      "  exit 0",
+      "done"
+    ],
+    "child-loop-cache-prune-candidate",
+    stateRootPath,
+    cacheName
+  ] {
+    Err message ->
+      textResultError message,
+    Ok process ->
+      if process.exitCode != 0 then
+        textResultError process.stderr
+      else
+        Ok (firstTextOrEmpty (textSplit process.stdout "\n"))
+  }
+
+pruneChildLoopNamedCacheLoop : Str -> Int -> Int -> Str
+pruneChildLoopNamedCacheLoop cacheName maxMb attempts =
+  if attempts > 128 then
+    textConcat ["child loop cache prune exceeded iteration budget: ", cacheName]
+  else
+    match childLoopNamedCacheUsedMb cacheName {
+      Err message ->
+        message,
+      Ok usedMb ->
+        if usedMb <= maxMb then
+          cachePruneDoneTrace (textConcat [stateRootPath, "/loop-*/", cacheName])
+        else
+          match childLoopNamedCachePruneCandidate cacheName {
+            Err message ->
+              message,
+            Ok candidate ->
+              if candidate == "" then
+                cachePruneDoneTrace (textConcat [stateRootPath, "/loop-*/", cacheName])
+              else
+                match runCommand "." ["rm", "-rf", candidate] {
+                  Err message ->
+                    message,
+                  Ok removed ->
+                    if removed.exitCode != 0 then
+                      removed.stderr
+                    else
+                      pruneChildLoopNamedCacheLoop cacheName maxMb (incrementManagerCounter attempts)
+                }
+          }
+    }
+
+pruneChildLoopNamedCache : Str -> Int -> Str
+pruneChildLoopNamedCache cacheName maxMb = {
+  let traceStart = appendManagerTrace (textConcat ["child-cache-prune:start:", cacheName, ":max=", encode maxMb]) in
+  if traceStart != "" then
+    traceStart
+  else if maxMb <= 0 then
+    ""
+  else
+    pruneChildLoopNamedCacheLoop cacheName maxMb 0
+}
+
+pruneChildLoopCaches : Str
+pruneChildLoopCaches = {
+  let baselineError = pruneChildLoopNamedCache "baseline-cache" childLoopBaselineCacheTotalMaxMb in
+  if baselineError != "" then
+    textConcat ["child loop baseline cache retention failed: ", baselineError]
   else {
-    let removed =
-      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+    let xdgError = pruneChildLoopNamedCache "xdg-cache" childLoopXdgCacheTotalMaxMb in
+    if xdgError != "" then
+      textConcat ["child loop xdg cache retention failed: ", xdgError]
+    else
+      ""
+  }
+}
+
+pruneTaskWorkspaceCaches : Str -> Str
+pruneTaskWorkspaceCaches taskId = {
+  let workspaceError = pruneCacheDirectory taskWorkspaceCacheRoot taskWorkspaceCacheMaxMb taskId in
+  if workspaceError != "" then
+    textConcat ["task workspace cache retention failed: ", workspaceError]
+  else {
+    let baselineError = pruneCacheDirectory taskWorkspaceBaselineCacheRoot taskBaselineCacheMaxMb taskId in
+    if baselineError != "" then
+      textConcat ["task baseline cache retention failed: ", baselineError]
+    else
+      ""
+  }
+}
+
+pruneManagerResourceCaches : Str
+pruneManagerResourceCaches = {
+  let artifactError = pruneCacheDirectory (pathJoin [stateRootPath, "artifacts"]) managerArtifactsCacheMaxMb "" in
+  if artifactError != "" then
+    textConcat ["manager artifact cache retention failed: ", artifactError]
+  else {
+    let xdgError = pruneCacheDirectory managerXdgCacheHome managerXdgCacheMaxMb "" in
+    if xdgError != "" then
+      textConcat ["manager xdg cache retention failed: ", xdgError]
+    else {
+      let childLoopError = pruneChildLoopCaches in
+      if childLoopError != "" then
+        textConcat ["manager child loop cache retention failed: ", childLoopError]
+      else
+        ""
+    }
+  }
+}
+
+cleanupTaskWorkspace : Str -> Str
+cleanupTaskWorkspace taskId = {
+  let removedLink =
+    match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+      Ok result -> result,
+      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+    } in
+  if removedLink.exitCode != 0 then
+    textConcat ["task workspace link cleanup failed: ", taskId, ": ", removedLink.stderr]
+  else {
+    let removedActual =
+      match runCommand "." ["rm", "-rf", taskWorkspaceActualRoot taskId, taskWorkspaceBaselineActualRoot taskId] {
         Ok result -> result,
         Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
       } in
-    if removed.exitCode != 0 then
-      textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
+    if removedActual.exitCode != 0 then
+      textConcat ["task workspace cleanup failed: ", taskId, ": ", removedActual.stderr]
+    else
+      pruneTaskWorkspaceCaches taskId
+  }
+}
+
+cleanupFailedTaskWorkspace : Str -> Str
+cleanupFailedTaskWorkspace taskId =
+  if retainFailedTaskWorkspaces then
+    ""
+  else
+    cleanupTaskWorkspace taskId
+
+ensureTaskWorkspace : Str -> Str
+ensureTaskWorkspace taskId = {
+  if fileExists (taskWorkspaceReadyPath taskId) then
+    ""
+  else {
+    let retentionError = pruneTaskWorkspaceCaches taskId in
+    if retentionError != "" then
+      textConcat ["task workspace retention failed: ", taskId, ": ", retentionError]
     else {
-      let created =
-        match runCommand "." ["mkdir", "-p", taskWorkspaceRoot taskId] {
+      let removedLink =
+        match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
           Ok result -> result,
           Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
         } in
-      if created.exitCode != 0 then
-        textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+      if removedLink.exitCode != 0 then
+        textConcat ["task workspace link cleanup failed: ", taskId, ": ", removedLink.stderr]
       else {
-        let copied =
-          match runCommand "." [
-            "bash",
-            "-lc",
-            textConcat [
-              "tar -cf - ",
-              workspaceCloneExcludeFlags,
-              "-C ",
-              workspaceRoot,
-              " . | tar -xf - -C ",
-              taskWorkspaceRoot taskId
-            ]
-          ] {
+        let removedActual =
+          match runCommand "." ["rm", "-rf", taskWorkspaceActualRoot taskId, taskWorkspaceBaselineActualRoot taskId] {
             Ok result -> result,
             Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
           } in
-        if copied.exitCode != 0 then
-          textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
-        else
-          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-            Ok written -> "",
-            Err message ->
-              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+        if removedActual.exitCode != 0 then
+          textConcat ["task workspace cleanup failed: ", taskId, ": ", removedActual.stderr]
+        else {
+          let created =
+            match runCommand "." ["mkdir", "-p", taskWorkspaceActualRoot taskId] {
+              Ok result -> result,
+              Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+            } in
+          if created.exitCode != 0 then
+            textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+          else {
+            let copied =
+              match runCommand "." [
+                "bash",
+                "-lc",
+                textConcat [
+                  "tar -cf - ",
+                  workspaceCloneExcludeFlags,
+                  "-C ",
+                  workspaceRoot,
+                  " . | tar -xf - -C ",
+                  taskWorkspaceActualRoot taskId
+                ]
+              ] {
+                Ok result -> result,
+                Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+              } in
+            if copied.exitCode != 0 then
+              textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
+            else {
+              let createdBaseline =
+                match runCommand "." ["mkdir", "-p", taskWorkspaceBaselineActualRoot taskId] {
+                  Ok result -> result,
+                  Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                } in
+              if createdBaseline.exitCode != 0 then
+                textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", createdBaseline.stderr]
+              else {
+                let copiedBaseline =
+                  match runCommand "." [
+                    "bash",
+                    "-lc",
+                    textConcat [
+                      "tar -cf - -C ",
+                      taskWorkspaceActualRoot taskId,
+                      " . | tar -xf - -C ",
+                      taskWorkspaceBaselineActualRoot taskId
+                    ]
+                  ] {
+                    Ok result -> result,
+                    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                  } in
+                if copiedBaseline.exitCode != 0 then
+                  textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", copiedBaseline.stderr]
+                else {
+                  let linked =
+                    match runCommand "." ["ln", "-s", taskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                      Ok result -> result,
+                      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                    } in
+                  if linked.exitCode != 0 then
+                    textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                  else
+                    match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                      Ok written -> pruneTaskWorkspaceCaches taskId,
+                      Err message ->
+                        textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                    }
+                }
+              }
+            }
           }
+        }
       }
     }
+  }
+}
+
+taskWorkspacePromotionScript : Str
+taskWorkspacePromotionScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "base=\"$2\"",
+  "dest=\"$3\"",
+  "conflict_marker=\"$4\"",
+  "diff_out=\"$5\"",
+  "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\"",
+  "rm -f \"$conflict_marker\" \"$diff_out\"",
+  "if [ ! -d \"$src\" ]; then",
+  "  printf 'missing task workspace: %s\n' \"$src\" >&2",
+  "  exit 2",
+  "fi",
+  "if [ ! -d \"$base\" ]; then",
+  "  printf 'missing task baseline workspace: %s\n' \"$base\" >&2",
+  "  exit 2",
+  "fi",
+  "mkdir -p \"$dest\"",
+  "tmp=\"$(mktemp -d)\"",
+  "trap 'rm -rf \"$tmp\"' EXIT",
+  "list_files() {",
+  "  root=\"$1\"",
+  "  (cd \"$root\" && find . -type f -print | while IFS= read -r rel; do",
+  "    case \"$rel\" in",
+  "      ./.workspace-ready) continue ;;",
+  "      ./.git/*|*/.git/*) continue ;;",
+  "      ./.clasp-agents/*|*/.clasp-agents/*) continue ;;",
+  "      ./.clasp-loops/*|*/.clasp-loops/*) continue ;;",
+  "      ./.clasp-swarm/*|*/.clasp-swarm/*) continue ;;",
+  "      ./.clasp-task-workspaces/*|*/.clasp-task-workspaces/*) continue ;;",
+  "      ./.clasp-task-baselines/*|*/.clasp-task-baselines/*) continue ;;",
+  "      ./.clasp-test-tmp/*|*/.clasp-test-tmp/*) continue ;;",
+  "      ./.clasp-test-tmp-*/*|*/.clasp-test-tmp-*/*) continue ;;",
+  "      ./.clasp-verify-tmp/*|*/.clasp-verify-tmp/*) continue ;;",
+  "      ./.clasp-verify-tmp-*/*|*/.clasp-verify-tmp-*/*) continue ;;",
+  "      ./benchmarks/workspaces/*|*/benchmarks/workspaces/*) continue ;;",
+  "      ./benchmarks/results/*|*/benchmarks/results/*) continue ;;",
+  "      ./dist/*|*/dist/*) continue ;;",
+  "      ./dist-newstyle/*|*/dist-newstyle/*) continue ;;",
+  "      ./result/*|*/result/*) continue ;;",
+  "      ./runtime/target/*|*/runtime/target/*) continue ;;",
+  "      ./node_modules/*|*/node_modules/*) continue ;;",
+  "      ./__serve-native-export-host/*|*/__serve-native-export-host/*) continue ;;",
+  "      ./exec-image/*|*/exec-image/*) continue ;;",
+  "    esac",
+  "    printf '%s\n' \"${rel#./}\"",
+  "  done | sort)",
+  "}",
+  "write_recoverable_diff() {",
+  "  tmp_diff=\"$diff_out.tmp.$$\"",
+  "  diff -ruN \\",
+  "    --exclude=.workspace-ready \\",
+  "    --exclude=.git \\",
+  "    --exclude=.clasp-agents \\",
+  "    --exclude=.clasp-loops \\",
+  "    --exclude=.clasp-swarm \\",
+  "    --exclude=.clasp-task-workspaces \\",
+  "    --exclude=.clasp-task-baselines \\",
+  "    --exclude=.clasp-test-tmp \\",
+  "    --exclude=.clasp-test-tmp-* \\",
+  "    --exclude=.clasp-verify-tmp \\",
+  "    --exclude=.clasp-verify-tmp-* \\",
+  "    --exclude=workspaces \\",
+  "    --exclude=results \\",
+  "    --exclude=dist \\",
+  "    --exclude=dist-newstyle \\",
+  "    --exclude=result \\",
+  "    --exclude=target \\",
+  "    --exclude=node_modules \\",
+  "    --exclude=__serve-native-export-host \\",
+  "    --exclude=exec-image \\",
+  "    \"$base\" \"$src\" >\"$tmp_diff\" || true",
+  "  if [ -s \"$tmp_diff\" ]; then",
+  "    mv \"$tmp_diff\" \"$diff_out\"",
+  "  else",
+  "    rm -f \"$tmp_diff\" \"$diff_out\"",
+  "  fi",
+  "}",
+  "base_files=\"$tmp/base-files\"",
+  "src_files=\"$tmp/src-files\"",
+  "changed=\"$tmp/changed-files\"",
+  "conflicts=\"$tmp/conflicts\"",
+  "list_files \"$base\" >\"$base_files\"",
+  "list_files \"$src\" >\"$src_files\"",
+  "comm -12 \"$base_files\" \"$src_files\" | while IFS= read -r rel; do",
+  "  if ! cmp -s \"$base/$rel\" \"$src/$rel\"; then",
+  "    printf '%s\n' \"$rel\"",
+  "  fi",
+  "done >\"$changed\"",
+  "comm -13 \"$base_files\" \"$src_files\" >>\"$changed\"",
+  "sort -u -o \"$changed\" \"$changed\"",
+  ": >\"$conflicts\"",
+  "while IFS= read -r rel; do",
+  "  [ -n \"$rel\" ] || continue",
+  "  if [ -e \"$dest/$rel\" ] && ! cmp -s \"$dest/$rel\" \"$src/$rel\"; then",
+  "    if [ -e \"$base/$rel\" ]; then",
+  "      if ! cmp -s \"$dest/$rel\" \"$base/$rel\"; then",
+  "        printf '%s\n' \"$rel\" >>\"$conflicts\"",
+  "      fi",
+  "    else",
+  "      printf '%s\n' \"$rel\" >>\"$conflicts\"",
+  "    fi",
+  "  fi",
+  "done <\"$changed\"",
+  "if [ -s \"$conflicts\" ]; then",
+  "  write_recoverable_diff",
+  "  {",
+  "    printf 'promotion conflict: task workspace would overwrite files changed since snapshot\n'",
+  "    cat \"$conflicts\"",
+  "  } >\"$conflict_marker\"",
+  "  exit 0",
+  "fi",
+  "while IFS= read -r rel; do",
+  "  [ -n \"$rel\" ] || continue",
+  "  mkdir -p \"$dest/$(dirname \"$rel\")\"",
+  "  cp -p \"$src/$rel\" \"$dest/$rel\"",
+  "done <\"$changed\""
+]
+
+taskPromotionDiffScript : Str
+taskPromotionDiffScript = textJoin "\n" [
+  "set +e",
+  "src=\"$1\"",
+  "base=\"$2\"",
+  "out=\"$3\"",
+  "if [ ! -d \"$src\" ] || [ ! -d \"$base\" ]; then",
+  "  exit 0",
+  "fi",
+  "mkdir -p \"$(dirname \"$out\")\"",
+  "tmp=\"$out.tmp.$$\"",
+  "diff -ruN \\",
+  "  --exclude=.workspace-ready \\",
+  "  --exclude=.git \\",
+  "  --exclude=.clasp-agents \\",
+  "  --exclude=.clasp-loops \\",
+  "  --exclude=.clasp-swarm \\",
+  "  --exclude=.clasp-task-workspaces \\",
+  "  --exclude=.clasp-task-baselines \\",
+  "  --exclude=.clasp-test-tmp \\",
+  "  --exclude=.clasp-test-tmp-* \\",
+  "  --exclude=.clasp-verify-tmp \\",
+  "  --exclude=.clasp-verify-tmp-* \\",
+  "  --exclude=workspaces \\",
+  "  --exclude=results \\",
+  "  --exclude=dist \\",
+  "  --exclude=dist-newstyle \\",
+  "  --exclude=result \\",
+  "  --exclude=target \\",
+  "  --exclude=node_modules \\",
+  "  --exclude=__serve-native-export-host \\",
+  "  --exclude=exec-image \\",
+  "  \"$base\" \"$src\" >\"$tmp\"",
+  "code=\"$?\"",
+  "if [ \"$code\" -eq 0 ]; then",
+  "  rm -f \"$tmp\" \"$out\"",
+  "  exit 0",
+  "fi",
+  "if [ \"$code\" -eq 1 ]; then",
+  "  mv \"$tmp\" \"$out\"",
+  "  exit 0",
+  "fi",
+  "mv \"$tmp\" \"$out\"",
+  "exit 0"
+]
+
+writeTaskPromotionDiff : PlannerTaskSpec -> Str
+writeTaskPromotionDiff spec =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    taskPromotionDiffScript,
+    "write-task-promotion-diff",
+    taskWorkspaceActualRoot spec.taskId,
+    taskWorkspaceBaselineActualRoot spec.taskId,
+    taskPromotionDiffPath spec.taskId
+  ] {
+    Err message ->
+      textConcat ["task promotion diff failed: ", spec.taskId, ": ", message],
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else
+        textConcat ["task promotion diff failed: ", spec.taskId, ": ", process.stderr]
+  }
+
+promoteVerifiedTaskWorkspace : PlannerTaskSpec -> Str
+promoteVerifiedTaskWorkspace spec =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    taskWorkspacePromotionScript,
+    "promote-task-workspace",
+    taskWorkspaceActualRoot spec.taskId,
+    taskWorkspaceBaselineActualRoot spec.taskId,
+    workspaceRoot,
+    taskPromotionConflictPath spec.taskId,
+    taskPromotionDiffPath spec.taskId
+  ] {
+    Err message ->
+      textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", message],
+    Ok process ->
+      if fileExists (taskPromotionConflictPath spec.taskId) then
+        textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion conflict: task workspace would overwrite files changed since snapshot"]
+      else if process.exitCode == 0 then
+        ""
+      else
+        textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", process.stderr]
   }
 
 firstTextOrEmpty : [Str] -> Str
@@ -1169,6 +2346,24 @@ firstTextOrEmpty values = {
     }
   };
   first
+}
+
+secondTextOrEmpty : [Str] -> Str
+secondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
 }
 
 writeManagerState : ManagerState -> Str
@@ -1298,9 +2493,47 @@ latestBenchmarkTargetMet = match readBenchmarkCheckpointPath benchmarkLatestPath
   Err message -> false
 }
 
+managerHealthSummaryText : Int -> Str
+managerHealthSummaryText wave =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    textJoin "\n" [
+      "state_root=\"$1\"",
+      "workspace_root=\"$2\"",
+      "baseline_root=\"$3\"",
+      "manager_cache=\"$4\"",
+      "printf 'wave=%s\\n' \"$5\"",
+      "printf 'stateRootMb='; du -sm \"$state_root\" 2>/dev/null | awk '{print $1}' || printf 'unknown'; printf '\\n'",
+      "printf 'taskWorkspacesMb='; du -sm \"$workspace_root\" 2>/dev/null | awk '{print $1}' || printf '0'; printf '\\n'",
+      "printf 'taskBaselinesMb='; du -sm \"$baseline_root\" 2>/dev/null | awk '{print $1}' || printf '0'; printf '\\n'",
+      "printf 'managerCacheMb='; du -sm \"$manager_cache\" 2>/dev/null | awk '{print $1}' || printf '0'; printf '\\n'",
+      "printf 'activeChildStates='; grep -Rsl '\"final\"[[:space:]]*:[[:space:]]*false' \"$state_root\"/loop-*/state.json 2>/dev/null | wc -l | tr -d ' '; printf '\\n'",
+      "printf 'failedChildStates='; grep -Rsl '\"verdict\"[[:space:]]*:[[:space:]]*\"fail\"' \"$state_root\"/loop-*/state.json 2>/dev/null | wc -l | tr -d ' '; printf '\\n'",
+      "printf 'missingDurableReportFailures='; grep -Rsl 'task child loop finished without a durable report' \"$state_root\"/loop-*/feedback.json 2>/dev/null | wc -l | tr -d ' '; printf '\\n'",
+      "printf 'recoverableDiffs='; find \"$state_root\" -maxdepth 2 -name 'changes-*.diff' -type f 2>/dev/null | wc -l | tr -d ' '; printf '\\n'",
+      "printf 'diskAvailableKb='; df -Pk \"$state_root\" 2>/dev/null | awk 'NR==2 {print $4}' || printf 'unknown'; printf '\\n'"
+    ],
+    "manager-health",
+    stateRootPath,
+    taskWorkspaceCacheRoot,
+    taskWorkspaceBaselineCacheRoot,
+    managerXdgCacheHome,
+    encode wave
+  ] {
+    Err message ->
+      textConcat ["manager health unavailable: ", message],
+    Ok process ->
+      if process.exitCode == 0 then
+        process.stdout
+      else
+        textConcat ["manager health unavailable: ", process.stderr]
+  }
+
 plannerInputFingerprintSourceFor : Int -> Str -> Str
 plannerInputFingerprintSourceFor wave benchmarkSummary =
   let mailboxSummary = mailboxSummaryText wave in
+  let healthSummary = managerHealthSummaryText wave in
   textJoin "\n" [
     textConcat ["goal:", goalText],
     textConcat ["planner-policy:", plannerPolicyText],
@@ -1310,7 +2543,8 @@ plannerInputFingerprintSourceFor wave benchmarkSummary =
     textConcat ["wave:", encode wave],
     textConcat ["benchmark-enabled:", encode benchmarkEnabled],
     textConcat ["benchmark-summary:", benchmarkSummary],
-    textConcat ["mailbox-summary:", mailboxSummary]
+    textConcat ["mailbox-summary:", mailboxSummary],
+    textConcat ["health-summary:", healthSummary]
   ]
 
 plannerInputStateFor : Int -> Str -> PlannerInputState
@@ -1344,12 +2578,150 @@ readProcessOutputText path = match readFile path {
   Err message -> ""
 }
 
+readProcessOutputTailText : Str -> Str
+readProcessOutputTailText path =
+  if fileExists path then
+    match runCommand "." ["tail", "-c", encode taskFailureLogTailBytes, path] {
+      Ok process ->
+        if process.exitCode == 0 then
+          process.stdout
+        else
+          textConcat ["tail failed for ", path, ": ", process.stderr],
+      Err message ->
+        textConcat ["tail failed for ", path, ": ", message]
+    }
+  else
+    ""
+
+pairedPlannerStdoutArtifactPath : Str -> Str
+pairedPlannerStdoutArtifactPath stderrPath = {
+  let parts = textSplit (pathBasename stderrPath) ".stderr." in
+  let prefix = firstTextOrEmpty parts in
+  let suffix = secondTextOrEmpty parts in
+  if length parts == 2 then
+    pathJoin [pathDirname stderrPath, textConcat [prefix, ".stdout.", suffix]]
+  else
+    ""
+}
+
+plannerRunFailureDetail : SwarmRun -> Str
+plannerRunFailureDetail run =
+  textJoin "\n" [
+    textConcat ["exitCode=", encode run.exitCode],
+    textConcat ["stdoutArtifactPath=", run.stdoutArtifactPath],
+    textConcat ["stderrArtifactPath=", run.stderrArtifactPath],
+    textConcat ["stdoutTail=", readProcessOutputTailText run.stdoutArtifactPath],
+    textConcat ["stderrTail=", readProcessOutputTailText run.stderrArtifactPath]
+  ]
+
+plannerFailureEvidenceText : Str -> Str
+plannerFailureEvidenceText detail =
+  if detail == "" then
+    ""
+  else if fileExists detail then {
+    let stdoutPath = pairedPlannerStdoutArtifactPath detail in
+    textJoin "\n" [
+      textConcat ["stderrArtifactPath=", detail],
+      textConcat ["stdoutArtifactPath=", stdoutPath],
+      textConcat ["stdoutTail=", readProcessOutputTailText stdoutPath],
+      textConcat ["stderrTail=", readProcessOutputTailText detail]
+    ]
+  } else
+    detail
+
+childLoopLaunchSummary : Str -> Str
+childLoopLaunchSummary taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      textConcat [
+        "launcher pid=",
+        encode process.pid,
+        " running=",
+        encode process.running,
+        " completed=",
+        encode process.completed,
+        " exitCode=",
+        encode process.exitCode
+      ],
+    Err message ->
+      textConcat ["launcher state unavailable: ", message]
+  }
+
+childLoopStateSummary : Str -> Str
+childLoopStateSummary taskId =
+  if fileExists (taskStatusPath taskId) then
+    readProcessOutputTailText (taskStatusPath taskId)
+  else
+    "child state file missing"
+
+benchmarkSignalError : Str -> Result BenchmarkSignal
+benchmarkSignalError message = Err message
+
+readBenchmarkSignalStdout : Int -> Result BenchmarkSignal
+readBenchmarkSignalStdout wave =
+  let stdoutPath = benchmarkStdoutPathFor wave in
+  if fileExists stdoutPath then
+    match runCommand "." [
+      "bash",
+      "-lc",
+      "grep -F '\"suite\"' \"$1\" | tail -n 1",
+      "benchmark-signal",
+      stdoutPath
+    ] {
+      Err message ->
+        benchmarkSignalError message,
+      Ok process ->
+        let raw = firstTextOrEmpty (textSplit process.stdout "\n") in
+        if raw == "" then
+          benchmarkSignalError (textConcat ["missing benchmark signal in ", stdoutPath])
+        else
+          Ok (decode BenchmarkSignal raw)
+    }
+  else
+    benchmarkSignalError (textConcat ["missing benchmark stdout: ", stdoutPath])
+
+benchmarkResultFromSignal : BenchmarkSignal -> ProcessResult
+benchmarkResultFromSignal signal =
+  ProcessResult {
+    exitCode = 0,
+    stdout = encode signal,
+    stderr = ""
+  }
+
+benchmarkTimeoutResultFromStdout : Int -> Result ProcessResult
+benchmarkTimeoutResultFromStdout wave =
+  match readBenchmarkSignalStdout wave {
+    Err message ->
+      processResultError "timeout",
+    Ok signal ->
+      Ok (benchmarkResultFromSignal signal)
+  }
+
 benchmarkResultFromProcess : WatchedProcess -> ProcessResult
 benchmarkResultFromProcess process =
   ProcessResult {
     exitCode = process.exitCode,
     stdout = readProcessOutputText process.stdoutPath,
     stderr = readProcessOutputText process.stderrPath
+  }
+
+benchmarkResultFromCompletedProcess : Int -> WatchedProcess -> Result ProcessResult
+benchmarkResultFromCompletedProcess wave process =
+  let raw = benchmarkResultFromProcess process in
+  match readBenchmarkSignalStdout wave {
+    Ok signal ->
+      Ok (
+        ProcessResult {
+          exitCode = 0,
+          stdout = encode signal,
+          stderr = raw.stderr
+        }
+      ),
+    Err message ->
+      if raw.exitCode != 0 then
+        Ok raw
+      else
+        processResultError message
   }
 
 benchmarkCommandArgs : Int -> Int -> [Str]
@@ -1402,9 +2774,12 @@ runBenchmarkCommand wave benchmarkRuns =
     Ok launched ->
       match awaitWatchedProcessTimeout launched.heartbeatPath benchmarkWatchPollMs benchmarkTimeoutMs {
         Err message ->
-          processResultError message,
+          if message == "timeout" then
+            benchmarkTimeoutResultFromStdout wave
+          else
+            processResultError message,
         Ok process ->
-          Ok (benchmarkResultFromProcess process)
+          benchmarkResultFromCompletedProcess wave process
       }
   }
 
@@ -1481,6 +2856,262 @@ taskStatusIsTerminal status =
   else
     status == "failed"
 
+taskStatusIsActive : Str -> Bool
+taskStatusIsActive status =
+  if status == "leased" then
+    true
+  else
+    status == "active"
+
+plannedActiveTaskIds : [Str] -> [Str] -> [SwarmTask] -> [Str]
+plannedActiveTaskIds plannedIds heartbeatActiveTaskIds taskValues = {
+  let mut activeTaskIds = emptyTexts;
+  for taskId in plannedIds {
+    let taskStatus = taskStatusFor taskValues taskId in
+    if textListHas taskId heartbeatActiveTaskIds then {
+      activeTaskIds = append activeTaskIds [taskId];
+      activeTaskIds
+    } else if taskStatusIsActive taskStatus then {
+      activeTaskIds = append activeTaskIds [taskId];
+      activeTaskIds
+    } else
+      activeTaskIds
+  };
+  activeTaskIds
+}
+
+statusWaitingReason : Str -> [Str] -> [Str] -> [Str] -> StatusWaitingReason
+statusWaitingReason kind taskIds relatedTaskIds details =
+  StatusWaitingReason {
+    kind = kind,
+    taskIds = taskIds,
+    relatedTaskIds = relatedTaskIds,
+    details = details
+  }
+
+appendUniqueText : [Str] -> Str -> [Str]
+appendUniqueText values value =
+  if value == "" then
+    values
+  else if textListHas value values then
+    values
+  else
+    append values [value]
+
+appendUniqueTexts : [Str] -> [Str] -> [Str]
+appendUniqueTexts values additions = {
+  let mut rendered = values;
+  for value in additions {
+    rendered = appendUniqueText rendered value;
+    rendered
+  };
+  rendered
+}
+
+firstWaitingReasonKind : [StatusWaitingReason] -> Str
+firstWaitingReasonKind reasons = {
+  let mut kind = "";
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else {
+      kind = reason.kind;
+      found = true;
+      found
+    }
+  };
+  kind
+}
+
+firstWaitingReasonTaskIds : [StatusWaitingReason] -> [Str]
+firstWaitingReasonTaskIds reasons = {
+  let mut taskIds = emptyTexts;
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else {
+      taskIds = reason.taskIds;
+      found = true;
+      found
+    }
+  };
+  taskIds
+}
+
+dependencyIdsFromBlocker : Str -> [Str]
+dependencyIdsFromBlocker blocker = match textPrefix blocker "waiting on " {
+  Ok remainder ->
+    if remainder == "" then
+      emptyTexts
+    else
+      textSplit remainder ",",
+  Err message ->
+    emptyTexts
+}
+
+taskDependencyIds : SwarmTask -> [Str]
+taskDependencyIds task = {
+  let mut dependencyIds = emptyTexts;
+  for blocker in task.blockedBy {
+    dependencyIds = appendUniqueTexts dependencyIds (dependencyIdsFromBlocker blocker);
+    dependencyIds
+  };
+  dependencyIds
+}
+
+taskBudgetBlockers : SwarmTask -> [Str]
+taskBudgetBlockers task = {
+  let mut blockers = emptyTexts;
+  for blocker in task.blockedBy {
+    if length (textSplit blocker "budget exhausted") > 1 then {
+      blockers = appendUniqueText blockers blocker;
+      blockers
+    } else if length (textSplit blocker "deadline expired") > 1 then {
+      blockers = appendUniqueText blockers blocker;
+      blockers
+    } else
+      blockers
+  };
+  blockers
+}
+
+trackedTasksForStatus : [SwarmTask] -> [Str] -> [SwarmTask]
+trackedTasksForStatus objectiveTasks plannedTaskIds = {
+  let mut trackedTasks = emptyTasks;
+  for task in objectiveTasks {
+    if length plannedTaskIds == 0 then {
+      trackedTasks = append trackedTasks [task];
+      trackedTasks
+    } else if textListHas task.taskId plannedTaskIds then {
+      trackedTasks = append trackedTasks [task];
+      trackedTasks
+    } else
+      trackedTasks
+  };
+  trackedTasks
+}
+
+plannerWaitingReasons : ManagerState -> [StatusWaitingReason]
+plannerWaitingReasons state =
+  if state.phase == "planner-running" then
+    [statusWaitingReason "planner-execution" [state.plannerTaskId] emptyTexts [textConcat ["wave=", encode state.wave]]]
+  else
+    emptyStatusWaitingReasons
+
+benchmarkWaitingReasons : ManagerState -> [Str] -> [StatusWaitingReason]
+benchmarkWaitingReasons state plannedTaskIds = {
+  let details =
+    if latestBenchmarkSummaryText == "" then
+      [textConcat ["wave=", encode state.wave]]
+    else
+      [textConcat ["wave=", encode state.wave], latestBenchmarkSummaryText] in
+  if state.phase == "benchmark-running" then
+    [statusWaitingReason "benchmark-execution" plannedTaskIds emptyTexts details]
+  else
+    emptyStatusWaitingReasons
+}
+
+dependencyWaitingReasons : [SwarmTask] -> [StatusWaitingReason]
+dependencyWaitingReasons tasks = {
+  let mut taskIds = emptyTexts;
+  let mut relatedTaskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for task in tasks {
+    let dependencyIds = taskDependencyIds task in
+    if length dependencyIds == 0 then
+      details
+    else {
+      taskIds = appendUniqueText taskIds task.taskId;
+      relatedTaskIds = appendUniqueTexts relatedTaskIds dependencyIds;
+      details =
+        appendUniqueText details (textConcat [task.taskId, ":waiting on ", textJoin "," dependencyIds]);
+      details
+    }
+  };
+  if length taskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "task-dependencies" taskIds relatedTaskIds details]
+}
+
+budgetWaitingReasons : [SwarmTask] -> [StatusWaitingReason]
+budgetWaitingReasons tasks = {
+  let mut taskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for task in tasks {
+    let blockers = taskBudgetBlockers task in
+    if length blockers == 0 then
+      details
+    else {
+      taskIds = appendUniqueText taskIds task.taskId;
+      for blocker in blockers {
+        details = appendUniqueText details (textConcat [task.taskId, ":", blocker]);
+        details
+      };
+      details
+    }
+  };
+  if length taskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "task-budget" taskIds emptyTexts details]
+}
+
+childHealthWaitingReasons : [Str] -> [StatusWaitingReason]
+childHealthWaitingReasons taskIds = {
+  let mut unhealthyTaskIds = emptyTexts;
+  let mut details = emptyTexts;
+  for taskId in taskIds {
+    if fileExists (taskStatusPath taskId) then
+      match readChildLoopStatePath (taskStatusPath taskId) {
+        Ok childState ->
+          if childState.final then
+            details
+          else if childState.completed then
+            details
+          else if childState.healthy == false then {
+            unhealthyTaskIds = appendUniqueText unhealthyTaskIds taskId;
+            details =
+              appendUniqueText
+                details
+                (textConcat [taskId, ":phase=", childState.phase, ":attention=", childState.attentionReason]);
+            details
+          } else if childState.needsAttention then {
+            unhealthyTaskIds = appendUniqueText unhealthyTaskIds taskId;
+            details =
+              appendUniqueText
+                details
+                (textConcat [taskId, ":phase=", childState.phase, ":attention=", childState.attentionReason]);
+            details
+          } else
+            details,
+        Err message ->
+          details
+      }
+    else
+      details
+  };
+  if length unhealthyTaskIds == 0 then
+    emptyStatusWaitingReasons
+  else
+    [statusWaitingReason "child-health" unhealthyTaskIds emptyTexts details]
+}
+
+statusWaitingReasons : ManagerState -> [Str] -> [SwarmTask] -> [StatusWaitingReason]
+statusWaitingReasons state plannedTaskIds trackedTasks =
+  append
+    (append
+      (append
+        (append
+          (plannerWaitingReasons state)
+          (benchmarkWaitingReasons state plannedTaskIds))
+        (dependencyWaitingReasons trackedTasks))
+      (budgetWaitingReasons trackedTasks))
+    (childHealthWaitingReasons
+      (if length plannedTaskIds == 0 then map taskIdOf trackedTasks else plannedTaskIds))
+
 plannerTaskIdOf : PlannerTaskSpec -> Str
 plannerTaskIdOf task = task.taskId
 
@@ -1496,9 +3127,11 @@ materializePlannerTask wave spec = {
   };
   PlannerTaskSpec {
     taskId = materializeTaskId wave spec.taskId,
+    role = spec.role,
     detail = spec.detail,
     dependencies = renderedDependencies,
-    taskPrompt = spec.taskPrompt
+    taskPrompt = spec.taskPrompt,
+    coordinationFocus = spec.coordinationFocus
   }
 }
 
@@ -1676,6 +3309,53 @@ planValidationIssueText issue =
 planValidationIssueTexts : [PlanValidationIssue] -> [Str]
 planValidationIssueTexts issues = map planValidationIssueText issues
 
+planValidationFailureDetail : PlanValidationResult -> Str
+planValidationFailureDetail validation = textJoin "\n" (planValidationIssueTexts validation.issues)
+
+planValidationIssueCodeOf : PlanValidationIssue -> Str
+planValidationIssueCodeOf issue = issue.code
+
+planValidationIssueCodeRecoverable : Str -> Bool
+planValidationIssueCodeRecoverable code =
+  if code == "planned-task-budget" then
+    true
+  else if code == "objective-task-budget" then
+    true
+  else
+    code == "objective-run-budget"
+
+planValidationOnlyRecoverableIssues : [PlanValidationIssue] -> Bool
+planValidationOnlyRecoverableIssues issues = {
+  let mut ok = true;
+  for issue in issues {
+    if ok == false then
+      ok
+    else if planValidationIssueCodeRecoverable issue.code then
+      ok
+    else {
+      ok = false;
+      ok
+    }
+  };
+  ok
+}
+
+planValidationHasIssueCode : PlanValidationResult -> Str -> Bool
+planValidationHasIssueCode validation wanted =
+  textListHas wanted (map planValidationIssueCodeOf validation.issues)
+
+recoverablePlannerValidationFailure : PlanValidationResult -> Bool
+recoverablePlannerValidationFailure validation =
+  if validation.valid then
+    false
+  else if planValidationHasIssueCode validation "planned-task-budget" then
+    if planValidationOnlyRecoverableIssues validation.issues then
+      validation.plannerTaskLimit > 0
+    else
+      false
+  else
+    false
+
 planValidationFailureReport : PlanValidationResult -> VerifierReport
 planValidationFailureReport validation =
   VerifierReport {
@@ -1686,7 +3366,6 @@ planValidationFailureReport validation =
     follow_up = ["Fix the planner output or manager limits before materializing swarm tasks."],
     capability_statuses = emptyCapabilityStatuses
   }
-
 incrementManagerCounter : Int -> Int
 incrementManagerCounter value =
   if value == 0 then
@@ -2044,18 +3723,26 @@ repeatAdd count amount =
   else
     addManagerCounters amount (repeatAdd (decrementManagerCounter count) amount)
 
+minimumObjectiveWaveBudget : Int
+minimumObjectiveWaveBudget =
+  incrementManagerCounter maxTaskLoops
+
+configuredObjectiveBudgetFloor : Int
+configuredObjectiveBudgetFloor =
+  repeatAdd configuredPlannerWaveCount minimumObjectiveWaveBudget
+
+objectiveTaskBudget : Int
+objectiveTaskBudget = configuredObjectiveTaskBudget
+
+objectiveRunBudget : Int
+objectiveRunBudget = configuredObjectiveRunBudget
+
 validatePlannerReport : PlannerReport -> PlanValidationResult
 validatePlannerReport report = {
   let requiredTaskBudget =
-    if benchmarkEnabled then
-      repeatAdd maxWaves (incrementManagerCounter maxTaskLoops)
-    else
-      incrementManagerCounter (length report.tasks) in
+    configuredObjectiveBudgetFloor in
   let requiredRunBudget =
-    if benchmarkEnabled then
-      repeatAdd maxWaves (incrementManagerCounter maxTaskLoops)
-    else
-      incrementManagerCounter (length report.tasks) in
+    configuredObjectiveBudgetFloor in
   let structuralState =
     fold
       planValidationFoldStep
@@ -2181,8 +3868,29 @@ ensureProjectRootRecord =
   else
     match writeFile projectRootRecordPath managerProjectRoot {
       Ok written -> "",
+        Err message -> message
+    }
+
+ensureRecordedText : Str -> Str -> Str
+ensureRecordedText path value =
+  if value == "" then
+    ""
+  else if readTextOrEmpty path == value then
+    ""
+  else
+    match writeFile path value {
+      Ok written -> "",
       Err message -> message
     }
+
+ensureServiceIdentityRecord : Str
+ensureServiceIdentityRecord = {
+  let serviceRootError = ensureRecordedText serviceRootRecordPath serviceRoot in
+  if serviceRootError != "" then
+    serviceRootError
+  else
+    ensureRecordedText serviceIdRecordPath serviceId
+}
 
 signalManagerReady : Str
 signalManagerReady =
@@ -2198,8 +3906,28 @@ ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
     "config-error:missing-workspace-root"
+  else if maxTaskLoops < 1 then
+    "config-error:max-tasks-must-be-positive"
+  else if plannerTaskMaxRuns < 1 then
+    "config-error:planner-max-runs-must-be-positive"
+  else if childMaxAttempts < 1 then
+    "config-error:child-max-attempts-must-be-positive"
   else if maxConcurrentChildren < 1 then
     "config-error:max-concurrent-children-must-be-positive"
+  else if objectiveTaskBudget < configuredObjectiveBudgetFloor then
+    textConcat [
+      "config-error:objective-task-budget-too-small:configured=",
+      encode objectiveTaskBudget,
+      ":required=",
+      encode configuredObjectiveBudgetFloor
+    ]
+  else if objectiveRunBudget < configuredObjectiveBudgetFloor then
+    textConcat [
+      "config-error:objective-run-budget-too-small:configured=",
+      encode objectiveRunBudget,
+      ":required=",
+      encode configuredObjectiveBudgetFloor
+    ]
   else if benchmarkEnabled then
     if maxWaves < 1 then
       "config-error:benchmark-max-waves-must-be-positive"
@@ -2208,16 +3936,32 @@ ensureManagerReady =
     else
       match mkdirAll stateRootPath {
         Ok created ->
+          let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+          if trace0 != "" then
+            trace0
+          else
           let restoreError = restoreManagerSnapshotIfNeeded in
           if restoreError != "" then
             restoreError
           else
-            let projectRootError = ensureProjectRootRecord in
-            if projectRootError != "" then
-              textConcat ["project-root-error:", projectRootError]
+          let projectRootError = ensureProjectRootRecord in
+          if projectRootError != "" then
+            textConcat ["project-root-error:", projectRootError]
+          else
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
             else
-              match mkdirAll workspaceRoot {
+              let resourcePruneError = pruneManagerResourceCaches in
+              if resourcePruneError != "" then
+                resourcePruneError
+              else
+              match mkdirAll resolvedWorkspaceRoot {
                 Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
                   let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
                   if policyError != "" then
                     policyError
@@ -2232,6 +3976,10 @@ ensureManagerReady =
   else
     match mkdirAll stateRootPath {
       Ok created ->
+        let trace0 = appendBootstrapTrace "bootstrap:state-root-ready" in
+        if trace0 != "" then
+          trace0
+        else
         let restoreError = restoreManagerSnapshotIfNeeded in
         if restoreError != "" then
           restoreError
@@ -2240,16 +3988,28 @@ ensureManagerReady =
           if projectRootError != "" then
             textConcat ["project-root-error:", projectRootError]
           else
-            match mkdirAll workspaceRoot {
-              Ok workspaceCreated ->
-                let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
-                if policyError != "" then
-                  policyError
-                else
-                  signalManagerReady,
-              Err message ->
-                textConcat ["workspace-root-error:", message]
-            },
+            let serviceIdentityError = ensureServiceIdentityRecord in
+            if serviceIdentityError != "" then
+              textConcat ["service-identity-error:", serviceIdentityError]
+            else
+              let resourcePruneError = pruneManagerResourceCaches in
+              if resourcePruneError != "" then
+                resourcePruneError
+              else
+              match mkdirAll resolvedWorkspaceRoot {
+                Ok workspaceCreated ->
+                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+                  if trace1 != "" then
+                    trace1
+                  else
+                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+                  if policyError != "" then
+                    policyError
+                  else
+                    signalManagerReady,
+                Err message ->
+                  textConcat ["workspace-root-error:", message]
+              },
       Err message ->
         textConcat ["state-root-error:", message]
     }
@@ -2260,7 +4020,7 @@ codexCommand schemaPath reportPath prompt = [
   "exec",
   "--json",
   "--cd",
-  workspaceRoot,
+    resolvedWorkspaceRoot,
   "-m",
   codexModel,
   "-c",
@@ -2307,30 +4067,41 @@ plannerPromptFor wave benchmarkSummary = textJoin "\n" [
   plannerPolicyText,
   "Current shared swarm mailbox context:",
   mailboxSummaryText wave,
+  "Current manager health/resource context:",
+  managerHealthSummaryText wave,
   "Do not assume a fixed role taxonomy beyond the minimal substrate already present. Let coordination patterns emerge from the work and the shared mailbox.",
+  "Use focused verification for ordinary implementation branches. Reserve full verify-all for signoff, verifyall, or integration closure tasks, and treat verifier timeouts as first-class planner input.",
+  "If prior failed branches have recoverableDiff details, plan from those artifacts instead of rediscovering the same work from scratch.",
   "Return JSON matching the planner schema.",
-  "Plan 1-3 bounded tasks with explicit dependencies and task prompts."
+  textConcat ["Plan 1-", encode maxTaskLoops, " bounded tasks with explicit dependencies and task prompts."],
+  "Each planned task must include an explicit role and a coordinationFocus list.",
+  "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."
 ]
 
 plannerCommandFor : Int -> Str -> SwarmCommand
 plannerCommandFor wave benchmarkSummary =
-  commandSpec managerProjectRoot (codexCommand resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptFor wave benchmarkSummary))
-
+  commandSpec
+    managerProjectRoot
+    (append
+      [
+        "bash",
+        "-lc",
+        textJoin "\n" [
+          "if [ \"$1\" -le 0 ]; then",
+          "  exec \"${@:2}\"",
+          "fi",
+          "seconds=$(( ($1 + 999) / 1000 ))",
+          "duration=\"${seconds}s\"",
+          "exec timeout \"$duration\" \"${@:2}\" < /dev/null"
+        ],
+        "planner-timeout",
+        encode plannerTimeoutMs
+      ]
+      (codexCommand resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptFor wave benchmarkSummary)))
 ensureObjective : Str
-ensureObjective = match objectives swarmStateRoot {
-  Ok objectiveValues ->
-    if textListHas objectiveId (map objectiveIdOf objectiveValues) then
-      ""
-    else
-      match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
-        Ok created -> "",
-        Err message -> message
-      },
-  Err message ->
-    match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
-      Ok created -> "",
-      Err createMessage -> createMessage
-    }
+ensureObjective = match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+  Ok created -> "",
+  Err message -> message
 }
 
 ensureTask : Str -> Str -> [Str] -> Str
@@ -2351,18 +4122,40 @@ ensureTask taskId detail dependencies = match tasks swarmStateRoot {
 }
 
 ensurePlannerTaskFor : Int -> Str
-ensurePlannerTaskFor wave =
-  ensureTask
-    (plannerTaskIdForWave wave)
-    (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
-    emptyTexts
+ensurePlannerTaskFor wave = match tasks swarmStateRoot {
+  Ok taskValues ->
+    if taskListHasId (plannerTaskIdForWave wave) taskValues then
+      ""
+    else
+      match taskCreate
+        objectiveRef
+        (plannerTaskIdForWave wave)
+        (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
+        emptyTexts
+        plannerTaskMaxRuns
+        taskLeaseTimeoutMs {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match taskCreate
+      objectiveRef
+      (plannerTaskIdForWave wave)
+      (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
+      emptyTexts
+      plannerTaskMaxRuns
+      taskLeaseTimeoutMs {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
 
 ensurePlannedTaskStep : EnsurePlanState -> PlannerTaskSpec -> EnsurePlanState
 ensurePlannedTaskStep state spec =
   if state.error != "" then
     state
   else {
-    let taskError = ensureTask spec.taskId spec.detail spec.dependencies in
+    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
     if taskError != "" then
       EnsurePlanState { error = taskError }
     else {
@@ -2391,33 +4184,54 @@ plannerTaskCountError report =
   else
     ""
 
-taskPromptText : Int -> PlannerTaskSpec -> Str
-taskPromptText wave spec = textJoin "\n" [
+taskPromptText : Int -> PlannerReport -> PlannerTaskSpec -> Str
+taskPromptText wave report spec = textJoin "\n" [
   "# Clasp Task",
   "",
   "High-level goal:",
   goalText,
   "",
   textConcat ["Task ID: ", spec.taskId],
+  textConcat ["Assigned role: ", plannerTaskRoleLabel spec],
+  textConcat ["Coordination focus: ", plannerTaskCoordinationSummary spec],
   textConcat ["Detail: ", spec.detail],
   "",
   "Planner instruction:",
   spec.taskPrompt,
   "",
+  "Sibling branches in this wave:",
+  plannerTaskSiblingSummaryText report spec.taskId,
+  "",
   "Shared swarm mailbox context:",
-  mailboxSummaryText wave,
+  mailboxSummaryTextForReport wave report,
   "",
   textConcat ["Shared swarm mailbox path: ", mailboxPath],
   "Use the shared mailbox context as durable coordination memory. Do not assume any special fixed swarm role beyond what the current work requires.",
+  "Before you finish, re-read the shared mailbox and leave findings that sibling branches can reuse.",
   "",
   "Complete this task in the current checkout. Keep the slice bounded, update tests, and let the child verifier decide pass/fail."
 ]
 
-writeTaskPromptFile : Int -> PlannerTaskSpec -> Str
-writeTaskPromptFile wave spec = match writeFile (taskPromptPath spec.taskId) (taskPromptText wave spec) {
+writeTaskPromptFile : Int -> PlannerReport -> PlannerTaskSpec -> Str
+writeTaskPromptFile wave report spec = match writeFile (taskPromptPath spec.taskId) (taskPromptText wave report spec) {
   Ok written -> "",
   Err message -> message
 }
+
+taskVerificationTier : PlannerTaskSpec -> Str
+taskVerificationTier spec =
+  if textIncludes spec.taskId "verifyall" then
+    "full"
+  else if textIncludes spec.taskId "verify-all" then
+    "full"
+  else if textIncludes spec.taskId "signoff" then
+    "full"
+  else if textIncludes spec.taskId "integrated-verification" then
+    "full"
+  else if textIncludes (plannerTaskRoleLabel spec) "verifier" then
+    "full"
+  else
+    "focused"
 
 childLoopCommandArgs : PlannerTaskSpec -> [Str]
 childLoopCommandArgs spec =
@@ -2433,13 +4247,33 @@ childLoopCommandArgs spec =
     "CLASP_RT_UPGRADE_TRANSACTION_PATH_JSON",
     "-u",
     "CLASP_RT_UPGRADE_GENERATION_JSON",
+    "-u",
+    "CLASP_MANAGER_BENCHMARK_COMMAND_JSON",
+    "-u",
+    "CLASP_MANAGER_BENCHMARK_CWD_JSON",
+    "-u",
+    "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON",
+    "-u",
+    "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON",
     textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
     textConcat ["CLASP_LOOP_TASK_FILE_JSON=", encode (taskPromptPath spec.taskId)],
-    textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceRoot spec.taskId)],
+    textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceActualRoot spec.taskId)],
+    textConcat ["CLASP_MANAGER_TASK_ROLE_JSON=", encode (plannerTaskRoleLabel spec)],
+    textConcat ["CLASP_MANAGER_TASK_COORDINATION_JSON=", encode (plannerTaskCoordinationSummary spec)],
     textConcat ["CLASP_LOOP_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASP_LOOP_VERIFICATION_TIER_JSON=", encode (taskVerificationTier spec)],
+    textConcat ["CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
+    textConcat ["CLASP_LOOP_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
+    textConcat ["CLASP_LOOP_BASELINE_CACHE_ROOT_JSON=", encode (pathJoin [taskReportStateRoot spec.taskId, "baseline-cache"])],
+    textConcat ["CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
+    textConcat ["XDG_CACHE_HOME=", pathJoin [taskReportStateRoot spec.taskId, "xdg-cache"]],
+    "CLASP_VERIFY_LOCK_TIMEOUT_SECS=30",
+    "CLASP_VERIFY_ON_LOCK_TIMEOUT=run-nested",
+    "CLASP_VERIFY_NESTED_COMMANDS=bash scripts/test-verify-all.sh\nbash scripts/test-task-manifest.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-goal-manager-fast.sh\n",
+    textConcat ["CLASP_VERIFY_LABEL=", textConcat ["swarm-child-verify-", spec.taskId]],
     textConcat ["CLASP_MANAGER_PROJECT_ROOT_JSON=", encode managerProjectRoot],
-    managerClaspcBin,
+    resolvedManagerClaspcBin,
     "run",
     resolvedChildLoopProgramPath,
     "--",
@@ -2514,6 +4348,10 @@ benchmarkFailureReport checkpoint =
     capability_statuses = emptyCapabilityStatuses
   }
 
+managerFailureState : [Str] -> Int -> Int -> ManagerState
+managerFailureState plannedTaskIds wave benchmarkRuns =
+  managerStateFor "failed" "fail" false "" plannedTaskIds wave benchmarkRuns true
+
 plannerSummaryOrEmpty : Int -> Str
 plannerSummaryOrEmpty wave = match readPlannerReportForWave wave {
   Ok report -> report.objectiveSummary,
@@ -2522,12 +4360,17 @@ plannerSummaryOrEmpty wave = match readPlannerReportForWave wave {
 
 statusView : ManagerState -> StatusView
 statusView state =
-  let activeTaskIds =
-    if length state.plannedTaskIds == 0 then
+  let plannedTaskIds =
+    match readPlannerReportForWave state.wave {
+      Ok report -> plannerTaskIds (materializePlannerReport state.wave report),
+      Err message -> state.plannedTaskIds
+    } in
+  let heartbeatActiveTaskIds =
+    if length plannedTaskIds == 0 then
       emptyTexts
     else {
       let mut runningIds = emptyTexts;
-      for taskId in state.plannedTaskIds {
+      for taskId in plannedTaskIds {
         if childLoopRunning taskId then {
           runningIds = append runningIds [taskId];
           runningIds
@@ -2539,6 +4382,8 @@ statusView state =
   match tasks swarmStateRoot {
     Ok taskValues ->
       let objectiveTasks = filter taskInObjective taskValues in
+      let trackedTasks = trackedTasksForStatus objectiveTasks plannedTaskIds in
+      let activeTaskIds = plannedActiveTaskIds plannedTaskIds heartbeatActiveTaskIds objectiveTasks in
       let readyTaskIds = match ready objectiveRef {
         Ok readyTasks -> map taskIdOf readyTasks,
         Err message -> emptyTexts
@@ -2548,35 +4393,39 @@ statusView state =
           Ok objectiveValue -> objectiveValue.projectedStatus,
           Err message -> textConcat ["objective-error:", message]
         } in
+      let waitingReasons = statusWaitingReasons state plannedTaskIds trackedTasks in
       StatusView {
         state = state,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = objectiveProjectedStatus,
-        plannedTaskIds =
-          match readPlannerReportForWave state.wave {
-            Ok report -> plannerTaskIds report,
-            Err message -> state.plannedTaskIds
-          },
+        plannedTaskIds = plannedTaskIds,
         allTaskIds = map taskIdOf objectiveTasks,
         readyTaskIds = readyTaskIds,
         activeTaskIds = activeTaskIds,
         completedTaskIds = map taskIdOf (filter taskCompleted objectiveTasks),
         failedTaskIds = map taskIdOf (filter taskFailed objectiveTasks),
+        waitingReasons = waitingReasons,
+        primaryWaitingReason = firstWaitingReasonKind waitingReasons,
+        primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
         benchmarkSummary = latestBenchmarkSummaryText,
         benchmarkTargetMet = latestBenchmarkTargetMet,
         feedbackSummary = readFeedbackSummary
       },
     Err message ->
+      let waitingReasons = statusWaitingReasons state plannedTaskIds emptyTasks in
       StatusView {
         state = state,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = textConcat ["task-error:", message],
-        plannedTaskIds = state.plannedTaskIds,
+        plannedTaskIds = plannedTaskIds,
         allTaskIds = emptyTexts,
         readyTaskIds = emptyTexts,
-        activeTaskIds = activeTaskIds,
+        activeTaskIds = heartbeatActiveTaskIds,
         completedTaskIds = emptyTexts,
         failedTaskIds = emptyTexts,
+        waitingReasons = waitingReasons,
+        primaryWaitingReason = firstWaitingReasonKind waitingReasons,
+        primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
         benchmarkSummary = latestBenchmarkSummaryText,
         benchmarkTargetMet = latestBenchmarkTargetMet,
         feedbackSummary = readFeedbackSummary
@@ -2620,6 +4469,242 @@ plannerFailure summary detail = {
     (syntheticFailureReport summary detail)
 }
 
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+recoverablePlannerLeaseFailure : Str -> Bool
+recoverablePlannerLeaseFailure detail =
+  if textIncludes detail "task run budget exhausted" then
+    true
+  else
+    textIncludes detail "lease held by `manager`"
+
+plannerFailureSummaryRecoverable : Str -> Bool
+plannerFailureSummaryRecoverable summary =
+  if summary == "planner run failed" then
+    true
+  else
+    summary == "planner step failed before producing a durable report"
+
+recoverablePlannerTransportFailure : Str -> Bool
+recoverablePlannerTransportFailure detail =
+  if textIncludes detail "We're currently experiencing high demand" then
+    true
+  else if textIncludes detail "stream disconnected before completion" then
+    true
+  else if textIncludes detail "websocket closed by server before response.completed" then
+    true
+  else if textIncludes detail "websocket closed by server" then
+    true
+  else if textIncludes detail "turn.failed" then
+    true
+  else
+    textIncludes detail "exitCode=124"
+
+continueAfterPlannerLeaseBlocker : Str -> Str -> Str
+continueAfterPlannerLeaseBlocker summary detail = {
+  let state = readManagerState in
+  if state.wave < maxWaves then {
+    let traceError =
+      appendManagerTrace
+        (textConcat [
+          "planner-wave-",
+          encode state.wave,
+          ":recoverable-lease-blocker:",
+          summary,
+          ":",
+          detail
+        ]) in
+    if traceError != "" then
+      plannerFailure "manager trace write failed" traceError
+    else {
+      let nextWave = incrementManagerCounter state.wave in
+      let nextState =
+        managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave state.benchmarkRuns false in
+      let stateError = writeManagerState nextState in
+      if stateError != "" then
+        plannerFailure "planner lease recovery state write failed" stateError
+      else
+        runPlanner
+    }
+  } else
+    plannerFailure summary detail
+}
+
+continueAfterPlannerTransportBlocker : Str -> Str -> Str
+continueAfterPlannerTransportBlocker summary detail = {
+  let state = readManagerState in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "planner-wave-",
+        encode state.wave,
+        ":recoverable-transport-blocker:",
+        summary,
+        ":",
+        detail
+      ]) in
+  if traceError != "" then
+    plannerFailure "manager trace write failed" traceError
+  else
+    match fail (plannerHandleForWave state.wave) {
+      Err message ->
+        plannerFailure "planner transport recovery fail transition failed" message,
+      Ok failedValue ->
+        match retry (plannerHandleForWave state.wave) {
+          Err message ->
+            plannerFailure "planner transport recovery retry failed" message,
+          Ok retriedValue -> {
+            let nextState =
+              managerStateFor "needs-planner" "pending" false "" emptyTexts state.wave state.benchmarkRuns false in
+            let stateError = writeManagerState nextState in
+            if stateError != "" then
+              plannerFailure "planner transport recovery state write failed" stateError
+            else
+              runPlanner
+          }
+        }
+    }
+}
+
+continueAfterPlannerValidationBlocker : Str -> Str -> Str
+continueAfterPlannerValidationBlocker summary detail = {
+  let state = readManagerState in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "planner-wave-",
+        encode state.wave,
+        ":recoverable-validation-blocker:",
+        summary,
+        ":",
+        detail
+      ]) in
+  if traceError != "" then
+    plannerFailure "manager trace write failed" traceError
+  else
+    match fail (plannerHandleForWave state.wave) {
+      Err message ->
+        plannerFailure "planner validation recovery fail transition failed" message,
+      Ok failedValue ->
+        match retry (plannerHandleForWave state.wave) {
+          Err message ->
+            plannerFailure "planner validation recovery retry failed" message,
+          Ok retriedValue -> {
+            let nextState =
+              managerStateFor "needs-planner" "pending" false "" emptyTexts state.wave state.benchmarkRuns false in
+            let stateError = writeManagerState nextState in
+            if stateError != "" then
+              plannerFailure "planner validation recovery state write failed" stateError
+            else
+              runPlanner
+          }
+        }
+    }
+}
+recoverableFinalPlannerLeaseState : ManagerState -> Bool
+recoverableFinalPlannerLeaseState state =
+  if state.phase == "failed" then
+    if state.activeTaskId == plannerTaskIdForWave state.wave then
+      readFeedbackSummary == "planner lease failed"
+    else
+      false
+  else
+    false
+
+finalPlannerTaskMatchesWave : ManagerState -> Bool
+finalPlannerTaskMatchesWave state =
+  if state.activeTaskId == state.plannerTaskId then
+    true
+  else if state.activeTaskId == plannerTaskIdForWave state.wave then
+    true
+  else
+    state.plannerTaskId == plannerTaskIdForWave state.wave
+
+recoverableFinalPlannerTransportDetail : ManagerState -> Str
+recoverableFinalPlannerTransportDetail state =
+  plannerFailureEvidenceText (firstTextOrEmpty (readVerifierReportPath feedbackPath).findings)
+
+recoverableFinalPlannerTransportState : ManagerState -> Bool
+recoverableFinalPlannerTransportState state =
+  if state.phase == "failed" then
+    if finalPlannerTaskMatchesWave state then {
+      let summary = readFeedbackSummary in
+      if plannerFailureSummaryRecoverable summary then
+        recoverablePlannerTransportFailure (recoverableFinalPlannerTransportDetail state)
+      else
+        false
+    } else
+      false
+  else
+    false
+
+finalizeBenchmarkCheckpoint : PlannerReport -> Int -> Int -> BenchmarkCheckpoint -> Str
+finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint = {
+  let failureState = managerFailureState (plannerTaskIds report) wave benchmarkRuns in
+  let checkpointWriteError = writeBenchmarkCheckpoint checkpoint in
+  if checkpointWriteError != "" then
+    finalizeWithReport failureState (syntheticFailureReport "benchmark checkpoint write failed" checkpointWriteError)
+  else {
+    let mailboxError = refreshMailbox wave in
+    if mailboxError != "" then
+      finalizeWithReport failureState (syntheticFailureReport "mailbox write failed" mailboxError)
+    else {
+      let nextBenchmarkRuns = incrementManagerCounter benchmarkRuns in
+      match ready objectiveRef {
+        Err message ->
+          finalizeWithReport failureState (syntheticFailureReport "benchmark ready queue lookup failed" message),
+        Ok readyTasks -> {
+          let mut readyPlannedIds = emptyTexts;
+          for readyTask in readyTasks {
+            let readyTaskId = taskIdOf readyTask in
+            if textListHas readyTaskId (plannerTaskIds report) then {
+              readyPlannedIds = append readyPlannedIds [readyTaskId];
+              readyPlannedIds
+            } else
+              readyPlannedIds
+          };
+          if length readyPlannedIds > 0 then
+            executeReadyTasks report wave nextBenchmarkRuns
+          else if checkpoint.meetsTarget then
+            finalizeWithReport
+              (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
+              (managerPassReport report)
+          else if wave < maxWaves then {
+            let nextWave = incrementManagerCounter wave in
+            let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave nextBenchmarkRuns false in
+            let nextStateError = writeManagerState nextState in
+            if nextStateError != "" then
+              finalizeWithReport
+                (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+                (syntheticFailureReport "benchmark replan state write failed" nextStateError)
+            else
+              runPlanner
+          } else
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave nextBenchmarkRuns)
+              (benchmarkFailureReport checkpoint)
+        }
+      }
+    }
+  }
+}
+
+benchmarkCommandFailure : PlannerReport -> Int -> Int -> Str -> Str
+benchmarkCommandFailure report wave benchmarkRuns message =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport "benchmark command failed" message)
+
+benchmarkTimeoutFailure : PlannerReport -> Int -> Int -> Str
+benchmarkTimeoutFailure report wave benchmarkRuns =
+  finalizeWithReport
+    (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+    (syntheticFailureReport
+      "benchmark command timed out"
+      (textConcat
+        ["Benchmark command exceeded ", encode benchmarkTimeoutMs, "ms. See ", benchmarkHeartbeatPathFor wave, " and ", benchmarkStderrPathFor wave, "."]))
+
 runBenchmarkCheckpoint : PlannerReport -> Int -> Int -> Str
 runBenchmarkCheckpoint report wave benchmarkRuns = {
   let benchmarkState =
@@ -2635,103 +4720,143 @@ runBenchmarkCheckpoint report wave benchmarkRuns = {
   let stateError = writeManagerState benchmarkState in
   if stateError != "" then
     finalizeWithReport
-      (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
+      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
       (syntheticFailureReport "benchmark state write failed" stateError)
   else {
     let trace0 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":start"]) in
     if trace0 != "" then
       finalizeWithReport
-        (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
         (syntheticFailureReport "benchmark trace write failed" trace0)
     else
-    match runBenchmarkCommand wave benchmarkRuns {
-      Err message ->
-        if message == "timeout" then
-          finalizeWithReport
-            (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-            (syntheticFailureReport
-              "benchmark command timed out"
-              (textConcat
-                ["Benchmark command exceeded ", encode benchmarkTimeoutMs, "ms. See ", benchmarkHeartbeatPathFor wave, " and ", benchmarkStderrPathFor wave, "."]))
-        else
-          finalizeWithReport
-            (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-            (syntheticFailureReport "benchmark command failed to start" message),
-      Ok process -> {
-        let trace1 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":command-finished"]) in
-        if trace1 != "" then
-          finalizeWithReport
-            (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-            (syntheticFailureReport "benchmark trace write failed" trace1)
-        else
-        if process.exitCode != 0 then
-          finalizeWithReport
-            (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-            (syntheticFailureReport "benchmark command failed" process.stderr)
-        else {
-          let signal = decode BenchmarkSignal process.stdout in
-          let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
-          if trace2 != "" then
+      match runBenchmarkCommand wave benchmarkRuns {
+        Err message ->
+          if message == "timeout" then
+            benchmarkTimeoutFailure report wave benchmarkRuns
+          else
             finalizeWithReport
-              (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-              (syntheticFailureReport "benchmark trace write failed" trace2)
-          else {
-          let checkpoint = checkpointFromSignal wave signal in
-          let trace3 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":checkpoint-created"]) in
-          if trace3 != "" then
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark command failed to start" message),
+        Ok process -> {
+          let trace1 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":command-finished"]) in
+          if trace1 != "" then
             finalizeWithReport
-              (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-              (syntheticFailureReport "benchmark trace write failed" trace3)
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark trace write failed" trace1)
+          else if process.exitCode != 0 then
+            benchmarkCommandFailure report wave benchmarkRuns process.stderr
           else {
-          let checkpointWriteError = writeBenchmarkCheckpoint checkpoint in
-          if checkpointWriteError != "" then
-            finalizeWithReport
-              (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-              (syntheticFailureReport "benchmark checkpoint write failed" checkpointWriteError)
-          else {
-            let mailboxError = refreshMailbox wave in
-            if mailboxError != "" then
+            let signal = decode BenchmarkSignal process.stdout in
+            let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
+            if trace2 != "" then
               finalizeWithReport
-                (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-                (syntheticFailureReport "mailbox write failed" mailboxError)
+                (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                (syntheticFailureReport "benchmark trace write failed" trace2)
             else {
-            let trace4 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":checkpoint-written"]) in
-            if trace4 != "" then
-              finalizeWithReport
-                (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave benchmarkRuns true)
-                (syntheticFailureReport "benchmark trace write failed" trace4)
-            else {
-            let nextBenchmarkRuns = incrementManagerCounter benchmarkRuns in
-            if signal.meetsTarget then
-              finalizeWithReport
-                (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
-                (managerPassReport report)
-            else if wave < maxWaves then {
-              let nextWave = incrementManagerCounter wave in
-              let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave nextBenchmarkRuns false in
-              let nextStateError = writeManagerState nextState in
-              if nextStateError != "" then
+              let checkpoint = checkpointFromSignal wave signal in
+              let trace3 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":checkpoint-created"]) in
+              if trace3 != "" then
                 finalizeWithReport
-                  (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave nextBenchmarkRuns true)
-                  (syntheticFailureReport "benchmark replan state write failed" nextStateError)
+                  (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                  (syntheticFailureReport "benchmark trace write failed" trace3)
               else
-                runPlanner
+                finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
             }
-              else
-                finalizeWithReport
-                  (managerStateFor "failed" "fail" false "" (plannerTaskIds report) wave nextBenchmarkRuns true)
-                  (benchmarkFailureReport checkpoint)
-            }
-            }
-            }
-          }
-          }
           }
         }
       }
-    }
   }
 }
+
+resumeBenchmarkCheckpoint : Int -> Int -> Str
+resumeBenchmarkCheckpoint wave benchmarkRuns =
+  match readPlannerReportForWave wave {
+    Err message ->
+      plannerFailure "planner report missing during benchmark recovery" message,
+    Ok report ->
+      if fileExists (benchmarkCheckpointPathFor wave) then
+        match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+          Err message ->
+            finalizeWithReport
+              (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+              (syntheticFailureReport "benchmark checkpoint decode failed" message),
+          Ok checkpoint ->
+            finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
+        }
+      else if fileExists (benchmarkHeartbeatPathFor wave) then
+        match awaitWatchedProcessTimeout (benchmarkHeartbeatPathFor wave) benchmarkWatchPollMs benchmarkTimeoutMs {
+          Err message ->
+            if message == "timeout" then
+              match readBenchmarkSignalStdout wave {
+                Err signalMessage ->
+                  benchmarkTimeoutFailure report wave benchmarkRuns,
+                Ok signal ->
+                  finalizeBenchmarkCheckpoint
+                    report
+                    wave
+                    benchmarkRuns
+                    (checkpointFromSignal wave signal)
+              }
+            else
+              finalizeWithReport
+                (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                (syntheticFailureReport "benchmark recovery failed" message),
+          Ok process ->
+            match benchmarkResultFromCompletedProcess wave process {
+              Err signalMessage ->
+                finalizeWithReport
+                  (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                  (syntheticFailureReport "benchmark signal missing" signalMessage),
+              Ok result ->
+                if result.exitCode != 0 then
+                  benchmarkCommandFailure report wave benchmarkRuns result.stderr
+                else
+                  finalizeBenchmarkCheckpoint
+                    report
+                    wave
+                    benchmarkRuns
+                    (checkpointFromSignal wave (decode BenchmarkSignal result.stdout))
+            }
+        }
+      else
+        runBenchmarkCheckpoint report wave benchmarkRuns
+  }
+
+resumeCurrentWave : ManagerState -> Str
+resumeCurrentWave state =
+  if fileExists (plannerReportPathFor state.wave) then
+    continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
+  else
+    finalizeWithReport
+      (managerFailureState state.plannedTaskIds state.wave state.benchmarkRuns)
+      (syntheticFailureReport
+        "planner report missing during task recovery"
+        (textConcat ["Missing planner report for wave ", encode state.wave, " while resuming task execution."]))
+
+resumePlannerWave : ManagerState -> Str
+resumePlannerWave state =
+  if fileExists (plannerReportPathFor state.wave) then
+    continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
+  else
+    runPlanner
+
+completePlannerTaskIfNeeded : Int -> Str
+completePlannerTaskIfNeeded wave =
+  match tasks swarmStateRoot {
+    Err message ->
+      textConcat ["planner task lookup failed: ", message],
+    Ok taskValues ->
+      let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave wave) in
+      if plannerTaskStatus == "completed" then
+        ""
+      else
+        match complete (plannerHandleForWave wave) {
+          Err message ->
+            message,
+          Ok completedValue ->
+            ""
+        }
+  }
 
 runPlanner : Str
 runPlanner = {
@@ -2739,18 +4864,34 @@ runPlanner = {
   let wave = state.wave in
   let benchmarkSummary = latestBenchmarkSummaryText in
   let reusablePlannerReport = plannerReportReusableFor wave benchmarkSummary in
+  let trace0 = appendBootstrapTrace (textConcat ["run-planner:wave-", encode wave, ":start"]) in
+  if trace0 != "" then
+    plannerFailure "manager bootstrap trace failed" trace0
+  else
   let prepError = ensureManagerReady in
   if prepError != "" then
     plannerFailure "manager setup failed" prepError
   else {
+    let trace1 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":manager-ready"]) in
+    if trace1 != "" then
+      plannerFailure "manager trace write failed" trace1
+    else {
     let objectiveError = ensureObjective in
     if objectiveError != "" then
       plannerFailure "objective creation failed" objectiveError
     else {
+      let trace2 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":objective-ready"]) in
+      if trace2 != "" then
+        plannerFailure "manager trace write failed" trace2
+      else {
       let plannerTaskError = ensurePlannerTaskFor wave in
       if plannerTaskError != "" then
         plannerFailure "planner task creation failed" plannerTaskError
       else {
+        let trace3 = appendManagerTrace (textConcat ["run-planner:wave-", encode wave, ":planner-task-ready"]) in
+        if trace3 != "" then
+          plannerFailure "manager trace write failed" trace3
+        else {
         let plannerState =
           managerStateFor "planner-running" "pending" false (plannerTaskIdForWave wave) emptyTexts wave state.benchmarkRuns false in
         let stateError = writeManagerState plannerState in
@@ -2767,33 +4908,43 @@ runPlanner = {
         else
           match lease (plannerHandleForWave wave) {
             Err message ->
-              plannerFailure "planner lease failed" message,
+              if recoverablePlannerLeaseFailure message then
+                continueAfterPlannerLeaseBlocker "planner lease failed" message
+              else
+                plannerFailure "planner lease failed" message,
             Ok leaseValue ->
               match toolRun (plannerHandleForWave wave) (plannerCommandFor wave benchmarkSummary) {
                 Err message ->
-                  plannerFailure "planner run failed" message,
+                  if recoverablePlannerTransportFailure message then
+                    continueAfterPlannerTransportBlocker "planner run failed" message
+                  else
+                    plannerFailure "planner run failed" message,
                 Ok runValue ->
                   if fileExists (plannerReportPathFor wave) then
-                    match complete (plannerHandleForWave wave) {
-                      Err message ->
-                        plannerFailure "planner completion failed" message,
-                      Ok completedValue -> {
-                        let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
-                        if traceError != "" then
-                          plannerFailure "manager trace write failed" traceError
-                        else
-                          continueWithPlan
-                      }
+                    {
+                      let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":report-ready"]) in
+                      if traceError != "" then
+                        plannerFailure "manager trace write failed" traceError
+                      else
+                        continueWithPlan
                     }
                   else {
-                    let failed = fail (plannerHandleForWave wave) in
-                    plannerFailure "planner step failed before producing a durable report" runValue.stderrArtifactPath
+                    let detail = plannerRunFailureDetail runValue in
+                    if recoverablePlannerTransportFailure detail then
+                      continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail
+                    else {
+                      let failed = fail (plannerHandleForWave wave) in
+                      plannerFailure "planner step failed before producing a durable report" detail
+                    }
                   }
               }
           }
       }
     }
   }
+    }
+      }
+    }
 }
 
 plannedTaskFailureReport : [Str] -> VerifierReport
@@ -2808,25 +4959,143 @@ plannedTaskStalledReport report =
     "planned task execution stalled"
     (textConcat ["No running or ready planned task remained for ", report.objectiveSummary, "."])
 
+continueAfterPlannedTaskBlocker : PlannerReport -> Int -> Int -> VerifierReport -> Str
+continueAfterPlannedTaskBlocker report wave benchmarkRuns blockerReport =
+  if wave < maxWaves then {
+    let mailboxError = refreshMailbox wave in
+    if mailboxError != "" then
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "mailbox write failed" mailboxError)
+    else {
+      let nextWave = incrementManagerCounter wave in
+      let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave benchmarkRuns false in
+      let nextStateError = writeManagerState nextState in
+      if nextStateError != "" then
+        finalizeWithReport
+          (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+          (syntheticFailureReport "planned task replan state write failed" nextStateError)
+      else
+        runPlanner
+    }
+  } else
+    finalizeWithReport
+      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+      blockerReport
+
 childLoopMissingReport : PlannerTaskSpec -> VerifierReport
 childLoopMissingReport spec =
   syntheticFailureReport
     "task child loop finished without a durable report"
-    (readProcessOutputText (taskProcessStderrPath spec.taskId))
+    (textJoin "\n"
+      (append
+        [
+          textConcat ["task=", spec.taskId],
+          textConcat ["role=", plannerTaskRoleLabel spec],
+          textConcat ["reportSettlePolls=", encode childReportSettlePolls],
+          textConcat ["reportSettlePollMs=", encode childLoopWatchPollMs],
+          childLoopLaunchSummary spec.taskId,
+          textConcat ["state=", childLoopStateSummary spec.taskId],
+          textConcat ["stderr_tail=", readProcessOutputTailText (taskProcessStderrPath spec.taskId)],
+          textConcat ["stdout_tail=", readProcessOutputTailText (taskProcessStdoutPath spec.taskId)]
+        ]
+        (taskRecoverableDiffDetails spec.taskId)))
+
+promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
+promotionFailureReport spec message =
+  syntheticFailureReport
+    "task promotion failed"
+    (if fileExists (taskPromotionDiffPath spec.taskId) then
+      textConcat [
+        message,
+        "\nrecoverableDiff=",
+        taskPromotionDiffPath spec.taskId,
+        "\nrecoverableDiffKind=promotion-workspace",
+        "\nrecoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+      ]
+    else
+      message)
+
+promotionFailureFinding : PlannerTaskSpec -> Str
+promotionFailureFinding spec =
+  textConcat [
+    "task workspace promotion failed: ",
+    spec.taskId,
+    ": promotion conflict: task workspace would overwrite files changed since snapshot"
+  ]
+
+promotionFailureFindingsJson : PlannerTaskSpec -> Str
+promotionFailureFindingsJson spec =
+  if fileExists (taskPromotionDiffPath spec.taskId) then
+    textConcat [
+      encode (promotionFailureFinding spec),
+      ",",
+      encode (textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId]),
+      ",",
+      encode "recoverableDiffKind=promotion-workspace",
+      ",",
+      encode "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+    ]
+  else
+    encode (promotionFailureFinding spec)
+
+promotionFailureJson : PlannerTaskSpec -> Str
+promotionFailureJson spec =
+  textConcat [
+    "{\"verdict\":\"fail\",\"summary\":\"task promotion failed\",\"findings\":[",
+    promotionFailureFindingsJson spec,
+    "],\"tests_run\":[],\"follow_up\":[",
+    encode "Resolve the promotion conflict or replan from the recoverable diff artifact instead of discarding useful work.",
+    "],\"capability_statuses\":[]}"
+  ]
+
+writePromotionFailureFeedback : PlannerTaskSpec -> Str
+writePromotionFailureFeedback spec =
+  match mkdirAll (taskReportStateRoot spec.taskId) {
+    Err message -> textConcat ["task feedback directory create failed: ", spec.taskId, ": ", message],
+    Ok created ->
+      match writeFile (taskFeedbackPath spec.taskId) (promotionFailureJson spec) {
+        Ok written -> "",
+        Err message -> textConcat ["task feedback write failed: ", spec.taskId, ": ", message]
+      }
+  }
+
+recordPromotionFailure : PlannerTaskSpec -> Str
+recordPromotionFailure spec = {
+  let feedbackError = writePromotionFailureFeedback spec in
+  if feedbackError != "" then
+    feedbackError
+  else
+    match fail (taskHandleFor spec.taskId) {
+      Err message ->
+        textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
+      Ok failedValue -> {
+        let cleanupError = cleanupFailedTaskWorkspace spec.taskId in
+        if cleanupError != "" then
+          appendManagerTrace (textConcat ["task-cleanup:error:", spec.taskId, ":", cleanupError])
+        else
+          ""
+      }
+    }
+}
 
 completePlannedTask : PlannerTaskSpec -> Str
 completePlannedTask spec =
-  match complete (taskHandleFor spec.taskId) {
-    Err message ->
-      textConcat ["task completion failed: ", spec.taskId, ": ", message],
-    Ok completedValue ->
-      match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
-        Err message ->
-          textConcat ["task review failed: ", spec.taskId, ": ", message],
-        Ok reviewValue ->
-          ""
-      }
-  }
+  let promotionError = promoteVerifiedTaskWorkspace spec in
+  if promotionError != "" then
+    recordPromotionFailure spec
+  else
+    match complete (taskHandleFor spec.taskId) {
+      Err message ->
+        textConcat ["task completion failed: ", spec.taskId, ": ", message],
+      Ok completedValue ->
+        match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+          Err message ->
+            textConcat ["task review failed: ", spec.taskId, ": ", message],
+          Ok reviewValue ->
+            ""
+        }
+    }
 
 recordPlannedTaskFailure : PlannerTaskSpec -> VerifierReport -> Str
 recordPlannedTaskFailure spec report = {
@@ -2837,14 +5106,19 @@ recordPlannedTaskFailure spec report = {
     match fail (taskHandleFor spec.taskId) {
       Err message ->
         textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
-      Ok failedValue ->
-        ""
+      Ok failedValue -> {
+        let cleanupError = cleanupFailedTaskWorkspace spec.taskId in
+        if cleanupError != "" then
+          appendManagerTrace (textConcat ["task-cleanup:error:", spec.taskId, ":", cleanupError])
+        else
+          ""
+      }
     }
 }
 
-launchReadyTask : Int -> PlannerTaskSpec -> Str
-launchReadyTask wave spec = {
-  let promptError = writeTaskPromptFile wave spec in
+launchReadyTask : Int -> PlannerReport -> PlannerTaskSpec -> Str
+launchReadyTask wave report spec = {
+  let promptError = writeTaskPromptFile wave report spec in
   if promptError != "" then
     textConcat ["task prompt write failed: ", spec.taskId, ": ", promptError]
   else {
@@ -2881,6 +5155,46 @@ launchChildLoop spec =
     childLoopWatchPollMs
     (childLoopCommandArgs spec)
 
+retryChildLoopMissingReport : PlannerTaskSpec -> VerifierReport -> Str
+retryChildLoopMissingReport spec report =
+  if childLoopManagerRetryAvailable spec.taskId == false then
+    recordPlannedTaskFailure spec report
+  else {
+    let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
+    if retryWriteError != "" then
+      textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
+    else {
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-retry:",
+            spec.taskId,
+            ":missing-durable-report:retry=",
+            encode nextRetry
+          ]) in
+      if traceError != "" then
+        traceError
+      else {
+        let resetError = resetChildLoopForManagerRetry spec.taskId in
+        if resetError != "" then
+          textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
+        else {
+          let workspaceError = ensureTaskWorkspace spec.taskId in
+          if workspaceError != "" then
+            textConcat ["task child loop retry workspace setup failed: ", spec.taskId, ": ", workspaceError]
+          else
+            match launchChildLoop spec {
+              Err message ->
+                recordPlannedTaskFailure spec (syntheticFailureReport "task child loop retry failed to start" message),
+              Ok launched ->
+                ""
+            }
+        }
+      }
+    }
+  }
+
 continueWithPlanResolved : Int -> Int -> Str -> Result PlannerReport -> Str
 continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
   match reportResult {
@@ -2914,27 +5228,48 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
       if trace3 != "" then
         plannerFailure "manager trace write failed" trace3
       else {
+      let plannerState = readManagerState in
       if validation.valid == false then
-        finalizeWithReport failureState (planValidationFailureReport validation)
+        if plannerState.phase == "planner-running" then
+          if recoverablePlannerValidationFailure validation then
+            continueAfterPlannerValidationBlocker "planner validation failed" (planValidationFailureDetail validation)
+          else
+            finalizeWithReport failureState (planValidationFailureReport validation)
+        else
+          finalizeWithReport failureState (planValidationFailureReport validation)
       else {
-        let plannerInputWriteError = writePlannerInputState (plannerInputStateFor wave benchmarkSummary) in
-        if plannerInputWriteError != "" then
-          finalizeWithReport failureState (syntheticFailureReport "planner input state write failed" plannerInputWriteError)
+        let plannerCompletionError =
+          if plannerState.phase == "planner-running" then
+            completePlannerTaskIfNeeded wave
+          else
+            "" in
+        if plannerCompletionError != "" then
+          finalizeWithReport failureState (syntheticFailureReport "planner completion failed" plannerCompletionError)
         else {
-          let trace4 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:planner-input-written"]) in
+          let trace4 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:planner-completed"]) in
           if trace4 != "" then
             plannerFailure "manager trace write failed" trace4
           else {
-          let ensureTasksError = ensurePlannedTasks report in
-          if ensureTasksError != "" then
-            finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
-          else
-            {
-              let trace5 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:tasks-ready"]) in
+            let plannerInputWriteError = writePlannerInputState (plannerInputStateFor wave benchmarkSummary) in
+            if plannerInputWriteError != "" then
+              finalizeWithReport failureState (syntheticFailureReport "planner input state write failed" plannerInputWriteError)
+            else {
+              let trace5 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:planner-input-written"]) in
               if trace5 != "" then
                 plannerFailure "manager trace write failed" trace5
+              else {
+              let ensureTasksError = ensurePlannedTasks report in
+              if ensureTasksError != "" then
+                finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
               else
-                executeReadyTasks report wave benchmarkRuns
+                {
+                  let trace6 = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":continue-with-plan:tasks-ready"]) in
+                  if trace6 != "" then
+                    plannerFailure "manager trace write failed" trace6
+                  else
+                    executeReadyTasks report wave benchmarkRuns
+                }
+              }
             }
           }
         }
@@ -2981,11 +5316,25 @@ executeReadyTasks report wave benchmarkRuns = {
                 completePlannedTask spec
             else if taskStatus == "failed" then
               ""
+            else if childLoopMissingDurableReport childReport then
+              retryChildLoopMissingReport spec childReport
             else
               recordPlannedTaskFailure spec childReport in
+          let mailboxWriteError =
+            if taskError != "" then
+              ""
+            else if taskStatusIsTerminal taskStatus then
+              ""
+            else
+              appendMailboxMessages (taskMailboxMessagesForCompletedSpec wave spec childReport) in
           if taskError != "" then
             {
               schedulerError = taskError;
+              schedulerError
+            }
+          else if mailboxWriteError != "" then
+            {
+              schedulerError = mailboxWriteError;
               schedulerError
             }
           else
@@ -2998,11 +5347,33 @@ executeReadyTasks report wave benchmarkRuns = {
             runningTaskIds = append runningTaskIds [spec.taskId];
             schedulerError
           } else if childLoopLaunchCompleted spec.taskId then {
+            let settled = settleChildLoopReportReady spec.taskId childReportSettlePolls in
+            if settled then
+              schedulerError
+            else {
+              let taskError =
+                if taskStatus == "failed" then
+                  ""
+                else
+                  retryChildLoopMissingReport spec (childLoopMissingReport spec) in
+              if taskError != "" then
+                {
+                  schedulerError = taskError;
+                  schedulerError
+                }
+              else
+                schedulerError
+            }
+          } else {
             let taskError =
               if taskStatus == "failed" then
                 ""
               else
-                recordPlannedTaskFailure spec (childLoopMissingReport spec) in
+                retryChildLoopMissingLaunchHeartbeat
+                  wave
+                  report
+                  spec
+                  (childLoopMissingLaunchHeartbeatReport spec) in
             if taskError != "" then
               {
                 schedulerError = taskError;
@@ -3010,8 +5381,7 @@ executeReadyTasks report wave benchmarkRuns = {
               }
             else
               schedulerError
-          } else
-            schedulerError
+          }
         else
           schedulerError
       };
@@ -3038,12 +5408,18 @@ executeReadyTasks report wave benchmarkRuns = {
                     launchError
                   else if taskStatusIsTerminal taskStatus then
                     launchError
+                  else if taskStatus == "leased" then
+                    launchError
+                  else if taskStatus == "active" then
+                    launchError
                   else if textListHas spec.taskId activeTaskIds then
                     launchError
-                  else if fileExists (taskFeedbackPath spec.taskId) then
+                  else if fileExists (taskProcessHeartbeatPath spec.taskId) then
+                    launchError
+                  else if childLoopReportReady spec.taskId then
                     launchError
                   else if taskListHasId spec.taskId readyTasks then {
-                    let taskError = launchReadyTask wave spec in
+                    let taskError = launchReadyTask wave report spec in
                     if taskError != "" then
                       {
                         launchError = taskError;
@@ -3075,10 +5451,13 @@ executeReadyTasks report wave benchmarkRuns = {
                   if stateError != "" then
                     finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
                   else if length activeTaskIds > 0 then
-                    match sleepMsValue childLoopWatchPollMs {
+                    match awaitWatchedProcessTimeout
+                      (taskProcessHeartbeatPath (firstTextOrEmpty activeTaskIds))
+                      childLoopWatchPollMs
+                      taskLeaseTimeoutMs {
                       Err message ->
-                        finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
-                      Ok slept ->
+                        executeReadyTasks report wave benchmarkRuns,
+                      Ok process ->
                         executeReadyTasks report wave benchmarkRuns
                     }
                   else
@@ -3087,6 +5466,20 @@ executeReadyTasks report wave benchmarkRuns = {
                         finalizeWithReport failureState (syntheticFailureReport "final task refresh failed" message),
                       Ok finalRawTaskValues -> {
                         let finalTasks = filter taskInObjective finalRawTaskValues;
+                        let mut readyReportIds = emptyTexts;
+                        for spec in report.tasks {
+                          let taskStatus = taskStatusFor finalTasks spec.taskId in
+                          if taskStatusIsTerminal taskStatus then
+                            readyReportIds
+                          else if childLoopReportReady spec.taskId then {
+                            readyReportIds = append readyReportIds [spec.taskId];
+                            readyReportIds
+                          } else
+                            readyReportIds
+                        };
+                        if length readyReportIds > 0 then
+                          executeReadyTasks report wave benchmarkRuns
+                        else {
                         let mut completedIds = emptyTexts;
                         let mut failedIds = emptyTexts;
                         for spec in report.tasks {
@@ -3100,27 +5493,54 @@ executeReadyTasks report wave benchmarkRuns = {
                           } else
                             completedIds
                         };
-                        let mut readyPlannedIds = emptyTexts;
-                        for readyTask in readyTasks {
-                          let readyTaskId = taskIdOf readyTask in
-                          if textListHas readyTaskId plannedIds then {
-                            readyPlannedIds = append readyPlannedIds [readyTaskId];
-                            readyPlannedIds
-                          } else
-                            readyPlannedIds
-                        };
-                        if benchmarkEnabled then
-                          runBenchmarkCheckpoint report wave benchmarkRuns
-                        else if length completedIds == length report.tasks then
-                          finalizeWithReport
-                            (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
-                            (managerPassReport report)
-                        else if length failedIds > 0 then
-                          finalizeWithReport failureState (plannedTaskFailureReport failedIds)
-                        else if length readyPlannedIds > 0 then
-                          executeReadyTasks report wave benchmarkRuns
-                        else
-                          finalizeWithReport failureState (plannedTaskStalledReport report)
+                        match ready objectiveRef {
+                          Err message ->
+                            finalizeWithReport failureState (syntheticFailureReport "final ready queue lookup failed" message),
+                          Ok finalReadyTasks -> {
+                            let mut readyPlannedIds = emptyTexts;
+                            for readyTask in finalReadyTasks {
+                              let readyTaskId = taskIdOf readyTask in
+                              if textListHas readyTaskId plannedIds then {
+                                readyPlannedIds = append readyPlannedIds [readyTaskId];
+                                readyPlannedIds
+                              } else
+                                readyPlannedIds
+                            };
+                            if length readyPlannedIds > 0 then
+                              executeReadyTasks report wave benchmarkRuns
+                            else if benchmarkEnabled then
+                              runBenchmarkCheckpoint report wave benchmarkRuns
+                            else if length completedIds == length report.tasks then
+                              finalizeWithReport
+                                (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
+                                (managerPassReport report)
+                            else if length failedIds > 0 then
+                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
+                            else {
+                              let mut pendingLaunchIds = emptyTexts;
+                              for spec in report.tasks {
+                                let taskStatus = taskStatusFor finalTasks spec.taskId in
+                                if taskStatusIsTerminal taskStatus then
+                                  pendingLaunchIds
+                                else if childLoopLaunchPending spec.taskId then {
+                                  pendingLaunchIds = append pendingLaunchIds [spec.taskId];
+                                  pendingLaunchIds
+                                } else
+                                  pendingLaunchIds
+                              };
+                              if length pendingLaunchIds > 0 then
+                                match sleepMsValue childLoopWatchPollMs {
+                                  Err message ->
+                                    finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
+                                  Ok slept ->
+                                    executeReadyTasks report wave benchmarkRuns
+                                }
+                              else
+                                continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
+                            }
+                          }
+                        }
+                        }
                       }
                     }
                 }
@@ -3131,17 +5551,191 @@ executeReadyTasks report wave benchmarkRuns = {
   }
 }
 
+serviceStatusOutputForRoot : Str -> Str
+serviceStatusOutputForRoot root =
+  match readServiceStatus root {
+    Ok service -> encode service,
+    Err message -> textConcat ["error:", message]
+  }
+
 serviceStatusOutput : Str
 serviceStatusOutput =
-  if fileExists (serviceStatusPath serviceRoot) then
-    readTextOrEmpty (serviceStatusPath serviceRoot)
-  else if recordedServiceRoot != "" then
+  if recordedServiceRoot != "" then
     if fileExists (serviceStatusPath recordedServiceRoot) then
-      readTextOrEmpty (serviceStatusPath recordedServiceRoot)
+      serviceStatusOutputForRoot recordedServiceRoot
+    else if fileExists (serviceStatusPath serviceRoot) then
+      serviceStatusOutputForRoot serviceRoot
     else
       "error:missing-service-status"
+  else if fileExists (serviceStatusPath serviceRoot) then
+    serviceStatusOutputForRoot serviceRoot
   else
     "error:missing-service-status"
+
+managerServiceConfigArgs : [Str]
+managerServiceConfigArgs =
+  [
+    textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
+    textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
+    textConcat ["CLASP_MANAGER_GOAL_JSON=", encode goalText],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode objectiveId],
+    textConcat ["CLASP_MANAGER_PROGRAM_JSON=", encode managerProgramPath],
+    textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode workspaceRoot],
+    textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
+    textConcat ["CLASP_MANAGER_CLASPC_BIN_JSON=", encode resolvedManagerClaspcBin],
+    textConcat ["CLASP_MANAGER_XDG_CACHE_HOME_JSON=", encode managerXdgCacheHome],
+    textConcat ["XDG_CACHE_HOME=", managerXdgCacheHome],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_JSON=", encode childLoopProgramPath],
+    textConcat ["CLASP_MANAGER_PLANNER_SCHEMA_JSON=", encode plannerSchemaPath],
+    textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
+    textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
+    textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
+    textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASP_MANAGER_MAX_TASKS_JSON=", encode maxTaskLoops],
+    textConcat ["CLASP_MANAGER_PLANNER_MAX_RUNS_JSON=", encode plannerTaskMaxRuns],
+    textConcat ["CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON=", encode plannerTimeoutMs],
+    textConcat ["CLASP_MANAGER_MAX_WAVES_JSON=", encode maxWaves],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON=", encode objectiveTaskBudget],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON=", encode objectiveRunBudget],
+    textConcat ["CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON=", encode taskLeaseTimeoutMs],
+    textConcat ["CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
+    textConcat ["CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON=", encode maxConcurrentChildren],
+    textConcat ["CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON=", encode taskWorkspaceCacheMaxMb],
+    textConcat ["CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON=", encode taskBaselineCacheMaxMb],
+    textConcat ["CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_BASELINE_CACHE_TOTAL_MAX_MB_JSON=", encode childLoopBaselineCacheTotalMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_LOOP_XDG_CACHE_TOTAL_MAX_MB_JSON=", encode childLoopXdgCacheTotalMaxMb],
+    textConcat ["CLASP_MANAGER_ARTIFACTS_CACHE_MAX_MB_JSON=", encode managerArtifactsCacheMaxMb],
+    textConcat ["CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON=", encode managerXdgCacheMaxMb],
+    textConcat ["CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
+    textConcat ["CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
+    textConcat ["CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON=", encode taskFailureLogTailBytes],
+    textConcat ["CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON=", encode retainFailedTaskWorkspaces],
+    textConcat ["CLASP_MANAGER_BENCHMARK_COMMAND_JSON=", encode benchmarkCommand],
+    textConcat ["CLASP_MANAGER_BENCHMARK_CWD_JSON=", encode benchmarkCwd],
+    textConcat ["CLASP_MANAGER_BENCHMARK_POLL_MS_JSON=", encode benchmarkWatchPollMs],
+    textConcat ["CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON=", encode benchmarkTimeoutMs],
+    textConcat ["CLASP_MANAGER_SERVICE_ROOT_JSON=", encode serviceRoot],
+    textConcat ["CLASP_MANAGER_SERVICE_ID_JSON=", encode serviceId],
+    textConcat ["CLASP_MANAGER_SERVICE_RESTART_DELAY_MS_JSON=", encode serviceRestartDelayMs]
+  ]
+
+managerServiceCommandArgs : [Str]
+managerServiceCommandArgs =
+  if currentExecutablePath != "" then
+    append
+      (append ["env"] managerServiceConfigArgs)
+      [currentExecutablePath, stateRootPath]
+  else
+    append
+      (append ["env"] managerServiceConfigArgs)
+      [
+        resolvedManagerClaspcBin,
+        "run",
+        resolvedManagerProgramPath,
+        "--",
+        stateRootPath
+      ]
+
+managedServiceSupervisorSpec : ServiceSupervisorSpec
+managedServiceSupervisorSpec =
+  serviceSupervisorSpec
+    managerProjectRoot
+    serviceRoot
+    serviceId
+    serviceReadyPath
+    managerReadyText
+    childLoopWatchPollMs
+    upgradeReadyPollMs
+    upgradeReadyTimeoutMs
+    serviceRestartDelayMs
+    managerServiceCommandArgs
+
+recoverManagedService : ServiceStatus -> Str
+recoverManagedService service = {
+  let state = readManagerState in
+  if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if service.status == "completed" then
+    resumeManager
+  else {
+    let traceRecovery =
+      appendManagerTrace
+        (textConcat
+          [
+            "service-final-before-manager-final:status=",
+            service.status,
+            ":wave=",
+            encode state.wave,
+            ":benchmark-runs=",
+            encode state.benchmarkRuns
+          ]) in
+    if traceRecovery != "" then
+      textConcat ["error:", traceRecovery]
+    else
+      runManagedServiceBootstrap
+  }
+}
+
+waitForManagedServiceCompletion : Str
+waitForManagedServiceCompletion = {
+  let state = readManagerState in
+  if state.final then
+    statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else
+    match readServiceStatus serviceRoot {
+      Ok service ->
+        if service.status == "completed" then
+          recoverManagedService service
+        else if service.status == "failed" then
+          recoverManagedService service
+        else
+          match sleepMsValue childLoopWatchPollMs {
+            Err message -> textConcat ["error:", message],
+            Ok slept -> waitForManagedServiceCompletion
+          },
+      Err message ->
+        match sleepMsValue childLoopWatchPollMs {
+          Err sleepMessage -> textConcat ["error:", sleepMessage],
+          Ok slept -> waitForManagedServiceCompletion
+        }
+    }
+}
+
+runManagedServiceBootstrap : Str
+runManagedServiceBootstrap =
+  match superviseService managedServiceSupervisorSpec {
+    Ok service ->
+      if service.status == "completed" then
+        recoverManagedService service
+      else if service.status == "failed" then
+        recoverManagedService service
+      else
+        waitForManagedServiceCompletion,
+    Err message -> textConcat ["error:", message]
+  }
+
+runManagedServiceResume : Str
+runManagedServiceResume = {
+  let prepError = ensureManagerReady in
+  if prepError != "" then
+    textConcat ["error:", prepError]
+  else {
+    let traceResume = appendManagerTrace "service-resume:start" in
+    if traceResume != "" then
+      textConcat ["error:", traceResume]
+    else
+      resumeManager
+  }
+}
 
 runManagerUpgrade : Str
 runManagerUpgrade = {
@@ -3181,17 +5775,62 @@ runManagerUpgrade = {
 statusOutput : Str
 statusOutput = encode (statusView readManagerState)
 
-resumeManager : Str
-resumeManager = {
+continueManagedResume : Str -> Str
+continueManagedResume result = {
   let state = readManagerState in
   if state.final then
     statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if state.phase == "needs-planner" then
+    resumeManager
   else
+    result
+}
+
+resumeManagerOnce : Str
+resumeManagerOnce = {
+  let state = readManagerState in
+  let traceState =
+    appendManagerTrace
+      (textConcat
+        ["resume-manager:phase=", state.phase, ":wave=", encode state.wave, ":benchmark-runs=", encode state.benchmarkRuns]) in
+  if traceState != "" then
+    textConcat ["error:", traceState]
+  else if state.final then
+    if recoverableFinalPlannerLeaseState state then
+      continueAfterPlannerLeaseBlocker "planner lease failed" "recovering final failed planner lease state"
+    else if recoverableFinalPlannerTransportState state then
+      continueAfterPlannerTransportBlocker readFeedbackSummary (recoverableFinalPlannerTransportDetail state)
+    else
+      statusOutput
+  else if state.phase == "completed" then
+    statusOutput
+  else if state.phase == "failed" then
+    statusOutput
+  else if state.phase == "task-running" then
+    resumeCurrentWave state
+  else if state.phase == "benchmark-running" then
+    resumeBenchmarkCheckpoint state.wave state.benchmarkRuns
+  else if state.phase == "planner-running" then
+    resumePlannerWave state
+  else if state.phase == "needs-planner" then
     if plannerReportReusableFor state.wave latestBenchmarkSummaryText then
       continueWithPlan
     else
       runPlanner
+  else if length state.plannedTaskIds > 0 then
+    resumeCurrentWave state
+  else if plannerReportReusableFor state.wave latestBenchmarkSummaryText then
+    continueWithPlan
+  else
+    runPlanner
 }
+
+resumeManager : Str
+resumeManager = continueManagedResume resumeManagerOnce
 
 main : Str
 main =
@@ -3201,5 +5840,7 @@ main =
     serviceStatusOutput
   else if commandName == "upgrade" then
     runManagerUpgrade
+  else if runningUnderServiceSupervisor == false then
+    runManagedServiceBootstrap
   else
-    resumeManager
+    runManagedServiceResume

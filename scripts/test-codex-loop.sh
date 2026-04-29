@@ -499,6 +499,13 @@ printf '%s\n' "$status_output" | grep -F 'status: running' >/dev/null
 printf '%s\n' "$status_output" | grep -F "runtime: $runtime_dir_5" >/dev/null
 pid_5="$(cat "$runtime_dir_5/loop.pid")"
 kill -0 "$pid_5" >/dev/null 2>&1
+for _ in $(seq 1 100); do
+  if [[ -f "$runtime_dir_5/lifecycle.log" ]] && grep -F 'loop-start:task.md' "$runtime_dir_5/lifecycle.log" >/dev/null 2>&1; then
+    break
+  fi
+  kill -0 "$pid_5" >/dev/null 2>&1
+  sleep 0.05
+done
 grep -F 'loop-start:task.md' "$runtime_dir_5/lifecycle.log" >/dev/null
 stop_output="$(
   cd "$project_dir" && \

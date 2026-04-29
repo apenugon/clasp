@@ -1,0 +1,271 @@
+module GoalManagerPlannerMemory
+
+import GoalManagerStateRuntime
+import GoalManagerBenchmarkCheckpoint
+import GoalManagerCounters
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+plannerMemoryWindow : Int
+plannerMemoryWindow = 3
+
+plannerMemoryDefaultText : Str
+plannerMemoryDefaultText = "No prior wave memory is available yet."
+
+plannerBacklogDefaultText : Str
+plannerBacklogDefaultText = "No prioritized backlog is available yet."
+
+plannerMemoryPathFor : Int -> Str
+plannerMemoryPathFor wave =
+  pathJoin [stateRootPath, textConcat ["planner-memory-", encode wave, ".md"]]
+
+plannerBacklogPathFor : Int -> Str
+plannerBacklogPathFor wave =
+  pathJoin [stateRootPath, textConcat ["planner-backlog-", encode wave, ".md"]]
+
+plannerMemoryLatestPath : Str
+plannerMemoryLatestPath = pathJoin [stateRootPath, "planner-memory-latest.md"]
+
+plannerBacklogLatestPath : Str
+plannerBacklogLatestPath = pathJoin [stateRootPath, "planner-backlog-latest.md"]
+
+plannerTextFromPathOr : Str -> Str -> Str
+plannerTextFromPathOr path fallback = match readFile path {
+  Ok raw ->
+    if raw == "" then
+      fallback
+    else
+      raw,
+  Err message -> fallback
+}
+
+plannerMemoryTextFor : Int -> Str
+plannerMemoryTextFor wave =
+  if fileExists (plannerMemoryPathFor wave) then
+    plannerTextFromPathOr (plannerMemoryPathFor wave) plannerMemoryDefaultText
+  else if fileExists plannerMemoryLatestPath then
+    plannerTextFromPathOr plannerMemoryLatestPath plannerMemoryDefaultText
+  else
+    plannerMemoryDefaultText
+
+plannerBacklogTextFor : Int -> Str
+plannerBacklogTextFor wave =
+  if fileExists (plannerBacklogPathFor wave) then
+    plannerTextFromPathOr (plannerBacklogPathFor wave) plannerBacklogDefaultText
+  else if fileExists plannerBacklogLatestPath then
+    plannerTextFromPathOr plannerBacklogLatestPath plannerBacklogDefaultText
+  else
+    plannerBacklogDefaultText
+
+appendPlannerLine : Str -> Str -> Str
+appendPlannerLine current next =
+  if next == "" then
+    current
+  else if current == "" then
+    next
+  else
+    textConcat [current, "\n", next]
+
+appendPlannerBlock : Str -> Str -> Str
+appendPlannerBlock current next =
+  if next == "" then
+    current
+  else if current == "" then
+    next
+  else
+    textConcat [current, "\n\n", next]
+
+plannerWaveBenchmarkMemoryLine : Int -> Str
+plannerWaveBenchmarkMemoryLine wave =
+  if fileExists (benchmarkCheckpointPathFor wave) then
+    match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+      Ok checkpoint ->
+        textConcat [
+          "Wave ",
+          encode wave,
+          " benchmark [",
+          if checkpoint.meetsTarget then "met" else "gap",
+          "]: ",
+          checkpoint.summary
+        ],
+      Err message -> ""
+    }
+  else
+    ""
+
+plannerWaveBenchmarkBacklogLine : Int -> Str
+plannerWaveBenchmarkBacklogLine wave =
+  if fileExists (benchmarkCheckpointPathFor wave) then
+    match readBenchmarkCheckpointPath (benchmarkCheckpointPathFor wave) {
+      Ok checkpoint ->
+        if checkpoint.meetsTarget then
+          ""
+        else
+          textConcat ["Priority from wave ", encode wave, " benchmark: ", checkpoint.summary],
+      Err message -> ""
+    }
+  else
+    ""
+
+plannerWaveMemoryText : Int -> Str
+plannerWaveMemoryText wave =
+  if fileExists (plannerReportPathFor wave) then
+    match readPlannerReportForWave wave {
+      Err message ->
+        textConcat ["Wave ", encode wave, " planner report decode failed: ", message],
+      Ok report -> {
+        let objectiveLine = textConcat ["Wave ", encode wave, " objective: ", report.objectiveSummary] in
+        let strategyLine = textConcat ["Wave ", encode wave, " strategy: ", report.strategy] in
+        let benchmarkLine = plannerWaveBenchmarkMemoryLine wave in
+        let residualRisk = firstTextOrEmpty report.residualRisks in
+        let residualRiskLine =
+          if residualRisk == "" then
+            ""
+          else
+            textConcat ["Wave ", encode wave, " residual risk: ", residualRisk] in
+        let withObjective = appendPlannerLine "" objectiveLine in
+        let withStrategy = appendPlannerLine withObjective strategyLine in
+        let withBenchmark = appendPlannerLine withStrategy benchmarkLine in
+        appendPlannerLine withBenchmark residualRiskLine
+      }
+    }
+  else
+    ""
+
+previousPlannerWave : Int -> Int
+previousPlannerWave wave =
+  if wave <= 1 then
+    0
+  else
+    decrementManagerCounter wave
+
+plannerWaveBacklogText : Int -> Str
+plannerWaveBacklogText wave =
+  if fileExists (plannerReportPathFor wave) then
+    match readPlannerReportForWave wave {
+      Err message -> "",
+      Ok report -> {
+        let benchmarkLine = plannerWaveBenchmarkBacklogLine wave in
+        let residualRisk = firstTextOrEmpty report.residualRisks in
+        let residualRiskLine =
+          if residualRisk == "" then
+            ""
+          else
+            textConcat ["Priority from wave ", encode wave, " planner: ", residualRisk] in
+        appendPlannerLine benchmarkLine residualRiskLine
+      }
+    }
+  else
+    ""
+
+plannerMemoryTextForWave : Int -> Str
+plannerMemoryTextForWave wave =
+  if wave <= 1 then
+    plannerMemoryDefaultText
+  else {
+    let priorWave = previousPlannerWave wave in
+    let priorWave2 = previousPlannerWave priorWave in
+    let priorWave3 = previousPlannerWave priorWave2 in
+    let block1 = plannerWaveMemoryText priorWave in
+    let block2 =
+      if priorWave2 <= 0 then
+        ""
+      else
+        plannerWaveMemoryText priorWave2 in
+    let block3 =
+      if priorWave3 <= 0 then
+        ""
+      else
+        plannerWaveMemoryText priorWave3 in
+    let withLatest = appendPlannerBlock "" block1 in
+    let withSecond = appendPlannerBlock withLatest block2 in
+    let combined = appendPlannerBlock withSecond block3 in
+    if combined == "" then
+      plannerMemoryDefaultText
+    else
+      combined
+  }
+
+plannerBacklogTextForWave : Int -> Str
+plannerBacklogTextForWave wave =
+  if wave <= 1 then
+    plannerBacklogDefaultText
+  else {
+    let priorWave = previousPlannerWave wave in
+    let priorWave2 = previousPlannerWave priorWave in
+    let priorWave3 = previousPlannerWave priorWave2 in
+    let line1 = plannerWaveBacklogText priorWave in
+    let line2 =
+      if priorWave2 <= 0 then
+        ""
+      else
+        plannerWaveBacklogText priorWave2 in
+    let line3 =
+      if priorWave3 <= 0 then
+        ""
+      else
+        plannerWaveBacklogText priorWave3 in
+    let withLatest = appendPlannerLine "" line1 in
+    let withSecond = appendPlannerLine withLatest line2 in
+    let combined = appendPlannerLine withSecond line3 in
+    if combined == "" then
+      plannerBacklogDefaultText
+    else
+      combined
+  }
+
+writePlannerMemoryText : Str -> Str -> Str
+writePlannerMemoryText path text = match writeFile path text {
+  Ok written -> "",
+  Err message -> message
+}
+
+refreshPlannerMemoryFor : Int -> Str
+refreshPlannerMemoryFor wave = {
+  let trace0 = appendManagerTrace (textConcat ["planner-memory:wave-", encode wave, ":start"]) in
+  if trace0 != "" then
+    trace0
+  else {
+    let memoryText = plannerMemoryTextForWave wave in
+    let trace1 = appendManagerTrace (textConcat ["planner-memory:wave-", encode wave, ":memory-text-ready"]) in
+    if trace1 != "" then
+      trace1
+    else {
+      let backlogText = plannerBacklogTextForWave wave in
+      let trace2 = appendManagerTrace (textConcat ["planner-memory:wave-", encode wave, ":texts-ready"]) in
+      if trace2 != "" then
+        trace2
+      else {
+        let memoryPathError = writePlannerMemoryText (plannerMemoryPathFor wave) memoryText in
+        if memoryPathError != "" then
+          memoryPathError
+        else {
+          let latestMemoryError = writePlannerMemoryText plannerMemoryLatestPath memoryText in
+          if latestMemoryError != "" then
+            latestMemoryError
+          else {
+            let trace3 = appendManagerTrace (textConcat ["planner-memory:wave-", encode wave, ":memory-written"]) in
+            if trace3 != "" then
+              trace3
+            else {
+              let backlogPathError = writePlannerMemoryText (plannerBacklogPathFor wave) backlogText in
+              if backlogPathError != "" then
+                backlogPathError
+              else {
+                let latestBacklogError = writePlannerMemoryText plannerBacklogLatestPath backlogText in
+                if latestBacklogError != "" then
+                  latestBacklogError
+                else
+                  appendManagerTrace (textConcat ["planner-memory:wave-", encode wave, ":backlog-written"])
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

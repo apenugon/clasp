@@ -1,0 +1,70 @@
+module GoalManagerTaskSet
+
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+taskIdOf : SwarmTask -> Str
+taskIdOf task = task.taskId
+
+objectiveIdOf : SwarmObjective -> Str
+objectiveIdOf objective = objective.objectiveId
+
+taskCompleted : SwarmTask -> Bool
+taskCompleted task = task.status == "completed"
+
+taskFailed : SwarmTask -> Bool
+taskFailed task = task.status == "failed"
+
+taskInObjective : SwarmTask -> Bool
+taskInObjective task = task.objectiveId == objectiveId
+
+textSearchStep : TextSearch -> Str -> TextSearch
+textSearchStep search value =
+  if search.found then
+    search
+  else
+    TextSearch {
+      wanted = search.wanted,
+      found = value == search.wanted
+    }
+
+textListHas : Str -> [Str] -> Bool
+textListHas wanted values =
+  (fold textSearchStep (TextSearch { wanted = wanted, found = false }) values).found
+
+taskListHasId : Str -> [SwarmTask] -> Bool
+taskListHasId wanted taskValues = textListHas wanted (map taskIdOf taskValues)
+
+taskStatusLookupStep : TaskStatusLookup -> SwarmTask -> TaskStatusLookup
+taskStatusLookupStep state task =
+  if state.found then
+    state
+  else if task.taskId == state.wanted then
+    TaskStatusLookup {
+      wanted = state.wanted,
+      found = true,
+      status = task.status
+    }
+  else
+    state
+
+taskStatusFor : [SwarmTask] -> Str -> Str
+taskStatusFor taskValues taskId =
+  (fold
+    taskStatusLookupStep
+    (TaskStatusLookup {
+      wanted = taskId,
+      found = false,
+      status = "missing"
+    })
+    taskValues).status
+
+taskStatusIsTerminal : Str -> Bool
+taskStatusIsTerminal status =
+  if status == "completed" then
+    true
+  else
+    status == "failed"

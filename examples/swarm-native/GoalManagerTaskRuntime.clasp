@@ -1,0 +1,202 @@
+module GoalManagerTaskRuntime
+
+import GoalManagerWatch
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+childLoopUsesVerifierHeartbeat : Str -> Bool
+childLoopUsesVerifierHeartbeat phase =
+  if phase == "verifier-preparing" then
+    true
+  else if phase == "verifier-step-ready" then
+    true
+  else if phase == "verifier-prompt-ready" then
+    true
+  else if phase == "verifier-command-ready" then
+    true
+  else if phase == "verifier-launching" then
+    true
+  else
+    phase == "verifier-running"
+
+childLoopHeartbeatPath : Str -> ChildLoopState -> Str
+childLoopHeartbeatPath taskId state =
+  if childLoopUsesVerifierHeartbeat state.phase then
+    taskVerifierHeartbeatPath taskId state.attempt
+  else
+    taskBuilderHeartbeatPath taskId state.attempt
+
+childLoopLaunchState : Str -> Result WatchedProcess
+childLoopLaunchState taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    reconcileWatchedProcess (taskProcessHeartbeatPath taskId)
+  else
+    watchedProcessError "missing launch heartbeat"
+
+childLoopLaunchRunning : Str -> Bool
+childLoopLaunchRunning taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        process.completed == false
+      else
+        false,
+    Err message ->
+      false
+  }
+
+childLoopLaunchCompleted : Str -> Bool
+childLoopLaunchCompleted taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        false
+      else
+        process.completed,
+    Err message ->
+      false
+  }
+
+childLoopLaunchPending : Str -> Bool
+childLoopLaunchPending taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    if childLoopReportReady taskId then
+      false
+    else if childLoopLaunchCompleted taskId then
+      false
+    else
+      true
+  else
+    false
+
+childLoopTerminal : Str -> Bool
+childLoopTerminal taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          true
+        else
+          state.completed,
+      Err message ->
+        false
+    }
+  else
+    false
+
+childLoopReportReady : Str -> Bool
+childLoopReportReady taskId =
+  if fileExists (taskFeedbackPath taskId) then
+    if fileExists (taskStatusPath taskId) then
+      if childLoopTerminal taskId then
+        true
+      else if fileExists (taskProcessHeartbeatPath taskId) then
+        childLoopLaunchCompleted taskId
+      else
+        false
+    else
+      true
+  else
+    false
+
+childLoopRunning : Str -> Bool
+childLoopRunning taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          false
+        else if state.completed then
+          false
+        else {
+          let heartbeatPath = childLoopHeartbeatPath taskId state in
+          if fileExists heartbeatPath then
+            match reconcileWatchedProcess heartbeatPath {
+              Ok process ->
+                if process.running then
+                  process.completed == false
+                else
+                  false,
+              Err message ->
+                if fileExists (taskProcessHeartbeatPath taskId) then
+                  childLoopLaunchRunning taskId
+                else
+                  false
+            }
+          else if fileExists (taskProcessHeartbeatPath taskId) then
+            childLoopLaunchRunning taskId
+          else
+            false
+        },
+      Err message ->
+        false
+    }
+  else if fileExists (taskProcessHeartbeatPath taskId) then
+    childLoopLaunchRunning taskId
+  else
+    false
+
+writeTaskFeedback : Str -> VerifierReport -> Str
+writeTaskFeedback taskId report =
+  match mkdirAll (taskReportStateRoot taskId) {
+    Err message ->
+      message,
+    Ok created ->
+      match writeFile (taskFeedbackPath taskId) (encode report) {
+        Ok written -> "",
+        Err writeMessage -> writeMessage
+      }
+  }
+
+ensureTaskWorkspace : Str -> Str
+ensureTaskWorkspace taskId =
+  if fileExists (taskWorkspaceReadyPath taskId) then
+    ""
+  else {
+    let removed =
+      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+        Ok result -> result,
+        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+      } in
+    if removed.exitCode != 0 then
+      textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
+    else {
+      let created =
+        match runCommand "." ["mkdir", "-p", taskWorkspaceRoot taskId] {
+          Ok result -> result,
+          Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+        } in
+      if created.exitCode != 0 then
+        textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+      else {
+        let copied =
+          match runCommand "." [
+            "bash",
+            "-lc",
+            textConcat [
+              "tar -cf - ",
+              workspaceCloneExcludeFlags,
+              "-C ",
+              workspaceRoot,
+              " . | tar -xf - -C ",
+              taskWorkspaceRoot taskId
+            ]
+          ] {
+            Ok result -> result,
+            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+          } in
+        if copied.exitCode != 0 then
+          textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
+        else
+          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+            Ok written -> "",
+            Err message ->
+              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+          }
+      }
+    }
+  }

@@ -6277,6 +6277,211 @@ compileTests =
               assertEqual "expected verifier stdout/stderr artifacts" 2 (length artifactArray)
             other ->
               assertFailure ("expected persisted swarm artifacts array, got " <> show other)
+    , testCase "claspc run persists typed legal-assistant storage across restart-stable ordinary program runs" $
+        withProjectFiles "legal-assistant-storage" [] $ \root -> do
+          let stateRoot = root </> "state"
+              statePath = stateRoot </> "assistant-state.json"
+              runStorage command =
+                runClaspcWithEnv
+                  [ ("CLASP_LEGAL_STORAGE_ROOT_JSON", show stateRoot)
+                  , ("CLASP_LEGAL_STORAGE_COMMAND_JSON", show command)
+                  ]
+                  ["run", "examples/legal-assistant-storage/Main.clasp"]
+          (bootstrapExitCode, bootstrapStdout, bootstrapStderr) <- runStorage ("bootstrap" :: String)
+          case bootstrapExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant bootstrap run to succeed:\n" <> bootstrapStdout <> bootstrapStderr)
+            ExitSuccess ->
+              pure ()
+          bootstrapValue <- case eitherDecodeStrictText (T.pack bootstrapStdout) of
+            Left decodeErr ->
+              assertFailure ("expected legal assistant bootstrap output JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "bootstrap success" (Just (Bool True)) (lookupObjectKey "success" bootstrapValue)
+          assertEqual "bootstrap document count" (Just (Number 1)) (lookupObjectKey "documentCount" bootstrapValue)
+          assertEqual "bootstrap chat count" (Just (Number 1)) (lookupObjectKey "chatTurnCount" bootstrapValue)
+          assertEqual "bootstrap latest document status" (Just (String "uploaded")) (lookupObjectKey "latestDocumentStatus" bootstrapValue)
+          persistedAfterBootstrap <- TIO.readFile statePath
+          bootstrapStateValue <- case eitherDecodeStrictText persistedAfterBootstrap of
+            Left decodeErr ->
+              assertFailure ("expected persisted legal assistant state JSON after bootstrap:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "persisted bootstrap user count" (Just (Number 1)) (lookupObjectKey "users" bootstrapStateValue >>= jsonArrayLengthValue)
+          assertEqual "persisted bootstrap document count" (Just (Number 1)) (lookupObjectKey "documents" bootstrapStateValue >>= jsonArrayLengthValue)
+          (appendExitCode, appendStdout, appendStderr) <- runStorage ("append" :: String)
+          case appendExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant append run to succeed:\n" <> appendStdout <> appendStderr)
+            ExitSuccess ->
+              pure ()
+          appendValue <- case eitherDecodeStrictText (T.pack appendStdout) of
+            Left decodeErr ->
+              assertFailure ("expected legal assistant append output JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "append success" (Just (Bool True)) (lookupObjectKey "success" appendValue)
+          assertEqual "append document count" (Just (Number 2)) (lookupObjectKey "documentCount" appendValue)
+          assertEqual "append chat count" (Just (Number 2)) (lookupObjectKey "chatTurnCount" appendValue)
+          assertEqual "append latest document id" (Just (String "doc-2")) (lookupObjectKey "latestDocumentId" appendValue)
+          assertEqual "append latest document status" (Just (String "indexed")) (lookupObjectKey "latestDocumentStatus" appendValue)
+          assertEqual "append latest chat role" (Just (String "assistant")) (lookupObjectKey "latestChatRole" appendValue)
+          assertEqual "append known users" (Just ["user-1"]) (lookupObjectTextArray "knownUserIds" appendValue)
+          (snapshotExitCode, snapshotStdout, snapshotStderr) <- runStorage ("snapshot" :: String)
+          case snapshotExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant snapshot run to succeed:\n" <> snapshotStdout <> snapshotStderr)
+            ExitSuccess ->
+              pure ()
+          snapshotValue <- case eitherDecodeStrictText (T.pack snapshotStdout) of
+            Left decodeErr ->
+              assertFailure ("expected legal assistant snapshot output JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "snapshot latest document status" (Just (String "indexed")) (lookupObjectKey "latestDocumentStatus" snapshotValue)
+          assertEqual "snapshot latest owner email" (Just (String "ada@northwind.example")) (lookupObjectKey "latestOwnerEmail" snapshotValue)
+          assertEqual "snapshot latest referenced documents" (Just ["doc-2"]) (lookupObjectTextArray "latestReferencedDocumentIds" snapshotValue)
+          persistedAfterAppend <- TIO.readFile statePath
+          appendStateValue <- case eitherDecodeStrictText persistedAfterAppend of
+            Left decodeErr ->
+              assertFailure ("expected persisted legal assistant state JSON after append:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "persisted append document count" (Just (Number 2)) (lookupObjectKey "documents" appendStateValue >>= jsonArrayLengthValue)
+          assertEqual "persisted append chat count" (Just (Number 2)) (lookupObjectKey "chatTurns" appendStateValue >>= jsonArrayLengthValue)
+    , testCase "claspc run executes the legal assistant appbench slice with durable uploads, @document priority, and process-backed web search" $
+        withProjectFiles "legal-assistant-appbench" [] $ \root -> do
+          let stateRoot = root </> "state"
+              statePath = stateRoot </> "assistant-state.json"
+              searchLogPath = stateRoot </> "search-log.json"
+              uploadPayload documentId title filename body =
+                concat
+                  [ "{\"authToken\":\"token-ada\",\"conversationId\":\"conv-legal-1\",\"title\":\""
+                  , title
+                  , "\",\"upload\":{\"documentId\":\""
+                  , documentId
+                  , "\",\"filename\":\""
+                  , filename
+                  , "\",\"mediaType\":\"text/plain\",\"sizeBytes\":0,\"contentText\":\""
+                  , body
+                  , "\"}}"
+                  ]
+              askPayload =
+                "{\"authToken\":\"token-ada\",\"conversationId\":\"conv-legal-1\",\"prompt\":\"Compare @document[doc-msa|Master Services Agreement] against current Delaware force majeure guidance.\"}"
+          projectRoot <- makeAbsolute "."
+          let runLegal command extraEnv =
+                runClaspcWithEnv
+                  ( [ ("CLASP_LEGAL_APPBENCH_STATE_ROOT_JSON", show stateRoot)
+                    , ("CLASP_LEGAL_APPBENCH_WORKSPACE_JSON", show projectRoot)
+                    , ("CLASP_LEGAL_APPBENCH_COMMAND_JSON", show command)
+                    ]
+                      <> extraEnv
+                  )
+                  ["run", "examples/legal-assistant-appbench/Main.clasp"]
+              decodeOutput label stdoutText =
+                case eitherDecodeStrictText (T.pack stdoutText) of
+                  Left decodeErr ->
+                    assertFailure ("expected " <> label <> " output JSON:\n" <> decodeErr)
+                  Right value ->
+                    pure value
+          (bootstrapExitCode, bootstrapStdout, bootstrapStderr) <- runLegal ("bootstrap" :: String) []
+          case bootstrapExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant appbench bootstrap to succeed:\n" <> bootstrapStdout <> bootstrapStderr)
+            ExitSuccess ->
+              pure ()
+          bootstrapValue <- decodeOutput "bootstrap" bootstrapStdout
+          assertEqual "bootstrap command" (Just (String "bootstrap")) (lookupObjectKey "command" bootstrapValue)
+          assertEqual "bootstrap document count" (Just (Number 0)) (lookupObjectKey "documentCount" bootstrapValue)
+          (uploadExitCode, uploadStdout, uploadStderr) <-
+            runLegal
+              ("upload" :: String)
+              [ ( "CLASP_LEGAL_APPBENCH_UPLOAD_JSON"
+                , uploadPayload
+                    "doc-msa"
+                    "Master Services Agreement"
+                    "msa.txt"
+                    "The Master Services Agreement includes a force majeure clause and a notice requirement."
+                )
+              ]
+          case uploadExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected first legal assistant upload to succeed:\n" <> uploadStdout <> uploadStderr)
+            ExitSuccess ->
+              pure ()
+          uploadValue <- decodeOutput "first upload" uploadStdout
+          assertEqual "first upload version" (Just (Number 1)) (lookupObjectKey "latestDocumentVersion" uploadValue)
+          assertEqual "first upload status" (Just (String "uploaded")) (lookupObjectKey "latestDocumentStatus" uploadValue)
+          (replaceExitCode, replaceStdout, replaceStderr) <-
+            runLegal
+              ("upload" :: String)
+              [ ( "CLASP_LEGAL_APPBENCH_UPLOAD_JSON"
+                , uploadPayload
+                    "doc-msa"
+                    "Master Services Agreement"
+                    "msa-v2.txt"
+                    "The updated Master Services Agreement keeps the force majeure clause and adds a cure period."
+                )
+              ]
+          case replaceExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected replacement upload to succeed:\n" <> replaceStdout <> replaceStderr)
+            ExitSuccess ->
+              pure ()
+          replaceValue <- decodeOutput "replacement upload" replaceStdout
+          assertEqual "replacement upload version" (Just (Number 2)) (lookupObjectKey "latestDocumentVersion" replaceValue)
+          assertEqual "replacement upload status" (Just (String "replaced")) (lookupObjectKey "latestDocumentStatus" replaceValue)
+          (secondUploadExitCode, secondUploadStdout, secondUploadStderr) <-
+            runLegal
+              ("upload" :: String)
+              [ ( "CLASP_LEGAL_APPBENCH_UPLOAD_JSON"
+                , uploadPayload
+                    "doc-delaware"
+                    "Delaware Case Notes"
+                    "delaware.txt"
+                    "Delaware case notes discuss force majeure notice and contractual remedies."
+                )
+              ]
+          case secondUploadExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected second legal assistant upload to succeed:\n" <> secondUploadStdout <> secondUploadStderr)
+            ExitSuccess ->
+              pure ()
+          secondUploadValue <- decodeOutput "second upload" secondUploadStdout
+          assertEqual "second upload document count" (Just (Number 2)) (lookupObjectKey "documentCount" secondUploadValue)
+          (askExitCode, askStdout, askStderr) <- runLegal ("ask" :: String) [("CLASP_LEGAL_APPBENCH_ASK_JSON", askPayload)]
+          case askExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant ask command to succeed:\n" <> askStdout <> askStderr)
+            ExitSuccess ->
+              pure ()
+          askValue <- decodeOutput "ask" askStdout
+          assertEqual "ask tool kinds" (Just ["retrieval", "web-search"]) (lookupObjectTextArray "latestToolKinds" askValue)
+          assertEqual "ask referenced documents" (Just ["doc-msa"]) (lookupObjectTextArray "latestReferencedDocumentIds" askValue)
+          assertEqual "ask retrieved documents" (Just ["doc-msa", "doc-delaware"]) (lookupObjectTextArray "latestRetrievedDocumentIds" askValue)
+          assertEqual
+            "ask citation labels"
+            (Just ["Master Services Agreement v2", "Delaware Case Notes", "Delaware Force Majeure Update"])
+            (lookupObjectTextArray "latestCitationLabels" askValue)
+          persistedSearchLog <- TIO.readFile searchLogPath
+          assertBool "expected process-backed search log to record the query" ("Delaware force majeure guidance" `T.isInfixOf` persistedSearchLog)
+          (snapshotExitCode, snapshotStdout, snapshotStderr) <- runLegal ("snapshot" :: String) []
+          case snapshotExitCode of
+            ExitFailure _ ->
+              assertFailure ("expected legal assistant snapshot to succeed:\n" <> snapshotStdout <> snapshotStderr)
+            ExitSuccess ->
+              pure ()
+          snapshotValue <- decodeOutput "snapshot" snapshotStdout
+          assertEqual "snapshot chat turn count" (Just (Number 5)) (lookupObjectKey "chatTurnCount" snapshotValue)
+          persistedState <- TIO.readFile statePath
+          persistedStateValue <- case eitherDecodeStrictText persistedState of
+            Left decodeErr ->
+              assertFailure ("expected persisted legal assistant appbench state JSON:\n" <> decodeErr)
+            Right value ->
+              pure value
+          assertEqual "persisted document count" (Just (Number 2)) (lookupObjectKey "documents" persistedStateValue >>= jsonArrayLengthValue)
+          assertEqual "persisted turn count" (Just (Number 5)) (lookupObjectKey "turns" persistedStateValue >>= jsonArrayLengthValue)
     , testCase "hosted native tool runner rejects compiler artifacts that do not expose the requested command" $
         withProjectFiles "hosted-tool-runner-entrypoint" [("Fake.clasp", "module Main\n\nmain : Str\nmain = \"fake\"\n")] $ \root -> do
           let embeddedIrPath = root </> "Fake.native.ir"
@@ -8679,6 +8884,10 @@ runNodeModule compiledPath = do
 jsonArrayValues :: Maybe Value -> Maybe [Value]
 jsonArrayValues (Just (Array items)) = Just (toList items)
 jsonArrayValues _ = Nothing
+
+jsonArrayLengthValue :: Value -> Maybe Value
+jsonArrayLengthValue (Array items) = Just (Number (fromIntegral (length items)))
+jsonArrayLengthValue _ = Nothing
 
 runNodeScript :: Text -> IO Text
 runNodeScript script = do

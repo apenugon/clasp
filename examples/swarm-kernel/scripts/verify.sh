@@ -209,6 +209,8 @@ printf '%s\n' "$sqlite_status_output" | grep -F '"attempts":1' >/dev/null
 
 sqlite_repair_bootstrap_output="$("$claspc_bin" --json swarm bootstrap "$sqlite_state_root" repair)"
 printf '%s\n' "$sqlite_repair_bootstrap_output" | grep -F '"taskId":"repair"' >/dev/null
+sqlite_repair_lease_output="$(CLASP_SWARM_ACTOR=worker-2 "$claspc_bin" --json swarm lease "$sqlite_state_root" repair)"
+printf '%s\n' "$sqlite_repair_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 sqlite_repair_fail_output="$(CLASP_SWARM_ACTOR=worker-2 "$claspc_bin" --json swarm fail "$sqlite_state_root" repair)"
 printf '%s\n' "$sqlite_repair_fail_output" | grep -F '"kind":"task_failed"' >/dev/null
 sqlite_repair_retry_output="$("$claspc_bin" --json swarm retry "$sqlite_state_root" repair)"
@@ -220,7 +222,9 @@ printf '%s\n' "$sqlite_summary_output" | grep -F '"queuedTaskIds":["repair"]' >/
 printf '%s\n' "$sqlite_summary_output" | grep -F '"statusByTask":{"bootstrap":"completed","repair":"queued"}' >/dev/null
 printf '%s\n' "$sqlite_summary_output" | grep -F '"bootstrapStatus":"completed"' >/dev/null
 
-tool_output="$("$claspc_bin" --json swarm tool "$sqlite_state_root" repair --cwd "$project_root" -- bash -lc 'printf tool-ok; >&2 printf tool-err')"
+sqlite_repair_tool_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$sqlite_state_root" repair)"
+printf '%s\n' "$sqlite_repair_tool_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
+tool_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm tool "$sqlite_state_root" repair --cwd "$project_root" -- bash -lc 'printf tool-ok; >&2 printf tool-err')"
 printf '%s\n' "$tool_output" | grep -F '"role":"tool"' >/dev/null
 printf '%s\n' "$tool_output" | grep -F '"status":"passed"' >/dev/null
 tool_stdout_path="$(printf '%s\n' "$tool_output" | sed -n 's/.*"stdoutArtifactPath":"\([^"]*\)".*/\1/p')"
@@ -230,7 +234,7 @@ tool_stderr_path="$(printf '%s\n' "$tool_output" | sed -n 's/.*"stderrArtifactPa
 grep -Fx 'tool-ok' "$tool_stdout_path" >/dev/null
 grep -Fx 'tool-err' "$tool_stderr_path" >/dev/null
 
-verifier_output="$("$claspc_bin" --json swarm verifier run "$sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
+verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$verifier_output" | grep -F '"role":"verifier"' >/dev/null
 printf '%s\n' "$verifier_output" | grep -F '"name":"native-smoke"' >/dev/null
 printf '%s\n' "$verifier_output" | grep -F '"status":"passed"' >/dev/null
@@ -314,6 +318,8 @@ if printf '%s\n' "$ready_before_output" | grep -F '"taskId":"repair-2"' >/dev/nu
   exit 1
 fi
 
+plan_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$sqlite_state_root" plan)"
+printf '%s\n' "$plan_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 plan_complete_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm complete "$sqlite_state_root" plan)"
 printf '%s\n' "$plan_complete_output" | grep -F '"taskId":"plan"' >/dev/null
 printf '%s\n' "$plan_complete_output" | grep -F '"status":"completed"' >/dev/null
@@ -325,6 +331,8 @@ manager_after_plan_output="$("$claspc_bin" --json swarm manager next "$sqlite_st
 printf '%s\n' "$manager_after_plan_output" | grep -F '"action":"run-task"' >/dev/null
 printf '%s\n' "$manager_after_plan_output" | grep -F '"taskId":"repair-2"' >/dev/null
 
+repair_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$sqlite_state_root" repair-2)"
+printf '%s\n' "$repair_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 repair_complete_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm complete "$sqlite_state_root" repair-2)"
 printf '%s\n' "$repair_complete_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$repair_complete_output" | grep -F '"status":"completed"' >/dev/null
@@ -337,7 +345,7 @@ manager_after_repair_output="$("$claspc_bin" --json swarm manager next "$sqlite_
 printf '%s\n' "$manager_after_repair_output" | grep -F '"action":"run-verifier"' >/dev/null
 printf '%s\n' "$manager_after_repair_output" | grep -F '"verifier":"native-smoke"' >/dev/null
 
-repair_verifier_output="$("$claspc_bin" --json swarm verifier run "$sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
+repair_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$repair_verifier_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$repair_verifier_output" | grep -F '"status":"passed"' >/dev/null
 

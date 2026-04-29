@@ -1,0 +1,268 @@
+module GoalManagerPlanValidation
+
+import GoalManagerCounters
+import GoalManagerTaskSet
+import GoalManagerPlannerMaterialize
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+planValidationIssue : Str -> Str -> Str -> PlanValidationIssue
+planValidationIssue code taskId detail =
+  PlanValidationIssue {
+    code = code,
+    taskId = taskId,
+    detail = detail
+  }
+
+appendPlanValidationIssue : [PlanValidationIssue] -> Str -> Str -> Str -> [PlanValidationIssue]
+appendPlanValidationIssue issues code taskId detail =
+  append issues [planValidationIssue code taskId detail]
+
+dependencyDeclared : [Str] -> Str -> Bool
+dependencyDeclared knownTaskIds dependency =
+  textListHas dependency knownTaskIds
+
+dependencyIssueStep : DependencyIssueState -> Str -> DependencyIssueState
+dependencyIssueStep state dependency =
+  if dependency == "" then
+    DependencyIssueState {
+      issues = appendPlanValidationIssue state.issues "missing-dependency-id" state.taskId "Planner task dependencies must not be empty strings.",
+      taskId = state.taskId,
+      knownTaskIds = state.knownTaskIds
+    }
+  else if dependency == plannerTaskId then
+    DependencyIssueState {
+      issues = appendPlanValidationIssue state.issues "reserved-dependency" state.taskId "Planner task dependencies must refer only to other planned tasks, not the reserved planner task.",
+      taskId = state.taskId,
+      knownTaskIds = state.knownTaskIds
+    }
+  else if dependency == state.taskId then
+    DependencyIssueState {
+      issues = appendPlanValidationIssue state.issues "self-dependency" state.taskId "Planner task depends on itself.",
+      taskId = state.taskId,
+      knownTaskIds = state.knownTaskIds
+    }
+  else if dependencyDeclared state.knownTaskIds dependency then
+    state
+  else
+    DependencyIssueState {
+      issues = appendPlanValidationIssue state.issues "missing-dependency" state.taskId (textConcat ["Planner task depends on unknown planned task `", dependency, "`."]),
+      taskId = state.taskId,
+      knownTaskIds = state.knownTaskIds
+    }
+
+planValidationFoldStep : PlanValidationFoldState -> PlannerTaskSpec -> PlanValidationFoldState
+planValidationFoldStep state spec = {
+  let taskId = spec.taskId in
+  let issues0 = state.issues in
+  let issues1 =
+    if taskId == "" then
+      appendPlanValidationIssue issues0 "missing-task-id" taskId "Planner task is missing a taskId."
+    else
+      issues0 in
+  let issues2 =
+    if spec.detail == "" then
+      appendPlanValidationIssue issues1 "missing-detail" taskId "Planner task detail must not be empty."
+    else
+      issues1 in
+  let issues3 =
+    if spec.taskPrompt == "" then
+      appendPlanValidationIssue issues2 "missing-prompt" taskId "Planner task prompt must not be empty."
+    else
+      issues2 in
+  let issues4 =
+    if taskId != "" then
+      if textListHas taskId state.seenTaskIds then
+        appendPlanValidationIssue issues3 "duplicate-task-id" taskId "Planner task ids must be unique."
+      else
+        issues3
+    else
+      issues3 in
+  let issues5 =
+    if taskId == plannerTaskId then
+      appendPlanValidationIssue issues4 "reserved-task-id" taskId "Planner task must not reuse the reserved planner task id."
+    else
+      issues4 in
+  let dependencyState =
+    fold
+      dependencyIssueStep
+      (DependencyIssueState {
+        issues = issues5,
+        taskId = taskId,
+        knownTaskIds = state.knownTaskIds
+      })
+      spec.dependencies in
+  PlanValidationFoldState {
+    issues = dependencyState.issues,
+    seenTaskIds = append state.seenTaskIds [taskId],
+    knownTaskIds = state.knownTaskIds
+  }
+}
+
+dependencyResolvedStep : DependencyCheck -> Str -> DependencyCheck
+dependencyResolvedStep state dependency =
+  if state.allResolved then
+    DependencyCheck {
+      resolvedTaskIds = state.resolvedTaskIds,
+      allResolved = textListHas dependency state.resolvedTaskIds
+    }
+  else
+    state
+
+allDependenciesResolved : [Str] -> [Str] -> Bool
+allDependenciesResolved resolvedTaskIds dependencies =
+  (fold
+    dependencyResolvedStep
+    (DependencyCheck {
+      resolvedTaskIds = resolvedTaskIds,
+      allResolved = true
+    })
+    dependencies).allResolved
+
+cyclePartitionStep : CyclePartitionState -> PlannerTaskSpec -> CyclePartitionState
+cyclePartitionStep state spec =
+  if allDependenciesResolved state.resolvedTaskIds spec.dependencies then
+    CyclePartitionState {
+      remaining = state.remaining,
+      resolvedTaskIds = append state.resolvedTaskIds [spec.taskId],
+      progressed = true
+    }
+  else
+    CyclePartitionState {
+      remaining = append state.remaining [spec],
+      resolvedTaskIds = state.resolvedTaskIds,
+      progressed = state.progressed
+    }
+
+cycleBlockedTaskIds : [PlannerTaskSpec] -> [Str] -> [Str]
+cycleBlockedTaskIds pendingSpecs resolvedTaskIds =
+  if length pendingSpecs == 0 then
+    emptyTexts
+  else {
+    let partition =
+      fold
+        cyclePartitionStep
+        (CyclePartitionState {
+          remaining = emptyPlannerTasks,
+          resolvedTaskIds = resolvedTaskIds,
+          progressed = false
+        })
+        pendingSpecs in
+    if partition.progressed then
+      cycleBlockedTaskIds partition.remaining partition.resolvedTaskIds
+    else
+      map plannerTaskIdOf partition.remaining
+  }
+
+planValidationIssueText : PlanValidationIssue -> Str
+planValidationIssueText issue =
+  if issue.taskId == "" then
+    textConcat [issue.code, ": ", issue.detail]
+  else
+    textConcat [issue.code, "(", issue.taskId, "): ", issue.detail]
+
+planValidationIssueTexts : [PlanValidationIssue] -> [Str]
+planValidationIssueTexts issues = map planValidationIssueText issues
+
+planValidationFailureReport : PlanValidationResult -> VerifierReport
+planValidationFailureReport validation =
+  VerifierReport {
+    verdict = "fail",
+    summary = "planner validation failed",
+    findings = planValidationIssueTexts validation.issues,
+    tests_run = ["planner plan validation"],
+    follow_up = ["Fix the planner output or manager limits before materializing swarm tasks."],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+validatePlannerReport : PlannerReport -> PlanValidationResult
+validatePlannerReport report = {
+  let requiredTaskBudget =
+    configuredObjectiveBudgetFloor in
+  let requiredRunBudget =
+    configuredObjectiveBudgetFloor in
+  let structuralState =
+    fold
+      planValidationFoldStep
+      (PlanValidationFoldState {
+        issues = emptyPlanValidationIssues,
+        seenTaskIds = emptyTexts,
+        knownTaskIds = plannerTaskIds report
+      })
+      report.tasks in
+  let issues0 = structuralState.issues in
+  let issues1 =
+    if length report.tasks == 0 then
+      appendPlanValidationIssue issues0 "empty-plan" "" "Planner produced zero tasks."
+    else
+      issues0 in
+  let issues2 =
+    if length report.tasks > maxTaskLoops then
+      appendPlanValidationIssue
+        issues1
+        "planned-task-budget"
+        ""
+        (textConcat [
+          "Planner produced ",
+          encode (length report.tasks),
+          " planned tasks but CLASP_MANAGER_MAX_TASKS_JSON allows only ",
+          encode maxTaskLoops,
+          " planned tasks."
+        ])
+    else
+      issues1 in
+  let issues3 =
+    if objectiveTaskBudget < requiredTaskBudget then
+      appendPlanValidationIssue
+        issues2
+        "objective-task-budget"
+        ""
+        (textConcat [
+          "Objective task budget must allow at least ",
+          encode requiredTaskBudget,
+          " total tasks for the configured planner/task waves."
+        ])
+    else
+      issues2 in
+  let issues4 =
+    if objectiveRunBudget < requiredRunBudget then
+      appendPlanValidationIssue
+        issues3
+        "objective-run-budget"
+        ""
+        (textConcat [
+          "Objective run budget must allow at least ",
+          encode requiredRunBudget,
+          " total runs for the configured planner/task waves."
+        ])
+    else
+      issues3 in
+  let cycleIssues =
+    if length issues4 == 0 then
+      cycleBlockedTaskIds report.tasks emptyTexts
+    else
+      emptyTexts in
+  let issues5 =
+    if length cycleIssues == 0 then
+      issues4
+    else
+      appendPlanValidationIssue
+        issues4
+        "dependency-cycle"
+        ""
+        (textConcat [
+          "Planner task dependencies are cyclic or otherwise impossible to resolve: ",
+          textJoin ", " cycleIssues
+        ]) in
+  PlanValidationResult {
+    valid = length issues5 == 0,
+    issues = issues5,
+    plannedTaskCount = length report.tasks,
+    plannerTaskLimit = maxTaskLoops,
+    objectiveTaskBudget = objectiveTaskBudget,
+    objectiveRunBudget = objectiveRunBudget,
+    cycleBlockedTaskIds = cycleIssues
+  }
+}

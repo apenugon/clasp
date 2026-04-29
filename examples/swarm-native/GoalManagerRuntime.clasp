@@ -1,0 +1,466 @@
+module GoalManagerRuntime
+
+import GoalManagerCounters
+import GoalManagerPreludeProject
+import GoalManagerPreludeDecode
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Service
+import Swarm
+
+childLoopUsesVerifierHeartbeat : Str -> Bool
+childLoopUsesVerifierHeartbeat phase =
+  if phase == "verifier-preparing" then
+    true
+  else if phase == "verifier-step-ready" then
+    true
+  else if phase == "verifier-prompt-ready" then
+    true
+  else if phase == "verifier-command-ready" then
+    true
+  else if phase == "verifier-launching" then
+    true
+  else
+    phase == "verifier-running"
+
+childLoopHeartbeatPath : Str -> ChildLoopState -> Str
+childLoopHeartbeatPath taskId state =
+  if childLoopUsesVerifierHeartbeat state.phase then
+    taskVerifierHeartbeatPath taskId state.attempt
+  else
+    taskBuilderHeartbeatPath taskId state.attempt
+
+childLoopLaunchState : Str -> Result WatchedProcess
+childLoopLaunchState taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    reconcileWatchedProcess (taskProcessHeartbeatPath taskId)
+  else
+    watchedProcessError "missing launch heartbeat"
+
+childLoopLaunchRunning : Str -> Bool
+childLoopLaunchRunning taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        process.completed == false
+      else
+        false,
+    Err message ->
+      false
+  }
+
+childLoopLaunchCompleted : Str -> Bool
+childLoopLaunchCompleted taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      if process.running then
+        false
+      else
+        process.completed,
+    Err message ->
+      false
+  }
+
+childLoopLaunchPending : Str -> Bool
+childLoopLaunchPending taskId =
+  if fileExists (taskProcessHeartbeatPath taskId) then
+    if childLoopReportReady taskId then
+      false
+    else if childLoopLaunchCompleted taskId then
+      false
+    else
+      true
+  else
+    false
+
+childLoopTerminal : Str -> Bool
+childLoopTerminal taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          true
+        else
+          state.completed,
+      Err message ->
+        false
+    }
+  else
+    false
+
+childLoopReportReady : Str -> Bool
+childLoopReportReady taskId =
+  if fileExists (taskFeedbackPath taskId) then
+    if fileExists (taskStatusPath taskId) then
+      if childLoopTerminal taskId then
+        true
+      else if fileExists (taskProcessHeartbeatPath taskId) then
+        childLoopLaunchCompleted taskId
+      else
+        false
+    else
+      true
+  else
+    false
+
+childLoopRunning : Str -> Bool
+childLoopRunning taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          false
+        else if state.completed then
+          false
+        else {
+          let heartbeatPath = childLoopHeartbeatPath taskId state in
+          if fileExists heartbeatPath then
+            match reconcileWatchedProcess heartbeatPath {
+              Ok process ->
+                if process.running then
+                  process.completed == false
+                else
+                  false,
+              Err message ->
+                if fileExists (taskProcessHeartbeatPath taskId) then
+                  childLoopLaunchRunning taskId
+                else
+                  false
+            }
+          else if fileExists (taskProcessHeartbeatPath taskId) then
+            childLoopLaunchRunning taskId
+          else
+            false
+        },
+      Err message ->
+        false
+    }
+  else if fileExists (taskProcessHeartbeatPath taskId) then
+    childLoopLaunchRunning taskId
+  else
+    false
+
+writeTaskFeedback : Str -> VerifierReport -> Str
+writeTaskFeedback taskId report =
+  match mkdirAll (taskReportStateRoot taskId) {
+    Err message ->
+      message,
+    Ok created ->
+      match writeFile (taskFeedbackPath taskId) (encode report) {
+        Ok written -> "",
+        Err writeMessage -> writeMessage
+      }
+  }
+
+ensureTaskWorkspace : Str -> Str
+ensureTaskWorkspace taskId =
+  if fileExists (taskWorkspaceReadyPath taskId) then
+    ""
+  else {
+    let removed =
+      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+        Ok result -> result,
+        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+      } in
+    if removed.exitCode != 0 then
+      textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
+    else {
+      let created =
+        match runCommand "." ["mkdir", "-p", taskWorkspaceRoot taskId] {
+          Ok result -> result,
+          Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+        } in
+      if created.exitCode != 0 then
+        textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+      else {
+        let copied =
+          match runCommand "." [
+            "bash",
+            "-lc",
+            textConcat [
+              "tar -cf - ",
+              workspaceCloneExcludeFlags,
+              "-C ",
+              workspaceRoot,
+              " . | tar -xf - -C ",
+              taskWorkspaceRoot taskId
+            ]
+          ] {
+            Ok result -> result,
+            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+          } in
+        if copied.exitCode != 0 then
+          textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
+        else
+          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+            Ok written -> "",
+            Err message ->
+              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+          }
+      }
+    }
+  }
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+writeManagerState : ManagerState -> Str
+writeManagerState state = match writeFile statusPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+emptyManagerState : ManagerState
+emptyManagerState =
+  ManagerState {
+    phase = "needs-planner",
+    verdict = "pending",
+    completed = false,
+    objectiveId = objectiveId,
+    plannerTaskId = plannerTaskIdForWave 1,
+    activeTaskId = "",
+    plannedTaskIds = emptyTexts,
+    wave = 1,
+    benchmarkRuns = 0,
+    final = false
+  }
+
+readManagerStatePath : Str -> ManagerState
+readManagerStatePath path = match readFile path {
+  Ok raw -> decode ManagerState raw,
+  Err message -> emptyManagerState
+}
+
+readManagerState : ManagerState
+readManagerState = readManagerStatePath statusPath
+
+currentUpgradeSnapshot : ManagerUpgradeSnapshot
+currentUpgradeSnapshot =
+  ManagerUpgradeSnapshot {
+    state = readManagerState,
+    feedback = readTextOrEmpty feedbackPath,
+    projectRoot = managerProjectRoot
+  }
+
+restoreManagerSnapshotIfNeeded : Str
+restoreManagerSnapshotIfNeeded =
+  if restoreSnapshotPath == "" then
+    ""
+  else if fileExists restoredSnapshotPath then
+    ""
+  else
+    match readFile restoreSnapshotPath {
+      Err message ->
+        textConcat ["restore-read-error:", message],
+      Ok raw ->
+        let snapshot = decode ManagerUpgradeSnapshot raw in
+        let stateError = writeManagerState snapshot.state in
+        if stateError != "" then
+          textConcat ["restore-state-error:", stateError]
+        else {
+          let feedbackError =
+            if snapshot.feedback == "" then
+              ""
+            else
+              match writeFile feedbackPath snapshot.feedback {
+                Ok written -> "",
+                Err message -> message
+              } in
+          if feedbackError != "" then
+            textConcat ["restore-feedback-error:", feedbackError]
+          else
+            match writeFile serviceRootRecordPath restoreServiceRoot {
+              Err message ->
+                textConcat ["restore-service-root-error:", message],
+              Ok serviceRootWritten ->
+                match writeFile serviceIdRecordPath restoreServiceId {
+                  Err message ->
+                    textConcat ["restore-service-id-error:", message],
+                  Ok serviceIdWritten ->
+                    match writeFile projectRootRecordPath snapshot.projectRoot {
+                      Err message ->
+                        textConcat ["restore-project-root-error:", message],
+                      Ok projectRootWritten ->
+                        match
+                          writeFile
+                            restoredSnapshotPath
+                            (encode
+                              (ManagerUpgradeRestoreRecord {
+                                serviceRoot = restoreServiceRoot,
+                                serviceId = restoreServiceId,
+                                generation = restoreGeneration,
+                                transactionPath = restoreTransactionPath,
+                                projectRoot = snapshot.projectRoot,
+                                snapshot = snapshot
+                              }))
+                        {
+                          Ok written -> "",
+                          Err message ->
+                            textConcat ["restore-marker-error:", message]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+readPlannerReportForWave : Int -> Result PlannerReport
+readPlannerReportForWave wave = readPlannerReportPath (plannerReportPathFor wave)
+
+readPlannerInputState : Result PlannerInputState
+readPlannerInputState = readPlannerInputStatePath plannerInputPath
+
+benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointError message = Err message
+
+readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
+readBenchmarkCheckpointPath path = match readFile path {
+  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Err message -> benchmarkCheckpointError message
+}
+
+latestBenchmarkSummaryText : Str
+latestBenchmarkSummaryText = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.summary,
+  Err message -> ""
+}
+
+latestBenchmarkTargetMet : Bool
+latestBenchmarkTargetMet = match readBenchmarkCheckpointPath benchmarkLatestPath {
+  Ok checkpoint -> checkpoint.meetsTarget,
+  Err message -> false
+}
+writeBenchmarkCheckpoint : BenchmarkCheckpoint -> Str
+writeBenchmarkCheckpoint checkpoint = {
+  let checkpointText = encode checkpoint in
+  match writeFile (benchmarkCheckpointPathFor checkpoint.wave) checkpointText {
+    Ok written ->
+      match writeFile benchmarkLatestPath checkpointText {
+        Ok latestWritten -> "",
+        Err message -> message
+      },
+    Err message -> message
+  }
+}
+
+readProcessOutputText : Str -> Str
+readProcessOutputText path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+benchmarkResultFromProcess : WatchedProcess -> ProcessResult
+benchmarkResultFromProcess process =
+  ProcessResult {
+    exitCode = process.exitCode,
+    stdout = readProcessOutputText process.stdoutPath,
+    stderr = readProcessOutputText process.stderrPath
+  }
+
+benchmarkCommandArgs : Int -> Int -> [Str]
+benchmarkCommandArgs wave benchmarkRuns =
+  append
+    [
+      "env",
+      textConcat ["CLASP_MANAGER_STATE_ROOT=", stateRootPath],
+      textConcat ["CLASP_MANAGER_PROJECT_ROOT=", managerProjectRoot],
+      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", workspaceRoot],
+      textConcat ["CLASP_MANAGER_BENCHMARK_WAVE=", encode wave],
+      textConcat ["CLASP_MANAGER_BENCHMARK_RUNS=", encode benchmarkRuns]
+    ]
+    benchmarkCommand
+
+pollWatchedProcess : Str -> Int -> Int -> Result WatchedProcess
+pollWatchedProcess heartbeatPath pollMs remainingMs =
+  match reconcileWatchedProcess heartbeatPath {
+    Err message ->
+      watchedProcessError message,
+    Ok process ->
+      if process.completed then
+        Ok process
+      else if process.running == false then
+        Ok process
+      else if remainingMs <= 0 then
+        watchedProcessError "timeout"
+      else {
+        let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+        match sleepMsValue sleepDelay {
+          Ok slept ->
+            pollWatchedProcess heartbeatPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+          Err message ->
+            watchedProcessError message
+        }
+      }
+  }
+
+
+benchmarkHeartbeatCompleted : Str -> Bool
+benchmarkHeartbeatCompleted heartbeatRaw = (decode WatchedProcess heartbeatRaw).completed
+
+benchmarkHeartbeatRunning : Str -> Bool
+benchmarkHeartbeatRunning heartbeatRaw = (decode WatchedProcess heartbeatRaw).running
+
+benchmarkHeartbeatSucceeded : Str -> Bool
+benchmarkHeartbeatSucceeded heartbeatRaw = (decode WatchedProcess heartbeatRaw).exitCode == 0
+
+pollBenchmarkResult : Str -> Str -> Str -> Int -> Int -> Result ProcessResult
+pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
+  if fileExists heartbeatPath then
+    match readFile heartbeatPath {
+      Err message -> processResultError message,
+      Ok heartbeatRaw ->
+        let process = decode WatchedProcess heartbeatRaw in
+        if process.completed then
+          Ok (ProcessResult { exitCode = process.exitCode, stdout = readProcessOutputText stdoutPath, stderr = readProcessOutputText stderrPath })
+        else if process.running == false then
+          Ok (ProcessResult { exitCode = process.exitCode, stdout = readProcessOutputText stdoutPath, stderr = readProcessOutputText stderrPath })
+        else if remainingMs <= 0 then
+          processResultError "timeout"
+        else {
+          let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+          match sleepMsValue sleepDelay {
+            Ok slept ->
+              pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+            Err message ->
+              processResultError message
+          }
+        }
+    }
+  else if remainingMs <= 0 then
+    processResultError "timeout"
+  else {
+    let sleepDelay = if remainingMs < pollMs then remainingMs else pollMs in
+    match sleepMsValue sleepDelay {
+      Ok slept -> pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs (subtractManagerCounters remainingMs sleepDelay),
+      Err message -> processResultError message
+    }
+  }
+
+runBenchmarkCommand : Int -> Int -> Result ProcessResult
+runBenchmarkCommand wave benchmarkRuns =
+  match spawnWatchedProcess
+    benchmarkCwd
+    (benchmarkStdoutPathFor wave)
+    (benchmarkStderrPathFor wave)
+    (benchmarkHeartbeatPathFor wave)
+    benchmarkWatchPollMs
+    (benchmarkCommandArgs wave benchmarkRuns) {
+    Err message ->
+      processResultError message,
+    Ok launched ->
+      pollBenchmarkResult launched.heartbeatPath launched.stdoutPath launched.stderrPath benchmarkWatchPollMs benchmarkTimeoutMs
+  }

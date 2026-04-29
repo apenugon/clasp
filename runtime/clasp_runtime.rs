@@ -28,6 +28,16 @@ const CLASP_RT_LAYOUT_BOOL: u32 = 10;
 const CLASP_RT_LAYOUT_LIST_VALUE: u32 = 11;
 const CLASP_RT_LAYOUT_EARLY_RETURN: u32 = 12;
 const CLASP_RT_INTERPRETER_MAX_DEPTH: usize = 4096;
+const DOCUMENT_UPLOAD_MAX_BYTES: usize = 64 * 1024;
+const DOCUMENT_REFERENCE_MAX_COUNT: usize = 32;
+const DOCUMENT_EXCERPT_MAX_CHARS: usize = 160;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DocumentReferenceSpec {
+    document_id: String,
+    label: String,
+    raw: String,
+}
 
 #[derive(Clone)]
 struct NativeLeadRecord {
@@ -93,6 +103,83 @@ fn set_native_route_error(message: String) {
 
 fn take_native_route_error() -> Option<String> {
     native_route_error_state().lock().ok().and_then(|mut state| state.take())
+}
+
+fn document_boundary_fingerprint(value: &str) -> String {
+    const FNV_OFFSET: u64 = 14695981039346656037;
+    const FNV_PRIME: u64 = 1099511628211;
+
+    let mut fingerprint = FNV_OFFSET;
+    for &byte in value.as_bytes() {
+        fingerprint ^= u64::from(byte);
+        fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+    }
+
+    format!("{fingerprint:016x}")
+}
+
+fn document_excerpt(value: &str) -> String {
+    let excerpt: String = value.chars().take(DOCUMENT_EXCERPT_MAX_CHARS).collect();
+    if excerpt.chars().count() == value.chars().count() {
+        excerpt
+    } else {
+        format!("{excerpt}...")
+    }
+}
+
+fn valid_document_reference_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':'))
+}
+
+fn parse_document_reference_specs(text: &str) -> Result<Vec<DocumentReferenceSpec>, String> {
+    let mut references = Vec::new();
+    let mut search_index = 0usize;
+
+    while let Some(relative_index) = text[search_index..].find("@document[") {
+        let start = search_index + relative_index;
+        let payload_start = start + "@document[".len();
+        let Some(relative_end) = text[payload_start..].find(']') else {
+            return Err("unterminated @document reference".to_owned());
+        };
+        let end = payload_start + relative_end;
+        let raw = &text[start..=end];
+        let payload = text[payload_start..end].trim();
+        if payload.is_empty() {
+            return Err(format!("invalid @document reference `{raw}`"));
+        }
+
+        let (document_id, label) = match payload.split_once('|') {
+            Some((document_id, label)) => (document_id.trim(), label.trim()),
+            None => (payload, payload),
+        };
+
+        if !valid_document_reference_id(document_id) {
+            return Err(format!("invalid @document id `{document_id}`"));
+        }
+
+        references.push(DocumentReferenceSpec {
+            document_id: document_id.to_owned(),
+            label: if label.is_empty() {
+                document_id.to_owned()
+            } else {
+                label.to_owned()
+            },
+            raw: raw.to_owned(),
+        });
+
+        if references.len() > DOCUMENT_REFERENCE_MAX_COUNT {
+            return Err(format!(
+                "too many @document references; expected at most {DOCUMENT_REFERENCE_MAX_COUNT}"
+            ));
+        }
+
+        search_index = end + 1;
+    }
+
+    Ok(references)
 }
 
 fn trace_interpreter_enabled() -> bool {
@@ -1269,6 +1356,14 @@ unsafe fn encode_runtime_value_json(value: *mut ClaspRtHeader) -> Option<Vec<u8>
         }
         CLASP_RT_LAYOUT_VARIANT_VALUE => {
             let variant = value as *mut ClaspRtVariantValue;
+            if variant_items(variant).is_empty() {
+                return Some(
+                    json_string_literal(&normalize_variant_wire_tag(
+                        &String::from_utf8_lossy(string_bytes((*variant).tag)),
+                    ))
+                    .into_bytes(),
+                );
+            }
             let mut encoded = Vec::from([b'{']);
             append_json_string_literal(&mut encoded, b"$tag");
             encoded.extend_from_slice(b":");
@@ -2894,9 +2989,11 @@ fn interpret_runtime_binding(
         ("swarmReadyJson", 2) => unsafe { clasp_rt_swarm_ready_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmManagerNextJson", 2) => unsafe { clasp_rt_swarm_manager_next_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectiveCreateJson", 5) => unsafe { clasp_rt_swarm_objective_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
+        ("swarmObjectiveCreateWithDeadlineJson", 6) => unsafe { clasp_rt_swarm_objective_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmObjectiveStatusJson", 2) => unsafe { clasp_rt_swarm_objective_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateWithDeadlineJson", 8) => unsafe { clasp_rt_swarm_task_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
@@ -2968,11 +3065,27 @@ fn interpret_runtime_binding(
                 args[10],
             ) as *mut ClaspRtHeader
         },
+        ("superviseCommandJson", 10) => unsafe {
+            clasp_rt_supervise_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4] as *mut ClaspRtString,
+                args[5],
+                args[6],
+                args[7],
+                args[8],
+                args[9],
+            ) as *mut ClaspRtHeader
+        },
         ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
         ("writeFile", 2) => unsafe { clasp_rt_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("appendFile", 2) => unsafe { clasp_rt_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("mkdirAll", 1) => unsafe { clasp_rt_mkdir_all(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("readFile", 1) => unsafe { clasp_rt_read_file(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("documentUploadBoundary", 1) => unsafe { interpret_document_upload_boundary(args[0]) },
+        ("documentReferenceBoundary", 1) => unsafe { interpret_document_reference_boundary(args[0]) },
         ("mockLeadSummaryModel", 1) => unsafe { interpret_mock_lead_summary_model_binding(args[0]) },
         ("mockLeadOutreachModel", 1) => unsafe { interpret_mock_lead_outreach_model_binding(args[0]) },
         ("storeLead", 2) => unsafe { interpret_store_lead_binding(args[0], args[1]) },
@@ -3075,9 +3188,11 @@ fn interpret_builtin_runtime_binding(
         ("swarmReadyJson", 2) => unsafe { clasp_rt_swarm_ready_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmManagerNextJson", 2) => unsafe { clasp_rt_swarm_manager_next_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectiveCreateJson", 5) => unsafe { clasp_rt_swarm_objective_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
+        ("swarmObjectiveCreateWithDeadlineJson", 6) => unsafe { clasp_rt_swarm_objective_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmObjectiveStatusJson", 2) => unsafe { clasp_rt_swarm_objective_status_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateWithDeadlineJson", 8) => unsafe { clasp_rt_swarm_task_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
@@ -3147,6 +3262,20 @@ fn interpret_builtin_runtime_binding(
                 args[8],
                 args[9],
                 args[10],
+            ) as *mut ClaspRtHeader
+        },
+        ("superviseCommandJson", 10) => unsafe {
+            clasp_rt_supervise_command_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4] as *mut ClaspRtString,
+                args[5],
+                args[6],
+                args[7],
+                args[8],
+                args[9],
             ) as *mut ClaspRtHeader
         },
         ("sleepMs", 1) => unsafe { clasp_rt_sleep_ms(args[0]) as *mut ClaspRtHeader },
@@ -3226,9 +3355,11 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmReadyJson"
             | "swarmManagerNextJson"
             | "swarmObjectiveCreateJson"
+            | "swarmObjectiveCreateWithDeadlineJson"
             | "swarmObjectiveStatusJson"
             | "swarmObjectivesJson"
             | "swarmTaskCreateJson"
+            | "swarmTaskCreateWithDeadlineJson"
             | "swarmPolicySetJson"
             | "swarmToolRunJson"
             | "swarmVerifierRunJson"
@@ -3245,6 +3376,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "awaitWatchedProcessTimeoutJson"
             | "handoffCommandJson"
             | "upgradeCommandJson"
+            | "superviseCommandJson"
             | "sleepMs"
             | "writeFile"
             | "appendFile"
@@ -3280,6 +3412,50 @@ fn binding_return_type_name(binding: &ClaspRtNativeRuntimeBinding) -> Option<&st
 
 fn json_string_literal(value: &str) -> String {
     format!("{value:?}")
+}
+
+fn normalize_variant_wire_tag(tag: &str) -> String {
+    let mut normalized = String::with_capacity(tag.len());
+    let mut seen_text = false;
+
+    for ch in tag.chars() {
+        if ch == '_' {
+            if seen_text && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            continue;
+        }
+
+        if ch.is_ascii_uppercase() {
+            if seen_text && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            normalized.push(ch.to_ascii_lowercase());
+            seen_text = true;
+            continue;
+        }
+
+        normalized.push(ch);
+        seen_text = true;
+    }
+
+    if normalized.ends_with('_') {
+        normalized.pop();
+    }
+
+    normalized
+}
+
+fn variant_constructor_for_wire_tag<'a>(
+    variant_schema: &'a ClaspRtVariantSchema,
+    tag: &str,
+) -> Option<&'a ClaspRtVariantConstructorSchema> {
+    variant_schema.constructors.get(tag).or_else(|| {
+        variant_schema
+            .constructors
+            .values()
+            .find(|constructor| normalize_variant_wire_tag(&constructor.name) == tag)
+    })
 }
 
 fn json_variant_literal(tag: &str) -> String {
@@ -3345,6 +3521,117 @@ unsafe fn variant_field_text(
 ) -> Option<String> {
     let field_value = record_field_value_by_name(record_value, field_name)?;
     variant_tag_text(field_value)
+}
+
+unsafe fn runtime_result_ok(value: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    clasp_rt_build_variant_header("Ok", vec![value])
+}
+
+unsafe fn runtime_result_err(message: &str) -> *mut ClaspRtHeader {
+    clasp_rt_build_variant_header(
+        "Err",
+        vec![clasp_rt_build_string_header(message)],
+    )
+}
+
+unsafe fn document_upload_field_record(value: *mut ClaspRtHeader) -> Result<*mut ClaspRtRecordValue, String> {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return Err("document upload must be a record".to_owned());
+    }
+    Ok(value as *mut ClaspRtRecordValue)
+}
+
+unsafe fn interpret_document_upload_boundary(upload: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    let upload_record = match document_upload_field_record(upload) {
+        Ok(record) => record,
+        Err(message) => return runtime_result_err(&message),
+    };
+
+    let Some(document_id) = string_field_text(upload_record, b"documentId") else {
+        return runtime_result_err("document upload is missing `documentId`");
+    };
+    let Some(filename) = string_field_text(upload_record, b"filename") else {
+        return runtime_result_err("document upload is missing `filename`");
+    };
+    let Some(media_type) = string_field_text(upload_record, b"mediaType") else {
+        return runtime_result_err("document upload is missing `mediaType`");
+    };
+    let Some(size_bytes) = int_field_value(upload_record, b"sizeBytes") else {
+        return runtime_result_err("document upload is missing `sizeBytes`");
+    };
+    let Some(content_text) = string_field_text(upload_record, b"contentText") else {
+        return runtime_result_err("document upload is missing `contentText`");
+    };
+
+    if document_id.trim().is_empty() {
+        return runtime_result_err("document upload `documentId` must not be empty");
+    }
+    if filename.trim().is_empty() {
+        return runtime_result_err("document upload `filename` must not be empty");
+    }
+    if media_type.trim().is_empty() {
+        return runtime_result_err("document upload `mediaType` must not be empty");
+    }
+    if size_bytes < 0 {
+        return runtime_result_err("document upload `sizeBytes` must not be negative");
+    }
+    if size_bytes as usize > DOCUMENT_UPLOAD_MAX_BYTES {
+        return runtime_result_err("document upload exceeds the native ingestion byte limit");
+    }
+    if content_text.len() > DOCUMENT_UPLOAD_MAX_BYTES {
+        return runtime_result_err("document upload content exceeds the native ingestion byte limit");
+    }
+
+    let normalized_size_bytes = if size_bytes == 0 && !content_text.is_empty() {
+        content_text.len() as i64
+    } else {
+        size_bytes
+    };
+    let handle = clasp_rt_build_record_header(
+        "DocumentHandle",
+        vec![
+            ("documentId".to_owned(), clasp_rt_build_string_header(&document_id)),
+            ("filename".to_owned(), clasp_rt_build_string_header(&filename)),
+            ("mediaType".to_owned(), clasp_rt_build_string_header(&media_type)),
+            ("sizeBytes".to_owned(), clasp_rt_build_int_header(normalized_size_bytes)),
+            ("excerpt".to_owned(), clasp_rt_build_string_header(&document_excerpt(&content_text))),
+            (
+                "contentFingerprint".to_owned(),
+                clasp_rt_build_string_header(&document_boundary_fingerprint(&content_text)),
+            ),
+        ],
+    );
+    runtime_result_ok(handle)
+}
+
+unsafe fn interpret_document_reference_boundary(value: *mut ClaspRtHeader) -> *mut ClaspRtHeader {
+    let text = match clasp_rt_string_arg(value) {
+        Ok(text) => text,
+        Err(_) => return runtime_result_err("document references must be extracted from a string"),
+    };
+
+    match parse_document_reference_specs(&text) {
+        Ok(references) => {
+            let items = references
+                .into_iter()
+                .map(|reference| {
+                    clasp_rt_build_record_header(
+                        "DocumentReference",
+                        vec![
+                            (
+                                "documentId".to_owned(),
+                                clasp_rt_build_string_header(&reference.document_id),
+                            ),
+                            ("label".to_owned(), clasp_rt_build_string_header(&reference.label)),
+                            ("raw".to_owned(), clasp_rt_build_string_header(&reference.raw)),
+                        ],
+                    )
+                })
+                .collect();
+            runtime_result_ok(clasp_rt_build_list_header(items))
+        }
+        Err(message) => runtime_result_err(&message),
+    }
 }
 
 fn lead_record_json(lead: &NativeLeadRecord) -> String {
@@ -3433,21 +3720,33 @@ unsafe fn interpret_mock_lead_summary_model_binding(arg: *mut ClaspRtHeader) -> 
     let Some(budget) = int_field_value(intake, b"budget") else {
         return null_mut();
     };
+    let priority_hint = variant_field_text(intake, b"priorityHint");
     let segment = variant_field_text(intake, b"segment")
         .unwrap_or_else(|| "Startup".to_owned())
         .to_ascii_lowercase();
 
-    let priority = if budget >= 50_000 {
-        "High"
+    let priority = if let Some(priority_hint) = priority_hint {
+        priority_hint
+    } else if budget >= 50_000 {
+        "High".to_owned()
     } else if budget >= 20_000 {
-        "Medium"
+        "Medium".to_owned()
     } else {
-        "Low"
+        "Low".to_owned()
     };
     let priority = env::var("CLASP_MOCK_LEAD_SUMMARY_PRIORITY")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| priority.to_owned());
+        .unwrap_or(priority);
+    let priority = match priority.as_str() {
+        "High" | "high" => "High".to_owned(),
+        "Medium" | "medium" => "Medium".to_owned(),
+        "Low" | "low" => "Low".to_owned(),
+        _ => {
+            set_native_route_error("priority must be one of: low, medium, high".to_owned());
+            return null_mut();
+        }
+    };
     let segment_tag = match segment.as_str() {
         "enterprise" => "Enterprise",
         "growth" => "Growth",
@@ -3457,6 +3756,15 @@ unsafe fn interpret_mock_lead_summary_model_binding(arg: *mut ClaspRtHeader) -> 
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| segment_tag.to_owned());
+    let segment_tag = match segment_tag.as_str() {
+        "Enterprise" | "enterprise" => "Enterprise".to_owned(),
+        "Growth" | "growth" => "Growth".to_owned(),
+        "Startup" | "startup" => "Startup".to_owned(),
+        _ => {
+            set_native_route_error("segment must be one of: startup, growth, enterprise".to_owned());
+            return null_mut();
+        }
+    };
     let follow_up_required = env::var("CLASP_MOCK_LEAD_SUMMARY_FOLLOW_UP_REQUIRED")
         .ok()
         .and_then(|value| match value.to_ascii_lowercase().as_str() {
@@ -4775,7 +5083,7 @@ unsafe fn decode_named_json_to_runtime(
             if let Some(variant_schema) = image.variant_schemas.get(other) {
                 if bytes.get(value_slice.start) == Some(&b'"') {
                     let tag = json_string_owned(bytes, value_slice)?;
-                    let constructor = variant_schema.constructors.get(&tag)?;
+                    let constructor = variant_constructor_for_wire_tag(variant_schema, &tag)?;
                     if !constructor.payloads.is_empty() {
                         return None;
                     }
@@ -4786,7 +5094,7 @@ unsafe fn decode_named_json_to_runtime(
                     return None;
                 }
                 let tag = json_string_owned(bytes, json_object_lookup(bytes, value_slice, "$tag")?)?;
-                let constructor = variant_schema.constructors.get(&tag)?;
+                let constructor = variant_constructor_for_wire_tag(variant_schema, &tag)?;
                 let mut payloads = Vec::with_capacity(constructor.payloads.len());
                 for (index, payload_type) in constructor.payloads.iter().enumerate() {
                     let payload_key = format!("${index}");
@@ -6737,99 +7045,75 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
     }
 }
 
-fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, String> {
-    if args.len() < 5 {
-        return Err("invalid_spawn_command".to_owned());
-    }
+const WATCHED_PROCESS_MONITOR_SCRIPT: &str = r#"
+set -u
 
-    let stdout_path = args[0].clone();
-    let stderr_path = args[1].clone();
-    let heartbeat_path = args[2].clone();
-    let poll_ms = args[3]
-        .parse::<u64>()
-        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
-        .max(50);
-    let watched_command = args[4..].to_vec();
-    if watched_command.is_empty() {
-        return Err("missing_watch_command".to_owned());
-    }
+stdout_path="$1"
+stderr_path="$2"
+heartbeat_path="$3"
+poll_ms="$4"
+shift 4
 
-    let stdout_file = create_truncated_output_file(&stdout_path)?;
-    let stderr_file = create_truncated_output_file(&stderr_path)?;
-    let resolved_program = resolve_process_program(&watched_command[0], cwd);
-    let mut child = ProcessCommand::new(&resolved_program)
-        .args(&watched_command[1..])
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file))
-        .spawn()
-        .map_err(|err| err.to_string())?;
-    let pid = child.id();
-
-    let initial = watched_process_status_json(
-        pid,
-        true,
-        false,
-        -1,
-        &stdout_path,
-        &stderr_path,
-        &heartbeat_path,
-    );
-    write_watched_process_heartbeat(&heartbeat_path, &initial)?;
-
-    thread::spawn(move || loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let exit_code = status.code().unwrap_or(-1);
-                let payload = watched_process_status_json(
-                    pid,
-                    false,
-                    true,
-                    exit_code,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                break;
-            }
-            Ok(None) => {
-                let payload = watched_process_status_json(
-                    pid,
-                    true,
-                    false,
-                    -1,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                thread::sleep(Duration::from_millis(poll_ms));
-            }
-            Err(err) => {
-                if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&stderr_path) {
-                    let _ = writeln!(file, "{err}");
-                }
-                let payload = watched_process_status_json(
-                    pid,
-                    false,
-                    true,
-                    -1,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                break;
-            }
-        }
-    });
-
-    Ok(initial)
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
 }
 
-fn spawn_watched_process_with_env_json(
+now_ms() {
+  date +%s%3N 2>/dev/null || printf '0'
+}
+
+write_heartbeat() {
+  local running="$1"
+  local completed="$2"
+  local exit_code="$3"
+  local tmp_path="${heartbeat_path}.tmp.${BASHPID}"
+  printf '{"pid":%s,"running":%s,"completed":%s,"exitCode":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","updatedAtMs":%s}' \
+    "$child_pid" \
+    "$running" \
+    "$completed" \
+    "$exit_code" \
+    "$(json_escape "$stdout_path")" \
+    "$(json_escape "$stderr_path")" \
+    "$(json_escape "$heartbeat_path")" \
+    "$(now_ms)" >"$tmp_path" && mv "$tmp_path" "$heartbeat_path"
+}
+
+mkdir -p "$(dirname "$stdout_path")" "$(dirname "$stderr_path")" "$(dirname "$heartbeat_path")" || exit 125
+: >"$stdout_path" || exit 125
+: >"$stderr_path" || exit 125
+
+poll_sleep="0.050"
+if command -v awk >/dev/null 2>&1; then
+  poll_sleep="$(awk -v ms="$poll_ms" 'BEGIN { if (ms < 50) ms = 50; printf "%.3f", ms / 1000 }')"
+fi
+
+"$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
+child_pid=$!
+write_heartbeat true false -1
+
+(
+  while kill -0 "$child_pid" >/dev/null 2>&1; do
+    write_heartbeat true false -1
+    sleep "$poll_sleep"
+  done
+) &
+heartbeat_loop_pid=$!
+
+wait "$child_pid"
+exit_code=$?
+kill "$heartbeat_loop_pid" >/dev/null 2>&1 || true
+wait "$heartbeat_loop_pid" >/dev/null 2>&1 || true
+write_heartbeat false true "$exit_code"
+exit "$exit_code"
+"#;
+
+fn spawn_watched_process_monitor_json(
     cwd: &str,
     stdout_path: &str,
     stderr_path: &str,
@@ -6842,92 +7126,104 @@ fn spawn_watched_process_with_env_json(
         return Err("missing_watch_command".to_owned());
     }
 
-    let stdout_file = create_truncated_output_file(stdout_path)?;
-    let stderr_file = create_truncated_output_file(stderr_path)?;
-    let resolved_program = resolve_process_program(&watched_command[0], cwd);
-    let mut command = ProcessCommand::new(&resolved_program);
+    ensure_parent_dir(stdout_path)?;
+    ensure_parent_dir(stderr_path)?;
+    ensure_parent_dir(heartbeat_path)?;
+
+    let mut command = ProcessCommand::new("bash");
     command
-        .args(&watched_command[1..])
+        .arg("-c")
+        .arg(WATCHED_PROCESS_MONITOR_SCRIPT)
+        .arg("clasp-rt-watch-monitor")
+        .arg(stdout_path)
+        .arg(stderr_path)
+        .arg(heartbeat_path)
+        .arg(poll_ms.to_string())
+        .args(watched_command)
         .current_dir(cwd)
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file));
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     for (key, value) in extra_env {
         command.env(key, value);
     }
-    let mut child = command.spawn().map_err(|err| err.to_string())?;
-    let pid = child.id();
 
-    let stdout_path = stdout_path.to_owned();
-    let stderr_path = stderr_path.to_owned();
-    let heartbeat_path = heartbeat_path.to_owned();
-    let initial = watched_process_status_json(
-        pid,
+    let mut monitor = command.spawn().map_err(|err| err.to_string())?;
+    let monitor_pid = monitor.id();
+    thread::spawn(move || {
+        let _ = monitor.wait();
+    });
+
+    for _ in 0..100 {
+        match fs::read_to_string(heartbeat_path) {
+            Ok(payload) if !payload.trim().is_empty() => return Ok(payload),
+            _ => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+
+    let fallback = watched_process_status_json(
+        monitor_pid,
         true,
         false,
         -1,
-        &stdout_path,
-        &stderr_path,
-        &heartbeat_path,
+        stdout_path,
+        stderr_path,
+        heartbeat_path,
     );
-    write_watched_process_heartbeat(&heartbeat_path, &initial)?;
+    write_watched_process_heartbeat(heartbeat_path, &fallback)?;
+    Ok(fallback)
+}
 
-    thread::spawn(move || loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let exit_code = status.code().unwrap_or(-1);
-                let payload = watched_process_status_json(
-                    pid,
-                    false,
-                    true,
-                    exit_code,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                break;
-            }
-            Ok(None) => {
-                let payload = watched_process_status_json(
-                    pid,
-                    true,
-                    false,
-                    -1,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                thread::sleep(Duration::from_millis(poll_ms));
-            }
-            Err(err) => {
-                if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&stderr_path) {
-                    let _ = writeln!(file, "{err}");
-                }
-                let payload = watched_process_status_json(
-                    pid,
-                    false,
-                    true,
-                    -1,
-                    &stdout_path,
-                    &stderr_path,
-                    &heartbeat_path,
-                );
-                let _ = write_watched_process_heartbeat(&heartbeat_path, &payload);
-                break;
-            }
-        }
-    });
+fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 5 {
+        return Err("invalid_spawn_command".to_owned());
+    }
 
-    Ok(initial)
+    let poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    spawn_watched_process_monitor_json(cwd, &args[0], &args[1], &args[2], poll_ms, &[], &args[4..])
+}
+
+fn spawn_watched_process_with_env_json(
+    cwd: &str,
+    stdout_path: &str,
+    stderr_path: &str,
+    heartbeat_path: &str,
+    poll_ms: u64,
+    extra_env: &[(String, String)],
+    watched_command: &[String],
+) -> Result<String, String> {
+    spawn_watched_process_monitor_json(
+        cwd,
+        stdout_path,
+        stderr_path,
+        heartbeat_path,
+        poll_ms.max(50),
+        extra_env,
+        watched_command,
+    )
 }
 
 fn watched_process_exists(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    Path::new(&format!("/proc/{pid}")).exists()
+    let proc_root = format!("/proc/{pid}");
+    if !Path::new(&proc_root).exists() {
+        return false;
+    }
+
+    let stat_path = format!("{proc_root}/stat");
+    let Ok(stat) = fs::read_to_string(stat_path) else {
+        return true;
+    };
+    let Some((_, fields_after_name)) = stat.rsplit_once(") ") else {
+        return true;
+    };
+    let state = fields_after_name.split_whitespace().next().unwrap_or("");
+    state != "Z" && state != "X"
 }
 
 fn reconcile_watched_process_json(heartbeat_path: &str) -> Result<String, String> {
@@ -7187,6 +7483,10 @@ fn service_status_json(
     })
 }
 
+fn service_status_is_final(status: &str) -> bool {
+    status == "completed" || status == "failed"
+}
+
 fn upgrade_transaction_json(
     service_root: &str,
     service_id: &str,
@@ -7247,6 +7547,187 @@ fn clear_stale_upgrade_lock(lock_path: &str) -> Result<(), String> {
         remove_file_if_exists(lock_path)?;
     }
     Ok(())
+}
+
+fn clear_stale_service_supervisor_lock(lock_path: &str) -> Result<(), String> {
+    if !Path::new(lock_path).exists() {
+        return Ok(());
+    }
+    let Ok(lock_value) = read_json_file(lock_path) else {
+        remove_file_if_exists(lock_path)?;
+        return Ok(());
+    };
+    let Some(supervisor_pid) = lock_value
+        .get("supervisorPid")
+        .and_then(serde_json::Value::as_i64)
+        .map(|value| value.max(0) as u32)
+    else {
+        remove_file_if_exists(lock_path)?;
+        return Ok(());
+    };
+    if supervisor_pid == 0 || !watched_process_exists(supervisor_pid) {
+        remove_file_if_exists(lock_path)?;
+    }
+    Ok(())
+}
+
+fn service_record_has_live_owner(service_value: &serde_json::Value) -> Result<bool, String> {
+    let status = service_value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if status != "active" && status != "starting" && status != "restarting" {
+        return Ok(false);
+    }
+
+    let Some(heartbeat_path) = service_value
+        .get("heartbeatPath")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    if heartbeat_path.is_empty() || !Path::new(heartbeat_path).exists() {
+        return Ok(false);
+    }
+
+    let reconciled_payload = reconcile_watched_process_json(heartbeat_path)?;
+    let reconciled: serde_json::Value = serde_json::from_str(&reconciled_payload)
+        .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+    let running = reconciled
+        .get("running")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let completed = reconciled
+        .get("completed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    Ok(running && !completed)
+}
+
+fn reconcile_service_status_payload(service_path: &str) -> Result<Option<String>, String> {
+    if !Path::new(service_path).exists() {
+        return Ok(None);
+    }
+
+    let payload = fs::read_to_string(service_path).map_err(|err| err.to_string())?;
+    if payload.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let mut service_value: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|err| format!("invalid service heartbeat: {err}"))?;
+    let status = service_value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if service_status_is_final(status) {
+        return Ok(Some(payload));
+    }
+    if status != "active" && status != "starting" && status != "restarting" {
+        return Ok(Some(payload));
+    }
+
+    let Some(heartbeat_path) = service_value
+        .get("heartbeatPath")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(Some(payload));
+    };
+    if heartbeat_path.is_empty() {
+        return Ok(Some(payload));
+    }
+
+    if !Path::new(heartbeat_path).exists() {
+        service_value["status"] = serde_json::Value::String("failed".to_owned());
+        service_value["exitCode"] = serde_json::Value::Number(serde_json::Number::from(1));
+        service_value["updatedAtMs"] =
+            serde_json::Value::Number(serde_json::Number::from(runtime_time_unix_ms()));
+        let updated = service_value.to_string();
+        write_json_file_atomic(service_path, &service_value)?;
+        return Ok(Some(updated));
+    }
+
+    let reconciled_payload = reconcile_watched_process_json(heartbeat_path)?;
+    let reconciled: serde_json::Value = serde_json::from_str(&reconciled_payload)
+        .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+    let running = reconciled
+        .get("running")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let completed = reconciled
+        .get("completed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if running && !completed {
+        return Ok(Some(payload));
+    }
+
+    let exit_code = reconciled
+        .get("exitCode")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(-1);
+    let pid = reconciled
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+
+    service_value["status"] = serde_json::Value::String(if exit_code == 0 {
+        "completed".to_owned()
+    } else {
+        "failed".to_owned()
+    });
+    if pid > 0 {
+        service_value["ownerPid"] = serde_json::Value::Number(serde_json::Number::from(pid));
+    }
+    service_value["exitCode"] = serde_json::Value::Number(serde_json::Number::from(exit_code));
+    service_value["updatedAtMs"] =
+        serde_json::Value::Number(serde_json::Number::from(runtime_time_unix_ms()));
+
+    let updated = service_value.to_string();
+    write_json_file_atomic(service_path, &service_value)?;
+    Ok(Some(updated))
+}
+
+fn clear_stale_service_status_for_restart(service_path: &Path) -> Result<(), String> {
+    if !service_path.exists() {
+        return Ok(());
+    }
+
+    let service_path_text = service_path.to_string_lossy();
+    let Ok(service_value) = read_json_file(&service_path_text) else {
+        remove_file_if_exists(&service_path_text)?;
+        return Ok(());
+    };
+
+    if service_record_has_live_owner(&service_value)? {
+        return Ok(());
+    }
+
+    remove_file_if_exists(&service_path_text)
+}
+
+fn service_wait_result(service_path: &str, timeout_ms: u64) -> Result<String, String> {
+    let started = Instant::now();
+    loop {
+        if let Some(payload) = reconcile_service_status_payload(service_path)? {
+            if !payload.trim().is_empty() {
+                let decoded: serde_json::Value = serde_json::from_str(&payload)
+                    .map_err(|err| format!("invalid service heartbeat: {err}"))?;
+                let status = decoded
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                if status == "active" || service_status_is_final(status) {
+                    return Ok(payload);
+                }
+            }
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms.max(1)) {
+            return Err("service_wait_timeout".to_owned());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn upgrade_wait_result(transaction_path: &str, timeout_ms: u64) -> Result<String, String> {
@@ -7365,6 +7846,10 @@ fn run_upgrade_supervisor_from_config(config_path: &str) -> Result<(), String> {
         (
             "CLASP_RT_UPGRADE_GENERATION_JSON".to_owned(),
             generation.to_string(),
+        ),
+        (
+            "CLASP_RT_SERVICE_SUPERVISED_JSON".to_owned(),
+            "true".to_owned(),
         ),
     ];
     let initial_payload = spawn_watched_process_with_env_json(
@@ -7560,6 +8045,328 @@ fn run_upgrade_supervisor_from_config(config_path: &str) -> Result<(), String> {
 
 pub fn clasp_rt_run_upgrade_supervisor_command(config_path: &str) -> Result<(), String> {
     run_upgrade_supervisor_from_config(config_path)
+}
+
+fn run_service_supervisor_from_config(config_path: &str) -> Result<(), String> {
+    let config = read_json_file(config_path)?;
+    let cwd = json_string_field(&config, "cwd")?;
+    let service_root = json_string_field(&config, "serviceRoot")?;
+    let service_id = json_string_field(&config, "serviceId")?;
+    let service_path = json_string_field(&config, "servicePath")?;
+    let lock_path = json_string_field(&config, "lockPath")?;
+    let ready_path = json_string_field(&config, "readyPath")?;
+    let ready_contains = json_string_field(&config, "readyContains")?;
+    let watch_poll_ms = json_i64_field(&config, "watchPollMs")?.max(50) as u64;
+    let ready_poll_ms = json_i64_field(&config, "readyPollMs")?.max(10) as u64;
+    let ready_timeout_ms = json_i64_field(&config, "readyTimeoutMs")?.max(1) as u64;
+    let restart_delay_ms = json_i64_field(&config, "restartDelayMs")?.max(0) as u64;
+    let command = json_string_list_field(&config, "command")?;
+    let service_root_path = Path::new(&service_root).to_path_buf();
+    fs::create_dir_all(service_root_path.join("runs")).map_err(|err| err.to_string())?;
+
+    write_json_file_atomic(
+        &lock_path,
+        &serde_json::json!({
+            "supervisorPid": std::process::id() as i64,
+            "configPath": config_path,
+            "createdAtMs": runtime_time_unix_ms(),
+        }),
+    )?;
+
+    let mut generation = read_json_file(&service_path)
+        .ok()
+        .and_then(|value| value.get("generation").and_then(serde_json::Value::as_i64))
+        .unwrap_or(0);
+
+    loop {
+        generation += 1;
+        let run_id = format!("run-{}-{}", generation, runtime_time_unix_ms());
+        let run_root = service_root_path.join("runs").join(&run_id);
+        fs::create_dir_all(&run_root).map_err(|err| err.to_string())?;
+        let stdout_path = run_root.join("service.stdout.log");
+        let stderr_path = run_root.join("service.stderr.log");
+        let heartbeat_path = run_root.join("service.heartbeat.json");
+
+        remove_file_if_exists(&ready_path)?;
+
+        let child_env = vec![
+            (
+                "CLASP_RT_SERVICE_SUPERVISED_JSON".to_owned(),
+                "true".to_owned(),
+            ),
+            (
+                "CLASP_RT_SERVICE_ROOT_JSON".to_owned(),
+                json_string_literal(&service_root),
+            ),
+            (
+                "CLASP_RT_SERVICE_ID_JSON".to_owned(),
+                json_string_literal(&service_id),
+            ),
+            (
+                "CLASP_RT_SERVICE_GENERATION_JSON".to_owned(),
+                generation.to_string(),
+            ),
+        ];
+        let initial_payload = spawn_watched_process_with_env_json(
+            &cwd,
+            &stdout_path.to_string_lossy(),
+            &stderr_path.to_string_lossy(),
+            &heartbeat_path.to_string_lossy(),
+            watch_poll_ms,
+            &child_env,
+            &command,
+        )?;
+        let initial: serde_json::Value = serde_json::from_str(&initial_payload)
+            .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+        let owner_pid = initial
+            .get("pid")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+
+        write_json_file_atomic(
+            &service_path,
+            &service_status_json(
+                &service_root,
+                &service_id,
+                generation,
+                "starting",
+                owner_pid,
+                &heartbeat_path.to_string_lossy(),
+                config_path,
+                "",
+                -1,
+            ),
+        )?;
+
+        let ready_started = Instant::now();
+        let mut ready = false;
+        loop {
+            let reconciled_payload = reconcile_watched_process_json(&heartbeat_path.to_string_lossy())?;
+            let reconciled: serde_json::Value = serde_json::from_str(&reconciled_payload)
+                .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+            let running = reconciled
+                .get("running")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let completed = reconciled
+                .get("completed")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            if completed || !running {
+                let exit_code = reconciled
+                    .get("exitCode")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(-1);
+                write_json_file_atomic(
+                    &service_path,
+                    &service_status_json(
+                        &service_root,
+                        &service_id,
+                        generation,
+                        "restarting",
+                        owner_pid,
+                        &heartbeat_path.to_string_lossy(),
+                        config_path,
+                        "",
+                        exit_code,
+                    ),
+                )?;
+                break;
+            }
+            if ready_marker_matches(&ready_path, &ready_contains)? {
+                ready = true;
+                write_json_file_atomic(
+                    &service_path,
+                    &service_status_json(
+                        &service_root,
+                        &service_id,
+                        generation,
+                        "active",
+                        owner_pid,
+                        &heartbeat_path.to_string_lossy(),
+                        config_path,
+                        "",
+                        -1,
+                    ),
+                )?;
+                break;
+            }
+            if ready_started.elapsed() >= Duration::from_millis(ready_timeout_ms) {
+                write_json_file_atomic(
+                    &service_path,
+                    &service_status_json(
+                        &service_root,
+                        &service_id,
+                        generation,
+                        "failed",
+                        owner_pid,
+                        &heartbeat_path.to_string_lossy(),
+                        config_path,
+                        "",
+                        -1,
+                    ),
+                )?;
+                remove_file_if_exists(&lock_path)?;
+                return Err("service ready timeout".to_owned());
+            }
+            let remaining_ms = ready_timeout_ms.saturating_sub(ready_started.elapsed().as_millis() as u64);
+            thread::sleep(Duration::from_millis(ready_poll_ms.min(remaining_ms.max(1))));
+        }
+
+        if !ready {
+            if restart_delay_ms > 0 {
+                thread::sleep(Duration::from_millis(restart_delay_ms));
+            }
+            continue;
+        }
+
+        let final_payload = await_watched_process_json(&heartbeat_path.to_string_lossy(), watch_poll_ms)?;
+        let final_state: serde_json::Value = serde_json::from_str(&final_payload)
+            .map_err(|err| format!("invalid watched process heartbeat: {err}"))?;
+        let exit_code = final_state
+            .get("exitCode")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(-1);
+
+        if exit_code == 0 {
+            write_json_file_atomic(
+                &service_path,
+                &service_status_json(
+                    &service_root,
+                    &service_id,
+                    generation,
+                    "completed",
+                    owner_pid,
+                    &heartbeat_path.to_string_lossy(),
+                    config_path,
+                    "",
+                    exit_code,
+                ),
+            )?;
+            remove_file_if_exists(&lock_path)?;
+            return Ok(());
+        }
+
+        write_json_file_atomic(
+            &service_path,
+            &service_status_json(
+                &service_root,
+                &service_id,
+                generation,
+                "restarting",
+                owner_pid,
+                &heartbeat_path.to_string_lossy(),
+                config_path,
+                "",
+                exit_code,
+            ),
+        )?;
+        if restart_delay_ms > 0 {
+            thread::sleep(Duration::from_millis(restart_delay_ms));
+        }
+    }
+}
+
+pub fn clasp_rt_run_service_supervisor_command(config_path: &str) -> Result<(), String> {
+    run_service_supervisor_from_config(config_path)
+}
+
+fn supervise_command_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 9 {
+        return Err("invalid_supervise_command".to_owned());
+    }
+
+    let service_root = args[0].clone();
+    let service_id = args[1].clone();
+    let ready_path = args[2].clone();
+    let ready_contains = args[3].clone();
+    let watch_poll_ms = args[4]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let ready_poll_ms = args[5]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_poll_ms".to_owned())?
+        .max(10);
+    let ready_timeout_ms = args[6]
+        .parse::<u64>()
+        .map_err(|_| "invalid_ready_timeout_ms".to_owned())?
+        .max(1);
+    let restart_delay_ms = args[7]
+        .parse::<u64>()
+        .map_err(|_| "invalid_restart_delay_ms".to_owned())?;
+    let command = args[8..].to_vec();
+
+    if service_root.is_empty() {
+        return Err("missing_service_root".to_owned());
+    }
+    if service_id.is_empty() {
+        return Err("missing_service_id".to_owned());
+    }
+    if ready_path.is_empty() {
+        return Err("missing_service_ready_path".to_owned());
+    }
+    if command.is_empty() {
+        return Err("missing_service_command".to_owned());
+    }
+
+    let service_root_path = Path::new(&service_root).to_path_buf();
+    fs::create_dir_all(&service_root_path).map_err(|err| err.to_string())?;
+    let service_path = service_root_path.join("service.json");
+    let lock_path = service_root_path.join("supervisor.lock");
+    let config_path = service_root_path.join("supervisor.config.json");
+    clear_stale_service_supervisor_lock(&lock_path.to_string_lossy())?;
+    if !lock_path.exists() {
+        clear_stale_service_status_for_restart(&service_path)?;
+    }
+
+    let config_payload = serde_json::json!({
+        "cwd": cwd,
+        "serviceRoot": service_root,
+        "serviceId": service_id,
+        "servicePath": service_path.display().to_string(),
+        "lockPath": lock_path.display().to_string(),
+        "readyPath": ready_path,
+        "readyContains": ready_contains,
+        "watchPollMs": watch_poll_ms as i64,
+        "readyPollMs": ready_poll_ms as i64,
+        "readyTimeoutMs": ready_timeout_ms as i64,
+        "restartDelayMs": restart_delay_ms as i64,
+        "command": command,
+    });
+    write_json_file_atomic(&config_path.to_string_lossy(), &config_payload)?;
+
+    if !lock_path.exists() {
+        let current_exe =
+            env::current_exe().map_err(|err| format!("failed to resolve current executable: {err}"))?;
+        let mut supervisor = ProcessCommand::new(current_exe);
+        supervisor
+            .arg("__clasp-service-supervisor")
+            .arg(&config_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null());
+        if env::var("CLASP_RT_TRACE_UPGRADE").is_ok() {
+            supervisor.stderr(Stdio::inherit());
+        } else {
+            supervisor.stderr(Stdio::null());
+        }
+        let spawned = supervisor
+            .spawn()
+            .map_err(|err| format!("failed to spawn service supervisor: {err}"))?;
+        write_json_file_atomic(
+            &lock_path.to_string_lossy(),
+            &serde_json::json!({
+                "supervisorPid": spawned.id() as i64,
+                "configPath": config_path.display().to_string(),
+                "createdAtMs": runtime_time_unix_ms(),
+            }),
+        )?;
+    }
+
+    service_wait_result(
+        &service_path.to_string_lossy(),
+        ready_timeout_ms.saturating_add(restart_delay_ms).saturating_add(5000),
+    )
 }
 
 fn upgrade_command_json(cwd: &str, args: &[String]) -> Result<String, String> {
@@ -8435,6 +9242,26 @@ pub unsafe extern "C" fn clasp_rt_mkdir_all(path: *mut ClaspRtString) -> *mut Cl
 #[no_mangle]
 pub unsafe extern "C" fn clasp_rt_env_var(name: *mut ClaspRtString) -> *mut ClaspRtResultString {
     let name_string = String::from_utf8_lossy(string_bytes(name)).into_owned();
+    if name_string == "CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON" {
+        match env::var(&name_string) {
+            Ok(value) => return clasp_rt_result_ok_string(build_runtime_string(value.as_bytes())),
+            Err(env::VarError::NotUnicode(_)) => {
+                return clasp_rt_result_err_string(build_runtime_string(b"invalid"))
+            }
+            Err(env::VarError::NotPresent) => {
+                let encoded = serde_json::to_string(
+                    &env::current_exe()
+                        .ok()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                );
+                return match encoded {
+                    Ok(value) => clasp_rt_result_ok_string(build_runtime_string(value.as_bytes())),
+                    Err(_) => clasp_rt_result_err_string(build_runtime_string(b"missing")),
+                };
+            }
+        }
+    }
     match env::var(&name_string) {
         Ok(value) => clasp_rt_result_ok_string(build_runtime_string(value.as_bytes())),
         Err(env::VarError::NotPresent) => clasp_rt_result_err_string(build_runtime_string(b"missing")),
@@ -8697,6 +9524,37 @@ pub unsafe extern "C" fn clasp_rt_swarm_objective_create_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_objective_create_with_deadline_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    detail: *mut ClaspRtString,
+    max_tasks: *mut ClaspRtHeader,
+    max_runs: *mut ClaspRtHeader,
+    deadline_at_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let max_tasks_value = match clasp_rt_int_arg(max_tasks) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_runs_value = match clasp_rt_int_arg(max_runs) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let deadline_value = match clasp_rt_int_arg(deadline_at_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_objective_create_with_deadline(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
+        max_tasks_value,
+        max_runs_value,
+        deadline_value,
+    ))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_objective_status_json(
     root: *mut ClaspRtString,
     objective_id: *mut ClaspRtString,
@@ -8741,6 +9599,45 @@ pub unsafe extern "C" fn clasp_rt_swarm_task_create_json(
         &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
         &dependencies_value,
         max_runs_value,
+        lease_timeout_value,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_task_create_with_deadline_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    detail: *mut ClaspRtString,
+    dependencies: *mut ClaspRtHeader,
+    max_runs: *mut ClaspRtHeader,
+    deadline_at_ms: *mut ClaspRtHeader,
+    lease_timeout_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let dependencies_value = match clasp_rt_string_list_arg(dependencies) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_runs_value = match clasp_rt_int_arg(max_runs) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let deadline_value = match clasp_rt_int_arg(deadline_at_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let lease_timeout_value = match clasp_rt_int_arg(lease_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_task_create_with_deadline(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
+        &dependencies_value,
+        max_runs_value,
+        deadline_value,
         lease_timeout_value,
     ))
 }
@@ -9184,6 +10081,64 @@ pub unsafe extern "C" fn clasp_rt_upgrade_command_json(
     }
 }
 
+pub unsafe extern "C" fn clasp_rt_supervise_command_json(
+    cwd: *mut ClaspRtString,
+    service_root: *mut ClaspRtString,
+    service_id: *mut ClaspRtString,
+    ready_path: *mut ClaspRtString,
+    ready_contains: *mut ClaspRtString,
+    watch_poll_ms: *mut ClaspRtHeader,
+    ready_poll_ms: *mut ClaspRtHeader,
+    ready_timeout_ms: *mut ClaspRtHeader,
+    restart_delay_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let service_root_string = String::from_utf8_lossy(string_bytes(service_root)).into_owned();
+    let service_id_string = String::from_utf8_lossy(string_bytes(service_id)).into_owned();
+    let ready_path_string = String::from_utf8_lossy(string_bytes(ready_path)).into_owned();
+    let ready_contains_string = String::from_utf8_lossy(string_bytes(ready_contains)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let watch_poll_ms_value = match clasp_rt_int_arg(watch_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_poll_ms_value = match clasp_rt_int_arg(ready_poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let ready_timeout_ms_value = match clasp_rt_int_arg(ready_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let restart_delay_ms_value = match clasp_rt_int_arg(restart_delay_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+
+    let mut args = vec![
+        service_root_string,
+        service_id_string,
+        ready_path_string,
+        ready_contains_string,
+        watch_poll_ms_value.to_string(),
+        ready_poll_ms_value.to_string(),
+        ready_timeout_ms_value.to_string(),
+        restart_delay_ms_value.to_string(),
+    ];
+    args.extend(command_values);
+    match supervise_command_json(&cwd_string, &args) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
 pub unsafe extern "C" fn clasp_rt_sleep_ms(
     delay_ms: *mut ClaspRtHeader,
 ) -> *mut ClaspRtResultString {
@@ -9213,6 +10168,96 @@ mod tests {
             .map(|value| build_runtime_string(value) as *mut ClaspRtHeader)
             .collect();
         build_runtime_list_value(items) as *mut ClaspRtHeader
+    }
+
+    #[test]
+    fn parse_document_reference_specs_extracts_explicit_references() {
+        let references = parse_document_reference_specs(
+            "Compare @document[doc-alpha|Alpha MSA] against @document[doc-beta].",
+        )
+        .expect("expected @document references to parse");
+
+        assert_eq!(
+            references,
+            vec![
+                DocumentReferenceSpec {
+                    document_id: "doc-alpha".to_owned(),
+                    label: "Alpha MSA".to_owned(),
+                    raw: "@document[doc-alpha|Alpha MSA]".to_owned(),
+                },
+                DocumentReferenceSpec {
+                    document_id: "doc-beta".to_owned(),
+                    label: "doc-beta".to_owned(),
+                    raw: "@document[doc-beta]".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_document_reference_specs_rejects_unterminated_references() {
+        let error = parse_document_reference_specs("Review @document[doc-alpha")
+            .expect_err("expected unterminated reference to fail");
+        assert_eq!(error, "unterminated @document reference");
+    }
+
+    #[test]
+    fn document_upload_boundary_returns_typed_handle() {
+        unsafe {
+            let upload = clasp_rt_build_record_header(
+                "UploadedDocument",
+                vec![
+                    (
+                        "documentId".to_owned(),
+                        clasp_rt_build_string_header("doc-service-agreement"),
+                    ),
+                    (
+                        "filename".to_owned(),
+                        clasp_rt_build_string_header("service-agreement.txt"),
+                    ),
+                    ("mediaType".to_owned(), clasp_rt_build_string_header("text/plain")),
+                    ("sizeBytes".to_owned(), clasp_rt_build_int_header(0)),
+                    (
+                        "contentText".to_owned(),
+                        clasp_rt_build_string_header("Service agreement terms and renewal window."),
+                    ),
+                ],
+            );
+
+            let result = interpret_document_upload_boundary(upload);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+
+            let result_variant = result as *mut ClaspRtVariantValue;
+            let payload = variant_items(result_variant)[0];
+            let payload_record = payload as *mut ClaspRtRecordValue;
+            assert_eq!(string_bytes((*payload_record).record_name), b"DocumentHandle");
+            assert_eq!(
+                string_field_text(payload_record, b"documentId"),
+                Some("doc-service-agreement".to_owned())
+            );
+            assert_eq!(
+                string_field_text(payload_record, b"filename"),
+                Some("service-agreement.txt".to_owned())
+            );
+            assert_eq!(
+                string_field_text(payload_record, b"mediaType"),
+                Some("text/plain".to_owned())
+            );
+            assert_eq!(int_field_value(payload_record, b"sizeBytes"), Some(43));
+            assert_eq!(
+                string_field_text(payload_record, b"excerpt"),
+                Some("Service agreement terms and renewal window.".to_owned())
+            );
+            assert_eq!(
+                string_field_text(payload_record, b"contentFingerprint"),
+                Some(document_boundary_fingerprint(
+                    "Service agreement terms and renewal window."
+                ))
+            );
+
+            release_header(null_mut(), upload);
+            release_header(null_mut(), result);
+        }
     }
 
     #[test]
@@ -9562,6 +10607,179 @@ mod tests {
     }
 
     #[test]
+    fn clear_stale_service_status_for_restart_removes_dead_active_record() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-stale-service-status-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected stale service temp root");
+        let service_path = temp_root.join("service.json");
+        let heartbeat_path = temp_root.join("service.heartbeat.json");
+        std::fs::write(
+            &heartbeat_path,
+            serde_json::json!({
+                "pid": 0,
+                "running": true,
+                "completed": false,
+                "exitCode": 0,
+                "stdoutPath": temp_root.join("stdout.log").display().to_string(),
+                "stderrPath": temp_root.join("stderr.log").display().to_string(),
+                "heartbeatPath": heartbeat_path.display().to_string(),
+                "updatedAtMs": 0,
+            })
+            .to_string(),
+        )
+        .expect("expected stale service heartbeat write");
+        std::fs::write(
+            &service_path,
+            service_status_json(
+                &temp_root.to_string_lossy(),
+                "goal-manager",
+                1,
+                "active",
+                0,
+                &heartbeat_path.to_string_lossy(),
+                "",
+                "",
+                -1,
+            )
+            .to_string(),
+        )
+        .expect("expected stale service status write");
+
+        clear_stale_service_status_for_restart(&service_path)
+            .expect("expected stale service status cleanup");
+
+        assert!(
+            !service_path.exists(),
+            "expected stale active service record to be removed before supervisor restart"
+        );
+        let reconciled: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&heartbeat_path).expect("expected reconciled heartbeat")
+        )
+        .expect("expected heartbeat json");
+        assert_eq!(reconciled["running"].as_bool(), Some(false));
+        assert_eq!(reconciled["completed"].as_bool(), Some(true));
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn clear_stale_service_status_for_restart_preserves_live_active_record() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-live-service-status-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected live service temp root");
+        let service_path = temp_root.join("service.json");
+        let heartbeat_path = temp_root.join("service.heartbeat.json");
+        std::fs::write(
+            &heartbeat_path,
+            serde_json::json!({
+                "pid": std::process::id(),
+                "running": true,
+                "completed": false,
+                "exitCode": 0,
+                "stdoutPath": temp_root.join("stdout.log").display().to_string(),
+                "stderrPath": temp_root.join("stderr.log").display().to_string(),
+                "heartbeatPath": heartbeat_path.display().to_string(),
+                "updatedAtMs": runtime_time_unix_ms(),
+            })
+            .to_string(),
+        )
+        .expect("expected live service heartbeat write");
+        std::fs::write(
+            &service_path,
+            service_status_json(
+                &temp_root.to_string_lossy(),
+                "goal-manager",
+                1,
+                "active",
+                std::process::id() as i64,
+                &heartbeat_path.to_string_lossy(),
+                "",
+                "",
+                -1,
+            )
+            .to_string(),
+        )
+        .expect("expected live service status write");
+
+        clear_stale_service_status_for_restart(&service_path)
+            .expect("expected live service status check");
+
+        assert!(
+            service_path.exists(),
+            "expected live active service record to be preserved"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn service_wait_result_reconciles_dead_active_record() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-service-wait-stale-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected stale service temp root");
+        let service_path = temp_root.join("service.json");
+        let heartbeat_path = temp_root.join("service.heartbeat.json");
+        std::fs::write(
+            &heartbeat_path,
+            serde_json::json!({
+                "pid": 0,
+                "running": true,
+                "completed": false,
+                "exitCode": 0,
+                "stdoutPath": temp_root.join("stdout.log").display().to_string(),
+                "stderrPath": temp_root.join("stderr.log").display().to_string(),
+                "heartbeatPath": heartbeat_path.display().to_string(),
+                "updatedAtMs": 0,
+            })
+            .to_string(),
+        )
+        .expect("expected stale service heartbeat write");
+        std::fs::write(
+            &service_path,
+            service_status_json(
+                &temp_root.to_string_lossy(),
+                "goal-manager",
+                1,
+                "active",
+                0,
+                &heartbeat_path.to_string_lossy(),
+                "",
+                "",
+                -1,
+            )
+            .to_string(),
+        )
+        .expect("expected stale service status write");
+
+        let result = service_wait_result(service_path.to_str().expect("service path text"), 100)
+            .expect("expected service wait to reconcile stale active record");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&result).expect("expected valid reconciled service json");
+        assert_eq!(parsed["status"].as_str(), Some("failed"));
+        assert_eq!(parsed["exitCode"].as_i64(), Some(-1));
+
+        let persisted: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&service_path).expect("expected persisted service status")
+        )
+        .expect("expected persisted service json");
+        assert_eq!(persisted["status"].as_str(), Some("failed"));
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn watched_process_exists_handles_basic_liveness() {
+        assert!(!watched_process_exists(0));
+        assert!(watched_process_exists(std::process::id()));
+    }
+
+    #[test]
     fn await_watched_process_json_retries_transient_empty_heartbeat() {
         unsafe {
             let heartbeat_path =
@@ -9776,7 +10994,8 @@ mod tests {
         let transaction_root = service_root.join("transactions").join("tx-1");
         std::fs::create_dir_all(&transaction_root).expect("expected transaction root");
         let script_path = temp_root.join("candidate.sh");
-        let env_capture_path = temp_root.join("candidate.env");
+        let service_id_capture_path = temp_root.join("candidate.service_id.env");
+        let supervised_capture_path = temp_root.join("candidate.supervised.env");
         let ready_path = temp_root.join("ready.txt");
         let snapshot_path = transaction_root.join("snapshot.json");
         let stdout_path = transaction_root.join("candidate.stdout.log");
@@ -9790,8 +11009,9 @@ mod tests {
         std::fs::write(
             &script_path,
             format!(
-                "#!/bin/sh\nprintf '%s' \"$CLASP_RT_UPGRADE_SERVICE_ID_JSON\" > {}\nsleep 0.05\nprintf ready > {}\nsleep 0.05\nprintf done\\n\n",
-                env_capture_path.display(),
+                "#!/bin/sh\nprintf '%s' \"$CLASP_RT_UPGRADE_SERVICE_ID_JSON\" > {}\nprintf '%s' \"$CLASP_RT_SERVICE_SUPERVISED_JSON\" > {}\nsleep 0.05\nprintf ready > {}\nsleep 0.05\nprintf done\\n\n",
+                service_id_capture_path.display(),
+                supervised_capture_path.display(),
                 ready_path.display()
             ),
         )
@@ -9834,7 +11054,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&service_path).expect("service text"))
                 .expect("service json");
         let captured_service_id =
-            std::fs::read_to_string(&env_capture_path).expect("captured service id env");
+            std::fs::read_to_string(&service_id_capture_path).expect("captured service id env");
+        let captured_supervised =
+            std::fs::read_to_string(&supervised_capture_path).expect("captured supervised env");
 
         assert_eq!(transaction["phase"].as_str(), Some("completed"));
         assert_eq!(transaction["committed"].as_bool(), Some(true));
@@ -9842,7 +11064,95 @@ mod tests {
         assert_eq!(service["status"].as_str(), Some("completed"));
         assert_eq!(service["generation"].as_i64(), Some(1));
         assert_eq!(captured_service_id, "\"feedback-loop-service\"");
+        assert_eq!(captured_supervised, "true");
         assert!(!lock_path.exists(), "expected supervisor to release upgrade lock");
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn service_supervisor_restarts_failed_candidate_and_finishes_successor() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-service-supervisor-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected service temp root");
+        let service_root = temp_root.join("service");
+        let service_path = service_root.join("service.json");
+        let lock_path = service_root.join("supervisor.lock");
+        let config_path = service_root.join("supervisor.config.json");
+        let script_path = temp_root.join("service.sh");
+        let ready_path = temp_root.join("ready.txt");
+        let count_path = temp_root.join("count.txt");
+        std::fs::create_dir_all(&service_root).expect("expected service root");
+
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\ncount=0\nif [ -f {count} ]; then count=$(cat {count}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {count}\nprintf ready > {ready}\nif [ \"$count\" -eq 1 ]; then exit 7; fi\nprintf done\\n\n",
+                count = count_path.display(),
+                ready = ready_path.display(),
+            ),
+        )
+        .expect("expected service script write");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("expected service script metadata")
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("expected executable service script permissions");
+
+        let config = serde_json::json!({
+            "cwd": temp_root.display().to_string(),
+            "serviceRoot": service_root.display().to_string(),
+            "serviceId": "goal-manager-service",
+            "servicePath": service_path.display().to_string(),
+            "lockPath": lock_path.display().to_string(),
+            "readyPath": ready_path.display().to_string(),
+            "readyContains": "ready",
+            "watchPollMs": 50,
+            "readyPollMs": 25,
+            "readyTimeoutMs": 1000,
+            "restartDelayMs": 25,
+            "command": [script_path.display().to_string()],
+        });
+        std::fs::write(&config_path, config.to_string()).expect("expected supervisor config write");
+
+        let config_path_text = config_path
+            .to_str()
+            .expect("expected config path text")
+            .to_owned();
+        let supervisor = std::thread::spawn(move || {
+            run_service_supervisor_from_config(&config_path_text)
+                .expect("expected service supervisor run");
+        });
+
+        let initial = service_wait_result(service_path.to_str().expect("service path text"), 6000)
+            .expect("expected service wait to observe active service");
+        let initial_json: serde_json::Value =
+            serde_json::from_str(&initial).expect("expected valid initial service json");
+        assert_eq!(initial_json["status"].as_str(), Some("active"));
+
+        let started = Instant::now();
+        loop {
+            let payload = std::fs::read_to_string(&service_path).expect("expected service status");
+            let service: serde_json::Value =
+                serde_json::from_str(&payload).expect("expected valid service status");
+            if service["status"].as_str() == Some("completed") {
+                assert_eq!(service["generation"].as_i64(), Some(2));
+                break;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "expected supervisor to complete restarted service"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+
+        let count = std::fs::read_to_string(&count_path).expect("expected restart counter");
+        assert_eq!(count.trim(), "2");
+        assert!(!lock_path.exists(), "expected service supervisor lock to be released");
+        assert!(config_path.exists(), "expected config to remain for inspection");
+        supervisor.join().expect("expected service supervisor thread to join");
 
         let _ = std::fs::remove_dir_all(temp_root);
     }
@@ -9880,6 +11190,33 @@ mod tests {
 
             release_header(null_mut(), value);
             release_header(null_mut(), result);
+        }
+    }
+
+    #[test]
+    fn env_var_virtualizes_current_executable_path_when_unset() {
+        let original = std::env::var("CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON").ok();
+        std::env::remove_var("CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON");
+
+        unsafe {
+            let name = build_runtime_string(b"CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON");
+            let result = clasp_rt_env_var(name);
+            assert!((*result).is_ok);
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let decoded: String = serde_json::from_str(&payload).expect("expected json string payload");
+            let expected = std::env::current_exe()
+                .expect("expected current test binary path")
+                .to_string_lossy()
+                .into_owned();
+            assert_eq!(decoded, expected);
+
+            release_header(null_mut(), name as *mut ClaspRtHeader);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+        }
+
+        match original {
+            Some(value) => std::env::set_var("CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON", value),
+            None => std::env::remove_var("CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON"),
         }
     }
 }
