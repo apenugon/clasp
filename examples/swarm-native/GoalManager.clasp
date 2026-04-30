@@ -5001,6 +5001,20 @@ childLoopMissingReport spec =
         ]
         (taskRecoverableDiffDetails spec.taskId)))
 
+childLoopMissingLaunchHeartbeatReport : PlannerTaskSpec -> VerifierReport
+childLoopMissingLaunchHeartbeatReport spec =
+  syntheticFailureReport
+    "task child loop failed to establish a durable launch heartbeat"
+    (textJoin "\n"
+      [
+        textConcat ["task=", spec.taskId],
+        textConcat ["role=", plannerTaskRoleLabel spec],
+        childLoopLaunchSummary spec.taskId,
+        textConcat ["state=", childLoopStateSummary spec.taskId],
+        textConcat ["stderr_tail=", readProcessOutputTailText (taskProcessStderrPath spec.taskId)],
+        textConcat ["stdout_tail=", readProcessOutputTailText (taskProcessStdoutPath spec.taskId)]
+      ])
+
 promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
 promotionFailureReport spec message =
   syntheticFailureReport
@@ -5195,6 +5209,51 @@ retryChildLoopMissingReport spec report =
     }
   }
 
+requeueTaskForManagerRetry : Str -> Str -> Str
+requeueTaskForManagerRetry taskId failureSummary =
+  match retry (taskHandleFor taskId) {
+    Err message ->
+      textConcat [failureSummary, ": ", taskId, ": ", message],
+    Ok retriedValue ->
+      ""
+  }
+
+retryChildLoopMissingLaunchHeartbeat : Int -> PlannerReport -> PlannerTaskSpec -> VerifierReport -> Str
+retryChildLoopMissingLaunchHeartbeat wave report spec failureReport =
+  if childLoopManagerRetryAvailable spec.taskId == false then
+    recordPlannedTaskFailure spec failureReport
+  else {
+    let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
+    if retryWriteError != "" then
+      textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
+    else {
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-retry:",
+            spec.taskId,
+            ":missing-launch-heartbeat:retry=",
+            encode nextRetry
+          ]) in
+      if traceError != "" then
+        traceError
+      else {
+        let requeueError =
+          requeueTaskForManagerRetry spec.taskId "task child loop retry requeue failed" in
+        if requeueError != "" then
+          requeueError
+        else {
+          let resetError = resetChildLoopForManagerRetry spec.taskId in
+          if resetError != "" then
+            textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
+          else
+            launchReadyTask wave report spec
+        }
+      }
+    }
+  }
+
 continueWithPlanResolved : Int -> Int -> Str -> Result PlannerReport -> Str
 continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
   match reportResult {
@@ -5351,6 +5410,11 @@ executeReadyTasks report wave benchmarkRuns = {
             if settled then
               schedulerError
             else {
+              let retryAvailable =
+                if taskStatus == "failed" then
+                  false
+                else
+                  childLoopManagerRetryAvailable spec.taskId in
               let taskError =
                 if taskStatus == "failed" then
                   ""
@@ -5361,10 +5425,19 @@ executeReadyTasks report wave benchmarkRuns = {
                   schedulerError = taskError;
                   schedulerError
                 }
+              else if retryAvailable then {
+                runningTaskIds = append runningTaskIds [spec.taskId];
+                schedulerError
+              }
               else
                 schedulerError
             }
           } else {
+            let retryAvailable =
+              if taskStatus == "failed" then
+                false
+              else
+                childLoopManagerRetryAvailable spec.taskId in
             let taskError =
               if taskStatus == "failed" then
                 ""
@@ -5379,6 +5452,10 @@ executeReadyTasks report wave benchmarkRuns = {
                 schedulerError = taskError;
                 schedulerError
               }
+            else if retryAvailable then {
+              runningTaskIds = append runningTaskIds [spec.taskId];
+              schedulerError
+            }
             else
               schedulerError
           }

@@ -1358,6 +1358,14 @@ resumeLoop state =
     runVerifierPhase state.attempt
   else if state.phase == "verifier-launching" then
     runVerifierPhase state.attempt
+  else if state.phase == "verifier-command-ready" then
+    runVerifierPhase state.attempt
+  else if state.phase == "verifier-prompt-ready" then
+    runVerifierPhase state.attempt
+  else if state.phase == "verifier-step-ready" then
+    runVerifierPhase state.attempt
+  else if state.phase == "verifier-preparing" then
+    runVerifierPhase state.attempt
   else if state.attempt == 0 then
     runAttempt 1
   else

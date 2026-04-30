@@ -416,6 +416,22 @@ if [[ "${CLASP_TEST_FAKE_CHILD_CRASH_ONCE_NO_REPORT:-0}" == "1" && "$task_id" ==
   fi
 fi
 
+if [[ "${CLASP_TEST_FAKE_CHILD_VERIFIER_EXPORT_CRASH_ONCE:-0}" == "1" && "$task_id" == "benchmark-gap" ]]; then
+  marker="$(dirname "$state_root")/.fake-child-verifier-export-crashed-once-$task_id"
+  if [[ ! -f "$marker" ]]; then
+    mkdir -p "$state_root"
+    printf 'crashed-once\n' >"$marker"
+    cat >"$state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+    cat >"$state_root/builder-1.json" <<JSON
+{"summary":"fake child builder report before verifier export crash for $task_id","files_touched":[],"tests_run":[],"residual_risks":[],"feedback":{"summary":"builder completed before verifier export crash","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+    printf "runtime failed to execute native compiler export 'main' from image fake-%s.native.image.json\n" "$task_id" >&2
+    exit 43
+  fi
+fi
+
 if [[ "${CLASP_TEST_FAKE_CHILD_DELAY_REPORT_AFTER_EXIT:-0}" == "1" && "$task_id" == "benchmark-gap" ]]; then
   mkdir -p "$state_root"
   cat >"$state_root/state.json" <<'JSON'
@@ -928,6 +944,24 @@ grep -F '"verdict":"pass"' "$crash_retry_output" >/dev/null
 grep -F 'child-loop-retry:benchmark-gap:missing-durable-report:retry=1' "$crash_retry_state/trace.log" >/dev/null
 grep -Fx 'fixed-after-feedback' "$crash_retry_workspace/workspace.txt" >/dev/null
 test -f "$crash_retry_workspace/.clasp-task-workspaces/benchmark-gap/.workspace-ready"
+
+trace_case "child-verifier-export-crash-retries-before-fail"
+verifier_crash_retry_state="$test_root_abs/verifier-crash-retry-state"
+verifier_crash_retry_workspace="$test_root_abs/verifier-crash-retry-workspace"
+verifier_crash_retry_output="$test_root_abs/verifier-crash-retry-output.txt"
+mkdir -p "$verifier_crash_retry_workspace"
+run_goal_manager "$verifier_crash_retry_state" "$verifier_crash_retry_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_VERIFIER_EXPORT_CRASH_ONCE='1' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON='2' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$verifier_crash_retry_output" 2>&1
+grep -F '"phase":"completed"' "$verifier_crash_retry_output" >/dev/null
+grep -F '"verdict":"pass"' "$verifier_crash_retry_output" >/dev/null
+grep -F 'child-loop-retry:benchmark-gap:missing-durable-report:retry=1' "$verifier_crash_retry_state/trace.log" >/dev/null
+grep -F '"summary":"fake child loop completed"' "$verifier_crash_retry_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -Fx 'fixed-after-feedback' "$verifier_crash_retry_workspace/workspace.txt" >/dev/null
 
 trace_case "child-report-settles-after-process-exit"
 settle_report_state="$test_root_abs/settle-report-state"

@@ -99,6 +99,11 @@ reconcilePlannedTasks report wave objectiveTasks = {
         if settled then
           schedulerError
         else {
+          let retryAvailable =
+            if taskStatus == "failed" then
+              false
+            else
+              childLoopManagerRetryAvailable spec.taskId in
           let taskError =
             if taskStatus == "failed" then
               ""
@@ -109,10 +114,19 @@ reconcilePlannedTasks report wave objectiveTasks = {
               schedulerError = taskError;
               schedulerError
             }
+          else if retryAvailable then {
+            runningTaskIds = append runningTaskIds [spec.taskId];
+            schedulerError
+          }
           else
             schedulerError
         }
       } else {
+        let retryAvailable =
+          if taskStatus == "failed" then
+            false
+          else
+            childLoopManagerRetryAvailable spec.taskId in
         let taskError =
           if taskStatus == "failed" then
             ""
@@ -123,14 +137,19 @@ reconcilePlannedTasks report wave objectiveTasks = {
               spec
               (childLoopMissingLaunchHeartbeatReport spec) in
         if taskError != "" then
-          {
-            schedulerError = taskError;
-            schedulerError
-          }
+            {
+              schedulerError = taskError;
+              schedulerError
+            }
+        else if retryAvailable then {
+          runningTaskIds = append runningTaskIds [spec.taskId];
+          schedulerError
+        }
         else
           schedulerError
       }
     } else if taskStatus == "leased" then {
+      let retryAvailable = childLoopManagerRetryAvailable spec.taskId in
       let taskError =
         retryChildLoopMissingLaunchHeartbeat
           wave
@@ -138,13 +157,18 @@ reconcilePlannedTasks report wave objectiveTasks = {
           spec
           (childLoopMissingLaunchHeartbeatReport spec) in
       if taskError != "" then
-        {
-          schedulerError = taskError;
-          schedulerError
-        }
+          {
+            schedulerError = taskError;
+            schedulerError
+          }
+      else if retryAvailable then {
+        runningTaskIds = append runningTaskIds [spec.taskId];
+        schedulerError
+      }
       else
         schedulerError
     } else if taskStatus == "active" then {
+      let retryAvailable = childLoopManagerRetryAvailable spec.taskId in
       let taskError =
         retryChildLoopMissingLaunchHeartbeat
           wave
@@ -152,10 +176,14 @@ reconcilePlannedTasks report wave objectiveTasks = {
           spec
           (childLoopMissingLaunchHeartbeatReport spec) in
       if taskError != "" then
-        {
-          schedulerError = taskError;
-          schedulerError
-        }
+          {
+            schedulerError = taskError;
+            schedulerError
+          }
+      else if retryAvailable then {
+        runningTaskIds = append runningTaskIds [spec.taskId];
+        schedulerError
+      }
       else
         schedulerError
     }
@@ -228,6 +256,7 @@ launchReadyTasks report wave refreshedTasks readyTasks runningTaskIds = {
           launchError
         }
     } else if taskStatus == "leased" then {
+      let retryAvailable = childLoopManagerRetryAvailable spec.taskId in
       let taskError =
         retryChildLoopMissingLaunchHeartbeat
           wave
@@ -235,17 +264,20 @@ launchReadyTasks report wave refreshedTasks readyTasks runningTaskIds = {
           spec
           (childLoopMissingLaunchHeartbeatReport spec) in
       if taskError != "" then
-        {
-          launchError = taskError;
-          launchError
-        }
-      else
+          {
+            launchError = taskError;
+            launchError
+          }
+      else if retryAvailable then
         {
           activeTaskIds = append activeTaskIds [spec.taskId];
           launchSlots = decrementManagerCounter launchSlots;
           launchError
         }
+      else
+        launchError
     } else if taskStatus == "active" then {
+      let retryAvailable = childLoopManagerRetryAvailable spec.taskId in
       let taskError =
         retryChildLoopMissingLaunchHeartbeat
           wave
@@ -253,16 +285,18 @@ launchReadyTasks report wave refreshedTasks readyTasks runningTaskIds = {
           spec
           (childLoopMissingLaunchHeartbeatReport spec) in
       if taskError != "" then
-        {
-          launchError = taskError;
-          launchError
-        }
-      else
+          {
+            launchError = taskError;
+            launchError
+          }
+      else if retryAvailable then
         {
           activeTaskIds = append activeTaskIds [spec.taskId];
           launchSlots = decrementManagerCounter launchSlots;
           launchError
         }
+      else
+        launchError
     } else
       launchError
   };
