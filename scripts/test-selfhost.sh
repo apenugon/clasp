@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp_root="${CLASP_TEST_TMPDIR:-$project_root/.clasp-test-tmp}"
+tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-selfhost.XXXXXX")"
@@ -14,6 +14,11 @@ cache_root="$test_root/cache-root"
 selfhost_entry_cache_root="$test_root/selfhost-entry-cache-root"
 selfhost_entry_check_output="$test_root/selfhost.entry.check.json"
 selfhost_entry_check_log="$test_root/selfhost.entry.check.log"
+semantic_probe_cache_root="$test_root/semantic-probe-cache"
+semantic_source_path="$test_root/semantic-context.clasp"
+semantic_check_output="$test_root/semantic.check.txt"
+semantic_air_output="$test_root/semantic.air.json"
+semantic_context_output="$test_root/semantic.context.json"
 large_selfhost_project_root="$test_root/large-selfhost-project"
 large_selfhost_cache_root="$test_root/large-selfhost-cache"
 large_selfhost_check_output="$test_root/large-selfhost.check.json"
@@ -64,10 +69,101 @@ helper : Str -> Str
 helper value = "hello"
 EOF
 
+cat >"$semantic_source_path" <<'EOF'
+module Main
+
+type LeadPriority = Low | Medium | High
+
+record LeadRequest = {
+  company : Str,
+  budget : Int,
+  priorityHint : LeadPriority
+}
+
+record LeadSummary = {
+  summary : Str,
+  priority : LeadPriority,
+  followUpRequired : Bool
+}
+
+foreign mockLeadSummaryModel : LeadRequest -> Str = "mockLeadSummaryModel"
+
+summarizeLead : LeadRequest -> LeadSummary
+summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)
+
+route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
+EOF
+
 mkdir -p "$cache_root"
 mkdir -p "$selfhost_entry_cache_root"
+mkdir -p "$semantic_probe_cache_root"
 
 node "$project_root/scripts/generate-promoted-module-summary-cache.mjs" --check >/dev/null
+node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
+
+XDG_CACHE_HOME="$semantic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$project_root/src/embedded.compiler.native.image.json" \
+  checkSourceText \
+  "$semantic_source_path" \
+  "$semantic_check_output"
+grep -F 'summarizeLead : LeadRequest -> LeadSummary' "$semantic_check_output" >/dev/null
+
+XDG_CACHE_HOME="$semantic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$project_root/src/embedded.compiler.native.image.json" \
+  airSourceText \
+  "$semantic_source_path" \
+  "$semantic_air_output"
+node - "$semantic_air_output" <<'EOF'
+const fs = require("node:fs");
+
+const artifact = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (artifact.format !== "clasp-air-v1") {
+  throw new Error(`unexpected AIR format: ${artifact.format}`);
+}
+const route = artifact.nodes?.find((entry) => entry.kind === "route" && entry.name === "summarizeLeadRoute");
+if (!route) {
+  throw new Error("missing summarizeLeadRoute in AIR nodes");
+}
+if (route.responseKind !== "json") {
+  throw new Error(`unexpected AIR route responseKind: ${route.responseKind}`);
+}
+EOF
+
+XDG_CACHE_HOME="$semantic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$project_root/src/embedded.compiler.native.image.json" \
+  contextSourceText \
+  "$semantic_source_path" \
+  "$semantic_context_output"
+node - "$semantic_context_output" <<'EOF'
+const fs = require("node:fs");
+
+const graph = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (graph.format !== "clasp-context-v1") {
+  throw new Error(`unexpected context format: ${graph.format}`);
+}
+const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "summarizeLeadRoute");
+if (!route) {
+  throw new Error("missing summarizeLeadRoute in context surfaceIndex.routes");
+}
+if (route.responseKind !== "json") {
+  throw new Error(`unexpected route responseKind: ${route.responseKind}`);
+}
+const hasForeignUse = graph.edges?.some(
+  (edge) => edge.kind === "uses" && edge.from === "decl:summarizeLead" && edge.to === "foreign:mockLeadSummaryModel",
+);
+if (!hasForeignUse) {
+  throw new Error("missing declaration uses edge to mockLeadSummaryModel");
+}
+const hasSchemaUse = graph.edges?.some(
+  (edge) => edge.kind === "uses" && edge.from === "decl:summarizeLead" && edge.to === "schema:LeadSummary",
+);
+if (!hasSchemaUse) {
+  throw new Error("missing declaration uses edge to LeadSummary schema");
+}
+EOF
 
 XDG_CACHE_HOME="$selfhost_entry_cache_root" CLASP_NATIVE_TRACE_CACHE=1 "$claspc_bin" --json check "$project_root/src/Main.clasp" >"$selfhost_entry_check_output" 2>"$selfhost_entry_check_log"
 grep -F '"status":"ok"' "$selfhost_entry_check_output" >/dev/null

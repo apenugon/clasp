@@ -23,6 +23,10 @@ semanticJsonEdge : Str -> Str -> Str -> Str
 semanticJsonEdge fromId toId kind =
   jsonObject [jsonFieldText "from" fromId, jsonFieldText "to" toId, jsonFieldText "kind" kind]
 
+semanticRouteResponseKind : Str -> Str
+semanticRouteResponseKind responseType =
+  if responseType == "Page" then "page" else if responseType == "Redirect" then "redirect" else "json"
+
 semanticPermissionText : HostedPolicyPermissionAst -> Str
 semanticPermissionText permission =
   textConcat [renderHostedPolicyPermissionKind (policyPermissionKind permission), ":", policyPermissionValue permission]
@@ -436,6 +440,7 @@ semanticAirRouteNodes routeDecls = {
           , jsonFieldText "path" (routeDeclPath routeDecl)
           , jsonFieldText "requestType" (routeDeclRequestType routeDecl)
           , jsonFieldText "responseType" (routeDeclResponseType routeDecl)
+          , jsonFieldText "responseKind" (semanticRouteResponseKind (routeDeclResponseType routeDecl))
           , jsonFieldText "handler" (routeDeclHandlerName routeDecl)
           ]);
     nodes
@@ -652,6 +657,16 @@ semanticTypeNames modl = typeDeclNames modl
 semanticDeclNames : HostedModuleAst -> [Str]
 semanticDeclNames modl = declNames modl
 
+semanticForeignNames : HostedModuleAst -> [Str]
+semanticForeignNames modl = {
+  let mut names = emptyRenderedTexts;
+  for foreignDecl in moduleForeignDeclarations modl {
+    names = appendRenderedText names (foreignDeclName foreignDecl);
+    names
+  };
+  names
+}
+
 semanticGuideNames : HostedModuleAst -> [Str]
 semanticGuideNames modl = {
   let mut names = emptyRenderedTexts;
@@ -774,6 +789,271 @@ semanticMergeGateNames modl = {
 
 semanticContainsText : [Str] -> Str -> Bool
 semanticContainsText values target = containsText values target
+
+semanticNonEmptyContainsText : [Str] -> Str -> Bool
+semanticNonEmptyContainsText values target =
+  if target == "" then false else semanticContainsText values target
+
+semanticAppendUniqueText : [Str] -> Str -> [Str]
+semanticAppendUniqueText values value =
+  if semanticContainsText values value then values else appendRenderedText values value
+
+semanticAppendNamedTargetEdge : [Str] -> [Str] -> Str -> Str -> Str -> Str -> [Str]
+semanticAppendNamedTargetEdge edges availableNames targetName fromId targetPrefix kind =
+  if semanticNonEmptyContainsText availableNames targetName then
+    appendRenderedText edges (semanticJsonEdge fromId (textConcat [targetPrefix, targetName]) kind)
+  else
+    edges
+
+semanticDeclUseTargetNodeId : HostedModuleAst -> Str -> Str
+semanticDeclUseTargetNodeId modl target =
+  if semanticContainsText (semanticDeclNames modl) target then
+    textConcat ["decl:", target]
+  else if semanticContainsText (semanticForeignNames modl) target then
+    textConcat ["foreign:", target]
+  else if semanticContainsText (semanticRecordNames modl) target then
+    textConcat ["schema:", target]
+  else
+    ""
+
+semanticAppendDeclUseTarget : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendDeclUseTarget modl targetIds target = {
+  let targetId = semanticDeclUseTargetNodeId modl target;
+  if targetId == "" then targetIds else semanticAppendUniqueText targetIds targetId
+}
+
+semanticExprListUseTargetNodeIds : HostedModuleAst -> [HostedExprAst] -> [Str]
+semanticExprListUseTargetNodeIds modl values = {
+  let mut targetIds = emptyRenderedTexts;
+  for value in values {
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl value);
+    targetIds
+  };
+  targetIds
+}
+
+semanticRecordFieldUseTargetNodeIds : HostedModuleAst -> HostedRecordFieldExprAst -> [Str]
+semanticRecordFieldUseTargetNodeIds modl field =
+  semanticExprUseTargetNodeIds modl (recordExprFieldValue field)
+
+semanticRecordFieldsUseTargetNodeIds : HostedModuleAst -> [HostedRecordFieldExprAst] -> [Str]
+semanticRecordFieldsUseTargetNodeIds modl fields = {
+  let mut targetIds = emptyRenderedTexts;
+  for field in fields {
+    targetIds = append targetIds (semanticRecordFieldUseTargetNodeIds modl field);
+    targetIds
+  };
+  targetIds
+}
+
+semanticMatchBranchUseTargetNodeIds : HostedModuleAst -> HostedMatchBranchAst -> [Str]
+semanticMatchBranchUseTargetNodeIds modl branch =
+  semanticExprUseTargetNodeIds modl (branchBodyExpr branch)
+
+semanticMatchBranchesUseTargetNodeIds : HostedModuleAst -> [HostedMatchBranchAst] -> [Str]
+semanticMatchBranchesUseTargetNodeIds modl branches = {
+  let mut targetIds = emptyRenderedTexts;
+  for branch in branches {
+    targetIds = append targetIds (semanticMatchBranchUseTargetNodeIds modl branch);
+    targetIds
+  };
+  targetIds
+}
+
+semanticExprUseTargetNodeIds : HostedModuleAst -> HostedExprAst -> [Str]
+semanticExprUseTargetNodeIds modl expr = match expr {
+  HostedName name ->
+    semanticAppendDeclUseTarget modl emptyRenderedTexts name,
+  HostedString value ->
+    emptyRenderedTexts,
+  HostedInt value ->
+    emptyRenderedTexts,
+  HostedBool value ->
+    emptyRenderedTexts,
+  HostedList values ->
+    semanticExprListUseTargetNodeIds modl values,
+  HostedCall callee args -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts callee;
+    targetIds = append targetIds (semanticExprListUseTargetNodeIds modl args);
+    targetIds
+  },
+  HostedConstructor constructorName args -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts constructorName;
+    targetIds = append targetIds (semanticExprListUseTargetNodeIds modl args);
+    targetIds
+  },
+  HostedMatch subject branches -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl subject;
+    targetIds = append targetIds (semanticMatchBranchesUseTargetNodeIds modl branches);
+    targetIds
+  },
+  HostedRecord recordName fields -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts recordName;
+    targetIds = append targetIds (semanticRecordFieldsUseTargetNodeIds modl fields);
+    targetIds
+  },
+  HostedFieldAccess subject fieldName ->
+    semanticExprUseTargetNodeIds modl subject,
+  HostedLet binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedMutableLet binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedAssign binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedFor binder iterable loopBody body -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl iterable;
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl loopBody);
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl body);
+    targetIds
+  },
+  HostedReturn value ->
+    semanticExprUseTargetNodeIds modl value,
+  HostedIf condition thenBranch elseBranch -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl condition;
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl thenBranch);
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl elseBranch);
+    targetIds
+  },
+  HostedEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedNotEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedLessThan left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedLessThanOrEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedGreaterThan left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedGreaterThanOrEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right)
+}
+
+semanticDeclUseTargetNodeIds : HostedModuleAst -> HostedDeclAst -> [Str]
+semanticDeclUseTargetNodeIds modl decl =
+  semanticExprUseTargetNodeIds modl (declBody decl)
+
+semanticDeclUseEdges : HostedModuleAst -> [Str]
+semanticDeclUseEdges modl = {
+  let mut edges = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    for targetId in semanticDeclUseTargetNodeIds modl decl {
+      if targetId != semanticDeclNodeId decl then {
+        edges = appendRenderedText edges (semanticJsonEdge (semanticDeclNodeId decl) targetId "uses");
+        edges
+      } else {
+        edges
+      }
+    };
+    edges
+  };
+  edges
+}
+
+semanticContextSurfaceIndexRoutes : [HostedRouteDeclAst] -> [Str]
+semanticContextSurfaceIndexRoutes routeDecls = {
+  let mut entries = emptyRenderedTexts;
+  for routeDecl in routeDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticRouteNodeId routeDecl)
+          , jsonFieldText "name" (routeDeclName routeDecl)
+          , jsonFieldText "identity" (routeDeclIdentity routeDecl)
+          , jsonFieldText "method" (routeDeclMethod routeDecl)
+          , jsonFieldText "path" (routeDeclPath routeDecl)
+          , jsonFieldText "requestType" (routeDeclRequestType routeDecl)
+          , jsonFieldText "responseType" (routeDeclResponseType routeDecl)
+          , jsonFieldText "responseKind" (semanticRouteResponseKind (routeDeclResponseType routeDecl))
+          , jsonFieldText "handler" (routeDeclHandlerName routeDecl)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexWorkflows : [HostedWorkflowDeclAst] -> [Str]
+semanticContextSurfaceIndexWorkflows workflowDecls = {
+  let mut entries = emptyRenderedTexts;
+  for workflowDecl in workflowDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticWorkflowNodeId workflowDecl)
+          , jsonFieldText "name" (workflowDeclName workflowDecl)
+          , jsonFieldText "identity" (workflowDeclIdentity workflowDecl)
+          , jsonFieldText "stateType" (renderHostedType (workflowDeclStateTypeAst workflowDecl))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexTools : [HostedToolDeclAst] -> [Str]
+semanticContextSurfaceIndexTools toolDecls = {
+  let mut entries = emptyRenderedTexts;
+  for toolDecl in toolDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticToolNodeId toolDecl)
+          , jsonFieldText "name" (toolDeclName toolDecl)
+          , jsonFieldText "server" (toolDeclServerName toolDecl)
+          , jsonFieldText "operation" (toolDeclOperation toolDecl)
+          , jsonFieldText "requestType" (toolDeclRequestType toolDecl)
+          , jsonFieldText "responseType" (toolDeclResponseType toolDecl)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexAgents : [HostedAgentDeclAst] -> [Str]
+semanticContextSurfaceIndexAgents agentDecls = {
+  let mut entries = emptyRenderedTexts;
+  for agentDecl in agentDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticAgentNodeId agentDecl)
+          , jsonFieldText "name" (agentDeclName agentDecl)
+          , jsonFieldText "role" (agentDeclRoleName agentDecl)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexForeignBoundaries : [HostedForeignDeclAst] -> [Str]
+semanticContextSurfaceIndexForeignBoundaries foreignDecls = {
+  let mut entries = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticForeignNodeId foreignDecl)
+          , jsonFieldText "name" (foreignDeclName foreignDecl)
+          , jsonFieldText "runtimeName" (foreignDeclRuntimeName foreignDecl)
+          , jsonFieldText "type" (renderHostedType (foreignDeclTypeAst foreignDecl))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndex : HostedModuleAst -> Str
+semanticContextSurfaceIndex modl =
+  jsonObject
+    [ jsonFieldRaw "routes" (jsonArray (semanticContextSurfaceIndexRoutes (moduleRouteDeclarations modl)))
+    , jsonFieldRaw "workflows" (jsonArray (semanticContextSurfaceIndexWorkflows (moduleWorkflowDeclarations modl)))
+    , jsonFieldRaw "tools" (jsonArray (semanticContextSurfaceIndexTools (moduleToolDeclarations modl)))
+    , jsonFieldRaw "agents" (jsonArray (semanticContextSurfaceIndexAgents (moduleAgentDeclarations modl)))
+    , jsonFieldRaw "foreignBoundaries" (jsonArray (semanticContextSurfaceIndexForeignBoundaries (moduleForeignDeclarations modl)))
+    ]
 
 semanticContextModuleNode : HostedModuleAst -> Str
 semanticContextModuleNode modl =
@@ -984,15 +1264,7 @@ semanticContextEdges modl = {
   };
   for guideDecl in moduleGuideDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticGuideNodeId guideDecl) "declares");
-    if guideDeclExtends guideDecl != "" && semanticContainsText (semanticGuideNames modl) (guideDeclExtends guideDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticGuideNodeId guideDecl) (textConcat ["guide:", guideDeclExtends guideDecl]) "extends");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticGuideNames modl) (guideDeclExtends guideDecl) (semanticGuideNodeId guideDecl) "guide:" "extends";
     for entry in guideDeclEntries guideDecl {
       edges =
         appendRenderedText
@@ -1008,24 +1280,8 @@ semanticContextEdges modl = {
   };
   for projectionDecl in moduleProjectionDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticProjectionNodeId projectionDecl) "declares");
-    if projectionDeclSourceRecordName projectionDecl != "" && semanticContainsText (semanticRecordNames modl) (projectionDeclSourceRecordName projectionDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticProjectionNodeId projectionDecl) (textConcat ["schema:", projectionDeclSourceRecordName projectionDecl]) "source-schema");
-      edges
-    } else {
-      edges
-    };
-    if projectionDeclPolicyName projectionDecl != "" && semanticContainsText (semanticPolicyNames modl) (projectionDeclPolicyName projectionDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticProjectionNodeId projectionDecl) (textConcat ["policy:", projectionDeclPolicyName projectionDecl]) "policy");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (projectionDeclSourceRecordName projectionDecl) (semanticProjectionNodeId projectionDecl) "schema:" "source-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (projectionDeclPolicyName projectionDecl) (semanticProjectionNodeId projectionDecl) "policy:" "policy";
     for field in projectionDeclFields projectionDecl {
       edges =
         appendRenderedText
@@ -1037,37 +1293,13 @@ semanticContextEdges modl = {
   };
   for roleDecl in moduleAgentRoleDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticAgentRoleNodeId roleDecl) "declares");
-    if agentRoleDeclGuideName roleDecl != "" && semanticContainsText (semanticGuideNames modl) (agentRoleDeclGuideName roleDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticAgentRoleNodeId roleDecl) (textConcat ["guide:", agentRoleDeclGuideName roleDecl]) "guide");
-      edges
-    } else {
-      edges
-    };
-    if agentRoleDeclPolicyName roleDecl != "" && semanticContainsText (semanticPolicyNames modl) (agentRoleDeclPolicyName roleDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticAgentRoleNodeId roleDecl) (textConcat ["policy:", agentRoleDeclPolicyName roleDecl]) "policy");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticGuideNames modl) (agentRoleDeclGuideName roleDecl) (semanticAgentRoleNodeId roleDecl) "guide:" "guide";
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (agentRoleDeclPolicyName roleDecl) (semanticAgentRoleNodeId roleDecl) "policy:" "policy";
     edges
   };
   for agentDecl in moduleAgentDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticAgentNodeId agentDecl) "declares");
-    if agentDeclRoleName agentDecl != "" && semanticContainsText (semanticAgentRoleNames modl) (agentDeclRoleName agentDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticAgentNodeId agentDecl) (textConcat ["agent-role:", agentDeclRoleName agentDecl]) "role");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticAgentRoleNames modl) (agentDeclRoleName agentDecl) (semanticAgentNodeId agentDecl) "agent-role:" "role";
     edges
   };
   for workflowDecl in moduleWorkflowDeclarations modl {
@@ -1076,138 +1308,44 @@ semanticContextEdges modl = {
   };
   for routeDecl in moduleRouteDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticRouteNodeId routeDecl) "declares");
-    if routeDeclHandlerName routeDecl != "" && semanticContainsText (semanticDeclNames modl) (routeDeclHandlerName routeDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticRouteNodeId routeDecl) (textConcat ["decl:", routeDeclHandlerName routeDecl]) "handler");
-      edges
-    } else {
-      edges
-    };
-    if routeDeclRequestType routeDecl != "" && semanticContainsText (semanticRecordNames modl) (routeDeclRequestType routeDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticRouteNodeId routeDecl) (textConcat ["schema:", routeDeclRequestType routeDecl]) "request-schema");
-      edges
-    } else {
-      edges
-    };
-    if routeDeclResponseType routeDecl != "" && semanticContainsText (semanticRecordNames modl) (routeDeclResponseType routeDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticRouteNodeId routeDecl) (textConcat ["schema:", routeDeclResponseType routeDecl]) "response-schema");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticDeclNames modl) (routeDeclHandlerName routeDecl) (semanticRouteNodeId routeDecl) "decl:" "handler";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (routeDeclRequestType routeDecl) (semanticRouteNodeId routeDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (routeDeclResponseType routeDecl) (semanticRouteNodeId routeDecl) "schema:" "response-schema";
     edges
   };
   for hookDecl in moduleHookDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticHookNodeId hookDecl) "declares");
-    if hookDeclHandlerName hookDecl != "" && semanticContainsText (semanticDeclNames modl) (hookDeclHandlerName hookDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticHookNodeId hookDecl) (textConcat ["decl:", hookDeclHandlerName hookDecl]) "handler");
-      edges
-    } else {
-      edges
-    };
-    if hookDeclRequestType hookDecl != "" && semanticContainsText (semanticRecordNames modl) (hookDeclRequestType hookDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticHookNodeId hookDecl) (textConcat ["schema:", hookDeclRequestType hookDecl]) "request-schema");
-      edges
-    } else {
-      edges
-    };
-    if hookDeclResponseType hookDecl != "" && semanticContainsText (semanticRecordNames modl) (hookDeclResponseType hookDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticHookNodeId hookDecl) (textConcat ["schema:", hookDeclResponseType hookDecl]) "response-schema");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticDeclNames modl) (hookDeclHandlerName hookDecl) (semanticHookNodeId hookDecl) "decl:" "handler";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (hookDeclRequestType hookDecl) (semanticHookNodeId hookDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (hookDeclResponseType hookDecl) (semanticHookNodeId hookDecl) "schema:" "response-schema";
     edges
   };
   for toolServerDecl in moduleToolServerDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticToolServerNodeId toolServerDecl) "declares");
-    if toolServerDeclPolicyName toolServerDecl != "" && semanticContainsText (semanticPolicyNames modl) (toolServerDeclPolicyName toolServerDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticToolServerNodeId toolServerDecl) (textConcat ["policy:", toolServerDeclPolicyName toolServerDecl]) "policy");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (toolServerDeclPolicyName toolServerDecl) (semanticToolServerNodeId toolServerDecl) "policy:" "policy";
     edges
   };
   for toolDecl in moduleToolDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticToolNodeId toolDecl) "declares");
-    if toolDeclServerName toolDecl != "" && semanticContainsText (semanticToolServerNames modl) (toolDeclServerName toolDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticToolNodeId toolDecl) (textConcat ["toolserver:", toolDeclServerName toolDecl]) "server");
-      edges
-    } else {
-      edges
-    };
-    if toolDeclRequestType toolDecl != "" && semanticContainsText (semanticRecordNames modl) (toolDeclRequestType toolDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticToolNodeId toolDecl) (textConcat ["schema:", toolDeclRequestType toolDecl]) "request-schema");
-      edges
-    } else {
-      edges
-    };
-    if toolDeclResponseType toolDecl != "" && semanticContainsText (semanticRecordNames modl) (toolDeclResponseType toolDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticToolNodeId toolDecl) (textConcat ["schema:", toolDeclResponseType toolDecl]) "response-schema");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticToolServerNames modl) (toolDeclServerName toolDecl) (semanticToolNodeId toolDecl) "toolserver:" "server";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (toolDeclRequestType toolDecl) (semanticToolNodeId toolDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (toolDeclResponseType toolDecl) (semanticToolNodeId toolDecl) "schema:" "response-schema";
     edges
   };
   for verifierDecl in moduleVerifierDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticVerifierNodeId verifierDecl) "declares");
-    if verifierDeclToolName verifierDecl != "" && semanticContainsText (semanticToolNames modl) (verifierDeclToolName verifierDecl) then {
-      edges =
-        appendRenderedText
-          edges
-          (semanticJsonEdge (semanticVerifierNodeId verifierDecl) (textConcat ["tool:", verifierDeclToolName verifierDecl]) "tool");
-      edges
-    } else {
-      edges
-    };
+    edges = semanticAppendNamedTargetEdge edges (semanticToolNames modl) (verifierDeclToolName verifierDecl) (semanticVerifierNodeId verifierDecl) "tool:" "tool";
     edges
   };
   for mergeGateDecl in moduleMergeGateDeclarations modl {
     edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticMergeGateNodeId mergeGateDecl) "declares");
     for verifierName in mergeGateDeclVerifierNames mergeGateDecl {
-      if verifierName != "" && semanticContainsText (semanticVerifierNames modl) verifierName then {
-        edges =
-          appendRenderedText
-            edges
-            (semanticJsonEdge (semanticMergeGateNodeId mergeGateDecl) (textConcat ["verifier:", verifierName]) "verifier");
-        edges
-      } else {
-        edges
-      }
+      edges = semanticAppendNamedTargetEdge edges (semanticVerifierNames modl) verifierName (semanticMergeGateNodeId mergeGateDecl) "verifier:" "verifier";
+      edges
     };
     edges
   };
+  edges = append edges (semanticDeclUseEdges modl);
   edges
 }
 
@@ -1220,6 +1358,7 @@ renderContextModuleJson modl = {
     , jsonFieldText "module" (moduleNameOf modl)
     , jsonFieldRaw "nodeCount" (encode (length nodes))
     , jsonFieldRaw "edgeCount" (encode (length edges))
+    , jsonFieldRaw "surfaceIndex" (semanticContextSurfaceIndex modl)
     , jsonFieldRaw "nodes" (jsonArray nodes)
     , jsonFieldRaw "edges" (jsonArray edges)
     ]

@@ -15,6 +15,7 @@ require_pattern() {
 
 bash -n "$project_root/scripts/test-native-claspc.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
+node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
 
 require_pattern "examples/feedback-loop/Main.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"'
 require_pattern "examples/feedback-loop/Main.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"'
@@ -28,6 +29,10 @@ require_pattern "examples/feedback-loop/Main.clasp" 'ensureStepReportWithTimeout
 require_pattern "examples/feedback-loop/Process.clasp" 'awaitWatchedProcessTimeoutJson'
 
 require_pattern "scripts/test-selfhost.sh" 'generate-promoted-module-summary-cache.mjs" --check'
+require_pattern "scripts/test-selfhost.sh" 'check-promoted-native-image-exports.mjs'
+require_pattern "scripts/test-selfhost.sh" 'contextSourceText'
+require_pattern "scripts/test-selfhost.sh" 'surfaceIndex'
+require_pattern "scripts/test-selfhost.sh" 'mockLeadSummaryModel'
 require_pattern "scripts/test-selfhost.sh" 'module-summary promoted hit module=Compiler.Ast'
 require_pattern "scripts/test-selfhost.sh" 'module-summary promoted hit module=Compiler.Emit.JavaScript'
 require_pattern "scripts/test-selfhost.sh" 'module-summary promoted hit module=Main'
