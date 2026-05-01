@@ -387,6 +387,9 @@ childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Err message -> 1000
 }
 
+childLoopAwaitTimeoutMs : Int
+childLoopAwaitTimeoutMs = readEnvInt "CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON" 10000
+
 maxTaskLoops : Int
 maxTaskLoops = match envVar "CLASP_MANAGER_MAX_TASKS_JSON" {
   Ok raw -> decode Int raw,
@@ -818,6 +821,27 @@ taskVerifierHeartbeatPath taskId attempt =
 
 taskHandleFor : Str -> TaskHandle
 taskHandleFor taskId = taskHandle swarmStateRoot taskId actorName
+
+heartbeatTaskLease : Str -> Str
+heartbeatTaskLease taskId =
+  match heartbeat (taskHandleFor taskId) {
+    Err message -> {
+      let traced = appendManagerTrace (textConcat ["task-heartbeat:nonfatal:", taskId, ":", message]) in
+      ""
+    },
+    Ok heartbeatValue ->
+      ""
+  }
+
+heartbeatTaskLeases : [Str] -> Str
+heartbeatTaskLeases taskIds = {
+  let mut ignored = "";
+  for taskId in taskIds {
+    ignored = heartbeatTaskLease taskId;
+    ignored
+  };
+  ""
+}
 
 workspaceCloneExcludeFlags : Str
 workspaceCloneExcludeFlags =
@@ -5082,7 +5106,7 @@ recordPromotionFailure spec = {
   else
     match fail (taskHandleFor spec.taskId) {
       Err message ->
-        textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
+        recoverExpiredTaskFailureRecording spec message,
       Ok failedValue -> {
         let cleanupError = cleanupFailedTaskWorkspace spec.taskId in
         if cleanupError != "" then
@@ -5092,6 +5116,21 @@ recordPromotionFailure spec = {
       }
     }
 }
+
+recoverExpiredTaskFailureRecording : PlannerTaskSpec -> Str -> Str
+recoverExpiredTaskFailureRecording spec message =
+  if textIncludes message "expired" then
+    match retry (taskHandleFor spec.taskId) {
+      Err retryMessage ->
+        textConcat ["task failure recording failed: ", spec.taskId, ": ", message, "; retry failed: ", retryMessage],
+      Ok retriedValue -> {
+        let traceError =
+          appendManagerTrace (textConcat ["task-failure-expired-lease-requeued:", spec.taskId, ":", message]) in
+        traceError
+      }
+    }
+  else
+    textConcat ["task failure recording failed: ", spec.taskId, ": ", message]
 
 completePlannedTask : PlannerTaskSpec -> Str
 completePlannedTask spec =
@@ -5119,7 +5158,7 @@ recordPlannedTaskFailure spec report = {
   else
     match fail (taskHandleFor spec.taskId) {
       Err message ->
-        textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
+        recoverExpiredTaskFailureRecording spec message,
       Ok failedValue -> {
         let cleanupError = cleanupFailedTaskWorkspace spec.taskId in
         if cleanupError != "" then
@@ -5399,10 +5438,12 @@ executeReadyTasks report wave benchmarkRuns = {
           else
             schedulerError
         } else if childLoopRunning spec.taskId then {
+          let heartbeatError = heartbeatTaskLease spec.taskId;
           runningTaskIds = append runningTaskIds [spec.taskId];
           schedulerError
         } else if fileExists (taskProcessHeartbeatPath spec.taskId) then
           if childLoopLaunchRunning spec.taskId then {
+            let heartbeatError = heartbeatTaskLease spec.taskId;
             runningTaskIds = append runningTaskIds [spec.taskId];
             schedulerError
           } else if childLoopLaunchCompleted spec.taskId then {
@@ -5528,14 +5569,17 @@ executeReadyTasks report wave benchmarkRuns = {
                   if stateError != "" then
                     finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
                   else if length activeTaskIds > 0 then
-                    match awaitWatchedProcessTimeout
-                      (taskProcessHeartbeatPath (firstTextOrEmpty activeTaskIds))
-                      childLoopWatchPollMs
-                      taskLeaseTimeoutMs {
-                      Err message ->
-                        executeReadyTasks report wave benchmarkRuns,
-                      Ok process ->
-                        executeReadyTasks report wave benchmarkRuns
+                    {
+                      let heartbeatError = heartbeatTaskLeases activeTaskIds;
+                      match awaitWatchedProcessTimeout
+                        (taskProcessHeartbeatPath (firstTextOrEmpty activeTaskIds))
+                        childLoopWatchPollMs
+                        childLoopAwaitTimeoutMs {
+                        Err message ->
+                          executeReadyTasks report wave benchmarkRuns,
+                        Ok process ->
+                          executeReadyTasks report wave benchmarkRuns
+                      }
                     }
                   else
                     match tasks swarmStateRoot {
@@ -5668,6 +5712,7 @@ managerServiceConfigArgs =
     textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
     textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON=", encode childLoopAwaitTimeoutMs],
     textConcat ["CLASP_MANAGER_MAX_TASKS_JSON=", encode maxTaskLoops],
     textConcat ["CLASP_MANAGER_PLANNER_MAX_RUNS_JSON=", encode plannerTaskMaxRuns],
     textConcat ["CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON=", encode plannerTimeoutMs],

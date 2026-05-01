@@ -1414,6 +1414,29 @@ fn require_unexpired_lease_owner(
     Ok((task, spec))
 }
 
+fn require_recorded_lease_owner(
+    connection: &Connection,
+    task_id: &str,
+    actor: &str,
+    action: &str,
+) -> Result<SwarmTaskState, String> {
+    let Some(task) = load_task_state(connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    if task.lease_actor.is_empty() {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: no lease owner is recorded"
+        ));
+    }
+    if task.lease_actor.as_str() != actor {
+        return Err(format!(
+            "swarm task `{task_id}` cannot {action}: lease is owned by `{}`",
+            task.lease_actor
+        ));
+    }
+    Ok(task)
+}
+
 fn require_manager_actor(
     connection: &Connection,
     task_id: &str,
@@ -3227,7 +3250,7 @@ fn execute_event_command(
     } else if kind == "task_completed" {
         let _ = require_active_lease_owner(&connection, task_id, actor, "complete", at_ms)?;
     } else if kind == "task_failed" {
-        let _ = require_active_lease_owner(&connection, task_id, actor, "fail", at_ms)?;
+        let _ = require_recorded_lease_owner(&connection, task_id, actor, "fail")?;
     } else if kind == "task_requeued" {
         require_manager_actor(&connection, task_id, actor, "requeue")?;
     } else if kind == "task_stopped" {
@@ -4597,6 +4620,35 @@ mod tests {
         assert_eq!(manager_next.get("action").and_then(|value| value.as_str()), Some("recover-lease"));
         assert_eq!(manager_next.get("taskId").and_then(|value| value.as_str()), Some("repair"));
 
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "fail".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        let failed_status = super::task_record_json(
+            &connection,
+            &super::load_task_state(&connection, "repair")
+                .expect("load failed task state")
+                .expect("failed task exists"),
+        )
+        .expect("failed task json");
+        assert_eq!(failed_status.get("status").and_then(|value| value.as_str()), Some("failed"));
+
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "retry".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
         assert_eq!(
             maybe_run_swarm(&vec![
                 "claspc".to_owned(),
