@@ -833,6 +833,25 @@ test -f "$failed_replan_state/planner-2.json"
 grep -F '"wave-2-benchmark-gap"' "$failed_replan_state/status.json" >/dev/null
 grep -Fx 'fixed-after-feedback' "$failed_replan_workspace/workspace.txt" >/dev/null
 
+trace_case "task-workspace-snapshot-excludes-cache-dirs"
+snapshot_exclude_state="$test_root_abs/snapshot-exclude-state"
+snapshot_exclude_workspace="$test_root_abs/snapshot-exclude-workspace"
+snapshot_exclude_output="$test_root_abs/snapshot-exclude-output.txt"
+mkdir -p \
+  "$snapshot_exclude_workspace/.clasp-task-workspaces/stale-cache" \
+  "$snapshot_exclude_workspace/.clasp-task-baselines/stale-baseline"
+printf 'must-not-copy\n' >"$snapshot_exclude_workspace/.clasp-task-workspaces/stale-cache/sentinel.txt"
+printf 'must-not-copy\n' >"$snapshot_exclude_workspace/.clasp-task-baselines/stale-baseline/sentinel.txt"
+run_goal_manager "$snapshot_exclude_state" "$snapshot_exclude_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$snapshot_exclude_output" 2>&1
+grep -F '"phase":"completed"' "$snapshot_exclude_output" >/dev/null
+grep -F '"verdict":"pass"' "$snapshot_exclude_output" >/dev/null
+test -f "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.workspace-ready"
+test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-workspaces/stale-cache/sentinel.txt"
+test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-baselines/stale-baseline/sentinel.txt"
+
 if [[ "${CLASP_GOAL_MANAGER_FAST_EXTENDED:-0}" == "1" ]]; then
 trace_case "relative-workspace-ready-link"
 relative_workspace_project="$test_root_abs/relative-workspace-project"
