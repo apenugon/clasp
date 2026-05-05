@@ -344,7 +344,7 @@ finalPlannedTaskStatus report finalTasks readyTasks plannedIds = {
     let taskStatus = taskStatusFor finalTasks spec.taskId in
     if taskStatusIsTerminal taskStatus then
       pendingLaunchIds
-    else if taskStatus == "leased" || taskStatus == "active" then {
+    else if taskStatusIsActive taskStatus then {
       pendingLaunchIds = append pendingLaunchIds [spec.taskId];
       pendingLaunchIds
     } else if childLoopLaunchPending spec.taskId then {

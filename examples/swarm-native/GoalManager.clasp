@@ -302,6 +302,7 @@ emptySwarmMailboxMessages = []
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
 foreign sleepMsRaw : Int -> Result Str = "sleepMs"
 
@@ -995,6 +996,10 @@ watchedProcessResult value = match value {
   Ok raw -> Ok (decode WatchedProcess raw),
   Err message -> watchedProcessError message
 }
+
+awaitWatchedProcess : Str -> Int -> Result WatchedProcess
+awaitWatchedProcess heartbeatPath pollMs =
+  watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
 
 awaitWatchedProcessTimeout : Str -> Int -> Int -> Result WatchedProcess
 awaitWatchedProcessTimeout heartbeatPath pollMs timeoutMs =
@@ -5594,12 +5599,11 @@ executeReadyTasks report wave benchmarkRuns = {
                   else if length activeTaskIds > 0 then
                     {
                       let heartbeatError = heartbeatTaskLeases activeTaskIds;
-                      match awaitWatchedProcessTimeout
+                      match awaitWatchedProcess
                         (taskProcessHeartbeatPath (firstTextOrEmpty activeTaskIds))
-                        childLoopWatchPollMs
-                        childLoopAwaitTimeoutMs {
+                        childLoopWatchPollMs {
                         Err message ->
-                          executeReadyTasks report wave benchmarkRuns,
+                          continueAfterPlannedTaskBlocker report wave benchmarkRuns (syntheticFailureReport "task wait failed" message),
                         Ok process ->
                           executeReadyTasks report wave benchmarkRuns
                       }
@@ -5673,10 +5677,12 @@ executeReadyTasks report wave benchmarkRuns = {
                                   pendingLaunchIds
                               };
                               if length pendingLaunchIds > 0 then
-                                match sleepMsValue childLoopWatchPollMs {
+                                match awaitWatchedProcess
+                                  (taskProcessHeartbeatPath (firstTextOrEmpty pendingLaunchIds))
+                                  childLoopWatchPollMs {
                                   Err message ->
-                                    finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
-                                  Ok slept ->
+                                    finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
+                                  Ok process ->
                                     executeReadyTasks report wave benchmarkRuns
                                 }
                               else
@@ -5842,6 +5848,11 @@ waitForManagedServiceCompletion = {
           recoverManagedService service
         else if service.status == "failed" then
           recoverManagedService service
+        else if service.heartbeatPath != "" then
+          match awaitWatchedProcess service.heartbeatPath childLoopWatchPollMs {
+            Err message -> textConcat ["error:", message],
+            Ok process -> waitForManagedServiceCompletion
+          }
         else
           match sleepMsValue childLoopWatchPollMs {
             Err message -> textConcat ["error:", message],

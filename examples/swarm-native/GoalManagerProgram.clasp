@@ -1308,25 +1308,24 @@ recoverManagedService service = {
 }
 
 managerServiceEnvArgs : [Str]
+servicePassthroughEnvArg : Str -> [Str]
+servicePassthroughEnvArg name =
+  match envVar name {
+    Ok raw -> [textConcat [name, "=", raw]],
+    Err message -> emptyTexts
+  }
+
 managerServicePassthroughEnvArgs : [Str]
-managerServicePassthroughEnvArgs = {
-  let mut rendered = emptyTexts;
-  for name in [
-    "CLASP_TEST_FAKE_PLANNER_MODE",
-    "CLASP_TEST_FAKE_CODEX_SLEEP_SECS",
-    "CLASP_TEST_FAKE_BENCHMARK_MODE",
-    "CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS"
-  ] {
-    match envVar name {
-      Ok raw ->
-        rendered = append rendered [textConcat [name, "=", raw]],
-      Err message ->
-        rendered
-    };
-    rendered
-  };
-  rendered
-}
+managerServicePassthroughEnvArgs =
+  append
+    (append
+      (append
+        (append
+          (servicePassthroughEnvArg "CLASP_TEST_FAKE_PLANNER_MODE")
+          (servicePassthroughEnvArg "CLASP_TEST_FAKE_CODEX_SLEEP_SECS"))
+        (servicePassthroughEnvArg "CLASP_TEST_FAKE_CHILD_SLEEP_SECS"))
+      (servicePassthroughEnvArg "CLASP_TEST_FAKE_BENCHMARK_MODE"))
+    (servicePassthroughEnvArg "CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS")
 
 managerServiceEnvArgs =
   append [

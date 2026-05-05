@@ -65,25 +65,24 @@ recoverManagedService service = {
 }
 
 managerServiceEnvArgs : [Str]
+servicePassthroughEnvArg : Str -> [Str]
+servicePassthroughEnvArg name =
+  match envVar name {
+    Ok raw -> [textConcat [name, "=", raw]],
+    Err message -> emptyTexts
+  }
+
 managerServicePassthroughEnvArgs : [Str]
-managerServicePassthroughEnvArgs = {
-  let mut rendered = emptyTexts;
-  for name in [
-    "CLASP_TEST_FAKE_PLANNER_MODE",
-    "CLASP_TEST_FAKE_CODEX_SLEEP_SECS",
-    "CLASP_TEST_FAKE_BENCHMARK_MODE",
-    "CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS"
-  ] {
-    match envVar name {
-      Ok raw ->
-        rendered = append rendered [textConcat [name, "=", raw]],
-      Err message ->
-        rendered
-    };
-    rendered
-  };
-  rendered
-}
+managerServicePassthroughEnvArgs =
+  append
+    (append
+      (append
+        (append
+          (servicePassthroughEnvArg "CLASP_TEST_FAKE_PLANNER_MODE")
+          (servicePassthroughEnvArg "CLASP_TEST_FAKE_CODEX_SLEEP_SECS"))
+        (servicePassthroughEnvArg "CLASP_TEST_FAKE_CHILD_SLEEP_SECS"))
+      (servicePassthroughEnvArg "CLASP_TEST_FAKE_BENCHMARK_MODE"))
+    (servicePassthroughEnvArg "CLASP_TEST_FAKE_BENCHMARK_SLEEP_SECS")
 
 managerServiceEnvArgs =
   append [
@@ -97,6 +96,8 @@ managerServiceEnvArgs =
     textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode workspaceRoot],
     textConcat ["CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON=", encode taskWorkspaceBaseRoot],
     textConcat ["CLASP_MANAGER_CLASPC_BIN_JSON=", encode managerClaspcBin],
+    textConcat ["CLASP_MANAGER_XDG_CACHE_HOME_JSON=", encode managerXdgCacheHome],
+    textConcat ["XDG_CACHE_HOME=", managerXdgCacheHome],
     textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
     textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
     textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
@@ -163,6 +164,11 @@ waitForManagedServiceCompletion = {
           recoverManagedService service
         else if service.status == "failed" then
           recoverManagedService service
+        else if service.heartbeatPath != "" then
+          match awaitWatchedProcess service.heartbeatPath childLoopWatchPollMs {
+            Err message -> textConcat ["error:", message],
+            Ok process -> waitForManagedServiceCompletion
+          }
         else
           match sleepMsValue childLoopWatchPollMs {
             Err message -> textConcat ["error:", message],

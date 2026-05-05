@@ -480,6 +480,10 @@ if [[ -n "$workspace_root" ]]; then
   printf '%s\n' 'transient-noise' >"$workspace_root/.clasp-test-tmp/noise.txt"
 fi
 
+if [[ -n "${CLASP_TEST_FAKE_CHILD_SLEEP_SECS:-}" ]]; then
+  sleep "$CLASP_TEST_FAKE_CHILD_SLEEP_SECS"
+fi
+
 mkdir -p "$state_root"
 cat >"$state_root/state.json" <<'JSON'
 {"attempt":1,"phase":"completed","verdict":"pass","completed":true,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":true}
@@ -851,6 +855,35 @@ grep -F '"verdict":"pass"' "$snapshot_exclude_output" >/dev/null
 test -f "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.workspace-ready"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-workspaces/stale-cache/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-baselines/stale-baseline/sentinel.txt"
+
+trace_case "active-child-wait-does-not-spin"
+active_wait_state="$test_root_abs/active-wait-state"
+active_wait_workspace="$test_root_abs/active-wait-workspace"
+active_wait_output="$test_root_abs/active-wait-output.txt"
+mkdir -p "$active_wait_workspace"
+run_goal_manager "$active_wait_state" "$active_wait_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='1' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_LOOP_WATCH_POLL_MS_JSON='10' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$active_wait_output" 2>&1 &
+goal_manager_live_pid=$!
+wait_for_path_contains "$active_wait_state/status.json" '"phase":"task-running"' "" 1200 0.05
+wait_for_path_contains "$active_wait_state/loop-benchmark-gap/loop.process.heartbeat.json" '"running":true' "" 600 0.05
+sleep 0.25
+active_wait_launch_returns=0
+if [[ -f "$active_wait_state/trace.log" ]]; then
+  active_wait_launch_returns="$(grep -c 'launch-ready:return' "$active_wait_state/trace.log" 2>/dev/null || true)"
+fi
+stop_goal_manager_service "$active_wait_state"
+wait_or_kill_pid "$goal_manager_live_pid" 100
+goal_manager_live_pid=""
+if (( active_wait_launch_returns > 3 )); then
+  echo "active child wait spun in Clasp recursion; launch-ready:return count=$active_wait_launch_returns" >&2
+  sed -n '1,120p' "$active_wait_state/trace.log" >&2 || true
+  exit 1
+fi
 
 if [[ "${CLASP_GOAL_MANAGER_FAST_EXTENDED:-0}" == "1" ]]; then
 trace_case "relative-workspace-ready-link"

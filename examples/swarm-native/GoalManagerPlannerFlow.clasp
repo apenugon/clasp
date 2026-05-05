@@ -501,13 +501,16 @@ executeReadyTasks report wave benchmarkRuns = {
                   let stateError = writeManagerState runningState in
                   if stateError != "" then
                     finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
-                  else if length launched.activeTaskIds > 0 then
-                    match sleepMsValue childLoopWatchPollMs {
+                  else if length launched.activeTaskIds > 0 then {
+                    match awaitWatchedProcess
+                      (taskProcessHeartbeatPath (firstTextOrEmpty launched.activeTaskIds))
+                      childLoopWatchPollMs {
                       Err message ->
-                        finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
-                      Ok slept ->
+                        finalizeWithReport failureState (syntheticFailureReport "task wait failed" message),
+                      Ok process ->
                         executeReadyTasks report wave benchmarkRuns
                     }
+                  }
                   else
                     match tasks swarmStateRoot {
                       Err message ->
@@ -545,10 +548,12 @@ executeReadyTasks report wave benchmarkRuns = {
                             finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                         else
                           if length finalStatus.pendingLaunchIds > 0 then
-                            match sleepMsValue childLoopWatchPollMs {
+                            match awaitWatchedProcess
+                              (taskProcessHeartbeatPath (firstTextOrEmpty finalStatus.pendingLaunchIds))
+                              childLoopWatchPollMs {
                               Err message ->
-                                finalizeWithReport failureState (syntheticFailureReport "task poll sleep failed" message),
-                              Ok slept ->
+                                finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
+                              Ok process ->
                                 executeReadyTasks report wave benchmarkRuns
                             }
                           else if length finalStatus.readyPlannedIds > 0 then

@@ -7,6 +7,7 @@ import Swarm
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
 foreign sleepMsRaw : Int -> Result Str = "sleepMs"
 
@@ -58,6 +59,10 @@ managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-na
 
 workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+managerXdgCacheHome : Str
+managerXdgCacheHome =
+  readEnvText "CLASP_MANAGER_XDG_CACHE_HOME_JSON" (pathJoin [stateRootPath, "manager-xdg-cache"])
 
 taskWorkspaceBaseRoot : Str
 taskWorkspaceBaseRoot =

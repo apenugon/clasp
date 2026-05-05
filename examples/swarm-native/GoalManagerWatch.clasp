@@ -21,6 +21,10 @@ readWatchedProcessPath path = match readFile path {
   Err message -> watchedProcessError message
 }
 
+awaitWatchedProcess : Str -> Int -> Result WatchedProcess
+awaitWatchedProcess heartbeatPath pollMs =
+  watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
+
 awaitWatchedProcessTimeout : Str -> Int -> Int -> Result WatchedProcess
 awaitWatchedProcessTimeout heartbeatPath pollMs timeoutMs =
   watchedProcessResult (awaitWatchedProcessTimeoutRaw heartbeatPath pollMs timeoutMs)
