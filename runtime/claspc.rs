@@ -185,6 +185,7 @@ struct IncrementalProjectSummaryPlan {
 struct IncrementalProjectSummaryModulePlan {
     imported_module_order: Vec<String>,
     scoped_bundle: String,
+    fallback_scoped_bundle: String,
 }
 
 fn print_json_error(message: &str) {
@@ -1017,7 +1018,7 @@ fn plan_incremental_project_summary(
             .filter(|name| closure.contains(*name) && name.as_str() != module_name)
             .cloned()
             .collect::<Vec<_>>();
-        let scoped_bundle = original_module_order
+        let fallback_scoped_bundle = original_module_order
             .iter()
             .filter(|name| closure.contains(*name))
             .map(|name| {
@@ -1027,16 +1028,57 @@ fn plan_incremental_project_summary(
             })
             .collect::<Result<Vec<_>, _>>()?
             .join(PROJECT_BUNDLE_SEPARATOR);
+        let scoped_bundle = reduced_project_summary_source(
+            module_name,
+            &imported_module_order,
+            &source_by_name,
+        )
+        .unwrap_or_else(|| fallback_scoped_bundle.clone());
         modules.insert(
             module_name.clone(),
             IncrementalProjectSummaryModulePlan {
                 imported_module_order,
                 scoped_bundle,
+                fallback_scoped_bundle,
             },
         );
     }
 
     Ok(IncrementalProjectSummaryPlan { module_order, modules })
+}
+
+fn module_summary_imported_interface_block(block: &str) -> bool {
+    let first_line = block.lines().next().unwrap_or("").trim();
+    matches!(leading_keyword(first_line), "record" | "type" | "foreign" | "hosted")
+}
+
+fn reduced_project_summary_source(
+    module_name: &str,
+    imported_module_order: &[String],
+    source_by_name: &HashMap<String, &str>,
+) -> Option<String> {
+    let target_source = *source_by_name.get(module_name)?;
+    let target = parse_module_validation_source(target_source)?;
+    let mut sections = Vec::new();
+
+    sections.push(target.module_header);
+    sections.extend(target.imports);
+
+    for imported_module_name in imported_module_order {
+        let imported_source = *source_by_name.get(imported_module_name)?;
+        let imported = parse_module_validation_source(imported_source)?;
+        sections.extend(
+            imported
+                .interface_blocks
+                .into_iter()
+                .filter(|block| module_summary_imported_interface_block(block)),
+        );
+    }
+
+    sections.extend(target.interface_blocks);
+    sections.extend(target.declarations.into_iter().map(|decl| decl.source));
+
+    Some(format!("{}\n", sections.join("\n\n")))
 }
 
 fn module_interface_fingerprints(
@@ -1785,14 +1827,49 @@ mod tests {
             .expect("summary plan for Shared.User");
 
         assert_eq!(user_plan.imported_module_order, vec!["Shared.Helper".to_owned()]);
+        assert!(user_plan.scoped_bundle.contains("module Shared.User"));
+        assert!(user_plan.scoped_bundle.contains("greeting : Str"));
+        assert!(!user_plan.scoped_bundle.contains(PROJECT_BUNDLE_SEPARATOR));
+        assert!(!user_plan.scoped_bundle.contains("module Shared.Helper"));
         assert_eq!(
-            user_plan.scoped_bundle,
+            user_plan.fallback_scoped_bundle,
             [
                 "module Shared.User\nimport Shared.Helper\ngreeting : Str\ngreeting = helper\n",
                 "module Shared.Helper\nhelper : Str\nhelper = \"ok\"\n",
             ]
             .join(PROJECT_BUNDLE_SEPARATOR)
         );
+    }
+
+    #[test]
+    fn incremental_project_summary_plan_keeps_imported_type_interfaces() {
+        let bundle_build = ProjectBundleBuild {
+            bundle: [
+                "module Main\nimport Shared.Types\nmain : Box\nmain = make\n",
+                "module Shared.Types\nrecord Box { value : Str }\nmake : Box\nmake = Box{ value = \"ok\" }\n",
+            ]
+            .join(PROJECT_BUNDLE_SEPARATOR),
+            modules: vec![
+                ProjectBundleModule {
+                    canonical_path: "/tmp/Main.clasp".to_owned(),
+                    module_name: "Main".to_owned(),
+                    source_fingerprint: "main".to_owned(),
+                    import_module_names: vec!["Shared.Types".to_owned()],
+                },
+                ProjectBundleModule {
+                    canonical_path: "/tmp/Shared/Types.clasp".to_owned(),
+                    module_name: "Shared.Types".to_owned(),
+                    source_fingerprint: "types".to_owned(),
+                    import_module_names: vec![],
+                },
+            ],
+        };
+
+        let plan = plan_incremental_project_summary(&bundle_build).expect("summary plan");
+        let main_plan = plan.modules.get("Main").expect("summary plan for Main");
+
+        assert!(main_plan.scoped_bundle.contains("record Box { value : Str }"));
+        assert!(!main_plan.scoped_bundle.contains("make = Box"));
     }
 
     #[test]
@@ -3719,6 +3796,36 @@ fn execute_project_module_summary_export(
     )
 }
 
+fn execute_project_module_summary_export_for_plan(
+    embedded_path_text: &str,
+    module_name: &str,
+    module_plan: &IncrementalProjectSummaryModulePlan,
+    imported_summaries_text: &str,
+) -> Result<String, String> {
+    let output = execute_project_module_summary_export(
+        embedded_path_text,
+        &module_plan.scoped_bundle,
+        imported_summaries_text,
+    )?;
+    if output.strip_prefix("ERROR:").is_some()
+        && module_plan.scoped_bundle != module_plan.fallback_scoped_bundle
+    {
+        let fallback_output = execute_project_module_summary_export(
+            embedded_path_text,
+            &module_plan.fallback_scoped_bundle,
+            imported_summaries_text,
+        )?;
+        if fallback_output.strip_prefix("ERROR:").is_none() {
+            trace_native_cache(&format!(
+                "module-summary reduced-source fallback module={}",
+                module_name
+            ));
+            return Ok(fallback_output);
+        }
+    }
+    Ok(output)
+}
+
 fn append_cached_module_summary_to_imports(imported_summaries_text: &str, cached_summary: &str) -> String {
     match (imported_summaries_text.trim().is_empty(), cached_summary.trim().is_empty()) {
         (true, true) => String::new(),
@@ -3812,9 +3919,10 @@ fn execute_incremental_project_summary(
                     &cached,
                 )? {
                     Some(output) => output,
-                    None => execute_project_module_summary_export(
+                    None => execute_project_module_summary_export_for_plan(
                         embedded_path_text,
-                        &module_plan.scoped_bundle,
+                        module_name,
+                        module_plan,
                         &imported_summaries_text,
                     )?,
                 };
@@ -3850,9 +3958,10 @@ fn execute_incremental_project_summary(
                 }
             }
         } else {
-            let output = execute_project_module_summary_export(
+            let output = execute_project_module_summary_export_for_plan(
                 embedded_path_text,
-                &module_plan.scoped_bundle,
+                module_name,
+                module_plan,
                 &imported_summaries_text,
             )?;
             write_cached_module_summary(

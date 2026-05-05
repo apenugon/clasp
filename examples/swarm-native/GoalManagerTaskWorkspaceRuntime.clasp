@@ -19,13 +19,40 @@ writeTaskFeedback taskId report =
       }
   }
 
+taskPromotionDiffPath : Str -> Str
+taskPromotionDiffPath taskId =
+  pathJoin [taskReportStateRoot taskId, "promotion-recoverable.diff"]
+
+taskPromotionConflictPath : Str -> Str
+taskPromotionConflictPath taskId =
+  pathJoin [taskReportStateRoot taskId, "promotion-conflict.marker"]
+
+cleanupTaskWorkspace : Str -> Str
+cleanupTaskWorkspace taskId =
+  match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId, taskWorkspaceActualRoot taskId, taskWorkspaceBaselineActualRoot taskId] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else
+        process.stderr
+  }
+
+cleanupFailedTaskWorkspace : Str -> Str
+cleanupFailedTaskWorkspace taskId =
+  if retainFailedTaskWorkspaces then
+    ""
+  else
+    cleanupTaskWorkspace taskId
+
 ensureTaskWorkspace : Str -> Str
 ensureTaskWorkspace taskId =
   if fileExists (taskWorkspaceReadyPath taskId) then
     ""
   else {
     let removed =
-      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId] {
+      match runCommand "." ["rm", "-rf", taskWorkspaceRoot taskId, taskWorkspaceActualRoot taskId, taskWorkspaceBaselineActualRoot taskId] {
         Ok result -> result,
         Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
       } in
@@ -33,7 +60,7 @@ ensureTaskWorkspace taskId =
       textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
     else {
       let created =
-        match runCommand "." ["mkdir", "-p", taskWorkspaceRoot taskId] {
+        match runCommand "." ["mkdir", "-p", taskWorkspaceActualRoot taskId] {
           Ok result -> result,
           Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
         } in
@@ -50,7 +77,7 @@ ensureTaskWorkspace taskId =
               "-C ",
               workspaceRoot,
               " . | tar -xf - -C ",
-              taskWorkspaceRoot taskId
+              taskWorkspaceActualRoot taskId
             ]
           ] {
             Ok result -> result,
@@ -58,12 +85,141 @@ ensureTaskWorkspace taskId =
           } in
         if copied.exitCode != 0 then
           textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
-        else
-          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-            Ok written -> "",
-            Err message ->
-              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+        else {
+          let baselineCreated =
+            match runCommand "." ["mkdir", "-p", taskWorkspaceBaselineActualRoot taskId] {
+              Ok result -> result,
+              Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+            } in
+          if baselineCreated.exitCode != 0 then
+            textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", baselineCreated.stderr]
+          else {
+            let baselineCopied =
+              match runCommand "." [
+                "bash",
+                "-lc",
+                textConcat [
+                  "tar -cf - -C ",
+                  taskWorkspaceActualRoot taskId,
+                  " . | tar -xf - -C ",
+                  taskWorkspaceBaselineActualRoot taskId
+                ]
+              ] {
+                Ok result -> result,
+                Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+              } in
+            if baselineCopied.exitCode != 0 then
+              textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", baselineCopied.stderr]
+            else {
+              let linkParentCreated =
+                match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
+                  Ok result -> result,
+                  Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                } in
+              if linkParentCreated.exitCode != 0 then
+                textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
+              else
+                let linked =
+                  match runCommand "." ["ln", "-s", taskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                    Ok result -> result,
+                    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                  } in
+                if linked.exitCode != 0 then
+                  textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                else
+                  match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                    Ok written -> "",
+                    Err message ->
+                      textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                  }
+            }
           }
+        }
       }
     }
+  }
+
+taskWorkspacePromotionScript : Str
+taskWorkspacePromotionScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "base=\"$2\"",
+  "dest=\"$3\"",
+  "conflict_marker=\"$4\"",
+  "diff_out=\"$5\"",
+  "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\"",
+  "rm -f \"$conflict_marker\" \"$diff_out\"",
+  "if [ ! -d \"$src\" ]; then printf 'missing task workspace: %s\n' \"$src\" >&2; exit 2; fi",
+  "if [ ! -d \"$base\" ]; then printf 'missing task baseline workspace: %s\n' \"$base\" >&2; exit 2; fi",
+  "mkdir -p \"$dest\"",
+  "tmp=\"$(mktemp -d)\"",
+  "trap 'rm -rf \"$tmp\"' EXIT",
+  "list_files() {",
+  "  root=\"$1\"",
+  "  (cd \"$root\" && find . -type f -print | while IFS= read -r rel; do",
+  "    case \"$rel\" in",
+  "      ./.workspace-ready|./.git/*|*/.git/*|./.clasp-agents/*|*/.clasp-agents/*|./.clasp-loops/*|*/.clasp-loops/*|./.clasp-swarm/*|*/.clasp-swarm/*|./.clasp-task-workspaces/*|*/.clasp-task-workspaces/*|./.clasp-task-baselines/*|*/.clasp-task-baselines/*|./.clasp-test-tmp/*|*/.clasp-test-tmp/*|./.clasp-test-tmp-*/*|*/.clasp-test-tmp-*/*|./.clasp-verify-tmp/*|*/.clasp-verify-tmp/*|./.clasp-verify-tmp-*/*|*/.clasp-verify-tmp-*/*|./benchmarks/workspaces/*|*/benchmarks/workspaces/*|./benchmarks/results/*|*/benchmarks/results/*|./dist/*|*/dist/*|./dist-newstyle/*|*/dist-newstyle/*|./result/*|*/result/*|./runtime/target/*|*/runtime/target/*|./node_modules/*|*/node_modules/*|./__serve-native-export-host/*|*/__serve-native-export-host/*|./exec-image/*|*/exec-image/*) continue ;;",
+  "    esac",
+  "    printf '%s\n' \"${rel#./}\"",
+  "  done | sort)",
+  "}",
+  "write_recoverable_diff() {",
+  "  tmp_diff=\"$diff_out.tmp.$$\"",
+  "  diff -ruN --exclude=.workspace-ready --exclude=.git --exclude=.clasp-agents --exclude=.clasp-loops --exclude=.clasp-swarm --exclude=.clasp-task-workspaces --exclude=.clasp-task-baselines --exclude=.clasp-test-tmp --exclude=.clasp-test-tmp-* --exclude=.clasp-verify-tmp --exclude=.clasp-verify-tmp-* --exclude=workspaces --exclude=results --exclude=dist --exclude=dist-newstyle --exclude=result --exclude=target --exclude=node_modules --exclude=__serve-native-export-host --exclude=exec-image \"$base\" \"$src\" >\"$tmp_diff\" || true",
+  "  if [ -s \"$tmp_diff\" ]; then mv \"$tmp_diff\" \"$diff_out\"; else rm -f \"$tmp_diff\" \"$diff_out\"; fi",
+  "}",
+  "base_files=\"$tmp/base-files\"",
+  "src_files=\"$tmp/src-files\"",
+  "changed=\"$tmp/changed-files\"",
+  "conflicts=\"$tmp/conflicts\"",
+  "list_files \"$base\" >\"$base_files\"",
+  "list_files \"$src\" >\"$src_files\"",
+  "comm -12 \"$base_files\" \"$src_files\" | while IFS= read -r rel; do if ! cmp -s \"$base/$rel\" \"$src/$rel\"; then printf '%s\n' \"$rel\"; fi; done >\"$changed\"",
+  "comm -13 \"$base_files\" \"$src_files\" >>\"$changed\"",
+  "sort -u -o \"$changed\" \"$changed\"",
+  ": >\"$conflicts\"",
+  "while IFS= read -r rel; do",
+  "  [ -n \"$rel\" ] || continue",
+  "  if [ -e \"$dest/$rel\" ] && ! cmp -s \"$dest/$rel\" \"$src/$rel\"; then",
+  "    if [ -e \"$base/$rel\" ]; then",
+  "      if ! cmp -s \"$dest/$rel\" \"$base/$rel\"; then printf '%s\n' \"$rel\" >>\"$conflicts\"; fi",
+  "    else",
+  "      printf '%s\n' \"$rel\" >>\"$conflicts\"",
+  "    fi",
+  "  fi",
+  "done <\"$changed\"",
+  "if [ -s \"$conflicts\" ]; then",
+  "  write_recoverable_diff",
+  "  { printf 'promotion conflict: task workspace would overwrite files changed since snapshot\n'; cat \"$conflicts\"; } >\"$conflict_marker\"",
+  "  exit 0",
+  "fi",
+  "while IFS= read -r rel; do",
+  "  [ -n \"$rel\" ] || continue",
+  "  mkdir -p \"$dest/$(dirname \"$rel\")\"",
+  "  cp -p \"$src/$rel\" \"$dest/$rel\"",
+  "done <\"$changed\""
+]
+
+promoteVerifiedTaskWorkspace : PlannerTaskSpec -> Str
+promoteVerifiedTaskWorkspace spec =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    taskWorkspacePromotionScript,
+    "promote-task-workspace",
+    taskWorkspaceActualRoot spec.taskId,
+    taskWorkspaceBaselineActualRoot spec.taskId,
+    workspaceRoot,
+    taskPromotionConflictPath spec.taskId,
+    taskPromotionDiffPath spec.taskId
+  ] {
+    Err message ->
+      textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", message],
+    Ok process ->
+      if fileExists (taskPromotionConflictPath spec.taskId) then
+        textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion conflict: task workspace would overwrite files changed since snapshot"]
+      else if process.exitCode == 0 then
+        ""
+      else
+        textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", process.stderr]
   }

@@ -7,13 +7,10 @@ import Swarm
 
 materializeTaskId : Int -> Str -> Str
 materializeTaskId wave taskIdValue =
-  if benchmarkEnabled then
-    if wave == 1 then
-      taskIdValue
-    else
-      textConcat ["wave-", encode wave, "-", taskIdValue]
-  else
+  if wave == 1 then
     taskIdValue
+  else
+    textConcat ["wave-", encode wave, "-", taskIdValue]
 
 objectiveRef : ObjectiveHandle
 objectiveRef = objectiveHandle swarmStateRoot objectiveId
@@ -133,6 +130,14 @@ taskReportStateRoot taskId = pathJoin [stateRootPath, textConcat ["loop-", taskI
 
 taskWorkspaceRoot : Str -> Str
 taskWorkspaceRoot taskId = pathJoin [taskWorkspaceBaseRoot, textConcat ["workspace-", taskId]]
+
+taskWorkspaceActualRoot : Str -> Str
+taskWorkspaceActualRoot taskId =
+  pathJoin [workspaceRoot, ".clasp-task-workspaces", taskId]
+
+taskWorkspaceBaselineActualRoot : Str -> Str
+taskWorkspaceBaselineActualRoot taskId =
+  pathJoin [workspaceRoot, ".clasp-task-baselines", taskId]
 
 taskWorkspaceAliasPath : Str -> Str
 taskWorkspaceAliasPath taskId = pathJoin [stateRootPath, textConcat ["workspace-", taskId]]

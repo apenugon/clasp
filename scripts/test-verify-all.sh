@@ -34,8 +34,13 @@ cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhos
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
+cp "$project_root/scripts/ensure-goal-manager-binary.sh" "$test_root/scripts/ensure-goal-manager-binary.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
+mkdir -p "$test_root/examples/swarm-native" "$test_root/runtime"
+printf 'module Main\nmain : Str\nmain = "ok"\n' > "$test_root/examples/swarm-native/GoalManager.clasp"
+printf 'module Main\nmain : Str\nmain = "ok"\n' > "$test_root/examples/swarm-native/GoalManager.wrapper.clasp"
+printf '[package]\nname = "fake-runtime"\nversion = "0.0.0"\n' > "$test_root/runtime/Cargo.toml"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -64,6 +69,70 @@ grep -F 'acquire_verify_lock()' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'nativeImageProjectBuildPlanText' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'nativeImageProjectModuleDeclsText' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'GoalManager.wrapper.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'sha256sum "$claspc_bin"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+
+cat > "$test_root/bin/fake-slow-claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 10
+EOF
+chmod +x "$test_root/bin/fake-slow-claspc"
+
+goal_manager_timeout_stderr="$test_root/goal-manager-timeout.stderr"
+if CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-slow-claspc" \
+  CLASP_GOAL_MANAGER_CACHE_DIR="$test_root/goal-manager-timeout-cache" \
+  CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS=1 \
+  CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS=2 \
+  "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh" \
+  >/dev/null 2>"$goal_manager_timeout_stderr"; then
+  echo "expected goal manager compile timeout" >&2
+  exit 1
+fi
+grep -F 'goal manager compile timed out after 1s on attempt 1/2; retrying with warmed caches' "$goal_manager_timeout_stderr" >/dev/null
+grep -F 'goal manager compile timed out after 1s across 2 attempt(s)' "$goal_manager_timeout_stderr" >/dev/null
+
+cat > "$test_root/bin/fake-fast-claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+output=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$output" ]]; then
+  echo "missing -o" >&2
+  exit 1
+fi
+cat > "$output" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+EOF
+chmod +x "$test_root/bin/fake-fast-claspc"
+
+goal_manager_cache="$test_root/goal-manager-cache"
+goal_manager_binary_one="$(
+  CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+goal_manager_binary_two="$(
+  CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$goal_manager_binary_one" == "$goal_manager_binary_two" ]]
+[[ -x "$goal_manager_binary_one" ]]
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash

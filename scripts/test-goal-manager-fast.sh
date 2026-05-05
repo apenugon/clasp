@@ -145,7 +145,7 @@ fake_slow_benchmark_bin="$test_root_abs/fake-benchmark-slow"
 fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
-grep -F 'exec timeout \"$duration\" \"${@:2}\" < /dev/null' "$project_root/examples/swarm-native/GoalManager.clasp" >/dev/null
+grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
 grep -F 'import GoalManagerServiceMain' "$goal_manager_source" >/dev/null
 mkdir -p "$test_root_abs/bin"
 
@@ -427,7 +427,15 @@ JSON
     cat >"$state_root/builder-1.json" <<JSON
 {"summary":"fake child builder report before verifier export crash for $task_id","files_touched":[],"tests_run":[],"residual_risks":[],"feedback":{"summary":"builder completed before verifier export crash","ergonomics":[],"follow_ups":[],"warnings":[]}}
 JSON
+    cat >"$state_root/changes-1.diff" <<DIFF
+diff --git a/fake-$task_id.txt b/fake-$task_id.txt
+--- a/fake-$task_id.txt
++++ b/fake-$task_id.txt
+@@
++recoverable verifier export crash diff
+DIFF
     printf "runtime failed to execute native compiler export 'main' from image fake-%s.native.image.json\n" "$task_id" >&2
+    printf "fake verifier stdout before export crash for %s\n" "$task_id"
     exit 43
   fi
 fi
@@ -927,6 +935,34 @@ grep -F 'fake child crashed before durable report' "$crash_cleanup_state/loop-be
 test ! -e "$crash_cleanup_workspace/.clasp-task-workspaces/benchmark-gap"
 test ! -e "$crash_cleanup_workspace/.clasp-task-baselines/benchmark-gap"
 
+trace_case "child-verifier-export-crash-durable-report-gate"
+verifier_crash_gate_state="$test_root_abs/verifier-crash-gate-state"
+verifier_crash_gate_workspace="$test_root_abs/verifier-crash-gate-workspace"
+verifier_crash_gate_output="$test_root_abs/verifier-crash-gate-output.txt"
+mkdir -p "$verifier_crash_gate_workspace"
+run_goal_manager "$verifier_crash_gate_state" "$verifier_crash_gate_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_VERIFIER_EXPORT_CRASH_ONCE='1' \
+  CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON='1' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$verifier_crash_gate_output" 2>&1
+grep -F '"phase":"failed"' "$verifier_crash_gate_output" >/dev/null
+grep -F '"verdict":"fail"' "$verifier_crash_gate_output" >/dev/null
+grep -F '"summary":"task child loop finished without a durable report"' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'builderReportPath=' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'builder-1.json' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'builderReportSummary=fake child builder report before verifier export crash for benchmark-gap' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'builderFeedbackSummary=builder completed before verifier export crash' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'state={' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F '"phase":"verifier-step-ready"' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'stderr_tail=runtime failed to execute native compiler export' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'stdout_tail=fake verifier stdout before export crash for benchmark-gap' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'recoverableDiff=' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'recoverableDiffKind=child-loop' "$verifier_crash_gate_state/loop-benchmark-gap/feedback.json" >/dev/null
+grep -F 'builderReportSummary=fake child builder report before verifier export crash for benchmark-gap' "$verifier_crash_gate_state/mailbox.json" >/dev/null
+grep -F 'builderFeedbackSummary=builder completed before verifier export crash' "$verifier_crash_gate_state/mailbox.json" >/dev/null
+grep -F 'recoverableDiffKind=child-loop' "$verifier_crash_gate_state/mailbox.json" >/dev/null
+
 trace_case "child-crash-once-retries-before-fail"
 crash_retry_state="$test_root_abs/crash-retry-state"
 crash_retry_workspace="$test_root_abs/crash-retry-workspace"
@@ -1118,7 +1154,7 @@ grep -F '"verdict":"pass"' "$planner_validation_output" >/dev/null
 grep -F '"wave":1' "$planner_validation_state/status.json" >/dev/null
 grep -F 'recoverable-validation-blocker' "$planner_validation_state/trace.log" >/dev/null
 
-trace_case "planner-timeout-retries-same-wave"
+trace_case "planner-slow-direct-completes-same-wave"
 planner_timeout_state="$test_root_abs/planner-timeout-state"
 planner_timeout_workspace="$test_root_abs/planner-timeout-workspace"
 planner_timeout_output="$test_root_abs/planner-timeout-output.txt"
@@ -1127,7 +1163,7 @@ run_goal_manager "$planner_timeout_state" "$planner_timeout_workspace"   CLASP_T
 grep -F '"phase":"completed"' "$planner_timeout_output" >/dev/null
 grep -F '"verdict":"pass"' "$planner_timeout_output" >/dev/null
 grep -F '"wave":1' "$planner_timeout_state/status.json" >/dev/null
-grep -F 'recoverable-transport-blocker' "$planner_timeout_state/trace.log" >/dev/null
+grep -F 'planner-wave-1:run-command:start' "$planner_timeout_state/trace.log" >/dev/null
 
 trace_case "preflight-budget-contract-fails-before-planner"
 preflight_budget_state="$test_root_abs/preflight-budget-state"

@@ -48,26 +48,33 @@ plannerBenchmarkContextFor wave benchmarkSummary =
   else
     textConcat ["Current wave: ", encode wave, " of ", encode maxWaves]
 
+plannerTaskWorkspaceCacheRoot : Str
+plannerTaskWorkspaceCacheRoot = pathJoin [workspaceRoot, ".clasp-task-workspaces"]
+
+plannerTaskWorkspaceBaselineCacheRoot : Str
+plannerTaskWorkspaceBaselineCacheRoot = pathJoin [workspaceRoot, ".clasp-task-baselines"]
+
+managerHealthSummaryText : Int -> Str
+managerHealthSummaryText wave =
+  textJoin "\n" [
+    textConcat ["wave=", encode wave],
+    textConcat ["stateRoot=", stateRootPath],
+    textConcat ["taskWorkspaceRoot=", plannerTaskWorkspaceCacheRoot],
+    textConcat ["taskBaselineRoot=", plannerTaskWorkspaceBaselineCacheRoot],
+    textConcat ["managerCache=", managerXdgCacheHome],
+    "hostProbe=disabled-in-native-fast-path"
+  ]
+
 plannerPromptFor : Int -> Str -> Str
 plannerPromptFor wave benchmarkSummary =
   textJoin "\n" [
     "You are the planner subagent for the Clasp repository.",
-    "Read AGENTS.md first if it exists.",
     "Plan the next bounded tasks needed to improve Clasp autonomously.",
     plannerBenchmarkContextFor wave benchmarkSummary,
     "High-level goal:",
     goalText,
-    "Current planner policy:",
-    plannerPolicyText,
-    "Current shared swarm mailbox context:",
-    mailboxSummaryText wave,
-    "Current cross-wave memory:",
-    plannerMemoryTextFor wave,
-    "Current prioritized backlog:",
-    plannerBacklogTextFor wave,
-    "Do not assume a fixed role taxonomy beyond the minimal substrate already present. Let coordination patterns emerge from the work and the shared mailbox.",
-    "Use focused verification for ordinary implementation branches. Reserve full verify-all for signoff, verifyall, or integration closure tasks, and treat verifier timeouts as first-class planner input.",
-    "If prior failed branches have recoverableDiff details, plan from those artifacts instead of rediscovering the same work from scratch.",
+    "Current manager health/resource context:",
+    managerHealthSummaryText wave,
     "Return JSON matching the planner schema.",
     textConcat ["Plan 1-", encode maxTaskLoops, " bounded tasks with explicit dependencies and task prompts."],
     "Each planned task must include an explicit role and a coordinationFocus list.",
@@ -78,19 +85,23 @@ plannerCommandFor : Int -> Str -> SwarmCommand
 plannerCommandFor wave benchmarkSummary =
   commandSpec
     managerProjectRoot
-    (append
-      [
-        "bash",
-        "-lc",
-        textJoin "\n" [
-          "if [ \"$1\" -le 0 ]; then",
-          "  exec \"${@:2}\"",
-          "fi",
-          "seconds=$(( ($1 + 999) / 1000 ))",
-          "duration=\"${seconds}s\"",
-          "exec timeout \"$duration\" \"${@:2}\" < /dev/null"
-        ],
-        "planner-timeout",
-        encode plannerTimeoutMs
-      ]
-      (codexCommand resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptFor wave benchmarkSummary)))
+    [
+      codexBin,
+      "exec",
+      "--json",
+      "--cd",
+      managerProjectRoot,
+      "-m",
+      codexModel,
+      "-c",
+      codexReasoningConfig,
+      "--skip-git-repo-check",
+      "--sandbox",
+      codexSandbox,
+      "--ephemeral",
+      "--output-schema",
+      resolvedPlannerSchemaPath,
+      "-o",
+      plannerReportPathFor wave,
+      plannerPromptFor wave benchmarkSummary
+    ]

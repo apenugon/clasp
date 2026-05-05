@@ -55,6 +55,7 @@ builderReportMailboxDetails spec report = {
   details = appendPrefixedMailboxDetails details "ergonomics=" report.feedback.ergonomics;
   details = appendPrefixedMailboxDetails details "follow-up=" report.feedback.follow_ups;
   details = appendPrefixedMailboxDetails details "warning=" report.feedback.warnings;
+  details = append details (taskRecoverableDiffDetails spec.taskId);
   details
 }
 
@@ -68,6 +69,8 @@ verifierReportMailboxDetails spec report = {
   details = appendPrefixedMailboxDetails details "test=" report.tests_run;
   details = appendPrefixedMailboxDetails details "follow-up=" report.follow_up;
   details = appendCapabilityMailboxDetails details report.capability_statuses;
+  details = append details (taskBuilderReportContextDetails spec.taskId);
+  details = append details (taskRecoverableDiffDetails spec.taskId);
   details
 }
 

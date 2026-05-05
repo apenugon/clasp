@@ -115,7 +115,13 @@ taskDependencyIds task = {
     dependencyIds = appendUniqueTexts dependencyIds (dependencyIdsFromBlocker blocker);
     dependencyIds
   };
-  dependencyIds
+  if length dependencyIds == 0 then
+    if task.status == "created" then
+      task.dependencies
+    else
+      dependencyIds
+  else
+    dependencyIds
 }
 
 taskBudgetBlockers : SwarmTask -> [Str]
@@ -276,7 +282,7 @@ statusView state =
       Ok report -> plannerTaskIds (materializePlannerReport state.wave report),
       Err message -> state.plannedTaskIds
     } in
-  let activeTaskIds =
+  let heartbeatActiveTaskIds =
     if length plannedTaskIds == 0 then
       emptyTexts
     else {
@@ -294,6 +300,7 @@ statusView state =
     Ok taskValues ->
       let objectiveTasks = filter taskInObjective taskValues in
       let trackedTasks = trackedTasksForStatus objectiveTasks plannedTaskIds in
+      let activeTaskIds = plannedActiveTaskIds plannedTaskIds heartbeatActiveTaskIds objectiveTasks in
       let readyTaskIds = match ready objectiveRef {
         Ok readyTasks -> map taskIdOf readyTasks,
         Err message -> emptyTexts
@@ -330,7 +337,7 @@ statusView state =
         plannedTaskIds = plannedTaskIds,
         allTaskIds = emptyTexts,
         readyTaskIds = emptyTexts,
-        activeTaskIds = activeTaskIds,
+        activeTaskIds = heartbeatActiveTaskIds,
         completedTaskIds = emptyTexts,
         failedTaskIds = emptyTexts,
         waitingReasons = waitingReasons,

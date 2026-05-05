@@ -2,9 +2,11 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-goal_manager_source="$project_root/examples/swarm-native/GoalManager.clasp"
-cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-$project_root/.clasp-loops/.cache/goal-manager-fast}"
+goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$project_root/examples/swarm-native/GoalManager.wrapper.clasp}"
+cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-/tmp/clasp-nix-cache/goal-manager-fast}"
 claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-claspc.sh")}"
+compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"
+compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-4}"
 declare -a alias_paths=()
 
 usage() {
@@ -28,8 +30,8 @@ done
 
 compute_goal_manager_cache_key() {
   {
-    printf 'claspc\t'
-    stat -c '%Y:%s:%n' "$claspc_bin"
+    printf 'claspc-content\t'
+    sha256sum "$claspc_bin"
     find \
       "$project_root/examples/swarm-native" \
       "$project_root/src" \
@@ -46,9 +48,60 @@ compute_goal_manager_cache_key() {
 compile_goal_manager_binary() {
   local output_path="$1"
   local output_tmp="$output_path.tmp.$$"
+  local compile_status=0
+  local attempt=1
+
+  if ! [[ "$compile_timeout_secs" =~ ^[0-9]+$ ]]; then
+    compile_timeout_secs=0
+  fi
+  if ! [[ "$compile_attempts" =~ ^[0-9]+$ ]] || (( compile_attempts < 1 )); then
+    compile_attempts=4
+  fi
 
   rm -f "$output_tmp"
-  env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp"
+
+  while (( attempt <= compile_attempts )); do
+    compile_status=0
+    if (( compile_timeout_secs > 0 )); then
+      timeout --kill-after=5s "$compile_timeout_secs" \
+        env \
+          RUSTC=/definitely-missing-rustc \
+          CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-8}" \
+          CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}" \
+          "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
+        || compile_status=$?
+    else
+      env \
+        RUSTC=/definitely-missing-rustc \
+        CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-8}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}" \
+        "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
+        || compile_status=$?
+    fi
+
+    if (( compile_status == 0 )); then
+      break
+    fi
+
+    rm -f "$output_tmp"
+    if ! (( compile_status == 124 || compile_status == 137 )) || (( attempt >= compile_attempts )); then
+      break
+    fi
+    printf 'goal manager compile timed out after %ss on attempt %s/%s; retrying with warmed caches: %s\n' \
+      "$compile_timeout_secs" "$attempt" "$compile_attempts" "$goal_manager_source" >&2
+    attempt=$((attempt + 1))
+  done
+
+  if (( compile_status != 0 )); then
+    rm -f "$output_tmp"
+    if (( compile_status == 124 || compile_status == 137 )); then
+      printf 'goal manager compile timed out after %ss across %s attempt(s): %s\n' "$compile_timeout_secs" "$compile_attempts" "$goal_manager_source" >&2
+    else
+      printf 'goal manager compile failed with exit %s: %s\n' "$compile_status" "$goal_manager_source" >&2
+    fi
+    return "$compile_status"
+  fi
+
   chmod +x "$output_tmp"
   mv "$output_tmp" "$output_path"
 }

@@ -77,13 +77,35 @@ childLoopMissingReport : PlannerTaskSpec -> VerifierReport
 childLoopMissingReport spec =
   syntheticFailureReport
     "task child loop finished without a durable report"
-    (readProcessOutputText (taskProcessStderrPath spec.taskId))
+    (textJoin "\n"
+      (append
+        (append
+          [
+            textConcat ["task=", spec.taskId],
+            textConcat ["role=", plannerTaskRoleLabel spec],
+            textConcat ["reportSettlePolls=", encode childReportSettlePolls],
+            textConcat ["reportSettlePollMs=", encode childLoopWatchPollMs],
+            childLoopLaunchSummary spec.taskId,
+            textConcat ["state=", childLoopStateSummary spec.taskId],
+            textConcat ["stderr_tail=", readProcessOutputTailText (taskProcessStderrPath spec.taskId)],
+            textConcat ["stdout_tail=", readProcessOutputTailText (taskProcessStdoutPath spec.taskId)]
+          ]
+          (taskBuilderReportContextDetails spec.taskId))
+        (taskRecoverableDiffDetails spec.taskId)))
 
 childLoopMissingLaunchHeartbeatReport : PlannerTaskSpec -> VerifierReport
 childLoopMissingLaunchHeartbeatReport spec =
   syntheticFailureReport
     "task child loop failed to establish a durable launch heartbeat"
-    (readProcessOutputText (taskProcessStderrPath spec.taskId))
+    (textJoin "\n"
+      [
+        textConcat ["task=", spec.taskId],
+        textConcat ["role=", plannerTaskRoleLabel spec],
+        childLoopLaunchSummary spec.taskId,
+        textConcat ["state=", childLoopStateSummary spec.taskId],
+        textConcat ["stderr_tail=", readProcessOutputTailText (taskProcessStderrPath spec.taskId)],
+        textConcat ["stdout_tail=", readProcessOutputTailText (taskProcessStdoutPath spec.taskId)]
+      ])
 
 childLoopMissingDurableReport : VerifierReport -> Bool
 childLoopMissingDurableReport report =
@@ -100,16 +122,40 @@ requeueTaskForManagerRetry taskId failureSummary =
 
 completePlannedTask : PlannerTaskSpec -> Str
 completePlannedTask spec =
-  match complete (taskHandleFor spec.taskId) {
-    Err message ->
-      textConcat ["task completion failed: ", spec.taskId, ": ", message],
-    Ok completedValue ->
-      match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
-        Err message ->
-          textConcat ["task review failed: ", spec.taskId, ": ", message],
-        Ok reviewValue ->
-          ""
-      }
+  let promotionError = promoteVerifiedTaskWorkspace spec in
+  if promotionError != "" then
+    recordPlannedTaskFailure spec (promotionFailureReport spec promotionError)
+  else
+    match complete (taskHandleFor spec.taskId) {
+      Err message ->
+        textConcat ["task completion failed: ", spec.taskId, ": ", message],
+      Ok completedValue ->
+        match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+          Err message ->
+            textConcat ["task review failed: ", spec.taskId, ": ", message],
+          Ok reviewValue ->
+            ""
+        }
+    }
+
+promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
+promotionFailureReport spec message =
+  VerifierReport {
+    verdict = "fail",
+    summary = "task promotion failed",
+    findings =
+      if fileExists (taskPromotionDiffPath spec.taskId) then
+        [
+          message,
+          textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId],
+          "recoverableDiffKind=promotion-workspace",
+          "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+        ]
+      else
+        [message],
+    tests_run = emptyTexts,
+    follow_up = ["Inspect the failing manager or child loop artifacts and retry the task."],
+    capability_statuses = emptyCapabilityStatuses
   }
 
 recordPlannedTaskFailure : PlannerTaskSpec -> VerifierReport -> Str

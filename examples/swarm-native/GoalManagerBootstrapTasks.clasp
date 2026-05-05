@@ -124,6 +124,9 @@ writeTaskPromptFile wave report spec =
     Err message -> message
   }
 
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
 taskVerificationTier : PlannerTaskSpec -> Str
 taskVerificationTier spec =
   if textIncludes spec.taskId "verifyall" then
@@ -163,7 +166,7 @@ childLoopCommandArgs spec = [
   textConcat ["CLASP_LOOP_OBJECTIVE_JSON=", encode spec.taskId],
   textConcat ["CLASP_LOOP_TASK_JSON=", encode spec.detail],
   textConcat ["CLASP_LOOP_TASK_FILE_JSON=", encode (taskPromptPath spec.taskId)],
-  textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceRoot spec.taskId)],
+  textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceActualRoot spec.taskId)],
   textConcat ["CLASP_LOOP_STATE_ROOT_JSON=", encode (taskReportStateRoot spec.taskId)],
   textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
   textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
@@ -196,4 +199,9 @@ childLoopCommand : PlannerTaskSpec -> SwarmCommand
 childLoopCommand spec = commandSpec managerProjectRoot (childLoopCommandArgs spec)
 
 taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
-taskLaunchRecordCommand spec = commandSpec managerProjectRoot ["bash", "-lc", textConcat ["echo launch > ", taskWorkspaceAliasPath spec.taskId]]
+taskLaunchRecordCommand spec =
+  commandSpec "." [
+    "bash",
+    "-lc",
+    textConcat ["printf launched-child-loop:", spec.taskId]
+  ]

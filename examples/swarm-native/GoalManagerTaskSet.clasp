@@ -68,3 +68,27 @@ taskStatusIsTerminal status =
     true
   else
     status == "failed"
+
+taskStatusIsActive : Str -> Bool
+taskStatusIsActive status =
+  if status == "leased" then
+    true
+  else
+    status == "active"
+
+plannedActiveTaskIds : [Str] -> [Str] -> [SwarmTask] -> [Str]
+plannedActiveTaskIds plannedIds heartbeatActiveTaskIds taskValues = {
+  let mut activeTaskIds = emptyTexts;
+  for taskId in plannedIds {
+    let taskStatus = taskStatusFor taskValues taskId in
+    if textListHas taskId heartbeatActiveTaskIds then {
+      activeTaskIds = append activeTaskIds [taskId];
+      activeTaskIds
+    } else if taskStatusIsActive taskStatus then {
+      activeTaskIds = append activeTaskIds [taskId];
+      activeTaskIds
+    } else
+      activeTaskIds
+  };
+  activeTaskIds
+}

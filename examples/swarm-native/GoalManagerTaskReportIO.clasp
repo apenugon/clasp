@@ -1,5 +1,6 @@
 module GoalManagerTaskReportIO
 
+import GoalManagerTaskStatusRuntime
 import GoalManagerWatch
 import GoalManagerPreludeProject
 import GoalManagerPrelude
@@ -54,6 +55,84 @@ taskLatestBuilderReport taskId =
 taskLatestBuilderReportPath : Str -> Str
 taskLatestBuilderReportPath taskId =
   taskBuilderReportPath taskId (taskLatestAttempt taskId)
+
+taskDiffPath : Str -> Int -> Str
+taskDiffPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["changes-", encode attempt, ".diff"]]
+
+taskLatestDiffPath : Str -> Str
+taskLatestDiffPath taskId =
+  taskDiffPath taskId (taskLatestAttempt taskId)
+
+readProcessOutputTailText : Str -> Str
+readProcessOutputTailText path =
+  if fileExists path then
+    match runCommand "." ["tail", "-c", encode taskFailureLogTailBytes, path] {
+      Ok process ->
+        if process.exitCode == 0 then
+          process.stdout
+        else
+          textConcat ["tail failed for ", path, ": ", process.stderr],
+      Err message ->
+        textConcat ["tail failed for ", path, ": ", message]
+    }
+  else
+    ""
+
+childLoopLaunchSummary : Str -> Str
+childLoopLaunchSummary taskId =
+  match childLoopLaunchState taskId {
+    Ok process ->
+      textConcat [
+        "launcher pid=",
+        encode process.pid,
+        " running=",
+        encode process.running,
+        " completed=",
+        encode process.completed,
+        " exitCode=",
+        encode process.exitCode
+      ],
+    Err message ->
+      textConcat ["launcher state unavailable: ", message]
+  }
+
+childLoopStateSummary : Str -> Str
+childLoopStateSummary taskId =
+  if fileExists (taskStatusPath taskId) then
+    readProcessOutputTailText (taskStatusPath taskId)
+  else
+    "child state file missing"
+
+taskRecoverableDiffDetails : Str -> [Str]
+taskRecoverableDiffDetails taskId =
+  if fileExists (taskLatestDiffPath taskId) then
+    [
+      textConcat ["recoverableDiff=", taskLatestDiffPath taskId],
+      "recoverableDiffKind=child-loop",
+      "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+    ]
+  else
+    emptyTexts
+
+taskBuilderReportContextDetails : Str -> [Str]
+taskBuilderReportContextDetails taskId =
+  if fileExists (taskLatestBuilderReportPath taskId) then
+    match taskLatestBuilderReport taskId {
+      Ok report ->
+        [
+          textConcat ["builderReportPath=", taskLatestBuilderReportPath taskId],
+          textConcat ["builderReportSummary=", report.summary],
+          textConcat ["builderFeedbackSummary=", report.feedback.summary]
+        ],
+      Err message ->
+        [
+          textConcat ["builderReportPath=", taskLatestBuilderReportPath taskId],
+          textConcat ["builderReportReadError=", message]
+        ]
+    }
+  else
+    emptyTexts
 
 readFeedbackSummary : Str
 readFeedbackSummary =

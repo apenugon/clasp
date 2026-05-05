@@ -28,57 +28,7 @@ import Swarm
 resumeCurrentWave : ManagerState -> Str
 resumeCurrentWave state =
   if fileExists (plannerReportPathFor state.wave) then
-    match tasks swarmStateRoot {
-      Err message ->
-        continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave),
-      Ok rawTaskValues -> {
-        let objectiveTasks = filter taskInObjective rawTaskValues in
-        let mut failedTaskIds = emptyTexts;
-        let mut activeTaskIds = emptyTexts;
-        for taskId in state.plannedTaskIds {
-          let taskStatus = taskStatusFor objectiveTasks taskId in
-          let reportReady = childLoopReportReady taskId in
-          let launchHeartbeatExists = fileExists (taskProcessHeartbeatPath taskId) in
-          let launchRunning =
-            if launchHeartbeatExists then
-              childLoopLaunchRunning taskId
-            else
-              false in
-          let loopRunning = childLoopRunning taskId in
-          if reportReady then
-            if taskStatus == "failed" then {
-              failedTaskIds = append failedTaskIds [taskId];
-              failedTaskIds
-            } else
-              failedTaskIds
-          else if loopRunning || launchRunning then {
-            activeTaskIds = append activeTaskIds [taskId];
-            activeTaskIds
-          } else
-            activeTaskIds
-        };
-        let resumeScanTrace =
-          appendManagerTrace
-            (textConcat
-              [
-                "resume-current-wave:failed=",
-                encode (length failedTaskIds),
-                ":active=",
-                encode (length activeTaskIds)
-              ]) in
-        if resumeScanTrace != "" then
-          continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
-        else if length failedTaskIds > 0 then
-          if length activeTaskIds == 0 then
-            finalizeWithReport
-              (managerFailureState state.plannedTaskIds state.wave state.benchmarkRuns)
-              (plannedTaskFailureReport failedTaskIds)
-          else
-            continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
-        else
-          continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
-      }
-    }
+    continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
   else
     finalizeWithReport
       (managerFailureState state.plannedTaskIds state.wave state.benchmarkRuns)
@@ -91,7 +41,20 @@ resumePlannerWave state =
   if fileExists (plannerReportPathFor state.wave) then
     continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
   else
-    runPlanner
+    match tasks swarmStateRoot {
+      Err message ->
+        runPlanner,
+      Ok taskValues ->
+        let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave state.wave) in
+        if taskStatusIsActive plannerTaskStatus then {
+          let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
+          if traceError != "" then
+            plannerFailure "manager trace write failed" traceError
+          else
+            encode (statusView state)
+        } else
+          runPlanner
+    }
 
 completePlannerTaskIfNeeded : Int -> Str
 completePlannerTaskIfNeeded wave =
@@ -174,33 +137,188 @@ runPlanner = {
             else
               continueWithPlan
           }
-        else
+        else {
+          let plannerPromptPath = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]] in
+          match writeFile
+            plannerPromptPath
+            "You are the planner subagent for the Clasp repository.\nPlan the next bounded tasks needed to improve Clasp autonomously.\nWave: 1\nHigh-level goal:\nImprove Clasp autonomously.\nCurrent manager health/resource context:\nhostProbe=disabled-in-native-fast-path\nReturn JSON matching the planner schema.\nPlan 1-1 bounded tasks with explicit dependencies and task prompts.\nEach planned task must include an explicit role and a coordinationFocus list.\nWhen tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch." {
+            Err message ->
+              plannerFailure "planner prompt write failed" message,
+            Ok promptWriteValue -> {
+              let plannerCommand =
+                commandSpec
+                  managerProjectRoot
+                  [
+                    "bash",
+                    "-lc",
+                    textJoin "\n" [
+                      "prompt=$(cat \"$1\")",
+                      "exec \"$2\" exec --json --cd \"$3\" -m \"$4\" -c \"$5\" --skip-git-repo-check --sandbox \"$6\" --ephemeral --output-schema \"$7\" -o \"$8\" \"$prompt\""
+                    ],
+                    "planner-direct",
+                    plannerPromptPath,
+                    codexBin,
+                    managerProjectRoot,
+                    codexModel,
+                    codexReasoningConfig,
+                    codexSandbox,
+                    resolvedPlannerSchemaPath,
+                    plannerReportPathFor wave
+                  ] in
+              let commandTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":command-ready"]) in
+              if commandTrace != "" then
+                plannerFailure "manager trace write failed" commandTrace
+              else
           match lease (plannerHandleForWave wave) {
             Err message ->
-              plannerFailure "planner lease failed" message,
-            Ok leaseValue ->
-              match toolRun (plannerHandleForWave wave) (plannerCommandFor wave benchmarkSummary) {
-                Err message ->
-                  plannerFailure "planner run failed" message,
-                Ok runValue ->
-                  if fileExists (plannerReportPathFor wave) then
-                    match complete (plannerHandleForWave wave) {
-                      Err message ->
-                        plannerFailure "planner completion failed" message,
-                      Ok completedValue -> {
-                        let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
+              if length (textSplit message "task run budget exhausted") > 1 then {
+                let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":recoverable-lease-blocker:planner lease failed:", message]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else if wave < maxWaves then {
+                  let nextWave = incrementManagerCounter wave in
+                  let nextState =
+                    managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave state.benchmarkRuns false in
+                  let stateError = writeManagerState nextState in
+                  if stateError != "" then
+                    plannerFailure "planner lease recovery state write failed" stateError
+                  else
+                    runPlanner
+                } else
+                  plannerFailure "planner lease failed" message
+              } else if length (textSplit message "lease held by `manager`") > 1 then {
+                let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":recoverable-lease-blocker:planner lease failed:", message]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else if wave < maxWaves then {
+                  let nextWave = incrementManagerCounter wave in
+                  let nextState =
+                    managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave state.benchmarkRuns false in
+                  let stateError = writeManagerState nextState in
+                  if stateError != "" then
+                    plannerFailure "planner lease recovery state write failed" stateError
+                  else
+                    runPlanner
+                } else
+                  plannerFailure "planner lease failed" message
+              } else
+                plannerFailure "planner lease failed" message,
+            Ok leaseValue -> {
+              let leaseTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":lease-acquired"]) in
+              if leaseTrace != "" then
+                plannerFailure "manager trace write failed" leaseTrace
+              else {
+                let runTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":run-command:start"]) in
+                if runTrace != "" then
+                  plannerFailure "manager trace write failed" runTrace
+                else
+                match runCommand plannerCommand.cwd plannerCommand.command {
+                  Err message -> {
+                    let recoverableTransport =
+                      if textIncludes message "We're currently experiencing high demand" then
+                        true
+                      else if textIncludes message "stream disconnected before completion" then
+                        true
+                      else if textIncludes message "websocket closed by server before response.completed" then
+                        true
+                      else if textIncludes message "websocket closed by server" then
+                        true
+                      else if textIncludes message "turn.failed" then
+                        true
+                      else
+                        textIncludes message "exitCode=124" in
+                    if recoverableTransport then {
+                      let traceError =
+                        appendManagerTrace
+                          (textConcat ["planner-wave-", encode wave, ":recoverable-transport-blocker:planner run failed:", message]) in
+                      if traceError != "" then
+                        plannerFailure "manager trace write failed" traceError
+                      else
+                        match fail (plannerHandleForWave wave) {
+                          Err failMessage ->
+                            plannerFailure "planner transport recovery fail transition failed" failMessage,
+                          Ok failedValue ->
+                            match retry (plannerHandleForWave wave) {
+                              Err retryMessage ->
+                                plannerFailure "planner transport recovery retry failed" retryMessage,
+                              Ok retriedValue -> {
+                                let nextState =
+                                  managerStateFor "needs-planner" "pending" false "" emptyTexts wave state.benchmarkRuns false in
+                                let stateError = writeManagerState nextState in
+                                if stateError != "" then
+                                  plannerFailure "planner transport recovery state write failed" stateError
+                                else
+                                  runPlanner
+                              }
+                            }
+                        }
+                    } else
+                      plannerFailure "planner run failed" message
+                  },
+                  Ok process ->
+                    if process.exitCode != 0 then {
+                      let detail = textConcat [process.stderr, process.stdout] in
+                      let recoverableTransport =
+                        if textIncludes detail "We're currently experiencing high demand" then
+                          true
+                        else if textIncludes detail "stream disconnected before completion" then
+                          true
+                        else if textIncludes detail "websocket closed by server before response.completed" then
+                          true
+                        else if textIncludes detail "websocket closed by server" then
+                          true
+                        else if textIncludes detail "turn.failed" then
+                          true
+                        else
+                          textIncludes detail "exitCode=124" in
+                      if recoverableTransport then {
+                        let traceError =
+                          appendManagerTrace
+                            (textConcat ["planner-wave-", encode wave, ":recoverable-transport-blocker:planner run failed:", detail]) in
                         if traceError != "" then
                           plannerFailure "manager trace write failed" traceError
                         else
-                          continueWithPlan
-                      }
+                          match fail (plannerHandleForWave wave) {
+                            Err failMessage ->
+                              plannerFailure "planner transport recovery fail transition failed" failMessage,
+                            Ok failedValue ->
+                              match retry (plannerHandleForWave wave) {
+                                Err retryMessage ->
+                                  plannerFailure "planner transport recovery retry failed" retryMessage,
+                                Ok retriedValue -> {
+                                  let nextState =
+                                    managerStateFor "needs-planner" "pending" false "" emptyTexts wave state.benchmarkRuns false in
+                                  let stateError = writeManagerState nextState in
+                                  if stateError != "" then
+                                    plannerFailure "planner transport recovery state write failed" stateError
+                                  else
+                                    runPlanner
+                                }
+                              }
+                          }
+                      } else
+                        plannerFailure "planner run failed" detail
                     }
-                  else {
-                    let failed = fail (plannerHandleForWave wave) in
-                    plannerFailure "planner step failed before producing a durable report" runValue.stderrArtifactPath
-                  }
+                    else
+                      if fileExists (plannerReportPathFor wave) then
+                        {
+                          let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
+                          if traceError != "" then
+                            plannerFailure "manager trace write failed" traceError
+                          else
+                            continueWithPlan
+                        }
+                      else {
+                        let failed = fail (plannerHandleForWave wave) in
+                        plannerFailure "planner step failed before producing a durable report" (textConcat [process.stderr, process.stdout])
+                      }
+                }
               }
+            }
           }
+            }
+          }
+        }
       }
     }
   }
@@ -244,7 +362,50 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
       else {
       let plannerState = readManagerState in
       if validation.valid == false then
-        finalizeWithReport failureState (planValidationFailureReport validation)
+        if plannerState.phase == "planner-running" then
+          {
+            let recoverableValidation =
+              if validation.plannerTaskLimit > 0 then
+                validation.plannedTaskCount > validation.plannerTaskLimit
+              else
+                false in
+            if recoverableValidation then {
+            let detail =
+              textConcat [
+                "planned-task-budget: planned=",
+                encode validation.plannedTaskCount,
+                ":limit=",
+                encode validation.plannerTaskLimit
+              ] in
+            let traceError =
+              appendManagerTrace
+                (textConcat ["planner-wave-", encode wave, ":recoverable-validation-blocker:planner validation failed:", detail]) in
+            if traceError != "" then
+              plannerFailure "manager trace write failed" traceError
+            else
+              match fail (plannerHandleForWave wave) {
+                Err failMessage ->
+                  plannerFailure "planner validation recovery fail transition failed" failMessage,
+                Ok failedValue ->
+                  match retry (plannerHandleForWave wave) {
+                    Err retryMessage ->
+                      plannerFailure "planner validation recovery retry failed" retryMessage,
+                    Ok retriedValue -> {
+                      let nextState =
+                        managerStateFor "needs-planner" "pending" false "" emptyTexts wave benchmarkRuns false in
+                      let stateError = writeManagerState nextState in
+                      if stateError != "" then
+                        plannerFailure "planner validation recovery state write failed" stateError
+                      else
+                        runPlanner
+                    }
+                  }
+              }
+            } else
+              finalizeWithReport failureState (planValidationFailureReport validation)
+          }
+        else
+          finalizeWithReport failureState (planValidationFailureReport validation)
       else {
         let plannerCompletionError =
           if plannerState.phase == "planner-running" then
@@ -356,12 +517,32 @@ executeReadyTasks report wave benchmarkRuns = {
                         let finalStatus = finalPlannedTaskStatus report finalTasks readyTasks plannedIds in
                         if benchmarkEnabled then
                           runBenchmarkCheckpoint report wave benchmarkRuns
-                        else if length finalStatus.completedIds == length report.tasks then
-                          finalizeWithReport
-                            (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
-                            (managerPassReport report)
+                        else if length finalStatus.completedIds == length report.tasks then {
+                          let completedState =
+                            managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true in
+                          let feedbackError = writeFeedback (managerPassReport report) in
+                          if feedbackError != "" then
+                            textConcat ["feedback-error:", feedbackError]
+                          else {
+                            let stateError = writeManagerState completedState in
+                            if stateError != "" then
+                              textConcat ["state-error:", stateError]
+                            else
+                              readTextOrEmpty statusPath
+                          }
+                        }
                         else if length finalStatus.failedIds > 0 then
-                          finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
+                          if wave < maxWaves then {
+                            let nextWave = incrementManagerCounter wave in
+                            let nextState =
+                              managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave benchmarkRuns false in
+                            let stateError = writeManagerState nextState in
+                            if stateError != "" then
+                              finalizeWithReport failureState (syntheticFailureReport "task failure replan state write failed" stateError)
+                            else
+                              runPlanner
+                          } else
+                            finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                         else
                           if length finalStatus.pendingLaunchIds > 0 then
                             match sleepMsValue childLoopWatchPollMs {

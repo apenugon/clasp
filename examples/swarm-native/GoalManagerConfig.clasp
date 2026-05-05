@@ -340,10 +340,7 @@ plannerTaskId = "planner"
 
 plannerTaskIdForWave : Int -> Str
 plannerTaskIdForWave wave =
-  if benchmarkEnabled then
-    if wave == 1 then
-      plannerTaskId
-    else
-      textConcat ["planner-", encode wave]
-  else
+  if wave == 1 then
     plannerTaskId
+  else
+    textConcat ["planner-", encode wave]
