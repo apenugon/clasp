@@ -2,6 +2,33 @@ module Main
 
 import Swarm
 
+record FailedToolReport = {
+  objective : Str,
+  task : Str,
+  objectiveCreate : SwarmObjective,
+  taskCreate : SwarmTask,
+  managerBefore : SwarmManagerAction,
+  step : ToolStepResult,
+  taskStatus : SwarmTask,
+  objectiveStatus : SwarmObjectiveStatus,
+  managerAfter : SwarmManagerAction
+}
+
+record FailedVerifierReport = {
+  objective : Str,
+  task : Str,
+  verifier : Str,
+  objectiveCreate : SwarmObjective,
+  taskCreate : SwarmTask,
+  policy : SwarmPolicy,
+  toolStep : ToolStepResult,
+  verifierStep : VerifierStepResult,
+  managerAfterVerifier : SwarmManagerAction,
+  reviewStep : ReviewStepResult,
+  objectiveStatus : SwarmObjectiveStatus,
+  managerAfterReview : SwarmManagerAction
+}
+
 record NativeSwarmReport = {
   objective : Str,
   planningTask : Str,
@@ -23,7 +50,9 @@ record NativeSwarmReport = {
   objectives : [SwarmObjective],
   tasks : [SwarmTask],
   summary : SwarmSummary,
-  managerAfter : SwarmManagerAction
+  managerAfter : SwarmManagerAction,
+  failedTool : FailedToolReport,
+  failedVerifier : FailedVerifierReport
 }
 
 stateRoot : SwarmRoot
@@ -86,8 +115,167 @@ builderCommand = commandSpec workspaceCwd ["bash", "-lc", "printf builder-ok"]
 verifierCommand : SwarmCommand
 verifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-ok"]
 
+failedToolObjectiveId : Str
+failedToolObjectiveId = "failure-tool"
+
+failedToolTaskId : Str
+failedToolTaskId = "tool-fails"
+
+failedToolDeadlineAtMs : Int
+failedToolDeadlineAtMs = 4102444600000
+
+failedToolObjectiveRef : ObjectiveHandle
+failedToolObjectiveRef = objectiveHandle stateRoot failedToolObjectiveId
+
+failedToolRef : TaskHandle
+failedToolRef = taskHandle stateRoot failedToolTaskId actorName
+
+failedToolCommand : SwarmCommand
+failedToolCommand = commandSpec workspaceCwd ["bash", "-lc", "printf failed-tool-out; printf failed-tool-err >&2; exit 7"]
+
+failedVerifierObjectiveId : Str
+failedVerifierObjectiveId = "failure-verifier"
+
+failedVerifierTaskId : Str
+failedVerifierTaskId = "verifier-fails"
+
+failedVerifierName : Str
+failedVerifierName = "native-smoke-fail"
+
+failedVerifierDeadlineAtMs : Int
+failedVerifierDeadlineAtMs = 4102444700000
+
+failedVerifierObjectiveRef : ObjectiveHandle
+failedVerifierObjectiveRef = objectiveHandle stateRoot failedVerifierObjectiveId
+
+failedVerifierRef : TaskHandle
+failedVerifierRef = taskHandle stateRoot failedVerifierTaskId actorName
+
+verifierSetupCommand : SwarmCommand
+verifierSetupCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-setup-ok"]
+
+failedVerifierCommand : SwarmCommand
+failedVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf failed-verifier-out; printf failed-verifier-err >&2; exit 3"]
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
+
+failedToolReportResultError : Str -> Result FailedToolReport
+failedToolReportResultError message = Err message
+
+failedVerifierReportResultError : Str -> Result FailedVerifierReport
+failedVerifierReportResultError message = Err message
+
+failedToolScenario : Result FailedToolReport
+failedToolScenario =
+  match objectiveCreateWithDeadline stateRoot failedToolObjectiveId "Demonstrate failed tool command semantics through the ordinary Swarm helper API." 1 2 failedToolDeadlineAtMs {
+    Ok objectiveCreateValue ->
+      match taskCreateWithDeadline failedToolObjectiveRef failedToolTaskId "Run a tool command that fails and leaves durable artifacts." [] 2 failedToolDeadlineAtMs 60000 {
+        Ok taskCreateValue ->
+          match managerNext failedToolObjectiveRef {
+            Ok managerBeforeValue ->
+              match runToolStep failedToolRef failedToolCommand mailboxLimit {
+                Ok stepValue ->
+                  match status failedToolRef {
+                    Ok taskStatusValue ->
+                      match objectiveStatus failedToolObjectiveRef {
+                        Ok objectiveStatusValue ->
+                          match managerNext failedToolObjectiveRef {
+                            Ok managerAfterValue ->
+                              Ok (FailedToolReport {
+                                objective = failedToolObjectiveId,
+                                task = failedToolTaskId,
+                                objectiveCreate = objectiveCreateValue,
+                                taskCreate = taskCreateValue,
+                                managerBefore = managerBeforeValue,
+                                step = stepValue,
+                                taskStatus = taskStatusValue,
+                                objectiveStatus = objectiveStatusValue,
+                                managerAfter = managerAfterValue
+                              }),
+                            Err message ->
+                              failedToolReportResultError message
+                          },
+                        Err message ->
+                          failedToolReportResultError message
+                      },
+                    Err message ->
+                      failedToolReportResultError message
+                  },
+                Err message ->
+                  failedToolReportResultError message
+              },
+            Err message ->
+              failedToolReportResultError message
+          },
+        Err message ->
+          failedToolReportResultError message
+      },
+    Err message ->
+      failedToolReportResultError message
+  }
+
+failedVerifierScenario : Result FailedVerifierReport
+failedVerifierScenario =
+  match objectiveCreateWithDeadline stateRoot failedVerifierObjectiveId "Demonstrate failed verifier and mergegate semantics through the ordinary Swarm helper API." 1 3 failedVerifierDeadlineAtMs {
+    Ok objectiveCreateValue ->
+      match taskCreateWithDeadline failedVerifierObjectiveRef failedVerifierTaskId "Complete setup, then record a failed required verifier." [] 2 failedVerifierDeadlineAtMs 60000 {
+        Ok taskCreateValue ->
+          match policySet failedVerifierRef "trunk" ["merge-ready"] [failedVerifierName] {
+            Ok policyValue ->
+              match runToolStep failedVerifierRef verifierSetupCommand mailboxLimit {
+                Ok toolStepValue ->
+                  match runVerifierStep failedVerifierRef failedVerifierName failedVerifierCommand mailboxLimit {
+                    Ok verifierStepValue ->
+                      match managerNext failedVerifierObjectiveRef {
+                        Ok managerAfterVerifierValue ->
+                          match approveAndMerge failedVerifierRef "merge-ready" "trunk" [failedVerifierName] mailboxLimit {
+                            Ok reviewStepValue ->
+                              match objectiveStatus failedVerifierObjectiveRef {
+                                Ok objectiveStatusValue ->
+                                  match managerNext failedVerifierObjectiveRef {
+                                    Ok managerAfterReviewValue ->
+                                      Ok (FailedVerifierReport {
+                                        objective = failedVerifierObjectiveId,
+                                        task = failedVerifierTaskId,
+                                        verifier = failedVerifierName,
+                                        objectiveCreate = objectiveCreateValue,
+                                        taskCreate = taskCreateValue,
+                                        policy = policyValue,
+                                        toolStep = toolStepValue,
+                                        verifierStep = verifierStepValue,
+                                        managerAfterVerifier = managerAfterVerifierValue,
+                                        reviewStep = reviewStepValue,
+                                        objectiveStatus = objectiveStatusValue,
+                                        managerAfterReview = managerAfterReviewValue
+                                      }),
+                                    Err message ->
+                                      failedVerifierReportResultError message
+                                  },
+                                Err message ->
+                                  failedVerifierReportResultError message
+                              },
+                            Err message ->
+                              failedVerifierReportResultError message
+                          },
+                        Err message ->
+                          failedVerifierReportResultError message
+                      },
+                    Err message ->
+                      failedVerifierReportResultError message
+                  },
+                Err message ->
+                  failedVerifierReportResultError message
+              },
+            Err message ->
+              failedVerifierReportResultError message
+          },
+        Err message ->
+          failedVerifierReportResultError message
+      },
+    Err message ->
+      failedVerifierReportResultError message
+  }
 
 main : Str
 main =
@@ -127,29 +315,41 @@ main =
                                                                     Ok summaryValue ->
                                                                       match managerNext objectiveRef {
                                                                         Ok managerAfterValue ->
-                                                                          encode (NativeSwarmReport {
-                                                                            objective = objectiveId,
-                                                                            planningTask = planningTaskId,
-                                                                            repairTask = repairTaskId,
-                                                                            objectiveCreate = objectiveCreateValue,
-                                                                            planningTaskCreate = planningTaskCreateValue,
-                                                                            repairTaskCreate = repairTaskCreateValue,
-                                                                            policy = policyValue,
-                                                                            readyBefore = readyBeforeValue,
-                                                                            managerBefore = managerBeforeValue,
-                                                                            planningStep = planningStepValue,
-                                                                            managerAfterPlan = managerAfterPlanValue,
-                                                                            repairStep = repairStepValue,
-                                                                            managerAfterRepair = managerAfterRepairValue,
-                                                                            verifierStep = verifierStepValue,
-                                                                            managerAfterVerifier = managerAfterVerifierValue,
-                                                                            reviewStep = reviewStepValue,
-                                                                            objectiveStatus = objectiveStatusValue,
-                                                                            objectives = objectivesValue,
-                                                                            tasks = tasksValue,
-                                                                            summary = summaryValue,
-                                                                            managerAfter = managerAfterValue
-                                                                          }),
+                                                                          match failedToolScenario {
+                                                                            Ok failedToolValue ->
+                                                                              match failedVerifierScenario {
+                                                                                Ok failedVerifierValue ->
+                                                                                  encode (NativeSwarmReport {
+                                                                                    objective = objectiveId,
+                                                                                    planningTask = planningTaskId,
+                                                                                    repairTask = repairTaskId,
+                                                                                    objectiveCreate = objectiveCreateValue,
+                                                                                    planningTaskCreate = planningTaskCreateValue,
+                                                                                    repairTaskCreate = repairTaskCreateValue,
+                                                                                    policy = policyValue,
+                                                                                    readyBefore = readyBeforeValue,
+                                                                                    managerBefore = managerBeforeValue,
+                                                                                    planningStep = planningStepValue,
+                                                                                    managerAfterPlan = managerAfterPlanValue,
+                                                                                    repairStep = repairStepValue,
+                                                                                    managerAfterRepair = managerAfterRepairValue,
+                                                                                    verifierStep = verifierStepValue,
+                                                                                    managerAfterVerifier = managerAfterVerifierValue,
+                                                                                    reviewStep = reviewStepValue,
+                                                                                    objectiveStatus = objectiveStatusValue,
+                                                                                    objectives = objectivesValue,
+                                                                                    tasks = tasksValue,
+                                                                                    summary = summaryValue,
+                                                                                    managerAfter = managerAfterValue,
+                                                                                    failedTool = failedToolValue,
+                                                                                    failedVerifier = failedVerifierValue
+                                                                                  }),
+                                                                                Err message ->
+                                                                                  errorText message
+                                                                              },
+                                                                            Err message ->
+                                                                              errorText message
+                                                                          },
                                                                         Err message ->
                                                                           errorText message
                                                                       },

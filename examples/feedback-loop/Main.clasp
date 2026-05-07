@@ -37,6 +37,20 @@ record StepHandle = {
   stderrPath : Str,
   heartbeatPath : Str
 }
+record FocusedVerifySelection = {
+  source : Str,
+  diffPath : Str,
+  commands : [Str],
+  reason : Str
+}
+record DiffFocusedState = {
+  changed : Bool,
+  broad : Bool,
+  unknown : Bool,
+  loop : Bool,
+  controlPlane : Bool,
+  verifyHarness : Bool
+}
 record LoopUpgradeSnapshot = { state : LoopState, feedback : Str }
 record LoopUpgradeRestoreRecord = {
   serviceRoot : Str,
@@ -258,6 +272,9 @@ baselineArchivePath = pathJoin [stateRoot, "baseline.tar"]
 
 baselineDiffPath : Int -> Str
 baselineDiffPath attempt = pathJoin [stateRoot, textConcat ["changes-", encode attempt, ".diff"]]
+
+focusedVerifySelectionPath : Int -> Str
+focusedVerifySelectionPath attempt = pathJoin [stateRoot, textConcat ["focused-verify-", encode attempt, ".json"]]
 
 builderReportPath : Int -> Str
 builderReportPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".json"]]
@@ -761,15 +778,27 @@ verifierTimeoutMs =
   else
     focusedVerifierTimeoutMs
 
-focusedVerifyCommandText : Str
-focusedVerifyCommandText =
-  if length focusedVerifyCommands == 0 then
-    "- No focused commands were supplied. Run the narrowest task-specific checks you can justify."
-  else
-    textConcat ["- ", textJoin "\n- " focusedVerifyCommands]
+focusedVerifyCommandText : Int -> Str
+focusedVerifyCommandText attempt = {
+  let selection = selectedFocusedVerifySelection attempt in
+  textConcat ["- ", textJoin "\n- " selection.commands]
+}
 
-verifierVerificationInstructions : Str
-verifierVerificationInstructions =
+focusedVerifyAuditText : Int -> Str
+focusedVerifyAuditText attempt = {
+  let selection = selectedFocusedVerifySelection attempt in
+  textJoin "\n" [
+    textConcat ["Focused verification command source: ", selection.source],
+    textConcat ["Focused verification selection reason: ", selection.reason],
+    textConcat ["Focused verification audit path: ", focusedVerifySelectionPath attempt],
+    textConcat ["Baseline diff path: ", selection.diffPath],
+    "Focused verification commands selected for this attempt:",
+    focusedVerifyCommandText attempt
+  ]
+}
+
+verifierVerificationInstructions : Int -> Str
+verifierVerificationInstructions attempt =
   if isFullVerificationTier then
     textJoin "\n" [
       "Verification tier: full.",
@@ -784,8 +813,7 @@ verifierVerificationInstructions =
       "Run bounded task-focused checks and return a durable verifier report even if confidence is incomplete.",
       "Prefer fast, local evidence over broad repository-wide signoff; classify any skipped slow checks as follow-up.",
       textConcat ["Verifier timeout budget ms: ", encode verifierTimeoutMs, "."],
-      "Focused verification commands supplied by the manager:",
-      focusedVerifyCommandText
+      focusedVerifyAuditText attempt
     ]
 
 loopState : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> LoopState
@@ -1117,6 +1145,283 @@ refreshBaselineDiff attempt = {
     result.stderr
 }
 
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+verifyFastFocusedCommands : [Str]
+verifyFastFocusedCommands = ["bash scripts/verify-fast.sh"]
+
+noDiffFocusedCommands : [Str]
+noDiffFocusedCommands = ["runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp"]
+
+feedbackLoopFocusedCommands : [Str]
+feedbackLoopFocusedCommands = [
+  "runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp",
+  "runtime/target/debug/claspc --json check examples/feedback-loop/ProcessDemo.clasp",
+  "bash scripts/test-feedback-loop-resume.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+controlPlaneFocusedCommands : [Str]
+controlPlaneFocusedCommands = [
+  "runtime/target/debug/claspc --json check examples/swarm-native/GoalManager.clasp",
+  "bash scripts/test-goal-manager-fast.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+verifyHarnessFocusedCommands : [Str]
+verifyHarnessFocusedCommands = [
+  "bash scripts/test-verify-all.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+emptyDiffFocusedState : DiffFocusedState
+emptyDiffFocusedState =
+  DiffFocusedState {
+    changed = false,
+    broad = false,
+    unknown = false,
+    loop = false,
+    controlPlane = false,
+    verifyHarness = false
+  }
+
+diffLinePathText : Str -> Str
+diffLinePathText line =
+  match textPrefix line "+++ " {
+    Ok tail ->
+      tail,
+    Err notPlus ->
+      match textPrefix line "--- " {
+        Ok tail ->
+          tail,
+        Err notMinus ->
+          ""
+      }
+  }
+
+diffPathTouchesBroadCompilerRuntime : Str -> Bool
+diffPathTouchesBroadCompilerRuntime pathText =
+  if textIncludes pathText "/src/" then
+    true
+  else
+    textIncludes pathText "/runtime/"
+
+diffPathTouchesLoop : Str -> Bool
+diffPathTouchesLoop pathText =
+  if textIncludes pathText "/examples/feedback-loop/" then
+    true
+  else if textIncludes pathText "/scripts/test-feedback-loop-resume.sh" then
+    true
+  else
+    textIncludes pathText "/scripts/test-swarm-ready-gate.sh"
+
+diffPathTouchesControlPlane : Str -> Bool
+diffPathTouchesControlPlane pathText =
+  if textIncludes pathText "/examples/swarm-native/" then
+    true
+  else if textIncludes pathText "/scripts/test-goal-manager-fast.sh" then
+    true
+  else
+    textIncludes pathText "/scripts/test-native-claspc.sh"
+
+diffPathTouchesVerifyHarness : Str -> Bool
+diffPathTouchesVerifyHarness pathText =
+  if textIncludes pathText "/scripts/verify-fast.sh" then
+    true
+  else if textIncludes pathText "/scripts/verify-all.sh" then
+    true
+  else
+    textIncludes pathText "/scripts/test-verify-all.sh"
+
+markDiffBroad : DiffFocusedState -> DiffFocusedState
+markDiffBroad state =
+  DiffFocusedState {
+    changed = true,
+    broad = true,
+    unknown = state.unknown,
+    loop = state.loop,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+markDiffUnknown : DiffFocusedState -> DiffFocusedState
+markDiffUnknown state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = true,
+    loop = state.loop,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+markDiffLoop : DiffFocusedState -> DiffFocusedState
+markDiffLoop state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = true,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+markDiffControlPlane : DiffFocusedState -> DiffFocusedState
+markDiffControlPlane state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    controlPlane = true,
+    verifyHarness = state.verifyHarness
+  }
+
+markDiffVerifyHarness : DiffFocusedState -> DiffFocusedState
+markDiffVerifyHarness state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    controlPlane = state.controlPlane,
+    verifyHarness = true
+  }
+
+classifyDiffLine : DiffFocusedState -> Str -> DiffFocusedState
+classifyDiffLine state line = {
+  let pathText = diffLinePathText line in
+  if pathText == "" then
+    state
+  else if textIncludes pathText "/dev/null" then
+    state
+  else if diffPathTouchesBroadCompilerRuntime pathText then
+    markDiffBroad state
+  else if diffPathTouchesLoop pathText then
+    markDiffLoop state
+  else if diffPathTouchesControlPlane pathText then
+    markDiffControlPlane state
+  else if diffPathTouchesVerifyHarness pathText then
+    markDiffVerifyHarness state
+  else
+    markDiffUnknown state
+}
+
+classifyDiffText : Str -> DiffFocusedState
+classifyDiffText diffText = fold classifyDiffLine emptyDiffFocusedState (textSplit diffText "\n")
+
+knownDiffFocusedCommands : DiffFocusedState -> [Str]
+knownDiffFocusedCommands state = {
+  let loopCommands = if state.loop then feedbackLoopFocusedCommands else emptyTexts in
+  let controlCommands = if state.controlPlane then controlPlaneFocusedCommands else emptyTexts in
+  let verifyCommands = if state.verifyHarness then verifyHarnessFocusedCommands else emptyTexts in
+  let combined = append (append loopCommands controlCommands) verifyCommands in
+  if length combined == 0 then
+    noDiffFocusedCommands
+  else
+    combined
+}
+
+focusedCommandsForDiffState : DiffFocusedState -> [Str]
+focusedCommandsForDiffState state =
+  if state.changed then
+    if state.broad then
+      verifyFastFocusedCommands
+    else if state.unknown then
+      verifyFastFocusedCommands
+    else
+      knownDiffFocusedCommands state
+  else
+    noDiffFocusedCommands
+
+focusedReasonForDiffState : DiffFocusedState -> Str
+focusedReasonForDiffState state =
+  if state.changed then
+    if state.broad then
+      "diff touched compiler/runtime substrate; selected conservative verify-fast"
+    else if state.unknown then
+      "diff included unknown paths; selected conservative verify-fast"
+    else
+      "diff touched only known feedback-loop/control-plane/verification harness paths; selected narrow focused checks"
+  else
+    "baseline diff was empty; selected a lightweight feedback-loop check"
+
+focusedVerifySelectionFromDiffText : Int -> Str -> FocusedVerifySelection
+focusedVerifySelectionFromDiffText attempt diffText = {
+  let state = classifyDiffText diffText in
+  FocusedVerifySelection {
+    source = "diff-derived",
+    diffPath = baselineDiffPath attempt,
+    commands = focusedCommandsForDiffState state,
+    reason = focusedReasonForDiffState state
+  }
+}
+
+focusedVerifySelectionFromDiff : Int -> FocusedVerifySelection
+focusedVerifySelectionFromDiff attempt =
+  match readFile (baselineDiffPath attempt) {
+    Ok raw ->
+      focusedVerifySelectionFromDiffText attempt raw,
+    Err message ->
+      FocusedVerifySelection {
+        source = "diff-derived",
+        diffPath = baselineDiffPath attempt,
+        commands = verifyFastFocusedCommands,
+        reason = textConcat ["diff artifact could not be read; selected conservative verify-fast: ", message]
+      }
+  }
+
+focusedVerifySelectionFromManager : Int -> FocusedVerifySelection
+focusedVerifySelectionFromManager attempt =
+  FocusedVerifySelection {
+    source = "manager-env",
+    diffPath = baselineDiffPath attempt,
+    commands = focusedVerifyCommands,
+    reason = "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON supplied non-empty focused commands"
+  }
+
+selectedFocusedVerifySelection : Int -> FocusedVerifySelection
+selectedFocusedVerifySelection attempt =
+  if length focusedVerifyCommands == 0 then
+    focusedVerifySelectionFromDiff attempt
+  else
+    focusedVerifySelectionFromManager attempt
+
+persistFocusedVerifySelection : Int -> Str
+persistFocusedVerifySelection attempt =
+  if isFullVerificationTier then
+    ""
+  else
+    match writeFile (focusedVerifySelectionPath attempt) (encode (selectedFocusedVerifySelection attempt)) {
+      Ok written ->
+        "",
+      Err message ->
+        message
+    }
+
+prepareFocusedVerifySelection : Int -> Str
+prepareFocusedVerifySelection attempt =
+  if isFullVerificationTier then
+    ""
+  else {
+    let diffError =
+      if length focusedVerifyCommands == 0 then
+        refreshBaselineDiff attempt
+      else
+        "" in
+    let tracedDiffError =
+      if diffError == "" then
+        ""
+      else
+        tracePoint (textConcat ["focused-verify-diff-error:", diffError]) in
+    let auditError = persistFocusedVerifySelection attempt in
+    if auditError == "" then
+      ""
+    else
+      textConcat ["focused-verify-selection-error:", auditError]
+  }
+
 builderPrompt : Int -> Str
 builderPrompt attempt =
   textJoin "\n" [
@@ -1143,7 +1448,7 @@ verifierPrompt attempt =
     textConcat ["Read the task file at ", taskFile, "."],
     "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
     verifierPolicySection attempt,
-    verifierVerificationInstructions,
+    verifierVerificationInstructions attempt,
     textConcat ["Attempt: ", encode attempt]
   ]
 
@@ -1381,15 +1686,20 @@ runVerifierPhase attempt =
     if prepError != "" then
       prepError
     else {
-      let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
-      let verifierStep = stepHandle "verifier" attempt in
-      let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
-      if verifierRun.exitCode == 0 then
-        textConcat ["pass:", encode attempt]
-      else if attempt == maxAttempts then
-        textConcat ["fail:", encode attempt]
-      else
-        runBuilderPhase (incrementAttempt attempt)
+      let selectionError = prepareFocusedVerifySelection attempt in
+      if selectionError != "" then
+        selectionError
+      else {
+        let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
+        let verifierStep = stepHandle "verifier" attempt in
+        let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
+        if verifierRun.exitCode == 0 then
+          textConcat ["pass:", encode attempt]
+        else if attempt == maxAttempts then
+          textConcat ["fail:", encode attempt]
+        else
+          runBuilderPhase (incrementAttempt attempt)
+      }
     }
   }
 

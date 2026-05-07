@@ -82,9 +82,70 @@ if [[ "$prompt" != *"verifier subagent"* ]]; then
   exit 66
 fi
 
+if [[ "$prompt" == *"Run the full signoff command before reporting pass:"* ]]; then
+  printf 'focused verifier prompt unexpectedly demanded full signoff\n' >&2
+  exit 68
+fi
+
 if [[ ! -f "$state_root/changes-1.diff" ]]; then
   printf 'missing refreshed baseline diff before verifier launch\n' >&2
   exit 67
+fi
+
+if [[ "${CLASP_TEST_EXPECT_MANAGER_STRING_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: manager-env"* ]]; then
+    printf 'verifier prompt did not mark manager string commands as authoritative\n' >&2
+    exit 69
+  fi
+  if [[ "$prompt" != *"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"* ]]; then
+    printf 'verifier prompt did not preserve manager JSON string command text\n' >&2
+    exit 70
+  fi
+fi
+
+if [[ "${CLASP_TEST_EXPECT_MANAGER_LIST_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: manager-env"* ]]; then
+    printf 'verifier prompt did not mark manager list commands as authoritative\n' >&2
+    exit 71
+  fi
+  if [[ "$prompt" != *"bash scripts/test-feedback-loop-resume.sh"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
+    printf 'verifier prompt did not preserve manager JSON list commands\n' >&2
+    exit 72
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'manager list commands were unexpectedly replaced by diff-derived verify-fast\n' >&2
+    exit 73
+  fi
+fi
+
+if [[ "${CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark loop commands as diff-derived\n' >&2
+    exit 74
+  fi
+  if [[ "$prompt" != *"bash scripts/test-feedback-loop-resume.sh"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
+    printf 'verifier prompt did not select loop-focused checks from the diff\n' >&2
+    exit 75
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'loop-only diff unexpectedly fell back to verify-fast\n' >&2
+    exit 76
+  fi
+fi
+
+if [[ "${CLASP_TEST_EXPECT_UNKNOWN_VERIFY_FAST:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark unknown commands as diff-derived\n' >&2
+    exit 77
+  fi
+  if [[ "$prompt" != *"diff included unknown paths; selected conservative verify-fast"* ]]; then
+    printf 'verifier prompt did not explain unknown diff fallback\n' >&2
+    exit 78
+  fi
+  if [[ "$prompt" != *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'unknown diff did not select verify-fast\n' >&2
+    exit 79
+  fi
 fi
 
 printf 'verifier\n' >>"$state_root/codex-invocations.log"
@@ -128,11 +189,15 @@ resume_output="$(
   CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$baseline_root\"" \
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_MANAGER_STRING_COMMANDS='1' \
   "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root"
 )"
 
 printf '%s\n' "$resume_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$state_root/verifier-1.json"
+test -f "$state_root/focused-verify-1.json"
+grep -F '"source":"manager-env"' "$state_root/focused-verify-1.json" >/dev/null
+grep -F 'runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh' "$state_root/focused-verify-1.json" >/dev/null
 grep -F '"summary":"resumed verifier produced a durable report"' "$state_root/verifier-1.json" >/dev/null
 grep -F '"phase":"completed"' "$state_root/state.json" >/dev/null
 grep -F '"verdict":"pass"' "$state_root/feedback.json" >/dev/null
@@ -159,6 +224,117 @@ do
     exit 1
   fi
 done
+
+manager_list_state_root="$test_root_abs/loop-manager-list-state"
+manager_list_workspace_root="$fixture_project/.clasp-task-workspaces/manager-list-task"
+manager_list_baseline_root="$fixture_project/.clasp-task-baselines/manager-list-task"
+mkdir -p "$manager_list_state_root" "$manager_list_workspace_root" "$manager_list_baseline_root"
+printf 'base\n' >"$manager_list_baseline_root/workspace.txt"
+cp -a "$manager_list_baseline_root/." "$manager_list_workspace_root/"
+printf 'manager-list-change\n' >"$manager_list_workspace_root/workspace.txt"
+cat >"$manager_list_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$manager_list_state_root/builder-1.json" <<'JSON'
+{"summary":"builder completed before manager list verification","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"manager list commands","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$manager_list_state_root/baseline.ready"
+
+manager_list_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$manager_list_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$manager_list_baseline_root\"" \
+  CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='["bash scripts/test-feedback-loop-resume.sh","bash scripts/test-swarm-ready-gate.sh"]' \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_MANAGER_LIST_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$manager_list_state_root"
+)"
+
+printf '%s\n' "$manager_list_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$manager_list_state_root/focused-verify-1.json"
+grep -F '"source":"manager-env"' "$manager_list_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-swarm-ready-gate.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'bash scripts/verify-fast.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'manager list focused commands unexpectedly fell back to verify-fast\n' >&2
+  exit 1
+fi
+
+derived_loop_state_root="$test_root_abs/loop-derived-focused-state"
+derived_loop_workspace_root="$fixture_project/.clasp-task-workspaces/derived-focused-task"
+derived_loop_baseline_root="$fixture_project/.clasp-task-baselines/derived-focused-task"
+mkdir -p \
+  "$derived_loop_state_root" \
+  "$derived_loop_workspace_root/examples/feedback-loop" \
+  "$derived_loop_baseline_root/examples/feedback-loop"
+printf 'base feedback loop\n' >"$derived_loop_baseline_root/examples/feedback-loop/Main.clasp"
+cp -a "$derived_loop_baseline_root/." "$derived_loop_workspace_root/"
+printf 'changed feedback loop\n' >"$derived_loop_workspace_root/examples/feedback-loop/Main.clasp"
+cat >"$derived_loop_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$derived_loop_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed feedback-loop program","files_touched":["examples/feedback-loop/Main.clasp"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive focused loop commands","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$derived_loop_state_root/baseline.ready"
+
+derived_loop_output="$(
+  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$derived_loop_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_loop_baseline_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_loop_state_root"
+)"
+
+printf '%s\n' "$derived_loop_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$derived_loop_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-swarm-ready-gate.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'bash scripts/verify-fast.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'loop-only focused diff unexpectedly selected verify-fast\n' >&2
+  exit 1
+fi
+
+unknown_state_root="$test_root_abs/loop-unknown-focused-state"
+unknown_workspace_root="$fixture_project/.clasp-task-workspaces/unknown-focused-task"
+unknown_baseline_root="$fixture_project/.clasp-task-baselines/unknown-focused-task"
+mkdir -p "$unknown_state_root" "$unknown_workspace_root" "$unknown_baseline_root"
+printf 'base readme\n' >"$unknown_baseline_root/README.md"
+cp -a "$unknown_baseline_root/." "$unknown_workspace_root/"
+printf 'changed readme\n' >"$unknown_workspace_root/README.md"
+cat >"$unknown_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$unknown_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed an unknown surface","files_touched":["README.md"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"empty manager commands must derive verify-fast","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$unknown_state_root/baseline.ready"
+
+unknown_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$unknown_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$unknown_baseline_root\"" \
+  CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='""' \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_UNKNOWN_VERIFY_FAST='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$unknown_state_root"
+)"
+
+printf '%s\n' "$unknown_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$unknown_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$unknown_state_root/focused-verify-1.json" >/dev/null
+grep -F 'diff included unknown paths; selected conservative verify-fast' "$unknown_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/verify-fast.sh' "$unknown_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'bash scripts/verify-all.sh' "$unknown_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'unknown focused diff selected verify-all instead of verify-fast\n' >&2
+  exit 1
+fi
 
 missing_state_root="$test_root_abs/loop-missing-baseline-state"
 missing_workspace_root="$fixture_project/.clasp-task-workspaces/missing-baseline-task"

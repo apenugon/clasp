@@ -256,6 +256,16 @@ verifierStepResultError message = Err message
 reviewStepResultError : Str -> Result ReviewStepResult
 reviewStepResultError message = Err message
 
+runPassed : SwarmRun -> Bool
+runPassed run = run.status == "passed"
+
+finishToolRun : TaskHandle -> SwarmRun -> Result SwarmTaskUpdate
+finishToolRun handle run =
+  if runPassed run then
+    complete handle
+  else
+    fail handle
+
 taskResult : Result Str -> Result SwarmTask
 taskResult value = match value {
   Ok raw -> Ok (decode SwarmTask raw),
@@ -498,7 +508,7 @@ runToolStep handle spec mailboxLimit =
     Ok leaseValue ->
       match toolRun handle spec {
         Ok runValue ->
-          match complete handle {
+          match finishToolRun handle runValue {
             Ok statusValue ->
               match taskMailbox handle mailboxLimit {
                 Ok mailboxValue ->

@@ -3584,10 +3584,12 @@ fn execute_mergegate_decide(
     verifier_names: &[String],
 ) -> Result<(ExitCode, Value), String> {
     let (_paths, mut connection) = open_swarm_connection(root)?;
+    let effective_verifier_names =
+        effective_mergegate_verifier_names(&connection, task_id, mergegate_name, verifier_names)?;
     let mut verifier_states = Vec::new();
     let mut missing = false;
     let mut failed = false;
-    for verifier_name in verifier_names {
+    for verifier_name in &effective_verifier_names {
         match latest_verifier_run(&connection, task_id, verifier_name) {
             Ok(Some(run)) => {
                 let passed = run.exit_code == 0;
@@ -3644,6 +3646,30 @@ fn execute_mergegate_decide(
         },
         decision,
     ))
+}
+
+fn effective_mergegate_verifier_names(
+    connection: &Connection,
+    task_id: &str,
+    mergegate_name: &str,
+    verifier_names: &[String],
+) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
+    if let Some(policy) = load_merge_policy(connection, task_id)? {
+        if policy.mergegate_name == mergegate_name {
+            for verifier_name in decode_string_list(&policy.required_verifiers_json) {
+                if !names.iter().any(|name| name == &verifier_name) {
+                    names.push(verifier_name);
+                }
+            }
+        }
+    }
+    for verifier_name in verifier_names {
+        if !names.iter().any(|name| name == verifier_name) {
+            names.push(verifier_name.clone());
+        }
+    }
+    Ok(names)
 }
 
 fn handle_mergegate_decide(
@@ -4819,6 +4845,143 @@ mod tests {
             objective_status.get("projectedStatus").and_then(|value| value.as_str()),
             Some("completed")
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_mergegate_uses_policy_verifiers_when_decider_omits_them() {
+        let root = unique_root("mergegate-policy-verifiers");
+        let root_text = root.to_string_lossy().to_string();
+
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "objective".to_owned(),
+                "create".to_owned(),
+                root_text.clone(),
+                "loop".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "task".to_owned(),
+                "create".to_owned(),
+                root_text.clone(),
+                "loop".to_owned(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "policy".to_owned(),
+                "set".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+                "trunk".to_owned(),
+                "--require-approval".to_owned(),
+                "merge-ready".to_owned(),
+                "--require-verifier".to_owned(),
+                "native-smoke".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "complete".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "verifier".to_owned(),
+                "run".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+                "native-smoke".to_owned(),
+                "--".to_owned(),
+                "bash".to_owned(),
+                "-lc".to_owned(),
+                "printf failed-verifier-out; printf failed-verifier-err >&2; exit 9".to_owned(),
+            ]),
+            Some(ExitCode::from(9))
+        );
+        let empty_verifier_names: Vec<String> = Vec::new();
+        let (mergegate_exit_code, mergegate_decision) =
+            super::execute_mergegate_decide(&root, "repair", "manager", "trunk", &empty_verifier_names)
+                .expect("decide mergegate");
+        assert_eq!(mergegate_exit_code, ExitCode::from(1));
+        assert_eq!(
+            mergegate_decision.get("verdict").and_then(|value| value.as_str()),
+            Some("fail")
+        );
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let run = super::latest_verifier_run(&connection, "repair", "native-smoke")
+            .expect("load verifier run")
+            .expect("verifier run exists");
+        assert_eq!(run.status, "failed");
+        assert_eq!(run.exit_code, 9);
+        assert!(
+            fs::read_to_string(&run.stdout_artifact_path)
+                .expect("read stdout artifact")
+                .contains("failed-verifier-out")
+        );
+        assert!(
+            fs::read_to_string(&run.stderr_artifact_path)
+                .expect("read stderr artifact")
+                .contains("failed-verifier-err")
+        );
+
+        let decision = super::latest_mergegate_payload(&connection, "repair", "trunk")
+            .expect("load mergegate decision")
+            .expect("mergegate decision exists");
+        assert_eq!(decision.get("verdict").and_then(|value| value.as_str()), Some("fail"));
+        assert_eq!(
+            decision
+                .get("verifiers")
+                .and_then(|value| value.as_array())
+                .and_then(|values| values.first())
+                .and_then(|value| value.get("name"))
+                .and_then(|value| value.as_str()),
+            Some("native-smoke")
+        );
+        assert_eq!(
+            decision
+                .get("verifiers")
+                .and_then(|value| value.as_array())
+                .and_then(|values| values.first())
+                .and_then(|value| value.get("status"))
+                .and_then(|value| value.as_str()),
+            Some("failed")
+        );
+        let next = super::manager_next_json(&connection, "loop").expect("manager next");
+        assert_eq!(next.get("action").and_then(|value| value.as_str()), Some("rerun-verifier"));
+        assert_eq!(next.get("verifier").and_then(|value| value.as_str()), Some("native-smoke"));
 
         let _ = fs::remove_dir_all(root);
     }

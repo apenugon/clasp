@@ -1603,6 +1603,21 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"tasks":[{"attempts":1,"task
 printf '%s\n' "$swarm_native_run_output" | grep -F '"summary":{"allTaskIds":["plan","repair-2"]' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"completedTaskIds":["plan","repair-2"]' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfter":{"objectiveId":"appbench","status":"completed","action":"objective-complete"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"failedTool":{"objective":"failure-tool","task":"tool-fails"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf failed-tool-out; printf failed-tool-err >&2; exit 7"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"exitCode":7,"name":"bash","role":"tool"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-fails","status":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"kind":"task_failed","taskId":"tool-fails"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"taskId":"tool-fails","kind":"stdout"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"taskId":"tool-fails","kind":"stderr"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfter":{"objectiveId":"failure-tool","status":"blocked","action":"inspect-task"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"failedVerifier":{"objective":"failure-verifier","task":"verifier-fails","verifier":"native-smoke-fail"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"verifierStep":{"run":{"actor":"manager","command":["bash","-lc","printf failed-verifier-out; printf failed-verifier-err >&2; exit 3"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"exitCode":3,"name":"native-smoke-fail","role":"verifier"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterVerifier":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
 [[ -x "$swarm_native_binary" ]]
@@ -1622,6 +1637,16 @@ printf '%s\n' "$swarm_native_output" | grep -F '"kind":"approval_granted","taskI
 printf '%s\n' "$swarm_native_output" | grep -F '"projectedStatus":"completed"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"completedTaskIds":["plan","repair-2"]' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"appbench","status":"completed","action":"objective-complete"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"failedTool":{"objective":"failure-tool","task":"tool-fails"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":7,"name":"bash","role":"tool"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-fails","status":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-fails","kind":"stdout"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"failure-tool","status":"blocked","action":"inspect-task"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"failedVerifier":{"objective":"failure-verifier","task":"verifier-fails","verifier":"native-smoke-fail"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":3,"name":"native-smoke-fail","role":"verifier"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
 
 swarm_feedback_loop_state_root_abs="$test_root_abs/swarm-feedback-loop-state"
 swarm_feedback_loop_workspace_root_abs="$test_root_abs/swarm-feedback-loop-workspace"
