@@ -13,6 +13,16 @@ require_pattern() {
   fi
 }
 
+reject_pattern() {
+  local path="$1"
+  local pattern="$2"
+
+  if grep -F -- "$pattern" "$project_root/$path" >/dev/null; then
+    printf 'unexpected swarm-ready gate pattern in %s: %s\n' "$path" "$pattern" >&2
+    exit 1
+  fi
+}
+
 bash -n "$project_root/scripts/test-native-claspc.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -26,6 +36,12 @@ require_pattern "examples/feedback-loop/Main.clasp" 'Verification tier: focused.
 require_pattern "examples/feedback-loop/Main.clasp" 'Do not run `bash scripts/verify-all.sh` for this focused branch.'
 require_pattern "examples/feedback-loop/Main.clasp" 'CLASP_LOOP_FOCUSED_VERIFIER_TIMEOUT_MS_JSON'
 require_pattern "examples/feedback-loop/Main.clasp" 'ensureStepReportWithTimeout'
+require_pattern "examples/feedback-loop/Main.clasp" 'diff -ruN '
+require_pattern "examples/feedback-loop/Main.clasp" 'verifierShellCommand'
+require_pattern "examples/feedback-loop/Main.clasp" 'CLASP_LOOP_BASELINE_WORKSPACE_JSON'
+reject_pattern "examples/feedback-loop/Main.clasp" '"file: workspace.txt"'
+reject_pattern "examples/feedback-loop/Main.clasp" '"--exclude=workspace.txt "'
+require_pattern "scripts/verify-all.sh" 'bash scripts/test-feedback-loop-resume.sh'
 require_pattern "examples/feedback-loop/Process.clasp" 'awaitWatchedProcessTimeoutJson'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'heartbeatTaskLease'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON'

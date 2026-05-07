@@ -21,6 +21,7 @@ full_sequential_verify_commands=$'
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-swarm-ready-gate.sh
+bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh

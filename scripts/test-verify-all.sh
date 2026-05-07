@@ -34,6 +34,7 @@ cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhos
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
+cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
 cp "$project_root/scripts/ensure-goal-manager-binary.sh" "$test_root/scripts/ensure-goal-manager-binary.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
@@ -55,6 +56,7 @@ grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null

@@ -10261,6 +10261,45 @@ mod tests {
     }
 
     #[test]
+    fn run_command_json_passes_subprocess_args_once() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let script_path = cwd_dir.join(format!("clasp-run-command-json-args-{}.sh", std::process::id()));
+            std::fs::write(
+                &script_path,
+                b"#!/bin/sh\nprintf '%s' \"$#:$1:$2\"\n",
+            )
+            .expect("expected test script write to succeed");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected executable test script permissions");
+
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+                build_runtime_string(b"alpha") as *mut ClaspRtHeader,
+                build_runtime_string(b"beta") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_command_json(cwd, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(0));
+            assert_eq!(parsed["stdout"].as_str(), Some("2:alpha:beta"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            let _ = std::fs::remove_file(script_path);
+        }
+    }
+
+    #[test]
     fn list_equality_handles_string_list_and_value_list() {
         unsafe {
             let split_value = build_string_list(&[b"Ada"]);

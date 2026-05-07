@@ -69,7 +69,28 @@ readEnvInt name fallback = match envVar name {
 
 readEnvTextList : Str -> [Str] -> [Str]
 readEnvTextList name fallback = match envVar name {
-  Ok raw -> decode [Str] raw,
+  Ok raw -> match textPrefix raw "[" {
+    Ok arrayTail -> decode [Str] raw,
+    Err notArray -> fallback
+  },
+  Err message -> fallback
+}
+
+jsonTextOrRaw : Str -> Str
+jsonTextOrRaw raw = match textPrefix raw "\"" {
+  Ok quotedTail -> decode Str raw,
+  Err notQuoted -> raw
+}
+
+nonEmptyText : Str -> Bool
+nonEmptyText value = value != ""
+
+readEnvCommandTextList : Str -> [Str] -> [Str]
+readEnvCommandTextList name fallback = match envVar name {
+  Ok raw -> match textPrefix raw "[" {
+    Ok arrayTail -> decode [Str] raw,
+    Err notArray -> filter nonEmptyText (textSplit (jsonTextOrRaw raw) "\n")
+  },
   Err message -> fallback
 }
 
@@ -90,6 +111,12 @@ defaultBaselineWorkspace = {
 
 baselineWorkspace : Str
 baselineWorkspace = readEnvText "CLASP_LOOP_BASELINE_WORKSPACE_JSON" defaultBaselineWorkspace
+
+baselineWorkspaceProvided : Bool
+baselineWorkspaceProvided = match envVar "CLASP_LOOP_BASELINE_WORKSPACE_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
 
 builderSchemaPath : Str
 builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
@@ -122,7 +149,7 @@ verificationTier : Str
 verificationTier = readEnvText "CLASP_LOOP_VERIFICATION_TIER_JSON" "focused"
 
 focusedVerifyCommands : [Str]
-focusedVerifyCommands = readEnvTextList "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON" emptyTexts
+focusedVerifyCommands = readEnvCommandTextList "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON" emptyTexts
 
 fullVerifyCommand : Str
 fullVerifyCommand = readEnvText "CLASP_LOOP_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
@@ -149,7 +176,7 @@ readySignalText : Str
 readySignalText = readEnvText "CLASP_LOOP_READY_TEXT_JSON" "ready"
 
 handoffCommandList : [Str]
-handoffCommandList = readEnvTextList "CLASP_LOOP_HANDOFF_COMMAND_JSON" emptyTexts
+handoffCommandList = readEnvCommandTextList "CLASP_LOOP_HANDOFF_COMMAND_JSON" emptyTexts
 
 handoffReadyPath : Str
 handoffReadyPath = readEnvText "CLASP_LOOP_HANDOFF_READY_PATH_JSON" ""
@@ -170,7 +197,7 @@ serviceId : Str
 serviceId = readEnvText "CLASP_LOOP_SERVICE_ID_JSON" "feedback-loop"
 
 upgradeCommandList : [Str]
-upgradeCommandList = readEnvTextList "CLASP_LOOP_UPGRADE_COMMAND_JSON" emptyTexts
+upgradeCommandList = readEnvCommandTextList "CLASP_LOOP_UPGRADE_COMMAND_JSON" emptyTexts
 
 upgradeReadyPath : Str
 upgradeReadyPath = readEnvText "CLASP_LOOP_UPGRADE_READY_PATH_JSON" ""
@@ -545,6 +572,34 @@ ensureStepReportWithTimeout step command launchingState runningState timeoutMs =
     }
   }
 
+launchStepAndAwaitWithTimeoutNoState : StepHandle -> [Str] -> Int -> ProcessResult
+launchStepAndAwaitWithTimeoutNoState step command timeoutMs =
+  match spawnStep step command {
+    Err message ->
+      failedProcessResult message,
+    Ok process ->
+      resumeStepWithTimeout step timeoutMs
+  }
+
+ensureStepReportWithTimeoutNoState : StepHandle -> [Str] -> Int -> ProcessResult
+ensureStepReportWithTimeoutNoState step command timeoutMs =
+  if fileExists step.reportPath then
+    successProcessResult step
+  else if fileExists step.heartbeatPath then {
+    let reconciled = reconcileStep step in
+    let resumed = resumeStepWithTimeout step timeoutMs in
+    if fileExists step.reportPath then
+      successProcessResult step
+    else
+      resumed
+  } else {
+    let launched = launchStepAndAwaitWithTimeoutNoState step command timeoutMs in
+    if fileExists step.reportPath then
+      successProcessResult step
+    else
+      launched
+  }
+
 readVerifierReport : Int -> VerifierReport
 readVerifierReport attempt = match readFile (verifierReportPath attempt) {
   Ok raw ->
@@ -759,6 +814,55 @@ writeLoopState state = match writeFile loopStatePath (encode state) {
     message
 }
 
+loopStateJsonFields : Int -> Str -> Str -> Bool -> Int -> Int -> Bool -> Bool -> Str -> Bool -> Str
+loopStateJsonFields attempt phase verdict completed builderRuns verifierRuns healthy needsAttention attentionReason final =
+  textConcat [
+    "{\"attempt\":",
+    encode attempt,
+    ",\"phase\":",
+    encode phase,
+    ",\"verdict\":",
+    encode verdict,
+    ",\"completed\":",
+    encode completed,
+    ",\"builderRuns\":",
+    encode builderRuns,
+    ",\"verifierRuns\":",
+    encode verifierRuns,
+    ",\"healthy\":",
+    encode healthy,
+    ",\"needsAttention\":",
+    encode needsAttention,
+    ",\"attentionReason\":",
+    encode attentionReason,
+    ",\"final\":",
+    encode final,
+    "}"
+  ]
+
+pendingVerifierStateJson : Int -> Str -> Str
+pendingVerifierStateJson attempt phase =
+  loopStateJsonFields attempt phase "pending" false attempt attempt true false "" false
+
+completedPassStateJson : Int -> Str
+completedPassStateJson attempt =
+  loopStateJsonFields attempt "completed" "pass" true attempt attempt true false "" true
+
+failedFinalStateJson : Int -> Str -> Str
+failedFinalStateJson attempt reason =
+  loopStateJsonFields attempt "failed" "fail" false attempt attempt false true reason true
+
+retryBuilderStateJson : Int -> Int -> Str -> Str
+retryBuilderStateJson nextAttempt completedAttempt reason =
+  loopStateJsonFields nextAttempt "needs-builder" "retry" false completedAttempt completedAttempt false true reason false
+
+verifierFailureStateJson : Int -> Str -> Str
+verifierFailureStateJson attempt reason =
+  if attempt == maxAttempts then
+    failedFinalStateJson attempt reason
+  else
+    retryBuilderStateJson (incrementAttempt attempt) attempt reason
+
 readLoopState : LoopState
 readLoopState = match readFile loopStatePath {
   Ok raw ->
@@ -915,8 +1019,12 @@ baselineExcludeFlags =
     "--exclude=*/.clasp-loops ",
     "--exclude=.clasp-swarm ",
     "--exclude=*/.clasp-swarm ",
+    "--exclude=.clasp-task-baselines ",
+    "--exclude=*/.clasp-task-baselines ",
     "--exclude=.clasp-task-workspaces ",
     "--exclude=*/.clasp-task-workspaces ",
+    "--exclude=.workspace-ready ",
+    "--exclude=*/.workspace-ready ",
     "--exclude=.clasp-test-tmp ",
     "--exclude=*/.clasp-test-tmp ",
     "--exclude=.clasp-verify-tmp ",
@@ -925,10 +1033,16 @@ baselineExcludeFlags =
     "--exclude=*/.codex ",
     "--exclude=benchmarks/bundles ",
     "--exclude=*/benchmarks/bundles ",
+    "--exclude=bundles ",
+    "--exclude=*/bundles ",
     "--exclude=benchmarks/results ",
     "--exclude=*/benchmarks/results ",
+    "--exclude=results ",
+    "--exclude=*/results ",
     "--exclude=benchmarks/workspaces ",
     "--exclude=*/benchmarks/workspaces ",
+    "--exclude=workspaces ",
+    "--exclude=*/workspaces ",
     "--exclude=dist ",
     "--exclude=*/dist ",
     "--exclude=dist-newstyle ",
@@ -957,43 +1071,50 @@ baselineExcludeFlags =
     "--exclude=*/help ",
     "--exclude=--help ",
     "--exclude=*/--help ",
-    "--exclude=workspace.txt ",
-    "--exclude=*/workspace.txt ",
     "--exclude=src/native-verify-cache ",
     "--exclude=*/src/native-verify-cache "
   ]
 
-workspaceSnapshotPath : Str -> Str
-workspaceSnapshotPath root = pathJoin [root, "workspace.txt"]
-
-workspaceSnapshotText : Str -> Str
-workspaceSnapshotText root =
-  if fileExists (workspaceSnapshotPath root) then
-    readTextOrEmpty (workspaceSnapshotPath root)
-  else
-    "<missing>"
+baselineDiffScript : Int -> Str
+baselineDiffScript attempt = {
+  let diffPath = baselineDiffPath attempt in
+  textConcat [
+    "set +e\n",
+    "out=", encode diffPath, "\n",
+    "tmp=\"${out}.tmp.$$\"\n",
+    "rm -f \"$tmp\"\n",
+    "diff -ruN ",
+    baselineExcludeFlags,
+    encode baselineWorkspace,
+    " ",
+    encode workspaceRoot,
+    " >\"$tmp\"\n",
+    "status=$?\n",
+    "if [ \"$status\" -gt 1 ]; then printf 'diff failed with status %s\\n' \"$status\" >&2; rm -f \"$tmp\"; exit \"$status\"; fi\n",
+    "if [ -s \"$tmp\" ]; then mv \"$tmp\" \"$out\"; else : >\"$out\"; rm -f \"$tmp\"; fi\n"
+  ]
+}
 
 refreshBaselineDiff : Int -> Str
 refreshBaselineDiff attempt = {
   let tracedStart = tracePoint (textConcat ["diff:start:", encode attempt]) in
-  let baselineText = workspaceSnapshotText baselineWorkspace in
-  let currentText = workspaceSnapshotText workspaceRoot in
-  let artifactText =
-    textJoin "\n" [
-      "file: workspace.txt",
-      "--- baseline/workspace.txt",
-      baselineText,
-      "+++ workspace/workspace.txt",
-      currentText
+  let diffPath = baselineDiffPath attempt in
+  let result =
+    runProcess launcherCwd [
+      "bash",
+      "-lc",
+      baselineDiffScript attempt
     ] in
-  match writeFile (baselineDiffPath attempt) artifactText {
-    Ok written ->
+  if result.exitCode == 0 then
+    if fileExists diffPath then
       let tracedWrite = tracePoint (textConcat ["diff:write-ok:", encode attempt]) in
-      "",
-    Err message ->
-      let tracedWriteError = tracePoint (textConcat ["diff:write-err:", message]) in
-      message
-  }
+      ""
+    else
+      let tracedWriteMissing = tracePoint (textConcat ["diff:write-missing:", encode attempt]) in
+      textConcat ["diff artifact missing: ", diffPath]
+  else
+    let tracedWriteError = tracePoint (textConcat ["diff:write-err:", result.stderr]) in
+    result.stderr
 }
 
 builderPrompt : Int -> Str
@@ -1026,44 +1147,135 @@ verifierPrompt attempt =
     textConcat ["Attempt: ", encode attempt]
   ]
 
-ensureBaseline : ProcessResult
-ensureBaseline =
-  if fileExists baselineReadyPath then
-    ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" }
+verifierShellCommand : Int -> [Str]
+verifierShellCommand attempt =
+  append
+    [
+      "bash",
+      "-lc",
+      textConcat [
+        "set +e\n",
+        "state_path=", encode loopStatePath, "\n",
+        "feedback_path=", encode feedbackPath, "\n",
+        "report_path=", encode (verifierReportPath attempt), "\n",
+        "stdout_path=", encode (verifierStdoutPath attempt), "\n",
+        "stderr_path=", encode (verifierStderrPath attempt), "\n",
+        "heartbeat_path=", encode (verifierHeartbeatPath attempt), "\n",
+        "timeout_ms=", encode verifierTimeoutMs, "\n",
+        "command_state=", encode (pendingVerifierStateJson attempt "verifier-command-ready"), "\n",
+        "running_state=", encode (pendingVerifierStateJson attempt "verifier-running"), "\n",
+        "completed_state=", encode (completedPassStateJson attempt), "\n",
+        "failed_state=", encode (verifierFailureStateJson attempt "verifier did not pass"), "\n",
+        "no_report_state=", encode (verifierFailureStateJson attempt "verifier step failed before producing a durable report"), "\n",
+        "mkdir -p \"$(dirname \"$report_path\")\" \"$(dirname \"$stdout_path\")\" \"$(dirname \"$stderr_path\")\" \"$(dirname \"$heartbeat_path\")\" || exit $?\n",
+        "if [ -f \"$report_path\" ]; then status=0; else\n",
+        "  printf '%s' \"$command_state\" > \"$state_path\" || exit $?\n",
+        baselineDiffScript attempt,
+        "  diff_status=$?\n",
+        "  if [ \"$diff_status\" -ne 0 ]; then printf '%s' \"$no_report_state\" > \"$state_path\"; exit \"$diff_status\"; fi\n",
+        "  printf '%s' \"$running_state\" > \"$state_path\" || exit $?\n",
+        "  : >\"$stdout_path\"\n",
+        "  : >\"$stderr_path\"\n",
+        "  if [ \"$timeout_ms\" -gt 0 ]; then secs=$(( (timeout_ms + 999) / 1000 )); timeout \"$secs\" \"$@\" >\"$stdout_path\" 2>\"$stderr_path\"; status=$?; else \"$@\" >\"$stdout_path\" 2>\"$stderr_path\"; status=$?; fi\n",
+        "fi\n",
+        "if [ -f \"$report_path\" ]; then\n",
+        "  cp \"$report_path\" \"$feedback_path\"\n",
+        "  if grep -Eq '\"verdict\"[[:space:]]*:[[:space:]]*\"pass\"' \"$report_path\"; then printf '%s' \"$completed_state\" > \"$state_path\"; status=0; else printf '%s' \"$failed_state\" > \"$state_path\"; status=70; fi\n",
+        "else\n",
+        "  printf '%s' \"$no_report_state\" > \"$state_path\"\n",
+        "  if [ \"$status\" -eq 0 ]; then status=71; fi\n",
+        "fi\n",
+        "now_ms=$(date +%s%3N 2>/dev/null || printf '0')\n",
+        "printf '{\"pid\":0,\"running\":false,\"completed\":true,\"exitCode\":%s,\"stdoutPath\":", encode (verifierStdoutPath attempt), ",\"stderrPath\":", encode (verifierStderrPath attempt), ",\"heartbeatPath\":", encode (verifierHeartbeatPath attempt), ",\"updatedAtMs\":%s}' \"$status\" \"$now_ms\" > \"$heartbeat_path\"\n",
+        "exit \"$status\"\n"
+      ],
+      "clasp-feedback-loop-verifier"
+    ]
+    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
+
+markBaselineReady : ProcessResult
+markBaselineReady =
+  match writeFile baselineReadyPath "ready" {
+    Ok written ->
+      ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" },
+    Err message ->
+      ProcessResult { exitCode = 1, stdout = "", stderr = message }
+  }
+
+createBaselineSnapshot : ProcessResult
+createBaselineSnapshot = {
+  let removed = runProcess launcherCwd ["rm", "-rf", baselineWorkspace, baselineArchivePath] in
+  if removed.exitCode != 0 then
+    removed
   else {
-    let removed = runProcess launcherCwd ["rm", "-rf", baselineWorkspace, baselineArchivePath] in
-    if removed.exitCode != 0 then
-      removed
+    let created = runProcess launcherCwd ["mkdir", "-p", baselineWorkspace] in
+    if created.exitCode != 0 then
+      created
     else {
-      let created = runProcess launcherCwd ["mkdir", "-p", baselineWorkspace] in
-      if created.exitCode != 0 then
-        created
-      else {
-        let streamed = runProcess launcherCwd [
-          "bash",
-          "-lc",
-          textConcat [
-            "tar -cf - ",
-            baselineExcludeFlags,
-            "-C ",
-            workspaceRoot,
-            " . | ",
-            "tar -xf - -C ",
-            baselineWorkspace
-          ]
-        ] in
-        if streamed.exitCode != 0 then
-          streamed
-        else
-          match writeFile baselineReadyPath "ready" {
-            Ok written ->
-              ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" },
-            Err message ->
-              ProcessResult { exitCode = 1, stdout = "", stderr = message }
-          }
-      }
+      let streamed = runProcess launcherCwd [
+        "bash",
+        "-lc",
+        textConcat [
+          "tar -cf - ",
+          baselineExcludeFlags,
+          "-C ",
+          workspaceRoot,
+          " . | ",
+          "tar -xf - -C ",
+          baselineWorkspace
+        ]
+      ] in
+      if streamed.exitCode != 0 then
+        streamed
+      else
+        markBaselineReady
     }
   }
+}
+
+baselineCanBeSnapshottedFromWorkspace : Bool
+baselineCanBeSnapshottedFromWorkspace = {
+  let state = readLoopState in
+  if state.builderRuns > 0 then
+    false
+  else if state.verifierRuns > 0 then
+    false
+  else if fileExists (builderReportPath state.attempt) then
+    false
+  else if fileExists (baselineDiffPath state.attempt) then
+    false
+  else
+    true
+}
+
+providedBaselineMissing : ProcessResult
+providedBaselineMissing =
+  ProcessResult {
+    exitCode = 1,
+    stdout = "",
+    stderr =
+      textConcat [
+        "provided baseline workspace is missing; refusing to recreate it from a workspace that may contain builder changes: ",
+        baselineWorkspace
+      ]
+  }
+
+ensureBaseline : ProcessResult
+ensureBaseline =
+  if baselineWorkspaceProvided then
+    if fileExists baselineWorkspace then
+      markBaselineReady
+    else if baselineCanBeSnapshottedFromWorkspace then
+      createBaselineSnapshot
+    else
+      providedBaselineMissing
+  else if fileExists baselineReadyPath then
+    if fileExists baselineWorkspace then
+      ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" }
+    else
+      createBaselineSnapshot
+  else
+    createBaselineSnapshot
 
 runStepDirect : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
 runStepDirect step command launchingState runningState = {
@@ -1170,65 +1382,14 @@ runVerifierPhase attempt =
       prepError
     else {
       let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
-      let diffError = refreshBaselineDiff attempt in
-      if diffError != "" then
-        textConcat ["diff-error:", diffError]
-      else {
-        let tracedDiff = tracePoint (textConcat ["verifier:after-diff:", encode attempt]) in
-        let preparingStateError =
-          writeLoopState (loopState attempt "verifier-preparing" "pending" false attempt attempt true false "" false) in
-        if preparingStateError != "" then
-          textConcat ["state-error:", preparingStateError]
-        else {
-          let verifierStep = stepHandle "verifier" attempt;
-          let stepStateError =
-            writeLoopState (loopState attempt "verifier-step-ready" "pending" false attempt attempt true false "" false) in
-          if stepStateError != "" then
-            textConcat ["state-error:", stepStateError]
-          else {
-            let verifierPromptText = verifierPrompt attempt;
-            let promptStateError =
-              writeLoopState (loopState attempt "verifier-prompt-ready" "pending" false attempt attempt true false "" false) in
-            if promptStateError != "" then
-              textConcat ["state-error:", promptStateError]
-            else {
-              let verifierCommand = codexCommand verifierSchemaPath verifierStep.reportPath verifierPromptText;
-              let commandStateError =
-                writeLoopState (loopState attempt "verifier-command-ready" "pending" false attempt attempt true false "" false) in
-              if commandStateError != "" then
-                textConcat ["state-error:", commandStateError]
-              else {
-                let verifierRun =
-                  if watchModeEnabled then
-                    ensureStepReportWithTimeout
-                      verifierStep
-                      verifierCommand
-                      (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
-                      (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false)
-                      verifierTimeoutMs
-                  else
-                    runStepDirect
-                      verifierStep
-                      verifierCommand
-                      (loopState attempt "verifier-launching" "pending" false attempt attempt true false "" false)
-                      (loopState attempt "verifier-running" "pending" false attempt attempt true false "" false) in
-                if fileExists verifierStep.reportPath then {
-                  let report = readVerifierReport attempt in
-                  if report.verdict == "pass" then
-                    finishPass attempt report
-                  else
-                    persistFailureAndContinue attempt report
-                } else
-                    persistFailureAndContinue
-                      attempt
-                      (syntheticFailureReport
-                        "verifier step failed before producing a durable report"
-                        verifierRun.stderr)
-              }
-            }
-          }
-        }
-      }
+      let verifierStep = stepHandle "verifier" attempt in
+      let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
+      if verifierRun.exitCode == 0 then
+        textConcat ["pass:", encode attempt]
+      else if attempt == maxAttempts then
+        textConcat ["fail:", encode attempt]
+      else
+        runBuilderPhase (incrementAttempt attempt)
     }
   }
 
