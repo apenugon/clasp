@@ -213,12 +213,8 @@ const hostKey = stableFingerprint(Buffer.concat([
 ]));
 const nativeDir = path.join(cacheRoot, 'claspc-native', 'export-host-v1');
 const fileName = `${hostKey}.sock`;
-let socketPath = path.join(nativeDir, fileName);
-
-if (Buffer.byteLength(socketPath) >= 104) {
-  const cacheRootKey = stableFingerprint(Buffer.from(nativeDir));
-  socketPath = path.join('/tmp/clasp-native-export-host', 'export-host-v1', cacheRootKey, fileName);
-}
+const cacheRootKey = stableFingerprint(Buffer.from(nativeDir));
+const socketPath = path.join('/tmp/clasp-native-export-host', 'export-host-v1', cacheRootKey, fileName);
 
 process.stdout.write(`${socketPath}\n`);
 EOF

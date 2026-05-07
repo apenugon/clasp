@@ -1762,6 +1762,21 @@ childLoopManagerRetryAvailable : Str -> Bool
 childLoopManagerRetryAvailable taskId =
   readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
 
+childLoopHasBuilderProgress : Str -> Bool
+childLoopHasBuilderProgress taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          false
+        else
+          fileExists (taskBuilderReportPath taskId state.builderRuns),
+      Err message ->
+        false
+    }
+  else
+    false
+
 resetChildLoopForManagerRetry : Str -> Str
 resetChildLoopForManagerRetry taskId =
   match runCommand "." [
@@ -5241,6 +5256,7 @@ retryChildLoopMissingReport spec report =
   if childLoopManagerRetryAvailable spec.taskId == false then
     recordPlannedTaskFailure spec report
   else {
+    let preserveProgress = childLoopHasBuilderProgress spec.taskId in
     let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
     let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
     if retryWriteError != "" then
@@ -5257,21 +5273,40 @@ retryChildLoopMissingReport spec report =
       if traceError != "" then
         traceError
       else {
-        let resetError = resetChildLoopForManagerRetry spec.taskId in
-        if resetError != "" then
-          textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
-        else {
-          let workspaceError = ensureTaskWorkspace spec.taskId in
-          if workspaceError != "" then
-            textConcat ["task child loop retry workspace setup failed: ", spec.taskId, ": ", workspaceError]
-          else
-            match launchChildLoop spec {
-              Err message ->
-                recordPlannedTaskFailure spec (syntheticFailureReport "task child loop retry failed to start" message),
-              Ok launched ->
+        let relaunchError =
+          if preserveProgress then {
+            let preserveTrace =
+              appendManagerTrace
+                (textConcat [
+                  "child-loop-retry:",
+                  spec.taskId,
+                  ":preserve-builder-progress=true"
+                ]) in
+            if preserveTrace != "" then
+              preserveTrace
+            else
+              ""
+          } else {
+            let resetError = resetChildLoopForManagerRetry spec.taskId in
+            if resetError != "" then
+              textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
+            else {
+              let workspaceError = ensureTaskWorkspace spec.taskId in
+              if workspaceError != "" then
+                textConcat ["task child loop retry workspace setup failed: ", spec.taskId, ": ", workspaceError]
+              else
                 ""
             }
-        }
+          } in
+        if relaunchError != "" then
+          relaunchError
+        else
+          match launchChildLoop spec {
+            Err message ->
+              recordPlannedTaskFailure spec (syntheticFailureReport "task child loop retry failed to start" message),
+            Ok launched ->
+              ""
+          }
       }
     }
   }

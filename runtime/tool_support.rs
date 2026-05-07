@@ -438,14 +438,9 @@ fn native_export_host_socket_path(image_path_text: &str) -> Option<PathBuf> {
     let current_exe_bytes = fs::read(current_exe).ok()?;
     let image_bytes = fs::read(image_path_text).ok()?;
     let host_key = stable_fingerprint_bytes(&[current_exe_bytes, image_bytes].concat());
+    let cache_root_key = stable_fingerprint_text(&native_export_host_dir().display().to_string());
     let file_name = format!("{host_key}.sock");
-    let primary_path = native_export_host_dir().join(&file_name);
-    if unix_socket_path_is_short_enough(&primary_path) {
-        Some(primary_path)
-    } else {
-        let cache_root_key = stable_fingerprint_text(&native_export_host_dir().display().to_string());
-        Some(short_native_export_host_dir(&cache_root_key).join(file_name))
-    }
+    Some(short_native_export_host_dir(&cache_root_key).join(file_name))
 }
 
 fn native_export_host_lock_path(socket_path: &Path) -> PathBuf {
@@ -1965,7 +1960,32 @@ mod tests {
     }
 
     #[test]
-    fn native_export_host_socket_path_falls_back_to_short_root_for_long_cache_paths() {
+    fn native_export_host_socket_path_uses_short_root_for_regular_cache_paths() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("regular-host-cache");
+        let image_root = unique_test_root("regular-host-image");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::create_dir_all(&image_root).expect("create image root");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let image_path = image_root.join("compiler.native.image.json");
+        fs::write(&image_path, "{\"module\":\"Main\"}").expect("write image");
+
+        let socket_path = super::native_export_host_socket_path(image_path.to_str().expect("utf8 image path"))
+            .expect("socket path");
+        let short_root = PathBuf::from(super::DEFAULT_SHORT_HOST_ROOT)
+            .join(super::NATIVE_EXPORT_HOST_VERSION);
+
+        assert!(socket_path.starts_with(&short_root));
+        assert!(super::unix_socket_path_is_short_enough(&socket_path));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+        let _ = fs::remove_dir_all(image_root);
+    }
+
+    #[test]
+    fn native_export_host_socket_path_uses_short_root_for_long_cache_paths() {
         let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("long-host-cache");
         let image_root = unique_test_root("long-host-image");
