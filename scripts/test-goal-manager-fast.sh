@@ -1006,6 +1006,24 @@ test -f "$failed_replan_state/planner-2.json"
 grep -F '"wave-2-benchmark-gap"' "$failed_replan_state/status.json" >/dev/null
 grep -Fx 'fixed-after-feedback' "$failed_replan_workspace/workspace.txt" >/dev/null
 
+trace_case "failed-task-does-not-benchmark-pass"
+failed_benchmark_state="$test_root_abs/failed-benchmark-state"
+failed_benchmark_workspace="$test_root_abs/failed-benchmark-workspace"
+failed_benchmark_output="$test_root_abs/failed-benchmark-output.txt"
+mkdir -p "$failed_benchmark_workspace"
+run_goal_manager "$failed_benchmark_state" "$failed_benchmark_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_FAIL_FIRST_WAVE='1' \
+  CLASP_MANAGER_MAX_WAVES_JSON='2' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$fake_slow_benchmark_bin\"]" \
+  >"$failed_benchmark_output" 2>&1
+grep -F '"phase":"completed"' "$failed_benchmark_output" >/dev/null
+grep -F '"verdict":"pass"' "$failed_benchmark_output" >/dev/null
+grep -F '"wave":2' "$failed_benchmark_state/status.json" >/dev/null
+test ! -f "$failed_benchmark_state/benchmark-1.json"
+test -f "$failed_benchmark_state/benchmark-2.json"
+grep -F '"summary":"fake first wave failed"' "$failed_benchmark_state/loop-benchmark-gap/feedback.json" >/dev/null
+
 trace_case "task-workspace-snapshot-excludes-cache-dirs"
 snapshot_exclude_state="$test_root_abs/snapshot-exclude-state"
 snapshot_exclude_workspace="$test_root_abs/snapshot-exclude-workspace"

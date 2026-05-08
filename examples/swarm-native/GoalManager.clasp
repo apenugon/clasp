@@ -5958,7 +5958,6 @@ executeReadyTasks report wave benchmarkRuns = {
                               } else
                                 pendingLaunchIds
                             };
-                            let terminalPlannedTaskCount = addManagerCounters (length completedIds) (length failedIds) in
                             if length readyPlannedIds > 0 then
                               executeReadyTasks report wave benchmarkRuns
                             else if length pendingLaunchIds > 0 then
@@ -5970,8 +5969,10 @@ executeReadyTasks report wave benchmarkRuns = {
                                 Ok process ->
                                   executeReadyTasks report wave benchmarkRuns
                               }
+                            else if length failedIds > 0 then
+                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
                             else if benchmarkEnabled then
-                              if terminalPlannedTaskCount == length report.tasks then
+                              if length completedIds == length report.tasks then
                                 runBenchmarkCheckpoint report wave benchmarkRuns
                               else
                                 continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
@@ -5979,8 +5980,6 @@ executeReadyTasks report wave benchmarkRuns = {
                               finalizeWithReport
                                 (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
                                 (managerPassReport report)
-                            else if length failedIds > 0 then
-                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
                             else
                               continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
                           }
