@@ -77,6 +77,31 @@ canonical_existing_path() {
   printf '%s/%s\n' "$parent" "$name"
 }
 
+goal_manager_cache_path_id() {
+  local path="$1"
+  local canonical_path
+  local canonical_project_root
+
+  canonical_path="$(canonical_existing_path "$path")"
+  canonical_project_root="$(canonical_existing_path "$project_root")"
+  case "$canonical_path" in
+    "$canonical_project_root"/*)
+      printf '%s\n' "${canonical_path#"$canonical_project_root/"}"
+      ;;
+    *)
+      printf '%s\n' "$canonical_path"
+      ;;
+  esac
+}
+
+emit_goal_manager_file_cache_hash() {
+  local path="$1"
+  local hash
+
+  hash="$(sha256sum "$path" | awk '{print $1}')"
+  printf '%s  %s\n' "$hash" "$(goal_manager_cache_path_id "$path")"
+}
+
 source_is_swarm_native_clasp() {
   local canonical_source="$1"
   local canonical_swarm_dir
@@ -125,7 +150,9 @@ emit_goal_manager_import_closure_hashes() {
     done < <(awk '/^[[:space:]]*import[[:space:]]+[A-Za-z0-9_.]+/ { print $2 }' "$canonical_current")
   done
 
-  printf '%s\0' "${closure[@]}" | sort -z | xargs -0 sha256sum
+  for current in "${closure[@]}"; do
+    emit_goal_manager_file_cache_hash "$current"
+  done | sort -k2
 }
 
 emit_goal_manager_source_dependency_hashes() {
@@ -141,13 +168,13 @@ emit_goal_manager_source_dependency_hashes() {
 
 compute_goal_manager_cache_key() {
   {
-    printf 'goal-manager-source\t%s\n' "$goal_manager_source"
+    printf 'goal-manager-source\t%s\n' "$(goal_manager_cache_path_id "$goal_manager_source")"
     printf 'goal-manager-source-content\t'
-    sha256sum "$goal_manager_source"
+    emit_goal_manager_file_cache_hash "$goal_manager_source"
     printf 'goal-manager-source-dependencies\t'
     emit_goal_manager_source_dependency_hashes
     printf 'claspc-content\t'
-    sha256sum "$claspc_bin"
+    sha256sum "$claspc_bin" | awk '{print $1}'
     emit_goal_manager_build_mode_key
   } | sha256sum | awk '{print $1}'
 }

@@ -53,6 +53,7 @@ grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh"
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremental-guard.sh" >/dev/null
 grep -F 'export XDG_CACHE_HOME="$test_root/xdg-cache"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
@@ -93,7 +94,9 @@ grep -F 'goal-manager-source-dependencies' "$test_root/scripts/ensure-goal-manag
 grep -F 'goal-manager-build-mode' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal-manager-source' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
-grep -F 'sha256sum "$claspc_bin"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'goal_manager_cache_path_id()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'emit_goal_manager_file_cache_hash()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'sha256sum "$claspc_bin" | awk' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'compile_lock="$(dirname "$goal_manager_binary")/compile.lock"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 
@@ -182,6 +185,30 @@ grep -F "compile-source=$test_root/examples/swarm-native/GoalManager.wrapper.cla
 [[ "$(grep -c '^compile-source=' "$goal_manager_fast_log")" == "1" ]]
 [[ -f "$(dirname "$goal_manager_binary_one")/compile.lock" ]]
 [[ ! -e "$goal_manager_cache/compile.lock" ]]
+
+goal_manager_cross_workspace_cache="$test_root/goal-manager-cross-workspace-cache"
+goal_manager_cross_workspace_log="$test_root/fake-fast-cross-workspace.log"
+for cross_workspace in "$test_root/cross-workspace-a" "$test_root/cross-workspace-b"; do
+  mkdir -p "$cross_workspace/bin" "$cross_workspace/scripts" "$cross_workspace/examples/swarm-native"
+  cp "$test_root/scripts/ensure-goal-manager-binary.sh" "$cross_workspace/scripts/ensure-goal-manager-binary.sh"
+  cp "$test_root/bin/fake-fast-claspc" "$cross_workspace/bin/fake-fast-claspc"
+  printf 'module Main\n\nimport Service\n\nmain : Str\nmain = service\n' > "$cross_workspace/examples/swarm-native/GoalManager.wrapper.clasp"
+  printf 'module Service\nservice : Str\nservice = "same dependency"\n' > "$cross_workspace/examples/swarm-native/Service.clasp"
+done
+goal_manager_cross_workspace_binary_one="$(
+  CLASP_TEST_FAKE_FAST_CLASPC_LOG="$goal_manager_cross_workspace_log" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/cross-workspace-a/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cross_workspace_cache" \
+    "$bash_bin" "$test_root/cross-workspace-a/scripts/ensure-goal-manager-binary.sh"
+)"
+goal_manager_cross_workspace_binary_two="$(
+  CLASP_TEST_FAKE_FAST_CLASPC_LOG="$goal_manager_cross_workspace_log" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/cross-workspace-b/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cross_workspace_cache" \
+    "$bash_bin" "$test_root/cross-workspace-b/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$goal_manager_cross_workspace_binary_one" == "$goal_manager_cross_workspace_binary_two" ]]
+[[ "$(grep -c '^compile-source=' "$goal_manager_cross_workspace_log")" == "1" ]]
 
 printf 'module Extra\nextra : Str\nextra = "ignored by wrapper import closure cache key"\n' > "$test_root/examples/swarm-native/Extra.clasp"
 goal_manager_binary_after_unrelated_module="$(
