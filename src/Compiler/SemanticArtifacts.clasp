@@ -949,6 +949,644 @@ semanticDeclUseEdges modl = {
   edges
 }
 
+semanticAppendNonEmptyUniqueText : [Str] -> Str -> [Str]
+semanticAppendNonEmptyUniqueText values value =
+  if value == "" then values else semanticAppendUniqueText values value
+
+semanticAppendUniqueTexts : [Str] -> [Str] -> [Str]
+semanticAppendUniqueTexts values additions = {
+  let mut result = values;
+  for value in additions {
+    result = semanticAppendNonEmptyUniqueText result value;
+    result
+  };
+  result
+}
+
+semanticSchemaFieldNodeIds : HostedRecordDeclAst -> [Str]
+semanticSchemaFieldNodeIds recordDecl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for field in recordDeclFields recordDecl {
+    nodeIds = appendRenderedText nodeIds (semanticSchemaFieldNodeId (recordDeclName recordDecl) field);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticSchemaFieldNodeIdsByName : HostedModuleAst -> Str -> [Str]
+semanticSchemaFieldNodeIdsByName modl schemaName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    if recordDeclName recordDecl == schemaName then {
+      nodeIds = semanticAppendUniqueTexts nodeIds (semanticSchemaFieldNodeIds recordDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticAppendSchemaImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendSchemaImpactSurface modl surfaces schemaName = {
+  let mut result = surfaces;
+  if semanticNonEmptyContainsText (semanticRecordNames modl) schemaName then {
+    result = semanticAppendNonEmptyUniqueText result (textConcat ["schema:", schemaName]);
+    result = semanticAppendUniqueTexts result (semanticSchemaFieldNodeIdsByName modl schemaName);
+    result
+  } else {
+    result
+  }
+}
+
+semanticAppendDeclImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendDeclImpactSurface modl surfaces declNameText =
+  if semanticNonEmptyContainsText (semanticDeclNames modl) declNameText then semanticAppendNonEmptyUniqueText surfaces (textConcat ["decl:", declNameText]) else surfaces
+
+semanticAppendToolServerImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendToolServerImpactSurface modl surfaces serverName =
+  if semanticNonEmptyContainsText (semanticToolServerNames modl) serverName then semanticAppendNonEmptyUniqueText surfaces (textConcat ["toolserver:", serverName]) else surfaces
+
+semanticDeclIdsUsingTarget : HostedModuleAst -> Str -> [Str]
+semanticDeclIdsUsingTarget modl targetId = {
+  let mut nodeIds = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    if semanticContainsText (semanticDeclUseTargetNodeIds modl decl) targetId then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticDeclNodeId decl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticRouteAffectedSurfaces : HostedModuleAst -> HostedRouteDeclAst -> [Str]
+semanticRouteAffectedSurfaces modl routeDecl = {
+  let mut surfaces = [semanticRouteNodeId routeDecl];
+  surfaces = semanticAppendDeclImpactSurface modl surfaces (routeDeclHandlerName routeDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (routeDeclRequestType routeDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (routeDeclResponseType routeDecl);
+  surfaces
+}
+
+semanticHookAffectedSurfaces : HostedModuleAst -> HostedHookDeclAst -> [Str]
+semanticHookAffectedSurfaces modl hookDecl = {
+  let mut surfaces = [semanticHookNodeId hookDecl];
+  surfaces = semanticAppendDeclImpactSurface modl surfaces (hookDeclHandlerName hookDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (hookDeclRequestType hookDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (hookDeclResponseType hookDecl);
+  surfaces
+}
+
+semanticToolAffectedSurfaces : HostedModuleAst -> HostedToolDeclAst -> [Str]
+semanticToolAffectedSurfaces modl toolDecl = {
+  let mut surfaces = [semanticToolNodeId toolDecl];
+  surfaces = semanticAppendToolServerImpactSurface modl surfaces (toolDeclServerName toolDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (toolDeclRequestType toolDecl);
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (toolDeclResponseType toolDecl);
+  surfaces
+}
+
+semanticToolAffectedSurfacesByName : HostedModuleAst -> Str -> [Str]
+semanticToolAffectedSurfacesByName modl toolName = {
+  let mut surfaces = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    if toolDeclName toolDecl == toolName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticToolAffectedSurfaces modl toolDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
+semanticToolsAffectedSurfacesByNames : HostedModuleAst -> [Str] -> [Str]
+semanticToolsAffectedSurfacesByNames modl toolNames = {
+  let mut surfaces = emptyRenderedTexts;
+  for toolName in toolNames {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticToolAffectedSurfacesByName modl toolName);
+    surfaces
+  };
+  surfaces
+}
+
+semanticWorkflowAffectedSurfaces : HostedModuleAst -> HostedWorkflowDeclAst -> [Str]
+semanticWorkflowAffectedSurfaces modl workflowDecl = {
+  let mut surfaces = [semanticWorkflowNodeId workflowDecl];
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (renderHostedType (workflowDeclStateTypeAst workflowDecl));
+  surfaces
+}
+
+semanticProjectionAffectedSurfaces : HostedModuleAst -> HostedProjectionDeclAst -> [Str]
+semanticProjectionAffectedSurfaces modl projectionDecl = {
+  let mut surfaces = [semanticProjectionNodeId projectionDecl];
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces (projectionDeclSourceRecordName projectionDecl);
+  surfaces = semanticAppendNonEmptyUniqueText surfaces (textConcat ["policy:", projectionDeclPolicyName projectionDecl]);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticProjectionFieldNodeIds projectionDecl);
+  surfaces
+}
+
+semanticRouteIdsForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticRouteIdsForSchemaName modl schemaName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    if routeDeclRequestType routeDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticRouteNodeId routeDecl);
+      nodeIds
+    } else if routeDeclResponseType routeDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticRouteNodeId routeDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticHookIdsForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticHookIdsForSchemaName modl schemaName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for hookDecl in moduleHookDeclarations modl {
+    if hookDeclRequestType hookDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticHookNodeId hookDecl);
+      nodeIds
+    } else if hookDeclResponseType hookDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticHookNodeId hookDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticToolIdsForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticToolIdsForSchemaName modl schemaName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    if toolDeclRequestType toolDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticToolNodeId toolDecl);
+      nodeIds
+    } else if toolDeclResponseType toolDecl == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticToolNodeId toolDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticToolNamesForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticToolNamesForSchemaName modl schemaName = {
+  let mut names = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    if toolDeclRequestType toolDecl == schemaName then {
+      names = semanticAppendNonEmptyUniqueText names (toolDeclName toolDecl);
+      names
+    } else if toolDeclResponseType toolDecl == schemaName then {
+      names = semanticAppendNonEmptyUniqueText names (toolDeclName toolDecl);
+      names
+    } else {
+      names
+    }
+  };
+  names
+}
+
+semanticWorkflowIdsForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticWorkflowIdsForSchemaName modl schemaName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    if renderHostedType (workflowDeclStateTypeAst workflowDecl) == schemaName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticWorkflowNodeId workflowDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticProjectionSurfacesForSchemaName : HostedModuleAst -> Str -> [Str]
+semanticProjectionSurfacesForSchemaName modl schemaName = {
+  let mut surfaces = emptyRenderedTexts;
+  for projectionDecl in moduleProjectionDeclarations modl {
+    if projectionDeclSourceRecordName projectionDecl == schemaName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticProjectionAffectedSurfaces modl projectionDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
+semanticSchemaAffectedSurfaces : HostedModuleAst -> HostedRecordDeclAst -> [Str]
+semanticSchemaAffectedSurfaces modl recordDecl = {
+  let schemaName = recordDeclName recordDecl;
+  let schemaId = semanticSchemaNodeId recordDecl;
+  let mut surfaces = emptyRenderedTexts;
+  surfaces = semanticAppendSchemaImpactSurface modl surfaces schemaName;
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclIdsUsingTarget modl schemaId);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticRouteIdsForSchemaName modl schemaName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticHookIdsForSchemaName modl schemaName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticToolIdsForSchemaName modl schemaName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticWorkflowIdsForSchemaName modl schemaName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticProjectionSurfacesForSchemaName modl schemaName);
+  surfaces
+}
+
+semanticRouteAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]
+semanticRouteAffectedSurfacesByHandlerName modl handlerName = {
+  let mut surfaces = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    if routeDeclHandlerName routeDecl == handlerName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticRouteAffectedSurfaces modl routeDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
+semanticHookAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]
+semanticHookAffectedSurfacesByHandlerName modl handlerName = {
+  let mut surfaces = emptyRenderedTexts;
+  for hookDecl in moduleHookDeclarations modl {
+    if hookDeclHandlerName hookDecl == handlerName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticHookAffectedSurfaces modl hookDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
+semanticDeclAffectedSurfaces : HostedModuleAst -> HostedDeclAst -> [Str]
+semanticDeclAffectedSurfaces modl decl = {
+  let declId = semanticDeclNodeId decl;
+  let mut surfaces = [declId];
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclUseTargetNodeIds modl decl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclIdsUsingTarget modl declId);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticRouteAffectedSurfacesByHandlerName modl (declName decl));
+  surfaces = semanticAppendUniqueTexts surfaces (semanticHookAffectedSurfacesByHandlerName modl (declName decl));
+  surfaces
+}
+
+semanticVerifierNamesForToolName : HostedModuleAst -> Str -> [Str]
+semanticVerifierNamesForToolName modl toolName = {
+  let mut names = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    if verifierDeclToolName verifierDecl == toolName then {
+      names = semanticAppendNonEmptyUniqueText names (verifierDeclName verifierDecl);
+      names
+    } else {
+      names
+    }
+  };
+  names
+}
+
+semanticVerifierNamesForToolNames : HostedModuleAst -> [Str] -> [Str]
+semanticVerifierNamesForToolNames modl toolNames = {
+  let mut names = emptyRenderedTexts;
+  for toolName in toolNames {
+    names = semanticAppendUniqueTexts names (semanticVerifierNamesForToolName modl toolName);
+    names
+  };
+  names
+}
+
+semanticVerifierIdsForNames : HostedModuleAst -> [Str] -> [Str]
+semanticVerifierIdsForNames modl verifierNames = {
+  let mut nodeIds = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    if semanticContainsText verifierNames (verifierDeclName verifierDecl) then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticVerifierNodeId verifierDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticMergeGateIdsForVerifierName : HostedModuleAst -> Str -> [Str]
+semanticMergeGateIdsForVerifierName modl verifierName = {
+  let mut nodeIds = emptyRenderedTexts;
+  for mergeGateDecl in moduleMergeGateDeclarations modl {
+    if semanticContainsText (mergeGateDeclVerifierNames mergeGateDecl) verifierName then {
+      nodeIds = semanticAppendNonEmptyUniqueText nodeIds (semanticMergeGateNodeId mergeGateDecl);
+      nodeIds
+    } else {
+      nodeIds
+    }
+  };
+  nodeIds
+}
+
+semanticMergeGateIdsForVerifierNames : HostedModuleAst -> [Str] -> [Str]
+semanticMergeGateIdsForVerifierNames modl verifierNames = {
+  let mut nodeIds = emptyRenderedTexts;
+  for verifierName in verifierNames {
+    nodeIds = semanticAppendUniqueTexts nodeIds (semanticMergeGateIdsForVerifierName modl verifierName);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticToolNamesForVerifierNames : HostedModuleAst -> [Str] -> [Str]
+semanticToolNamesForVerifierNames modl verifierNames = {
+  let mut toolNames = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    if semanticContainsText verifierNames (verifierDeclName verifierDecl) then {
+      toolNames = semanticAppendNonEmptyUniqueText toolNames (verifierDeclToolName verifierDecl);
+      toolNames
+    } else {
+      toolNames
+    }
+  };
+  toolNames
+}
+
+semanticToolServerNamesForPolicyName : HostedModuleAst -> Str -> [Str]
+semanticToolServerNamesForPolicyName modl policyName = {
+  let mut names = emptyRenderedTexts;
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    if toolServerDeclPolicyName toolServerDecl == policyName then {
+      names = semanticAppendNonEmptyUniqueText names (toolServerDeclName toolServerDecl);
+      names
+    } else {
+      names
+    }
+  };
+  names
+}
+
+semanticToolNamesForServerNames : HostedModuleAst -> [Str] -> [Str]
+semanticToolNamesForServerNames modl serverNames = {
+  let mut names = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    if semanticContainsText serverNames (toolDeclServerName toolDecl) then {
+      names = semanticAppendNonEmptyUniqueText names (toolDeclName toolDecl);
+      names
+    } else {
+      names
+    }
+  };
+  names
+}
+
+semanticPolicyAffectedSurfaces : HostedModuleAst -> HostedPolicyDeclAst -> [Str]
+semanticPolicyAffectedSurfaces modl policyDecl = {
+  let policyName = policyDeclName policyDecl;
+  let mut roleNames = emptyRenderedTexts;
+  let mut serverNames = emptyRenderedTexts;
+  let mut surfaces = [semanticPolicyNodeId policyDecl];
+  for projectionDecl in moduleProjectionDeclarations modl {
+    if projectionDeclPolicyName projectionDecl == policyName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticProjectionAffectedSurfaces modl projectionDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  for roleDecl in moduleAgentRoleDeclarations modl {
+    if agentRoleDeclPolicyName roleDecl == policyName then {
+      roleNames = semanticAppendNonEmptyUniqueText roleNames (agentRoleDeclName roleDecl);
+      surfaces = semanticAppendNonEmptyUniqueText surfaces (semanticAgentRoleNodeId roleDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  for agentDecl in moduleAgentDeclarations modl {
+    if semanticContainsText roleNames (agentDeclRoleName agentDecl) then {
+      surfaces = semanticAppendNonEmptyUniqueText surfaces (semanticAgentNodeId agentDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    if toolServerDeclPolicyName toolServerDecl == policyName then {
+      serverNames = semanticAppendNonEmptyUniqueText serverNames (toolServerDeclName toolServerDecl);
+      surfaces = semanticAppendNonEmptyUniqueText surfaces (semanticToolServerNodeId toolServerDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces = semanticAppendUniqueTexts surfaces (semanticToolsAffectedSurfacesByNames modl (semanticToolNamesForServerNames modl serverNames));
+  surfaces
+}
+
+semanticToolNamesForPolicyName : HostedModuleAst -> Str -> [Str]
+semanticToolNamesForPolicyName modl policyName =
+  semanticToolNamesForServerNames modl (semanticToolServerNamesForPolicyName modl policyName)
+
+semanticVerifierAffectedSurfaces : HostedModuleAst -> HostedVerifierDeclAst -> [Str]
+semanticVerifierAffectedSurfaces modl verifierDecl = {
+  let mut surfaces = [semanticVerifierNodeId verifierDecl];
+  surfaces = semanticAppendUniqueTexts surfaces (semanticToolAffectedSurfacesByName modl (verifierDeclToolName verifierDecl));
+  surfaces
+}
+
+semanticMergeGateAffectedSurfaces : HostedModuleAst -> HostedMergeGateDeclAst -> [Str]
+semanticMergeGateAffectedSurfaces modl mergeGateDecl = {
+  let verifierNames = mergeGateDeclVerifierNames mergeGateDecl;
+  let mut surfaces = [semanticMergeGateNodeId mergeGateDecl];
+  surfaces = semanticAppendUniqueTexts surfaces (semanticVerifierIdsForNames modl verifierNames);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticToolsAffectedSurfacesByNames modl (semanticToolNamesForVerifierNames modl verifierNames));
+  surfaces
+}
+
+semanticImpactEntry : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Str
+semanticImpactEntry sourceId sourceKind sourceName affectedSurfaces relevantVerifiers relevantMergeGates =
+  jsonObject
+    [ jsonFieldText "sourceId" sourceId
+    , jsonFieldText "sourceKind" sourceKind
+    , jsonFieldText "name" sourceName
+    , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+    , jsonFieldRaw "relevantVerifiers" (semanticJsonTextArray relevantVerifiers)
+    , jsonFieldRaw "relevantMergeGates" (semanticJsonTextArray relevantMergeGates)
+    ]
+
+semanticContextImpactIndexSchemas : HostedModuleAst -> [Str]
+semanticContextImpactIndexSchemas modl = {
+  let mut entries = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    let toolNames = semanticToolNamesForSchemaName modl (recordDeclName recordDecl);
+    let verifierNames = semanticVerifierNamesForToolNames modl toolNames;
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticSchemaNodeId recordDecl)
+          "schema"
+          (recordDeclName recordDecl)
+          (semanticSchemaAffectedSurfaces modl recordDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexDecls : HostedModuleAst -> [Str]
+semanticContextImpactIndexDecls modl = {
+  let mut entries = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticDeclNodeId decl)
+          "declaration"
+          (declName decl)
+          (semanticDeclAffectedSurfaces modl decl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexRoutes : HostedModuleAst -> [Str]
+semanticContextImpactIndexRoutes modl = {
+  let mut entries = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticRouteNodeId routeDecl)
+          "route"
+          (routeDeclName routeDecl)
+          (semanticRouteAffectedSurfaces modl routeDecl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexTools : HostedModuleAst -> [Str]
+semanticContextImpactIndexTools modl = {
+  let mut entries = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    let verifierNames = semanticVerifierNamesForToolName modl (toolDeclName toolDecl);
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticToolNodeId toolDecl)
+          "tool"
+          (toolDeclName toolDecl)
+          (semanticToolAffectedSurfaces modl toolDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexWorkflows : HostedModuleAst -> [Str]
+semanticContextImpactIndexWorkflows modl = {
+  let mut entries = emptyRenderedTexts;
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticWorkflowNodeId workflowDecl)
+          "workflow"
+          (workflowDeclName workflowDecl)
+          (semanticWorkflowAffectedSurfaces modl workflowDecl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexPolicies : HostedModuleAst -> [Str]
+semanticContextImpactIndexPolicies modl = {
+  let mut entries = emptyRenderedTexts;
+  for policyDecl in modulePolicyDeclarations modl {
+    let verifierNames = semanticVerifierNamesForToolNames modl (semanticToolNamesForPolicyName modl (policyDeclName policyDecl));
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticPolicyNodeId policyDecl)
+          "policy"
+          (policyDeclName policyDecl)
+          (semanticPolicyAffectedSurfaces modl policyDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexVerifiers : HostedModuleAst -> [Str]
+semanticContextImpactIndexVerifiers modl = {
+  let mut entries = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    let verifierNames = [verifierDeclName verifierDecl];
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticVerifierNodeId verifierDecl)
+          "verifier"
+          (verifierDeclName verifierDecl)
+          (semanticVerifierAffectedSurfaces modl verifierDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexMergeGates : HostedModuleAst -> [Str]
+semanticContextImpactIndexMergeGates modl = {
+  let mut entries = emptyRenderedTexts;
+  for mergeGateDecl in moduleMergeGateDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticMergeGateNodeId mergeGateDecl)
+          "mergeGate"
+          (mergeGateDeclName mergeGateDecl)
+          (semanticMergeGateAffectedSurfaces modl mergeGateDecl)
+          (semanticVerifierIdsForNames modl (mergeGateDeclVerifierNames mergeGateDecl))
+          [semanticMergeGateNodeId mergeGateDecl]);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndex : HostedModuleAst -> Str
+semanticContextImpactIndex modl =
+  jsonObject
+    [ jsonFieldRaw "schemas" (jsonArray (semanticContextImpactIndexSchemas modl))
+    , jsonFieldRaw "declarations" (jsonArray (semanticContextImpactIndexDecls modl))
+    , jsonFieldRaw "routes" (jsonArray (semanticContextImpactIndexRoutes modl))
+    , jsonFieldRaw "tools" (jsonArray (semanticContextImpactIndexTools modl))
+    , jsonFieldRaw "workflows" (jsonArray (semanticContextImpactIndexWorkflows modl))
+    , jsonFieldRaw "policies" (jsonArray (semanticContextImpactIndexPolicies modl))
+    , jsonFieldRaw "verifiers" (jsonArray (semanticContextImpactIndexVerifiers modl))
+    , jsonFieldRaw "mergeGates" (jsonArray (semanticContextImpactIndexMergeGates modl))
+    ]
+
 semanticContextSurfaceIndexRoutes : [HostedRouteDeclAst] -> [Str]
 semanticContextSurfaceIndexRoutes routeDecls = {
   let mut entries = emptyRenderedTexts;
@@ -1359,6 +1997,7 @@ renderContextModuleJson modl = {
     , jsonFieldRaw "nodeCount" (encode (length nodes))
     , jsonFieldRaw "edgeCount" (encode (length edges))
     , jsonFieldRaw "surfaceIndex" (semanticContextSurfaceIndex modl)
+    , jsonFieldRaw "impactIndex" (semanticContextImpactIndex modl)
     , jsonFieldRaw "nodes" (jsonArray nodes)
     , jsonFieldRaw "edges" (jsonArray edges)
     ]

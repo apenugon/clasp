@@ -206,7 +206,7 @@ runManagedServiceBootstrap =
         recoverManagedService service
       else
         waitForManagedServiceCompletion,
-    Err message -> textConcat ["error:", message]
+    Err message -> continueManagedResume (textConcat ["error:", message])
   }
 
 runManagedServiceResume : Str

@@ -56,6 +56,119 @@ signalManagerReady =
       Err message -> message
     }
 
+managerWorkspaceReadyPath : Str
+managerWorkspaceReadyPath = pathJoin [resolvedWorkspaceRoot, ".clasp-manager-workspace-ready"]
+
+managerWorkspaceManifestPath : Str
+managerWorkspaceManifestPath = pathJoin [resolvedWorkspaceRoot, ".clasp-manager-workspace-manifest.json"]
+
+managerWorkspaceSnapshotPolicyId : Str
+managerWorkspaceSnapshotPolicyId =
+  textConcat ["manager-workspace-snapshot-v1:", textFingerprint64Hex workspaceCloneExcludeFlags]
+
+managerWorkspaceSnapshotScript : Str
+managerWorkspaceSnapshotScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "dst=\"$2\"",
+  "if [ -z \"$dst\" ] || [ \"$dst\" = \"/\" ]; then",
+  "  printf 'refusing unsafe workspace root: %s\n' \"$dst\" >&2",
+  "  exit 2",
+  "fi",
+  "if [ \"$src\" = \"$dst\" ]; then",
+  "  printf 'workspace root must differ from project root: %s\n' \"$dst\" >&2",
+  "  exit 2",
+  "fi",
+  "rm -rf \"$dst\"",
+  "mkdir -p \"$dst\"",
+  textConcat ["tar -cf - ", workspaceCloneExcludeFlags, "-C \"$src\" . | tar -xf - -C \"$dst\""]
+]
+
+managerWorkspaceManifestText : Int -> Str
+managerWorkspaceManifestText createdAtMs =
+  textConcat [
+    "{\"kind\":\"clasp-manager-workspace\",\"manifestVersion\":1",
+    ",\"projectRoot\":",
+    encode managerProjectRoot,
+    ",\"workspaceRoot\":",
+    encode workspaceRoot,
+    ",\"actualWorkspaceRoot\":",
+    encode resolvedWorkspaceRoot,
+    ",\"createdAtMs\":",
+    encode createdAtMs,
+    ",\"snapshotPolicyId\":",
+    encode managerWorkspaceSnapshotPolicyId,
+    "}"
+  ]
+
+createManagerWorkspaceSnapshot : Str
+createManagerWorkspaceSnapshot = {
+  let copied =
+    match runCommand "." [
+      "bash",
+      "-lc",
+      managerWorkspaceSnapshotScript,
+      "materialize-manager-workspace",
+      managerProjectRoot,
+      resolvedWorkspaceRoot
+    ] {
+      Ok result -> result,
+      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+    } in
+  if copied.exitCode != 0 then
+    textConcat ["workspace-root-error:", copied.stderr]
+  else {
+    let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
+      Ok written -> "",
+      Err message -> message
+    } in
+    if manifestError != "" then
+      textConcat ["workspace-manifest-error:", manifestError]
+    else {
+      let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+      if gitError != "" then
+        textConcat ["workspace-git-init-error:", gitError]
+      else
+        match writeFile managerWorkspaceReadyPath "ready" {
+          Ok written -> "",
+          Err message -> textConcat ["workspace-ready-error:", message]
+        }
+    }
+  }
+}
+
+ensureManagerWorkspaceSnapshot : Str
+ensureManagerWorkspaceSnapshot =
+  if fileExists managerWorkspaceReadyPath then
+    if fileExists managerWorkspaceManifestPath then
+      if fileExists (pathJoin [resolvedWorkspaceRoot, ".git"]) then
+        ""
+      else
+        createManagerWorkspaceSnapshot
+    else
+      createManagerWorkspaceSnapshot
+  else
+    createManagerWorkspaceSnapshot
+
+finishManagerWorkspaceReady : Str
+finishManagerWorkspaceReady = {
+  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+  if trace1 != "" then
+    trace1
+  else {
+    let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
+    if tracePolicy != "" then
+      tracePolicy
+    else {
+      let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+      if policyError != "" then
+        policyError
+      else
+        signalManagerReady
+    }
+  }
+}
+
 ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
@@ -122,24 +235,11 @@ ensureManagerReady =
               if traceWorkspace != "" then
                 traceWorkspace
               else
-              match mkdirAll workspaceRoot {
-                Ok workspaceCreated ->
-                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
-                  if trace1 != "" then
-                    trace1
-                  else
-                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
-                  if tracePolicy != "" then
-                    tracePolicy
-                  else
-                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
-                  if policyError != "" then
-                    policyError
-                  else
-                    signalManagerReady,
-                Err message ->
-                  textConcat ["workspace-root-error:", message]
-              },
+              let workspaceError = ensureManagerWorkspaceSnapshot in
+              if workspaceError != "" then
+                workspaceError
+              else
+                finishManagerWorkspaceReady,
         Err message ->
           textConcat ["state-root-error:", message]
       }
@@ -178,24 +278,11 @@ ensureManagerReady =
               if traceWorkspace != "" then
                 traceWorkspace
               else
-              match mkdirAll workspaceRoot {
-                Ok workspaceCreated ->
-                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
-                  if trace1 != "" then
-                    trace1
-                  else
-                  let tracePolicy = appendManagerTrace "bootstrap:policy-check" in
-                  if tracePolicy != "" then
-                    tracePolicy
-                  else
-                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
-                  if policyError != "" then
-                    policyError
-                  else
-                    signalManagerReady,
-                Err message ->
-                  textConcat ["workspace-root-error:", message]
-              },
+              let workspaceError = ensureManagerWorkspaceSnapshot in
+              if workspaceError != "" then
+                workspaceError
+              else
+                finishManagerWorkspaceReady,
       Err message ->
         textConcat ["state-root-error:", message]
     }

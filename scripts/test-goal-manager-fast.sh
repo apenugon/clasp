@@ -19,7 +19,7 @@ export CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_A
 goal_manager_live_pid=""
 goal_manager_monolithic_source="$project_root/examples/swarm-native/GoalManager.clasp"
 goal_manager_wrapper_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
-goal_manager_source="$goal_manager_wrapper_source"
+goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$goal_manager_wrapper_source}"
 goal_manager_live_binary="$project_root/.clasp-loops/.cache/goal-manager-live/swarm-goal-manager"
 goal_manager_actual_binary="$project_root/.clasp-loops/.cache/goal-manager-planner-memory/swarm-goal-manager"
 
@@ -155,7 +155,7 @@ goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
 goal_manager_binary_fresh=1
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
-grep -F 'import GoalManagerServiceMain' "$goal_manager_source" >/dev/null
+grep -F 'import GoalManagerServiceMain' "$goal_manager_wrapper_source" >/dev/null
 grep -F 'runManagedServiceBootstrap' "$goal_manager_monolithic_source" >/dev/null
 mkdir -p "$test_root_abs/bin"
 
@@ -223,9 +223,9 @@ ensure_probe_binary_two="$(
 )"
 [[ "$ensure_probe_binary_one" == "$ensure_probe_binary_two" ]]
 [[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "1" ]]
-grep -F "compile-source=$goal_manager_wrapper_source" "$fake_ensure_log" >/dev/null
+grep -F "compile-source=$goal_manager_source" "$fake_ensure_log" >/dev/null
 cmp -s "$ensure_probe_binary_one" "$ensure_probe_alias"
-"$ensure_probe_alias" | grep -F "compiled-source=$goal_manager_wrapper_source" >/dev/null
+"$ensure_probe_alias" | grep -F "compiled-source=$goal_manager_source" >/dev/null
 
 ensure_probe_binary_build_mode="$(
   CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
@@ -247,9 +247,14 @@ ensure_probe_monolithic_binary="$(
     CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
     "$project_root/scripts/ensure-goal-manager-binary.sh"
 )"
-[[ "$ensure_probe_monolithic_binary" != "$ensure_probe_binary_one" ]]
-grep -F "compile-source=$goal_manager_monolithic_source" "$fake_ensure_log" >/dev/null
-[[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "3" ]]
+if [[ "$goal_manager_source" == "$goal_manager_monolithic_source" ]]; then
+  [[ "$ensure_probe_monolithic_binary" == "$ensure_probe_binary_one" ]]
+  [[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "2" ]]
+else
+  [[ "$ensure_probe_monolithic_binary" != "$ensure_probe_binary_one" ]]
+  grep -F "compile-source=$goal_manager_monolithic_source" "$fake_ensure_log" >/dev/null
+  [[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "3" ]]
+fi
 
 if [[ "${CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_ONLY:-0}" == "1" ]]; then
   printf 'goal-manager-fast-cache-probe-ok\n'
@@ -1018,7 +1023,14 @@ run_goal_manager "$snapshot_exclude_state" "$snapshot_exclude_workspace" \
   >"$snapshot_exclude_output" 2>&1
 grep -F '"phase":"completed"' "$snapshot_exclude_output" >/dev/null
 grep -F '"verdict":"pass"' "$snapshot_exclude_output" >/dev/null
+test -f "$snapshot_exclude_workspace/.clasp-manager-workspace-ready"
+grep -F '"kind":"clasp-manager-workspace"' "$snapshot_exclude_workspace/.clasp-manager-workspace-manifest.json" >/dev/null
+test -f "$snapshot_exclude_workspace/examples/swarm-native/GoalManager.clasp"
+test -d "$snapshot_exclude_workspace/.git"
 test -f "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.workspace-ready"
+test -d "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.git"
+task_workspace_git_root="$(git -C "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap" rev-parse --show-toplevel)"
+[[ "$task_workspace_git_root" == "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap" ]]
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-workspaces/stale-cache/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-baselines/stale-baseline/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/runtime/target/debug/sentinel.txt"

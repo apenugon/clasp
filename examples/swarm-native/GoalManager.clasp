@@ -912,6 +912,43 @@ processResult value = match value {
 runCommand : Str -> [Str] -> Result ProcessResult
 runCommand cwd command = processResult (runCommandRaw cwd command)
 
+workspaceGitInitScript : Str
+workspaceGitInitScript = textJoin "\n" [
+  "set -euo pipefail",
+  "root=\"$1\"",
+  "if [ ! -d \"$root\" ]; then",
+  "  printf 'missing workspace root: %s\n' \"$root\" >&2",
+  "  exit 2",
+  "fi",
+  "if [ -e \"$root/.git\" ]; then",
+  "  exit 0",
+  "fi",
+  "if ! command -v git >/dev/null 2>&1; then",
+  "  mkdir -p \"$root/.git\"",
+  "  printf 'git unavailable; boundary only\n' >\"$root/.git/CLASP_BOUNDARY\"",
+  "  exit 0",
+  "fi",
+  "git -C \"$root\" init -q",
+  "git -C \"$root\" config user.name 'Clasp Swarm'",
+  "git -C \"$root\" config user.email 'clasp-swarm@example.invalid'",
+  "git -C \"$root\" add -A",
+  "git -C \"$root\" commit -q -m 'workspace baseline' >/dev/null 2>&1 || true"
+]
+
+initializeWorkspaceGitRepo : Str -> Str
+initializeWorkspaceGitRepo root =
+  match runCommand "." ["bash", "-lc", workspaceGitInitScript, "init-workspace-git", root] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else if process.stderr != "" then
+        process.stderr
+      else
+        process.stdout
+  }
+
 plannerReportError : Str -> Result PlannerReport
 plannerReportError message = Err message
 
@@ -2168,6 +2205,10 @@ ensureTaskWorkspace taskId = {
                 if copiedBaseline.exitCode != 0 then
                   textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", copiedBaseline.stderr]
                 else {
+                  let gitError = initializeWorkspaceGitRepo (taskWorkspaceActualRoot taskId) in
+                  if gitError != "" then
+                    textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+                  else {
                   let linked =
                     match runCommand "." ["ln", "-s", taskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
                       Ok result -> result,
@@ -2181,6 +2222,7 @@ ensureTaskWorkspace taskId = {
                       Err message ->
                         textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
                     }
+                  }
                 }
               }
             }
@@ -3951,6 +3993,114 @@ signalManagerReady =
       Err message -> message
     }
 
+managerWorkspaceReadyPath : Str
+managerWorkspaceReadyPath = pathJoin [resolvedWorkspaceRoot, ".clasp-manager-workspace-ready"]
+
+managerWorkspaceManifestPath : Str
+managerWorkspaceManifestPath = pathJoin [resolvedWorkspaceRoot, ".clasp-manager-workspace-manifest.json"]
+
+managerWorkspaceSnapshotPolicyId : Str
+managerWorkspaceSnapshotPolicyId =
+  textConcat ["manager-workspace-snapshot-v1:", textFingerprint64Hex workspaceCloneExcludeFlags]
+
+managerWorkspaceSnapshotScript : Str
+managerWorkspaceSnapshotScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "dst=\"$2\"",
+  "if [ -z \"$dst\" ] || [ \"$dst\" = \"/\" ]; then",
+  "  printf 'refusing unsafe workspace root: %s\n' \"$dst\" >&2",
+  "  exit 2",
+  "fi",
+  "if [ \"$src\" = \"$dst\" ]; then",
+  "  printf 'workspace root must differ from project root: %s\n' \"$dst\" >&2",
+  "  exit 2",
+  "fi",
+  "rm -rf \"$dst\"",
+  "mkdir -p \"$dst\"",
+  textConcat ["tar -cf - ", workspaceCloneExcludeFlags, "-C \"$src\" . | tar -xf - -C \"$dst\""]
+]
+
+managerWorkspaceManifestText : Int -> Str
+managerWorkspaceManifestText createdAtMs =
+  textConcat [
+    "{\"kind\":\"clasp-manager-workspace\",\"manifestVersion\":1",
+    ",\"projectRoot\":",
+    encode managerProjectRoot,
+    ",\"workspaceRoot\":",
+    encode workspaceRoot,
+    ",\"actualWorkspaceRoot\":",
+    encode resolvedWorkspaceRoot,
+    ",\"createdAtMs\":",
+    encode createdAtMs,
+    ",\"snapshotPolicyId\":",
+    encode managerWorkspaceSnapshotPolicyId,
+    "}"
+  ]
+
+createManagerWorkspaceSnapshot : Str
+createManagerWorkspaceSnapshot = {
+  let copied =
+    match runCommand "." [
+      "bash",
+      "-lc",
+      managerWorkspaceSnapshotScript,
+      "materialize-manager-workspace",
+      managerProjectRoot,
+      resolvedWorkspaceRoot
+    ] {
+      Ok result -> result,
+      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+    } in
+  if copied.exitCode != 0 then
+    textConcat ["workspace-root-error:", copied.stderr]
+  else {
+    let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
+      Ok written -> "",
+      Err message -> message
+    } in
+    if manifestError != "" then
+      textConcat ["workspace-manifest-error:", manifestError]
+    else {
+      let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+      if gitError != "" then
+        textConcat ["workspace-git-init-error:", gitError]
+      else
+        match writeFile managerWorkspaceReadyPath "ready" {
+          Ok written -> "",
+          Err message -> textConcat ["workspace-ready-error:", message]
+        }
+    }
+  }
+}
+
+ensureManagerWorkspaceSnapshot : Str
+ensureManagerWorkspaceSnapshot =
+  if fileExists managerWorkspaceReadyPath then
+    if fileExists managerWorkspaceManifestPath then
+      if fileExists (pathJoin [resolvedWorkspaceRoot, ".git"]) then
+        ""
+      else
+        createManagerWorkspaceSnapshot
+    else
+      createManagerWorkspaceSnapshot
+  else
+    createManagerWorkspaceSnapshot
+
+finishManagerWorkspaceReady : Str
+finishManagerWorkspaceReady = {
+  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
+  if trace1 != "" then
+    trace1
+  else {
+    let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
+    if policyError != "" then
+      policyError
+    else
+      signalManagerReady
+  }
+}
+
 ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
@@ -4005,20 +4155,11 @@ ensureManagerReady =
               if resourcePruneError != "" then
                 resourcePruneError
               else
-              match mkdirAll resolvedWorkspaceRoot {
-                Ok workspaceCreated ->
-                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
-                  if trace1 != "" then
-                    trace1
-                  else
-                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
-                  if policyError != "" then
-                    policyError
-                  else
-                    signalManagerReady,
-                Err message ->
-                  textConcat ["workspace-root-error:", message]
-              },
+              let workspaceError = ensureManagerWorkspaceSnapshot in
+              if workspaceError != "" then
+                workspaceError
+              else
+                finishManagerWorkspaceReady,
         Err message ->
           textConcat ["state-root-error:", message]
       }
@@ -4045,20 +4186,11 @@ ensureManagerReady =
               if resourcePruneError != "" then
                 resourcePruneError
               else
-              match mkdirAll resolvedWorkspaceRoot {
-                Ok workspaceCreated ->
-                  let trace1 = appendManagerTrace "bootstrap:workspace-root-ready" in
-                  if trace1 != "" then
-                    trace1
-                  else
-                  let policyError = ensurePolicyFile plannerPolicyPath defaultPlannerPolicyText in
-                  if policyError != "" then
-                    policyError
-                  else
-                    signalManagerReady,
-                Err message ->
-                  textConcat ["workspace-root-error:", message]
-              },
+              let workspaceError = ensureManagerWorkspaceSnapshot in
+              if workspaceError != "" then
+                workspaceError
+              else
+                finishManagerWorkspaceReady,
       Err message ->
         textConcat ["state-root-error:", message]
     }
@@ -4988,7 +5120,50 @@ completePlannerTaskIfNeeded wave =
       else
         match complete (plannerHandleForWave wave) {
           Err message ->
-            message,
+            if recoverablePlannerLeaseFailure message then {
+              let traceError =
+                appendManagerTrace
+                  (textConcat ["planner-wave-", encode wave, ":complete-recover-expired-planner-lease:", message]) in
+              if traceError != "" then
+                traceError
+              else
+                match lease (plannerHandleForWave wave) {
+                  Err leaseMessage ->
+                    textConcat [
+                      "planner completion lease recovery failed: ",
+                      leaseMessage,
+                      " after completion failure: ",
+                      message
+                    ],
+                  Ok leaseValue ->
+                    match complete (plannerHandleForWave wave) {
+                      Err completeMessage ->
+                        if recoverablePlannerLeaseFailure completeMessage then {
+                          let completionTraceError =
+                            appendManagerTrace
+                              (textConcat [
+                                "planner-wave-",
+                                encode wave,
+                                ":complete-skip-expired-planner-lease:",
+                                completeMessage
+                              ]) in
+                          if completionTraceError != "" then
+                            completionTraceError
+                          else
+                            ""
+                        } else
+                          textConcat [
+                            "planner completion failed after lease recovery: ",
+                            completeMessage,
+                            " original failure: ",
+                            message
+                          ],
+                      Ok completedValue ->
+                        ""
+                    }
+                }
+            } else
+              message,
           Ok completedValue ->
             ""
         }
@@ -5996,7 +6171,7 @@ runManagedServiceBootstrap =
         recoverManagedService service
       else
         waitForManagedServiceCompletion,
-    Err message -> textConcat ["error:", message]
+    Err message -> continueManagedResume (textConcat ["error:", message])
   }
 
 runManagedServiceResume : Str

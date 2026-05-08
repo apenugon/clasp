@@ -111,6 +111,7 @@ taskWorkspaceManifestValidationScript = textJoin "\n" [
   "link_target=\"$(readlink \"$link\")\" || fail \"task workspace symlink unreadable: $link\"",
   "[ \"$link_target\" = \"$expected_target\" ] || fail \"task workspace symlink target mismatch: expected $expected_target got $link_target\"",
   "require_dir \"$actual_root\" \"task workspace directory\"",
+  "require_dir \"$actual_root/.git\" \"task workspace git boundary\"",
   "require_dir \"$baseline_root\" \"task baseline workspace directory\"",
   "require_file \"$workspace_manifest\" \"task workspace manifest\"",
   "require_file \"$baseline_manifest\" \"task baseline workspace manifest\"",
@@ -243,6 +244,10 @@ createTaskWorkspaceSnapshot taskId = {
             if manifestError != "" then
               manifestError
             else {
+              let gitError = initializeWorkspaceGitRepo (taskWorkspaceActualRoot taskId) in
+              if gitError != "" then
+                textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+              else {
               let linkParentCreated =
                 match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
                   Ok result -> result,
@@ -264,6 +269,7 @@ createTaskWorkspaceSnapshot taskId = {
                     Err message ->
                       textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
                   }
+              }
             }
           }
         }

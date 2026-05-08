@@ -245,3 +245,40 @@ processResult value = match value {
 
 runCommand : Str -> [Str] -> Result ProcessResult
 runCommand cwd command = processResult (runCommandRaw cwd command)
+
+workspaceGitInitScript : Str
+workspaceGitInitScript = textJoin "\n" [
+  "set -euo pipefail",
+  "root=\"$1\"",
+  "if [ ! -d \"$root\" ]; then",
+  "  printf 'missing workspace root: %s\n' \"$root\" >&2",
+  "  exit 2",
+  "fi",
+  "if [ -e \"$root/.git\" ]; then",
+  "  exit 0",
+  "fi",
+  "if ! command -v git >/dev/null 2>&1; then",
+  "  mkdir -p \"$root/.git\"",
+  "  printf 'git unavailable; boundary only\n' >\"$root/.git/CLASP_BOUNDARY\"",
+  "  exit 0",
+  "fi",
+  "git -C \"$root\" init -q",
+  "git -C \"$root\" config user.name 'Clasp Swarm'",
+  "git -C \"$root\" config user.email 'clasp-swarm@example.invalid'",
+  "git -C \"$root\" add -A",
+  "git -C \"$root\" commit -q -m 'workspace baseline' >/dev/null 2>&1 || true"
+]
+
+initializeWorkspaceGitRepo : Str -> Str
+initializeWorkspaceGitRepo root =
+  match runCommand "." ["bash", "-lc", workspaceGitInitScript, "init-workspace-git", root] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else if process.stderr != "" then
+        process.stderr
+      else
+        process.stdout
+  }

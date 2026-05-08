@@ -1,0 +1,423 @@
+module AttemptLoop
+
+import Swarm
+
+record AttemptSpec = {
+  root : SwarmRoot,
+  objectiveId : Str,
+  objectiveDetail : Str,
+  objectiveMaxTasks : Int,
+  objectiveMaxRuns : Int,
+  stateRootPath : Str,
+  statusPath : Str,
+  feedbackPath : Str,
+  maxAttempts : Int,
+  actor : Str,
+  approvalName : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str]
+}
+
+record AttemptTaskIds = {
+  builderTaskId : Str,
+  verifierTaskId : Str
+}
+
+record PreviousVerifierFeedback = {
+  present : Bool,
+  path : Str,
+  raw : Str,
+  summary : Str
+}
+
+record AttemptStatus = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  objectiveId : Str,
+  lastBuilderTaskId : Str,
+  lastVerifierTaskId : Str,
+  final : Bool
+}
+
+record AttemptTerminalOutcome = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  final : Bool,
+  builderTaskId : Str,
+  verifierTaskId : Str,
+  feedbackPath : Str
+}
+
+record AttemptRetryDecision = {
+  attempt : Int,
+  maxAttempts : Int,
+  shouldRetry : Bool,
+  nextAttempt : Int,
+  terminal : Bool,
+  reason : Str,
+  feedbackSummary : Str,
+  feedbackPath : Str
+}
+
+record AttemptTaskIdSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record AttemptObjectiveSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+attemptEmptyTexts : [Str]
+attemptEmptyTexts = []
+
+attemptSpec : SwarmRoot -> Str -> Str -> Int -> Int -> Str -> Int -> Str -> Str -> Str -> [Str] -> [Str] -> AttemptSpec
+attemptSpec root objectiveId objectiveDetail objectiveMaxTasks objectiveMaxRuns stateRootPath maxAttempts actor approvalName mergegateName requiredApprovals requiredVerifiers =
+  AttemptSpec {
+    root = root,
+    objectiveId = objectiveId,
+    objectiveDetail = objectiveDetail,
+    objectiveMaxTasks = objectiveMaxTasks,
+    objectiveMaxRuns = objectiveMaxRuns,
+    stateRootPath = stateRootPath,
+    statusPath = pathJoin [stateRootPath, "status.json"],
+    feedbackPath = pathJoin [stateRootPath, "feedback.json"],
+    maxAttempts = maxAttempts,
+    actor = actor,
+    approvalName = approvalName,
+    mergegateName = mergegateName,
+    requiredApprovals = requiredApprovals,
+    requiredVerifiers = requiredVerifiers
+  }
+
+attemptBuilderTaskId : Int -> Str
+attemptBuilderTaskId attempt = textConcat ["builder-", encode attempt]
+
+attemptVerifierTaskId : Int -> Str
+attemptVerifierTaskId attempt = textConcat ["verifier-", encode attempt]
+
+attemptTaskIds : Int -> AttemptTaskIds
+attemptTaskIds attempt =
+  AttemptTaskIds {
+    builderTaskId = attemptBuilderTaskId attempt,
+    verifierTaskId = attemptVerifierTaskId attempt
+  }
+
+attemptBuilderHandle : AttemptSpec -> Int -> TaskHandle
+attemptBuilderHandle spec attempt =
+  taskHandle spec.root (attemptBuilderTaskId attempt) spec.actor
+
+attemptVerifierHandle : AttemptSpec -> Int -> TaskHandle
+attemptVerifierHandle spec attempt =
+  taskHandle spec.root (attemptVerifierTaskId attempt) spec.actor
+
+attemptStatus : Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Bool -> AttemptStatus
+attemptStatus attempt phase verdict completed objective builderTask verifierTask final =
+  AttemptStatus {
+    attempt = attempt,
+    phase = phase,
+    verdict = verdict,
+    completed = completed,
+    objectiveId = objective,
+    lastBuilderTaskId = builderTask,
+    lastVerifierTaskId = verifierTask,
+    final = final
+  }
+
+attemptStatusForPhase : AttemptSpec -> Int -> Str -> Str -> Bool -> Bool -> AttemptStatus
+attemptStatusForPhase spec attempt phase verdict completed final = {
+  let ids = attemptTaskIds attempt in
+  attemptStatus
+    attempt
+    phase
+    verdict
+    completed
+    spec.objectiveId
+    ids.builderTaskId
+    ids.verifierTaskId
+    final
+}
+
+attemptInitialStatus : AttemptSpec -> AttemptStatus
+attemptInitialStatus spec =
+  attemptStatus 1 "needs-builder" "pending" false spec.objectiveId "" "" false
+
+attemptWriteStatus : AttemptSpec -> AttemptStatus -> Str
+attemptWriteStatus spec state = match writeFile spec.statusPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+attemptReadStatus : AttemptSpec -> AttemptStatus
+attemptReadStatus spec = match readFile spec.statusPath {
+  Ok raw -> decode AttemptStatus raw,
+  Err message -> attemptInitialStatus spec
+}
+
+attemptEnsureRoot : AttemptSpec -> Str
+attemptEnsureRoot spec = match mkdirAll spec.stateRootPath {
+  Ok created -> "",
+  Err message -> textConcat ["state-root-error:", message]
+}
+
+attemptPreviousVerifierFeedback : AttemptSpec -> PreviousVerifierFeedback
+attemptPreviousVerifierFeedback spec = match readFile spec.feedbackPath {
+  Ok raw ->
+    PreviousVerifierFeedback {
+      present = true,
+      path = spec.feedbackPath,
+      raw = raw,
+      summary = raw
+    },
+  Err message ->
+    PreviousVerifierFeedback {
+      present = false,
+      path = spec.feedbackPath,
+      raw = "",
+      summary = ""
+    }
+}
+
+attemptFeedbackPromptSection : AttemptSpec -> Str -> Str
+attemptFeedbackPromptSection spec missingText = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  if feedback.present then
+    textJoin "\n" [
+      "Verifier feedback from the previous attempt:",
+      feedback.raw
+    ]
+  else
+    missingText
+}
+
+attemptNextNumber : Int -> Int
+attemptNextNumber value =
+  if value == 0 then
+    1
+  else if value == 1 then
+    2
+  else if value == 2 then
+    3
+  else if value == 3 then
+    4
+  else if value == 4 then
+    5
+  else if value == 5 then
+    6
+  else if value == 6 then
+    7
+  else if value == 7 then
+    8
+  else if value == 8 then
+    9
+  else if value == 9 then
+    10
+  else if value == 10 then
+    11
+  else if value == 11 then
+    12
+  else if value == 12 then
+    13
+  else if value == 13 then
+    14
+  else if value == 14 then
+    15
+  else if value == 15 then
+    16
+  else if value == 16 then
+    17
+  else if value == 17 then
+    18
+  else if value == 18 then
+    19
+  else if value == 19 then
+    20
+  else
+    value
+
+attemptRetryDecision : AttemptSpec -> Int -> Str -> AttemptRetryDecision
+attemptRetryDecision spec attempt reason = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  let shouldRetry = attempt != spec.maxAttempts in
+  AttemptRetryDecision {
+    attempt = attempt,
+    maxAttempts = spec.maxAttempts,
+    shouldRetry = shouldRetry,
+    nextAttempt = if shouldRetry then attemptNextNumber attempt else attempt,
+    terminal = if shouldRetry then false else true,
+    reason = reason,
+    feedbackSummary = feedback.summary,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptRetryDecisionFromStatus : AttemptSpec -> AttemptStatus -> AttemptRetryDecision
+attemptRetryDecisionFromStatus spec state = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  let shouldRetry =
+    if state.final then
+      false
+    else if state.completed then
+      false
+    else
+      state.attempt != spec.maxAttempts in
+  AttemptRetryDecision {
+    attempt = state.attempt,
+    maxAttempts = spec.maxAttempts,
+    shouldRetry = shouldRetry,
+    nextAttempt = if shouldRetry then attemptNextNumber state.attempt else state.attempt,
+    terminal = if shouldRetry then false else true,
+    reason = state.phase,
+    feedbackSummary = feedback.summary,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptRetryStatus : AttemptSpec -> AttemptRetryDecision -> AttemptStatus
+attemptRetryStatus spec decision = {
+  let ids = attemptTaskIds decision.attempt in
+  attemptStatus
+    decision.nextAttempt
+    "needs-builder"
+    "retry"
+    false
+    spec.objectiveId
+    ids.builderTaskId
+    ids.verifierTaskId
+    false
+}
+
+attemptTerminalOutcome : AttemptSpec -> Int -> Str -> Bool -> AttemptTerminalOutcome
+attemptTerminalOutcome spec attempt verdict completed = {
+  let ids = attemptTaskIds attempt in
+  AttemptTerminalOutcome {
+    attempt = attempt,
+    phase = if completed then "completed" else "failed",
+    verdict = verdict,
+    completed = completed,
+    final = true,
+    builderTaskId = ids.builderTaskId,
+    verifierTaskId = ids.verifierTaskId,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptOutcomeFromStatus : AttemptSpec -> AttemptStatus -> AttemptTerminalOutcome
+attemptOutcomeFromStatus spec state =
+  AttemptTerminalOutcome {
+    attempt = state.attempt,
+    phase = state.phase,
+    verdict = state.verdict,
+    completed = state.completed,
+    final = state.final,
+    builderTaskId =
+      if state.lastBuilderTaskId == "" then
+        attemptBuilderTaskId state.attempt
+      else
+        state.lastBuilderTaskId,
+    verifierTaskId =
+      if state.lastVerifierTaskId == "" then
+        attemptVerifierTaskId state.attempt
+      else
+        state.lastVerifierTaskId,
+    feedbackPath = spec.feedbackPath
+  }
+
+attemptStatusFromTerminalOutcome : AttemptSpec -> AttemptTerminalOutcome -> AttemptStatus
+attemptStatusFromTerminalOutcome spec outcome =
+  attemptStatus
+    outcome.attempt
+    outcome.phase
+    outcome.verdict
+    outcome.completed
+    spec.objectiveId
+    outcome.builderTaskId
+    outcome.verifierTaskId
+    outcome.final
+
+attemptPersistTerminalOutcome : AttemptSpec -> AttemptTerminalOutcome -> Str
+attemptPersistTerminalOutcome spec outcome =
+  attemptWriteStatus spec (attemptStatusFromTerminalOutcome spec outcome)
+
+attemptObjectiveSearch : AttemptObjectiveSearch -> SwarmObjective -> AttemptObjectiveSearch
+attemptObjectiveSearch search objective =
+  if search.found then
+    search
+  else
+    AttemptObjectiveSearch {
+      wanted = search.wanted,
+      found = objective.objectiveId == search.wanted
+    }
+
+attemptObjectiveListHasId : Str -> [SwarmObjective] -> Bool
+attemptObjectiveListHasId wanted objectiveValues =
+  (fold attemptObjectiveSearch (AttemptObjectiveSearch { wanted = wanted, found = false }) objectiveValues).found
+
+attemptTaskIdSearch : AttemptTaskIdSearch -> SwarmTask -> AttemptTaskIdSearch
+attemptTaskIdSearch search task =
+  if search.found then
+    search
+  else
+    AttemptTaskIdSearch {
+      wanted = search.wanted,
+      found = task.taskId == search.wanted
+    }
+
+attemptTaskListHasId : Str -> [SwarmTask] -> Bool
+attemptTaskListHasId wanted taskValues =
+  (fold attemptTaskIdSearch (AttemptTaskIdSearch { wanted = wanted, found = false }) taskValues).found
+
+attemptEnsureObjective : AttemptSpec -> Str
+attemptEnsureObjective spec = match objectives spec.root {
+  Ok objectiveValues ->
+    if attemptObjectiveListHasId spec.objectiveId objectiveValues then
+      ""
+    else
+      match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+attemptEnsureTask : AttemptSpec -> Str -> Str -> [Str] -> Int -> Int -> Str
+attemptEnsureTask spec taskId detail dependencies maxRuns leaseTimeoutMs = match tasks spec.root {
+  Ok taskValues ->
+    if attemptTaskListHasId taskId taskValues then
+      ""
+    else
+      match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+attemptEnsureAttemptTasks : AttemptSpec -> Int -> Str -> Str -> Str
+attemptEnsureAttemptTasks spec attempt builderDetail verifierDetail = {
+  let objectiveError = attemptEnsureObjective spec in
+  if objectiveError != "" then
+    objectiveError
+  else {
+    let ids = attemptTaskIds attempt in
+    let builderError = attemptEnsureTask spec ids.builderTaskId builderDetail attemptEmptyTexts 1 60000 in
+    if builderError != "" then
+      builderError
+    else
+      attemptEnsureTask spec ids.verifierTaskId verifierDetail [ids.builderTaskId] 1 60000
+  }
+}

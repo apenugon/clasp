@@ -1759,10 +1759,15 @@ printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"taskCount":4' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"approvalCount":1' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"mergeDecisionDetail":"Mergegate `autonomous-confidence` decided pass."' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"mergeGateSatisfied":true' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"previousVerifierFeedback":{"present":true' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"retryDecision":{"attempt":2,"maxAttempts":2,"shouldRetry":false,"nextAttempt":2,"terminal":true' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"terminalOutcome":{"attempt":2,"phase":"completed","verdict":"pass","completed":true,"final":true,"builderTaskId":"builder-2","verifierTaskId":"verifier-2"' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"builder-1"' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_output" | grep -F '"verifier-2"' >/dev/null
 grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_workspace_abs" >/dev/null
 grep -F '"verdict":"pass"' "$swarm_feedback_loop_feedback_path_abs" >/dev/null
+grep -F '"summary":"workspace still needs feedback"' "$swarm_feedback_loop_state_root_abs/verifier-1.json" >/dev/null
+grep -F 'Close the ordinary_program_execution category by using the verifier feedback' "$swarm_feedback_loop_state_root_abs/verifier-1.json" >/dev/null
 CLASP_LOOP_COMMAND=status "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$swarm_feedback_loop_state_root_abs" >"$swarm_feedback_loop_status_output_abs"
 grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs" >/dev/null
 grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs" >/dev/null
@@ -1770,6 +1775,9 @@ grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs" >/dev/null
 grep -F '"readyTaskIds":[]' "$swarm_feedback_loop_status_output_abs" >/dev/null
 grep -F '"approvalCount":1' "$swarm_feedback_loop_status_output_abs" >/dev/null
 grep -F '"mergeGateSatisfied":true' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"previousVerifierFeedback":{"present":true' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"retryDecision":{"attempt":2,"maxAttempts":2,"shouldRetry":false,"nextAttempt":2,"terminal":true' "$swarm_feedback_loop_status_output_abs" >/dev/null
+grep -F '"terminalOutcome":{"attempt":2,"phase":"completed","verdict":"pass","completed":true,"final":true,"builderTaskId":"builder-2","verifierTaskId":"verifier-2"' "$swarm_feedback_loop_status_output_abs" >/dev/null
 swarm_feedback_loop_objective_status_output="$("$claspc_bin" --json swarm objective status "$swarm_feedback_loop_state_root_abs" autonomous-confidence)"
 printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
@@ -1811,6 +1819,7 @@ printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"verdict":"pass"' 
 printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"approvalCount":1' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"mergeGateSatisfied":true' >/dev/null
+printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"retryDecision":{"attempt":2,"maxAttempts":2,"shouldRetry":false,"nextAttempt":2,"terminal":true' >/dev/null
 grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_native_workspace_abs" >/dev/null
 CLASP_LOOP_COMMAND=status "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs" >"$swarm_feedback_loop_status_output_abs.native"
 grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
@@ -1818,6 +1827,7 @@ grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs.native" >/
 grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 grep -F '"approvalCount":1' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 grep -F '"mergeGateSatisfied":true' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+grep -F '"terminalOutcome":{"attempt":2,"phase":"completed","verdict":"pass","completed":true,"final":true,"builderTaskId":"builder-2","verifierTaskId":"verifier-2"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
 
 goal_manager_state_root_abs="$test_root_abs/swarm-goal-manager-state"
 goal_manager_workspace_root_abs="$test_root_abs/swarm-goal-manager-workspace"

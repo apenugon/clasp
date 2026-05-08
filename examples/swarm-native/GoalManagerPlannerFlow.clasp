@@ -96,7 +96,55 @@ completePlannerTaskIfNeeded wave =
       else
         match complete (plannerHandleForWave wave) {
           Err message ->
-            message,
+            let completionLeaseRecoverable =
+              if textIncludes message "task run budget exhausted" then
+                true
+              else
+                textIncludes message "lease held by `manager`" in
+            if completionLeaseRecoverable then {
+              let traceError =
+                appendManagerTrace
+                  (textConcat ["planner-wave-", encode wave, ":complete-recover-expired-planner-lease:", message]) in
+              if traceError != "" then
+                traceError
+              else
+                match lease (plannerHandleForWave wave) {
+                  Err leaseMessage ->
+                    textConcat [
+                      "planner completion lease recovery failed: ",
+                      leaseMessage,
+                      " after completion failure: ",
+                      message
+                    ],
+                  Ok leaseValue ->
+                    match complete (plannerHandleForWave wave) {
+                      Err completeMessage ->
+                        if textIncludes completeMessage "lease held by `manager`" then {
+                          let completionTraceError =
+                            appendManagerTrace
+                              (textConcat [
+                                "planner-wave-",
+                                encode wave,
+                                ":complete-skip-expired-planner-lease:",
+                                completeMessage
+                              ]) in
+                          if completionTraceError != "" then
+                            completionTraceError
+                          else
+                            ""
+                        } else
+                          textConcat [
+                            "planner completion failed after lease recovery: ",
+                            completeMessage,
+                            " original failure: ",
+                            message
+                          ],
+                      Ok completedValue ->
+                        ""
+                    }
+                }
+            } else
+              message,
           Ok completedValue ->
             ""
         }

@@ -2928,6 +2928,57 @@ contextTests =
             assertBool "expected merge gate node" ("\"mergegate:trunk\"" `T.isInfixOf` jsonText)
             assertBool "expected verifier tool edge" ("\"verifier-tool\"" `T.isInfixOf` jsonText)
             assertBool "expected merge gate verifier edge" ("\"merge-gate-verifier\"" `T.isInfixOf` jsonText)
+    , testCase "context impact index maps route, tool, and workflow neighborhoods" $
+        case renderContextSourceJson "impact-index" impactIndexSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            graphValue <- case eitherDecodeStrictText (LT.toStrict rendered) of
+              Left decodeErr ->
+                assertFailure ("expected context graph json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            impactIndex <- case lookupObjectKey "impactIndex" graphValue of
+              Just value ->
+                pure value
+              Nothing ->
+                assertFailure "expected impactIndex object"
+            routeEntry <- requireImpactEntry "routes" "route:summarizeLeadRoute" impactIndex
+            assertTextArrayContains "expected route to include request schema" "affectedSurfaces" "schema:LeadRequest" routeEntry
+            assertTextArrayContains "expected route to include response schema" "affectedSurfaces" "schema:LeadSummary" routeEntry
+            assertTextArrayContains "expected route to include handler" "affectedSurfaces" "decl:summarizeLead" routeEntry
+            toolEntry <- requireImpactEntry "tools" "tool:searchRepo" impactIndex
+            assertTextArrayContains "expected tool to include tool server" "affectedSurfaces" "toolserver:RepoTools" toolEntry
+            assertTextArrayContains "expected tool to include request schema" "affectedSurfaces" "schema:SearchRequest" toolEntry
+            assertTextArrayContains "expected tool verifier relevance" "relevantVerifiers" "verifier:repoChecks" toolEntry
+            assertTextArrayContains "expected tool merge gate relevance" "relevantMergeGates" "mergegate:trunk" toolEntry
+            workflowEntry <- requireImpactEntry "workflows" "workflow:CounterFlow" impactIndex
+            assertTextArrayContains "expected workflow to include state schema" "affectedSurfaces" "schema:Counter" workflowEntry
+    , testCase "context impact index maps verifier and merge gate neighborhoods" $
+        case renderContextSourceJson "impact-index-control-plane" impactIndexSource of
+          Left err ->
+            assertFailure ("expected context graph generation to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right rendered -> do
+            graphValue <- case eitherDecodeStrictText (LT.toStrict rendered) of
+              Left decodeErr ->
+                assertFailure ("expected context graph json to decode:\n" <> decodeErr)
+              Right value ->
+                pure value
+            impactIndex <- case lookupObjectKey "impactIndex" graphValue of
+              Just value ->
+                pure value
+              Nothing ->
+                assertFailure "expected impactIndex object"
+            verifierEntry <- requireImpactEntry "verifiers" "verifier:repoChecks" impactIndex
+            assertTextArrayContains "expected verifier to include tool" "affectedSurfaces" "tool:searchRepo" verifierEntry
+            assertTextArrayContains "expected verifier to include request schema" "affectedSurfaces" "schema:SearchRequest" verifierEntry
+            assertTextArrayContains "expected verifier self relevance" "relevantVerifiers" "verifier:repoChecks" verifierEntry
+            assertTextArrayContains "expected verifier merge gate relevance" "relevantMergeGates" "mergegate:trunk" verifierEntry
+            mergeGateEntry <- requireImpactEntry "mergeGates" "mergegate:trunk" impactIndex
+            assertTextArrayContains "expected merge gate to include verifier" "affectedSurfaces" "verifier:repoChecks" mergeGateEntry
+            assertTextArrayContains "expected merge gate to include tool" "affectedSurfaces" "tool:searchRepo" mergeGateEntry
+            assertTextArrayContains "expected merge gate verifier relevance" "relevantVerifiers" "verifier:repoChecks" mergeGateEntry
+            assertTextArrayContains "expected merge gate self relevance" "relevantMergeGates" "mergegate:trunk" mergeGateEntry
     , testCase "claspc air rejects ordinary programs unless bootstrap recovery mode is requested" $
         withProjectFiles "air-cli-default" [("Main.clasp", interactivePageSource)] $ \root -> do
           let inputPath = root </> "Main.clasp"
@@ -9002,12 +9053,36 @@ lookupObjectTextArray key value =
         _ ->
           Nothing
 
+lookupObjectArray :: Text -> Value -> [Value]
+lookupObjectArray key value =
+  case lookupObjectKey key value of
+    Just (Array values) ->
+      toList values
+    _ ->
+      []
+
 objectHasTextField :: [(Text, Text)] -> Value -> Bool
 objectHasTextField expectedFields value =
   all fieldMatches expectedFields
   where
     fieldMatches (fieldName, expectedValue) =
       lookupObjectKey fieldName value == Just (String expectedValue)
+
+requireImpactEntry :: Text -> Text -> Value -> IO Value
+requireImpactEntry collectionName sourceId impactIndex =
+  case find (objectHasTextField [("sourceId", sourceId)]) (lookupObjectArray collectionName impactIndex) of
+    Just entry ->
+      pure entry
+    Nothing ->
+      assertFailure ("expected impactIndex." <> T.unpack collectionName <> " entry for " <> T.unpack sourceId)
+
+assertTextArrayContains :: String -> Text -> Text -> Value -> Assertion
+assertTextArrayContains label fieldName expectedValue value =
+  case lookupObjectTextArray fieldName value of
+    Just values ->
+      assertBool label (expectedValue `elem` values)
+    Nothing ->
+      assertFailure (label <> ": missing text array " <> T.unpack fieldName)
 
 extractNodeIds :: Value -> [Text]
 extractNodeIds value =
@@ -10384,6 +10459,36 @@ verifierSource =
     , ""
     , "verifier repoChecks = searchRepo"
     , "mergegate trunk = repoChecks"
+    , ""
+    , "main = \"ok\""
+    ]
+
+impactIndexSource :: Text
+impactIndexSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "record LeadRequest = { company : Str }"
+    , "record LeadSummary = { summary : Str, followUpRequired : Bool }"
+    , "record Counter = { count : Int }"
+    , "record SearchRequest = { query : Str }"
+    , "record SearchResponse = { summary : Str }"
+    , ""
+    , "summarizeLead : LeadRequest -> LeadSummary"
+    , "summarizeLead lead = LeadSummary { summary = lead.company, followUpRequired = true }"
+    , ""
+    , "workflow CounterFlow = { state : Counter }"
+    , ""
+    , "policy SupportDisclosure = public"
+    , ""
+    , "toolserver RepoTools = \"mcp\" \"stdio://repo-tools\" with SupportDisclosure"
+    , ""
+    , "tool searchRepo = RepoTools \"search_repo\" SearchRequest -> SearchResponse"
+    , ""
+    , "verifier repoChecks = searchRepo"
+    , "mergegate trunk = repoChecks"
+    , ""
+    , "route summarizeLeadRoute = POST \"/lead/summary\" LeadRequest -> LeadSummary summarizeLead"
     , ""
     , "main = \"ok\""
     ]
