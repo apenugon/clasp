@@ -462,8 +462,24 @@ executeReadyTasks report wave benchmarkRuns = {
                       Ok finalRawTaskValues -> {
                         let finalTasks = filter taskInObjective finalRawTaskValues;
                         let finalStatus = finalPlannedTaskStatus report finalTasks readyTasks plannedIds in
-                        if benchmarkEnabled then
-                          runBenchmarkCheckpoint report wave benchmarkRuns
+                        let terminalPlannedTaskCount =
+                          addManagerCounters (length finalStatus.completedIds) (length finalStatus.failedIds) in
+                        if length finalStatus.pendingLaunchIds > 0 then
+                          match awaitWatchedProcess
+                            (taskProcessHeartbeatPath (firstTextOrEmpty finalStatus.pendingLaunchIds))
+                            childLoopWatchPollMs {
+                            Err message ->
+                              finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
+                            Ok process ->
+                              executeReadyTasks report wave benchmarkRuns
+                          }
+                        else if length finalStatus.readyPlannedIds > 0 then
+                          executeReadyTasks report wave benchmarkRuns
+                        else if benchmarkEnabled then
+                          if terminalPlannedTaskCount == length report.tasks then
+                            runBenchmarkCheckpoint report wave benchmarkRuns
+                          else
+                            finalizeWithReport failureState (plannedTaskStalledReport report)
                         else if length finalStatus.completedIds == length report.tasks then
                           finalizeWithReport
                             (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
@@ -471,19 +487,7 @@ executeReadyTasks report wave benchmarkRuns = {
                         else if length finalStatus.failedIds > 0 then
                           finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                         else
-                          if length finalStatus.pendingLaunchIds > 0 then
-                            match awaitWatchedProcess
-                              (taskProcessHeartbeatPath (firstTextOrEmpty finalStatus.pendingLaunchIds))
-                              childLoopWatchPollMs {
-                              Err message ->
-                                finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
-                              Ok process ->
-                                executeReadyTasks report wave benchmarkRuns
-                            }
-                          else if length finalStatus.readyPlannedIds > 0 then
-                            executeReadyTasks report wave benchmarkRuns
-                          else
-                            finalizeWithReport failureState (plannedTaskStalledReport report)
+                          finalizeWithReport failureState (plannedTaskStalledReport report)
                       }
                     }
                 }

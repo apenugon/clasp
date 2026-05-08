@@ -72,6 +72,18 @@ resolveProjectPath value =
   else
     pathJoin [managerProjectRoot, value]
 
+resolveWorkspacePath : Str -> Str
+resolveWorkspacePath value =
+  if value == "" then
+    ""
+  else if isAbsolutePath value then
+    value
+  else
+    pathJoin [currentWorkingDir, value]
+
+resolvedWorkspaceRoot : Str
+resolvedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+
 resolvedPlannerSchemaPath : Str
 resolvedPlannerSchemaPath = resolveProjectPath plannerSchemaPath
 
@@ -80,3 +92,22 @@ resolvedChildLoopProgramPath = resolveProjectPath childLoopProgramPath
 
 resolvedManagerProgramPath : Str
 resolvedManagerProgramPath = resolveProjectPath managerProgramPath
+
+defaultProjectClaspcPath : Str
+defaultProjectClaspcPath = pathJoin [managerProjectRoot, "runtime/target/debug/claspc"]
+
+resolvedManagerClaspcBin : Str
+resolvedManagerClaspcBin =
+  if managerClaspcBin == "" then
+    defaultProjectClaspcPath
+  else if isAbsolutePath managerClaspcBin then
+    managerClaspcBin
+  else if managerClaspcBin == "claspc" then
+    if fileExists defaultProjectClaspcPath then
+      defaultProjectClaspcPath
+    else
+      managerClaspcBin
+  else if length (textSplit managerClaspcBin "/") > 1 then
+    resolveProjectPath managerClaspcBin
+  else
+    managerClaspcBin

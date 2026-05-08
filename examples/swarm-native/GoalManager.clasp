@@ -4687,6 +4687,42 @@ recoverableFinalPlannerTransportState state =
   else
     false
 
+incompletePlannedTaskIds : PlannerReport -> [SwarmTask] -> [Str]
+incompletePlannedTaskIds report taskValues = {
+  let mut incompleteIds = emptyTexts;
+  for spec in report.tasks {
+    let taskStatus = taskStatusFor taskValues spec.taskId in
+    if taskStatusIsTerminal taskStatus then
+      incompleteIds
+    else {
+      incompleteIds = append incompleteIds [spec.taskId];
+      incompleteIds
+    }
+  };
+  incompleteIds
+}
+
+resumeTasksAfterEarlyBenchmarkPass : PlannerReport -> Int -> Int -> [Str] -> Str
+resumeTasksAfterEarlyBenchmarkPass report wave benchmarkRuns incompleteIds = {
+  let resumeState =
+    managerStateFor
+      "task-running"
+      "pending"
+      false
+      (firstTextOrEmpty incompleteIds)
+      (plannerTaskIds report)
+      wave
+      benchmarkRuns
+      false in
+  let stateError = writeManagerState resumeState in
+  if stateError != "" then
+    finalizeWithReport
+      (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+      (syntheticFailureReport "benchmark incomplete task state write failed" stateError)
+  else
+    encode (statusView resumeState)
+}
+
 finalizeBenchmarkCheckpoint : PlannerReport -> Int -> Int -> BenchmarkCheckpoint -> Str
 finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint = {
   let failureState = managerFailureState (plannerTaskIds report) wave benchmarkRuns in
@@ -4715,9 +4751,20 @@ finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint = {
           if length readyPlannedIds > 0 then
             executeReadyTasks report wave nextBenchmarkRuns
           else if checkpoint.meetsTarget then
-            finalizeWithReport
-              (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
-              (managerPassReport report)
+            match tasks swarmStateRoot {
+              Err message ->
+                finalizeWithReport failureState (syntheticFailureReport "benchmark task lookup failed" message),
+              Ok rawTaskValues -> {
+                let objectiveTasks = filter taskInObjective rawTaskValues in
+                let incompleteIds = incompletePlannedTaskIds report objectiveTasks in
+                if length incompleteIds > 0 then {
+                  resumeTasksAfterEarlyBenchmarkPass report wave nextBenchmarkRuns incompleteIds
+                } else
+                  finalizeWithReport
+                    (managerStateFor "completed" "pass" true "" (plannerTaskIds report) wave nextBenchmarkRuns true)
+                    (managerPassReport report)
+              }
+            }
           else if wave < maxWaves then {
             let nextWave = incrementManagerCounter wave in
             let nextState = managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave nextBenchmarkRuns false in
@@ -5725,40 +5772,42 @@ executeReadyTasks report wave benchmarkRuns = {
                               } else
                                 readyPlannedIds
                             };
+                            let mut pendingLaunchIds = emptyTexts;
+                            for spec in report.tasks {
+                              let taskStatus = taskStatusFor finalTasks spec.taskId in
+                              if taskStatusIsTerminal taskStatus then
+                                pendingLaunchIds
+                              else if childLoopLaunchPending spec.taskId then {
+                                pendingLaunchIds = append pendingLaunchIds [spec.taskId];
+                                pendingLaunchIds
+                              } else
+                                pendingLaunchIds
+                            };
+                            let terminalPlannedTaskCount = addManagerCounters (length completedIds) (length failedIds) in
                             if length readyPlannedIds > 0 then
                               executeReadyTasks report wave benchmarkRuns
+                            else if length pendingLaunchIds > 0 then
+                              match awaitWatchedProcess
+                                (taskProcessHeartbeatPath (firstTextOrEmpty pendingLaunchIds))
+                                childLoopWatchPollMs {
+                                Err message ->
+                                  finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
+                                Ok process ->
+                                  executeReadyTasks report wave benchmarkRuns
+                              }
                             else if benchmarkEnabled then
-                              runBenchmarkCheckpoint report wave benchmarkRuns
+                              if terminalPlannedTaskCount == length report.tasks then
+                                runBenchmarkCheckpoint report wave benchmarkRuns
+                              else
+                                continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
                             else if length completedIds == length report.tasks then
                               finalizeWithReport
                                 (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)
                                 (managerPassReport report)
                             else if length failedIds > 0 then
                               continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
-                            else {
-                              let mut pendingLaunchIds = emptyTexts;
-                              for spec in report.tasks {
-                                let taskStatus = taskStatusFor finalTasks spec.taskId in
-                                if taskStatusIsTerminal taskStatus then
-                                  pendingLaunchIds
-                                else if childLoopLaunchPending spec.taskId then {
-                                  pendingLaunchIds = append pendingLaunchIds [spec.taskId];
-                                  pendingLaunchIds
-                                } else
-                                  pendingLaunchIds
-                              };
-                              if length pendingLaunchIds > 0 then
-                                match awaitWatchedProcess
-                                  (taskProcessHeartbeatPath (firstTextOrEmpty pendingLaunchIds))
-                                  childLoopWatchPollMs {
-                                  Err message ->
-                                    finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
-                                  Ok process ->
-                                    executeReadyTasks report wave benchmarkRuns
-                                }
-                              else
-                                continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
-                            }
+                            else
+                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
                           }
                         }
                         }

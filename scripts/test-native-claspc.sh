@@ -1872,6 +1872,8 @@ goal_manager_benchmark_resume_workspace_root_abs="$test_root_abs/swarm-goal-mana
 goal_manager_benchmark_resume_output_abs="$test_root_abs/swarm-goal-manager-benchmark-resume-output.txt"
 goal_manager_benchmark_resume_status_output_abs="$test_root_abs/swarm-goal-manager-benchmark-resume-status.json"
 goal_manager_benchmark_resume_state_status_abs="$goal_manager_benchmark_resume_state_root_abs/status.json"
+goal_manager_benchmark_active_resume_state_root_abs="$test_root_abs/swarm-goal-manager-benchmark-active-resume-state"
+goal_manager_benchmark_active_resume_workspace_root_abs="$test_root_abs/swarm-goal-manager-benchmark-active-resume-workspace"
 goal_manager_parallel_benchmark_state_root_abs="$test_root_abs/swarm-goal-manager-parallel-benchmark-state"
 goal_manager_parallel_benchmark_workspace_root_abs="$test_root_abs/swarm-goal-manager-parallel-benchmark-workspace"
 goal_manager_parallel_benchmark_workspace_abs="$goal_manager_parallel_benchmark_workspace_root_abs/workspace.txt"
@@ -1894,6 +1896,7 @@ mkdir -p "$goal_manager_empty_policy_workspace_root_abs"
 mkdir -p "$goal_manager_replan_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_resume_workspace_root_abs"
+mkdir -p "$goal_manager_benchmark_active_resume_workspace_root_abs"
 mkdir -p "$goal_manager_parallel_benchmark_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_fail_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_timeout_workspace_root_abs"
@@ -2496,6 +2499,37 @@ goal_manager_benchmark_objective_status_output="$("$claspc_bin" --json swarm obj
 printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
 printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"taskId":"planner-2"' >/dev/null
 printf '%s\n' "$goal_manager_benchmark_objective_status_output" | grep -F '"taskId":"wave-2-benchmark-finish"' >/dev/null
+
+mkdir -p "$goal_manager_benchmark_active_resume_state_root_abs"
+"$claspc_bin" --json swarm objective create "$goal_manager_benchmark_active_resume_state_root_abs" improve-clasp --detail 'Keep active planned tasks ahead of benchmark pass finalization' --max-tasks 2 --max-runs 2 >/dev/null
+"$claspc_bin" --json swarm task create "$goal_manager_benchmark_active_resume_state_root_abs" improve-clasp active-benchmark-gate --detail 'Active planned task must stay incomplete' --max-runs 1 >/dev/null
+CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$goal_manager_benchmark_active_resume_state_root_abs" active-benchmark-gate >/dev/null
+cat >"$goal_manager_benchmark_active_resume_state_root_abs/planner-1.json" <<'JSON'
+{"objectiveSummary":"Prevent benchmark pass from finalizing over active work.","strategy":"Keep a task active so benchmark recovery must resume task execution instead of completing the manager.","tasks":[{"taskId":"active-benchmark-gate","role":"control-plane-hardener","detail":"Stay active while a benchmark checkpoint is present.","dependencies":[],"taskPrompt":"Do not let the benchmark checkpoint finalize before this task reaches a terminal state.","coordinationFocus":["benchmark-ordering","task-liveness"]}],"testsRun":["manual-active-benchmark-regression"],"residualRisks":[]}
+JSON
+cat >"$goal_manager_benchmark_active_resume_state_root_abs/status.json" <<'JSON'
+{"phase":"benchmark-running","verdict":"pending","completed":false,"objectiveId":"improve-clasp","plannerTaskId":"planner","activeTaskId":"active-benchmark-gate","plannedTaskIds":["active-benchmark-gate"],"wave":1,"benchmarkRuns":0,"final":false}
+JSON
+cat >"$goal_manager_benchmark_active_resume_state_root_abs/benchmark-1.json" <<'JSON'
+{"wave":1,"suite":"appbench","summary":"AppBench target is already met.","passed":true,"meetsTarget":true,"scoreName":"timeToGreenMs","scoreValue":100,"targetName":"maxTimeToGreenMs","targetValue":120,"command":["fake-benchmark"]}
+JSON
+goal_manager_benchmark_active_resume_output="$(
+  trace_case "goal-manager-benchmark-active-resume"
+  CLASP_RT_SERVICE_SUPERVISED_JSON='true' \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_benchmark_active_resume_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$feedback_loop_benchmark_bin\"]" \
+  "$goal_manager_binary" "$goal_manager_benchmark_active_resume_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_benchmark_active_resume_output" | grep -F '"phase":"task-running"' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_active_resume_output" | grep -F '"activeTaskIds":["active-benchmark-gate"]' >/dev/null
+printf '%s\n' "$goal_manager_benchmark_active_resume_output" | grep -F '"benchmarkTargetMet":true' >/dev/null
+if printf '%s\n' "$goal_manager_benchmark_active_resume_output" | grep -F '"phase":"completed"' >/dev/null; then
+  echo "goal manager must not complete while a planned task is still active even if the benchmark target is met" >&2
+  exit 1
+fi
+grep -F '"phase":"task-running"' "$goal_manager_benchmark_active_resume_state_root_abs/status.json" >/dev/null
+grep -F '"benchmarkRuns":1' "$goal_manager_benchmark_active_resume_state_root_abs/status.json" >/dev/null
 
 goal_manager_benchmark_resume_heartbeat_abs="$goal_manager_benchmark_resume_state_root_abs/benchmark-1.heartbeat.json"
 trace_case "goal-manager-benchmark-resume"

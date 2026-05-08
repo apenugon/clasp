@@ -74,6 +74,8 @@ require_pattern "scripts/test-native-claspc.sh" 'swarm_loop_builder_running_outp
 require_pattern "scripts/test-native-claspc.sh" 'record-ergonomics-app'
 require_pattern "scripts/test-native-claspc.sh" 'polymorphism-app'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_sqlite_wrong_tool_marker'
+require_pattern "scripts/test-native-claspc.sh" 'goal-manager-benchmark-active-resume'
+require_pattern "scripts/test-native-claspc.sh" 'goal manager must not complete while a planned task is still active'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_sqlite_wrong_completed_verifier_marker'
 require_pattern "scripts/test-native-claspc.sh" 'active lease is owned by `manager`'
 require_pattern "scripts/test-native-claspc.sh" 'lease held by `worker-stale` expired'
