@@ -78,17 +78,20 @@ defaultPlannerPolicyText = textJoin "\n" [
   "Do not assume a fixed named agent taxonomy beyond the minimal substrate. Let coordination patterns emerge from task structure and the shared mailbox."
 ]
 
+plannerPolicyFallbackText : Str
+plannerPolicyFallbackText =
+  if fileExists plannerPolicyPath then
+    match readFile plannerPolicyPath {
+      Ok policyText -> policyText,
+      Err readMessage -> defaultPlannerPolicyText
+    }
+  else
+    defaultPlannerPolicyText
+
 plannerPolicyText : Str
 plannerPolicyText = match envVar "CLASP_MANAGER_PLANNER_POLICY_JSON" {
-  Ok raw -> decode Str raw,
-  Err message ->
-    if fileExists plannerPolicyPath then
-      match readFile plannerPolicyPath {
-        Ok policyText -> policyText,
-        Err readMessage -> defaultPlannerPolicyText
-      }
-    else
-      defaultPlannerPolicyText
+  Ok raw -> if raw == "" then plannerPolicyFallbackText else decode Str raw,
+  Err message -> plannerPolicyFallbackText
 }
 
 codexReasoningConfig : Str

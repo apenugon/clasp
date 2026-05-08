@@ -1825,6 +1825,8 @@ goal_manager_promotion_conflict_workspace_root_abs="$test_root_abs/swarm-goal-ma
 goal_manager_budget_fail_state_root_abs="$test_root_abs/swarm-goal-manager-budget-fail-state"
 goal_manager_cycle_fail_state_root_abs="$test_root_abs/swarm-goal-manager-cycle-fail-state"
 goal_manager_reserved_dep_fail_state_root_abs="$test_root_abs/swarm-goal-manager-reserved-dep-fail-state"
+goal_manager_empty_policy_state_root_abs="$test_root_abs/swarm-goal-manager-empty-policy-state"
+goal_manager_empty_policy_workspace_root_abs="$test_root_abs/swarm-goal-manager-empty-policy-workspace"
 goal_manager_replan_state_root_abs="$test_root_abs/swarm-goal-manager-replan-state"
 goal_manager_replan_workspace_root_abs="$test_root_abs/swarm-goal-manager-replan-workspace"
 goal_manager_replan_workspace_abs="$goal_manager_replan_workspace_root_abs/workspace.txt"
@@ -1854,6 +1856,7 @@ mkdir -p "$goal_manager_dirty_resume_workspace_root_abs"
 mkdir -p "$goal_manager_service_restart_workspace_root_abs"
 mkdir -p "$goal_manager_parallel_live_workspace_root_abs"
 mkdir -p "$goal_manager_promotion_conflict_workspace_root_abs"
+mkdir -p "$goal_manager_empty_policy_workspace_root_abs"
 mkdir -p "$goal_manager_replan_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_workspace_root_abs"
 mkdir -p "$goal_manager_benchmark_resume_workspace_root_abs"
@@ -1959,6 +1962,26 @@ if grep -F 'no ready task matched' "$goal_manager_reserved_dep_fail_state_root_a
   echo "goal manager should fail with planner validation details before ready-task fallback" >&2
   exit 1
 fi
+
+mkdir -p "$goal_manager_empty_policy_state_root_abs"
+cat >"$goal_manager_empty_policy_state_root_abs/planner-policy.md" <<'EOF'
+Prefer file-backed policy when the JSON env override is empty.
+EOF
+goal_manager_empty_policy_output="$(
+  trace_case "goal-manager-empty-policy"
+  CLASP_TEST_FAKE_PLANNER_MODE='parallel-ready' \
+  CLASP_MANAGER_PLANNER_POLICY_JSON='' \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$goal_manager_empty_policy_workspace_root_abs\"" \
+  CLASP_MANAGER_CLASPC_BIN_JSON="\"$claspc_bin\"" \
+  CLASP_MANAGER_GOAL_JSON='"Improve Clasp autonomously."' \
+  CLASP_MANAGER_MAX_TASKS_JSON='2' \
+  "$goal_manager_binary" "$goal_manager_empty_policy_state_root_abs"
+)"
+printf '%s\n' "$goal_manager_empty_policy_output" | grep -F '"phase":"completed"' >/dev/null
+printf '%s\n' "$goal_manager_empty_policy_output" | grep -F '"verdict":"pass"' >/dev/null
+grep -F '"plannerPolicy":"Prefer file-backed policy when the JSON env override is empty.' "$goal_manager_empty_policy_state_root_abs/planner-input.json" >/dev/null
+grep -F '"valid":true' "$goal_manager_empty_policy_state_root_abs/plan-validation.json" >/dev/null
 
 trace_case "goal-manager-native"
 goal_manager_native_output="$(

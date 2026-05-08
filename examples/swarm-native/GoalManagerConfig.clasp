@@ -23,25 +23,25 @@ swarmStateRoot = swarmRoot stateRootPath
 
 readEnvText : Str -> Str -> Str
 readEnvText name fallback = match envVar name {
-  Ok raw -> decode Str raw,
+  Ok raw -> if raw == "" then fallback else decode Str raw,
   Err message -> fallback
 }
 
 readEnvTextList : Str -> [Str] -> [Str]
 readEnvTextList name fallback = match envVar name {
-  Ok raw -> decode [Str] raw,
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
   Err message -> fallback
 }
 
 readEnvBool : Str -> Bool -> Bool
 readEnvBool name fallback = match envVar name {
-  Ok raw -> decode Bool raw,
+  Ok raw -> if raw == "" then fallback else decode Bool raw,
   Err message -> fallback
 }
 
 readEnvInt : Str -> Int -> Int
 readEnvInt name fallback = match envVar name {
-  Ok raw -> decode Int raw,
+  Ok raw -> if raw == "" then fallback else decode Int raw,
   Err message -> fallback
 }
 

@@ -148,7 +148,7 @@ fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
-grep -F 'serviceGoalManagerMain' "$goal_manager_source" >/dev/null
+grep -F 'runManagedServiceBootstrap' "$goal_manager_source" >/dev/null
 mkdir -p "$test_root_abs/bin"
 
 cat >"$fake_codex_bin" <<'EOF'
@@ -784,6 +784,21 @@ if (!Array.isArray(benchmarkReason.taskIds) || !benchmarkReason.taskIds.includes
 NODE
 
 if [[ "${CLASP_GOAL_MANAGER_FAST_STATUS_ONLY:-0}" != "1" ]]; then
+trace_case "empty-policy-env-falls-back-to-policy-file"
+empty_policy_state="$test_root_abs/empty-policy-state"
+empty_policy_workspace="$test_root_abs/empty-policy-workspace"
+empty_policy_output="$test_root_abs/empty-policy-output.txt"
+mkdir -p "$empty_policy_state" "$empty_policy_workspace"
+cat >"$empty_policy_state/planner-policy.md" <<'EOF'
+Prefer file-backed policy when the JSON env override is empty.
+EOF
+run_goal_manager "$empty_policy_state" "$empty_policy_workspace" \
+  CLASP_MANAGER_PLANNER_POLICY_JSON='' \
+  >"$empty_policy_output" 2>&1
+grep -F '"phase":"completed"' "$empty_policy_output" >/dev/null
+grep -F '"verdict":"pass"' "$empty_policy_output" >/dev/null
+grep -F '"plannerPolicy":"Prefer file-backed policy when the JSON env override is empty.' "$empty_policy_state/planner-input.json" >/dev/null
+
 trace_case "split-mailbox-summary-resume"
 split_mailbox_state="$test_root_abs/split-mailbox-state"
 split_mailbox_workspace="$test_root_abs/split-mailbox-workspace"
