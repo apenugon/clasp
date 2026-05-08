@@ -148,7 +148,24 @@ record SwarmManagerAction = {
   objectiveId : Str,
   status : Str,
   action : Str,
-  suggestedCommand : [Str]
+  suggestedCommand : [Str],
+  taskId : Str,
+  taskStatus : Str,
+  blockedBy : [Str],
+  blockerTaskIds : [Str],
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  latestRunId : Int,
+  latestRunRole : Str,
+  latestRunName : Str,
+  latestRunStatus : Str,
+  latestRunExitCode : Int,
+  latestVerifier : Str,
+  latestVerifierStatus : Str,
+  latestVerifierExitCode : Int,
+  mergegateName : Str,
+  mergegateVerdict : Str,
+  mergegateDetail : Str
 }
 
 record SwarmObjectiveStatus = {
@@ -162,7 +179,11 @@ record SwarmMailbox = {
   tail : [SwarmEvent],
   approvals : [SwarmApproval],
   runs : [SwarmRun],
-  artifacts : [SwarmArtifact]
+  artifacts : [SwarmArtifact],
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str
 }
 
 record ToolStepResult = {
@@ -180,6 +201,7 @@ record VerifierStepResult = {
 record ReviewStepResult = {
   approval : SwarmApproval,
   approvals : [SwarmApproval],
+  managerAfterApproval : SwarmManagerAction,
   mergeDecision : SwarmMergeDecision,
   mailbox : SwarmMailbox
 }
@@ -467,6 +489,26 @@ history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId
 tail : TaskHandle -> Int -> Result [SwarmEvent]
 tail handle limit = eventListResult (swarmTailRaw handle.root.path handle.taskId limit)
 
+firstRunStatus : Str -> SwarmRun -> Str
+firstRunStatus current run = if current == "" then run.status else current
+
+firstRunName : Str -> SwarmRun -> Str
+firstRunName current run = if current == "" then run.name else current
+
+firstVerifierStatus : Str -> SwarmRun -> Str
+firstVerifierStatus current run =
+  if current == "" then
+    if run.role == "verifier" then run.status else ""
+  else
+    current
+
+firstVerifierName : Str -> SwarmRun -> Str
+firstVerifierName current run =
+  if current == "" then
+    if run.role == "verifier" then run.name else ""
+  else
+    current
+
 taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
 taskMailbox handle limit =
   match history handle {
@@ -484,7 +526,11 @@ taskMailbox handle limit =
                       tail = tailValue,
                       approvals = approvalsValue,
                       runs = runsValue,
-                      artifacts = artifactsValue
+                      artifacts = artifactsValue,
+                      latestRunStatus = fold firstRunStatus "" runsValue,
+                      latestRunName = fold firstRunName "" runsValue,
+                      latestVerifierStatus = fold firstVerifierStatus "" runsValue,
+                      latestVerifier = fold firstVerifierName "" runsValue
                     }),
                     Err message ->
                       mailboxResultError message
@@ -554,16 +600,27 @@ approveAndMerge handle approvalName mergegateName requiredVerifiers mailboxLimit
     Ok approvalValue ->
       match approvals handle {
         Ok approvalsValue ->
-          match mergegateDecide handle mergegateName requiredVerifiers {
-            Ok mergeDecisionValue ->
-              match taskMailbox handle mailboxLimit {
-                Ok mailboxValue ->
-                  Ok (ReviewStepResult {
-                    approval = approvalValue,
-                    approvals = approvalsValue,
-                    mergeDecision = mergeDecisionValue,
-                    mailbox = mailboxValue
-                  }),
+          match status handle {
+            Ok taskStatusValue ->
+              match managerNext (objectiveHandle handle.root taskStatusValue.objectiveId) {
+                Ok managerAfterApprovalValue ->
+                  match mergegateDecide handle mergegateName requiredVerifiers {
+                    Ok mergeDecisionValue ->
+                      match taskMailbox handle mailboxLimit {
+                        Ok mailboxValue ->
+                          Ok (ReviewStepResult {
+                            approval = approvalValue,
+                            approvals = approvalsValue,
+                            managerAfterApproval = managerAfterApprovalValue,
+                            mergeDecision = mergeDecisionValue,
+                            mailbox = mailboxValue
+                          }),
+                        Err message ->
+                          reviewStepResultError message
+                      },
+                    Err message ->
+                      reviewStepResultError message
+                  },
                 Err message ->
                   reviewStepResultError message
               },

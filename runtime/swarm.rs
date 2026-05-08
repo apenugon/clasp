@@ -2301,9 +2301,193 @@ fn objective_tasks(connection: &Connection, objective_id: &str) -> Result<Vec<Sw
     Ok(tasks)
 }
 
+fn string_values(values: Vec<String>) -> Value {
+    Value::Array(values.into_iter().map(Value::String).collect())
+}
+
+fn required_verifier_names_from_policy(policy: Option<&Value>) -> Vec<String> {
+    policy
+        .and_then(|value| value.get("requiredVerifiers"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| value.get("name").and_then(Value::as_str).map(str::to_owned))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn manager_action_with_details(connection: &Connection, mut value: Value) -> Result<Value, String> {
+    let Some(map) = value.as_object_mut() else {
+        return Ok(value);
+    };
+    let task_id = map
+        .get("taskId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let merge_policy = map.get("mergePolicy").cloned();
+    let at_ms = now_ms();
+
+    let mut task_status = String::new();
+    let mut blocked_by = string_list(map.get("blockedBy"));
+    let mut blocker_task_ids = Vec::new();
+    if !task_id.is_empty() {
+        if let Some(task) = load_task_state(connection, &task_id)? {
+            task_status = task.status.clone();
+            if blocked_by.is_empty() {
+                let (_ready, _lease_expired, blocked, _spec, _objective) =
+                    task_ready_state(connection, &task, at_ms)?;
+                blocked_by = blocked;
+            }
+        }
+        blocker_task_ids = unfinished_dependency_ids(connection, &task_id)?;
+    }
+
+    let mut required_approvals =
+        string_list(merge_policy.as_ref().and_then(|value| value.get("requiredApprovals")));
+    let mut required_verifiers = required_verifier_names_from_policy(merge_policy.as_ref());
+    let mut mergegate_name = map
+        .get("mergegateName")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if let Some(policy) = merge_policy.as_ref() {
+        if mergegate_name.is_empty() {
+            mergegate_name = policy
+                .get("mergegateName")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+        }
+    }
+    if !task_id.is_empty()
+        && (required_approvals.is_empty() || required_verifiers.is_empty() || mergegate_name.is_empty())
+    {
+        if let Some(policy) = load_merge_policy(connection, &task_id)? {
+            if required_approvals.is_empty() {
+                required_approvals = decode_string_list(&policy.required_approvals_json);
+            }
+            if required_verifiers.is_empty() {
+                required_verifiers = decode_string_list(&policy.required_verifiers_json);
+            }
+            if mergegate_name.is_empty() {
+                mergegate_name = policy.mergegate_name;
+            }
+        }
+    }
+
+    let latest_run = if task_id.is_empty() {
+        None
+    } else {
+        latest_run_for_task(connection, &task_id)?
+    };
+    let verifier_hint = map
+        .get("verifier")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let latest_verifier = if task_id.is_empty() {
+        None
+    } else if verifier_hint.is_empty() {
+        latest_verifier_run_for_task(connection, &task_id)?
+    } else {
+        latest_verifier_run(connection, &task_id, &verifier_hint)?
+    };
+
+    let mergegate_value = merge_policy.as_ref().and_then(|policy| policy.get("mergegate"));
+    let mergegate_verdict = mergegate_value
+        .and_then(|value| value.get("verdict"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let mergegate_detail = mergegate_value
+        .and_then(|value| value.get("detail"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    if !map.contains_key("taskId") {
+        map.insert("taskId".to_owned(), Value::String(task_id));
+    }
+    map.insert("taskStatus".to_owned(), Value::String(task_status));
+    map.insert("blockedBy".to_owned(), string_values(blocked_by));
+    map.insert("blockerTaskIds".to_owned(), string_values(blocker_task_ids));
+    map.insert("requiredApprovals".to_owned(), string_values(required_approvals));
+    map.insert("requiredVerifiers".to_owned(), string_values(required_verifiers));
+    map.insert(
+        "latestRunId".to_owned(),
+        json!(latest_run.as_ref().map(|run| run.run_id).unwrap_or(-1)),
+    );
+    map.insert(
+        "latestRunRole".to_owned(),
+        Value::String(
+            latest_run
+                .as_ref()
+                .map(|run| run.role.clone())
+                .unwrap_or_default(),
+        ),
+    );
+    map.insert(
+        "latestRunName".to_owned(),
+        Value::String(
+            latest_run
+                .as_ref()
+                .map(|run| run.name.clone())
+                .unwrap_or_default(),
+        ),
+    );
+    map.insert(
+        "latestRunStatus".to_owned(),
+        Value::String(
+            latest_run
+                .as_ref()
+                .map(|run| run.status.clone())
+                .unwrap_or_default(),
+        ),
+    );
+    map.insert(
+        "latestRunExitCode".to_owned(),
+        json!(latest_run.as_ref().map(|run| run.exit_code).unwrap_or(-999)),
+    );
+    map.insert(
+        "latestVerifier".to_owned(),
+        Value::String(
+            latest_verifier
+                .as_ref()
+                .map(|run| run.name.clone())
+                .unwrap_or(verifier_hint),
+        ),
+    );
+    map.insert(
+        "latestVerifierStatus".to_owned(),
+        Value::String(
+            latest_verifier
+                .as_ref()
+                .map(|run| run.status.clone())
+                .unwrap_or_default(),
+        ),
+    );
+    map.insert(
+        "latestVerifierExitCode".to_owned(),
+        json!(latest_verifier.as_ref().map(|run| run.exit_code).unwrap_or(-999)),
+    );
+    map.insert("mergegateName".to_owned(), Value::String(mergegate_name));
+    map.insert("mergegateVerdict".to_owned(), Value::String(mergegate_verdict));
+    map.insert("mergegateDetail".to_owned(), Value::String(mergegate_detail));
+
+    Ok(value)
+}
+
 fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Value, String> {
     let Some(objective) = load_objective(connection, objective_id)? else {
-        return Ok(json!({
+        return manager_action_with_details(connection, json!({
             "objectiveId": objective_id,
             "status": "missing",
             "action": "missing-objective",
@@ -2312,7 +2496,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
     };
     let tasks = objective_tasks(connection, objective_id)?;
     if tasks.is_empty() {
-        return Ok(json!({
+        return manager_action_with_details(connection, json!({
             "objectiveId": objective.objective_id.clone(),
             "status": "empty",
             "action": "plan-tasks",
@@ -2332,7 +2516,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
     for task in &tasks {
         let spec = load_task_spec(connection, &task.task_id)?;
         if lease_is_expired(task, spec.as_ref(), at_ms) {
-            return Ok(json!({
+            return manager_action_with_details(connection, json!({
                 "objectiveId": objective_id,
                 "status": "needs-attention",
                 "action": "recover-lease",
@@ -2344,8 +2528,10 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
         }
     }
     for task in &tasks {
-        if (task.status == "leased" || task.status == "active") && !lease_is_expired(task, load_task_spec(connection, &task.task_id)?.as_ref(), at_ms) {
-            return Ok(json!({
+        if (task.status == "leased" || task.status == "active")
+            && !lease_is_expired(task, load_task_spec(connection, &task.task_id)?.as_ref(), at_ms)
+        {
+            return manager_action_with_details(connection, json!({
                 "objectiveId": objective_id,
                 "status": "waiting",
                 "action": "wait-for-lease",
@@ -2366,7 +2552,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
                     .map(str::to_owned)
                 {
                     let failed_verifier_command = failed_verifier.clone();
-                    return Ok(json!({
+                    return manager_action_with_details(connection, json!({
                         "objectiveId": objective_id,
                         "status": "needs-attention",
                         "action": "rerun-verifier",
@@ -2394,7 +2580,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
                     .map(str::to_owned)
                 {
                     let missing_verifier_command = missing_verifier.clone();
-                    return Ok(json!({
+                    return manager_action_with_details(connection, json!({
                         "objectiveId": objective_id,
                         "status": "ready",
                         "action": "run-verifier",
@@ -2422,7 +2608,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
                     .map(str::to_owned)
                 {
                     let missing_approval_command = missing_approval.clone();
-                    return Ok(json!({
+                    return manager_action_with_details(connection, json!({
                         "objectiveId": objective_id,
                         "status": "ready",
                         "action": "request-approval",
@@ -2466,7 +2652,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
                         json!(mergegate_name.clone()),
                     ];
                     suggested_command.extend(required_verifiers.into_iter().map(|value| json!(value)));
-                    return Ok(json!({
+                    return manager_action_with_details(connection, json!({
                         "objectiveId": objective_id,
                         "status": "ready",
                         "action": "decide-mergegate",
@@ -2481,7 +2667,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
         }
         let (ready, _lease_expired, blocked, _spec, _objective) = task_ready_state(connection, task, at_ms)?;
         if ready {
-            return Ok(json!({
+            return manager_action_with_details(connection, json!({
                 "objectiveId": objective_id,
                 "status": "ready",
                 "action": "run-task",
@@ -2490,7 +2676,7 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
             }));
         }
         if task.status == "failed" || task.status == "stopped" {
-            return Ok(json!({
+            return manager_action_with_details(connection, json!({
                 "objectiveId": objective_id,
                 "status": "blocked",
                 "action": "inspect-task",
@@ -2511,10 +2697,23 @@ fn manager_next_json(connection: &Connection, objective_id: &str) -> Result<Valu
             Err(_) => false,
         }
     });
-    Ok(json!({
+    let mut selected_task_id = "";
+    let mut selected_blocked_by = Vec::new();
+    for task in &tasks {
+        if task.status != "completed" {
+            let (_ready, _lease_expired, blocked, _spec, _objective) =
+                task_ready_state(connection, task, at_ms)?;
+            selected_task_id = &task.task_id;
+            selected_blocked_by = blocked;
+            break;
+        }
+    }
+    manager_action_with_details(connection, json!({
         "objectiveId": objective.objective_id.clone(),
         "status": if all_satisfied { "completed" } else { "waiting" },
         "action": if all_satisfied { "objective-complete" } else { "wait" },
+        "taskId": if all_satisfied { "" } else { selected_task_id },
+        "blockedBy": selected_blocked_by,
         "taskCount": tasks.len(),
         "suggestedCommand": if all_satisfied {
             json!(["claspc", "swarm", "objective", "status", "<state-root>", objective.objective_id.clone()])
@@ -2699,6 +2898,84 @@ fn latest_verifier_run(
         )
         .optional()
         .map_err(|err| format!("failed to load verifier run `{verifier_name}`: {err}"))
+}
+
+fn latest_run_for_task(connection: &Connection, task_id: &str) -> Result<Option<SwarmRunRecord>, String> {
+    connection
+        .query_row(
+            "
+            SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
+                   COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                   COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
+            FROM swarm_runs AS runs
+            LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
+            LEFT JOIN swarm_artifacts AS stderr ON stderr.id = runs.stderr_artifact_id
+            WHERE runs.task_id = ?1
+            ORDER BY runs.id DESC
+            LIMIT 1
+            ",
+            params![task_id],
+            |row| {
+                let command_json: String = row.get(6)?;
+                let command = serde_json::from_str::<Vec<String>>(&command_json).unwrap_or_default();
+                Ok(SwarmRunRecord {
+                    run_id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    role: row.get(2)?,
+                    actor: row.get(3)?,
+                    name: row.get(4)?,
+                    cwd: row.get(5)?,
+                    command,
+                    exit_code: row.get(7)?,
+                    status: row.get(8)?,
+                    started_at_ms: row.get(9)?,
+                    ended_at_ms: row.get(10)?,
+                    stdout_artifact_path: row.get(11)?,
+                    stderr_artifact_path: row.get(12)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("failed to load latest run for `{task_id}`: {err}"))
+}
+
+fn latest_verifier_run_for_task(connection: &Connection, task_id: &str) -> Result<Option<SwarmRunRecord>, String> {
+    connection
+        .query_row(
+            "
+            SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
+                   COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                   COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
+            FROM swarm_runs AS runs
+            LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
+            LEFT JOIN swarm_artifacts AS stderr ON stderr.id = runs.stderr_artifact_id
+            WHERE runs.task_id = ?1 AND runs.role = 'verifier'
+            ORDER BY runs.id DESC
+            LIMIT 1
+            ",
+            params![task_id],
+            |row| {
+                let command_json: String = row.get(6)?;
+                let command = serde_json::from_str::<Vec<String>>(&command_json).unwrap_or_default();
+                Ok(SwarmRunRecord {
+                    run_id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    role: row.get(2)?,
+                    actor: row.get(3)?,
+                    name: row.get(4)?,
+                    cwd: row.get(5)?,
+                    command,
+                    exit_code: row.get(7)?,
+                    status: row.get(8)?,
+                    started_at_ms: row.get(9)?,
+                    ended_at_ms: row.get(10)?,
+                    stdout_artifact_path: row.get(11)?,
+                    stderr_artifact_path: row.get(12)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("failed to load latest verifier run for `{task_id}`: {err}"))
 }
 
 fn runs_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, String> {
@@ -3112,16 +3389,39 @@ fn format_manager_next_text(value: &Value) -> String {
     let action = string_field(value, "action").unwrap_or("unknown");
     let mut lines = vec![format!("objective {objective_id}"), format!("  status: {status}"), format!("  action: {action}")];
     if let Some(task_id) = string_field(value, "taskId") {
-        lines.push(format!("  task: {task_id}"));
+        if !task_id.is_empty() {
+            lines.push(format!("  task: {task_id}"));
+        }
     }
     if let Some(approval) = string_field(value, "approval") {
-        lines.push(format!("  approval: {approval}"));
+        if !approval.is_empty() {
+            lines.push(format!("  approval: {approval}"));
+        }
     }
     if let Some(verifier) = string_field(value, "verifier") {
-        lines.push(format!("  verifier: {verifier}"));
+        if !verifier.is_empty() {
+            lines.push(format!("  verifier: {verifier}"));
+        }
     }
     if let Some(mergegate_name) = string_field(value, "mergegateName") {
-        lines.push(format!("  mergegate: {mergegate_name}"));
+        if !mergegate_name.is_empty() {
+            lines.push(format!("  mergegate: {mergegate_name}"));
+        }
+    }
+    if let Some(task_status) = string_field(value, "taskStatus") {
+        if !task_status.is_empty() {
+            lines.push(format!("  task status: {task_status}"));
+        }
+    }
+    if let Some(latest_verifier_status) = string_field(value, "latestVerifierStatus") {
+        if !latest_verifier_status.is_empty() {
+            lines.push(format!("  latest verifier: {latest_verifier_status}"));
+        }
+    }
+    if let Some(mergegate_verdict) = string_field(value, "mergegateVerdict") {
+        if !mergegate_verdict.is_empty() {
+            lines.push(format!("  mergegate verdict: {mergegate_verdict}"));
+        }
     }
     let suggested_command = string_list(value.get("suggestedCommand"));
     if !suggested_command.is_empty() {
@@ -3130,6 +3430,10 @@ fn format_manager_next_text(value: &Value) -> String {
     let blocked = string_list(value.get("blockedBy"));
     if !blocked.is_empty() {
         lines.push(format!("  blocked: {}", blocked.join("; ")));
+    }
+    let blockers = string_list(value.get("blockerTaskIds"));
+    if !blockers.is_empty() {
+        lines.push(format!("  blocker tasks: {}", blockers.join(", ")));
     }
     lines.join("\n")
 }
@@ -3628,6 +3932,7 @@ fn execute_mergegate_decide(
         "taskId": task_id,
         "mergegateName": mergegate_name,
         "verdict": verdict,
+        "detail": format!("Mergegate `{mergegate_name}` decided {verdict}."),
         "verifiers": verifier_states,
     });
     let _ = record_swarm_event(
@@ -4117,7 +4422,7 @@ mod tests {
     use super::{maybe_run_swarm, render_swarm_text, run_swarm_json_command, runtime_paths};
     use std::process::ExitCode;
     use rusqlite::Connection;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::fs;
     use std::path::PathBuf;
     use std::thread;
@@ -4767,6 +5072,21 @@ mod tests {
         let connection = Connection::open(paths.db_path).expect("open sqlite db");
         let initial = super::manager_next_json(&connection, "loop").expect("manager next json");
         assert_eq!(initial.get("action").and_then(|value| value.as_str()), Some("run-verifier"));
+        assert_eq!(initial.get("taskId").and_then(|value| value.as_str()), Some("repair"));
+        assert_eq!(initial.get("taskStatus").and_then(|value| value.as_str()), Some("completed"));
+        assert_eq!(
+            initial.get("requiredApprovals").and_then(Value::as_array).map(|values| values.len()),
+            Some(1)
+        );
+        assert_eq!(
+            initial
+                .get("requiredVerifiers")
+                .and_then(Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(Value::as_str),
+            Some("native-smoke")
+        );
+        assert_eq!(initial.get("mergegateVerdict").and_then(|value| value.as_str()), Some("missing"));
         let status = super::task_record_json(
             &connection,
             &super::load_task_state(&connection, "repair")
@@ -4804,6 +5124,18 @@ mod tests {
             after_verifier.get("action").and_then(|value| value.as_str()),
             Some("request-approval")
         );
+        assert_eq!(
+            after_verifier.get("latestVerifier").and_then(|value| value.as_str()),
+            Some("native-smoke")
+        );
+        assert_eq!(
+            after_verifier.get("latestVerifierStatus").and_then(|value| value.as_str()),
+            Some("passed")
+        );
+        assert_eq!(
+            after_verifier.get("latestVerifierExitCode").and_then(|value| value.as_i64()),
+            Some(0)
+        );
 
         assert_eq!(
             maybe_run_swarm(&vec![
@@ -4820,6 +5152,14 @@ mod tests {
         assert_eq!(
             after_approval.get("action").and_then(|value| value.as_str()),
             Some("decide-mergegate")
+        );
+        assert_eq!(
+            after_approval.get("mergegateName").and_then(|value| value.as_str()),
+            Some("trunk")
+        );
+        assert_eq!(
+            after_approval.get("latestRunStatus").and_then(|value| value.as_str()),
+            Some("passed")
         );
 
         assert_eq!(
@@ -4840,6 +5180,7 @@ mod tests {
             completed.get("action").and_then(|value| value.as_str()),
             Some("objective-complete")
         );
+        assert_eq!(completed.get("taskId").and_then(|value| value.as_str()), Some(""));
         let objective_status = super::objective_status_json(&connection, "loop").expect("objective status");
         assert_eq!(
             objective_status.get("projectedStatus").and_then(|value| value.as_str()),
@@ -4982,6 +5323,13 @@ mod tests {
         let next = super::manager_next_json(&connection, "loop").expect("manager next");
         assert_eq!(next.get("action").and_then(|value| value.as_str()), Some("rerun-verifier"));
         assert_eq!(next.get("verifier").and_then(|value| value.as_str()), Some("native-smoke"));
+        assert_eq!(next.get("latestVerifierStatus").and_then(|value| value.as_str()), Some("failed"));
+        assert_eq!(next.get("latestVerifierExitCode").and_then(|value| value.as_i64()), Some(9));
+        assert_eq!(next.get("mergegateVerdict").and_then(|value| value.as_str()), Some("fail"));
+        assert_eq!(
+            next.get("mergegateDetail").and_then(|value| value.as_str()),
+            Some("Mergegate `trunk` decided fail.")
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -5008,6 +5356,12 @@ mod tests {
         let manager_next = super::manager_next_json(&connection, "loop").expect("manager next");
         assert_eq!(manager_next.get("status").and_then(|value| value.as_str()), Some("empty"));
         assert_eq!(manager_next.get("action").and_then(|value| value.as_str()), Some("plan-tasks"));
+        assert_eq!(manager_next.get("taskId").and_then(|value| value.as_str()), Some(""));
+        assert_eq!(manager_next.get("taskStatus").and_then(|value| value.as_str()), Some(""));
+        assert_eq!(
+            manager_next.get("blockerTaskIds").and_then(Value::as_array).map(|values| values.len()),
+            Some(0)
+        );
         assert_eq!(manager_next.get("taskCount").and_then(|value| value.as_i64()), Some(0));
         assert_eq!(
             manager_next.get("suggestedCommand"),
@@ -5226,12 +5580,18 @@ mod tests {
             "status": "ready",
             "action": "request-approval",
             "taskId": "repair",
+            "taskStatus": "completed",
             "approval": "merge-ready",
+            "latestVerifierStatus": "passed",
+            "mergegateVerdict": "missing",
             "suggestedCommand": ["claspc", "swarm", "approve", "<state-root>", "repair", "merge-ready"]
         }));
         assert!(manager_text.contains("objective loop"));
         assert!(manager_text.contains("action: request-approval"));
         assert!(manager_text.contains("approval: merge-ready"));
+        assert!(manager_text.contains("task status: completed"));
+        assert!(manager_text.contains("latest verifier: passed"));
+        assert!(manager_text.contains("mergegate verdict: missing"));
         assert!(manager_text.contains("command: claspc swarm approve <state-root> repair merge-ready"));
 
         let approval_text = render_swarm_text(&json!({

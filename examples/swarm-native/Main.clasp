@@ -29,6 +29,29 @@ record FailedVerifierReport = {
   managerAfterReview : SwarmManagerAction
 }
 
+record ManagerTypedInspection = {
+  passedTaskId : Str,
+  passedTaskStatus : Str,
+  passedVerifier : Str,
+  passedVerifierStatus : Str,
+  passedMailboxVerifierStatus : Str,
+  blockedAction : Str,
+  blockedTaskId : Str,
+  blockedTaskStatus : Str,
+  blockedReasons : [Str],
+  blockedBlockerTaskIds : [Str],
+  failedToolRunStatus : Str,
+  failedToolMailboxRunStatus : Str,
+  failedVerifier : Str,
+  failedVerifierStatus : Str,
+  failedVerifierRequiredVerifiers : [Str],
+  mergeReadyAction : Str,
+  mergeReadyTaskId : Str,
+  mergeReadyRequiredApprovals : [Str],
+  mergeReadyRequiredVerifiers : [Str],
+  mergeReadyVerdict : Str
+}
+
 record NativeSwarmReport = {
   objective : Str,
   planningTask : Str,
@@ -52,7 +75,8 @@ record NativeSwarmReport = {
   summary : SwarmSummary,
   managerAfter : SwarmManagerAction,
   failedTool : FailedToolReport,
-  failedVerifier : FailedVerifierReport
+  failedVerifier : FailedVerifierReport,
+  typedInspection : ManagerTypedInspection
 }
 
 stateRoot : SwarmRoot
@@ -342,7 +366,29 @@ main =
                                                                                     summary = summaryValue,
                                                                                     managerAfter = managerAfterValue,
                                                                                     failedTool = failedToolValue,
-                                                                                    failedVerifier = failedVerifierValue
+                                                                                    failedVerifier = failedVerifierValue,
+                                                                                    typedInspection = ManagerTypedInspection {
+                                                                                      passedTaskId = managerAfterVerifierValue.taskId,
+                                                                                      passedTaskStatus = managerAfterVerifierValue.taskStatus,
+                                                                                      passedVerifier = managerAfterVerifierValue.latestVerifier,
+                                                                                      passedVerifierStatus = managerAfterVerifierValue.latestVerifierStatus,
+                                                                                      passedMailboxVerifierStatus = verifierStepValue.mailbox.latestVerifierStatus,
+                                                                                      blockedAction = failedToolValue.managerAfter.action,
+                                                                                      blockedTaskId = failedToolValue.managerAfter.taskId,
+                                                                                      blockedTaskStatus = failedToolValue.managerAfter.taskStatus,
+                                                                                      blockedReasons = failedToolValue.managerAfter.blockedBy,
+                                                                                      blockedBlockerTaskIds = failedToolValue.managerAfter.blockerTaskIds,
+                                                                                      failedToolRunStatus = failedToolValue.managerAfter.latestRunStatus,
+                                                                                      failedToolMailboxRunStatus = failedToolValue.step.mailbox.latestRunStatus,
+                                                                                      failedVerifier = failedVerifierValue.managerAfterVerifier.latestVerifier,
+                                                                                      failedVerifierStatus = failedVerifierValue.managerAfterVerifier.latestVerifierStatus,
+                                                                                      failedVerifierRequiredVerifiers = failedVerifierValue.managerAfterVerifier.requiredVerifiers,
+                                                                                      mergeReadyAction = reviewStepValue.managerAfterApproval.action,
+                                                                                      mergeReadyTaskId = reviewStepValue.managerAfterApproval.taskId,
+                                                                                      mergeReadyRequiredApprovals = reviewStepValue.managerAfterApproval.requiredApprovals,
+                                                                                      mergeReadyRequiredVerifiers = reviewStepValue.managerAfterApproval.requiredVerifiers,
+                                                                                      mergeReadyVerdict = reviewStepValue.managerAfterApproval.mergegateVerdict
+                                                                                    }
                                                                                   }),
                                                                                 Err message ->
                                                                                   errorText message

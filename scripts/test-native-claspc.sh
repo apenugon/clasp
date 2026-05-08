@@ -1491,6 +1491,8 @@ printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"mergegateName":"trunk"' 
 swarm_sqlite_manager_initial_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"action":"run-task"' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"taskId":"plan"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"taskStatus":"created"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"blockerTaskIds":[]' >/dev/null
 swarm_sqlite_ready_before_output="$("$claspc_bin" --json swarm ready "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_ready_before_output" | grep -F '"taskId":"plan"' >/dev/null
 if printf '%s\n' "$swarm_sqlite_ready_before_output" | grep -F '"taskId":"repair-2"' >/dev/null; then
@@ -1506,6 +1508,8 @@ printf '%s\n' "$swarm_sqlite_ready_after_output" | grep -F '"taskId":"repair-2"'
 swarm_sqlite_manager_after_plan_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_after_plan_output" | grep -F '"action":"run-task"' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_after_plan_output" | grep -F '"taskId":"repair-2"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_plan_output" | grep -F '"requiredApprovals":["merge-ready"]' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_plan_output" | grep -F '"requiredVerifiers":["native-smoke"]' >/dev/null
 swarm_sqlite_repair_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$swarm_sqlite_state_root" repair-2)"
 printf '%s\n' "$swarm_sqlite_repair_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 swarm_sqlite_repair_complete_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm complete "$swarm_sqlite_state_root" repair-2)"
@@ -1514,6 +1518,9 @@ swarm_sqlite_repair_status_output="$("$claspc_bin" --json swarm status "$swarm_s
 printf '%s\n' "$swarm_sqlite_repair_status_output" | grep -F '"missingVerifiers":["native-smoke"]' >/dev/null
 swarm_sqlite_manager_after_repair_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_after_repair_output" | grep -F '"action":"run-verifier"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_repair_output" | grep -F '"taskStatus":"completed"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_repair_output" | grep -F '"latestRunStatus":"passed"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_repair_output" | grep -F '"mergegateVerdict":"missing"' >/dev/null
 swarm_sqlite_wrong_completed_verifier_marker="$test_root_abs/swarm-sqlite-wrong-completed-verifier.marker"
 expect_command_failure_contains 'lease is owned by `manager`' env CLASP_SWARM_ACTOR=intruder "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf wrong-completed-verifier > "$1"' bash "$swarm_sqlite_wrong_completed_verifier_marker"
 [[ ! -e "$swarm_sqlite_wrong_completed_verifier_marker" ]]
@@ -1521,10 +1528,16 @@ swarm_sqlite_repair_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" -
 printf '%s\n' "$swarm_sqlite_repair_verifier_output" | grep -F '"taskId":"repair-2"' >/dev/null
 swarm_sqlite_manager_after_verifier_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_after_verifier_output" | grep -F '"action":"request-approval"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_output" | grep -F '"latestVerifier":"native-smoke"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_output" | grep -F '"latestVerifierStatus":"passed"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_output" | grep -F '"latestVerifierExitCode":0' >/dev/null
 swarm_sqlite_manager_after_verifier_text="$("$claspc_bin" swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'objective appbench' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'action: request-approval' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'approval: merge-ready' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'task status: completed' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'latest verifier: passed' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'mergegate verdict: missing' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_after_verifier_text" | grep -F 'command: claspc swarm approve <state-root> repair-2 merge-ready' >/dev/null
 swarm_sqlite_repair_approval_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm approve "$swarm_sqlite_state_root" repair-2 merge-ready)"
 printf '%s\n' "$swarm_sqlite_repair_approval_output" | grep -F '"taskId":"repair-2"' >/dev/null
@@ -1533,6 +1546,10 @@ printf '%s\n' "$swarm_sqlite_repair_approval_text" | grep -F 'approval repair-2 
 printf '%s\n' "$swarm_sqlite_repair_approval_text" | grep -F 'actor: manager' >/dev/null
 swarm_sqlite_manager_after_approval_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_after_approval_output" | grep -F '"action":"decide-mergegate"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_approval_output" | grep -F '"requiredApprovals":["merge-ready"]' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_approval_output" | grep -F '"requiredVerifiers":["native-smoke"]' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_approval_output" | grep -F '"mergegateName":"trunk"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_after_approval_output" | grep -F '"mergegateVerdict":"missing"' >/dev/null
 swarm_sqlite_repair_mergegate_output="$("$claspc_bin" --json swarm mergegate decide "$swarm_sqlite_state_root" repair-2 trunk native-smoke)"
 printf '%s\n' "$swarm_sqlite_repair_mergegate_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_sqlite_repair_mergegate_output" | grep -F '"verdict":"pass"' >/dev/null
@@ -1547,6 +1564,7 @@ printf '%s\n' "$swarm_sqlite_repair_tail_text" | grep -F 'repair-2 approval_gran
 printf '%s\n' "$swarm_sqlite_repair_tail_text" | grep -F 'repair-2 mergegate_decision by manager' >/dev/null
 swarm_sqlite_manager_complete_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_complete_output" | grep -F '"action":"objective-complete"' >/dev/null
+printf '%s\n' "$swarm_sqlite_manager_complete_output" | grep -F '"taskId":""' >/dev/null
 swarm_sqlite_objective_status_output="$("$claspc_bin" --json swarm objective status "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_objective_status_output" | grep -F '"objectiveId":"appbench"' >/dev/null
 printf '%s\n' "$swarm_sqlite_objective_status_output" | grep -F '"projectedStatus":"completed"' >/dev/null
@@ -1593,6 +1611,7 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"verifierStep":{"run":{"acto
 printf '%s\n' "$swarm_native_run_output" | grep -F '"name":"native-smoke","role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterVerifier":{"objectiveId":"appbench","status":"ready","action":"request-approval"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"reviewStep":{"approval":{"actor":"manager","approvalId":1' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterApproval":{"objectiveId":"appbench","status":"ready","action":"decide-mergegate"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeDecision":{"taskId":"repair-2","mergegateName":"trunk","verdict":"pass"}' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"approvals":[{"actor":"manager","approvalId":1' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"kind":"approval_granted","taskId":"repair-2"' >/dev/null
@@ -1618,6 +1637,11 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterVerifier":{"obj
 printf '%s\n' "$swarm_native_run_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-smoke","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"blockedAction":"inspect-task","blockedTaskId":"tool-fails","blockedTaskStatus":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"failedVerifier":"native-smoke-fail","failedVerifierStatus":"failed","failedVerifierRequiredVerifiers":["native-smoke-fail"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke"],"mergeReadyVerdict":"missing"' >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
 [[ -x "$swarm_native_binary" ]]
@@ -1632,6 +1656,7 @@ printf '%s\n' "$swarm_native_output" | grep -F '"planningStep":{"lease":{"databa
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterRepair":{"objectiveId":"appbench","status":"ready","action":"run-verifier"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterVerifier":{"objectiveId":"appbench","status":"ready","action":"request-approval"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"reviewStep":{"approval":{"actor":"manager","approvalId":1' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterApproval":{"objectiveId":"appbench","status":"ready","action":"decide-mergegate"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"repair-2","mergegateName":"trunk","verdict":"pass"}' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"kind":"approval_granted","taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"projectedStatus":"completed"' >/dev/null
@@ -1647,6 +1672,9 @@ printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":3,"name":"native-smok
 printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-smoke","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke"],"mergeReadyVerdict":"missing"' >/dev/null
 
 swarm_feedback_loop_state_root_abs="$test_root_abs/swarm-feedback-loop-state"
 swarm_feedback_loop_workspace_root_abs="$test_root_abs/swarm-feedback-loop-workspace"
