@@ -14,6 +14,7 @@ unset CLASP_VERIFY_TOPLEVEL_REENTRY
 unset CLASP_VERIFY_USE_CURRENT_SHELL
 unset CLASP_VERIFY_LOCK_TIMEOUT_SECS
 unset CLASP_VERIFY_ON_LOCK_TIMEOUT
+unset CLASP_VERIFY_REPORT_JSON
 
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
@@ -54,6 +55,8 @@ grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/d
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -259,6 +262,40 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 grep -F 'verify-selfhost: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
+fallback_report="$test_root/report-fallback.json"
+fallback_report_capture="$test_root/fallback-report.txt"
+rm -f "$fallback_report" "$fallback_report_capture" "$stderr_capture"
+PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_VERIFY_FALLBACK_COMMANDS=$'printf fallback-report > '"$fallback_report_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+CLASP_VERIFY_REPORT_JSON="$fallback_report" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$stderr_capture"
+
+[[ "$(< "$fallback_report_capture")" == "fallback-report" ]]
+node - "$fallback_report" "$explicit_lock_file" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const lockFile = process.argv[3];
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.finalVerdict === "passed", "fallback report should pass");
+assert(report.exitStatus === 0, "fallback report exit status should be zero");
+assert(report.mode === "fallback", `unexpected fallback mode: ${report.mode}`);
+assert(report.usedFallback === true, "fallback mode should be marked");
+assert(report.usedNested === false, "fallback mode should not be nested");
+assert(report.effectiveLockFile === lockFile, "fallback report should include effective lock file");
+assert(report.commandCount === 1 && report.commands.length === 1, "fallback report should contain one fake command");
+assert(report.commands[0].phase === "fallback", "fallback command should be tagged with fallback phase");
+assert(Number.isInteger(report.commands[0].elapsedMs) && report.commands[0].elapsedMs >= 0, "fallback elapsedMs should be structural");
+NODE
+
 parallel_capture_one="$test_root/parallel-one.txt"
 parallel_capture_two="$test_root/parallel-two.txt"
 sequential_capture="$test_root/sequential.txt"
@@ -275,6 +312,97 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$parallel_capture_one")" == "parallel-one" ]]
 [[ "$(< "$parallel_capture_two")" == "parallel-two" ]]
 [[ "$(< "$sequential_capture")" == "sequential-ok" ]]
+
+report_success="$test_root/report-success.json"
+report_success_parallel_one="$test_root/report-parallel-one.txt"
+report_success_parallel_two="$test_root/report-parallel-two.txt"
+report_success_sequential="$test_root/report-sequential.txt"
+rm -f "$report_success" "$report_success_parallel_one" "$report_success_parallel_two" "$report_success_sequential"
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_JOBS=2 \
+CLASP_VERIFY_PARALLEL_COMMANDS=$'printf report-parallel-one > '"$report_success_parallel_one"$'\nprintf report-parallel-two > '"$report_success_parallel_two" \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS=$'printf report-sequential > '"$report_success_sequential" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+CLASP_VERIFY_REPORT_JSON="$report_success" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+
+[[ "$(< "$report_success_parallel_one")" == "report-parallel-one" ]]
+[[ "$(< "$report_success_parallel_two")" == "report-parallel-two" ]]
+[[ "$(< "$report_success_sequential")" == "report-sequential" ]]
+node - "$report_success" "$explicit_lock_file" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const lockFile = process.argv[3];
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.schemaVersion === 1, "report schema version should be stable");
+assert(report.label === "verify-all", "report should preserve the verify label");
+assert(report.finalVerdict === "passed", "success report should pass");
+assert(report.exitStatus === 0, "success exit status should be zero");
+assert(report.mode === "normal", `unexpected success mode: ${report.mode}`);
+assert(report.usedFallback === false, "success should not use fallback");
+assert(report.usedNested === false, "success should not use nested verification");
+assert(report.lockHeld === true, "success report should observe the verify lock");
+assert(report.effectiveLockFile === lockFile, "success report should include effective lock file");
+assert(report.commandCount === 3 && report.commands.length === 3, "success report should contain all fake commands");
+const phases = new Set(report.commands.map((command) => command.phase));
+const groups = new Set(report.commands.map((command) => command.group));
+assert(phases.has("parallel") && phases.has("sequential"), "success report should include parallel and sequential phases");
+assert(groups.has("parallel") && groups.has("sequential"), "success report should include parallel and sequential groups");
+assert(report.commands.filter((command) => command.group === "parallel").length === 2, "parallel group should contain two commands");
+for (const command of report.commands) {
+  assert(typeof command.command === "string" && command.command.length > 0, "command text should be recorded");
+  assert(Number.isInteger(command.exitStatus), "command exit status should be an integer");
+  assert(Number.isInteger(command.elapsedMs) && command.elapsedMs >= 0, "command elapsedMs should be structural");
+  assert(command.endedAtMs >= command.startedAtMs, "command timestamps should be ordered");
+}
+assert(Number.isInteger(report.elapsedMs) && report.elapsedMs >= 0, "report elapsedMs should be structural");
+NODE
+
+report_failure="$test_root/report-failure.json"
+report_failure_before="$test_root/report-failure-before.txt"
+report_failure_after="$test_root/report-failure-after.txt"
+rm -f "$report_failure" "$report_failure_before" "$report_failure_after"
+if IN_NIX_SHELL= \
+  CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+  CLASP_VERIFY_PARALLEL_COMMANDS= \
+  CLASP_VERIFY_SEQUENTIAL_COMMANDS=$'printf before-failure > '"$report_failure_before"$'\nfalse\nprintf after-failure > '"$report_failure_after" \
+  CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+  CLASP_VERIFY_REPORT_JSON="$report_failure" \
+  "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$test_root/report-failure.stderr"; then
+  printf 'verify-all unexpectedly succeeded for report failure scenario\n' >&2
+  exit 1
+fi
+
+[[ "$(< "$report_failure_before")" == "before-failure" ]]
+[[ ! -f "$report_failure_after" ]]
+node - "$report_failure" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.finalVerdict === "failed", "failure report should fail");
+assert(report.exitStatus !== 0, "failure report exit status should be non-zero");
+assert(report.mode === "normal", `unexpected failure mode: ${report.mode}`);
+assert(report.commandCount === 2 && report.commands.length === 2, "failure report should stop after the failing command");
+assert(report.commands[0].exitStatus === 0, "first failure scenario command should pass");
+const failed = report.commands.find((command) => command.command === "false");
+assert(failed && failed.exitStatus !== 0, "failing command should be recorded with non-zero status");
+assert(!report.commands.some((command) => command.command.includes("after-failure")), "commands after failure should not be recorded");
+for (const command of report.commands) {
+  assert(command.phase === "sequential", "failure commands should be sequential");
+  assert(Number.isInteger(command.elapsedMs) && command.elapsedMs >= 0, "failure elapsedMs should be structural");
+}
+NODE
 
 git_test_root="$test_root/git-repo"
 mkdir -p "$git_test_root/scripts"
@@ -306,17 +434,36 @@ chmod u+w "$git_test_root/.git"
 chmod_restore_needed=0
 
 rm -f "$writable_nested_capture"
+nested_report="$test_root/report-nested.json"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 CLASP_VERIFY_IN_PROGRESS=1 \
 CLASP_VERIFY_ACTIVE_ROOT="$test_root" \
 CLASP_VERIFY_NESTED_COMMANDS=$'printf nested-ok > '"$writable_nested_capture" \
 CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+CLASP_VERIFY_REPORT_JSON="$nested_report" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 
 [[ "$(< "$writable_nested_capture")" == "nested-ok" ]]
+node - "$nested_report" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.finalVerdict === "passed", "nested report should pass");
+assert(report.mode === "nested", `unexpected nested mode: ${report.mode}`);
+assert(report.usedNested === true, "nested mode should be marked");
+assert(report.usedFallback === false, "nested mode should not be fallback");
+assert(report.commandCount === 1 && report.commands[0].phase === "nested", "nested command should be tagged");
+assert(Number.isInteger(report.commands[0].elapsedMs) && report.commands[0].elapsedMs >= 0, "nested elapsedMs should be structural");
+NODE
 
-rm -f "$lock_timeout_capture" "$stderr_capture"
+lock_timeout_report="$test_root/report-lock-timeout-nested.json"
+rm -f "$lock_timeout_capture" "$stderr_capture" "$lock_timeout_report"
 mkdir -p "${explicit_lock_file}.d"
 printf '%s\n' "$$" > "${explicit_lock_file}.d/pid"
 PATH="$test_root/bin:$PATH" \
@@ -325,12 +472,28 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 CLASP_VERIFY_LOCK_TIMEOUT_SECS=1 \
 CLASP_VERIFY_ON_LOCK_TIMEOUT=run-nested \
 CLASP_VERIFY_NESTED_COMMANDS=$'printf lock-timeout-nested > '"$lock_timeout_capture" \
+CLASP_VERIFY_REPORT_JSON="$lock_timeout_report" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$stderr_capture"
 rm -f "${explicit_lock_file}.d/pid"
 rmdir "${explicit_lock_file}.d" >/dev/null 2>&1 || true
 
 [[ "$(< "$lock_timeout_capture")" == "lock-timeout-nested" ]]
 grep -F 'verify-all: verify lock busy after 1s; running nested verification' "$stderr_capture" >/dev/null
+node - "$lock_timeout_report" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.finalVerdict === "passed", "lock-timeout nested report should pass");
+assert(report.mode === "lock-timeout-nested", `unexpected lock-timeout nested mode: ${report.mode}`);
+assert(report.usedNested === true, "lock-timeout nested mode should be marked");
+assert(report.commandCount === 1 && report.commands[0].phase === "nested", "lock-timeout nested command should be tagged");
+assert(Number.isInteger(report.commands[0].elapsedMs) && report.commands[0].elapsedMs >= 0, "lock-timeout elapsedMs should be structural");
+NODE
 
 rm -f "$fallback_capture"
 if PATH="$test_root/bin:$PATH" \
