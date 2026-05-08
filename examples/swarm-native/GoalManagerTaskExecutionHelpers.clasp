@@ -135,6 +135,99 @@ requeueTaskForManagerRetry taskId failureSummary =
       ""
   }
 
+approveCompletedPlannedTask : PlannerTaskSpec -> Str
+approveCompletedPlannedTask spec =
+  match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+    Err message ->
+      textConcat ["task review failed: ", spec.taskId, ": ", message],
+    Ok reviewValue ->
+      ""
+  }
+
+completePlannedTaskWithCurrentLease : PlannerTaskSpec -> Str
+completePlannedTaskWithCurrentLease spec =
+  match complete (taskHandleFor spec.taskId) {
+    Err message ->
+      textConcat ["task completion failed: ", spec.taskId, ": ", message],
+    Ok completedValue ->
+      approveCompletedPlannedTask spec
+  }
+
+recoverExpiredTaskCompletion : PlannerTaskSpec -> Str -> Str
+recoverExpiredTaskCompletion spec message =
+  if textIncludes message "expired" then
+    match lease (taskHandleFor spec.taskId) {
+      Err leaseMessage ->
+        textConcat [
+          "task completion failed: ",
+          spec.taskId,
+          ": ",
+          message,
+          "; lease recovery failed: ",
+          leaseMessage
+        ],
+      Ok leaseValue -> {
+        let traceError =
+          appendManagerTrace (textConcat ["task-complete-expired-lease-recovered:", spec.taskId, ":", message]) in
+        if traceError != "" then
+          traceError
+        else {
+          let completionError = completePlannedTaskWithCurrentLease spec in
+          if completionError == "" then
+            ""
+          else
+            textConcat [
+              completionError,
+              "; original completion failure: ",
+              message
+            ]
+        }
+      }
+    }
+  else
+    textConcat ["task completion failed: ", spec.taskId, ": ", message]
+
+runTaskLaunchRecordWithCurrentLease : PlannerTaskSpec -> Str
+runTaskLaunchRecordWithCurrentLease spec =
+  match toolRun (taskHandleFor spec.taskId) (taskLaunchRecordCommand spec) {
+    Err message ->
+      textConcat ["task launch run failed: ", message],
+    Ok runValue ->
+      ""
+  }
+
+recoverExpiredTaskLaunchRun : PlannerTaskSpec -> Str -> Str
+recoverExpiredTaskLaunchRun spec message =
+  if textIncludes message "expired" then
+    match lease (taskHandleFor spec.taskId) {
+      Err leaseMessage ->
+        textConcat [message, "; launch lease recovery failed: ", leaseMessage],
+      Ok leaseValue -> {
+        let traceError =
+          appendManagerTrace (textConcat ["task-launch-expired-lease-recovered:", spec.taskId, ":", message]) in
+        if traceError != "" then
+          traceError
+        else {
+          let launchError = runTaskLaunchRecordWithCurrentLease spec in
+          if launchError == "" then
+            ""
+          else
+            textConcat [launchError, "; original launch failure: ", message]
+        }
+      }
+    }
+  else
+    message
+
+recordTaskLaunchRun : PlannerTaskSpec -> Str
+recordTaskLaunchRun spec =
+  match toolRun (taskHandleFor spec.taskId) (taskLaunchRecordCommand spec) {
+    Err message ->
+      recoverExpiredTaskLaunchRun spec message,
+    Ok runValue ->
+      ""
+  }
+
 completePlannedTask : PlannerTaskSpec -> Str
 completePlannedTask spec =
   let promotionError = promoteVerifiedTaskWorkspace spec in
@@ -143,14 +236,9 @@ completePlannedTask spec =
   else
     match complete (taskHandleFor spec.taskId) {
       Err message ->
-        textConcat ["task completion failed: ", spec.taskId, ": ", message],
+        recoverExpiredTaskCompletion spec message,
       Ok completedValue ->
-        match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
-          Err message ->
-            textConcat ["task review failed: ", spec.taskId, ": ", message],
-          Ok reviewValue ->
-            ""
-        }
+        approveCompletedPlannedTask spec
     }
 
 promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
@@ -292,17 +380,16 @@ launchReadyTask wave report spec = {
         Err message ->
           recordPlannedTaskFailure spec (syntheticFailureReport "task lease failed" message),
         Ok leaseValue ->
-          match toolRun (taskHandleFor spec.taskId) (taskLaunchRecordCommand spec) {
-            Err message ->
-              recordPlannedTaskFailure spec (syntheticFailureReport "task launch run failed" message),
-            Ok runValue ->
+          let launchRecordError = recordTaskLaunchRun spec in
+          if launchRecordError != "" then
+            recordPlannedTaskFailure spec (syntheticFailureReport "task launch run failed" launchRecordError)
+          else
               match launchChildLoop spec {
                 Err message ->
                   recordPlannedTaskFailure spec (syntheticFailureReport "task child loop failed to start" message),
                 Ok launched ->
                   ""
               }
-          }
       }
   }
 }

@@ -1503,6 +1503,26 @@ grep -F '"phase":"completed"' "$expired_planner_output" >/dev/null
 grep -F '"verdict":"pass"' "$expired_planner_output" >/dev/null
 grep -F 'resume-recover-expired-planner-lease' "$expired_planner_state/trace.log" >/dev/null
 
+trace_case "expired-child-completion-lease-recovers"
+expired_child_state="$test_root_abs/expired-child-state"
+expired_child_workspace="$test_root_abs/expired-child-workspace"
+expired_child_output="$test_root_abs/expired-child-output.txt"
+mkdir -p "$expired_child_workspace"
+run_goal_manager "$expired_child_state" "$expired_child_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='0.15' \
+  CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON='25' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$expired_child_output" 2>&1
+grep -F '"phase":"completed"' "$expired_child_output" >/dev/null
+grep -F '"verdict":"pass"' "$expired_child_output" >/dev/null
+grep -F 'task-complete-expired-lease-recovered:benchmark-gap' "$expired_child_state/trace.log" >/dev/null
+if grep -F '"summary":"planned task reconciliation failed"' "$expired_child_state/feedback.json" >/dev/null 2>&1; then
+  echo "expired child completion leases should recover instead of final-failing reconciliation" >&2
+  exit 1
+fi
+
 trace_case "planner-validation-retries-same-wave"
 planner_validation_state="$test_root_abs/planner-validation-state"
 planner_validation_workspace="$test_root_abs/planner-validation-workspace"
