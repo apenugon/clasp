@@ -1,0 +1,60 @@
+module Main
+
+import GoalManagerTypes
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+
+envText : Str -> Str -> Str
+envText name fallback =
+  match envVar name {
+    Ok raw -> if raw == "" then fallback else raw,
+    Err message -> fallback
+  }
+
+envInt : Str -> Int -> Int
+envInt name fallback =
+  match envVar name {
+    Ok raw -> if raw == "" then fallback else decode Int raw,
+    Err message -> fallback
+  }
+
+benchmarkRoot : Str
+benchmarkRoot = envText "CLASP_MANAGER_PROJECT_ROOT" "."
+
+benchmarkWave : Int
+benchmarkWave = envInt "CLASP_MANAGER_BENCHMARK_WAVE" 1
+
+runGate : ProcessResult
+runGate =
+  match runCommandRaw benchmarkRoot ["bash", "scripts/test-swarm-ready-gate.sh"] {
+    Ok raw -> decode ProcessResult raw,
+    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+  }
+
+benchmarkSignalFor : ProcessResult -> BenchmarkSignal
+benchmarkSignalFor result =
+  if result.exitCode == 0 then
+    BenchmarkSignal {
+      suite = "swarm-ready-gate",
+      summary = textConcat ["swarm-ready gate passed after wave ", encode benchmarkWave],
+      passed = true,
+      meetsTarget = true,
+      scoreName = "passingWave",
+      scoreValue = benchmarkWave,
+      targetName = "minPassingWave",
+      targetValue = 1
+    }
+  else
+    BenchmarkSignal {
+      suite = "swarm-ready-gate",
+      summary = textConcat ["swarm-ready gate failed: ", result.stderr],
+      passed = false,
+      meetsTarget = false,
+      scoreName = "passingWave",
+      scoreValue = benchmarkWave,
+      targetName = "minPassingWave",
+      targetValue = 1
+    }
+
+main : Str
+main = encode (benchmarkSignalFor runGate)
