@@ -7,6 +7,9 @@ mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-feedback-loop-resume.XXXXXX")"
 test_root_abs="$(cd "$test_root" && pwd -P)"
 export XDG_CACHE_HOME="$test_root_abs/xdg-cache"
+# This fixture asserts focused verifier resume behavior. Parent swarm verifiers
+# may export a full-signoff tier, so pin the scenario explicitly.
+export CLASP_LOOP_VERIFICATION_TIER_JSON='"focused"'
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
