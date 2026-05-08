@@ -49,6 +49,10 @@ require_pattern "examples/feedback-loop/Process.clasp" 'awaitWatchedProcessTimeo
 require_pattern "examples/swarm-native/GoalManager.clasp" 'heartbeatTaskLease'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'recoverExpiredTaskFailureRecording'
+require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'childFocusedVerifyCommands'
+require_pattern "examples/swarm-native/GoalManagerConfig.clasp" '    ""'
+reject_pattern "examples/swarm-native/GoalManagerConfig.clasp" '    "bash scripts/test-goal-manager-fast.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-task-manifest.sh"'
+reject_pattern "examples/swarm-native/GoalManager.clasp" '    "bash scripts/test-goal-manager-fast.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-task-manifest.sh"'
 
 require_pattern "scripts/test-selfhost.sh" 'generate-promoted-module-summary-cache.mjs" --check'
 require_pattern "scripts/test-selfhost.sh" 'check-promoted-native-image-exports.mjs'

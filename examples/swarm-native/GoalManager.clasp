@@ -501,7 +501,7 @@ childFocusedVerifyCommands : Str
 childFocusedVerifyCommands =
   readEnvText
     "CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON"
-    "bash scripts/test-goal-manager-fast.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-task-manifest.sh"
+    ""
 
 childFullVerifyCommand : Str
 childFullVerifyCommand = readEnvText "CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
