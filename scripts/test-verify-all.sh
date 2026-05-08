@@ -74,6 +74,7 @@ grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/s
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'GoalManager.wrapper.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'goal-manager-source' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'sha256sum "$claspc_bin"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 
 cat > "$test_root/bin/fake-slow-claspc" <<'EOF'
@@ -135,6 +136,22 @@ goal_manager_binary_two="$(
 )"
 [[ "$goal_manager_binary_one" == "$goal_manager_binary_two" ]]
 [[ -x "$goal_manager_binary_one" ]]
+
+goal_manager_source_binary="$(
+  CLASP_GOAL_MANAGER_SOURCE="$test_root/examples/swarm-native/GoalManager.clasp" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+goal_manager_wrapper_binary="$(
+  CLASP_GOAL_MANAGER_SOURCE="$test_root/examples/swarm-native/GoalManager.wrapper.clasp" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$goal_manager_source_binary" != "$goal_manager_wrapper_binary" ]]
+[[ -x "$goal_manager_source_binary" ]]
+[[ -x "$goal_manager_wrapper_binary" ]]
 
 cat > "$test_root/bin/nix" <<'EOF'
 #!/usr/bin/env bash

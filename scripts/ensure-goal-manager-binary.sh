@@ -30,6 +30,7 @@ done
 
 compute_goal_manager_cache_key() {
   {
+    printf 'goal-manager-source\t%s\n' "$goal_manager_source"
     printf 'claspc-content\t'
     sha256sum "$claspc_bin"
     find \
