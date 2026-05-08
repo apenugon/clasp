@@ -1,10 +1,28 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::env;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::raw::c_int;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, ExitCode};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command as ProcessCommand, ExitCode, ExitStatus, Stdio};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+const SIGTERM: c_int = 15;
+#[cfg(unix)]
+const SIGKILL: c_int = 9;
+
+#[cfg(unix)]
+extern "C" {
+    fn setsid() -> c_int;
+    fn kill(pid: c_int, sig: c_int) -> c_int;
+}
 
 #[derive(Clone)]
 struct SwarmEvent {
@@ -152,13 +170,21 @@ enum SwarmCommand {
         required_verifiers: Vec<String>,
     },
     ManagerNext { root: PathBuf, objective_id: String },
-    ToolRun { root: PathBuf, task_id: String, actor: String, cwd: PathBuf, command: Vec<String> },
+    ToolRun {
+        root: PathBuf,
+        task_id: String,
+        actor: String,
+        cwd: PathBuf,
+        timeout_ms: Option<i64>,
+        command: Vec<String>,
+    },
     VerifierRun {
         root: PathBuf,
         task_id: String,
         actor: String,
         verifier_name: String,
         cwd: PathBuf,
+        timeout_ms: Option<i64>,
         command: Vec<String>,
     },
     MergegateDecide {
@@ -217,14 +243,25 @@ fn split_command_args(args: &[String]) -> Result<(Vec<String>, Vec<String>), Str
     Ok((before, after))
 }
 
-fn parse_named_run_prefix(prefix: &[String], verb: &str) -> Result<(PathBuf, String, String, PathBuf), String> {
+fn parse_timeout_ms(value: &str) -> Result<i64, String> {
+    let parsed = value
+        .parse::<i64>()
+        .map_err(|_| format!("invalid --timeout-ms value `{value}`"))?;
+    if parsed <= 0 {
+        return Err("--timeout-ms must be greater than 0".to_owned());
+    }
+    Ok(parsed)
+}
+
+fn parse_named_run_prefix(prefix: &[String], verb: &str) -> Result<(PathBuf, String, String, PathBuf, Option<i64>), String> {
     if prefix.len() < 2 {
-        return Err(format!("usage: claspc swarm {verb} <state-root> <task-id> [--actor NAME] [--cwd DIR] -- <command...>"));
+        return Err(format!("usage: claspc swarm {verb} <state-root> <task-id> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>"));
     }
     let root = parse_root_arg(&prefix[0]);
     let task_id = prefix[1].clone();
     let mut actor = default_actor();
     let mut cwd = env::current_dir().map_err(|err| format!("failed to resolve current directory: {err}"))?;
+    let mut timeout_ms = None;
     let mut index = 2usize;
     while index < prefix.len() {
         match prefix[index].as_str() {
@@ -242,12 +279,19 @@ fn parse_named_run_prefix(prefix: &[String], verb: &str) -> Result<(PathBuf, Str
                 cwd = PathBuf::from(value);
                 index += 2;
             }
+            "--timeout-ms" => {
+                let Some(value) = prefix.get(index + 1) else {
+                    return Err("missing value after --timeout-ms".to_owned());
+                };
+                timeout_ms = Some(parse_timeout_ms(value)?);
+                index += 2;
+            }
             other => {
                 return Err(format!("unknown option `{other}`"));
             }
         }
     }
-    Ok((root, task_id, actor, cwd))
+    Ok((root, task_id, actor, cwd, timeout_ms))
 }
 
 fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, String> {
@@ -632,22 +676,23 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         }
         "tool" => {
             let (prefix, command) = split_command_args(rest)?;
-            let (root, task_id, actor, cwd) = parse_named_run_prefix(&prefix, "tool")?;
-            SwarmCommand::ToolRun { root, task_id, actor, cwd, command }
+            let (root, task_id, actor, cwd, timeout_ms) = parse_named_run_prefix(&prefix, "tool")?;
+            SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, command }
         }
         "verifier" => {
             if rest.first().map(|value| value.as_str()) != Some("run") {
-                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] -- <command...>".to_owned());
+                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>".to_owned());
             }
             let (prefix, command) = split_command_args(&rest[1..])?;
             if prefix.len() < 3 {
-                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] -- <command...>".to_owned());
+                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>".to_owned());
             }
             let root = parse_root_arg(&prefix[0]);
             let task_id = prefix[1].clone();
             let verifier_name = prefix[2].clone();
             let mut actor = default_actor();
             let mut cwd = env::current_dir().map_err(|err| format!("failed to resolve current directory: {err}"))?;
+            let mut timeout_ms = None;
             let mut index = 3usize;
             while index < prefix.len() {
                 match prefix[index].as_str() {
@@ -665,10 +710,17 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         cwd = PathBuf::from(value);
                         index += 2;
                     }
+                    "--timeout-ms" => {
+                        let Some(value) = prefix.get(index + 1) else {
+                            return Err("missing value after --timeout-ms".to_owned());
+                        };
+                        timeout_ms = Some(parse_timeout_ms(value)?);
+                        index += 2;
+                    }
                     other => return Err(format!("unknown option `{other}`")),
                 }
             }
-            SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, command }
+            SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, command }
         }
         "mergegate" => {
             if rest.first().map(|value| value.as_str()) != Some("decide") {
@@ -3075,6 +3127,277 @@ fn artifact_path_by_id(connection: &Connection, artifact_id: Option<i64>) -> rus
         .map(|value| value.unwrap_or_default())
 }
 
+struct NativeCommandOutcome {
+    exit_code: i64,
+    status: String,
+    timed_out: bool,
+    stdout_reader_finished: bool,
+    stderr_reader_finished: bool,
+    reader_errors: Vec<String>,
+}
+
+fn timeout_duration(timeout_ms: i64) -> Duration {
+    Duration::from_millis(timeout_ms.max(1) as u64)
+}
+
+fn reader_timeout_grace_duration() -> Duration {
+    Duration::from_millis(150)
+}
+
+fn configure_killable_command(command: &mut ProcessCommand) {
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            if setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+}
+
+#[cfg(unix)]
+fn signal_process_group(child_id: u32, signal: c_int) {
+    if child_id > c_int::MAX as u32 {
+        return;
+    }
+    let pgid = -(child_id as c_int);
+    unsafe {
+        let _ = kill(pgid, signal);
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_process_group(_child_id: u32, _signal: i32) {}
+
+fn terminate_child_tree(child: &mut Child, child_id: u32) {
+    #[cfg(unix)]
+    {
+        signal_process_group(child_id, SIGTERM);
+        let _ = child.kill();
+        thread::sleep(Duration::from_millis(50));
+        signal_process_group(child_id, SIGKILL);
+        let _ = child.kill();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+}
+
+fn wait_child_until(child: &mut Child, deadline: Instant) -> Result<Option<ExitStatus>, String> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(Some(status)),
+            Ok(None) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return Ok(None);
+                }
+                let remaining = deadline.saturating_duration_since(now);
+                thread::sleep(remaining.min(Duration::from_millis(10)));
+            }
+            Err(err) => return Err(format!("failed to wait for swarm command: {err}")),
+        }
+    }
+}
+
+fn spawn_pipe_reader<R>(mut reader: R, path: PathBuf, label: &'static str) -> Receiver<Result<u64, String>>
+where
+    R: Read + Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let result = (|| -> Result<u64, String> {
+            let mut file = File::create(&path)
+                .map_err(|err| format!("failed to create swarm {label} artifact `{}`: {err}", path.display()))?;
+            let mut buffer = [0u8; 8192];
+            let mut total = 0u64;
+            loop {
+                let read = reader
+                    .read(&mut buffer)
+                    .map_err(|err| format!("failed to read swarm {label}: {err}"))?;
+                if read == 0 {
+                    break;
+                }
+                file.write_all(&buffer[..read])
+                    .map_err(|err| format!("failed to write swarm {label} artifact `{}`: {err}", path.display()))?;
+                file.flush()
+                    .map_err(|err| format!("failed to flush swarm {label} artifact `{}`: {err}", path.display()))?;
+                total += read as u64;
+            }
+            Ok(total)
+        })();
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn try_pipe_reader(receiver: &Receiver<Result<u64, String>>, label: &str) -> Option<(bool, Option<String>)> {
+    match receiver.try_recv() {
+        Ok(Ok(_)) => Some((true, None)),
+        Ok(Err(message)) => Some((true, Some(message))),
+        Err(TryRecvError::Empty) => None,
+        Err(TryRecvError::Disconnected) => Some((true, Some(format!("swarm {label} reader disconnected")))),
+    }
+}
+
+fn wait_pipe_readers_until(
+    stdout_rx: &Receiver<Result<u64, String>>,
+    stderr_rx: &Receiver<Result<u64, String>>,
+    deadline: Instant,
+    stdout_reader_finished: &mut bool,
+    stdout_reader_error: &mut Option<String>,
+    stderr_reader_finished: &mut bool,
+    stderr_reader_error: &mut Option<String>,
+) {
+    loop {
+        if !*stdout_reader_finished {
+            if let Some((finished, error)) = try_pipe_reader(stdout_rx, "stdout") {
+                *stdout_reader_finished = finished;
+                *stdout_reader_error = error;
+            }
+        }
+        if !*stderr_reader_finished {
+            if let Some((finished, error)) = try_pipe_reader(stderr_rx, "stderr") {
+                *stderr_reader_finished = finished;
+                *stderr_reader_error = error;
+            }
+        }
+        if *stdout_reader_finished && *stderr_reader_finished {
+            return;
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            if !*stdout_reader_finished && stdout_reader_error.is_none() {
+                *stdout_reader_error = Some("swarm stdout reader did not finish before the bounded wait elapsed".to_owned());
+            }
+            if !*stderr_reader_finished && stderr_reader_error.is_none() {
+                *stderr_reader_error = Some("swarm stderr reader did not finish before the bounded wait elapsed".to_owned());
+            }
+            return;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        thread::sleep(remaining.min(Duration::from_millis(10)));
+    }
+}
+
+fn run_command_with_timeout_to_artifacts(
+    cwd: &Path,
+    command: &[String],
+    stdout_path: &Path,
+    stderr_path: &Path,
+    timeout_ms: i64,
+) -> Result<NativeCommandOutcome, String> {
+    fs::write(stdout_path, [])
+        .map_err(|err| format!("failed to initialize swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
+    fs::write(stderr_path, [])
+        .map_err(|err| format!("failed to initialize swarm stderr artifact `{}`: {err}", stderr_path.display()))?;
+
+    let mut process = ProcessCommand::new(&command[0]);
+    process
+        .args(&command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_killable_command(&mut process);
+
+    let mut child = process
+        .spawn()
+        .map_err(|err| format!("failed to execute swarm command `{}`: {err}", command[0]))?;
+    let child_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture swarm stdout".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture swarm stderr".to_owned())?;
+    let stdout_rx = spawn_pipe_reader(stdout, stdout_path.to_path_buf(), "stdout");
+    let stderr_rx = spawn_pipe_reader(stderr, stderr_path.to_path_buf(), "stderr");
+
+    let deadline = Instant::now() + timeout_duration(timeout_ms);
+    let mut timed_out = false;
+    let mut status = match wait_child_until(&mut child, deadline)? {
+        Some(status) => Some(status),
+        None => {
+            timed_out = true;
+            terminate_child_tree(&mut child, child_id);
+            wait_child_until(&mut child, Instant::now() + Duration::from_millis(200))?
+        }
+    };
+    if timed_out {
+        terminate_child_tree(&mut child, child_id);
+        if status.is_none() {
+            status = wait_child_until(&mut child, Instant::now() + Duration::from_millis(200))?;
+        }
+    }
+
+    let mut stdout_reader_finished = false;
+    let mut stdout_reader_error = None;
+    let mut stderr_reader_finished = false;
+    let mut stderr_reader_error = None;
+    let reader_deadline = if timed_out {
+        Instant::now() + reader_timeout_grace_duration()
+    } else {
+        deadline
+    };
+    wait_pipe_readers_until(
+        &stdout_rx,
+        &stderr_rx,
+        reader_deadline,
+        &mut stdout_reader_finished,
+        &mut stdout_reader_error,
+        &mut stderr_reader_finished,
+        &mut stderr_reader_error,
+    );
+    if !timed_out && (!stdout_reader_finished || !stderr_reader_finished) {
+        timed_out = true;
+        terminate_child_tree(&mut child, child_id);
+        wait_pipe_readers_until(
+            &stdout_rx,
+            &stderr_rx,
+            Instant::now() + reader_timeout_grace_duration(),
+            &mut stdout_reader_finished,
+            &mut stdout_reader_error,
+            &mut stderr_reader_finished,
+            &mut stderr_reader_error,
+        );
+    }
+    let mut reader_errors = Vec::new();
+    if let Some(message) = stdout_reader_error {
+        reader_errors.push(message);
+    }
+    if let Some(message) = stderr_reader_error {
+        reader_errors.push(message);
+    }
+
+    let exit_code = if timed_out {
+        124
+    } else {
+        status.and_then(|value| value.code()).unwrap_or(1) as i64
+    };
+    let status_text = if timed_out {
+        "timed_out"
+    } else if exit_code == 0 {
+        "passed"
+    } else {
+        "failed"
+    };
+    Ok(NativeCommandOutcome {
+        exit_code,
+        status: status_text.to_owned(),
+        timed_out,
+        stdout_reader_finished,
+        stderr_reader_finished,
+        reader_errors,
+    })
+}
+
 fn run_native_command(
     connection: &mut Connection,
     paths: &SwarmRuntimePaths,
@@ -3084,6 +3407,7 @@ fn run_native_command(
     name: &str,
     cwd: &Path,
     command: &[String],
+    timeout_ms: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let at_ms = now_ms();
     let (_, spec) = if role == "verifier" {
@@ -3121,34 +3445,57 @@ fn run_native_command(
         json!({ "runId": run_id, "cwd": cwd.display().to_string(), "command": command }),
     )?;
 
-    let output = ProcessCommand::new(&command[0])
-        .args(&command[1..])
-        .current_dir(cwd)
-        .output()
-        .map_err(|err| format!("failed to execute swarm {role} command `{}`: {err}", command[0]))?;
-    let ended_at_ms = now_ms();
     let stdout_path = next_artifact_path(paths, task_id, run_id, "stdout");
     let stderr_path = next_artifact_path(paths, task_id, run_id, "stderr");
-    fs::write(&stdout_path, &output.stdout)
-        .map_err(|err| format!("failed to write swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
-    fs::write(&stderr_path, &output.stderr)
-        .map_err(|err| format!("failed to write swarm stderr artifact `{}`: {err}", stderr_path.display()))?;
+    let outcome = if let Some(timeout_ms) = timeout_ms {
+        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms)?
+    } else {
+        let output = ProcessCommand::new(&command[0])
+            .args(&command[1..])
+            .current_dir(cwd)
+            .output()
+            .map_err(|err| format!("failed to execute swarm {role} command `{}`: {err}", command[0]))?;
+        fs::write(&stdout_path, &output.stdout)
+            .map_err(|err| format!("failed to write swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
+        fs::write(&stderr_path, &output.stderr)
+            .map_err(|err| format!("failed to write swarm stderr artifact `{}`: {err}", stderr_path.display()))?;
+        let exit_code = output.status.code().unwrap_or(1) as i64;
+        NativeCommandOutcome {
+            exit_code,
+            status: if output.status.success() { "passed" } else { "failed" }.to_owned(),
+            timed_out: false,
+            stdout_reader_finished: true,
+            stderr_reader_finished: true,
+            reader_errors: Vec::new(),
+        }
+    };
+    let ended_at_ms = now_ms();
+    let artifact_metadata = json!({
+        "runId": run_id,
+        "role": role,
+        "name": name,
+        "timedOut": outcome.timed_out,
+        "timeoutMs": timeout_ms.unwrap_or(0),
+        "stdoutReaderFinished": outcome.stdout_reader_finished,
+        "stderrReaderFinished": outcome.stderr_reader_finished,
+        "readerErrors": outcome.reader_errors.clone(),
+    });
     let stdout_artifact_id = create_artifact(
         connection,
         task_id,
         "stdout",
         &stdout_path,
-        json!({ "runId": run_id, "role": role, "name": name }),
+        artifact_metadata.clone(),
     )?;
     let stderr_artifact_id = create_artifact(
         connection,
         task_id,
         "stderr",
         &stderr_path,
-        json!({ "runId": run_id, "role": role, "name": name }),
+        artifact_metadata.clone(),
     )?;
-    let exit_code = output.status.code().unwrap_or(1) as i64;
-    let status = if output.status.success() { "passed" } else { "failed" };
+    let exit_code = outcome.exit_code;
+    let status = outcome.status.as_str();
     finish_run(connection, run_id, exit_code, status, stdout_artifact_id, stderr_artifact_id)?;
     let _ = record_swarm_event(
         connection,
@@ -3160,6 +3507,11 @@ fn run_native_command(
             "runId": run_id,
             "exitCode": exit_code,
             "status": status,
+            "timedOut": outcome.timed_out,
+            "timeoutMs": timeout_ms.unwrap_or(0),
+            "stdoutReaderFinished": outcome.stdout_reader_finished,
+            "stderrReaderFinished": outcome.stderr_reader_finished,
+            "readerErrors": outcome.reader_errors.clone(),
             "stdoutArtifactPath": stdout_path.display().to_string(),
             "stderrArtifactPath": stderr_path.display().to_string()
         }),
@@ -3193,6 +3545,7 @@ fn run_json(run: &SwarmRunRecord) -> Value {
         "command": run.command,
         "exitCode": run.exit_code,
         "status": run.status,
+        "timedOut": run.status == "timed_out",
         "startedAtMs": run.started_at_ms,
         "endedAtMs": run.ended_at_ms,
         "stdoutArtifactPath": run.stdout_artifact_path,
@@ -3811,9 +4164,10 @@ fn execute_tool_run(
     actor: &str,
     cwd: &Path,
     command: &[String],
+    timeout_ms: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let (paths, mut connection) = open_swarm_connection(root)?;
-    run_native_command(&mut connection, &paths, task_id, actor, "tool", &command[0], cwd, command)
+    run_native_command(&mut connection, &paths, task_id, actor, "tool", &command[0], cwd, command, timeout_ms)
 }
 
 fn handle_tool_run(
@@ -3823,8 +4177,9 @@ fn handle_tool_run(
     actor: &str,
     cwd: &Path,
     command: &[String],
+    timeout_ms: Option<i64>,
 ) -> ExitCode {
-    match execute_tool_run(root, task_id, actor, cwd, command) {
+    match execute_tool_run(root, task_id, actor, cwd, command, timeout_ms) {
         Ok(run) => {
             print_output(&run_json(&run), json_mode);
             if run.exit_code == 0 {
@@ -3844,6 +4199,7 @@ fn execute_verifier_run(
     verifier_name: &str,
     cwd: &Path,
     command: &[String],
+    timeout_ms: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let (paths, mut connection) = open_swarm_connection(root)?;
     run_native_command(
@@ -3855,6 +4211,7 @@ fn execute_verifier_run(
         verifier_name,
         cwd,
         command,
+        timeout_ms,
     )
 }
 
@@ -3866,8 +4223,9 @@ fn handle_verifier_run(
     verifier_name: &str,
     cwd: &Path,
     command: &[String],
+    timeout_ms: Option<i64>,
 ) -> ExitCode {
-    match execute_verifier_run(root, task_id, actor, verifier_name, cwd, command) {
+    match execute_verifier_run(root, task_id, actor, verifier_name, cwd, command, timeout_ms) {
         Ok(run) => {
             print_output(&run_json(&run), json_mode);
             if run.exit_code == 0 {
@@ -4059,8 +4417,8 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
         | SwarmCommand::Approvals { .. }
         | SwarmCommand::Artifacts { .. }
         | SwarmCommand::ManagerNext { .. } => Ok((ExitCode::SUCCESS, execute_query_command(command)?)),
-        SwarmCommand::ToolRun { root, task_id, actor, cwd, command } => {
-            let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command)?;
+        SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, command } => {
+            let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command, timeout_ms)?;
             let exit_code = if run.exit_code == 0 {
                 ExitCode::SUCCESS
             } else {
@@ -4068,8 +4426,8 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             };
             Ok((exit_code, run_json(&run)))
         }
-        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, command } => {
-            let run = execute_verifier_run(&root, &task_id, &actor, &verifier_name, &cwd, &command)?;
+        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, command } => {
+            let run = execute_verifier_run(&root, &task_id, &actor, &verifier_name, &cwd, &command, timeout_ms)?;
             let exit_code = if run.exit_code == 0 {
                 ExitCode::SUCCESS
             } else {
@@ -4306,12 +4664,25 @@ pub fn builtin_swarm_tool_run(
     cwd: &str,
     command: &[String],
 ) -> Result<String, String> {
+    builtin_swarm_tool_run_with_timeout(root, task_id, actor, cwd, 0, command)
+}
+
+pub fn builtin_swarm_tool_run_with_timeout(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    cwd: &str,
+    timeout_ms: i64,
+    command: &[String],
+) -> Result<String, String> {
+    let timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
     render_builtin_json(run_json(&execute_tool_run(
         Path::new(root),
         task_id,
         actor,
         Path::new(cwd),
         command,
+        timeout_ms,
     )?))
 }
 
@@ -4323,6 +4694,19 @@ pub fn builtin_swarm_verifier_run(
     cwd: &str,
     command: &[String],
 ) -> Result<String, String> {
+    builtin_swarm_verifier_run_with_timeout(root, task_id, actor, verifier_name, cwd, 0, command)
+}
+
+pub fn builtin_swarm_verifier_run_with_timeout(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    verifier_name: &str,
+    cwd: &str,
+    timeout_ms: i64,
+    command: &[String],
+) -> Result<String, String> {
+    let timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
     render_builtin_json(run_json(&execute_verifier_run(
         Path::new(root),
         task_id,
@@ -4330,6 +4714,7 @@ pub fn builtin_swarm_verifier_run(
         verifier_name,
         Path::new(cwd),
         command,
+        timeout_ms,
     )?))
 }
 
@@ -4426,7 +4811,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     fn unique_root(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -4571,6 +4956,145 @@ mod tests {
             )
             .expect("count mergegate events");
         assert_eq!(event_count, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn timed_verifier_kills_pipe_holding_descendant_and_finishes_run() {
+        let root = unique_root("timeout-descendant");
+        let root_text = root.to_string_lossy().to_string();
+        fs::create_dir_all(&root).expect("create root");
+        let hold_path = root.join("held-open.txt");
+        fs::write(&hold_path, b"").expect("write hold file");
+        let hold_text = hold_path.to_string_lossy().to_string();
+
+        let bootstrap_args = vec!["claspc".to_owned(), "swarm".to_owned(), "bootstrap".to_owned(), root_text.clone(), "repair".to_owned()];
+        let lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "repair".to_owned()];
+        assert_eq!(maybe_run_swarm(&bootstrap_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&lease_args), Some(ExitCode::SUCCESS));
+
+        let verifier_args = vec![
+            "claspc".to_owned(),
+            "--json".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "pipe-timeout".to_owned(),
+            "--timeout-ms".to_owned(),
+            "200".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf timed-out; printf timed-err >&2; tail -f \"$1\" >&1 2>&2 & wait".to_owned(),
+            "bash".to_owned(),
+            hold_text,
+        ];
+        let started = Instant::now();
+        assert_eq!(maybe_run_swarm(&verifier_args), Some(ExitCode::from(124)));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "timed verifier exceeded bounded timeout: {:?}",
+            started.elapsed()
+        );
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let (exit_code, status, stdout_path, stderr_path): (i64, String, String, String) = connection
+            .query_row(
+                "
+                SELECT runs.exit_code, runs.status, stdout.path, stderr.path
+                FROM swarm_runs AS runs
+                LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
+                LEFT JOIN swarm_artifacts AS stderr ON stderr.id = runs.stderr_artifact_id
+                WHERE runs.task_id = 'repair' AND runs.role = 'verifier' AND runs.name = 'pipe-timeout'
+                ORDER BY runs.id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("load timed run");
+        assert_eq!(exit_code, 124);
+        assert_eq!(status, "timed_out");
+        assert!(fs::read_to_string(stdout_path).expect("read stdout").contains("timed-out"));
+        assert!(fs::read_to_string(stderr_path).expect("read stderr").contains("timed-err"));
+
+        let finish_payload: String = connection
+            .query_row(
+                "
+                SELECT payload_json
+                FROM swarm_events
+                WHERE task_id = 'repair' AND kind = 'verifier_run_finished'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load finished event");
+        assert!(finish_payload.contains("\"timedOut\":true"));
+        assert!(finish_payload.contains("\"exitCode\":124"));
+
+        let detached_hold_path = root.join("detached-held-open.txt");
+        fs::write(&detached_hold_path, b"").expect("write detached hold file");
+        let detached_hold_text = detached_hold_path.to_string_lossy().to_string();
+        let detached_bootstrap_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "bootstrap".to_owned(),
+            root_text.clone(),
+            "tool-detached".to_owned(),
+        ];
+        let detached_lease_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "lease".to_owned(),
+            root_text.clone(),
+            "tool-detached".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&detached_bootstrap_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&detached_lease_args), Some(ExitCode::SUCCESS));
+        let detached_tool_args = vec![
+            "claspc".to_owned(),
+            "--json".to_owned(),
+            "swarm".to_owned(),
+            "tool".to_owned(),
+            root_text.clone(),
+            "tool-detached".to_owned(),
+            "--timeout-ms".to_owned(),
+            "1000".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf detached-out; printf detached-err >&2; tail -f \"$1\" >&1 2>&2 & exit 0".to_owned(),
+            "bash".to_owned(),
+            detached_hold_text,
+        ];
+        let detached_started = Instant::now();
+        assert_eq!(maybe_run_swarm(&detached_tool_args), Some(ExitCode::from(124)));
+        assert!(
+            detached_started.elapsed() < Duration::from_secs(4),
+            "detached pipe holder exceeded bounded reader timeout: {:?}",
+            detached_started.elapsed()
+        );
+        let (detached_exit_code, detached_status): (i64, String) = connection
+            .query_row(
+                "
+                SELECT exit_code, status
+                FROM swarm_runs
+                WHERE task_id = 'tool-detached' AND role = 'tool'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("load detached timed run");
+        assert_eq!(detached_exit_code, 124);
+        assert_eq!(detached_status, "timed_out");
 
         let _ = fs::remove_dir_all(root);
     }

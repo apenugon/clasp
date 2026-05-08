@@ -321,6 +321,7 @@ swarm_loop_event_log="$swarm_loop_state_root/events.jsonl"
 swarm_sqlite_state_root="$test_root/swarm-sqlite/state"
 swarm_sqlite_db="$swarm_sqlite_state_root/swarm.db"
 swarm_native_run_state_root="$test_root/swarm-native-run-state"
+swarm_timed_run_state_root="$test_root/swarm-timed-run-state"
 swarm_native_binary="$test_root/bin/swarm-native"
 swarm_native_state_root="$test_root/swarm-native-state"
 swarm_feedback_loop_binary="$test_root/bin/swarm-feedback-loop"
@@ -1606,6 +1607,62 @@ swarm_sqlite_artifacts_output="$("$claspc_bin" --json swarm artifacts "$swarm_sq
 printf '%s\n' "$swarm_sqlite_artifacts_output" | grep -F '"kind":"stdout"' >/dev/null
 printf '%s\n' "$swarm_sqlite_artifacts_output" | grep -F '"kind":"stderr"' >/dev/null
 
+swarm_sqlite_tool_timeout_hold="$test_root_abs/swarm-sqlite-tool-timeout-held.txt"
+printf '' >"$swarm_sqlite_tool_timeout_hold"
+swarm_sqlite_tool_timeout_bootstrap_output="$("$claspc_bin" --json swarm bootstrap "$swarm_sqlite_state_root" tool-timeout)"
+printf '%s\n' "$swarm_sqlite_tool_timeout_bootstrap_output" | grep -F '"taskId":"tool-timeout"' >/dev/null
+swarm_sqlite_tool_timeout_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$swarm_sqlite_state_root" tool-timeout)"
+printf '%s\n' "$swarm_sqlite_tool_timeout_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
+set +e
+swarm_sqlite_tool_timeout_output="$(
+  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm tool "$swarm_sqlite_state_root" tool-timeout --cwd "$project_root" --timeout-ms 200 -- \
+    bash -lc 'printf tool-timeout-out; printf tool-timeout-err >&2; tail -f "$1" >&1 2>&2 & wait' bash "$swarm_sqlite_tool_timeout_hold" 2>&1
+)"
+swarm_sqlite_tool_timeout_status=$?
+set -e
+[[ "$swarm_sqlite_tool_timeout_status" == "124" ]]
+printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"role":"tool"' >/dev/null
+printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"status":"timed_out"' >/dev/null
+printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"exitCode":124' >/dev/null
+printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"timedOut":true' >/dev/null
+
+swarm_sqlite_timeout_hold="$test_root_abs/swarm-sqlite-timeout-held.txt"
+printf '' >"$swarm_sqlite_timeout_hold"
+swarm_sqlite_timeout_bootstrap_output="$("$claspc_bin" --json swarm bootstrap "$swarm_sqlite_state_root" pipe-timeout)"
+printf '%s\n' "$swarm_sqlite_timeout_bootstrap_output" | grep -F '"taskId":"pipe-timeout"' >/dev/null
+swarm_sqlite_timeout_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm lease "$swarm_sqlite_state_root" pipe-timeout)"
+printf '%s\n' "$swarm_sqlite_timeout_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
+set +e
+swarm_sqlite_timeout_output="$(
+  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" pipe-timeout pipe-holder --cwd "$project_root" --timeout-ms 200 -- \
+    bash -lc 'printf timeout-out; printf timeout-err >&2; tail -f "$1" >&1 2>&2 & wait' bash "$swarm_sqlite_timeout_hold" 2>&1
+)"
+swarm_sqlite_timeout_status=$?
+set -e
+[[ "$swarm_sqlite_timeout_status" == "124" ]]
+printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"status":"timed_out"' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"exitCode":124' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"timedOut":true' >/dev/null
+swarm_sqlite_timeout_stdout_path="$(printf '%s\n' "$swarm_sqlite_timeout_output" | sed -n 's/.*"stdoutArtifactPath":"\([^"]*\)".*/\1/p')"
+swarm_sqlite_timeout_stderr_path="$(printf '%s\n' "$swarm_sqlite_timeout_output" | sed -n 's/.*"stderrArtifactPath":"\([^"]*\)".*/\1/p')"
+[[ -f "$swarm_sqlite_timeout_stdout_path" ]]
+[[ -f "$swarm_sqlite_timeout_stderr_path" ]]
+grep -F 'timeout-out' "$swarm_sqlite_timeout_stdout_path" >/dev/null
+grep -F 'timeout-err' "$swarm_sqlite_timeout_stderr_path" >/dev/null
+swarm_sqlite_timeout_runs_output="$("$claspc_bin" --json swarm runs "$swarm_sqlite_state_root" pipe-timeout)"
+printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"name":"pipe-holder"' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"status":"timed_out"' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"timedOut":true' >/dev/null
+swarm_sqlite_timeout_tail_output="$("$claspc_bin" --json swarm tail "$swarm_sqlite_state_root" pipe-timeout --limit 5)"
+printf '%s\n' "$swarm_sqlite_timeout_tail_output" | grep -F '"kind":"verifier_run_finished"' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_tail_output" | grep -F '"timedOut":true' >/dev/null
+set +e
+swarm_sqlite_timeout_mergegate_output="$("$claspc_bin" --json swarm mergegate decide "$swarm_sqlite_state_root" pipe-timeout trunk pipe-holder 2>&1)"
+swarm_sqlite_timeout_mergegate_status=$?
+set -e
+[[ "$swarm_sqlite_timeout_mergegate_status" == "1" ]]
+printf '%s\n' "$swarm_sqlite_timeout_mergegate_output" | grep -F '"verdict":"fail"' >/dev/null
+
 swarm_native_run_output="$(
   CLASP_SWARM_CWD="$project_root" \
   CLASP_SWARM_ACTOR=manager \
@@ -1683,6 +1740,19 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"failedToolRunStatus":"faile
 printf '%s\n' "$swarm_native_run_output" | grep -F '"failedVerifier":"native-smoke-fail","failedVerifierStatus":"failed","failedVerifierRequiredVerifiers":["native-smoke-fail"]' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"],"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke","native-regression"],"mergeReadyVerdict":"missing"' >/dev/null
+
+swarm_timed_run_output="$(
+  CLASP_SWARM_CWD="$project_root" \
+  "$claspc_bin" run "$project_root/examples/swarm-native/TimedRuns.clasp" -- "$swarm_timed_run_state_root"
+)"
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"objective":"timed-runs"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"verifier":"pipe-timeout"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"runTimedOut":true' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"runStatus":"timed_out"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"runExitCode":124' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"mergeVerdict":"fail"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"status":"timed_out"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"timedOut":true' >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
 [[ -x "$swarm_native_binary" ]]

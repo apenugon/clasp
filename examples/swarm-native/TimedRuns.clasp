@@ -1,0 +1,133 @@
+module Main
+
+import Swarm
+
+record TimedRunsReport = {
+  objective : Str,
+  task : Str,
+  verifier : Str,
+  run : SwarmRun,
+  runs : [SwarmRun],
+  tail : [SwarmEvent],
+  mergeDecision : SwarmMergeDecision,
+  runTimedOut : Bool,
+  runStatus : Str,
+  runExitCode : Int,
+  mergeVerdict : Str
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-timed-runs-state"
+  else
+    pathJoin argv
+
+stateRoot : SwarmRoot
+stateRoot = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "timed-runs"
+
+taskId : Str
+taskId = "pipe-holder"
+
+verifierName : Str
+verifierName = "pipe-timeout"
+
+actorName : Str
+actorName = "manager"
+
+workspaceCwd : Str
+workspaceCwd = match envVar "CLASP_SWARM_CWD" {
+  Ok value -> value,
+  Err message -> "."
+}
+
+holdPath : Str
+holdPath = pathJoin [stateRootPath, "held-open.txt"]
+
+objectiveRef : ObjectiveHandle
+objectiveRef = objectiveHandle stateRoot objectiveId
+
+taskRef : TaskHandle
+taskRef = taskHandle stateRoot taskId actorName
+
+timeoutCommand : SwarmCommand
+timeoutCommand =
+  commandSpec workspaceCwd [
+    "bash",
+    "-lc",
+    "printf timed-out; printf timed-err >&2; tail -f \"$1\" >&1 2>&2 & wait",
+    "bash",
+    holdPath
+  ]
+
+errorText : Str -> Str
+errorText message = textConcat ["ERROR:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok created ->
+      match writeFile holdPath "" {
+        Ok written ->
+          match objectiveCreate stateRoot objectiveId "Exercise timeout-aware native swarm runs from ordinary Clasp code." 1 4 {
+            Ok objectiveValue ->
+              match taskCreate objectiveRef taskId "Run a verifier whose descendant keeps stdout and stderr open." [] 4 60000 {
+                Ok taskValue ->
+                  match policySet taskRef "trunk" [] [verifierName] {
+                    Ok policyValue ->
+                      match lease taskRef {
+                        Ok leaseValue ->
+                          match verifierRunWithTimeout taskRef verifierName timeoutCommand 200 {
+                            Ok runValue ->
+                              match runs taskRef {
+                                Ok runsValue ->
+                                  match tail taskRef 10 {
+                                    Ok tailValue ->
+                                      match mergegateDecide taskRef "trunk" [verifierName] {
+                                        Ok mergeDecisionValue ->
+                                          encode (TimedRunsReport {
+                                            objective = objectiveId,
+                                            task = taskId,
+                                            verifier = verifierName,
+                                            run = runValue,
+                                            runs = runsValue,
+                                            tail = tailValue,
+                                            mergeDecision = mergeDecisionValue,
+                                            runTimedOut = runValue.timedOut,
+                                            runStatus = runValue.status,
+                                            runExitCode = runValue.exitCode,
+                                            mergeVerdict = mergeDecisionValue.verdict
+                                          }),
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }
