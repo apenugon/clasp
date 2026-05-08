@@ -47,11 +47,39 @@ resumePlannerWave state =
       Ok taskValues ->
         let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave state.wave) in
         if taskStatusIsActive plannerTaskStatus then {
-          let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
-          if traceError != "" then
-            plannerFailure "manager trace write failed" traceError
-          else
-            encode (statusView state)
+          match managerNext objectiveRef {
+            Ok action -> {
+              let actionRecoversPlanner =
+                if action.action == "recover-lease" then
+                  action.taskId == plannerTaskIdForWave state.wave
+                else
+                  false in
+              if actionRecoversPlanner then {
+                let traceError =
+                  appendManagerTrace
+                    (textConcat ["planner-wave-", encode state.wave, ":resume-recover-expired-planner-lease:", plannerTaskStatus]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else
+                  runPlanner
+              } else {
+                let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else
+                  encode (statusView state)
+              }
+            },
+            Err message -> {
+              let traceError =
+                appendManagerTrace
+                  (textConcat ["planner-wave-", encode state.wave, ":resume-manager-next-failed:", message]) in
+              if traceError != "" then
+                plannerFailure "manager trace write failed" traceError
+              else
+                encode (statusView state)
+            }
+          }
         } else
           runPlanner
     }

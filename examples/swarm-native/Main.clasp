@@ -29,12 +29,31 @@ record FailedVerifierReport = {
   managerAfterReview : SwarmManagerAction
 }
 
+record FailedVerificationPlanReport = {
+  objective : Str,
+  task : Str,
+  plan : VerificationPlan,
+  objectiveCreate : SwarmObjective,
+  taskCreate : SwarmTask,
+  policy : SwarmPolicy,
+  toolStep : ToolStepResult,
+  verificationPlanResult : VerificationPlanResult,
+  managerAfterPlan : SwarmManagerAction,
+  reviewStep : ReviewStepResult,
+  objectiveStatus : SwarmObjectiveStatus,
+  managerAfterReview : SwarmManagerAction
+}
+
 record ManagerTypedInspection = {
   passedTaskId : Str,
   passedTaskStatus : Str,
   passedVerifier : Str,
   passedVerifierStatus : Str,
   passedMailboxVerifierStatus : Str,
+  passedPlanRequiredVerifiers : [Str],
+  passedPlanPassed : Bool,
+  passedPlanFailedVerifiers : [Str],
+  passedPlanArtifactCount : Int,
   blockedAction : Str,
   blockedTaskId : Str,
   blockedTaskStatus : Str,
@@ -45,6 +64,12 @@ record ManagerTypedInspection = {
   failedVerifier : Str,
   failedVerifierStatus : Str,
   failedVerifierRequiredVerifiers : [Str],
+  failedPlanRequiredVerifiers : [Str],
+  failedPlanPassed : Bool,
+  failedPlanFailedVerifiers : [Str],
+  failedPlanLatestVerifier : Str,
+  failedPlanLatestVerifierStatus : Str,
+  failedPlanMergeVerdict : Str,
   mergeReadyAction : Str,
   mergeReadyTaskId : Str,
   mergeReadyRequiredApprovals : [Str],
@@ -66,7 +91,8 @@ record NativeSwarmReport = {
   managerAfterPlan : SwarmManagerAction,
   repairStep : ToolStepResult,
   managerAfterRepair : SwarmManagerAction,
-  verifierStep : VerifierStepResult,
+  verificationPlan : VerificationPlan,
+  verificationPlanResult : VerificationPlanResult,
   managerAfterVerifier : SwarmManagerAction,
   reviewStep : ReviewStepResult,
   objectiveStatus : SwarmObjectiveStatus,
@@ -76,6 +102,7 @@ record NativeSwarmReport = {
   managerAfter : SwarmManagerAction,
   failedTool : FailedToolReport,
   failedVerifier : FailedVerifierReport,
+  failedVerificationPlan : FailedVerificationPlanReport,
   typedInspection : ManagerTypedInspection
 }
 
@@ -136,8 +163,24 @@ plannerCommand = commandSpec workspaceCwd ["bash", "-lc", "printf planner-ok"]
 builderCommand : SwarmCommand
 builderCommand = commandSpec workspaceCwd ["bash", "-lc", "printf builder-ok"]
 
-verifierCommand : SwarmCommand
-verifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-ok"]
+smokeVerifierName : Str
+smokeVerifierName = "native-smoke"
+
+regressionVerifierName : Str
+regressionVerifierName = "native-regression"
+
+smokeVerifierCommand : SwarmCommand
+smokeVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-ok"]
+
+regressionVerifierCommand : SwarmCommand
+regressionVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf regression-ok"]
+
+repairVerificationPlan : VerificationPlan
+repairVerificationPlan =
+  verificationPlan "focused-native" [
+    verificationCommand smokeVerifierName smokeVerifierCommand,
+    verificationCommand regressionVerifierName regressionVerifierCommand
+  ]
 
 failedToolObjectiveId : Str
 failedToolObjectiveId = "failure-tool"
@@ -181,6 +224,40 @@ verifierSetupCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier
 failedVerifierCommand : SwarmCommand
 failedVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf failed-verifier-out; printf failed-verifier-err >&2; exit 3"]
 
+failedPlanObjectiveId : Str
+failedPlanObjectiveId = "failure-plan"
+
+failedPlanTaskId : Str
+failedPlanTaskId = "verification-plan-fails"
+
+failedPlanPassingVerifierName : Str
+failedPlanPassingVerifierName = "native-plan-pass"
+
+failedPlanFailingVerifierName : Str
+failedPlanFailingVerifierName = "native-plan-fail"
+
+failedPlanDeadlineAtMs : Int
+failedPlanDeadlineAtMs = 4102444750000
+
+failedPlanObjectiveRef : ObjectiveHandle
+failedPlanObjectiveRef = objectiveHandle stateRoot failedPlanObjectiveId
+
+failedPlanRef : TaskHandle
+failedPlanRef = taskHandle stateRoot failedPlanTaskId actorName
+
+failedPlanPassingVerifierCommand : SwarmCommand
+failedPlanPassingVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf plan-pass-ok"]
+
+failedPlanFailingVerifierCommand : SwarmCommand
+failedPlanFailingVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf plan-fail-out; printf plan-fail-err >&2; exit 4"]
+
+failedVerificationPlan : VerificationPlan
+failedVerificationPlan =
+  verificationPlan "focused-native-failure" [
+    verificationCommand failedPlanPassingVerifierName failedPlanPassingVerifierCommand,
+    verificationCommand failedPlanFailingVerifierName failedPlanFailingVerifierCommand
+  ]
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
@@ -189,6 +266,9 @@ failedToolReportResultError message = Err message
 
 failedVerifierReportResultError : Str -> Result FailedVerifierReport
 failedVerifierReportResultError message = Err message
+
+failedVerificationPlanReportResultError : Str -> Result FailedVerificationPlanReport
+failedVerificationPlanReportResultError message = Err message
 
 failedToolScenario : Result FailedToolReport
 failedToolScenario =
@@ -301,15 +381,77 @@ failedVerifierScenario =
       failedVerifierReportResultError message
   }
 
+failedVerificationPlanScenario : Result FailedVerificationPlanReport
+failedVerificationPlanScenario =
+  match objectiveCreateWithDeadline stateRoot failedPlanObjectiveId "Demonstrate failed aggregate verification plan semantics through the ordinary Swarm helper API." 1 4 failedPlanDeadlineAtMs {
+    Ok objectiveCreateValue ->
+      match taskCreateWithDeadline failedPlanObjectiveRef failedPlanTaskId "Complete setup, then record one passing and one failing verifier through a typed plan." [] 3 failedPlanDeadlineAtMs 60000 {
+        Ok taskCreateValue ->
+          match policySetForVerificationPlan failedPlanRef "trunk" ["merge-ready"] failedVerificationPlan {
+            Ok policyValue ->
+              match runToolStep failedPlanRef verifierSetupCommand mailboxLimit {
+                Ok toolStepValue ->
+                  match executeVerificationPlan failedPlanRef failedVerificationPlan mailboxLimit {
+                    Ok verificationPlanValue ->
+                      match managerNext failedPlanObjectiveRef {
+                        Ok managerAfterPlanValue ->
+                          match approveAndMergeVerificationPlan failedPlanRef "merge-ready" "trunk" failedVerificationPlan mailboxLimit {
+                            Ok reviewStepValue ->
+                              match objectiveStatus failedPlanObjectiveRef {
+                                Ok objectiveStatusValue ->
+                                  match managerNext failedPlanObjectiveRef {
+                                    Ok managerAfterReviewValue ->
+                                      Ok (FailedVerificationPlanReport {
+                                        objective = failedPlanObjectiveId,
+                                        task = failedPlanTaskId,
+                                        plan = failedVerificationPlan,
+                                        objectiveCreate = objectiveCreateValue,
+                                        taskCreate = taskCreateValue,
+                                        policy = policyValue,
+                                        toolStep = toolStepValue,
+                                        verificationPlanResult = verificationPlanValue,
+                                        managerAfterPlan = managerAfterPlanValue,
+                                        reviewStep = reviewStepValue,
+                                        objectiveStatus = objectiveStatusValue,
+                                        managerAfterReview = managerAfterReviewValue
+                                      }),
+                                    Err message ->
+                                      failedVerificationPlanReportResultError message
+                                  },
+                                Err message ->
+                                  failedVerificationPlanReportResultError message
+                              },
+                            Err message ->
+                              failedVerificationPlanReportResultError message
+                          },
+                        Err message ->
+                          failedVerificationPlanReportResultError message
+                      },
+                    Err message ->
+                      failedVerificationPlanReportResultError message
+                  },
+                Err message ->
+                  failedVerificationPlanReportResultError message
+              },
+            Err message ->
+              failedVerificationPlanReportResultError message
+          },
+        Err message ->
+          failedVerificationPlanReportResultError message
+      },
+    Err message ->
+      failedVerificationPlanReportResultError message
+  }
+
 main : Str
 main =
   match objectiveCreateWithDeadline stateRoot objectiveId "Run a planner/builder/verifier loop directly from ordinary Clasp code over the native swarm substrate." 6 6 objectiveDeadlineAtMs {
     Ok objectiveCreateValue ->
       match taskCreateWithDeadline objectiveRef planningTaskId "Plan the repair work and unblock the execution DAG." [] 1 planningDeadlineAtMs 60000 {
         Ok planningTaskCreateValue ->
-          match taskCreateWithDeadline objectiveRef repairTaskId "Run the repair, verification, approval, and mergegate path." [planningTaskId] 2 repairDeadlineAtMs 60000 {
+          match taskCreateWithDeadline objectiveRef repairTaskId "Run the repair, verification, approval, and mergegate path." [planningTaskId] 3 repairDeadlineAtMs 60000 {
             Ok repairTaskCreateValue ->
-              match policySet repairRef "trunk" ["merge-ready"] ["native-smoke"] {
+              match policySetForVerificationPlan repairRef "trunk" ["merge-ready"] repairVerificationPlan {
                 Ok policyValue ->
                   match ready objectiveRef {
                     Ok readyBeforeValue ->
@@ -323,11 +465,11 @@ main =
                                     Ok repairStepValue ->
                                       match managerNext objectiveRef {
                                         Ok managerAfterRepairValue ->
-                                          match runVerifierStep repairRef "native-smoke" verifierCommand mailboxLimit {
-                                            Ok verifierStepValue ->
+                                          match executeVerificationPlan repairRef repairVerificationPlan mailboxLimit {
+                                            Ok verificationPlanValue ->
                                               match managerNext objectiveRef {
                                                 Ok managerAfterVerifierValue ->
-                                                  match approveAndMerge repairRef "merge-ready" "trunk" ["native-smoke"] mailboxLimit {
+                                                  match approveAndMergeVerificationPlan repairRef "merge-ready" "trunk" repairVerificationPlan mailboxLimit {
                                                     Ok reviewStepValue ->
                                                       match objectiveStatus objectiveRef {
                                                         Ok objectiveStatusValue ->
@@ -343,53 +485,70 @@ main =
                                                                             Ok failedToolValue ->
                                                                               match failedVerifierScenario {
                                                                                 Ok failedVerifierValue ->
-                                                                                  encode (NativeSwarmReport {
-                                                                                    objective = objectiveId,
-                                                                                    planningTask = planningTaskId,
-                                                                                    repairTask = repairTaskId,
-                                                                                    objectiveCreate = objectiveCreateValue,
-                                                                                    planningTaskCreate = planningTaskCreateValue,
-                                                                                    repairTaskCreate = repairTaskCreateValue,
-                                                                                    policy = policyValue,
-                                                                                    readyBefore = readyBeforeValue,
-                                                                                    managerBefore = managerBeforeValue,
-                                                                                    planningStep = planningStepValue,
-                                                                                    managerAfterPlan = managerAfterPlanValue,
-                                                                                    repairStep = repairStepValue,
-                                                                                    managerAfterRepair = managerAfterRepairValue,
-                                                                                    verifierStep = verifierStepValue,
-                                                                                    managerAfterVerifier = managerAfterVerifierValue,
-                                                                                    reviewStep = reviewStepValue,
-                                                                                    objectiveStatus = objectiveStatusValue,
-                                                                                    objectives = objectivesValue,
-                                                                                    tasks = tasksValue,
-                                                                                    summary = summaryValue,
-                                                                                    managerAfter = managerAfterValue,
-                                                                                    failedTool = failedToolValue,
-                                                                                    failedVerifier = failedVerifierValue,
-                                                                                    typedInspection = ManagerTypedInspection {
-                                                                                      passedTaskId = managerAfterVerifierValue.taskId,
-                                                                                      passedTaskStatus = managerAfterVerifierValue.taskStatus,
-                                                                                      passedVerifier = managerAfterVerifierValue.latestVerifier,
-                                                                                      passedVerifierStatus = managerAfterVerifierValue.latestVerifierStatus,
-                                                                                      passedMailboxVerifierStatus = verifierStepValue.mailbox.latestVerifierStatus,
-                                                                                      blockedAction = failedToolValue.managerAfter.action,
-                                                                                      blockedTaskId = failedToolValue.managerAfter.taskId,
-                                                                                      blockedTaskStatus = failedToolValue.managerAfter.taskStatus,
-                                                                                      blockedReasons = failedToolValue.managerAfter.blockedBy,
-                                                                                      blockedBlockerTaskIds = failedToolValue.managerAfter.blockerTaskIds,
-                                                                                      failedToolRunStatus = failedToolValue.managerAfter.latestRunStatus,
-                                                                                      failedToolMailboxRunStatus = failedToolValue.step.mailbox.latestRunStatus,
-                                                                                      failedVerifier = failedVerifierValue.managerAfterVerifier.latestVerifier,
-                                                                                      failedVerifierStatus = failedVerifierValue.managerAfterVerifier.latestVerifierStatus,
-                                                                                      failedVerifierRequiredVerifiers = failedVerifierValue.managerAfterVerifier.requiredVerifiers,
-                                                                                      mergeReadyAction = reviewStepValue.managerAfterApproval.action,
-                                                                                      mergeReadyTaskId = reviewStepValue.managerAfterApproval.taskId,
-                                                                                      mergeReadyRequiredApprovals = reviewStepValue.managerAfterApproval.requiredApprovals,
-                                                                                      mergeReadyRequiredVerifiers = reviewStepValue.managerAfterApproval.requiredVerifiers,
-                                                                                      mergeReadyVerdict = reviewStepValue.managerAfterApproval.mergegateVerdict
-                                                                                    }
-                                                                                  }),
+                                                                                  match failedVerificationPlanScenario {
+                                                                                    Ok failedVerificationPlanValue ->
+                                                                                      encode (NativeSwarmReport {
+                                                                                        objective = objectiveId,
+                                                                                        planningTask = planningTaskId,
+                                                                                        repairTask = repairTaskId,
+                                                                                        objectiveCreate = objectiveCreateValue,
+                                                                                        planningTaskCreate = planningTaskCreateValue,
+                                                                                        repairTaskCreate = repairTaskCreateValue,
+                                                                                        policy = policyValue,
+                                                                                        readyBefore = readyBeforeValue,
+                                                                                        managerBefore = managerBeforeValue,
+                                                                                        planningStep = planningStepValue,
+                                                                                        managerAfterPlan = managerAfterPlanValue,
+                                                                                        repairStep = repairStepValue,
+                                                                                        managerAfterRepair = managerAfterRepairValue,
+                                                                                        verificationPlan = repairVerificationPlan,
+                                                                                        verificationPlanResult = verificationPlanValue,
+                                                                                        managerAfterVerifier = managerAfterVerifierValue,
+                                                                                        reviewStep = reviewStepValue,
+                                                                                        objectiveStatus = objectiveStatusValue,
+                                                                                        objectives = objectivesValue,
+                                                                                        tasks = tasksValue,
+                                                                                        summary = summaryValue,
+                                                                                        managerAfter = managerAfterValue,
+                                                                                        failedTool = failedToolValue,
+                                                                                        failedVerifier = failedVerifierValue,
+                                                                                        failedVerificationPlan = failedVerificationPlanValue,
+                                                                                        typedInspection = ManagerTypedInspection {
+                                                                                          passedTaskId = managerAfterVerifierValue.taskId,
+                                                                                          passedTaskStatus = managerAfterVerifierValue.taskStatus,
+                                                                                          passedVerifier = managerAfterVerifierValue.latestVerifier,
+                                                                                          passedVerifierStatus = managerAfterVerifierValue.latestVerifierStatus,
+                                                                                          passedMailboxVerifierStatus = verificationPlanValue.mailbox.latestVerifierStatus,
+                                                                                          passedPlanRequiredVerifiers = repairVerificationPlan.requiredVerifierNames,
+                                                                                          passedPlanPassed = verificationPlanValue.passed,
+                                                                                          passedPlanFailedVerifiers = verificationPlanValue.failedVerifiers,
+                                                                                          passedPlanArtifactCount = verificationPlanValue.mailboxSummary.artifactCount,
+                                                                                          blockedAction = failedToolValue.managerAfter.action,
+                                                                                          blockedTaskId = failedToolValue.managerAfter.taskId,
+                                                                                          blockedTaskStatus = failedToolValue.managerAfter.taskStatus,
+                                                                                          blockedReasons = failedToolValue.managerAfter.blockedBy,
+                                                                                          blockedBlockerTaskIds = failedToolValue.managerAfter.blockerTaskIds,
+                                                                                          failedToolRunStatus = failedToolValue.managerAfter.latestRunStatus,
+                                                                                          failedToolMailboxRunStatus = failedToolValue.step.mailbox.latestRunStatus,
+                                                                                          failedVerifier = failedVerifierValue.managerAfterVerifier.latestVerifier,
+                                                                                          failedVerifierStatus = failedVerifierValue.managerAfterVerifier.latestVerifierStatus,
+                                                                                          failedVerifierRequiredVerifiers = failedVerifierValue.managerAfterVerifier.requiredVerifiers,
+                                                                                          failedPlanRequiredVerifiers = failedVerificationPlanValue.plan.requiredVerifierNames,
+                                                                                          failedPlanPassed = failedVerificationPlanValue.verificationPlanResult.passed,
+                                                                                          failedPlanFailedVerifiers = failedVerificationPlanValue.verificationPlanResult.failedVerifiers,
+                                                                                          failedPlanLatestVerifier = failedVerificationPlanValue.managerAfterPlan.latestVerifier,
+                                                                                          failedPlanLatestVerifierStatus = failedVerificationPlanValue.managerAfterPlan.latestVerifierStatus,
+                                                                                          failedPlanMergeVerdict = failedVerificationPlanValue.reviewStep.mergeDecision.verdict,
+                                                                                          mergeReadyAction = reviewStepValue.managerAfterApproval.action,
+                                                                                          mergeReadyTaskId = reviewStepValue.managerAfterApproval.taskId,
+                                                                                          mergeReadyRequiredApprovals = reviewStepValue.managerAfterApproval.requiredApprovals,
+                                                                                          mergeReadyRequiredVerifiers = reviewStepValue.managerAfterApproval.requiredVerifiers,
+                                                                                          mergeReadyVerdict = reviewStepValue.managerAfterApproval.mergegateVerdict
+                                                                                        }
+                                                                                      }),
+                                                                                    Err message ->
+                                                                                      errorText message
+                                                                                  },
                                                                                 Err message ->
                                                                                   errorText message
                                                                               },

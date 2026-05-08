@@ -86,10 +86,10 @@ plannerSchemaPath : Str
 plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.4"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
 
 codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"

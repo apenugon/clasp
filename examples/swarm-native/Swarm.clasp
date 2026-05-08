@@ -198,6 +198,40 @@ record VerifierStepResult = {
   mailbox : SwarmMailbox
 }
 
+record VerificationCommand = {
+  verifierName : Str,
+  command : SwarmCommand
+}
+
+record VerificationPlan = {
+  name : Str,
+  commands : [VerificationCommand],
+  requiredVerifierNames : [Str]
+}
+
+record VerificationPlanMailboxSummary = {
+  historyCount : Int,
+  tailCount : Int,
+  approvalCount : Int,
+  runCount : Int,
+  artifactCount : Int,
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str,
+  artifactKinds : [Str],
+  artifactPaths : [Str]
+}
+
+record VerificationPlanResult = {
+  plan : VerificationPlan,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  mailbox : SwarmMailbox,
+  mailboxSummary : VerificationPlanMailboxSummary
+}
+
 record ReviewStepResult = {
   approval : SwarmApproval,
   approvals : [SwarmApproval],
@@ -220,6 +254,21 @@ taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor 
 
 commandSpec : Str -> [Str] -> SwarmCommand
 commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
+
+verificationCommand : Str -> SwarmCommand -> VerificationCommand
+verificationCommand verifierName command =
+  VerificationCommand { verifierName = verifierName, command = command }
+
+verificationCommandName : VerificationCommand -> Str
+verificationCommandName command = command.verifierName
+
+verificationPlan : Str -> [VerificationCommand] -> VerificationPlan
+verificationPlan name commands =
+  VerificationPlan {
+    name = name,
+    commands = commands,
+    requiredVerifierNames = map verificationCommandName commands
+  }
 
 taskResultError : Str -> Result SwarmTask
 taskResultError message = Err message
@@ -274,6 +323,9 @@ toolStepResultError message = Err message
 
 verifierStepResultError : Str -> Result VerifierStepResult
 verifierStepResultError message = Err message
+
+verificationPlanResultError : Str -> Result VerificationPlanResult
+verificationPlanResultError message = Err message
 
 reviewStepResultError : Str -> Result ReviewStepResult
 reviewStepResultError message = Err message
@@ -509,6 +561,28 @@ firstVerifierName current run =
   else
     current
 
+artifactKind : SwarmArtifact -> Str
+artifactKind artifact = artifact.kind
+
+artifactPath : SwarmArtifact -> Str
+artifactPath artifact = artifact.path
+
+verificationPlanMailboxSummary : SwarmMailbox -> VerificationPlanMailboxSummary
+verificationPlanMailboxSummary mailbox =
+  VerificationPlanMailboxSummary {
+    historyCount = length mailbox.history,
+    tailCount = length mailbox.tail,
+    approvalCount = length mailbox.approvals,
+    runCount = length mailbox.runs,
+    artifactCount = length mailbox.artifacts,
+    latestRunStatus = mailbox.latestRunStatus,
+    latestRunName = mailbox.latestRunName,
+    latestVerifierStatus = mailbox.latestVerifierStatus,
+    latestVerifier = mailbox.latestVerifier,
+    artifactKinds = map artifactKind mailbox.artifacts,
+    artifactPaths = map artifactPath mailbox.artifacts
+  }
+
 taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
 taskMailbox handle limit =
   match history handle {
@@ -593,6 +667,66 @@ runVerifierStep handle verifierName spec mailboxLimit =
     Err message ->
       verifierStepResultError message
   }
+
+executeVerificationPlan : TaskHandle -> VerificationPlan -> Int -> Result VerificationPlanResult
+executeVerificationPlan handle plan mailboxLimit = {
+  let mut steps = [];
+  let mut passed = true;
+  let mut failedVerifiers = [];
+  let mut error = "";
+  for command in plan.commands {
+    if error == "" then {
+      match runVerifierStep handle command.verifierName command.command mailboxLimit {
+        Ok stepValue ->
+          {
+            steps = append steps [stepValue];
+            if runPassed stepValue.run then {
+              error
+            } else {
+              passed = false;
+              failedVerifiers = append failedVerifiers [command.verifierName];
+              error
+            }
+          },
+        Err message ->
+          {
+            error = message;
+            error
+          }
+      }
+    } else {
+      error
+    }
+  };
+  if error != "" then
+    verificationPlanResultError error
+  else
+    match taskMailbox handle mailboxLimit {
+      Ok mailboxValue ->
+        Ok (VerificationPlanResult {
+          plan = plan,
+          steps = steps,
+          passed = passed,
+          failedVerifiers = failedVerifiers,
+          mailbox = mailboxValue,
+          mailboxSummary = verificationPlanMailboxSummary mailboxValue
+        }),
+      Err message ->
+        verificationPlanResultError message
+    }
+}
+
+policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
+policySetForVerificationPlan handle mergegateName requiredApprovals plan =
+  policySet handle mergegateName requiredApprovals plan.requiredVerifierNames
+
+mergegateDecideVerificationPlan : TaskHandle -> Str -> VerificationPlan -> Result SwarmMergeDecision
+mergegateDecideVerificationPlan handle mergegateName plan =
+  mergegateDecide handle mergegateName plan.requiredVerifierNames
+
+approveAndMergeVerificationPlan : TaskHandle -> Str -> Str -> VerificationPlan -> Int -> Result ReviewStepResult
+approveAndMergeVerificationPlan handle approvalName mergegateName plan mailboxLimit =
+  approveAndMerge handle approvalName mergegateName plan.requiredVerifierNames mailboxLimit
 
 approveAndMerge : TaskHandle -> Str -> Str -> [Str] -> Int -> Result ReviewStepResult
 approveAndMerge handle approvalName mergegateName requiredVerifiers mailboxLimit =

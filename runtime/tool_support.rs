@@ -621,17 +621,26 @@ fn compiler_native_export_can_use_host(export_name: &str) -> bool {
 }
 
 fn read_native_image_text(image_path_text: &str) -> Result<String, String> {
+    let mut last_error = None;
+
     for attempt in 0..NATIVE_IMAGE_READ_RETRY_ATTEMPTS {
         match fs::read_to_string(image_path_text) {
             Ok(image_text) => return Ok(image_text),
-            Err(err) if err.kind() == ErrorKind::NotFound && attempt + 1 < NATIVE_IMAGE_READ_RETRY_ATTEMPTS => {
-                thread::sleep(Duration::from_millis(NATIVE_IMAGE_READ_RETRY_DELAY_MS));
+            Err(err) => {
+                last_error = Some(err);
+                if attempt + 1 < NATIVE_IMAGE_READ_RETRY_ATTEMPTS {
+                    thread::sleep(Duration::from_millis(NATIVE_IMAGE_READ_RETRY_DELAY_MS));
+                }
             }
-            Err(_) => return Err("failed to read native compiler image".to_owned()),
         }
     }
 
-    Err("failed to read native compiler image".to_owned())
+    let detail = last_error
+        .map(|err| err.to_string())
+        .unwrap_or_else(|| "unknown read error".to_owned());
+    Err(format!(
+        "failed to read native compiler image `{image_path_text}` after {NATIVE_IMAGE_READ_RETRY_ATTEMPTS} attempts: {detail}"
+    ))
 }
 
 fn should_bypass_native_export_host(image_path_text: &str, export_name: &str) -> bool {
@@ -1940,6 +1949,23 @@ mod tests {
         writer.join().expect("join delayed image writer");
 
         assert_eq!(image_text, "{\"module\":\"Main\"}");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_native_image_text_reports_path_and_error() {
+        let root = unique_test_root("native-image-read-error");
+        fs::create_dir_all(&root).expect("create read error root");
+        let image_path = root.join("embedded.compiler.native.image.json");
+        fs::create_dir_all(&image_path).expect("create directory at image path");
+
+        let message = super::read_native_image_text(image_path.to_str().expect("utf8 image path"))
+            .expect_err("directory path should fail as native image");
+
+        assert!(message.contains(image_path.to_str().expect("utf8 image path")));
+        assert!(message.contains("failed to read native compiler image"));
+        assert!(message.contains("after 10 attempts"));
 
         let _ = fs::remove_dir_all(root);
     }

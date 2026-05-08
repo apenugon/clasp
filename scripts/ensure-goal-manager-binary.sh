@@ -21,8 +21,9 @@ goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$(select_default_goal_manager_
 default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"
 cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-$default_cache_parent/goal-manager-fast}"
 claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-claspc.sh")}"
-compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"
-compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-4}"
+compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-120}"
+compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-1}"
+allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 goal_manager_native_bundle_jobs="${CLASP_NATIVE_BUNDLE_JOBS:-8}"
 goal_manager_native_image_section_jobs="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}"
 goal_manager_native_image_monolithic_decl_threshold="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}"
@@ -258,6 +259,42 @@ sync_goal_manager_alias() {
   mv "$alias_tmp" "$alias_path"
 }
 
+find_stale_goal_manager_binary() {
+  local candidate
+
+  for candidate in "${alias_paths[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  while IFS= read -r candidate; do
+    if [[ -n "$candidate" && "$candidate" != "$goal_manager_binary" && -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(find "$cache_root" -mindepth 2 -maxdepth 2 -type f -name swarm-goal-manager -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-)
+
+  return 1
+}
+
+use_stale_goal_manager_binary() {
+  local fallback_binary
+
+  if [[ "$allow_stale_on_compile_failure" == "0" ]]; then
+    return 1
+  fi
+
+  fallback_binary="$(find_stale_goal_manager_binary || true)"
+  if [[ -z "$fallback_binary" ]]; then
+    return 1
+  fi
+
+  printf 'goal manager compile failed; using stale goal manager binary: %s\n' "$fallback_binary" >&2
+  goal_manager_binary="$fallback_binary"
+}
+
 mkdir -p "$cache_root"
 cache_key="$(compute_goal_manager_cache_key)"
 goal_manager_binary="$cache_root/$cache_key/swarm-goal-manager"
@@ -269,6 +306,7 @@ if [[ "${CLASP_GOAL_MANAGER_FORCE_RECOMPILE:-0}" == "1" ]]; then
 fi
 
 if [[ ! -x "$goal_manager_binary" ]]; then
+  compile_status=0
   (
     flock 9
     if [[ "${CLASP_GOAL_MANAGER_FORCE_RECOMPILE:-0}" == "1" ]]; then
@@ -277,7 +315,12 @@ if [[ ! -x "$goal_manager_binary" ]]; then
     if [[ ! -x "$goal_manager_binary" ]]; then
       compile_goal_manager_binary "$goal_manager_binary"
     fi
-  ) 9>"$compile_lock"
+  ) 9>"$compile_lock" || compile_status=$?
+  if (( compile_status != 0 )) && [[ ! -x "$goal_manager_binary" ]]; then
+    if ! use_stale_goal_manager_binary; then
+      exit "$compile_status"
+    fi
+  fi
 fi
 
 for alias_path in "${alias_paths[@]}"; do

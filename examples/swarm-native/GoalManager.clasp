@@ -374,10 +374,10 @@ plannerSchemaPath : Str
 plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.4"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
 
 codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
@@ -880,6 +880,8 @@ workspaceCloneExcludeFlags =
     "--exclude=*/dist-newstyle ",
     "--exclude=result ",
     "--exclude=*/result ",
+    "--exclude=target ",
+    "--exclude=*/target ",
     "--exclude=runtime/target ",
     "--exclude=*/runtime/target ",
     "--exclude=node_modules ",
@@ -4312,6 +4314,8 @@ childLoopCommandArgs spec =
     textConcat ["CLASP_LOOP_BASELINE_CACHE_ROOT_JSON=", encode (pathJoin [taskReportStateRoot spec.taskId, "baseline-cache"])],
     textConcat ["CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
     textConcat ["XDG_CACHE_HOME=", pathJoin [taskReportStateRoot spec.taskId, "xdg-cache"]],
+    textConcat ["CLASPC_BIN=", resolvedManagerClaspcBin],
+    textConcat ["CLASP_CLASPC=", resolvedManagerClaspcBin],
     "CLASP_VERIFY_LOCK_TIMEOUT_SECS=30",
     "CLASP_VERIFY_ON_LOCK_TIMEOUT=run-nested",
     "CLASP_VERIFY_NESTED_COMMANDS=bash scripts/test-verify-all.sh\nbash scripts/test-task-manifest.sh\nbash scripts/test-native-runtime.sh\nbash scripts/test-goal-manager-fast.sh\n",
@@ -4888,11 +4892,39 @@ resumePlannerWave state =
       Ok taskValues ->
         let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave state.wave) in
         if taskStatusIsActive plannerTaskStatus then {
-          let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
-          if traceError != "" then
-            plannerFailure "manager trace write failed" traceError
-          else
-            encode (statusView state)
+          match managerNext objectiveRef {
+            Ok action -> {
+              let actionRecoversPlanner =
+                if action.action == "recover-lease" then
+                  action.taskId == plannerTaskIdForWave state.wave
+                else
+                  false in
+              if actionRecoversPlanner then {
+                let traceError =
+                  appendManagerTrace
+                    (textConcat ["planner-wave-", encode state.wave, ":resume-recover-expired-planner-lease:", plannerTaskStatus]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else
+                  runPlanner
+              } else {
+                let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
+                if traceError != "" then
+                  plannerFailure "manager trace write failed" traceError
+                else
+                  encode (statusView state)
+              }
+            },
+            Err message -> {
+              let traceError =
+                appendManagerTrace
+                  (textConcat ["planner-wave-", encode state.wave, ":resume-manager-next-failed:", message]) in
+              if traceError != "" then
+                plannerFailure "manager trace write failed" traceError
+              else
+                encode (statusView state)
+            }
+          }
         } else
           runPlanner
     }

@@ -133,6 +133,40 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS:-0}" == "1" ]]; then
   fi
 fi
 
+if [[ "${CLASP_TEST_EXPECT_DERIVED_NATIVE_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark native scenario commands as diff-derived\n' >&2
+    exit 80
+  fi
+  if [[ "$prompt" != *'$(scripts/resolve-claspc.sh) --json check examples/swarm-native/Main.clasp'* || "$prompt" != *"bash scripts/test-native-claspc.sh"* ]]; then
+    printf 'verifier prompt did not select native scenario checks from the diff\n' >&2
+    exit 81
+  fi
+  if [[ "$prompt" == *"bash scripts/test-goal-manager-fast.sh"* ]]; then
+    printf 'native scenario diff unexpectedly selected goal-manager fast test\n' >&2
+    exit 82
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'native scenario diff unexpectedly fell back to verify-fast\n' >&2
+    exit 83
+  fi
+fi
+
+if [[ "${CLASP_TEST_EXPECT_DERIVED_SPEED_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark compiler speed commands as diff-derived\n' >&2
+    exit 84
+  fi
+  if [[ "$prompt" != *"bash scripts/test-native-incremental-guard.sh"* || "$prompt" != *"node --check scripts/native-incremental-guard.mjs"* ]]; then
+    printf 'verifier prompt did not select compiler speed checks from the diff\n' >&2
+    exit 85
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'compiler speed diff unexpectedly fell back to verify-fast\n' >&2
+    exit 86
+  fi
+fi
+
 if [[ "${CLASP_TEST_EXPECT_UNKNOWN_VERIFY_FAST:-0}" == "1" ]]; then
   if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
     printf 'verifier prompt did not mark unknown commands as diff-derived\n' >&2
@@ -197,6 +231,10 @@ printf '%s\n' "$resume_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$state_root/verifier-1.json"
 test -f "$state_root/focused-verify-1.json"
 grep -F '"source":"manager-env"' "$state_root/focused-verify-1.json" >/dev/null
+grep -F '"changedSurfaceCategories"' "$state_root/focused-verify-1.json" >/dev/null
+grep -F 'manager_env_override' "$state_root/focused-verify-1.json" >/dev/null
+grep -F '"cacheEvidence"' "$state_root/focused-verify-1.json" >/dev/null
+grep -F 'runtime/claspc.rs emits [claspc-cache]' "$state_root/focused-verify-1.json" >/dev/null
 grep -F 'runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh' "$state_root/focused-verify-1.json" >/dev/null
 grep -F '"summary":"resumed verifier produced a durable report"' "$state_root/verifier-1.json" >/dev/null
 grep -F '"phase":"completed"' "$state_root/state.json" >/dev/null
@@ -254,6 +292,7 @@ manager_list_output="$(
 printf '%s\n' "$manager_list_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$manager_list_state_root/focused-verify-1.json"
 grep -F '"source":"manager-env"' "$manager_list_state_root/focused-verify-1.json" >/dev/null
+grep -F 'manager_env_override' "$manager_list_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'bash scripts/verify-fast.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null; then
@@ -271,6 +310,9 @@ mkdir -p \
 printf 'base feedback loop\n' >"$derived_loop_baseline_root/examples/feedback-loop/Main.clasp"
 cp -a "$derived_loop_baseline_root/." "$derived_loop_workspace_root/"
 printf 'changed feedback loop\n' >"$derived_loop_workspace_root/examples/feedback-loop/Main.clasp"
+mkdir -p "$derived_loop_workspace_root/runtime/target/debug"
+printf 'Signature: 8a477f597d28d172789f06886806bc55\n' >"$derived_loop_workspace_root/runtime/target/CACHEDIR.TAG"
+printf 'generated runtime build noise\n' >"$derived_loop_workspace_root/runtime/target/debug/generated.txt"
 cat >"$derived_loop_state_root/state.json" <<'JSON'
 {"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
 JSON
@@ -293,10 +335,103 @@ derived_loop_output="$(
 printf '%s\n' "$derived_loop_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$derived_loop_state_root/focused-verify-1.json"
 grep -F '"source":"diff-derived"' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+grep -F 'feedback_loop' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+grep -F '"fallbackReason":""' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'bash scripts/verify-fast.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null; then
   printf 'loop-only focused diff unexpectedly selected verify-fast\n' >&2
+  exit 1
+fi
+if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 'runtime/target' >/dev/null; then
+  printf 'loop-only focused diff unexpectedly included runtime/target noise\n' >&2
+  sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
+  exit 1
+fi
+
+derived_native_state_root="$test_root_abs/loop-derived-native-focused-state"
+derived_native_workspace_root="$fixture_project/.clasp-task-workspaces/derived-native-focused-task"
+derived_native_baseline_root="$fixture_project/.clasp-task-baselines/derived-native-focused-task"
+mkdir -p \
+  "$derived_native_state_root" \
+  "$derived_native_workspace_root/examples/swarm-native" \
+  "$derived_native_baseline_root/examples/swarm-native"
+printf 'base native scenario\n' >"$derived_native_baseline_root/examples/swarm-native/Swarm.clasp"
+cp -a "$derived_native_baseline_root/." "$derived_native_workspace_root/"
+printf 'changed native scenario\n' >"$derived_native_workspace_root/examples/swarm-native/Swarm.clasp"
+cat >"$derived_native_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$derived_native_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed native swarm scenario API","files_touched":["examples/swarm-native/Swarm.clasp"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive native scenario checks","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$derived_native_state_root/baseline.ready"
+
+derived_native_output="$(
+  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$derived_native_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_native_baseline_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_DERIVED_NATIVE_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_native_state_root"
+)"
+
+printf '%s\n' "$derived_native_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$derived_native_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$derived_native_state_root/focused-verify-1.json" >/dev/null
+grep -F 'native_scenario' "$derived_native_state_root/focused-verify-1.json" >/dev/null
+grep -F '"fallbackReason":""' "$derived_native_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-native-claspc.sh' "$derived_native_state_root/focused-verify-1.json" >/dev/null
+grep -F '$(scripts/resolve-claspc.sh) --json check examples/swarm-native/Main.clasp' "$derived_native_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'bash scripts/test-goal-manager-fast.sh' "$derived_native_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'native scenario focused diff unexpectedly selected goal-manager fast test\n' >&2
+  exit 1
+fi
+if grep -F 'bash scripts/verify-fast.sh' "$derived_native_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'native scenario focused diff unexpectedly selected verify-fast\n' >&2
+  exit 1
+fi
+
+derived_speed_state_root="$test_root_abs/loop-derived-speed-focused-state"
+derived_speed_workspace_root="$fixture_project/.clasp-task-workspaces/derived-speed-focused-task"
+derived_speed_baseline_root="$fixture_project/.clasp-task-baselines/derived-speed-focused-task"
+mkdir -p \
+  "$derived_speed_state_root" \
+  "$derived_speed_workspace_root/scripts" \
+  "$derived_speed_baseline_root/scripts"
+printf 'base speed guard\n' >"$derived_speed_baseline_root/scripts/measure-native-incremental.sh"
+cp -a "$derived_speed_baseline_root/." "$derived_speed_workspace_root/"
+printf 'changed speed guard\n' >"$derived_speed_workspace_root/scripts/measure-native-incremental.sh"
+cat >"$derived_speed_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$derived_speed_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed native incremental measurement","files_touched":["scripts/measure-native-incremental.sh"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive compiler speed checks","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$derived_speed_state_root/baseline.ready"
+
+derived_speed_output="$(
+  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$derived_speed_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_speed_baseline_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_DERIVED_SPEED_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_speed_state_root"
+)"
+
+printf '%s\n' "$derived_speed_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$derived_speed_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
+grep -F 'compiler_speed' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
+grep -F '"fallbackReason":""' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-native-incremental-guard.sh' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
+grep -F 'node --check scripts/native-incremental-guard.mjs' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'bash scripts/verify-fast.sh' "$derived_speed_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'compiler speed focused diff unexpectedly selected verify-fast\n' >&2
   exit 1
 fi
 
@@ -329,7 +464,9 @@ unknown_output="$(
 printf '%s\n' "$unknown_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$unknown_state_root/focused-verify-1.json"
 grep -F '"source":"diff-derived"' "$unknown_state_root/focused-verify-1.json" >/dev/null
+grep -F 'unknown_path' "$unknown_state_root/focused-verify-1.json" >/dev/null
 grep -F 'diff included unknown paths; selected conservative verify-fast' "$unknown_state_root/focused-verify-1.json" >/dev/null
+grep -F 'one or more changed paths did not match a known narrow surface; focused selection falls back to verify-fast' "$unknown_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/verify-fast.sh' "$unknown_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'bash scripts/verify-all.sh' "$unknown_state_root/focused-verify-1.json" >/dev/null; then
   printf 'unknown focused diff selected verify-all instead of verify-fast\n' >&2

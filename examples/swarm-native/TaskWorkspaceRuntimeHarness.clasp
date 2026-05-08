@@ -1,0 +1,39 @@
+module Main
+
+import GoalManagerConfig
+import GoalManagerTaskWorkspaceRuntime
+import GoalManagerTypes
+
+harnessTaskId : Str
+harnessTaskId = readEnvText "CLASP_TASK_WORKSPACE_HARNESS_TASK_ID_JSON" "benchmark-gap"
+
+harnessTaskSpec : PlannerTaskSpec
+harnessTaskSpec =
+  PlannerTaskSpec {
+    taskId = harnessTaskId,
+    role = "workspace-runtime-harness",
+    detail = "Exercise task workspace snapshot and promotion behavior without compiling the full goal manager.",
+    dependencies = [],
+    taskPrompt = "Update the task workspace fixture.",
+    coordinationFocus = ["task-workspace-runtime"]
+  }
+
+harnessResult : Str -> Str
+harnessResult message =
+  if message == "" then
+    "ok"
+  else
+    textConcat ["error:", message]
+
+main : Str
+main = {
+  let mode = readEnvText "CLASP_TASK_WORKSPACE_HARNESS_MODE_JSON" "ensure" in
+  if mode == "ensure" then
+    harnessResult (ensureTaskWorkspace harnessTaskId)
+  else if mode == "validate" then
+    harnessResult (validateTaskWorkspaceSnapshot harnessTaskId)
+  else if mode == "promote" then
+    harnessResult (promoteVerifiedTaskWorkspace harnessTaskSpec)
+  else
+    textConcat ["error:unknown harness mode: ", mode]
+}

@@ -23,7 +23,7 @@ const scenarios = {
         optionKey: "checkLog",
         expected: {
           moduleSummary: {
-            "Shared.User": "miss",
+            "Shared.User": "validated-hit",
             "Shared.Render": "hit",
             Main: "hit",
           },
@@ -68,6 +68,7 @@ function usage() {
       "  node scripts/native-incremental-guard.mjs <scenario> [--assert] [--report <path>]",
       "    [--native-log <path>] [--check-log <path>] [--image-log <path>]",
       "    [--time <name>=<path>]",
+      "    [--max-duration <name>=<seconds>]",
     ].join("\n"),
   );
 }
@@ -91,6 +92,7 @@ function parseArgs(argv) {
     checkLog: "",
     imageLog: "",
     timePaths: {},
+    maxDurations: {},
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -125,6 +127,21 @@ function parseArgs(argv) {
         const key = value.slice(0, equalsIndex);
         const path = value.slice(equalsIndex + 1);
         options.timePaths[key] = path;
+        break;
+      }
+      case "--max-duration": {
+        index += 1;
+        const value = argv[index] ?? "";
+        const equalsIndex = value.indexOf("=");
+        if (equalsIndex <= 0 || equalsIndex === value.length - 1) {
+          fail(`invalid --max-duration argument: ${value}`);
+        }
+        const key = value.slice(0, equalsIndex);
+        const maxSeconds = Number(value.slice(equalsIndex + 1));
+        if (!Number.isFinite(maxSeconds) || maxSeconds < 0) {
+          fail(`invalid --max-duration seconds for ${key}: ${value.slice(equalsIndex + 1)}`);
+        }
+        options.maxDurations[key] = maxSeconds;
         break;
       }
       default:
@@ -211,7 +228,8 @@ function readRealSeconds(timePath) {
     return null;
   }
 
-  return Number(match[1]);
+  const realSeconds = Number(match[1]);
+  return Number.isFinite(realSeconds) ? realSeconds : null;
 }
 
 function compactTrace(trace) {
@@ -304,6 +322,25 @@ for (const [traceName, traceSpec] of Object.entries(scenario.traces)) {
 const observedChangedModules = [
   ...new Set(Object.values(observedTraces).flatMap((trace) => trace.changedModules)),
 ].sort();
+const expectedChangedModules = [...scenario.changedModules].sort();
+if (JSON.stringify(observedChangedModules) !== JSON.stringify(expectedChangedModules)) {
+  mismatches.push(
+    `changedModules expected ${JSON.stringify(expectedChangedModules)} got ${JSON.stringify(observedChangedModules)}`,
+  );
+}
+
+const timingExpectations = {};
+for (const [name, maxRealSeconds] of Object.entries(options.maxDurations)) {
+  timingExpectations[name] = { maxRealSeconds };
+  const timing = advisoryTimings[name];
+  if (!timing) {
+    mismatches.push(`${name} timing expected <= ${maxRealSeconds}s got missing`);
+  } else if (timing.realSeconds === null) {
+    mismatches.push(`${name} timing expected <= ${maxRealSeconds}s got unparsable`);
+  } else if (timing.realSeconds > maxRealSeconds) {
+    mismatches.push(`${name} timing expected <= ${maxRealSeconds}s got ${timing.realSeconds}s`);
+  }
+}
 
 const report = {
   scenario: scenarioName,
@@ -317,6 +354,7 @@ const report = {
   ),
   observedChangedModules,
   advisoryTimings,
+  timingExpectations,
   matchesExpectations: mismatches.length === 0,
   mismatches,
 };

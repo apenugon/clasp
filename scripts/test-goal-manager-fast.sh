@@ -12,6 +12,9 @@ export XDG_CACHE_HOME="$test_root/xdg-cache"
 goal_manager_shared_cache_root="${CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT:-${CLASP_MANAGER_PROJECT_ROOT_JSON:-$project_root}}"
 goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/binaries}"
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
+export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-60}"
+export CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-1}"
+export CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 
 goal_manager_live_pid=""
 goal_manager_monolithic_source="$project_root/examples/swarm-native/GoalManager.clasp"
@@ -150,6 +153,7 @@ fake_slow_benchmark_bin="$test_root_abs/fake-benchmark-slow"
 fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
+goal_manager_binary_fresh=1
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
 grep -F 'import GoalManagerServiceMain' "$goal_manager_source" >/dev/null
 grep -F 'runManagedServiceBootstrap' "$goal_manager_monolithic_source" >/dev/null
@@ -417,6 +421,9 @@ elif [[ "$prompt" == *"builder subagent"* ]]; then
   printf '%s\n' "$content" >"$artifact_path"
   mkdir -p "$workspace_root/.clasp-test-tmp"
   printf '%s\n' 'transient-noise' >"$workspace_root/.clasp-test-tmp/noise.txt"
+  if [[ "${CLASP_TEST_FAKE_CHILD_CORRUPT_WORKSPACE_MANIFEST:-0}" == "1" ]]; then
+    printf '%s\n' '{"kind":"clasp-task-workspace","manifestVersion":1,"taskId":"wrong-task","snapshotPolicyId":"wrong-policy"}' >"$workspace_root/.clasp-task-workspace-manifest.json"
+  fi
   cat >"$report_path" <<JSON
 {"summary":"builder wrote $content","files_touched":["$workspace_file","notes/$artifact_file"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"use verifier feedback","ergonomics":["ordinary loop works"],"follow_ups":["keep direct codex invocation"],"warnings":[]}}
 JSON
@@ -590,6 +597,9 @@ if [[ -n "$workspace_root" ]]; then
   printf '%s\n' "$content" >"$workspace_root/workspace.txt"
   printf '%s\n' "$content" >"$workspace_root/notes/child-artifact.txt"
   printf '%s\n' 'transient-noise' >"$workspace_root/.clasp-test-tmp/noise.txt"
+  if [[ "${CLASP_TEST_FAKE_CHILD_CORRUPT_WORKSPACE_MANIFEST:-0}" == "1" ]]; then
+    printf '%s\n' '{"kind":"clasp-task-workspace","manifestVersion":1,"taskId":"wrong-task","snapshotPolicyId":"wrong-policy"}' >"$workspace_root/.clasp-task-workspace-manifest.json"
+  fi
 fi
 
 if [[ -n "${CLASP_TEST_FAKE_CHILD_SLEEP_SECS:-}" ]]; then
@@ -649,12 +659,20 @@ if [[ -n "${CLASP_GOAL_MANAGER_BINARY:-}" ]]; then
   goal_manager_actual_binary="$goal_manager_binary"
 else
   mkdir -p "$goal_manager_build_cache_dir" "$goal_manager_build_xdg_cache_home"
-  XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
-    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir" \
-    "$project_root/scripts/ensure-goal-manager-binary.sh" \
-    --alias "$goal_manager_live_binary" \
-    --alias "$goal_manager_actual_binary" \
-    >/dev/null
+  goal_manager_ensure_stderr="$test_root_abs/ensure-goal-manager.stderr"
+  if ! XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
+      CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir" \
+      "$project_root/scripts/ensure-goal-manager-binary.sh" \
+      --alias "$goal_manager_live_binary" \
+      --alias "$goal_manager_actual_binary" \
+      >/dev/null 2>"$goal_manager_ensure_stderr"; then
+    sed -n '1,120p' "$goal_manager_ensure_stderr" >&2 || true
+    exit 1
+  fi
+  sed -n '1,120p' "$goal_manager_ensure_stderr" >&2 || true
+  if grep -F 'using stale goal manager binary' "$goal_manager_ensure_stderr" >/dev/null 2>&1; then
+    goal_manager_binary_fresh=0
+  fi
   goal_manager_binary="$goal_manager_live_binary"
 fi
 
@@ -763,6 +781,20 @@ run_split_goal_manager_status() {
   local workspace_root="$2"
   shift 2
   run_goal_manager_status_with_binary "$split_goal_manager_binary" "$state_root" "$workspace_root" "$@"
+}
+
+run_task_workspace_harness() {
+  local state_root="$1"
+  local workspace_root="$2"
+  local task_workspace_base="$3"
+  local mode="${4:-ensure}"
+
+  env \
+    XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
+    CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
+    CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON="\"$task_workspace_base\"" \
+    CLASP_TASK_WORKSPACE_HARNESS_MODE_JSON="\"$mode\"" \
+    "$claspc_bin" run "$project_root/examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp" -- "$state_root"
 }
 
 if [[ "${CLASP_GOAL_MANAGER_FAST_STATUS_ONLY:-0}" != "1" ]]; then
@@ -975,9 +1007,11 @@ snapshot_exclude_workspace="$test_root_abs/snapshot-exclude-workspace"
 snapshot_exclude_output="$test_root_abs/snapshot-exclude-output.txt"
 mkdir -p \
   "$snapshot_exclude_workspace/.clasp-task-workspaces/stale-cache" \
-  "$snapshot_exclude_workspace/.clasp-task-baselines/stale-baseline"
+  "$snapshot_exclude_workspace/.clasp-task-baselines/stale-baseline" \
+  "$snapshot_exclude_workspace/runtime/target/debug"
 printf 'must-not-copy\n' >"$snapshot_exclude_workspace/.clasp-task-workspaces/stale-cache/sentinel.txt"
 printf 'must-not-copy\n' >"$snapshot_exclude_workspace/.clasp-task-baselines/stale-baseline/sentinel.txt"
+printf 'must-not-copy\n' >"$snapshot_exclude_workspace/runtime/target/debug/sentinel.txt"
 run_goal_manager "$snapshot_exclude_state" "$snapshot_exclude_workspace" \
   CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
   CLASP_MANAGER_MAX_WAVES_JSON='1' \
@@ -987,6 +1021,72 @@ grep -F '"verdict":"pass"' "$snapshot_exclude_output" >/dev/null
 test -f "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.workspace-ready"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-workspaces/stale-cache/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-baselines/stale-baseline/sentinel.txt"
+test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/runtime/target/debug/sentinel.txt"
+test ! -e "$snapshot_exclude_workspace/.clasp-task-baselines/benchmark-gap/runtime/target/debug/sentinel.txt"
+
+trace_case "task-workspace-stale-symlink-recovery"
+stale_symlink_state="$test_root_abs/stale-symlink-state"
+stale_symlink_workspace="$test_root_abs/stale-symlink-workspace"
+stale_symlink_base="$test_root_abs/stale-symlink-base"
+stale_symlink_output="$test_root_abs/stale-symlink-output.txt"
+stale_symlink_wrong_target="$test_root_abs/stale-symlink-wrong-target"
+stale_symlink_link="$stale_symlink_base/workspace-benchmark-gap"
+stale_symlink_actual="$stale_symlink_workspace/.clasp-task-workspaces/benchmark-gap"
+stale_symlink_baseline="$stale_symlink_workspace/.clasp-task-baselines/benchmark-gap"
+mkdir -p "$stale_symlink_workspace" "$stale_symlink_base" "$stale_symlink_wrong_target"
+printf '%s\n' 'ready' >"$stale_symlink_wrong_target/.workspace-ready"
+ln -s "$stale_symlink_wrong_target" "$stale_symlink_link"
+run_task_workspace_harness "$stale_symlink_state" "$stale_symlink_workspace" "$stale_symlink_base" ensure \
+  >"$stale_symlink_output" 2>&1
+grep -F 'ok' "$stale_symlink_output" >/dev/null
+[[ "$(readlink "$stale_symlink_link")" == "$stale_symlink_actual" ]]
+test -f "$stale_symlink_actual/.workspace-ready"
+grep -F '"taskId":"benchmark-gap"' "$stale_symlink_actual/.clasp-task-workspace-manifest.json" >/dev/null
+grep -F '"actualWorkspaceRoot":'"\"$stale_symlink_actual\"" "$stale_symlink_actual/.clasp-task-workspace-manifest.json" >/dev/null
+test -f "$stale_symlink_baseline/.clasp-task-workspace-manifest.json"
+
+trace_case "task-workspace-manifest-mismatch-refusal"
+manifest_mismatch_state="$test_root_abs/manifest-mismatch-state"
+manifest_mismatch_workspace="$test_root_abs/manifest-mismatch-workspace"
+manifest_mismatch_base="$test_root_abs/manifest-mismatch-base"
+manifest_mismatch_output="$test_root_abs/manifest-mismatch-output.txt"
+mkdir -p "$manifest_mismatch_workspace"
+run_task_workspace_harness "$manifest_mismatch_state" "$manifest_mismatch_workspace" "$manifest_mismatch_base" ensure \
+  >"$manifest_mismatch_output" 2>&1
+manifest_mismatch_actual="$manifest_mismatch_workspace/.clasp-task-workspaces/benchmark-gap"
+printf '%s\n' '{"kind":"clasp-task-workspace","manifestVersion":1,"taskId":"wrong-task","snapshotPolicyId":"wrong-policy"}' >"$manifest_mismatch_actual/.clasp-task-workspace-manifest.json"
+printf '%s\n' 'fixed-after-feedback' >"$manifest_mismatch_actual/workspace.txt"
+run_task_workspace_harness "$manifest_mismatch_state" "$manifest_mismatch_workspace" "$manifest_mismatch_base" promote \
+  >"$manifest_mismatch_output" 2>&1
+grep -F 'error:task workspace promotion failed' "$manifest_mismatch_output" >/dev/null
+grep -F 'manifest validation failed' "$manifest_mismatch_output" >/dev/null
+grep -F 'manifest mismatch' "$manifest_mismatch_output" >/dev/null
+manifest_mismatch_recoverable_diff="$manifest_mismatch_state/loop-benchmark-gap/promotion-recoverable.diff"
+test -f "$manifest_mismatch_recoverable_diff"
+grep -F 'manifest mismatch' "$manifest_mismatch_recoverable_diff" >/dev/null
+test ! -e "$manifest_mismatch_workspace/workspace.txt"
+
+trace_case "task-workspace-valid-reuse"
+valid_reuse_state_one="$test_root_abs/valid-reuse-state-one"
+valid_reuse_state_two="$test_root_abs/valid-reuse-state-two"
+valid_reuse_workspace="$test_root_abs/valid-reuse-workspace"
+valid_reuse_base="$test_root_abs/valid-reuse-base"
+valid_reuse_output_one="$test_root_abs/valid-reuse-output-one.txt"
+valid_reuse_output_two="$test_root_abs/valid-reuse-output-two.txt"
+valid_reuse_actual="$valid_reuse_workspace/.clasp-task-workspaces/benchmark-gap"
+valid_reuse_baseline="$valid_reuse_workspace/.clasp-task-baselines/benchmark-gap"
+mkdir -p "$valid_reuse_workspace"
+run_task_workspace_harness "$valid_reuse_state_one" "$valid_reuse_workspace" "$valid_reuse_base" ensure \
+  >"$valid_reuse_output_one" 2>&1
+grep -F 'ok' "$valid_reuse_output_one" >/dev/null
+printf '%s\n' 'preserve-valid-reuse' >"$valid_reuse_actual/reuse-marker.txt"
+printf '%s\n' 'preserve-valid-reuse' >"$valid_reuse_baseline/reuse-marker.txt"
+run_task_workspace_harness "$valid_reuse_state_two" "$valid_reuse_workspace" "$valid_reuse_base" ensure \
+  >"$valid_reuse_output_two" 2>&1
+grep -F 'ok' "$valid_reuse_output_two" >/dev/null
+grep -Fx 'preserve-valid-reuse' "$valid_reuse_actual/reuse-marker.txt" >/dev/null
+grep -Fx 'preserve-valid-reuse' "$valid_reuse_baseline/reuse-marker.txt" >/dev/null
+grep -F '"snapshotPolicyId":"workspace-snapshot-v1:' "$valid_reuse_actual/.clasp-task-workspace-manifest.json" >/dev/null
 
 trace_case "active-child-wait-does-not-spin"
 active_wait_state="$test_root_abs/active-wait-state"
@@ -1351,6 +1451,28 @@ grep -F '"verdict":"pass"' "$transient_planner_output" >/dev/null
 grep -F '"wave":1' "$transient_planner_state/status.json" >/dev/null
 grep -F 'recoverable-transport-blocker' "$transient_planner_state/trace.log" >/dev/null
 
+if [[ "$goal_manager_binary_fresh" == "1" ]]; then
+trace_case "expired-planner-lease-resumes-same-wave"
+expired_planner_state="$test_root_abs/expired-planner-state"
+expired_planner_workspace="$test_root_abs/expired-planner-workspace"
+expired_planner_output="$test_root_abs/expired-planner-output.txt"
+mkdir -p "$expired_planner_workspace"
+"$claspc_bin" --json swarm objective create "$expired_planner_state" improve-clasp --max-tasks 64 --max-runs 64 >/dev/null
+"$claspc_bin" --json swarm task create "$expired_planner_state" improve-clasp planner --max-runs 2 --lease-timeout-ms 1 >/dev/null
+"$claspc_bin" --json swarm lease "$expired_planner_state" planner >/dev/null
+cat >"$expired_planner_state/status.json" <<'JSON'
+{"phase":"planner-running","verdict":"pending","completed":false,"objectiveId":"improve-clasp","plannerTaskId":"planner","activeTaskId":"planner","plannedTaskIds":[],"wave":1,"benchmarkRuns":0,"final":false}
+JSON
+sleep 0.05
+run_goal_manager "$expired_planner_state" "$expired_planner_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$expired_planner_output" 2>&1
+grep -F '"phase":"completed"' "$expired_planner_output" >/dev/null
+grep -F '"verdict":"pass"' "$expired_planner_output" >/dev/null
+grep -F 'resume-recover-expired-planner-lease' "$expired_planner_state/trace.log" >/dev/null
+
 trace_case "planner-validation-retries-same-wave"
 planner_validation_state="$test_root_abs/planner-validation-state"
 planner_validation_workspace="$test_root_abs/planner-validation-workspace"
@@ -1372,6 +1494,9 @@ grep -F '"phase":"completed"' "$planner_timeout_output" >/dev/null
 grep -F '"verdict":"pass"' "$planner_timeout_output" >/dev/null
 grep -F '"wave":1' "$planner_timeout_state/status.json" >/dev/null
 grep -F 'planner-wave-1:run-command:start' "$planner_timeout_state/trace.log" >/dev/null
+else
+trace_case "stale-goal-manager-binary-skips-fresh-planner-recovery-regressions"
+fi
 
 trace_case "preflight-budget-contract-fails-before-planner"
 preflight_budget_state="$test_root_abs/preflight-budget-state"

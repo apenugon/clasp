@@ -351,10 +351,10 @@ plannerSchemaPath : Str
 plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.4"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "medium"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
 
 codexSandbox : Str
 codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
@@ -748,6 +748,8 @@ workspaceCloneExcludeFlags =
     "--exclude=*/dist-newstyle ",
     "--exclude=result ",
     "--exclude=*/result ",
+    "--exclude=target ",
+    "--exclude=*/target ",
     "--exclude=runtime/target ",
     "--exclude=*/runtime/target ",
     "--exclude=node_modules ",
@@ -2694,6 +2696,8 @@ childLoopCommandArgs spec =
     textConcat ["CLASP_MANAGER_TASK_COORDINATION_JSON=", encode (plannerTaskCoordinationSummary spec)],
     textConcat ["CLASP_LOOP_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASPC_BIN=", resolvedManagerClaspcBin],
+    textConcat ["CLASP_CLASPC=", resolvedManagerClaspcBin],
     textConcat ["CLASP_MANAGER_PROJECT_ROOT_JSON=", encode managerProjectRoot],
     managerClaspcBin,
     "run",
