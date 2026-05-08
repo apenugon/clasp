@@ -3,7 +3,8 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$project_root/examples/swarm-native/GoalManager.wrapper.clasp}"
-cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-/tmp/clasp-nix-cache/goal-manager-fast}"
+default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"
+cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-$default_cache_parent/goal-manager-fast}"
 claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-claspc.sh")}"
 compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"
 compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-4}"
@@ -127,6 +128,7 @@ mkdir -p "$cache_root"
 cache_key="$(compute_goal_manager_cache_key)"
 goal_manager_binary="$cache_root/$cache_key/swarm-goal-manager"
 mkdir -p "$(dirname "$goal_manager_binary")"
+compile_lock="$(dirname "$goal_manager_binary")/compile.lock"
 
 if [[ "${CLASP_GOAL_MANAGER_FORCE_RECOMPILE:-0}" == "1" ]]; then
   rm -f "$goal_manager_binary"
@@ -141,7 +143,7 @@ if [[ ! -x "$goal_manager_binary" ]]; then
     if [[ ! -x "$goal_manager_binary" ]]; then
       compile_goal_manager_binary "$goal_manager_binary"
     fi
-  ) 9>"$cache_root/compile.lock"
+  ) 9>"$compile_lock"
 fi
 
 for alias_path in "${alias_paths[@]}"; do

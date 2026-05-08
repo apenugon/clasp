@@ -76,6 +76,8 @@ grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-ma
 grep -F 'GoalManager.wrapper.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal-manager-source' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'sha256sum "$claspc_bin"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'compile_lock="$(dirname "$goal_manager_binary")/compile.lock"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 
 cat > "$test_root/bin/fake-slow-claspc" <<'EOF'
 #!/usr/bin/env bash
@@ -136,6 +138,23 @@ goal_manager_binary_two="$(
 )"
 [[ "$goal_manager_binary_one" == "$goal_manager_binary_two" ]]
 [[ -x "$goal_manager_binary_one" ]]
+[[ -f "$(dirname "$goal_manager_binary_one")/compile.lock" ]]
+[[ ! -e "$goal_manager_cache/compile.lock" ]]
+
+goal_manager_xdg_cache="$test_root/xdg-goal-manager-cache"
+goal_manager_xdg_binary="$(
+  XDG_CACHE_HOME="$goal_manager_xdg_cache" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+case "$goal_manager_xdg_binary" in
+  "$goal_manager_xdg_cache"/goal-manager-fast/*/swarm-goal-manager)
+    ;;
+  *)
+    printf 'goal manager cache did not respect XDG_CACHE_HOME: %s\n' "$goal_manager_xdg_binary" >&2
+    exit 1
+    ;;
+esac
 
 goal_manager_source_binary="$(
   CLASP_GOAL_MANAGER_SOURCE="$test_root/examples/swarm-native/GoalManager.clasp" \
