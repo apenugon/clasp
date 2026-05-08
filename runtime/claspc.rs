@@ -332,6 +332,15 @@ fn execute_project_export_args(
     Ok(String::from_utf8_lossy(&output_bytes).into_owned())
 }
 
+fn execute_project_export_args_local_only(
+    image_path: &str,
+    export_name: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let output_bytes = unsafe { execute_native_export_from_image_path_args_local_only(image_path, export_name, args) }?;
+    Ok(String::from_utf8_lossy(&output_bytes).into_owned())
+}
+
 fn parse_native_image_project_plan(plan_text: &str) -> Result<NativeImageProjectPlan, String> {
     if let Some(message) = plan_text.strip_prefix("ERROR:") {
         return Err(message.to_owned());
@@ -1347,6 +1356,18 @@ fn execute_project_module_decls_export(
     )
 }
 
+fn execute_project_module_decls_export_local_only(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+) -> Result<String, String> {
+    execute_project_export_args_local_only(
+        image_path,
+        NATIVE_IMAGE_MODULE_DECLS_EXPORT,
+        &[bundle.to_owned(), module_name.to_owned()],
+    )
+}
+
 fn execute_parallel_module_decl_section_export(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
@@ -1369,8 +1390,7 @@ fn execute_parallel_module_decl_section_export(
 
     for chunk in decl_plan.modules.chunks(max_jobs.max(1)) {
         let mut group_results: Vec<Option<String>> = chunk.iter().map(|_| None).collect();
-        let mut handles = Vec::new();
-        let mut probed_uncached = false;
+        let mut uncached_work = Vec::new();
 
         for (index, module_entry) in chunk.iter().enumerate() {
             if module_entry.decl_names_text.trim().is_empty() {
@@ -1397,63 +1417,7 @@ fn execute_parallel_module_decl_section_export(
                 continue;
             }
 
-            if max_jobs <= 1 || chunk.len() <= 1 {
-                let module_bundle = summary_plan
-                    .modules
-                    .get(&module_entry.module_name)
-                    .ok_or_else(|| {
-                        format!(
-                            "internal error: missing scoped bundle plan for project module `{}`",
-                            module_entry.module_name
-                        )
-                    })?;
-                let decl_text =
-                    execute_project_module_decls_export(
-                        image_path,
-                        &module_bundle.scoped_bundle,
-                        &module_entry.module_name,
-                    )?;
-                write_cached_native_image_decl_module(
-                    image_path,
-                    &decl_plan.context_fingerprint,
-                    &module_entry.module_name,
-                    module_source_fingerprint,
-                    &decl_text,
-                );
-                group_results[index] = Some(decl_text);
-                continue;
-            }
-
-            if !probed_uncached {
-                let module_bundle = summary_plan
-                    .modules
-                    .get(&module_entry.module_name)
-                    .ok_or_else(|| {
-                        format!(
-                            "internal error: missing scoped bundle plan for project module `{}`",
-                            module_entry.module_name
-                        )
-                    })?;
-                let decl_text =
-                    execute_project_module_decls_export(
-                        image_path,
-                        &module_bundle.scoped_bundle,
-                        &module_entry.module_name,
-                    )?;
-                write_cached_native_image_decl_module(
-                    image_path,
-                    &decl_plan.context_fingerprint,
-                    &module_entry.module_name,
-                    module_source_fingerprint,
-                    &decl_text,
-                );
-                group_results[index] = Some(decl_text);
-                probed_uncached = true;
-                continue;
-            }
-
-            let worker_image_path = image_path.to_owned();
-            let worker_bundle = summary_plan
+            let module_bundle = summary_plan
                 .modules
                 .get(&module_entry.module_name)
                 .ok_or_else(|| {
@@ -1464,42 +1428,67 @@ fn execute_parallel_module_decl_section_export(
                 })?
                 .scoped_bundle
                 .clone();
-            let worker_module_name = module_entry.module_name.clone();
-            let worker_context_fingerprint = decl_plan.context_fingerprint.clone();
-            let worker_source_fingerprint = module_source_fingerprint.to_owned();
-            handles.push((
+            uncached_work.push((
                 index,
-                worker_module_name.clone(),
-                worker_source_fingerprint.clone(),
-                thread::Builder::new()
-                    .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
-                    .spawn(move || {
-                        execute_project_module_decls_export(&worker_image_path, &worker_bundle, &worker_module_name)
-                            .map(|decl_text| {
-                                (
-                                    worker_context_fingerprint,
-                                    worker_module_name,
-                                    worker_source_fingerprint,
-                                    decl_text,
-                                )
-                            })
-                    })
-                    .map_err(|err| format!("failed to spawn native image module decl worker: {err}"))?,
+                module_entry.module_name.clone(),
+                module_source_fingerprint.to_owned(),
+                module_bundle,
             ));
         }
 
-        for (index, _, _, handle) in handles {
-            let (context_fingerprint, module_name, source_fingerprint, decl_text) = handle
-                .join()
-                .map_err(|_| "parallel native image module decl worker panicked".to_owned())??;
-            write_cached_native_image_decl_module(
-                image_path,
-                &context_fingerprint,
-                &module_name,
-                &source_fingerprint,
-                &decl_text,
-            );
-            group_results[index] = Some(decl_text);
+        if max_jobs <= 1 || uncached_work.len() <= 1 {
+            for (index, module_name, source_fingerprint, module_bundle) in uncached_work {
+                let decl_text = execute_project_module_decls_export(image_path, &module_bundle, &module_name)?;
+                write_cached_native_image_decl_module(
+                    image_path,
+                    &decl_plan.context_fingerprint,
+                    &module_name,
+                    &source_fingerprint,
+                    &decl_text,
+                );
+                group_results[index] = Some(decl_text);
+            }
+        } else {
+            let mut handles = Vec::new();
+            for (index, module_name, source_fingerprint, module_bundle) in uncached_work {
+                let worker_image_path = image_path.to_owned();
+                let worker_context_fingerprint = decl_plan.context_fingerprint.clone();
+                handles.push((
+                    index,
+                    thread::Builder::new()
+                        .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
+                        .spawn(move || {
+                            execute_project_module_decls_export_local_only(
+                                &worker_image_path,
+                                &module_bundle,
+                                &module_name,
+                            )
+                            .map(|decl_text| {
+                                (
+                                    worker_context_fingerprint,
+                                    module_name,
+                                    source_fingerprint,
+                                    decl_text,
+                                )
+                            })
+                        })
+                        .map_err(|err| format!("failed to spawn native image module decl worker: {err}"))?,
+                ));
+            }
+
+            for (index, handle) in handles {
+                let (context_fingerprint, module_name, source_fingerprint, decl_text) = handle
+                    .join()
+                    .map_err(|_| "parallel native image module decl worker panicked".to_owned())??;
+                write_cached_native_image_decl_module(
+                    image_path,
+                    &context_fingerprint,
+                    &module_name,
+                    &source_fingerprint,
+                    &decl_text,
+                );
+                group_results[index] = Some(decl_text);
+            }
         }
 
         for decl_text in group_results {
