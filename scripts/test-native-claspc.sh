@@ -298,6 +298,11 @@ feedback_loop_recovery_feedback_path="$feedback_loop_recovery_state_root/feedbac
 feedback_loop_recovery_builder_stdout="$feedback_loop_recovery_state_root/builder-2.stdout.jsonl"
 feedback_loop_recovery_builder_stderr="$feedback_loop_recovery_state_root/builder-2.stderr.log"
 feedback_loop_recovery_builder_heartbeat="$feedback_loop_recovery_state_root/builder-2.heartbeat.json"
+feedback_loop_no_report_state_root="$test_root/feedback-loop-no-report-state"
+feedback_loop_no_report_workspace_root="$test_root/feedback-loop-no-report-workspace"
+feedback_loop_no_report_workspace="$feedback_loop_no_report_workspace_root/workspace.txt"
+feedback_loop_no_report_feedback_path="$feedback_loop_no_report_state_root/feedback.json"
+feedback_loop_no_report_verifier_heartbeat="$feedback_loop_no_report_state_root/verifier-1.heartbeat.json"
 feedback_loop_stdout_recovery_state_root="$test_root/feedback-loop-stdout-recovery-state"
 feedback_loop_stdout_recovery_workspace_root="$test_root/feedback-loop-stdout-recovery-workspace"
 feedback_loop_stdout_recovery_workspace="$feedback_loop_stdout_recovery_workspace_root/workspace.txt"
@@ -644,7 +649,12 @@ elif [[ "$prompt" == *"verifier subagent"* ]]; then
   if [[ -f "$workspace_path" ]]; then
     content="$(cat "$workspace_path")"
   fi
-  if [[ "$prompt" == *"task-failing-branch.md"* ]]; then
+  if [[ "${CLASP_TEST_FAKE_SKIP_VERIFIER_REPORT_ONCE:-0}" == "1" && ! -f "$(dirname "$report_path")/.skipped-verifier-report" ]]; then
+    printf '%s\n' 'force-close-category' >"$builder_policy_path"
+    printf '%s\n' 'simulated verifier transport loss before durable report' >&2
+    touch "$(dirname "$report_path")/.skipped-verifier-report"
+    exit 0
+  elif [[ "$prompt" == *"task-failing-branch.md"* ]]; then
     emit_report_payload <<'JSON'
 {"verdict":"fail","summary":"speculative branch should not land","findings":["This branch intentionally fails so the manager has to keep going with other branches."],"tests_run":["speculative branch review"],"follow_up":["Keep the successful parallel branches moving and let the benchmark checkpoint decide whether another wave is needed."],"capability_statuses":[{"name":"ordinary_program_execution","status":"fail","evidence":["speculative branch stayed red"],"blocking_gaps":["this branch does not converge"],"required_closure":["Use another branch or a later wave instead of landing this task."]},{"name":"durable_native_substrate","status":"pass","evidence":["failure is deliberate, not a substrate crash"],"blocking_gaps":[],"required_closure":[]},{"name":"clasp_native_control_api","status":"pass","evidence":["manager can consume this structured verifier failure"],"blocking_gaps":[],"required_closure":[]},{"name":"orchestration_viability","status":"pass","evidence":["manager should continue after this failed branch"],"blocking_gaps":[],"required_closure":[]},{"name":"ergonomics","status":"pass","evidence":["fixture does not model ergonomic blockers"],"blocking_gaps":[],"required_closure":[]},{"name":"verification_gate","status":"fail","evidence":["branch is intentionally non-landing"],"blocking_gaps":["speculative branch should stay out of the landing set"],"required_closure":["Let another branch or another wave carry the benchmark target."]}]}
 JSON
@@ -974,6 +984,20 @@ grep -F 'builder-start' "$feedback_loop_recovery_builder_stdout" >/dev/null
 grep -F 'builder-progress' "$feedback_loop_recovery_builder_stderr" >/dev/null
 grep -F '"completed":true' "$feedback_loop_recovery_builder_heartbeat" >/dev/null
 grep -F '"verdict":"pass"' "$feedback_loop_recovery_feedback_path" >/dev/null
+
+mkdir -p "$feedback_loop_no_report_workspace_root"
+feedback_loop_no_report_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$feedback_loop_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$feedback_loop_task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$feedback_loop_no_report_workspace_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  CLASP_TEST_FAKE_SKIP_VERIFIER_REPORT_ONCE='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$feedback_loop_no_report_state_root"
+)"
+printf '%s\n' "$feedback_loop_no_report_output" | grep -Fx 'pass:2' >/dev/null
+grep -Fx 'fixed-after-feedback' "$feedback_loop_no_report_workspace" >/dev/null
+grep -F '"exitCode":71' "$feedback_loop_no_report_verifier_heartbeat" >/dev/null
+grep -F '"verdict":"pass"' "$feedback_loop_no_report_feedback_path" >/dev/null
 
 CLASP_LOOP_CODEX_BIN_JSON="\"$feedback_loop_codex_bin\"" \
 CLASP_LOOP_TASK_FILE_JSON="\"$feedback_loop_task_file\"" \

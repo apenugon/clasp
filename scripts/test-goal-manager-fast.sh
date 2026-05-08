@@ -9,6 +9,8 @@ export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-goal-manager-fast.XXXXXX")"
 test_root_abs="$(cd "$test_root" && pwd -P)"
 export XDG_CACHE_HOME="$test_root/xdg-cache"
+goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$project_root/.clasp-loops/.cache/goal-manager-fast/binaries}"
+goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$project_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
 
 goal_manager_live_pid=""
 goal_manager_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
@@ -545,7 +547,10 @@ if [[ -n "${CLASP_GOAL_MANAGER_BINARY:-}" ]]; then
   fi
   goal_manager_actual_binary="$goal_manager_binary"
 else
-  "$project_root/scripts/ensure-goal-manager-binary.sh" \
+  mkdir -p "$goal_manager_build_cache_dir" "$goal_manager_build_xdg_cache_home"
+  XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir" \
+    "$project_root/scripts/ensure-goal-manager-binary.sh" \
     --alias "$goal_manager_live_binary" \
     --alias "$goal_manager_actual_binary" \
     >/dev/null

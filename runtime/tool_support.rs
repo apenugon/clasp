@@ -1068,7 +1068,16 @@ fn native_export_host_lock_owner_pid(lock_path: &Path) -> Option<u32> {
 }
 
 fn process_appears_alive(pid: u32) -> bool {
-    PathBuf::from("/proc").join(pid.to_string()).exists()
+    let proc_root = PathBuf::from("/proc").join(pid.to_string());
+    let stat_path = proc_root.join("stat");
+    match fs::read_to_string(&stat_path) {
+        Ok(stat) => {
+            let after_name = stat.rsplit_once(") ").map(|(_, tail)| tail).unwrap_or("");
+            let state = after_name.split_whitespace().next().unwrap_or("");
+            !matches!(state, "Z" | "X")
+        }
+        Err(_) => proc_root.exists(),
+    }
 }
 
 fn clear_native_export_host_path(path: &Path) -> bool {
@@ -1166,9 +1175,19 @@ fn spawn_native_export_host(image_path_text: &str, socket_path: &Path) -> Result
     } else {
         command.stderr(Stdio::null());
     }
-    command
+    let mut child = command
         .spawn()
         .map_err(|err| format!("failed to start native export host: {err}"))?;
+    let child_pid = child.id();
+    if let Err(err) = thread::Builder::new()
+        .name(format!("clasp-native-export-host-reaper-{child_pid}"))
+        .spawn(move || {
+            if let Err(err) = child.wait() {
+                trace_native_host(&format!("failed to reap native export host pid={child_pid}: {err}"));
+            }
+        }) {
+        trace_native_host(&format!("failed to spawn native export host reaper pid={child_pid}: {err}"));
+    }
     wait_for_native_export_host(socket_path)
 }
 
@@ -1957,6 +1976,24 @@ mod tests {
         assert!(lock_path.exists());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn process_appears_alive_treats_zombies_as_dead() {
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+
+        while std::time::Instant::now() < deadline && super::process_appears_alive(pid) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert!(!super::process_appears_alive(pid));
+        let _ = child.wait();
     }
 
     #[test]
