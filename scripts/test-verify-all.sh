@@ -43,6 +43,8 @@ cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-na
 mkdir -p "$test_root/examples/swarm-native" "$test_root/runtime"
 printf 'module Main\nmain : Str\nmain = "ok"\n' > "$test_root/examples/swarm-native/GoalManager.clasp"
 printf 'module Main\nmain : Str\nmain = "ok"\n' > "$test_root/examples/swarm-native/GoalManager.wrapper.clasp"
+printf 'module Service\nservice : Str\nservice = "service"\n' > "$test_root/examples/swarm-native/Service.clasp"
+printf 'module Swarm\nswarm : Str\nswarm = "swarm"\n' > "$test_root/examples/swarm-native/Swarm.clasp"
 printf '[package]\nname = "fake-runtime"\nversion = "0.0.0"\n' > "$test_root/runtime/Cargo.toml"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -79,7 +81,9 @@ grep -F 'nativeImageProjectModuleDeclsText' "$test_root/src/scripts/verify.sh" >
 grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
-grep -F 'GoalManager.wrapper.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'GoalManager.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'goal-manager-source-content' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal-manager-source' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'sha256sum "$claspc_bin"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
@@ -146,6 +150,22 @@ goal_manager_binary_two="$(
 [[ -x "$goal_manager_binary_one" ]]
 [[ -f "$(dirname "$goal_manager_binary_one")/compile.lock" ]]
 [[ ! -e "$goal_manager_cache/compile.lock" ]]
+
+printf 'module Extra\nextra : Str\nextra = "ignored by flat manager cache key"\n' > "$test_root/examples/swarm-native/Extra.clasp"
+goal_manager_binary_after_unrelated_module="$(
+  CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$goal_manager_binary_after_unrelated_module" == "$goal_manager_binary_two" ]]
+
+printf 'module Service\nservice : Str\nservice = "changed dependency"\n' > "$test_root/examples/swarm-native/Service.clasp"
+goal_manager_binary_after_dependency_change="$(
+  CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
+    "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$goal_manager_binary_after_dependency_change" != "$goal_manager_binary_two" ]]
 
 goal_manager_xdg_cache="$test_root/xdg-goal-manager-cache"
 goal_manager_xdg_binary="$(

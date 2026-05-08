@@ -13,7 +13,7 @@ goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$project_root/.cla
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$project_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
 
 goal_manager_live_pid=""
-goal_manager_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
+goal_manager_source="$project_root/examples/swarm-native/GoalManager.clasp"
 goal_manager_live_binary="$project_root/.clasp-loops/.cache/goal-manager-live/swarm-goal-manager"
 goal_manager_actual_binary="$project_root/.clasp-loops/.cache/goal-manager-planner-memory/swarm-goal-manager"
 
@@ -148,7 +148,7 @@ fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
-grep -F 'import GoalManagerServiceMain' "$goal_manager_source" >/dev/null
+grep -F 'serviceGoalManagerMain' "$goal_manager_source" >/dev/null
 mkdir -p "$test_root_abs/bin"
 
 cat >"$fake_codex_bin" <<'EOF'

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$project_root/examples/swarm-native/GoalManager.wrapper.clasp}"
+goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$project_root/examples/swarm-native/GoalManager.clasp}"
+goal_manager_flat_source="$project_root/examples/swarm-native/GoalManager.clasp"
+goal_manager_wrapper_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
 default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"
 cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-$default_cache_parent/goal-manager-fast}"
 claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-claspc.sh")}"
@@ -32,18 +34,23 @@ done
 compute_goal_manager_cache_key() {
   {
     printf 'goal-manager-source\t%s\n' "$goal_manager_source"
+    printf 'goal-manager-source-content\t'
+    sha256sum "$goal_manager_source"
     printf 'claspc-content\t'
     sha256sum "$claspc_bin"
-    find \
-      "$project_root/examples/swarm-native" \
-      "$project_root/src" \
-      "$project_root/runtime" \
-      -type f \
-      \( -name '*.clasp' -o -name '*.rs' -o -name 'Cargo.toml' \) \
-      ! -path '*/target/*' \
-      -print0 \
-      | sort -z \
-      | xargs -0 sha256sum
+    if [[ "$goal_manager_source" == "$goal_manager_flat_source" ]]; then
+      sha256sum \
+        "$project_root/examples/swarm-native/Service.clasp" \
+        "$project_root/examples/swarm-native/Swarm.clasp"
+    elif [[ "$goal_manager_source" == "$goal_manager_wrapper_source" ]]; then
+      find \
+        "$project_root/examples/swarm-native" \
+        -type f \
+        -name '*.clasp' \
+        -print0 \
+        | sort -z \
+        | xargs -0 sha256sum
+    fi
   } | sha256sum | awk '{print $1}'
 }
 
@@ -70,6 +77,7 @@ compile_goal_manager_binary() {
           RUSTC=/definitely-missing-rustc \
           CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-8}" \
           CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}" \
+          CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}" \
           "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
         || compile_status=$?
     else
@@ -77,6 +85,7 @@ compile_goal_manager_binary() {
         RUSTC=/definitely-missing-rustc \
         CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-8}" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}" \
+        CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}" \
         "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
         || compile_status=$?
     fi
