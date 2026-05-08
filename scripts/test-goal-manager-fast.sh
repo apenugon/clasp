@@ -13,7 +13,9 @@ goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$project_root/.cla
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$project_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
 
 goal_manager_live_pid=""
-goal_manager_source="$project_root/examples/swarm-native/GoalManager.clasp"
+goal_manager_monolithic_source="$project_root/examples/swarm-native/GoalManager.clasp"
+goal_manager_wrapper_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
+goal_manager_source="$goal_manager_wrapper_source"
 goal_manager_live_binary="$project_root/.clasp-loops/.cache/goal-manager-live/swarm-goal-manager"
 goal_manager_actual_binary="$project_root/.clasp-loops/.cache/goal-manager-planner-memory/swarm-goal-manager"
 
@@ -148,8 +150,106 @@ fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
 split_goal_manager_binary="$test_root_abs/split-goal-manager"
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
-grep -F 'runManagedServiceBootstrap' "$goal_manager_source" >/dev/null
+grep -F 'import GoalManagerServiceMain' "$goal_manager_source" >/dev/null
+grep -F 'runManagedServiceBootstrap' "$goal_manager_monolithic_source" >/dev/null
 mkdir -p "$test_root_abs/bin"
+
+fake_ensure_claspc_bin="$test_root_abs/fake-ensure-claspc"
+fake_ensure_log="$test_root_abs/fake-ensure-claspc.log"
+cat >"$fake_ensure_claspc_bin" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output=""
+source_path=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output="$2"
+      shift 2
+      ;;
+    *.clasp)
+      source_path="$1"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$output" ]]; then
+  printf 'missing -o\n' >&2
+  exit 1
+fi
+
+if [[ -n "${CLASP_TEST_FAKE_ENSURE_CLASPC_LOG:-}" ]]; then
+  printf 'compile-source=%s\n' "$source_path" >>"$CLASP_TEST_FAKE_ENSURE_CLASPC_LOG"
+  printf 'compile-output=%s\n' "$output" >>"$CLASP_TEST_FAKE_ENSURE_CLASPC_LOG"
+fi
+
+cat >"$output" <<SCRIPT
+#!/usr/bin/env bash
+printf 'compiled-source=%s\n' '$source_path'
+printf 'compiled-output=%s\n' '$output'
+printf 'compiled-threshold=%s\n' '$CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD'
+exit 0
+SCRIPT
+EOF
+chmod +x "$fake_ensure_claspc_bin"
+
+ensure_probe_cache="$test_root_abs/ensure-goal-manager-cache"
+ensure_probe_alias="$test_root_abs/ensure-goal-manager-alias/swarm-goal-manager"
+mkdir -p "$(dirname "$ensure_probe_alias")"
+printf '#!/usr/bin/env bash\nexit 42\n' >"$ensure_probe_alias"
+chmod +x "$ensure_probe_alias"
+ensure_probe_binary_one="$(
+  CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
+    "$project_root/scripts/ensure-goal-manager-binary.sh" \
+    --alias "$ensure_probe_alias"
+)"
+ensure_probe_binary_two="$(
+  CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
+    "$project_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$ensure_probe_binary_one" == "$ensure_probe_binary_two" ]]
+[[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "1" ]]
+grep -F "compile-source=$goal_manager_wrapper_source" "$fake_ensure_log" >/dev/null
+cmp -s "$ensure_probe_binary_one" "$ensure_probe_alias"
+"$ensure_probe_alias" | grep -F "compiled-source=$goal_manager_wrapper_source" >/dev/null
+
+ensure_probe_binary_build_mode="$(
+  CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=1 \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
+    "$project_root/scripts/ensure-goal-manager-binary.sh" \
+    --alias "$ensure_probe_alias"
+)"
+[[ "$ensure_probe_binary_build_mode" != "$ensure_probe_binary_one" ]]
+[[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "2" ]]
+cmp -s "$ensure_probe_binary_build_mode" "$ensure_probe_alias"
+"$ensure_probe_alias" | grep -F 'compiled-threshold=1' >/dev/null
+
+ensure_probe_monolithic_binary="$(
+  CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_GOAL_MANAGER_SOURCE="$goal_manager_monolithic_source" \
+    CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
+    CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
+    "$project_root/scripts/ensure-goal-manager-binary.sh"
+)"
+[[ "$ensure_probe_monolithic_binary" != "$ensure_probe_binary_one" ]]
+grep -F "compile-source=$goal_manager_monolithic_source" "$fake_ensure_log" >/dev/null
+[[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "3" ]]
+
+if [[ "${CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_ONLY:-0}" == "1" ]]; then
+  printf 'goal-manager-fast-cache-probe-ok\n'
+  exit 0
+fi
 
 cat >"$fake_codex_bin" <<'EOF'
 #!/usr/bin/env bash
@@ -582,6 +682,7 @@ run_manager_binary() {
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
     CLASP_MANAGER_CLASPC_BIN_JSON="\"$fake_child_claspc_bin\"" \
     CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target for Clasp."' \
+    CLASP_MANAGER_OBJECTIVE_ID_JSON='"improve-clasp"' \
     CLASP_MANAGER_MAX_TASKS_JSON='1' \
     CLASP_MANAGER_MAX_WAVES_JSON='1' \
     CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
@@ -633,6 +734,7 @@ run_goal_manager_status_with_binary() {
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
     CLASP_MANAGER_CLASPC_BIN_JSON="\"$fake_child_claspc_bin\"" \
     CLASP_MANAGER_GOAL_JSON='"Beat the AppBench target for Clasp."' \
+    CLASP_MANAGER_OBJECTIVE_ID_JSON='"improve-clasp"' \
     CLASP_MANAGER_MAX_TASKS_JSON='1' \
     CLASP_MANAGER_MAX_WAVES_JSON='1' \
     CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
