@@ -662,9 +662,55 @@ runToolStep handle spec mailboxLimit =
       toolStepResultError message
   }
 
+runToolStepWithTimeout : TaskHandle -> SwarmCommand -> Int -> Int -> Result ToolStepResult
+runToolStepWithTimeout handle spec timeoutMs mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRunWithTimeout handle spec timeoutMs {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult {
+                    lease = leaseValue,
+                    run = runValue,
+                    status = statusValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  toolStepResultError message
+              },
+            Err message ->
+              toolStepResultError message
+          },
+        Err message ->
+          toolStepResultError message
+      },
+    Err message ->
+      toolStepResultError message
+  }
+
 runVerifierStep : TaskHandle -> Str -> SwarmCommand -> Int -> Result VerifierStepResult
 runVerifierStep handle verifierName spec mailboxLimit =
   match verifierRun handle verifierName spec {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue ->
+          Ok (VerifierStepResult {
+            run = runValue,
+            mailbox = mailboxValue
+          }),
+        Err message ->
+          verifierStepResultError message
+      },
+    Err message ->
+      verifierStepResultError message
+  }
+
+runVerifierStepWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit =
+  match verifierRunWithTimeout handle verifierName spec timeoutMs {
     Ok runValue ->
       match taskMailbox handle mailboxLimit {
         Ok mailboxValue ->
@@ -688,6 +734,54 @@ executeVerificationPlan handle plan mailboxLimit = {
   for command in plan.commands {
     if error == "" then {
       match runVerifierStep handle command.verifierName command.command mailboxLimit {
+        Ok stepValue ->
+          {
+            steps = append steps [stepValue];
+            if runPassed stepValue.run then {
+              error
+            } else {
+              passed = false;
+              failedVerifiers = append failedVerifiers [command.verifierName];
+              error
+            }
+          },
+        Err message ->
+          {
+            error = message;
+            error
+          }
+      }
+    } else {
+      error
+    }
+  };
+  if error != "" then
+    verificationPlanResultError error
+  else
+    match taskMailbox handle mailboxLimit {
+      Ok mailboxValue ->
+        Ok (VerificationPlanResult {
+          plan = plan,
+          steps = steps,
+          passed = passed,
+          failedVerifiers = failedVerifiers,
+          mailbox = mailboxValue,
+          mailboxSummary = verificationPlanMailboxSummary mailboxValue
+        }),
+      Err message ->
+        verificationPlanResultError message
+    }
+}
+
+executeVerificationPlanWithTimeout : TaskHandle -> VerificationPlan -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit = {
+  let mut steps = [];
+  let mut passed = true;
+  let mut failedVerifiers = [];
+  let mut error = "";
+  for command in plan.commands {
+    if error == "" then {
+      match runVerifierStepWithTimeout handle command.verifierName command.command timeoutMs mailboxLimit {
         Ok stepValue ->
           {
             steps = append steps [stepValue];

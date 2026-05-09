@@ -1734,6 +1734,21 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"passed":false,"failedVerifi
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6,"latestRunStatus":"failed","latestRunName":"native-plan-fail"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterPlan":{"objectiveId":"failure-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"timedOutTool":{"objective":"timeout-tool","task":"tool-times-out"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"exitCode":124,"name":"bash","role":"tool"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-times-out","status":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfter":{"objectiveId":"timeout-tool","status":"blocked","action":"inspect-task"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"taskId":"tool-times-out","timedOut":true' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"timedOutVerificationPlan":{"objective":"timeout-plan","task":"verification-plan-times-out","verifier":"native-plan-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"plan":{"name":"focused-native-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"requiredVerifierNames":["native-plan-timeout"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"exitCode":124,"name":"native-plan-timeout","role":"verifier"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-timeout"]' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"latestRunStatus":"timed_out","latestRunName":"native-plan-timeout","latestVerifierStatus":"timed_out","latestVerifier":"native-plan-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"managerAfterPlan":{"objectiveId":"timeout-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-times-out","mergegateName":"trunk","verdict":"fail"}' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-regression","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed","passedPlanRequiredVerifiers":["native-smoke","native-regression"],"passedPlanPassed":true,"passedPlanFailedVerifiers":[],"passedPlanArtifactCount":6' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"blockedAction":"inspect-task","blockedTaskId":"tool-fails","blockedTaskStatus":"failed"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
@@ -1799,6 +1814,21 @@ printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers"
 printf '%s\n' "$swarm_native_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6,"latestRunStatus":"failed","latestRunName":"native-plan-fail"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"failure-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"timedOutTool":{"objective":"timeout-tool","task":"tool-times-out"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"bash","role":"tool"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-times-out","status":"failed"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"timeout-tool","status":"blocked","action":"inspect-task"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-times-out","timedOut":true' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"timedOutVerificationPlan":{"objective":"timeout-plan","task":"verification-plan-times-out","verifier":"native-plan-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"plan":{"name":"focused-native-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-plan-timeout"]' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"native-plan-timeout","role":"verifier"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-timeout"]' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"latestRunStatus":"timed_out","latestRunName":"native-plan-timeout","latestVerifierStatus":"timed_out","latestVerifier":"native-plan-timeout"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"timeout-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-times-out","mergegateName":"trunk","verdict":"fail"}' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-regression","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed","passedPlanRequiredVerifiers":["native-smoke","native-regression"],"passedPlanPassed":true,"passedPlanFailedVerifiers":[],"passedPlanArtifactCount":6' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"],"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
