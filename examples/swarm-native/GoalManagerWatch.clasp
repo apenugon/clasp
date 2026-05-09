@@ -23,7 +23,17 @@ readWatchedProcessPath path = match readFile path {
 
 awaitWatchedProcess : Str -> Int -> Result WatchedProcess
 awaitWatchedProcess heartbeatPath pollMs =
-  watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
+  if childLoopAwaitTimeoutMs <= 0 then
+    watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
+  else
+    match awaitWatchedProcessTimeoutRaw heartbeatPath pollMs childLoopAwaitTimeoutMs {
+      Ok raw -> Ok (decode WatchedProcess raw),
+      Err message ->
+        if message == "timeout" then
+          reconcileWatchedProcess heartbeatPath
+        else
+          watchedProcessError message
+    }
 
 awaitWatchedProcessTimeout : Str -> Int -> Int -> Result WatchedProcess
 awaitWatchedProcessTimeout heartbeatPath pollMs timeoutMs =

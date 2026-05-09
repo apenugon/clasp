@@ -201,6 +201,12 @@ fn trace_native_cache(message: &str) {
     }
 }
 
+fn relaxed_native_image_build_plan_cache() -> bool {
+    env::var("CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE")
+        .map(|value| value != "0")
+        .unwrap_or(false)
+}
+
 fn fail(message: &str, json: bool) -> ExitCode {
     if json {
         print_json_error(message);
@@ -483,6 +489,48 @@ fn project_bundle_module_source_fingerprint<'a>(
         .iter()
         .find(|module| module.module_name == module_name)
         .map(|module| module.source_fingerprint.as_str())
+}
+
+fn native_image_decl_module_cache_context_fingerprint(
+    bundle_build: &ProjectBundleBuild,
+    decl_plan: &NativeImageDeclModulePlan,
+    module_name: &str,
+) -> Result<String, String> {
+    let modules_by_name = bundle_build
+        .modules
+        .iter()
+        .map(|module| (module.module_name.clone(), module))
+        .collect::<HashMap<_, _>>();
+    let mut memoized_closures = HashMap::new();
+    let closure = collect_project_module_closure_set(
+        module_name,
+        &modules_by_name,
+        &mut memoized_closures,
+        &mut HashSet::new(),
+    )?;
+    let mut context_parts = vec!["decl-module-context-v2".to_owned()];
+
+    for module in &bundle_build.modules {
+        if !closure.contains(&module.module_name) {
+            continue;
+        }
+        let Some(entry) = decl_plan
+            .modules
+            .iter()
+            .find(|entry| entry.module_name == module.module_name)
+        else {
+            return Err(format!(
+                "internal error: missing decl-module plan entry for `{}`",
+                module.module_name
+            ));
+        };
+        context_parts.push(format!(
+            "{}:{}",
+            module.module_name, entry.interface_fingerprint
+        ));
+    }
+
+    Ok(stable_fingerprint_text(&context_parts.join("\n")))
 }
 
 fn stable_fingerprint_text(text: &str) -> String {
@@ -1148,6 +1196,15 @@ fn load_cached_or_execute_native_image_build_plan(
                 {
                     return Ok((cached.build_plan_text, plan, decl_module_plan));
                 }
+            } else if relaxed_native_image_build_plan_cache() {
+                if let Ok((plan, decl_module_plan)) =
+                    parse_native_image_project_build_plan(&cached.build_plan_text)
+                {
+                    trace_native_cache(
+                        "build-plan relaxed-hit; reusing cached surface plan after interface-only mismatch",
+                    );
+                    return Ok((cached.build_plan_text, plan, decl_module_plan));
+                }
             }
         }
     }
@@ -1375,8 +1432,8 @@ fn execute_parallel_module_decl_section_export(
     decl_plan: &NativeImageDeclModulePlan,
     max_jobs: usize,
 ) -> Result<String, String> {
-    let summary_plan = plan_incremental_project_summary(bundle_build)?;
     let mut decl_sections = vec![constructor_decls.to_owned()];
+    let mut summary_plan_cache: Option<IncrementalProjectSummaryPlan> = None;
     if decl_plan.modules.is_empty() {
         return merge_json_arrays(&decl_sections);
     }
@@ -1406,42 +1463,94 @@ fn execute_parallel_module_decl_section_export(
                     module_entry.module_name
                 ));
             };
+            let module_context_fingerprint = native_image_decl_module_cache_context_fingerprint(
+                bundle_build,
+                decl_plan,
+                &module_entry.module_name,
+            )
+            .unwrap_or_else(|message| {
+                trace_native_cache(&format!(
+                    "decl-module context fallback module={} reason={}",
+                    module_entry.module_name, message
+                ));
+                decl_plan.context_fingerprint.clone()
+            });
 
-            if let Some(cached) = read_cached_native_image_decl_module(
+            let cached_decl_module = read_cached_native_image_decl_module(
                 image_path,
-                &decl_plan.context_fingerprint,
+                &module_context_fingerprint,
                 &module_entry.module_name,
                 module_source_fingerprint,
-            ) {
+            )
+            .or_else(|| {
+                if module_context_fingerprint == decl_plan.context_fingerprint {
+                    return None;
+                }
+                let cached = read_cached_native_image_decl_module(
+                    image_path,
+                    &decl_plan.context_fingerprint,
+                    &module_entry.module_name,
+                    module_source_fingerprint,
+                )?;
+                trace_native_cache(&format!(
+                    "decl-module legacy-context migrated module={}",
+                    module_entry.module_name
+                ));
+                write_cached_native_image_decl_module(
+                    image_path,
+                    &module_context_fingerprint,
+                    &module_entry.module_name,
+                    module_source_fingerprint,
+                    &cached,
+                );
+                Some(cached)
+            });
+
+            if let Some(cached) = cached_decl_module {
                 group_results[index] = Some(cached);
                 continue;
             }
 
-            let module_bundle = summary_plan
-                .modules
-                .get(&module_entry.module_name)
-                .ok_or_else(|| {
-                    format!(
-                        "internal error: missing scoped bundle plan for project module `{}`",
-                        module_entry.module_name
-                    )
-                })?
-                .scoped_bundle
-                .clone();
             uncached_work.push((
                 index,
                 module_entry.module_name.clone(),
                 module_source_fingerprint.to_owned(),
-                module_bundle,
+                module_context_fingerprint,
             ));
         }
 
+        if uncached_work.is_empty() {
+            trace_native_cache("decl-module summary-plan skipped; all chunk modules cached");
+        } else if summary_plan_cache.is_none() {
+            trace_native_cache(&format!(
+                "decl-module summary-plan needed uncached={}",
+                uncached_work.len()
+            ));
+            summary_plan_cache = Some(plan_incremental_project_summary(bundle_build)?);
+        } else {
+            trace_native_cache(&format!(
+                "decl-module summary-plan reused uncached={}",
+                uncached_work.len()
+            ));
+        };
+
         if max_jobs <= 1 || uncached_work.len() <= 1 {
-            for (index, module_name, source_fingerprint, module_bundle) in uncached_work {
+            for (index, module_name, source_fingerprint, module_context_fingerprint) in uncached_work {
+                let module_bundle = summary_plan_cache
+                    .as_ref()
+                    .and_then(|plan| plan.modules.get(&module_name))
+                    .ok_or_else(|| {
+                        format!(
+                            "internal error: missing scoped bundle plan for project module `{}`",
+                            module_name
+                        )
+                    })?
+                    .scoped_bundle
+                    .clone();
                 let decl_text = execute_project_module_decls_export(image_path, &module_bundle, &module_name)?;
                 write_cached_native_image_decl_module(
                     image_path,
-                    &decl_plan.context_fingerprint,
+                    &module_context_fingerprint,
                     &module_name,
                     &source_fingerprint,
                     &decl_text,
@@ -1450,9 +1559,19 @@ fn execute_parallel_module_decl_section_export(
             }
         } else {
             let mut handles = Vec::new();
-            for (index, module_name, source_fingerprint, module_bundle) in uncached_work {
+            for (index, module_name, source_fingerprint, module_context_fingerprint) in uncached_work {
+                let module_bundle = summary_plan_cache
+                    .as_ref()
+                    .and_then(|plan| plan.modules.get(&module_name))
+                    .ok_or_else(|| {
+                        format!(
+                            "internal error: missing scoped bundle plan for project module `{}`",
+                            module_name
+                        )
+                    })?
+                    .scoped_bundle
+                    .clone();
                 let worker_image_path = image_path.to_owned();
-                let worker_context_fingerprint = decl_plan.context_fingerprint.clone();
                 handles.push((
                     index,
                     thread::Builder::new()
@@ -1464,8 +1583,17 @@ fn execute_parallel_module_decl_section_export(
                                 &module_name,
                             )
                             .map(|decl_text| {
+                                // Persist inside the worker so an outer timeout still preserves
+                                // completed module work even if another worker blocks the join.
+                                write_cached_native_image_decl_module(
+                                    &worker_image_path,
+                                    &module_context_fingerprint,
+                                    &module_name,
+                                    &source_fingerprint,
+                                    &decl_text,
+                                );
                                 (
-                                    worker_context_fingerprint,
+                                    module_context_fingerprint,
                                     module_name,
                                     source_fingerprint,
                                     decl_text,
@@ -1686,9 +1814,10 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
-        merge_json_arrays, native_image_cache_dir, plan_incremental_project_summary,
-        read_cached_native_image, split_decl_name_chunks, write_cached_native_image, ProjectBundleBuild,
-        ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
+        merge_json_arrays, native_image_cache_dir, native_image_decl_module_cache_context_fingerprint,
+        plan_incremental_project_summary, read_cached_native_image, split_decl_name_chunks,
+        write_cached_native_image, NativeImageDeclModuleEntry, NativeImageDeclModulePlan,
+        ProjectBundleBuild, ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -1769,6 +1898,84 @@ mod tests {
                 "Main".to_owned(),
             ]
         );
+    }
+
+    fn test_decl_module_plan(entries: &[(&str, &str)]) -> NativeImageDeclModulePlan {
+        NativeImageDeclModulePlan {
+            context_fingerprint: "project-wide-context".to_owned(),
+            modules: entries
+                .iter()
+                .map(|(module_name, interface_fingerprint)| NativeImageDeclModuleEntry {
+                    module_name: (*module_name).to_owned(),
+                    decl_names_text: "main".to_owned(),
+                    interface_fingerprint: (*interface_fingerprint).to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn decl_module_cache_context_ignores_unrelated_module_interfaces() {
+        let bundle_build = ProjectBundleBuild {
+            bundle: String::new(),
+            modules: vec![
+                ProjectBundleModule {
+                    canonical_path: "/tmp/Main.clasp".to_owned(),
+                    module_name: "Main".to_owned(),
+                    source_fingerprint: "main".to_owned(),
+                    import_module_names: vec!["Shared".to_owned()],
+                },
+                ProjectBundleModule {
+                    canonical_path: "/tmp/Shared.clasp".to_owned(),
+                    module_name: "Shared".to_owned(),
+                    source_fingerprint: "shared".to_owned(),
+                    import_module_names: vec![],
+                },
+                ProjectBundleModule {
+                    canonical_path: "/tmp/Unrelated.clasp".to_owned(),
+                    module_name: "Unrelated".to_owned(),
+                    source_fingerprint: "unrelated".to_owned(),
+                    import_module_names: vec![],
+                },
+            ],
+        };
+        let original_plan = test_decl_module_plan(&[
+            ("Main", "iface-main"),
+            ("Shared", "iface-shared-v1"),
+            ("Unrelated", "iface-unrelated-v1"),
+        ]);
+        let unrelated_changed_plan = test_decl_module_plan(&[
+            ("Main", "iface-main"),
+            ("Shared", "iface-shared-v1"),
+            ("Unrelated", "iface-unrelated-v2"),
+        ]);
+        let imported_changed_plan = test_decl_module_plan(&[
+            ("Main", "iface-main"),
+            ("Shared", "iface-shared-v2"),
+            ("Unrelated", "iface-unrelated-v1"),
+        ]);
+
+        let original_context = native_image_decl_module_cache_context_fingerprint(
+            &bundle_build,
+            &original_plan,
+            "Main",
+        )
+        .expect("original context");
+        let unrelated_changed_context = native_image_decl_module_cache_context_fingerprint(
+            &bundle_build,
+            &unrelated_changed_plan,
+            "Main",
+        )
+        .expect("unrelated changed context");
+        let imported_changed_context = native_image_decl_module_cache_context_fingerprint(
+            &bundle_build,
+            &imported_changed_plan,
+            "Main",
+        )
+        .expect("imported changed context");
+
+        assert_eq!(original_context, unrelated_changed_context);
+        assert_ne!(original_context, imported_changed_context);
     }
 
     #[test]

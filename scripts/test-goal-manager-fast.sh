@@ -1510,18 +1510,72 @@ expired_child_output="$test_root_abs/expired-child-output.txt"
 mkdir -p "$expired_child_workspace"
 run_goal_manager "$expired_child_state" "$expired_child_workspace" \
   CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
-  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='0.15' \
-  CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON='25' \
+  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='2.2' \
+  CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON='2000' \
+  CLASP_MANAGER_TASK_PROMOTION_HEARTBEAT_JSON='false' \
   CLASP_MANAGER_TRACE_JSON='true' \
   CLASP_MANAGER_MAX_WAVES_JSON='1' \
   >"$expired_child_output" 2>&1
 grep -F '"phase":"completed"' "$expired_child_output" >/dev/null
 grep -F '"verdict":"pass"' "$expired_child_output" >/dev/null
-grep -F 'task-complete-expired-lease-recovered:benchmark-gap' "$expired_child_state/trace.log" >/dev/null
 if grep -F '"summary":"planned task reconciliation failed"' "$expired_child_state/feedback.json" >/dev/null 2>&1; then
   echo "expired child completion leases should recover instead of final-failing reconciliation" >&2
   exit 1
 fi
+
+trace_case "manager-heartbeats-long-child-lease"
+heartbeat_child_state="$test_root_abs/heartbeat-child-state"
+heartbeat_child_workspace="$test_root_abs/heartbeat-child-workspace"
+heartbeat_child_output="$test_root_abs/heartbeat-child-output.txt"
+heartbeat_child_status="$test_root_abs/heartbeat-child-task.json"
+mkdir -p "$heartbeat_child_workspace"
+run_goal_manager "$heartbeat_child_state" "$heartbeat_child_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='0.35' \
+  CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON='5000' \
+  CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON='50' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$heartbeat_child_output" 2>&1
+grep -F '"phase":"completed"' "$heartbeat_child_output" >/dev/null
+grep -F '"verdict":"pass"' "$heartbeat_child_output" >/dev/null
+"$claspc_bin" --json swarm status "$heartbeat_child_state" benchmark-gap >"$heartbeat_child_status"
+grep -F '"status":"completed"' "$heartbeat_child_status" >/dev/null
+grep -F '"heartbeatSeen":true' "$heartbeat_child_status" >/dev/null
+if grep -F 'task-complete-expired-lease-recovered:benchmark-gap' "$heartbeat_child_state/trace.log" >/dev/null 2>&1; then
+  echo "manager heartbeats should keep long child leases fresh instead of relying on completion recovery" >&2
+  exit 1
+fi
+
+trace_case "bounded-child-await-reconciles-without-finalizing"
+bounded_await_state="$test_root_abs/bounded-await-state"
+bounded_await_workspace="$test_root_abs/bounded-await-workspace"
+bounded_await_output="$test_root_abs/bounded-await-output.txt"
+mkdir -p "$bounded_await_workspace"
+run_goal_manager "$bounded_await_state" "$bounded_await_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_CHILD_SLEEP_SECS='0.45' \
+  CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON='120' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_LOOP_WATCH_POLL_MS_JSON='10' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$bounded_await_output" 2>&1 &
+goal_manager_live_pid=$!
+wait_for_path_contains "$bounded_await_state/status.json" '"phase":"task-running"' "" 1200 0.05
+wait_for_path_contains "$bounded_await_state/trace.log" 'launch-ready:return:error=:active=1' "" 1200 0.05
+sleep 0.2
+grep -F '"phase":"task-running"' "$bounded_await_state/status.json" >/dev/null
+bounded_await_launch_returns="$(grep -c 'launch-ready:return' "$bounded_await_state/trace.log" 2>/dev/null || true)"
+if (( bounded_await_launch_returns > 8 )); then
+  echo "bounded child await spun too aggressively; launch-ready:return count=$bounded_await_launch_returns" >&2
+  sed -n '1,160p' "$bounded_await_state/trace.log" >&2 || true
+  exit 1
+fi
+wait_or_kill_pid "$goal_manager_live_pid" 200
+goal_manager_live_pid=""
+grep -F '"phase":"completed"' "$bounded_await_output" >/dev/null
+grep -F '"verdict":"pass"' "$bounded_await_output" >/dev/null
+grep -F '"summary":"fake child loop completed"' "$bounded_await_state/loop-benchmark-gap/feedback.json" >/dev/null
 
 trace_case "planner-validation-retries-same-wave"
 planner_validation_state="$test_root_abs/planner-validation-state"

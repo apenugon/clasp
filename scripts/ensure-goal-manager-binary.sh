@@ -27,6 +27,7 @@ allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAIL
 goal_manager_native_bundle_jobs="${CLASP_NATIVE_BUNDLE_JOBS:-8}"
 goal_manager_native_image_section_jobs="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}"
 goal_manager_native_image_monolithic_decl_threshold="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}"
+goal_manager_relaxed_build_plan_cache="${CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE:-1}"
 declare -a alias_paths=()
 
 usage() {
@@ -66,6 +67,7 @@ emit_goal_manager_build_mode_key() {
   emit_optional_build_mode CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD
   emit_optional_build_mode CLASP_NATIVE_DISABLE_EXPORT_HOST
   emit_optional_build_mode CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE
+  printf 'goal-manager-build-mode\tCLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE\t%s\n' "$goal_manager_relaxed_build_plan_cache"
 }
 
 canonical_existing_path() {
@@ -204,6 +206,7 @@ compile_goal_manager_binary() {
           CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
           CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
           CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \
+          CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="$goal_manager_relaxed_build_plan_cache" \
           "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
         || compile_status=$?
     else
@@ -212,6 +215,7 @@ compile_goal_manager_binary() {
         CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
         CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \
+        CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="$goal_manager_relaxed_build_plan_cache" \
         "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp" \
         || compile_status=$?
     fi

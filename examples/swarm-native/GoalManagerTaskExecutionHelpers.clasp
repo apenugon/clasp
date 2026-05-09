@@ -261,6 +261,52 @@ promotionFailureReport spec message =
     capability_statuses = emptyCapabilityStatuses
   }
 
+heartbeatTaskLease : Str -> Str
+heartbeatTaskLease taskId =
+  match heartbeat (taskHandleFor taskId) {
+    Err message -> {
+      let traced = appendManagerTrace (textConcat ["task-heartbeat:nonfatal:", taskId, ":", message]) in
+      ""
+    },
+    Ok heartbeatValue ->
+      ""
+  }
+
+heartbeatTaskLeases : [Str] -> Str
+heartbeatTaskLeases taskIds = {
+  let mut ignored = "";
+  for taskId in taskIds {
+    ignored = heartbeatTaskLease taskId;
+    ignored
+  };
+  ""
+}
+
+awaitChildLoopProcess : [Str] -> Result WatchedProcess
+awaitChildLoopProcess taskIds = {
+  let taskId = firstTextOrEmpty taskIds in
+  let heartbeatError = heartbeatTaskLeases taskIds in
+  if childLoopAwaitTimeoutMs <= 0 then
+    awaitWatchedProcess (taskProcessHeartbeatPath taskId) childLoopWatchPollMs
+  else
+    awaitWatchedProcessTimeout (taskProcessHeartbeatPath taskId) childLoopWatchPollMs childLoopAwaitTimeoutMs
+}
+
+recoverExpiredTaskFailureRecording : PlannerTaskSpec -> Str -> Str
+recoverExpiredTaskFailureRecording spec message =
+  if textIncludes message "expired" then
+    match retry (taskHandleFor spec.taskId) {
+      Err retryMessage ->
+        textConcat ["task failure recording failed: ", spec.taskId, ": ", message, "; retry failed: ", retryMessage],
+      Ok retriedValue -> {
+        let traceError =
+          appendManagerTrace (textConcat ["task-failure-expired-lease-requeued:", spec.taskId, ":", message]) in
+        traceError
+      }
+    }
+  else
+    textConcat ["task failure recording failed: ", spec.taskId, ": ", message]
+
 recordPlannedTaskFailure : PlannerTaskSpec -> VerifierReport -> Str
 recordPlannedTaskFailure spec report = {
   let feedbackError = writeTaskFeedback spec.taskId report in
@@ -269,9 +315,14 @@ recordPlannedTaskFailure spec report = {
   else
     match fail (taskHandleFor spec.taskId) {
       Err message ->
-        textConcat ["task failure recording failed: ", spec.taskId, ": ", message],
-      Ok failedValue ->
-        ""
+        recoverExpiredTaskFailureRecording spec message,
+      Ok failedValue -> {
+        let cleanupError = cleanupFailedTaskWorkspace spec.taskId in
+        if cleanupError != "" then
+          appendManagerTrace (textConcat ["task-cleanup:error:", spec.taskId, ":", cleanupError])
+        else
+          ""
+      }
     }
 }
 

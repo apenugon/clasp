@@ -21,6 +21,13 @@ import GoalManagerTypes
 import Service
 import Swarm
 
+ignoreAlreadyExistsPlannerBootstrap : Str -> Str
+ignoreAlreadyExistsPlannerBootstrap message =
+  if textIncludes message "already exists" then
+    ""
+  else
+    message
+
 ensurePolicyFile : Str -> Str -> Str
 ensurePolicyFile path contents =
   if fileExists path then
@@ -260,7 +267,7 @@ ensureObjective =
   else
     match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
       Ok created -> "",
-      Err message -> message
+      Err message -> ignoreAlreadyExistsPlannerBootstrap message
     }
 
 ensureTask : Str -> Str -> [Str] -> Str
@@ -270,7 +277,7 @@ ensureTask taskId detail dependencies =
   else
     match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
       Ok created -> "",
-      Err message -> message
+      Err message -> ignoreAlreadyExistsPlannerBootstrap message
     }
 
 ensurePlannerTaskFor : Int -> Str

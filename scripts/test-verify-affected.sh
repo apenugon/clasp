@@ -113,6 +113,18 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
     break;
+  case "goal-manager-fast-script":
+    assert(report.changedFiles.includes("scripts/test-goal-manager-fast.sh"), "GoalManager harness should be present");
+    assert(report.changedFiles.includes("scripts/test-swarm-ready-gate.sh"), "swarm-ready harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-goal-manager-fast.sh'"), "GoalManager harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-goal-manager-fast.sh"), "GoalManager harness should run focused coverage");
+    assert(hasCommand("bash -n 'scripts/test-swarm-ready-gate.sh'"), "swarm-ready harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm-ready harness should run focused coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-ready-gate.sh").length === 1, "swarm-ready command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known focused harnesses should not use verify-fast fallback");
+    assert(logHas("scripts/test-goal-manager-fast.sh"), "fake GoalManager fast command should execute");
+    assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
+    break;
   case "empty-no-git":
     assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
     assert(report.inputFallbackMode === "git-unavailable" || report.inputFallbackMode === "git-empty", `unexpected input fallback mode: ${report.inputFallbackMode}`);
@@ -154,6 +166,12 @@ script_log="$test_root/script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
   run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
 assert_report "$script_report" "$script_log" verification-script
+
+goal_manager_report="$test_root/goal-manager-report.json"
+goal_manager_log="$test_root/goal-manager.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
+  run_verify_affected --changed-file scripts/test-goal-manager-fast.sh --changed-file scripts/test-swarm-ready-gate.sh > "$goal_manager_report"
+assert_report "$goal_manager_report" "$goal_manager_log" goal-manager-fast-script
 
 empty_report="$test_root/empty-report.json"
 empty_log="$test_root/empty.log"

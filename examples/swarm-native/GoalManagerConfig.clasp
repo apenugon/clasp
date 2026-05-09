@@ -100,6 +100,9 @@ childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Err message -> 1000
 }
 
+childLoopAwaitTimeoutMs : Int
+childLoopAwaitTimeoutMs = readEnvInt "CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON" 10000
+
 maxTaskLoops : Int
 maxTaskLoops = match envVar "CLASP_MANAGER_MAX_TASKS_JSON" {
   Ok raw -> decode Int raw,
@@ -221,6 +224,9 @@ taskFailureLogTailBytes = readEnvInt "CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_
 
 retainFailedTaskWorkspaces : Bool
 retainFailedTaskWorkspaces = readEnvBool "CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON" false
+
+taskPromotionHeartbeatEnabled : Bool
+taskPromotionHeartbeatEnabled = readEnvBool "CLASP_MANAGER_TASK_PROMOTION_HEARTBEAT_JSON" true
 
 mailboxLimit : Int
 mailboxLimit = 6

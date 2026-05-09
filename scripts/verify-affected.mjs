@@ -251,6 +251,7 @@ const COMMANDS = {
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
+  goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   feedbackResume: "bash scripts/test-feedback-loop-resume.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
@@ -337,6 +338,33 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       matched = true;
       reason(file, "benchmarks", "benchmark path uses benchmark task-prep coverage");
       addSelected(selectedByCommand, "benchmark-task-prep", COMMANDS.benchmarkTaskPrep, "benchmark path", file);
+    }
+
+    if (file === "scripts/test-goal-manager-fast.sh") {
+      matched = true;
+      reason(file, "goal-manager-fast-harness", "GoalManager fast harness uses shell syntax plus focused GoalManager coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "GoalManager fast shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "goal-manager-fast", COMMANDS.goalManagerFast, "GoalManager fast harness", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager fast harness", file);
+    }
+
+    if (file === "scripts/test-swarm-ready-gate.sh") {
+      matched = true;
+      reason(file, "swarm-ready-gate-harness", "swarm-ready gate uses shell syntax plus its focused structural coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm-ready gate shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
     }
 
     if (isVerificationScript(file)) {

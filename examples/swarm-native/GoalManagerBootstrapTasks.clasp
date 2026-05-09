@@ -9,6 +9,13 @@ import GoalManagerConfig
 import GoalManagerTypes
 import Swarm
 
+ignoreAlreadyExistsTaskBootstrap : Str -> Str
+ignoreAlreadyExistsTaskBootstrap message =
+  if textIncludes message "already exists" then
+    ""
+  else
+    message
+
 ensureObjective : Str
 ensureObjective =
   match objectives swarmStateRoot {
@@ -18,12 +25,12 @@ ensureObjective =
       else
         match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
           Ok created -> "",
-          Err message -> message
+          Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
       match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
         Ok created -> "",
-        Err createMessage -> createMessage
+        Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
       }
   }
 
@@ -36,12 +43,12 @@ ensureTask taskId detail dependencies =
       else
         match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
           Ok created -> "",
-          Err message -> message
+          Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
       match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
         Ok created -> "",
-        Err createMessage -> createMessage
+        Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
       }
   }
 
@@ -60,7 +67,7 @@ ensurePlannerTaskFor wave =
           plannerTaskMaxRuns
           taskLeaseTimeoutMs {
           Ok created -> "",
-          Err message -> message
+          Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
       match taskCreate
@@ -71,7 +78,7 @@ ensurePlannerTaskFor wave =
         plannerTaskMaxRuns
         taskLeaseTimeoutMs {
         Ok created -> "",
-        Err createMessage -> createMessage
+        Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
       }
   }
 
@@ -173,6 +180,7 @@ childLoopCommandArgs spec = [
   textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
   textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
   textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+  textConcat ["CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON=", encode childLoopAwaitTimeoutMs],
   textConcat ["CLASP_LOOP_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
   textConcat ["CLASP_LOOP_VERIFICATION_TIER_JSON=", encode (taskVerificationTier spec)],
   textConcat ["CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],

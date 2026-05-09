@@ -88,10 +88,12 @@ reconcilePlannedTasks report wave objectiveTasks = {
       else
         schedulerError
     } else if loopRunning then {
+      let heartbeatError = heartbeatTaskLease spec.taskId;
       runningTaskIds = append runningTaskIds [spec.taskId];
       schedulerError
     } else if launchHeartbeatExists then {
       if launchRunning then {
+        let heartbeatError = heartbeatTaskLease spec.taskId;
         runningTaskIds = append runningTaskIds [spec.taskId];
         schedulerError
       } else if launchCompleted then {
