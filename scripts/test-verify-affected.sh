@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
+bash_bin="$(command -v bash)"
+test_root=""
+
+cleanup() {
+  rm -rf "${test_root:-}"
+}
+
+trap cleanup EXIT
+
+mkdir -p "$tmp_root"
+test_root="$(mktemp -d "$tmp_root/verify-affected.XXXXXX")"
+project_copy="$test_root/project"
+mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler" \
+  "$project_copy/runtime" "$project_copy/examples/swarm-native" "$project_copy/examples/feedback-loop" \
+  "$project_copy/benchmarks" "$test_root/bin"
+
+cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affected.sh"
+cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
+
+cat > "$test_root/bin/bash" <<EOF
+#!$bash_bin
+set -euo pipefail
+printf '%s\n' "\$*" >> "\${CLASP_TEST_FAKE_COMMAND_LOG:?}"
+printf 'fake-bash:%s\n' "\$*"
+EOF
+chmod +x "$test_root/bin/bash"
+
+run_verify_affected() {
+  (
+    cd "$project_copy"
+    PATH="$test_root/bin:$PATH" "$bash_bin" scripts/verify-affected.sh "$@"
+  )
+}
+
+assert_report() {
+  local report_path="$1"
+  local log_path="$2"
+  local scenario="$3"
+
+  node - "$report_path" "$log_path" "$scenario" <<'NODE'
+const fs = require("node:fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const logPath = process.argv[3];
+const scenario = process.argv[4];
+const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").trim().split(/\n/).filter(Boolean) : [];
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`${scenario}: ${message}`);
+    process.exit(1);
+  }
+}
+
+function hasCommand(fragment) {
+  return report.selectedCommands.some((command) => command.command.includes(fragment));
+}
+
+function logHas(fragment) {
+  return log.some((line) => line.includes(fragment));
+}
+
+assert(report.schemaVersion === 1, "schema version should be stable");
+assert(report.finalVerdict === "passed", `expected pass, got ${report.finalVerdict}`);
+assert(report.exitStatus === 0, "exit status should be zero");
+assert(Array.isArray(report.commandRecords), "command records should be present");
+assert(report.executedCommandCount === report.commandRecords.length, "executed command count should match records");
+for (const record of report.commandRecords) {
+  assert(Number.isInteger(record.elapsedMs) && record.elapsedMs >= 0, "command elapsedMs should be structural");
+  assert(record.endedAtMs >= record.startedAtMs, "command timestamps should be ordered");
+}
+
+switch (scenario) {
+  case "source-no-git":
+    assert(report.usedGitFallback === false, "explicit source input should not use git fallback");
+    assert(report.inputSources.some((source) => source.kind === "argv"), "argv source should be recorded");
+    assert(report.changedFiles.includes("src/Compiler/Checker.clasp"), "source file should be normalized");
+    assert(hasCommand("bash scripts/test-selfhost.sh"), "source route should run selfhost coverage");
+    assert(hasCommand("bash src/scripts/verify.sh"), "source route should run hosted source verification");
+    assert(!hasCommand("benchmarks/"), "source route should avoid broad benchmark commands");
+    assert(report.usedVerifyFastFallback === false, "known source input should not use verify-fast fallback");
+    assert(logHas("scripts/test-selfhost.sh"), "fake selfhost command should execute");
+    assert(logHas("src/scripts/verify.sh"), "fake source verify command should execute");
+    break;
+  case "mixed-swarm-runtime":
+    assert(report.inputSources.filter((source) => source.kind === "files-from").length === 2, "repeated files-from sources should be recorded");
+    assert(report.inputSources.some((source) => source.kind === "env"), "env source should be recorded");
+    assert(report.changedFiles.includes("runtime/swarm.rs"), "runtime file should be present");
+    assert(report.changedFiles.includes("examples/swarm-native/GoalManager.clasp"), "swarm file should be present");
+    assert(report.changedFiles.includes("examples/feedback-loop/Main.clasp"), "feedback-loop file should be present");
+    assert(hasCommand("bash scripts/test-native-runtime.sh"), "runtime route should run native runtime coverage");
+    assert(hasCommand("bash scripts/test-native-claspc.sh"), "runtime/swarm route should run native claspc coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm route should run ready-gate coverage");
+    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop route should run resume coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
+    break;
+  case "unknown-fallback":
+    assert(report.verificationFallbackMode === "unknown-path", "unknown path should mark fallback mode");
+    assert(report.usedVerifyFastFallback === true, "unknown path should use verify-fast fallback");
+    assert(report.selectedCommands.length === 1, "unknown-only input should select only verify-fast");
+    assert(hasCommand("bash scripts/verify-fast.sh"), "unknown path should run verify-fast");
+    assert(logHas("scripts/verify-fast.sh"), "fake verify-fast command should execute");
+    break;
+  case "verification-script":
+    assert(report.changedFiles.includes("scripts/verify-affected.mjs"), "affected helper should be present");
+    assert(hasCommand("node --check scripts/verify-affected.mjs"), "affected helper should run node syntax check");
+    assert(hasCommand("bash scripts/test-verify-affected.sh"), "affected helper should run focused regression");
+    assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
+    assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
+    break;
+  case "empty-no-git":
+    assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
+    assert(report.inputFallbackMode === "git-unavailable" || report.inputFallbackMode === "git-empty", `unexpected input fallback mode: ${report.inputFallbackMode}`);
+    assert(report.verificationFallbackMode === "git-unavailable-empty-input" || report.verificationFallbackMode === "empty-input", `unexpected verification fallback mode: ${report.verificationFallbackMode}`);
+    assert(report.changedFiles.length === 0, "empty no-git scenario should have no changed files");
+    assert(hasCommand("bash scripts/verify-fast.sh"), "empty input should run verify-fast");
+    break;
+  default:
+    assert(false, `unknown scenario ${scenario}`);
+}
+NODE
+}
+
+source_report="$test_root/source-report.json"
+source_log="$test_root/source.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$source_log" \
+  run_verify_affected --changed-file ./src/Compiler/Checker.clasp --changed-file src/Main.clasp > "$source_report"
+assert_report "$source_report" "$source_log" source-no-git
+
+mixed_report="$test_root/mixed-report.json"
+mixed_log="$test_root/mixed.log"
+mixed_files_one="$test_root/mixed-one.txt"
+mixed_files_two="$test_root/mixed-two.txt"
+printf 'runtime/swarm.rs\n' > "$mixed_files_one"
+printf 'examples/feedback-loop/Main.clasp\n' > "$mixed_files_two"
+CLASP_TEST_FAKE_COMMAND_LOG="$mixed_log" \
+  CLASP_VERIFY_CHANGED_FILES='examples/swarm-native/GoalManager.clasp,runtime/claspc.rs' \
+  run_verify_affected --files-from "$mixed_files_one" --files-from "$mixed_files_two" > "$mixed_report"
+assert_report "$mixed_report" "$mixed_log" mixed-swarm-runtime
+
+unknown_report="$test_root/unknown-report.json"
+unknown_log="$test_root/unknown.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$unknown_log" \
+  run_verify_affected --changed-file docs/notes.md > "$unknown_report"
+assert_report "$unknown_report" "$unknown_log" unknown-fallback
+
+script_report="$test_root/script-report.json"
+script_log="$test_root/script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
+  run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
+assert_report "$script_report" "$script_log" verification-script
+
+empty_report="$test_root/empty-report.json"
+empty_log="$test_root/empty.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$empty_log" \
+  run_verify_affected > "$empty_report"
+assert_report "$empty_report" "$empty_log" empty-no-git

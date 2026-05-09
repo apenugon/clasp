@@ -32,6 +32,9 @@ mkdir -p "$test_root/bin" "$test_root/scripts" "$test_root/src/scripts" "$test_r
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+cp "$project_root/scripts/verify-affected.sh" "$test_root/scripts/verify-affected.sh"
+cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affected.mjs"
+cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
@@ -51,6 +54,7 @@ printf '[package]\nname = "fake-runtime"\nversion = "0.0.0"\n' > "$test_root/run
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
@@ -73,6 +77,13 @@ grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" 
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'verificationFallbackMode' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'usedVerifyFastFallback' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/verify-fast.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'source-no-git' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null

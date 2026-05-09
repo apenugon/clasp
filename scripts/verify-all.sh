@@ -39,6 +39,7 @@ bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh
 bash scripts/test-verify-all.sh
+bash scripts/test-verify-affected.sh
 bash examples/lead-app-ts/scripts/verify.sh
 bash benchmarks/test-task-prep.sh
 bash benchmarks/test-persistence-benchmarks.sh
@@ -55,6 +56,7 @@ bash benchmarks/test-series-summary.sh
 '
 fallback_verify_commands=$'
 bash scripts/test-verify-all.sh
+bash scripts/test-verify-affected.sh
 bash scripts/test-task-manifest.sh
 '
 

@@ -9,9 +9,11 @@ bash scripts/test-native-runtime.sh
 '
 fast_sequential_verify_commands=$'
 bash scripts/test-verify-all.sh
+bash scripts/test-verify-affected.sh
 '
 fallback_verify_commands=$'
 bash scripts/test-verify-all.sh
+bash scripts/test-verify-affected.sh
 bash scripts/test-task-manifest.sh
 '
 
