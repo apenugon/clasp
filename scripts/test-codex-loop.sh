@@ -217,6 +217,7 @@ EOF
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \
     CLASP_CODEX_LOOP_MODE=native \
+    CLASP_CLASPC="$project_dir/tools/fake-claspc" \
     CLASPC_BIN="$project_dir/tools/fake-claspc" \
     bash scripts/clasp-codex-loop.sh task.md "$workspace_dir_native" "$runtime_dir_native" >/dev/null
 )

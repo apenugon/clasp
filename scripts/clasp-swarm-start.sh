@@ -21,11 +21,17 @@ if [[ "${1:-}" == "--list-batches" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
   batch_labels=()
   while IFS= read -r lane_dir; do
-    while IFS= read -r task_file; do
+    task_files=()
+    task_files_output="$(clasp_swarm_task_files "$lane_dir")"
+    if [[ -n "$task_files_output" ]]; then
+      mapfile -t task_files <<< "$task_files_output"
+    fi
+
+    for task_file in "${task_files[@]}"; do
       batch_label="$(clasp_swarm_task_batch_label "$task_file")"
       [[ -n "$batch_label" ]] || continue
       batch_labels+=("$batch_label")
-    done < <(clasp_swarm_task_files "$lane_dir")
+    done
   done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
   if [[ "${#batch_labels[@]}" -gt 0 ]]; then
     printf '%s\n' "${batch_labels[@]}" | sort -u
@@ -65,12 +71,18 @@ clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_bran
 while IFS= read -r lane_dir; do
   if [[ -n "$batch_filter" ]]; then
     lane_has_batch=0
-    while IFS= read -r task_file; do
+    task_files=()
+    task_files_output="$(clasp_swarm_task_files "$lane_dir")"
+    if [[ -n "$task_files_output" ]]; then
+      mapfile -t task_files <<< "$task_files_output"
+    fi
+
+    for task_file in "${task_files[@]}"; do
       if [[ "$(clasp_swarm_task_batch_label "$task_file")" == "$batch_filter" ]]; then
         lane_has_batch=1
         break
       fi
-    done < <(clasp_swarm_task_files "$lane_dir")
+    done
 
     if [[ "$lane_has_batch" != "1" ]]; then
       continue

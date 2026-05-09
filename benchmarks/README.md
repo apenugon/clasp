@@ -320,10 +320,11 @@ Run the machine-readable public-app benchmark signal that the ordinary Clasp goa
 
 ```sh
 CLASP_ALLOW_BOOTSTRAP_RECOVERY=true \
-  node benchmarks/run-public-app-signal.mjs --count 1 --notes public-app-live
+  node benchmarks/run-public-app-signal.mjs --count 1 --notes public-app-live \
+    --checkpoint-output benchmarks/results/public-app-live.checkpoint.json
 ```
 
-The signal command writes exactly one JSON `BenchmarkSignal` object to stdout; benchmark runner logs go to stderr so the goal manager can checkpoint the final line directly. A manager run can wire it in as:
+The signal command writes exactly one JSON `BenchmarkSignal` object to stdout; benchmark runner logs go to stderr so the goal manager can checkpoint the final line directly. When `--checkpoint-output` is supplied, the command also writes a durable `clasp-benchmark-checkpoint-v1` file with the suite, summary, pass status, score, target, result-set coverage, and failure kind. If repository sign-off fails before the benchmark can run, pass `--skip-run true --repo-verification failed --repo-verification-summary "<failure>"` to persist a `repo-verification` checkpoint. A manager run can wire it in as:
 
 ```sh
 CLASP_MANAGER_BENCHMARK_COMMAND_JSON='["node","benchmarks/run-public-app-signal.mjs","--count","1","--mode","raw-repo","--notes","public-app-live"]'

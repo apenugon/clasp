@@ -43,7 +43,7 @@ module Main
 type LeadPriority = Low | Medium | High
 
 record LeadRequest = {
-  company : Str,
+  company : Str classified pii,
   budget : Int,
   priorityHint : LeadPriority
 }
@@ -130,6 +130,44 @@ if (route.requestSchemaId !== "schema:LeadRequest" || route.responseSchemaId !==
 if (route.handlerId !== "decl:summarizeLead") {
   throw new Error(`unexpected route handler identity: ${route.handlerId}`);
 }
+const leadRequestSchema = graph.surfaceIndex?.schemas?.find((entry) => entry.id === "schema:LeadRequest");
+if (!leadRequestSchema) {
+  throw new Error("missing LeadRequest in context surfaceIndex.schemas");
+}
+if (leadRequestSchema.kind !== "record" || leadRequestSchema.name !== "LeadRequest") {
+  throw new Error("LeadRequest schema entry missing stable record identity");
+}
+const leadRequestCompany = leadRequestSchema.fields?.find((field) => field.id === "schema-field:LeadRequest:company");
+if (leadRequestCompany?.name !== "company" || leadRequestCompany?.type !== "Str" || leadRequestCompany?.classification !== "pii") {
+  throw new Error("LeadRequest company field missing stable id/name/type/classification");
+}
+const priorityHint = graph.surfaceIndex?.schemaFields?.find((field) => field.id === "schema-field:LeadRequest:priorityHint");
+if (!priorityHint?.referencedTypes?.includes("type:LeadPriority")) {
+  throw new Error("LeadRequest priorityHint field missing enum type reference");
+}
+const leadSummarySchema = graph.surfaceIndex?.schemas?.find((entry) => entry.id === "schema:LeadSummary");
+if (!leadSummarySchema?.fieldIds?.includes("schema-field:LeadSummary:followUpRequired")) {
+  throw new Error("LeadSummary schema missing stable field ids");
+}
+if (!leadSummarySchema?.affectedRoutes?.includes("route:summarizeLeadRoute")) {
+  throw new Error("LeadSummary schema missing affected route link");
+}
+const leadPriorityType = graph.surfaceIndex?.types?.find((entry) => entry.id === "type:LeadPriority");
+if (!leadPriorityType) {
+  throw new Error("missing LeadPriority in context surfaceIndex.types");
+}
+for (const constructorName of ["Low", "Medium", "High"]) {
+  if (!leadPriorityType.wireConstructorNames?.includes(constructorName)) {
+    throw new Error(`LeadPriority missing wire constructor ${constructorName}`);
+  }
+}
+const highConstructor = leadPriorityType.constructors?.find((entry) => entry.id === "constructor:LeadPriority:High");
+if (highConstructor?.wireName !== "High") {
+  throw new Error("LeadPriority High constructor missing stable constructor entry");
+}
+if (!leadPriorityType.affectedSchemas?.includes("schema:LeadRequest") || !leadPriorityType.affectedRoutes?.includes("route:summarizeLeadRoute")) {
+  throw new Error("LeadPriority type missing schema/route impact links");
+}
 for (const expectedSurface of ["schema:LeadRequest", "schema:LeadSummary", "decl:summarizeLead", "foreign:mockLeadSummaryModel"]) {
   if (!route.affectedSurfaces?.includes(expectedSurface)) {
     throw new Error(`route affected surfaces missing ${expectedSurface}`);
@@ -176,6 +214,54 @@ if (entryModule?.role !== "entry" || sharedModule?.role !== "import") {
 const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "createLeadRecordRoute");
 if (!route) {
   throw new Error("missing createLeadRecordRoute in lead-app context");
+}
+const leadIntakeSchema = graph.surfaceIndex?.schemas?.find((entry) => entry.id === "schema:LeadIntake");
+if (!leadIntakeSchema) {
+  throw new Error("missing imported LeadIntake in lead-app surfaceIndex.schemas");
+}
+for (const [fieldId, expectedType] of [
+  ["schema-field:LeadIntake:company", "Str"],
+  ["schema-field:LeadIntake:contact", "Str"],
+  ["schema-field:LeadIntake:budget", "Int"],
+  ["schema-field:LeadIntake:segment", "LeadSegment"],
+]) {
+  const field = leadIntakeSchema.fields?.find((entry) => entry.id === fieldId);
+  if (field?.type !== expectedType) {
+    throw new Error(`LeadIntake field ${fieldId} expected ${expectedType}, got ${field?.type}`);
+  }
+}
+const leadIntakeSegment = graph.surfaceIndex?.schemaFields?.find((entry) => entry.id === "schema-field:LeadIntake:segment");
+if (!leadIntakeSegment?.referencedTypes?.includes("type:LeadSegment")) {
+  throw new Error("LeadIntake segment field missing LeadSegment type reference");
+}
+const leadRecordSchema = graph.surfaceIndex?.schemas?.find((entry) => entry.id === "schema:LeadRecord");
+if (!leadRecordSchema?.fieldIds?.includes("schema-field:LeadRecord:reviewStatus")) {
+  throw new Error("missing imported LeadRecord fields in surfaceIndex.schemas");
+}
+for (const [schema, expectedRoute] of [
+  [leadIntakeSchema, "route:createLeadRecordRoute"],
+  [leadRecordSchema, "route:createLeadRecordRoute"],
+]) {
+  if (!schema?.affectedRoutes?.includes(expectedRoute)) {
+    throw new Error(`${schema?.id} missing affected route ${expectedRoute}`);
+  }
+}
+for (const expectedForeign of ["foreign:storeLead", "foreign:mockLeadSummaryModel"]) {
+  if (!leadIntakeSchema.affectedForeignBoundaries?.includes(expectedForeign)) {
+    throw new Error(`LeadIntake missing affected foreign boundary ${expectedForeign}`);
+  }
+}
+const leadSegmentType = graph.surfaceIndex?.types?.find((entry) => entry.id === "type:LeadSegment");
+if (!leadSegmentType) {
+  throw new Error("missing imported LeadSegment in lead-app surfaceIndex.types");
+}
+for (const constructorName of ["Startup", "Growth", "Enterprise"]) {
+  if (!leadSegmentType.wireConstructorNames?.includes(constructorName)) {
+    throw new Error(`LeadSegment missing wire constructor ${constructorName}`);
+  }
+}
+if (!leadSegmentType.affectedSchemas?.includes("schema:LeadIntake") || !leadSegmentType.affectedRoutes?.includes("route:createLeadRecordRoute")) {
+  throw new Error("LeadSegment type missing schema/route impact links");
 }
 for (const [field, expected] of [
   ["requestSchemaId", "schema:LeadIntake"],

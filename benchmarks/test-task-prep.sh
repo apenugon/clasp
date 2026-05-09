@@ -317,33 +317,47 @@ check_lead_host_binding_manifest() {
   local task_manifest="$project_root/benchmarks/tasks/clasp-lead-segment/host-bindings.manifest.json"
   local workspace="$workspace_root/clasp-lead-segment"
   local workspace_manifest="$workspace/benchmark-prep/host-bindings.manifest.json"
+  local workspace_context="$workspace/benchmark-prep/Main.context.json"
+  local workspace_air="$workspace/benchmark-prep/Main.air.json"
   local workspace_surfaces="$workspace/benchmark-prep/Main.surfaces.json"
+  local workspace_agent_pack="$workspace/benchmark-prep/Main.agent-pack.json"
   local workspace_test="$workspace/test/lead-app.test.mjs"
 
   assert_file_exists "$example_manifest"
   assert_file_exists "$task_manifest"
   assert_file_exists "$workspace_manifest"
+  assert_file_exists "$workspace_context"
+  assert_file_exists "$workspace_air"
   assert_file_exists "$workspace_surfaces"
+  assert_file_exists "$workspace_agent_pack"
   assert_files_match "$example_manifest" "$task_manifest"
   assert_files_match "$task_manifest" "$workspace_manifest"
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/host-bindings.manifest.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.surfaces.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.agent-pack.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" 'App-owned edit surface'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`Shared/Lead.clasp`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" 'route host inputs, host/runtime binding contracts, model JSON shapes, and runtime-owned failure behavior'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" 'joins compiler context/AIR, surface index entries, app-owned edit files, host contracts, contract gaps, and verifier commands'
 
-  node - "$workspace_manifest" "$workspace_test" "$workspace_surfaces" <<'EOF'
+  node - "$workspace_manifest" "$workspace_test" "$workspace_surfaces" "$workspace_context" "$workspace_air" "$workspace_agent_pack" <<'EOF'
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
-const [manifestPath, testPath, surfacesPath] = process.argv.slice(2);
+const [manifestPath, testPath, surfacesPath, contextPath, airPath, agentPackPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const testSource = fs.readFileSync(testPath, "utf8");
 const surfaces = JSON.parse(fs.readFileSync(surfacesPath, "utf8"));
+const context = JSON.parse(fs.readFileSync(contextPath, "utf8"));
+const air = JSON.parse(fs.readFileSync(airPath, "utf8"));
+const agentPack = JSON.parse(fs.readFileSync(agentPackPath, "utf8"));
 
 assert.equal(manifest.format, "clasp-lead-host-bindings-v1");
 assert.equal(manifest.scope.benchmarkTask, "clasp-lead-segment");
+assert.equal(context.format, "clasp-context-v1");
+assert.equal(air.format, "clasp-air-v1");
 assert.equal(surfaces.format, "clasp-benchmark-surfaces-v1");
+assert.equal(agentPack.format, "clasp-benchmark-agent-pack-v1");
 assert.deepEqual(surfaces.appOwnedEditSurface, ["Shared/Lead.clasp"]);
 assert.ok(
   surfaces.sourceModules.some(
@@ -354,6 +368,104 @@ assert.ok(
   "semantic surfaces should mark Shared/Lead.clasp as the app-owned edit surface"
 );
 assert.equal(surfaces.artifacts.hostBindingManifest, "benchmark-prep/host-bindings.manifest.json");
+assert.equal(surfaces.artifacts.agentPack, "benchmark-prep/Main.agent-pack.json");
+assert.equal(surfaces.artifacts.surfaces, "benchmark-prep/Main.surfaces.json");
+
+assert.equal(agentPack.task.id, "clasp-lead-segment");
+assert.equal(agentPack.task.entry, "Main.clasp");
+assert.deepEqual(agentPack.task.verifierCommand, ["bash", "scripts/verify.sh"]);
+assert.equal(agentPack.artifacts.context, "benchmark-prep/Main.context.json");
+assert.equal(agentPack.artifacts.air, "benchmark-prep/Main.air.json");
+assert.equal(agentPack.artifacts.surfaces, "benchmark-prep/Main.surfaces.json");
+assert.equal(agentPack.artifacts.hostBindingManifest, "benchmark-prep/host-bindings.manifest.json");
+assert.deepEqual(agentPack.editTargets.primary, ["Shared/Lead.clasp"]);
+assert.ok(
+  agentPack.editTargets.sourceModules.some(
+    (sourceModule) =>
+      sourceModule.path === "Shared/Lead.clasp" &&
+      sourceModule.role === "app-owned-edit-surface" &&
+      sourceModule.sourceId === "source:Shared.Lead"
+  ),
+  "agent pack should point agents at the app-owned Shared/Lead.clasp source module"
+);
+assert.ok(
+  agentPack.compilerContext.surfaceIndex.routes.includes("route:createLeadRoute"),
+  "agent pack should retain compiler-owned surfaceIndex route ids"
+);
+assert.ok(
+  agentPack.compilerContext.airNodes.some(
+    (node) => node.id === "record:LeadIntake" && node.kind === "record"
+  ),
+  "agent pack should include relevant AIR nodes, not just docs"
+);
+
+assert.ok(
+  context.sourceModules.some(
+    (sourceModule) =>
+      sourceModule.sourceId === "source:Main" &&
+      sourceModule.moduleId === "module:Main" &&
+      sourceModule.moduleName === "Main" &&
+      sourceModule.role === "entry" &&
+      sourceModule.foreignBoundaries.includes("foreign:storeLead")
+  ),
+  "compiler-owned context should include the entry source module identity"
+);
+assert.ok(
+  context.sourceModules.some(
+    (sourceModule) =>
+      sourceModule.sourceId === "source:Shared.Lead" &&
+      sourceModule.moduleId === "module:Shared.Lead" &&
+      sourceModule.moduleName === "Shared.Lead" &&
+      sourceModule.role === "import" &&
+      sourceModule.schemas.includes("schema:LeadIntake")
+  ),
+  "compiler-owned context should include imported source module identities"
+);
+
+const compilerRoute = context.surfaceIndex.routes.find(
+  (route) => route.id === "route:createLeadRoute"
+);
+assert.ok(compilerRoute, "compiler-owned context missing createLeadRoute surface");
+assert.equal(compilerRoute.method, "POST");
+assert.equal(compilerRoute.path, "/leads");
+assert.equal(compilerRoute.requestSchemaId, "schema:LeadIntake");
+assert.ok(
+  compilerRoute.affectedSurfaces.includes("route:createLeadRoute") &&
+    compilerRoute.affectedSurfaces.includes("schema:LeadIntake") &&
+    compilerRoute.affectedSurfaces.includes("foreign:storeLead"),
+  "compiler-owned route surface should expose affected route, schema, and host binding surfaces"
+);
+assert.deepEqual(compilerRoute.affectedRoutes, ["route:createLeadRoute"]);
+assert.ok(
+  compilerRoute.affectedForeignBoundaries.includes("foreign:storeLead"),
+  "compiler-owned route surface should reference host-binding boundaries"
+);
+assert.ok(
+  context.surfaceIndex.foreignBoundaries.some(
+    (boundary) =>
+      boundary.id === "foreign:storeLead" &&
+      boundary.runtimeName === "storeLead" &&
+      boundary.type === "LeadIntake -> LeadSummary -> Str"
+  ),
+  "compiler-owned context should expose host-binding references"
+);
+assert.ok(
+  air.nodes.some((node) => node.id === "route:createLeadRoute" && node.kind === "route"),
+  "compiler-owned AIR should expose route nodes"
+);
+assert.ok(
+  air.nodes.some((node) => node.id === "record:LeadIntake" && node.kind === "record"),
+  "compiler-owned AIR should expose source record nodes"
+);
+
+const packCreateRoute = agentPack.surfaces.routes.find(
+  (route) => route.name === "createLeadRoute"
+);
+assert.ok(packCreateRoute, "agent pack missing createLeadRoute action route");
+assert.equal(packCreateRoute.method, "POST");
+assert.equal(packCreateRoute.path, "/leads");
+assert.equal(packCreateRoute.requestSchemaId, "schema:LeadIntake");
+assert.ok(packCreateRoute.affectedSurfaces.includes("foreign:storeLead"));
 
 const createRoute = manifest.routeHostInputs.find(
   (route) => route.method === "POST" && route.path === "/leads"
@@ -404,10 +516,24 @@ assert.deepEqual(
   ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
 );
 assert.ok(
+  agentPack.surfaces.forms.some(
+    (form) =>
+      form.action === "/leads" &&
+      form.expectedHostFields.some((field) => field.name === "segment" && field.type === "LeadSegment")
+  ),
+  "agent pack should expose the expected segment form/input contract"
+);
+assert.ok(
   surfaces.pages.some(
     (page) => page.routeName === "createLeadRoute" && page.path === "/leads"
   ),
   "semantic surfaces should expose page routes"
+);
+assert.ok(
+  agentPack.surfaces.pages.some(
+    (page) => page.routeName === "createLeadRoute" && page.path === "/leads"
+  ),
+  "agent pack should expose page routes"
 );
 assert.ok(
   surfaces.decodeBoundaries.some(
@@ -461,6 +587,24 @@ assert.ok(
   ),
   "semantic surfaces should expose storage host binding"
 );
+assert.ok(
+  agentPack.surfaces.boundaries.some(
+    (boundary) =>
+      boundary.name === "mockLeadSummaryModel" &&
+      boundary.boundaryKind === "model" &&
+      boundary.expectedJsonShape === "LeadSummary"
+  ),
+  "agent pack should classify model host boundaries"
+);
+assert.ok(
+  agentPack.surfaces.boundaries.some(
+    (boundary) =>
+      boundary.name === "storeLead" &&
+      boundary.boundaryKind === "storage" &&
+      boundary.decodedAs === "LeadRecord"
+  ),
+  "agent pack should classify storage host boundaries"
+);
 
 assert.deepEqual(
   manifest.expectedJsonShapes.LeadIntake.fields.map((field) => `${field.name}:${field.type}`),
@@ -503,6 +647,15 @@ assert.ok(
   "semantic surfaces should identify the missing segment field"
 );
 assert.ok(
+  agentPack.surfaces.schemas.some(
+    (schema) =>
+      schema.name === "LeadIntake" &&
+      schema.present === true &&
+      schema.missingFields.some((field) => field.name === "segment" && field.expected === "LeadSegment")
+  ),
+  "agent pack should attach missing segment fields to the LeadIntake schema"
+);
+assert.ok(
   surfaces.contractGaps.some(
     (gap) =>
       gap.kind === "missing-schema" &&
@@ -510,6 +663,32 @@ assert.ok(
       gap.expected === "enum"
   ),
   "semantic surfaces should identify the missing LeadSegment enum"
+);
+assert.ok(
+  agentPack.surfaces.types.some(
+    (typeSurface) =>
+      typeSurface.name === "LeadSegment" &&
+      typeSurface.present === false &&
+      typeSurface.expectedWireValues.includes("enterprise")
+  ),
+  "agent pack should expose the missing LeadSegment enum contract"
+);
+assert.ok(
+  agentPack.actionItems.some(
+    (item) =>
+      item.kind === "close-contract-gap" &&
+      item.schema === "LeadIntake" &&
+      item.field === "segment" &&
+      item.editFiles.includes("Shared/Lead.clasp") &&
+      item.verifierCommand.join(" ") === "bash scripts/verify.sh"
+  ),
+  "agent pack should make contract gaps directly actionable"
+);
+assert.ok(
+  agentPack.verifier.scenarioSignals.some(
+    (signal) => signal.file === "test/lead-app.test.mjs" && signal.asserts.includes("segment")
+  ),
+  "agent pack should carry scenario-level acceptance signals"
 );
 
 assert.match(testSource, /formFieldNames\(landingPage\.body\), \["company", "contact", "budget", "segment"\]/);
@@ -615,13 +794,21 @@ check_nested_clasp_benchmark_prep() {
   assert_file_exists "$workspace/benchmark-prep/Main.context.json"
   assert_file_exists "$workspace/benchmark-prep/Main.air.json"
   assert_file_exists "$workspace/benchmark-prep/Main.ui.json"
+  assert_file_exists "$workspace/benchmark-prep/Main.agent-pack.json"
   assert_file_exists "$workspace/LANGUAGE_GUIDE.md"
 
+  assert_contains "$workspace/benchmark-prep/Main.context.json" '"format": "clasp-context-v1"'
   assert_contains "$workspace/benchmark-prep/Main.context.json" '"route:summarizeLeadRoute"'
+  assert_contains "$workspace/benchmark-prep/Main.context.json" '"sourceId": "source:Shared.Lead"'
+  assert_contains "$workspace/benchmark-prep/Main.context.json" '"affectedSurfaces"'
+  assert_contains "$workspace/benchmark-prep/Main.air.json" '"format": "clasp-air-v1"'
   assert_contains "$workspace/benchmark-prep/Main.air.json" '"record:LeadRequest"'
   assert_contains "$workspace/benchmark-prep/Main.ui.json" '[]'
+  assert_contains "$workspace/benchmark-prep/Main.agent-pack.json" '"format": "clasp-benchmark-agent-pack-v1"'
+  assert_contains "$workspace/benchmark-prep/Main.surfaces.json" '"agentPack": "benchmark-prep/Main.agent-pack.json"'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`app/Main.clasp`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.context.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.agent-pack.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`POST /lead/summary` request `LeadRequest` -> response `LeadSummary`'
 }
 

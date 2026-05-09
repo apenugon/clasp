@@ -221,7 +221,7 @@ EOF
 }
 
 build_root="$project_root/runtime"
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh")"
 frontend_output="$test_root/hello.mjs"
 backend_project_dir="$test_root/backend-project"
 backend_project_path="$backend_project_dir/Main.clasp"
@@ -238,6 +238,10 @@ imported_cli_serial_image="$test_root/imported-cli-serial.native.image.json"
 imported_cli_parallel_image="$test_root/imported-cli-parallel.native.image.json"
 imported_cli_monolithic_image="$test_root/imported-cli-monolithic.native.image.json"
 imported_cli_whole_monolithic_image="$test_root/imported-cli-whole-monolithic.native.image.json"
+imported_cli_default_air="$imported_cli_project_dir/Main.air.json"
+imported_cli_default_context="$imported_cli_project_dir/Main.context.json"
+lead_app_air_output="$test_root/lead-app.air.json"
+lead_app_context_output="$test_root/lead-app.context.json"
 shared_cache_first_image="$test_root/shared-cache-first.native.image.json"
 shared_cache_second_image="$test_root/shared-cache-second.native.image.json"
 shared_cache_trace_log="$test_root/shared-cache-trace.log"
@@ -761,6 +765,76 @@ printf '%s\n' "$support_console_check" | grep -F '"status":"ok"' >/dev/null
 printf '%s\n' "$support_console_check" | grep -F 'supportSession : AuthSession' >/dev/null
 printf '%s\n' "$support_console_check" | grep -F 'currentCustomer : SupportCustomer' >/dev/null
 printf '%s\n' "$support_console_check" | grep -F 'dashboard : Empty -> Page' >/dev/null
+
+lead_app_air_report="$("$claspc_bin" --json air "$project_root/examples/lead-app/Main.clasp" -o "$lead_app_air_output")"
+printf '%s\n' "$lead_app_air_report" | grep -F '"status":"ok"' >/dev/null
+printf '%s\n' "$lead_app_air_report" | grep -F '"command":"air"' >/dev/null
+printf '%s\n' "$lead_app_air_report" | grep -F '"target":"air"' >/dev/null
+printf '%s\n' "$lead_app_air_report" | grep -F "\"output\":\"$lead_app_air_output\"" >/dev/null
+node - "$lead_app_air_output" <<'EOF'
+const fs = require("node:fs");
+
+const artifact = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (artifact.format !== "clasp-air-v1") {
+  throw new Error(`unexpected AIR format: ${artifact.format}`);
+}
+if (artifact.module !== "Main") {
+  throw new Error(`unexpected AIR module: ${artifact.module}`);
+}
+const hasImportedSchema = artifact.nodes?.some((node) => node.kind === "record" && node.name === "LeadRecord");
+const hasImportedBoundary = artifact.nodes?.some((node) => node.kind === "foreign" && node.name === "storeLead");
+if (!hasImportedSchema || !hasImportedBoundary) {
+  throw new Error("lead-app AIR did not include imported project surfaces");
+}
+EOF
+
+lead_app_context_report="$("$claspc_bin" --json context "$project_root/examples/lead-app/Main.clasp" -o "$lead_app_context_output")"
+printf '%s\n' "$lead_app_context_report" | grep -F '"status":"ok"' >/dev/null
+printf '%s\n' "$lead_app_context_report" | grep -F '"command":"context"' >/dev/null
+printf '%s\n' "$lead_app_context_report" | grep -F '"target":"context"' >/dev/null
+printf '%s\n' "$lead_app_context_report" | grep -F "\"output\":\"$lead_app_context_output\"" >/dev/null
+node - "$lead_app_context_output" <<'EOF'
+const fs = require("node:fs");
+
+const graph = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (graph.format !== "clasp-context-v1") {
+  throw new Error(`unexpected context format: ${graph.format}`);
+}
+const entryModule = graph.sourceModules?.find((entry) => entry.moduleName === "Main");
+const sharedModule = graph.sourceModules?.find((entry) => entry.moduleName === "Shared.Lead");
+if (entryModule?.role !== "entry" || !entryModule.imports?.includes("Shared.Lead")) {
+  throw new Error("lead-app context missing entry module import metadata");
+}
+if (sharedModule?.role !== "import") {
+  throw new Error("lead-app context missing Shared.Lead import module metadata");
+}
+const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "createLeadRecordRoute");
+if (!route?.affectedSurfaces?.includes("foreign:storeLead")) {
+  throw new Error("lead-app context missing imported foreign boundary impact");
+}
+EOF
+
+"$claspc_bin" air "$imported_cli_project_path" >/dev/null 2>&1
+"$claspc_bin" context "$imported_cli_project_path" >/dev/null 2>&1
+node - "$imported_cli_default_air" "$imported_cli_default_context" <<'EOF'
+const fs = require("node:fs");
+
+const [airPath, contextPath] = process.argv.slice(2);
+if (!airPath.endsWith("Main.air.json") || !contextPath.endsWith("Main.context.json")) {
+  throw new Error("test paths do not match expected default artifact extensions");
+}
+const air = JSON.parse(fs.readFileSync(airPath, "utf8"));
+if (air.format !== "clasp-air-v1") {
+  throw new Error(`unexpected default AIR format: ${air.format}`);
+}
+const context = JSON.parse(fs.readFileSync(contextPath, "utf8"));
+if (context.format !== "clasp-context-v1") {
+  throw new Error(`unexpected default context format: ${context.format}`);
+}
+if (!context.sourceModules?.some((entry) => entry.moduleName === "Shared.User" && entry.role === "import")) {
+  throw new Error("default context artifact missing imported project module");
+}
+EOF
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$backend_project_path" -o "$backend_binary"
 [[ -x "$backend_binary" ]]

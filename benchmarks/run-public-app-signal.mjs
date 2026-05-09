@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
@@ -40,7 +40,11 @@ function parseArgs(argv) {
     model: defaultModel,
     mode: defaultMode,
     workflowAssistance: defaultWorkflowAssistance,
-    skipRun: false
+    skipRun: false,
+    checkpointOutput: "",
+    wave: 1,
+    repoVerification: "unknown",
+    repoVerificationSummary: ""
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -83,6 +87,21 @@ function parseArgs(argv) {
       options.mode = value;
     } else if (key === "workflow-assistance") {
       options.workflowAssistance = value;
+    } else if (key === "checkpoint-output") {
+      options.checkpointOutput = value;
+    } else if (key === "wave") {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`invalid wave: ${value}`);
+      }
+      options.wave = parsed;
+    } else if (key === "repo-verification") {
+      if (value !== "passed" && value !== "failed" && value !== "unknown") {
+        throw new Error(`expected passed/failed/unknown for ${current}`);
+      }
+      options.repoVerification = value;
+    } else if (key === "repo-verification-summary") {
+      options.repoVerificationSummary = value;
     } else {
       throw new Error(`unknown option: ${current}`);
     }
@@ -99,7 +118,8 @@ function benchmarkSignal({
   passed,
   meetsTarget,
   scoreValue,
-  targetValue
+  targetValue,
+  failureKind = null
 }) {
   return {
     suite: "main-public-app-comparison",
@@ -109,8 +129,96 @@ function benchmarkSignal({
     scoreName: "throughputDeltaPct",
     scoreValue,
     targetName: "minThroughputDeltaPct",
-    targetValue
+    targetValue,
+    failureKind
   };
+}
+
+function benchmarkPassStatus(signal) {
+  if (!signal.passed) {
+    return "failed";
+  }
+
+  return signal.meetsTarget ? "pass" : "target-unmet";
+}
+
+function invocationCommand() {
+  return [
+    "node",
+    path.relative(projectRoot, path.join(benchmarkRoot, "run-public-app-signal.mjs")),
+    ...process.argv.slice(2)
+  ];
+}
+
+function checkpointForSignal(signal, options, notePrefix, resultSetStatus, invocation) {
+  return {
+    format: "clasp-benchmark-checkpoint-v1",
+    wave: options.wave,
+    generatedAt: new Date().toISOString(),
+    command: invocationCommand(),
+    suite: signal.suite,
+    summary: signal.summary,
+    passed: signal.passed,
+    meetsTarget: signal.meetsTarget,
+    passStatus: benchmarkPassStatus(signal),
+    failureKind: signal.failureKind,
+    scoreName: signal.scoreName,
+    scoreValue: signal.scoreValue,
+    targetName: signal.targetName,
+    targetValue: signal.targetValue,
+    score: {
+      name: signal.scoreName,
+      value: signal.scoreValue
+    },
+    target: {
+      name: signal.targetName,
+      value: signal.targetValue
+    },
+    benchmark: {
+      taskSet: options.taskSet,
+      notes: notePrefix,
+      harness: options.harness,
+      model: options.model,
+      mode: options.mode,
+      workflowAssistance: options.workflowAssistance,
+      skippedRun: options.skipRun || options.repoVerification === "failed"
+    },
+    repositoryVerification: {
+      status: options.repoVerification,
+      summary: options.repoVerificationSummary || null
+    },
+    resultSet: resultSetStatus
+      ? {
+        expectedTaskIds: resultSetStatus.expectedTaskIds,
+        observedTaskIds: resultSetStatus.observedTaskIds,
+        missingTaskIds: resultSetStatus.missingTaskIds,
+        matchingResultCount: resultSetStatus.matchingResultCount,
+        seriesResultCount: resultSetStatus.seriesResultCount,
+        runFailures: resultSetStatus.runFailures
+      }
+      : null,
+    invocation: {
+      startedAt: invocation.invocationStartedAt?.toISOString?.() ?? null,
+      runFailures: invocation.runFailures
+    }
+  };
+}
+
+async function writeBenchmarkCheckpoint(signal, options, notePrefix, resultSetStatus, invocation) {
+  if (!options.checkpointOutput) {
+    return null;
+  }
+
+  const outputPath = path.resolve(options.checkpointOutput);
+  const checkpoint = checkpointForSignal(signal, options, notePrefix, resultSetStatus, invocation);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, JSON.stringify(checkpoint, null, 2) + "\n", "utf8");
+  return outputPath;
+}
+
+async function emitSignal(signal, options, notePrefix, resultSetStatus, invocation) {
+  await writeBenchmarkCheckpoint(signal, options, notePrefix, resultSetStatus, invocation);
+  console.log(JSON.stringify(signal));
 }
 
 function utcSlugNow() {
@@ -392,6 +500,17 @@ function missingComparisonSummary(status, options, notePrefix) {
     ` score throughputDeltaPct=${missingComparisonScoreValue}; target minThroughputDeltaPct>=0.`;
 }
 
+function repoVerificationFailureSummary(status, options, notePrefix) {
+  const detail = options.repoVerificationSummary
+    ? ` detail=${options.repoVerificationSummary}.`
+    : "";
+  return `Repository verification failed before the public app benchmark checkpoint for notes=${notePrefix}, harness=${options.harness}, model=${options.model}, mode=${options.mode}, workflowAssistance=${options.workflowAssistance}. ` +
+    `suite=${publicAppBenchmark.comparisonLabel}; resultCount=${status.seriesResultCount}; matchingResultCount=${status.matchingResultCount}; ` +
+    `expectedTasks=${summarizeList(status.expectedTaskIds)}; observedTasks=${summarizeList(status.observedTaskIds)}; missingTasks=${summarizeList(status.missingTaskIds)}.` +
+    detail +
+    ` score throughputDeltaPct=${missingComparisonScoreValue}; target minThroughputDeltaPct>=0.`;
+}
+
 function computeSignalFromComparison(comparison, resultSetStatus, options, notePrefix) {
   if (comparison === null) {
     return benchmarkSignal({
@@ -399,7 +518,8 @@ function computeSignalFromComparison(comparison, resultSetStatus, options, noteP
       passed: false,
       meetsTarget: false,
       scoreValue: missingComparisonScoreValue,
-      targetValue: 0
+      targetValue: 0,
+      failureKind: resultSetStatus.runFailures.length > 0 ? "repo-verification" : "missing-results"
     });
   }
 
@@ -428,7 +548,8 @@ function computeSignalFromComparison(comparison, resultSetStatus, options, noteP
     passed: true,
     meetsTarget,
     scoreValue: throughputDelta,
-    targetValue: 0
+    targetValue: 0,
+    failureKind: meetsTarget ? null : "benchmark-performance"
   });
 }
 
@@ -441,7 +562,7 @@ async function main() {
   };
 
   try {
-    if (!options.skipRun) {
+    if (!options.skipRun && options.repoVerification !== "failed") {
       invocation = await runPublicAppSeries(options, notePrefix);
     }
 
@@ -458,18 +579,42 @@ async function main() {
       notePrefix,
       invocation.runFailures
     );
-    console.log(JSON.stringify(
-      computeSignalFromComparison(comparison, resultSetStatus, options, notePrefix)
-    ));
+
+    if (options.repoVerification === "failed") {
+      await emitSignal(
+        benchmarkSignal({
+          summary: repoVerificationFailureSummary(resultSetStatus, options, notePrefix),
+          passed: false,
+          meetsTarget: false,
+          scoreValue: missingComparisonScoreValue,
+          targetValue: 0,
+          failureKind: "repo-verification"
+        }),
+        options,
+        notePrefix,
+        resultSetStatus,
+        invocation
+      );
+      return;
+    }
+
+    await emitSignal(
+      computeSignalFromComparison(comparison, resultSetStatus, options, notePrefix),
+      options,
+      notePrefix,
+      resultSetStatus,
+      invocation
+    );
   } catch (error) {
     const summary = error instanceof Error ? error.message : String(error);
-    console.log(JSON.stringify(benchmarkSignal({
+    await emitSignal(benchmarkSignal({
       summary: `Public app benchmark run failed: ${summary}`,
       passed: false,
       meetsTarget: false,
       scoreValue: -100,
-      targetValue: 0
-    })));
+      targetValue: 0,
+      failureKind: "benchmark-command-failure"
+    }), options, notePrefix, null, invocation);
   }
 }
 

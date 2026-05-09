@@ -541,16 +541,15 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
   const airPath = path.join(prepRoot, `${moduleName}.air.json`);
   const uiPath = path.join(prepRoot, `${moduleName}.ui.json`);
   const surfacesPath = path.join(prepRoot, `${moduleName}.surfaces.json`);
+  const agentPackPath = path.join(prepRoot, `${moduleName}.agent-pack.json`);
   const explainPath = task.surfaceForm === "verbose"
     ? path.join(prepRoot, `${moduleName}.explain.txt`)
     : null;
 
   await mkdir(prepRoot, { recursive: true });
+  const context = await renderClaspJsonArtifact("context", entryPath, contextPath, env);
+  const air = await renderClaspJsonArtifact("air", entryPath, airPath, env);
   const nativeImage = await renderClaspNativeImage(entryPath, prepRoot, env);
-  const context = synthesizeClaspContext(entryPath, nativeImage);
-  const air = synthesizeClaspAir(entryPath, nativeImage);
-  await writeFile(contextPath, JSON.stringify(context, null, 2) + "\n", "utf8");
-  await writeFile(airPath, JSON.stringify(air, null, 2) + "\n", "utf8");
 
   const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
   await writeFile(uiPath, JSON.stringify(uiGraph, null, 2) + "\n", "utf8");
@@ -575,7 +574,20 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     hostBindingManifestPath,
     hostBindingManifest
   });
+  surfaces.artifacts.agentPack = path.relative(workspace, agentPackPath);
   await writeFile(surfacesPath, JSON.stringify(surfaces, null, 2) + "\n", "utf8");
+  const agentPack = synthesizeClaspAgentActionPack({
+    task,
+    workspace,
+    entryPath,
+    moduleName,
+    context,
+    air,
+    surfaces,
+    hostBindingManifestPath,
+    hostBindingManifest
+  });
+  await writeFile(agentPackPath, JSON.stringify(agentPack, null, 2) + "\n", "utf8");
 
   const guidePath = path.join(workspace, "LANGUAGE_GUIDE.md");
   const guide = renderClaspLanguageGuide({
@@ -584,6 +596,7 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     prepRoot,
     moduleName,
     surfacesPath,
+    agentPackPath,
     explainPath,
     hostBindingManifestPath,
     hostBindingManifest,
@@ -637,10 +650,16 @@ async function runClaspCompilerCommand(command, inputPath, outputPath, env) {
   }
 }
 
+async function renderClaspJsonArtifact(command, inputPath, outputPath, env) {
+  await runClaspCompilerCommand(command, inputPath, outputPath, env);
+  return JSON.parse(await readFile(outputPath, "utf8"));
+}
+
 async function runClaspCompilerCommandCapture(command, inputPath, outputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
+    "unset CLASP_CLASPC CLASPC_BIN",
     `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
     `"${"$"}claspc_bin" --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
   ].join(" && ");
@@ -691,6 +710,7 @@ async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
     "set -euo pipefail",
     `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
+    "unset CLASP_CLASPC CLASPC_BIN",
     `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
     `"${"$"}claspc_bin" ${command} ${shellQuote(inputPath)}`
   ].join(" && ");
@@ -710,94 +730,6 @@ async function renderClaspNativeImage(entryPath, prepRoot, env) {
   }
 
   return JSON.parse(await readFile(imagePath, "utf8"));
-}
-
-function synthesizeClaspContext(entryPath, nativeImage) {
-  const routeNodes = (nativeImage.runtime?.boundaries ?? [])
-    .filter((boundary) => boundary.kind === "route")
-    .map((boundary) => ({
-      id: boundary.id ?? `route:${boundary.name}`,
-      kind: "route",
-      file: entryPath,
-      attrs: [
-        { name: "name", value: boundary.name ?? "unknown" },
-        { name: "method", value: boundary.method ?? "UNKNOWN" },
-        { name: "path", value: boundary.path ?? "/" },
-        { name: "requestType", value: boundary.request ?? "Unknown" },
-        { name: "responseType", value: boundary.response ?? "Unknown" },
-      ],
-    }));
-  const foreignNodes = (nativeImage.runtime?.bindings ?? [])
-    .filter((binding) => isHostBindingName(binding.name))
-    .map((binding) => ({
-      id: `foreign:${binding.name}`,
-      kind: "foreign",
-      file: entryPath,
-      attrs: [
-        { name: "name", value: binding.name ?? "unknown" },
-        { name: "type", value: binding.type ?? "Unknown" },
-      ],
-    }));
-  const schemaNodes = [
-    ...((nativeImage.abi?.recordLayouts ?? []).map((layout) => ({
-      id: `schema:${layout.name}`,
-      kind: "schema",
-      file: entryPath,
-      attrs: [
-        { name: "name", value: layout.name ?? "Unknown" },
-        { name: "kind", value: "record" },
-      ],
-    }))),
-    ...((nativeImage.abi?.variantLayouts ?? []).map((layout) => ({
-      id: `schema:${layout.name}`,
-      kind: "schema",
-      file: entryPath,
-      attrs: [
-        { name: "name", value: layout.name ?? "Unknown" },
-        { name: "kind", value: "variant" },
-      ],
-    }))),
-  ];
-
-  return {
-    format: "clasp-benchmark-context-v1",
-    entry: entryPath,
-    nodes: [...routeNodes, ...foreignNodes, ...schemaNodes],
-  };
-}
-
-function synthesizeClaspAir(entryPath, nativeImage) {
-  const declNodes = (nativeImage.decls ?? []).map((decl) => ({
-    id: `decl:${decl.name}`,
-    kind: "decl",
-    file: entryPath,
-    attrs: [
-      { name: "name", value: decl.name ?? "unknown" },
-      { name: "kind", value: decl.kind ?? "unknown" },
-    ],
-  }));
-  const recordNodes = (nativeImage.abi?.recordLayouts ?? []).map((layout) => ({
-    id: `record:${layout.name}`,
-    kind: "record",
-    file: entryPath,
-    attrs: [
-      { name: "name", value: layout.name ?? "Unknown" },
-    ],
-  }));
-  const variantNodes = (nativeImage.abi?.variantLayouts ?? []).map((layout) => ({
-    id: `variant:${layout.name}`,
-    kind: "variant",
-    file: entryPath,
-    attrs: [
-      { name: "name", value: layout.name ?? "Unknown" },
-    ],
-  }));
-
-  return {
-    format: "clasp-benchmark-air-v1",
-    entry: entryPath,
-    nodes: [...declNodes, ...recordNodes, ...variantNodes],
-  };
 }
 
 function synthesizeClaspBenchmarkSurfaces({
@@ -834,6 +766,7 @@ function synthesizeClaspBenchmarkSurfaces({
       context: path.join("benchmark-prep", `${moduleName}.context.json`),
       air: path.join("benchmark-prep", `${moduleName}.air.json`),
       ui: path.join("benchmark-prep", `${moduleName}.ui.json`),
+      surfaces: path.join("benchmark-prep", `${moduleName}.surfaces.json`),
       hostBindingManifest: hostBindingManifestPath
         ? path.relative(workspace, hostBindingManifestPath)
         : null
@@ -851,6 +784,74 @@ function synthesizeClaspBenchmarkSurfaces({
     hostBindings,
     expectedJsonShapes,
     contractGaps: collectHostContractGaps(records, enums, expectedJsonShapes, appOwnedEditSurface)
+  };
+}
+
+function synthesizeClaspAgentActionPack({
+  task,
+  workspace,
+  entryPath,
+  moduleName,
+  context,
+  air,
+  surfaces,
+  hostBindingManifestPath,
+  hostBindingManifest
+}) {
+  const entry = path.relative(workspace, entryPath);
+  const artifacts = {
+    context: path.join("benchmark-prep", `${moduleName}.context.json`),
+    air: path.join("benchmark-prep", `${moduleName}.air.json`),
+    ui: path.join("benchmark-prep", `${moduleName}.ui.json`),
+    surfaces: path.join("benchmark-prep", `${moduleName}.surfaces.json`),
+    agentPack: path.join("benchmark-prep", `${moduleName}.agent-pack.json`),
+    hostBindingManifest: hostBindingManifestPath
+      ? path.relative(workspace, hostBindingManifestPath)
+      : null
+  };
+  const packRoutes = collectAgentPackRoutes(surfaces, context);
+  const packSchemas = collectAgentPackSchemas(surfaces, context);
+  const packTypes = collectAgentPackTypes(surfaces, context);
+  const packBoundaries = collectAgentPackBoundaries(surfaces, context, hostBindingManifest);
+  const referencedSurfaceIds = collectAgentPackSurfaceIds(packRoutes, packSchemas, packTypes, packBoundaries);
+
+  return {
+    format: "clasp-benchmark-agent-pack-v1",
+    task: {
+      id: task.id,
+      title: task.title ?? "",
+      suite: task.suite ?? "",
+      language: task.language ?? "",
+      entry,
+      prompt: task.prompt ?? null,
+      verifierCommand: normalizeTaskCommand(task.verify)
+    },
+    artifacts,
+    editTargets: {
+      primary: surfaces.appOwnedEditSurface ?? [],
+      sourceModules: collectAgentPackSourceModules(surfaces, context, entry)
+    },
+    compilerContext: {
+      contextFormat: context.format ?? null,
+      airFormat: air.format ?? null,
+      surfaceIndex: summarizeAgentPackSurfaceIndex(context),
+      airNodes: collectAgentPackAirNodes(air, referencedSurfaceIds)
+    },
+    surfaces: {
+      routes: packRoutes,
+      schemas: packSchemas,
+      types: packTypes,
+      forms: surfaces.forms ?? [],
+      pages: surfaces.pages ?? [],
+      boundaries: packBoundaries,
+      decodeBoundaries: surfaces.decodeBoundaries ?? []
+    },
+    contractGaps: surfaces.contractGaps ?? [],
+    actionItems: collectAgentPackActionItems(surfaces, context, task),
+    verifier: {
+      command: normalizeTaskCommand(task.verify),
+      scenarioSignals: hostBindingManifest?.acceptanceSignals ?? []
+    }
   };
 }
 
@@ -1209,6 +1210,348 @@ function hostContractGap(kind, schema, field, expected, appOwnedEditSurface) {
   };
 }
 
+function collectAgentPackRoutes(surfaces, context) {
+  const contextRoutesByName = new Map(
+    (context.surfaceIndex?.routes ?? []).map((route) => [route.name, route])
+  );
+
+  return (surfaces.routes ?? []).map((route) => {
+    const contextRoute = contextRoutesByName.get(route.name) ?? null;
+    return compactObject({
+      id: contextRoute?.id ?? `route:${route.name}`,
+      airNodeId: `route:${route.name}`,
+      name: route.name,
+      method: route.method,
+      path: route.path,
+      requestType: route.requestType,
+      responseType: route.responseType,
+      responseKind: route.responseKind,
+      handler: route.handler,
+      requestSchemaId: contextRoute?.requestSchemaId ?? schemaIdForType(route.requestType),
+      responseSchemaId: contextRoute?.responseSchemaId ?? schemaIdForType(route.responseType),
+      affectedSurfaces: contextRoute?.affectedSurfaces ?? [],
+      affectedRoutes: contextRoute?.affectedRoutes ?? [],
+      affectedSchemas: contextRoute?.affectedSchemas ?? [],
+      affectedForeignBoundaries: contextRoute?.affectedForeignBoundaries ?? [],
+      hostInput: route.hostInput,
+      runtimeOwnedFailures: route.runtimeOwnedFailures ?? []
+    });
+  });
+}
+
+function collectAgentPackSchemas(surfaces, context) {
+  const contextSchemasByName = new Map(
+    (context.surfaceIndex?.schemas ?? []).map((schema) => [schema.name, schema])
+  );
+  const expectedJsonShapes = surfaces.expectedJsonShapes ?? {};
+  const actualRecordsByName = new Map((surfaces.records ?? []).map((record) => [record.name, record]));
+  const schemaNames = new Set([
+    ...actualRecordsByName.keys(),
+    ...Object.entries(expectedJsonShapes)
+      .filter(([, shape]) => shape?.kind === "record")
+      .map(([name]) => name)
+  ]);
+
+  return [...schemaNames].sort((left, right) => left.localeCompare(right)).map((schemaName) => {
+    const record = actualRecordsByName.get(schemaName) ?? null;
+    const contextSchema = contextSchemasByName.get(schemaName) ?? null;
+    const expectedShape = expectedJsonShapes[schemaName] ?? null;
+    const gaps = (surfaces.contractGaps ?? []).filter((gap) => gap.schema === schemaName);
+
+    return compactObject({
+      id: contextSchema?.id ?? `schema:${schemaName}`,
+      airNodeId: record ? `record:${schemaName}` : null,
+      name: schemaName,
+      kind: expectedShape?.kind ?? contextSchema?.kind ?? "record",
+      present: Boolean(record),
+      fields: record?.fields ?? [],
+      expectedFields: expectedShape?.fields ?? null,
+      missingFields: gaps
+        .filter((gap) => gap.kind === "missing-field")
+        .map((gap) => compactObject({
+          name: gap.field,
+          expected: gap.expected,
+          editFiles: gap.appOwnedEditSurface ?? []
+        })),
+      affectedRoutes: contextSchema?.affectedRoutes ?? [],
+      affectedForeignBoundaries: contextSchema?.affectedForeignBoundaries ?? [],
+      affectedSurfaces: contextSchema?.affectedSurfaces ?? []
+    });
+  });
+}
+
+function collectAgentPackTypes(surfaces, context) {
+  const contextTypesByName = new Map(
+    (context.surfaceIndex?.types ?? []).map((typeSurface) => [typeSurface.name, typeSurface])
+  );
+  const expectedJsonShapes = surfaces.expectedJsonShapes ?? {};
+  const actualEnumsByName = new Map((surfaces.enums ?? []).map((enumShape) => [enumShape.name, enumShape]));
+  const typeNames = new Set([
+    ...actualEnumsByName.keys(),
+    ...Object.entries(expectedJsonShapes)
+      .filter(([, shape]) => shape?.kind === "enum")
+      .map(([name]) => name)
+  ]);
+
+  return [...typeNames].sort((left, right) => left.localeCompare(right)).map((typeName) => {
+    const enumShape = actualEnumsByName.get(typeName) ?? null;
+    const contextType = contextTypesByName.get(typeName) ?? null;
+    const expectedShape = expectedJsonShapes[typeName] ?? null;
+    const gaps = (surfaces.contractGaps ?? []).filter((gap) => gap.schema === typeName);
+
+    return compactObject({
+      id: contextType?.id ?? `type:${typeName}`,
+      airNodeId: enumShape ? `type:${typeName}` : null,
+      name: typeName,
+      kind: "enum",
+      present: Boolean(enumShape),
+      constructors: enumShape?.constructors ?? [],
+      wireValues: enumShape?.wireValues ?? [],
+      expectedWireValues: expectedShape?.wireValues ?? null,
+      missingWireValues: gaps
+        .filter((gap) => gap.kind === "missing-wire-value")
+        .map((gap) => gap.field),
+      missingSchema: gaps.some((gap) => gap.kind === "missing-schema"),
+      affectedSchemas: contextType?.affectedSchemas ?? [],
+      affectedRoutes: contextType?.affectedRoutes ?? [],
+      affectedForeignBoundaries: contextType?.affectedForeignBoundaries ?? [],
+      affectedSurfaces: contextType?.affectedSurfaces ?? []
+    });
+  });
+}
+
+function collectAgentPackBoundaries(surfaces, context, hostBindingManifest) {
+  const contextBoundariesByName = new Map(
+    (context.surfaceIndex?.foreignBoundaries ?? []).map((boundary) => [boundary.name, boundary])
+  );
+  const hostBindingsByName = new Map((surfaces.hostBindings ?? []).map((binding) => [binding.name, binding]));
+  const names = new Set([
+    ...hostBindingsByName.keys(),
+    ...contextBoundariesByName.keys(),
+    ...((hostBindingManifest?.mockModelCalls ?? []).map((binding) => binding.name)),
+    ...((hostBindingManifest?.hostBindings ?? []).map((binding) => binding.name))
+  ]);
+
+  return [...names].sort((left, right) => left.localeCompare(right)).map((name) => {
+    const hostBinding = hostBindingsByName.get(name) ?? null;
+    const contextBoundary = contextBoundariesByName.get(name) ?? null;
+    const manifestBinding = findManifestHostBinding(hostBindingManifest, name);
+
+    return compactObject({
+      id: contextBoundary?.id ?? `foreign:${name}`,
+      airNodeId: `foreign:${name}`,
+      name,
+      boundaryKind: agentPackBoundaryKind(hostBinding ?? manifestBinding),
+      role: hostBinding?.role ?? manifestBinding?.role ?? "foreign",
+      type: contextBoundary?.type ?? hostBinding?.type ?? manifestBinding?.signature ?? "",
+      runtimeName: contextBoundary?.runtimeName ?? hostBinding?.runtimeName ?? manifestBinding?.runtimeName ?? name,
+      inputType: hostBinding?.inputType ?? manifestBinding?.inputType ?? null,
+      decodedAs: hostBinding?.decodedAs ?? manifestBinding?.decodedAs ?? null,
+      expectedJsonShape: hostBinding?.expectedJsonShape ?? manifestBinding?.expectedJsonShape ?? null,
+      runtimeOwnedFailures: hostBinding?.runtimeOwnedFailures ?? manifestBinding?.runtimeOwnedFailures ?? []
+    });
+  });
+}
+
+function collectAgentPackSourceModules(surfaces, context, entry) {
+  const contextModulesByPath = new Map(
+    (context.sourceModules ?? []).map((sourceModule) => [
+      sourceModulePath(sourceModule, entry),
+      sourceModule
+    ])
+  );
+  const modulePaths = new Set([
+    ...((surfaces.sourceModules ?? []).map((sourceModule) => sourceModule.path)),
+    ...contextModulesByPath.keys()
+  ]);
+
+  return [...modulePaths].sort((left, right) => left.localeCompare(right)).map((modulePath) => {
+    const surfaceModule = (surfaces.sourceModules ?? []).find((sourceModule) => sourceModule.path === modulePath) ?? null;
+    const contextModule = contextModulesByPath.get(modulePath) ?? null;
+
+    return compactObject({
+      path: modulePath,
+      role: surfaceModule?.role ?? contextModule?.role ?? "support",
+      sourceId: contextModule?.sourceId ?? null,
+      moduleId: contextModule?.moduleId ?? null,
+      moduleName: contextModule?.moduleName ?? null,
+      schemas: contextModule?.schemas ?? [],
+      routes: contextModule?.routes ?? [],
+      foreignBoundaries: contextModule?.foreignBoundaries ?? []
+    });
+  });
+}
+
+function collectAgentPackActionItems(surfaces, context, task) {
+  const schemasByName = new Map(
+    collectAgentPackSchemas(surfaces, context).map((schema) => [schema.name, schema])
+  );
+  const typesByName = new Map(
+    collectAgentPackTypes(surfaces, context).map((typeSurface) => [typeSurface.name, typeSurface])
+  );
+  const verifierCommand = normalizeTaskCommand(task.verify);
+
+  return (surfaces.contractGaps ?? []).map((gap) => {
+    const relatedSurface = schemasByName.get(gap.schema) ?? typesByName.get(gap.schema) ?? null;
+    return compactObject({
+      kind: "close-contract-gap",
+      gapKind: gap.kind,
+      schema: gap.schema,
+      field: gap.field,
+      expected: gap.expected,
+      editFiles: gap.appOwnedEditSurface ?? surfaces.appOwnedEditSurface ?? [],
+      affectedRoutes: relatedSurface?.affectedRoutes ?? [],
+      affectedForeignBoundaries: relatedSurface?.affectedForeignBoundaries ?? [],
+      affectedSurfaces: relatedSurface?.affectedSurfaces ?? [],
+      verifierCommand
+    });
+  });
+}
+
+function collectAgentPackSurfaceIds(routes, schemas, types, boundaries) {
+  const ids = new Set();
+
+  for (const item of [...routes, ...schemas, ...types, ...boundaries]) {
+    addString(ids, item.id);
+    addString(ids, item.airNodeId);
+    for (const surfaceId of item.affectedSurfaces ?? []) {
+      addString(ids, surfaceId);
+    }
+  }
+
+  for (const schema of schemas) {
+    addString(ids, schema.id?.replace(/^schema:/, "record:"));
+    for (const field of schema.fields ?? []) {
+      addString(ids, `record-field:${schema.name}:${field.name}`);
+    }
+  }
+
+  for (const typeSurface of types) {
+    if (typeSurface.present) {
+      addString(ids, `type:${typeSurface.name}`);
+      for (const constructorName of typeSurface.constructors ?? []) {
+        addString(ids, `constructor:${typeSurface.name}:${constructorName}`);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function collectAgentPackAirNodes(air, referencedSurfaceIds) {
+  const airNodeIds = new Set();
+
+  for (const surfaceId of referencedSurfaceIds) {
+    addString(airNodeIds, surfaceToAirNodeId(surfaceId));
+  }
+
+  return (air.nodes ?? [])
+    .filter((node) => airNodeIds.has(node.id))
+    .map((node) => compactObject({
+      id: node.id,
+      kind: node.kind,
+      name: node.name ?? null
+    }));
+}
+
+function summarizeAgentPackSurfaceIndex(context) {
+  return {
+    routes: (context.surfaceIndex?.routes ?? []).map((route) => route.id),
+    schemas: (context.surfaceIndex?.schemas ?? []).map((schema) => schema.id),
+    schemaFields: (context.surfaceIndex?.schemaFields ?? []).map((field) => field.id),
+    types: (context.surfaceIndex?.types ?? []).map((typeSurface) => typeSurface.id),
+    foreignBoundaries: (context.surfaceIndex?.foreignBoundaries ?? []).map((boundary) => boundary.id)
+  };
+}
+
+function findManifestHostBinding(hostBindingManifest, name) {
+  const mockModel = (hostBindingManifest?.mockModelCalls ?? []).find((binding) => binding.name === name);
+  if (mockModel) {
+    return {
+      ...mockModel,
+      role: "mock-model"
+    };
+  }
+
+  const hostBinding = (hostBindingManifest?.hostBindings ?? []).find((binding) => binding.name === name);
+  if (hostBinding) {
+    return {
+      ...hostBinding,
+      role: "host-binding"
+    };
+  }
+
+  return null;
+}
+
+function agentPackBoundaryKind(binding) {
+  if (!binding) {
+    return "foreign";
+  }
+
+  if (binding.role === "mock-model") {
+    return "model";
+  }
+
+  if (typeof binding.name === "string" && /^(store|load|review)/.test(binding.name)) {
+    return "storage";
+  }
+
+  return binding.role === "host-binding" ? "host" : "foreign";
+}
+
+function sourceModulePath(sourceModule, entry) {
+  if (sourceModule.role === "entry") {
+    return entry;
+  }
+
+  if (typeof sourceModule.moduleName === "string" && sourceModule.moduleName.length > 0) {
+    return `${sourceModule.moduleName.split(".").join("/")}.clasp`;
+  }
+
+  return entry;
+}
+
+function schemaIdForType(typeName) {
+  return typeof typeName === "string" && typeName.length > 0
+    ? `schema:${typeName}`
+    : null;
+}
+
+function surfaceToAirNodeId(surfaceId) {
+  if (typeof surfaceId !== "string") {
+    return "";
+  }
+
+  if (surfaceId.startsWith("schema-field:")) {
+    return surfaceId.replace(/^schema-field:/, "record-field:");
+  }
+
+  if (surfaceId.startsWith("schema:")) {
+    return surfaceId.replace(/^schema:/, "record:");
+  }
+
+  return surfaceId;
+}
+
+function addString(target, value) {
+  if (typeof value === "string" && value.length > 0) {
+    target.add(value);
+  }
+}
+
+function normalizeTaskCommand(command) {
+  return Array.isArray(command)
+    ? command.filter((part) => typeof part === "string")
+    : [];
+}
+
+function compactObject(record) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined && value !== null)
+  );
+}
+
 function walkBenchmarkExpr(expr, visit) {
   if (!expr || typeof expr !== "object") {
     return;
@@ -1273,6 +1616,7 @@ function renderClaspLanguageGuide({
   prepRoot,
   moduleName,
   surfacesPath,
+  agentPackPath,
   explainPath,
   hostBindingManifestPath,
   hostBindingManifest,
@@ -1288,7 +1632,8 @@ function renderClaspLanguageGuide({
     path.join(prepRoot, `${moduleName}.context.json`),
     path.join(prepRoot, `${moduleName}.air.json`),
     path.join(prepRoot, `${moduleName}.ui.json`),
-    surfacesPath
+    surfacesPath,
+    agentPackPath
   ];
 
   if (explainPath) {
@@ -1354,6 +1699,13 @@ function renderClaspLanguageGuide({
     "## Benchmark surfaces",
     "",
     `- \`${path.relative(workspace, surfacesPath)}\` summarizes source modules, records/enums, typed routes, pages/forms, decode boundaries, host bindings, and expected host JSON shapes.`
+  );
+
+  lines.push(
+    "",
+    "## Agent action pack",
+    "",
+    `- \`${path.relative(workspace, agentPackPath)}\` joins compiler context/AIR, surface index entries, app-owned edit files, host contracts, contract gaps, and verifier commands for benchmark agents.`
   );
 
   lines.push("", "## Routes and boundaries", "");
@@ -1428,6 +1780,18 @@ function collectWorkspaceClaspSourceFiles(workspace) {
 }
 
 function collectContextRoutes(context) {
+  const surfaceRoutes = (context.surfaceIndex?.routes ?? [])
+    .map((route) => ({
+      method: String(route.method ?? "UNKNOWN"),
+      path: String(route.path ?? "/"),
+      requestType: String(route.requestType ?? "Unknown"),
+      responseType: String(route.responseType ?? "Unknown")
+    }));
+
+  if (surfaceRoutes.length > 0) {
+    return surfaceRoutes;
+  }
+
   return (context.nodes ?? [])
     .filter((node) => node.kind === "route")
     .map((node) => {
@@ -1446,16 +1810,23 @@ function collectContextForeignDecls(context, hostBindingManifest = null) {
     ...((hostBindingManifest?.mockModelCalls ?? []).map((binding) => binding.name)),
     ...((hostBindingManifest?.hostBindings ?? []).map((binding) => binding.name))
   ]);
+  const keepManifestBoundary = (name) => manifestNames.size === 0 || manifestNames.has(String(name ?? ""));
+  const surfaceForeignDecls = (context.surfaceIndex?.foreignBoundaries ?? [])
+    .filter((boundary) => keepManifestBoundary(boundary.name))
+    .map((boundary) => ({
+      name: String(boundary.name ?? "unknown"),
+      type: String(boundary.type ?? "Unknown")
+    }));
+
+  if (surfaceForeignDecls.length > 0) {
+    return surfaceForeignDecls;
+  }
 
   return (context.nodes ?? [])
     .filter((node) => node.kind === "foreign")
     .filter((node) => {
-      if (manifestNames.size === 0) {
-        return true;
-      }
-
       const attrs = attrsToRecord(node.attrs);
-      return manifestNames.has(String(attrs.name ?? ""));
+      return keepManifestBoundary(attrs.name);
     })
     .map((node) => {
       const attrs = attrsToRecord(node.attrs);

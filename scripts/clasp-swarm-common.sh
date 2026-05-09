@@ -472,6 +472,8 @@ clasp_swarm_batch_is_complete() {
   local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
   local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
   local scan_lanes=()
+  local task_files=()
+  local task_files_output=""
 
   [[ -n "$batch_label" ]] || return 1
 
@@ -487,7 +489,15 @@ clasp_swarm_batch_is_complete() {
   fi
 
   for scan_lane in "${scan_lanes[@]}"; do
-    while IFS= read -r task_file; do
+    task_files=()
+    if ! task_files_output="$(clasp_swarm_task_files "$scan_lane")"; then
+      return 1
+    fi
+    if [[ -n "$task_files_output" ]]; then
+      mapfile -t task_files <<< "$task_files_output"
+    fi
+
+    for task_file in "${task_files[@]}"; do
       task_batch="$(clasp_swarm_task_batch_label "$task_file")"
       if [[ "$task_batch" != "$batch_label" ]]; then
         continue
@@ -497,7 +507,7 @@ clasp_swarm_batch_is_complete() {
       if ! clasp_swarm_task_is_completed "$completed_root" "$task_file" "$project_root" "$main_branch" "$trunk_branch"; then
         return 1
       fi
-    done < <(clasp_swarm_task_files "$scan_lane")
+    done
   done
 
   [[ "$found" == "1" ]]
@@ -545,10 +555,19 @@ clasp_swarm_select_next_ready_task() {
   local project_root=""
   local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
   local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
+  local task_files=()
+  local task_files_output=""
 
   project_root="$(clasp_swarm_project_root)"
 
-  while IFS= read -r task_file; do
+  if ! task_files_output="$(clasp_swarm_task_files "$lane_dir")"; then
+    return 1
+  fi
+  if [[ -n "$task_files_output" ]]; then
+    mapfile -t task_files <<< "$task_files_output"
+  fi
+
+  for task_file in "${task_files[@]}"; do
     if [[ -n "$batch_filter" ]]; then
       task_batch="$(clasp_swarm_task_batch_label "$task_file")"
       if [[ "$task_batch" != "$batch_filter" ]]; then
@@ -579,7 +598,7 @@ clasp_swarm_select_next_ready_task() {
     if [[ -z "$first_pending" ]]; then
       first_pending="$task_file"
     fi
-  done < <(clasp_swarm_task_files "$lane_dir")
+  done
 
   if [[ -n "$first_pending" ]]; then
     printf '__WAIT__:%s\n' "$first_pending"

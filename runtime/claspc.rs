@@ -34,6 +34,8 @@ const CLASPC_MAIN_STACK_BYTES: usize = 64 * 1024 * 1024;
 enum Command {
     Check,
     Explain,
+    Air,
+    Context,
     Compile,
     Run,
     Native,
@@ -50,7 +52,7 @@ struct CliOptions {
 
 fn usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] <check|explain|compile|run|native|native-image> <entry.clasp> [-o output] [-- args...]"
+        "usage: {program} [--json] <check|explain|air|context|compile|run|native|native-image> <entry.clasp> [-o output] [-- args...]"
     );
     std::process::exit(2);
 }
@@ -241,6 +243,8 @@ fn parse_command(name: &str) -> Option<Command> {
     match name {
         "check" => Some(Command::Check),
         "explain" => Some(Command::Explain),
+        "air" => Some(Command::Air),
+        "context" => Some(Command::Context),
         "compile" => Some(Command::Compile),
         "run" => Some(Command::Run),
         "native" => Some(Command::Native),
@@ -296,7 +300,7 @@ fn parse_cli(args: &[String]) -> Result<CliOptions, String> {
 
     let Some(command) = parse_command(&positionals[0]) else {
         return Err(format!(
-            "unsupported command `{}`; native `claspc` currently supports check, explain, compile, run, native, and native-image",
+            "unsupported command `{}`; native `claspc` currently supports check, explain, air, context, compile, run, native, and native-image",
             positionals[0]
         ));
     };
@@ -1814,11 +1818,12 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
-        form_body_to_json, merge_json_arrays, native_image_cache_dir,
+        form_body_to_json, merge_json_arrays, native_image_cache_dir, parse_cli,
         native_image_decl_module_cache_context_fingerprint, native_route_error_http_response,
         native_route_info_from_image, plan_incremental_project_summary, read_cached_native_image,
-        split_decl_name_chunks, write_cached_native_image, NativeImageDeclModuleEntry, NativeImageDeclModulePlan,
-        ProjectBundleBuild, ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
+        replace_extension, split_decl_name_chunks, write_cached_native_image, Command,
+        NativeImageDeclModuleEntry, NativeImageDeclModulePlan, ProjectBundleBuild, ProjectBundleModule,
+        PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -1830,6 +1835,46 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn parse_cli_accepts_semantic_artifact_commands() {
+        let air_args = vec![
+            "claspc".to_owned(),
+            "--json".to_owned(),
+            "air".to_owned(),
+            "src/Main.clasp".to_owned(),
+            "-o".to_owned(),
+            "build/Main.air.json".to_owned(),
+        ];
+        let air_options = parse_cli(&air_args).expect("air options");
+        assert!(air_options.json);
+        assert!(matches!(air_options.command, Command::Air));
+        assert_eq!(air_options.input_path, PathBuf::from("src/Main.clasp"));
+        assert_eq!(air_options.output_path, Some(PathBuf::from("build/Main.air.json")));
+
+        let context_args = vec![
+            "claspc".to_owned(),
+            "context".to_owned(),
+            "src/Main.clasp".to_owned(),
+        ];
+        let context_options = parse_cli(&context_args).expect("context options");
+        assert!(!context_options.json);
+        assert!(matches!(context_options.command, Command::Context));
+        assert_eq!(context_options.input_path, PathBuf::from("src/Main.clasp"));
+        assert_eq!(context_options.output_path, None);
+    }
+
+    #[test]
+    fn semantic_artifact_default_extensions_match_cli_contract() {
+        assert_eq!(
+            replace_extension(&PathBuf::from("src/Main.clasp"), "air.json"),
+            PathBuf::from("src/Main.air.json")
+        );
+        assert_eq!(
+            replace_extension(&PathBuf::from("src/Main.clasp"), "context.json"),
+            PathBuf::from("src/Main.context.json")
+        );
     }
 
     #[test]
@@ -4410,6 +4455,8 @@ fn run_build(
                 Command::NativeImage => "native-image",
                 Command::Check => "check",
                 Command::Explain => "explain",
+                Command::Air => "air",
+                Command::Context => "context",
             }),
             json_string(&options.input_path.display().to_string()),
             json_string(target_name),
@@ -4697,6 +4744,22 @@ fn run_main(args: Vec<String>) -> ExitCode {
             }
         }
         Command::Explain => run_explain(&options, &embedded_path, &bundle_build),
+        Command::Air => run_build(
+            &options,
+            &embedded_path,
+            &bundle_build,
+            "airProjectText",
+            "air.json",
+            "air",
+        ),
+        Command::Context => run_build(
+            &options,
+            &embedded_path,
+            &bundle_build,
+            "contextProjectText",
+            "context.json",
+            "context",
+        ),
         Command::Compile => {
             let explicit_output_requests_frontend_js = options
                 .output_path

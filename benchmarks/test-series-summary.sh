@@ -134,6 +134,15 @@ write_result "2026-03-01T10-11-06.000Z--ts-lead-segment--codex.json" "ts-lead-se
 write_result "2026-03-01T10-11-07.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:07.000Z" 150000 140 130 true 0
 write_result "2026-03-01T10-11-08.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:08.000Z" 240000 175 160 true 0
 write_result "2026-03-01T10-11-09.000Z--clasp-legal-assistant-appbench--codex.json" "clasp-legal-assistant-appbench" "clasp" "codex" "gpt-5.4" "public-app-1" "2026-03-01T10:11:09.000Z" 300000 210 190 true 0
+write_result "2026-03-01T10-15-01.000Z--clasp-lead-priority--codex.json" "clasp-lead-priority" "clasp" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:01.000Z" 300000 300 280 true 0
+write_result "2026-03-01T10-15-02.000Z--ts-lead-priority--codex.json" "ts-lead-priority" "typescript" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:02.000Z" 100000 100 90 true 0
+write_result "2026-03-01T10-15-03.000Z--clasp-lead-rejection--codex.json" "clasp-lead-rejection" "clasp" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:03.000Z" 300000 300 280 true 0
+write_result "2026-03-01T10-15-04.000Z--ts-lead-rejection--codex.json" "ts-lead-rejection" "typescript" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:04.000Z" 100000 100 90 true 0
+write_result "2026-03-01T10-15-05.000Z--clasp-lead-segment--codex.json" "clasp-lead-segment" "clasp" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:05.000Z" 300000 300 280 true 0
+write_result "2026-03-01T10-15-06.000Z--ts-lead-segment--codex.json" "ts-lead-segment" "typescript" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:06.000Z" 100000 100 90 true 0
+write_result "2026-03-01T10-15-07.000Z--clasp-external-adaptation--codex.json" "clasp-external-adaptation" "clasp" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:07.000Z" 300000 300 280 true 0
+write_result "2026-03-01T10-15-08.000Z--ts-external-adaptation--codex.json" "ts-external-adaptation" "typescript" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:08.000Z" 100000 100 90 true 0
+write_result "2026-03-01T10-15-09.000Z--clasp-legal-assistant-appbench--codex.json" "clasp-legal-assistant-appbench" "clasp" "codex" "gpt-5.4" "public-app-lagging-1" "2026-03-01T10:15:09.000Z" 100000 100 90 true 0
 write_result "2026-03-01T10-11-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-1" "2026-03-01T10:11:00.000Z" 90 115 100 false 1
 write_result "2026-03-01T10-12-00.000Z--py-agent-escalation--codex.json" "py-agent-escalation" "python" "codex" "gpt-5.4" "py-escalation-2" "2026-03-01T10:12:00.000Z" 110 125 105 true 0
 write_result "2026-03-01T10-12-05.000Z--clasp-syntax-compact--codex.json" "clasp-syntax-compact" "clasp" "codex" "gpt-5.4" "syntax-a-1" "2026-03-01T10:12:05.000Z" 80 90 82 true 0
@@ -517,16 +526,21 @@ grep -Fq '    throughputDeltaPct: 38' <<<"$public_app_summary_output"
 grep -Fq '    tokenDelta: -115' <<<"$public_app_summary_output"
 grep -Fq '    uncachedTokenDelta: -100' <<<"$public_app_summary_output"
 
+public_app_checkpoint_path="$tmp_bin/public-app-checkpoint.json"
 public_app_signal_output="$(
   node "$project_root/benchmarks/run-public-app-signal.mjs" \
     --skip-run true \
     --notes public-app \
     --harness codex \
     --model gpt-5.4 \
-    --mode raw-repo
+    --mode raw-repo \
+    --checkpoint-output "$public_app_checkpoint_path" \
+    --wave 2
 )"
-node - "$public_app_signal_output" <<'NODE'
+node - "$public_app_signal_output" "$public_app_checkpoint_path" <<'NODE'
+const fs = require('fs');
 const signal = JSON.parse(process.argv[2]);
+const checkpoint = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 
 function assert(condition, message) {
   if (!condition) {
@@ -543,6 +557,7 @@ const requiredFields = [
   'scoreValue',
   'targetName',
   'targetValue',
+  'failureKind',
 ];
 for (const field of requiredFields) {
   assert(Object.prototype.hasOwnProperty.call(signal, field), `missing benchmark signal field: ${field}`);
@@ -555,6 +570,7 @@ assert(signal.scoreName === 'throughputDeltaPct', `unexpected scoreName: ${signa
 assert(signal.scoreValue === 38, `unexpected scoreValue: ${signal.scoreValue}`);
 assert(signal.targetName === 'minThroughputDeltaPct', `unexpected targetName: ${signal.targetName}`);
 assert(signal.targetValue === 0, `unexpected targetValue: ${signal.targetValue}`);
+assert(signal.failureKind === null, `unexpected failureKind: ${signal.failureKind}`);
 
 const managerCheckpoint = {
   wave: 1,
@@ -565,18 +581,79 @@ assert(Number.isInteger(managerCheckpoint.wave), 'manager checkpoint wave must b
 assert(Array.isArray(managerCheckpoint.command), 'manager checkpoint command must be an array');
 assert(Number.isInteger(managerCheckpoint.scoreValue), 'manager checkpoint score must be an integer');
 assert(Number.isInteger(managerCheckpoint.targetValue), 'manager checkpoint target must be an integer');
+assert(checkpoint.format === 'clasp-benchmark-checkpoint-v1', `unexpected checkpoint format: ${checkpoint.format}`);
+assert(checkpoint.wave === 2, `unexpected checkpoint wave: ${checkpoint.wave}`);
+assert(checkpoint.suite === 'main-public-app-comparison', `unexpected checkpoint suite: ${checkpoint.suite}`);
+assert(checkpoint.passed === true, 'expected checkpoint passed=true');
+assert(checkpoint.meetsTarget === true, 'expected checkpoint meetsTarget=true');
+assert(checkpoint.passStatus === 'pass', `unexpected checkpoint passStatus: ${checkpoint.passStatus}`);
+assert(checkpoint.failureKind === null, `unexpected checkpoint failureKind: ${checkpoint.failureKind}`);
+assert(Array.isArray(checkpoint.command), 'checkpoint command must be durable');
+assert(checkpoint.command.includes('--checkpoint-output'), 'checkpoint command should record the invocation');
+assert(checkpoint.summary === signal.summary, 'checkpoint summary should match stdout signal');
+assert(checkpoint.score.name === 'throughputDeltaPct', `unexpected checkpoint score name: ${checkpoint.score.name}`);
+assert(checkpoint.score.value === 38, `unexpected checkpoint score value: ${checkpoint.score.value}`);
+assert(checkpoint.target.name === 'minThroughputDeltaPct', `unexpected checkpoint target name: ${checkpoint.target.name}`);
+assert(checkpoint.target.value === 0, `unexpected checkpoint target value: ${checkpoint.target.value}`);
+assert(checkpoint.benchmark.notes === 'public-app', `unexpected checkpoint notes: ${checkpoint.benchmark.notes}`);
+assert(checkpoint.benchmark.mode === 'raw-repo', `unexpected checkpoint mode: ${checkpoint.benchmark.mode}`);
+assert(checkpoint.resultSet.seriesResultCount === 9, `unexpected checkpoint result count: ${checkpoint.resultSet.seriesResultCount}`);
+assert(checkpoint.resultSet.missingTaskIds.length === 0, 'expected no missing public app tasks');
 NODE
 
+lagging_public_app_checkpoint_path="$tmp_bin/lagging-public-app-checkpoint.json"
+lagging_public_app_signal_output="$(
+  node "$project_root/benchmarks/run-public-app-signal.mjs" \
+    --skip-run true \
+    --notes public-app-lagging \
+    --harness codex \
+    --model gpt-5.4 \
+    --mode raw-repo \
+    --checkpoint-output "$lagging_public_app_checkpoint_path" \
+    --wave 4
+)"
+node - "$lagging_public_app_signal_output" "$lagging_public_app_checkpoint_path" <<'NODE'
+const fs = require('fs');
+const signal = JSON.parse(process.argv[2]);
+const checkpoint = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(signal.suite === 'main-public-app-comparison', `unexpected suite: ${signal.suite}`);
+assert(signal.passed === true, 'complete benchmark result sets should pass signal collection');
+assert(signal.meetsTarget === false, 'expected lagging public app signal not to meet target');
+assert(signal.failureKind === 'benchmark-performance', `unexpected failureKind: ${signal.failureKind}`);
+assert(signal.scoreName === 'throughputDeltaPct', `unexpected scoreName: ${signal.scoreName}`);
+assert(signal.scoreValue === -67, `unexpected lagging scoreValue: ${signal.scoreValue}`);
+assert(signal.targetValue === 0, `unexpected lagging targetValue: ${signal.targetValue}`);
+assert(signal.summary.includes('Clasp is still behind the public app benchmark target.'), `unexpected lagging summary: ${signal.summary}`);
+assert(checkpoint.wave === 4, `unexpected checkpoint wave: ${checkpoint.wave}`);
+assert(checkpoint.passStatus === 'target-unmet', `unexpected lagging passStatus: ${checkpoint.passStatus}`);
+assert(checkpoint.failureKind === 'benchmark-performance', `unexpected checkpoint failureKind: ${checkpoint.failureKind}`);
+assert(checkpoint.score.value === -67, `unexpected checkpoint score: ${checkpoint.score.value}`);
+assert(checkpoint.resultSet.seriesResultCount === 9, `unexpected lagging result count: ${checkpoint.resultSet.seriesResultCount}`);
+assert(checkpoint.resultSet.missingTaskIds.length === 0, 'expected no missing lagging public app tasks');
+NODE
+
+missing_public_app_checkpoint_path="$tmp_bin/missing-public-app-checkpoint.json"
 missing_public_app_signal_output="$(
   node "$project_root/benchmarks/run-public-app-signal.mjs" \
     --skip-run true \
     --notes does-not-exist \
     --harness codex \
     --model gpt-5.4 \
-    --mode raw-repo
+    --mode raw-repo \
+    --checkpoint-output "$missing_public_app_checkpoint_path" \
+    --wave 3
 )"
-node - "$missing_public_app_signal_output" <<'NODE'
+node - "$missing_public_app_signal_output" "$missing_public_app_checkpoint_path" <<'NODE'
+const fs = require('fs');
 const signal = JSON.parse(process.argv[2]);
+const checkpoint = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 
 function assert(condition, message) {
   if (!condition) {
@@ -591,11 +668,65 @@ assert(signal.scoreName === 'throughputDeltaPct', `unexpected scoreName: ${signa
 assert(signal.scoreValue === -100, `unexpected scoreValue: ${signal.scoreValue}`);
 assert(signal.targetName === 'minThroughputDeltaPct', `unexpected targetName: ${signal.targetName}`);
 assert(signal.targetValue === 0, `unexpected targetValue: ${signal.targetValue}`);
+assert(signal.failureKind === 'missing-results', `unexpected failureKind: ${signal.failureKind}`);
 assert(signal.summary.includes('No public app benchmark results matched'), `missing actionable no-result summary: ${signal.summary}`);
 assert(signal.summary.includes('suite=main-public-app-comparison'), `summary missing suite: ${signal.summary}`);
 assert(signal.summary.includes('resultCount=0'), `summary missing resultCount=0: ${signal.summary}`);
 assert(signal.summary.includes('missingTasks=clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench'), `summary missing expected missing tasks: ${signal.summary}`);
 assert(signal.summary.includes('target minThroughputDeltaPct>=0'), `summary missing target: ${signal.summary}`);
+assert(checkpoint.format === 'clasp-benchmark-checkpoint-v1', `unexpected checkpoint format: ${checkpoint.format}`);
+assert(checkpoint.wave === 3, `unexpected checkpoint wave: ${checkpoint.wave}`);
+assert(checkpoint.passed === false, 'expected missing checkpoint passed=false');
+assert(checkpoint.meetsTarget === false, 'expected missing checkpoint meetsTarget=false');
+assert(checkpoint.passStatus === 'failed', `unexpected missing checkpoint passStatus: ${checkpoint.passStatus}`);
+assert(checkpoint.failureKind === 'missing-results', `unexpected checkpoint failureKind: ${checkpoint.failureKind}`);
+assert(checkpoint.score.value === -100, `unexpected missing checkpoint score: ${checkpoint.score.value}`);
+assert(checkpoint.target.value === 0, `unexpected missing checkpoint target: ${checkpoint.target.value}`);
+assert(checkpoint.resultSet.seriesResultCount === 0, `unexpected missing checkpoint result count: ${checkpoint.resultSet.seriesResultCount}`);
+assert(checkpoint.resultSet.missingTaskIds.length === 9, `unexpected missing task count: ${checkpoint.resultSet.missingTaskIds.length}`);
+NODE
+
+repo_verification_checkpoint_path="$tmp_bin/repo-verification-public-app-checkpoint.json"
+repo_verification_signal_output="$(
+  node "$project_root/benchmarks/run-public-app-signal.mjs" \
+    --skip-run true \
+    --repo-verification failed \
+    --repo-verification-summary "verify-all failed: scripts/test-codex-loop.sh" \
+    --notes repo-verification-failed \
+    --harness codex \
+    --model gpt-5.4 \
+    --mode raw-repo \
+    --checkpoint-output "$repo_verification_checkpoint_path" \
+    --wave 5
+)"
+node - "$repo_verification_signal_output" "$repo_verification_checkpoint_path" <<'NODE'
+const fs = require('fs');
+const signal = JSON.parse(process.argv[2]);
+const checkpoint = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(signal.suite === 'main-public-app-comparison', `unexpected suite: ${signal.suite}`);
+assert(signal.passed === false, 'expected repo verification signal to fail');
+assert(signal.meetsTarget === false, 'expected repo verification signal not to meet target');
+assert(signal.scoreValue === -100, `unexpected repo verification score: ${signal.scoreValue}`);
+assert(signal.targetValue === 0, `unexpected repo verification target: ${signal.targetValue}`);
+assert(signal.failureKind === 'repo-verification', `unexpected failureKind: ${signal.failureKind}`);
+assert(signal.summary.includes('Repository verification failed before the public app benchmark checkpoint'), `missing repo verification summary: ${signal.summary}`);
+assert(signal.summary.includes('verify-all failed: scripts/test-codex-loop.sh'), `missing repo verification detail: ${signal.summary}`);
+assert(checkpoint.format === 'clasp-benchmark-checkpoint-v1', `unexpected checkpoint format: ${checkpoint.format}`);
+assert(checkpoint.wave === 5, `unexpected repo verification wave: ${checkpoint.wave}`);
+assert(checkpoint.passStatus === 'failed', `unexpected repo verification passStatus: ${checkpoint.passStatus}`);
+assert(checkpoint.failureKind === 'repo-verification', `unexpected checkpoint failureKind: ${checkpoint.failureKind}`);
+assert(checkpoint.benchmark.skippedRun === true, 'repo verification checkpoint should not run the benchmark');
+assert(checkpoint.repositoryVerification.status === 'failed', `unexpected repo verification status: ${checkpoint.repositoryVerification.status}`);
+assert(checkpoint.repositoryVerification.summary === 'verify-all failed: scripts/test-codex-loop.sh', `unexpected repo verification detail: ${checkpoint.repositoryVerification.summary}`);
+assert(checkpoint.resultSet.seriesResultCount === 0, `unexpected repo verification result count: ${checkpoint.resultSet.seriesResultCount}`);
+assert(checkpoint.resultSet.missingTaskIds.length === 9, `unexpected repo verification missing task count: ${checkpoint.resultSet.missingTaskIds.length}`);
 NODE
 
 durable_workflow_summary_output="$(

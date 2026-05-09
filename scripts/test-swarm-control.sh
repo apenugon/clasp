@@ -24,6 +24,7 @@ lane_worktree_retry_test_root=""
 batch_start_test_root=""
 prompt_test_root=""
 prompt_test_root_2=""
+task_file_drain_test_root=""
 status_wave_name=""
 status_lane_root_1=""
 status_lane_root_2=""
@@ -45,7 +46,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}" "${summary_markdown_output:-}"
 }
 
@@ -1769,20 +1770,20 @@ bash scripts/verify-all.sh
 ```
 EOF
 
-cat > "$lane_root/LG-001-already-in-git.md" <<'EOF'
-# LG-001 Already in git
+cat > "$lane_root/LG-001-already-complete.md" <<'EOF'
+# LG-001 Already complete
 
 ## Goal
 
-Prove the swarm skips tasks already recorded in trusted git history.
+Prove the swarm skips tasks already recorded as complete.
 
 ## Why
 
-Completion should not depend only on marker files when the task already landed on main.
+Ready-task selection should not repeat work that already has a durable completion marker.
 
 ## Scope
 
-- Skip already-landed tasks during ready-task selection
+- Skip already-complete tasks during ready-task selection
 
 ## Likely Files
 
@@ -1802,6 +1803,8 @@ Completion should not depend only on marker files when the task already landed o
 bash scripts/verify-all.sh
 ```
 EOF
+
+printf '%s\t%s\n' '2026-03-13T00:00:00Z' 'landed' > "$global_completed_root/LG-001"
 
 bash -lc "
   set -euo pipefail
@@ -1831,6 +1834,45 @@ bash -lc "
   clasp_swarm_batch_is_complete foundation '$lane_root' '$global_completed_root'
   clasp_swarm_task_dependencies_met '$lane_root/ZZ-004-batched-follow-up.md' '$lane_root' '$global_completed_root'
 " >/dev/null
+
+task_file_drain_test_root="$(mktemp -d)"
+task_file_drain_lane_root="$task_file_drain_test_root/lane"
+task_file_drain_completed_root="$task_file_drain_test_root/completed"
+task_file_drain_global_completed_root="$task_file_drain_test_root/global-completed"
+task_file_drain_blocked_root="$task_file_drain_test_root/blocked"
+task_file_drain_stderr="$task_file_drain_test_root/stderr.log"
+
+mkdir -p \
+  "$task_file_drain_lane_root" \
+  "$task_file_drain_completed_root" \
+  "$task_file_drain_global_completed_root" \
+  "$task_file_drain_blocked_root"
+
+write_task_manifest \
+  "$task_file_drain_lane_root/RC-001-ready-now.md" \
+  "RC-001 Ready now"
+
+for task_number in $(seq 2 60); do
+  task_key="$(printf 'RC-%03d' "$task_number")"
+  write_task_manifest \
+    "$task_file_drain_lane_root/$task_key-waits.md" \
+    "$task_key Waits" \
+    "ZZ-999"
+done
+
+bash -lc "
+  set -euo pipefail
+  source '$project_root/scripts/clasp-swarm-common.sh'
+  next=\$(clasp_swarm_select_next_ready_task '$task_file_drain_lane_root' '$task_file_drain_completed_root' '$task_file_drain_global_completed_root' '$task_file_drain_blocked_root')
+  [[ \$(basename \"\$next\") == 'RC-001-ready-now.md' ]]
+  rm -rf '$task_file_drain_lane_root'
+  sleep 0.2
+" 2>"$task_file_drain_stderr" >/dev/null
+
+if [[ -s "$task_file_drain_stderr" ]]; then
+  cat "$task_file_drain_stderr" >&2
+  exit 1
+fi
 
 invalid_lane_root="$(mktemp -d)"
 
