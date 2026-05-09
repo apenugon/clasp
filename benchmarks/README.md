@@ -29,7 +29,8 @@ The baseline repos are intentionally incomplete. The acceptance tests should fai
 For the mirrored `lead-segment` tasks, the prep check also guards the intended mutation surface:
 
 - on the `Clasp` side, swapping in the completed app schema file from `../examples/lead-app/Shared/Lead.clasp` must be enough to reach green without editing the benchmark-only `server.mjs` wrapper or `test/lead-app.test.mjs` scaffold
-- on the `TypeScript` side, swapping in the canonical product files from `../examples/lead-app-ts/src/shared/lead.ts` and `../examples/lead-app-ts/src/server/main.ts` must be enough to reach green without editing `test/lead-app.test.mjs`
+- on the `TypeScript` side, swapping in the canonical product file from `../examples/lead-app-ts/src/shared/lead.ts` must be enough to reach green without editing `src/server/main.ts`, `src/server/runtime.ts`, or `test/lead-app.test.mjs`
+- the pristine prepared Clasp and TypeScript `lead-segment` workspaces must still fail before that product change is applied
 
 The repo distinction matters:
 
@@ -95,7 +96,6 @@ For the current `Oracle` lead-segment pair, the exact analogous edit surfaces ar
 
 - `benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp`
 - `benchmarks/tasks/ts-lead-segment/repo/src/shared/lead.ts`
-- `benchmarks/tasks/ts-lead-segment/repo/src/server/main.ts`
 
 The SQLite-backed dogfood benchmark also supports all three modes. For the current `Oracle` persisted TypeScript task, the exact app-owned edit surfaces are:
 
@@ -322,6 +322,14 @@ Run the machine-readable public-app benchmark signal that the ordinary Clasp goa
 CLASP_ALLOW_BOOTSTRAP_RECOVERY=true \
   node benchmarks/run-public-app-signal.mjs --count 1 --notes public-app-live
 ```
+
+The signal command writes exactly one JSON `BenchmarkSignal` object to stdout; benchmark runner logs go to stderr so the goal manager can checkpoint the final line directly. A manager run can wire it in as:
+
+```sh
+CLASP_MANAGER_BENCHMARK_COMMAND_JSON='["node","benchmarks/run-public-app-signal.mjs","--count","1","--mode","raw-repo","--notes","public-app-live"]'
+```
+
+When no complete result set exists, the signal is still a failing `BenchmarkSignal` with `suite`, `summary`, `scoreName`, `scoreValue`, `targetName`, and `targetValue`. The summary names the expected public-app task ids and the missing result ids instead of reporting a bare harness failure.
 
 Run the mirrored repeated `lead-segment` series for both languages:
 

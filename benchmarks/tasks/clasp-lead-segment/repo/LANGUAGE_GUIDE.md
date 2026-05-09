@@ -27,7 +27,7 @@ Start there before touching the verification harness.
   - compiles the workspace to a native binary
   - runs the acceptance test with `CLASP_BENCH_BINARY`
 
-For a task like `segment`, the intended first edit is in `Shared/Lead.clasp`, then `Main.clasp`. The test harness should stay unchanged unless there is a real native-runtime bug.
+For a task like `segment`, the intended app-owned edit is `Shared/Lead.clasp`. `Main.clasp` and the test harness should stay unchanged unless there is a real native-runtime bug.
 
 ## Useful Clasp patterns in this workspace
 

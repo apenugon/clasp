@@ -19,6 +19,17 @@ const defaultHarness = "codex";
 const defaultModel = "gpt-5.4";
 const defaultMode = "raw-repo";
 const defaultWorkflowAssistance = "unspecified";
+const missingComparisonScoreValue = -100;
+
+function normalizeWorkflowAssistance(value) {
+  return String(value ?? defaultWorkflowAssistance)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-")
+    || defaultWorkflowAssistance;
+}
 
 function parseArgs(argv) {
   const options = {
@@ -79,6 +90,7 @@ function parseArgs(argv) {
     index += 1;
   }
 
+  options.workflowAssistance = normalizeWorkflowAssistance(options.workflowAssistance);
   return options;
 }
 
@@ -127,7 +139,7 @@ async function runProcess(command, cwd, env, { allowFailure = false } = {}) {
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();
       stdout += text;
-      process.stdout.write(text);
+      process.stderr.write(text);
     });
 
     child.stderr.on("data", (chunk) => {
@@ -158,7 +170,21 @@ async function loadBundle(bundleManifestPath) {
   return JSON.parse(await readFile(bundleManifestPath, "utf8"));
 }
 
+async function loadResultsOrEmpty() {
+  try {
+    return await loadResults();
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
 async function runPublicAppSeries(options, notePrefix) {
+  const invocationStartedAt = new Date();
+  const runFailures = [];
   const workflowSlug = options.workflowAssistance
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
@@ -204,7 +230,7 @@ async function runPublicAppSeries(options, notePrefix) {
     const note = `${notePrefix}-${sample.sampleIndex}`;
     for (const entry of sample.runOrder ?? []) {
       const workspace = path.join(benchmarkRoot, "workspaces", `${entry.taskId}-${note}`);
-      await runProcess(
+      const result = await runProcess(
         [
           "node",
           path.join(benchmarkRoot, "run-benchmark.mjs"),
@@ -235,8 +261,103 @@ async function runPublicAppSeries(options, notePrefix) {
         env,
         { allowFailure: true }
       );
+      if (result.exitCode !== 0) {
+        runFailures.push({
+          taskId: entry.taskId,
+          sampleIndex: sample.sampleIndex,
+          exitCode: result.exitCode
+        });
+      }
     }
   }
+
+  return {
+    invocationStartedAt,
+    runFailures
+  };
+}
+
+function publicAppExpectedTaskIds() {
+  return [
+    ...publicAppBenchmark.taskPairs.flatMap((pair) => [
+      pair.leftTaskId,
+      pair.rightTaskId
+    ]),
+    ...(publicAppBenchmark.checkpointTaskIds ?? [])
+  ];
+}
+
+function parseSeriesRun(notes) {
+  const note = String(notes ?? "").trim();
+  const match = /^(.*)-(\d+)$/.exec(note);
+
+  if (!match || match[1].length === 0) {
+    return {
+      series: null,
+      runNumber: null
+    };
+  }
+
+  return {
+    series: match[1],
+    runNumber: Number.parseInt(match[2], 10)
+  };
+}
+
+function resultBelongsToSeries(result, notePrefix) {
+  return parseSeriesRun(result.notes).series === notePrefix;
+}
+
+function resultFinishedAtOrAfter(result, startedAt) {
+  const finishedAtMs = Date.parse(result.finishedAt);
+  return Number.isFinite(finishedAtMs) && finishedAtMs >= startedAt.getTime();
+}
+
+function summarizeList(values) {
+  return values.length === 0 ? "(none)" : values.join(",");
+}
+
+function summarizeRunFailures(runFailures) {
+  if (runFailures.length === 0) {
+    return "";
+  }
+
+  return ` nonZeroRuns=${runFailures
+    .map((failure) => `${failure.taskId}@sample${failure.sampleIndex}:exit${failure.exitCode}`)
+    .join(",")}.`;
+}
+
+function publicAppResultSetStatus(results, options, notePrefix, runFailures) {
+  const expectedTaskIds = publicAppExpectedTaskIds();
+  const matchingResults = results.filter((result) =>
+    matchesSummaryFilter(result, {
+      harness: options.harness,
+      model: options.model,
+      mode: options.mode,
+      workflowAssistance: options.workflowAssistance,
+      notes: notePrefix
+    })
+  );
+  const seriesResults = matchingResults.filter((result) =>
+    resultBelongsToSeries(result, notePrefix)
+  );
+  const observedTaskIds = [...new Set(
+    seriesResults
+      .map((result) => result.taskId)
+      .filter((taskId) => expectedTaskIds.includes(taskId))
+  )].sort((left, right) => left.localeCompare(right));
+  const missingTaskIds = expectedTaskIds.filter((taskId) =>
+    !observedTaskIds.includes(taskId)
+  );
+
+  return {
+    expectedTaskIds,
+    observedTaskIds,
+    missingTaskIds,
+    matchingResultCount: matchingResults.length,
+    seriesResultCount: seriesResults.length,
+    runFailures
+  };
 }
 
 function selectPublicAppComparison(results, options, notePrefix) {
@@ -260,13 +381,24 @@ function selectPublicAppComparison(results, options, notePrefix) {
   ) ?? null;
 }
 
-function computeSignalFromComparison(comparison) {
+function missingComparisonSummary(status, options, notePrefix) {
+  const prefix = status.seriesResultCount === 0
+    ? "No public app benchmark results matched"
+    : "Public app benchmark result set is incomplete";
+  return `${prefix} for notes=${notePrefix}, harness=${options.harness}, model=${options.model}, mode=${options.mode}, workflowAssistance=${options.workflowAssistance}. ` +
+    `suite=${publicAppBenchmark.comparisonLabel}; resultCount=${status.seriesResultCount}; matchingResultCount=${status.matchingResultCount}; ` +
+    `expectedTasks=${summarizeList(status.expectedTaskIds)}; observedTasks=${summarizeList(status.observedTaskIds)}; missingTasks=${summarizeList(status.missingTaskIds)}.` +
+    summarizeRunFailures(status.runFailures) +
+    ` score throughputDeltaPct=${missingComparisonScoreValue}; target minThroughputDeltaPct>=0.`;
+}
+
+function computeSignalFromComparison(comparison, resultSetStatus, options, notePrefix) {
   if (comparison === null) {
     return benchmarkSignal({
-      summary: "Public app benchmark did not produce a full Clasp vs TypeScript comparison.",
+      summary: missingComparisonSummary(resultSetStatus, options, notePrefix),
       passed: false,
       meetsTarget: false,
-      scoreValue: -100,
+      scoreValue: missingComparisonScoreValue,
       targetValue: 0
     });
   }
@@ -303,15 +435,32 @@ function computeSignalFromComparison(comparison) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const notePrefix = options.notes || `public-app-live-${utcSlugNow()}`;
+  let invocation = {
+    invocationStartedAt: null,
+    runFailures: []
+  };
 
   try {
     if (!options.skipRun) {
-      await runPublicAppSeries(options, notePrefix);
+      invocation = await runPublicAppSeries(options, notePrefix);
     }
 
-    const results = await loadResults();
+    const loadedResults = await loadResultsOrEmpty();
+    const results = invocation.invocationStartedAt === null
+      ? loadedResults
+      : loadedResults.filter((result) =>
+        resultFinishedAtOrAfter(result, invocation.invocationStartedAt)
+      );
     const comparison = selectPublicAppComparison(results, options, notePrefix);
-    console.log(JSON.stringify(computeSignalFromComparison(comparison)));
+    const resultSetStatus = publicAppResultSetStatus(
+      results,
+      options,
+      notePrefix,
+      invocation.runFailures
+    );
+    console.log(JSON.stringify(
+      computeSignalFromComparison(comparison, resultSetStatus, options, notePrefix)
+    ));
   } catch (error) {
     const summary = error instanceof Error ? error.message : String(error);
     console.log(JSON.stringify(benchmarkSignal({

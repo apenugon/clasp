@@ -1814,9 +1814,10 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
-        merge_json_arrays, native_image_cache_dir, native_image_decl_module_cache_context_fingerprint,
-        plan_incremental_project_summary, read_cached_native_image, split_decl_name_chunks,
-        write_cached_native_image, NativeImageDeclModuleEntry, NativeImageDeclModulePlan,
+        form_body_to_json, merge_json_arrays, native_image_cache_dir,
+        native_image_decl_module_cache_context_fingerprint, native_route_error_http_response,
+        native_route_info_from_image, plan_incremental_project_summary, read_cached_native_image,
+        split_decl_name_chunks, write_cached_native_image, NativeImageDeclModuleEntry, NativeImageDeclModulePlan,
         ProjectBundleBuild, ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
@@ -1854,6 +1855,66 @@ mod tests {
     #[test]
     fn count_decl_names_ignores_empty_lines() {
         assert_eq!(count_decl_names("alpha\n\n beta \n\n gamma\n"), 3);
+    }
+
+    #[test]
+    fn form_body_to_json_uses_emitted_route_schema_for_scalar_coercion() {
+        let image = serde_json::json!({
+            "runtime": {
+                "boundaries": [{
+                    "kind": "route",
+                    "method": "POST",
+                    "path": "/leads",
+                    "request": "LeadIntake",
+                    "responseKind": "page"
+                }]
+            },
+            "abi": {
+                "recordLayouts": [{
+                    "name": "LeadIntake",
+                    "fields": [
+                        {"name": "company", "type": "Str"},
+                        {"name": "budget", "type": "Int"},
+                        {"name": "segment", "type": "LeadSegment"}
+                    ]
+                }]
+            }
+        });
+        let route_info = native_route_info_from_image(&image, "POST", "/leads")
+            .expect("expected route metadata");
+        let body = form_body_to_json(
+            Some(&image),
+            Some(&route_info),
+            "company=SynthSpeak&budget=75000&segment=enterprise",
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("expected form JSON");
+
+        assert_eq!(parsed["company"].as_str(), Some("SynthSpeak"));
+        assert_eq!(parsed["budget"].as_i64(), Some(75000));
+        assert_eq!(parsed["segment"].as_str(), Some("enterprise"));
+    }
+
+    #[test]
+    fn native_route_error_http_response_shapes_boundary_statuses_by_route_kind() {
+        let (status, body) = native_route_error_http_response(
+            Some("page"),
+            "request_boundary:segment must be one of: startup, growth, enterprise",
+        );
+        assert_eq!(status, "400 Bad Request");
+        assert_eq!(
+            String::from_utf8(body).expect("utf8 body"),
+            "segment must be one of: startup, growth, enterprise"
+        );
+
+        let (status, body) = native_route_error_http_response(
+            Some("json"),
+            "model_boundary:segment must be one of: startup, growth, enterprise",
+        );
+        assert_eq!(status, "502 Bad Gateway");
+        assert_eq!(
+            String::from_utf8(body).expect("utf8 body"),
+            "{\"error\":\"segment must be one of: startup, growth, enterprise\"}"
+        );
     }
 
     #[test]
@@ -3527,6 +3588,114 @@ fn parse_json_text_field(body: &str, field_name: &str) -> Option<String> {
     None
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeHttpRouteInfo {
+    request_type: String,
+    response_kind: String,
+}
+
+fn native_route_info_from_image(
+    image: &serde_json::Value,
+    method: &str,
+    path: &str,
+) -> Option<NativeHttpRouteInfo> {
+    let boundaries = image
+        .get("runtime")
+        .and_then(|runtime| runtime.get("boundaries"))
+        .and_then(serde_json::Value::as_array)?;
+
+    for boundary in boundaries {
+        let is_route = boundary
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("route");
+        let matches_method = boundary
+            .get("method")
+            .and_then(serde_json::Value::as_str)
+            == Some(method);
+        let matches_path = boundary
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            == Some(path);
+        if is_route && matches_method && matches_path {
+            return Some(NativeHttpRouteInfo {
+                request_type: boundary
+                    .get("request")
+                    .and_then(serde_json::Value::as_str)?
+                    .to_owned(),
+                response_kind: boundary
+                    .get("responseKind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("json")
+                    .to_owned(),
+            });
+        }
+    }
+
+    None
+}
+
+fn native_record_field_types(
+    image: &serde_json::Value,
+    record_name: &str,
+) -> HashMap<String, String> {
+    let mut field_types = HashMap::new();
+    let Some(record_layouts) = image
+        .get("abi")
+        .and_then(|abi| abi.get("recordLayouts"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return field_types;
+    };
+
+    for layout in record_layouts {
+        let layout_name = layout
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if layout_name != record_name {
+            continue;
+        }
+        let Some(fields) = layout
+            .get("fields")
+            .and_then(serde_json::Value::as_array)
+        else {
+            return field_types;
+        };
+        for field in fields {
+            let Some(name) = field.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let Some(typ) = field.get("type").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            field_types.insert(name.to_owned(), typ.to_owned());
+        }
+        return field_types;
+    }
+
+    field_types
+}
+
+fn form_field_json_value(field_type: Option<&str>, value: String) -> serde_json::Value {
+    match field_type {
+        Some("Int") => value
+            .parse::<i64>()
+            .map(|parsed| serde_json::Value::Number(serde_json::Number::from(parsed)))
+            .unwrap_or_else(|_| serde_json::Value::String(value)),
+        Some("Bool") => {
+            if value.eq_ignore_ascii_case("true") {
+                serde_json::Value::Bool(true)
+            } else if value.eq_ignore_ascii_case("false") {
+                serde_json::Value::Bool(false)
+            } else {
+                serde_json::Value::String(value)
+            }
+        }
+        _ => serde_json::Value::String(value),
+    }
+}
+
 fn decode_form_component(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut index = 0usize;
@@ -3556,115 +3725,79 @@ fn decode_form_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-fn form_body_to_json(path: &str, body: &str) -> String {
-    let mut fields = Vec::new();
+fn form_body_to_json(
+    image: Option<&serde_json::Value>,
+    route_info: Option<&NativeHttpRouteInfo>,
+    body: &str,
+) -> String {
+    let field_types = match (image, route_info) {
+        (Some(image), Some(route_info)) => native_record_field_types(image, &route_info.request_type),
+        _ => HashMap::new(),
+    };
+    let mut fields = serde_json::Map::new();
+
     for pair in body.split('&').filter(|pair| !pair.is_empty()) {
         let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
         let name = decode_form_component(raw_name);
         let value = decode_form_component(raw_value);
-        if (path == "/leads" || path == "/api/leads") && name == "budget" {
-            if let Ok(parsed) = value.parse::<i64>() {
-                fields.push(format!("{}:{parsed}", json_string(&name)));
-                continue;
-            }
-        }
-        if (path == "/leads" || path == "/api/leads") && name == "segment" {
-            let value = match value.as_str() {
-                "startup" => "Startup".to_owned(),
-                "growth" => "Growth".to_owned(),
-                "enterprise" => "Enterprise".to_owned(),
-                _ => value,
-            };
-            fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
-            continue;
-        }
-        fields.push(format!("{}:{}", json_string(&name), json_string(&value)));
-    }
-    format!("{{{}}}", fields.join(","))
-}
-
-fn normalize_native_request_json(path: &str, request_json: &str) -> String {
-    if path != "/leads" && path != "/api/leads" {
-        return request_json.to_owned();
+        let field_value = form_field_json_value(field_types.get(&name).map(String::as_str), value);
+        fields.insert(name, field_value);
     }
 
-    let Some(segment) = parse_json_text_field(request_json, "segment") else {
-        return request_json.to_owned();
-    };
-    let normalized_segment = match segment.as_str() {
-        "startup" => "Startup",
-        "growth" => "Growth",
-        "enterprise" => "Enterprise",
-        _ => return request_json.to_owned(),
-    };
-    request_json.replacen(
-        &format!("\"segment\":{}", json_string(&segment)),
-        &format!("\"segment\":{}", json_string(normalized_segment)),
-        1,
-    )
+    serde_json::to_string(&serde_json::Value::Object(fields)).unwrap_or_else(|_| "{}".to_owned())
 }
 
-fn native_route_error_http_response(path: &str, request_json: &str, message: &str) -> (String, Vec<u8>) {
-    if message == "invalid_route_request_payload" {
-        if path == "/leads" && request_json.contains("\"budget\":") {
-            if parse_json_text_field(request_json, "budget").is_some() {
-                return (
-                    "400 Bad Request".to_owned(),
-                    b"budget must be an integer".to_vec(),
-                );
-            }
-            return (
-                "400 Bad Request".to_owned(),
-                b"segment must be one of: startup, growth, enterprise".to_vec(),
-            );
-        }
-        if path == "/api/leads" && parse_json_text_field(request_json, "budget").is_some() {
-            return (
-                "400 Bad Request".to_owned(),
-                b"{\"error\":\"budget must be an integer\"}".to_vec(),
-            );
-        }
+fn native_route_visible_error(message: &str) -> &str {
+    message
+        .strip_prefix("request_boundary:")
+        .or_else(|| message.strip_prefix("model_boundary:"))
+        .unwrap_or(message)
+}
+
+fn native_route_error_body(response_kind: Option<&str>, message: &str) -> Vec<u8> {
+    if response_kind == Some("page") {
+        message.as_bytes().to_vec()
+    } else {
+        format!("{{\"error\":{}}}", json_string(message)).into_bytes()
+    }
+}
+
+fn native_route_error_http_response(response_kind: Option<&str>, message: &str) -> (String, Vec<u8>) {
+    if let Some(detail) = message.strip_prefix("request_boundary:") {
         return (
             "400 Bad Request".to_owned(),
-            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+            native_route_error_body(response_kind, detail),
         );
     }
 
     if message == "invalid_route_request_json" || message == "invalid_route_request_type" {
         return (
             "400 Bad Request".to_owned(),
-            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+            native_route_error_body(response_kind, message),
         );
     }
 
-    if path == "/leads"
-        && (message == "priority must be one of: low, medium, high"
-            || message == "segment must be one of: startup, growth, enterprise")
-    {
-        return ("502 Bad Gateway".to_owned(), message.as_bytes().to_vec());
-    }
-
-    if path == "/lead/summary" && message == "priority must be one of: low, medium, high" {
+    if let Some(detail) = message.strip_prefix("model_boundary:") {
         return (
             "502 Bad Gateway".to_owned(),
-            b"{\"error\":\"route_dispatch_failed\"}".to_vec(),
+            native_route_error_body(response_kind, detail),
         );
     }
 
     if message == "route_dispatch_failed" || message.starts_with("Unknown lead:") {
         return (
             "502 Bad Gateway".to_owned(),
-            format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+            native_route_error_body(response_kind, message),
         );
     }
 
     (
         "500 Internal Server Error".to_owned(),
-        format!("{{\"error\":{}}}", json_string(message)).into_bytes(),
+        native_route_error_body(response_kind, message),
     )
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String), String> {
+fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String, String), String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|err| format!("failed to configure request timeout: {err}"))?;
@@ -3729,14 +3862,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String),
     }
     let body_bytes = &buffer[body_start..body_start + content_length];
     let body_text = String::from_utf8_lossy(body_bytes).into_owned();
-    let request_json = if body_text.trim().is_empty() {
-        "{}".to_owned()
-    } else if content_type.starts_with("application/x-www-form-urlencoded") {
-        form_body_to_json(&path, &body_text)
-    } else {
-        body_text
-    };
-    Ok((method.to_owned(), path, request_json))
+    Ok((method.to_owned(), path, content_type, body_text))
 }
 
 fn write_http_response(
@@ -3768,9 +3894,20 @@ fn write_http_response(
 }
 
 fn handle_http_connection(stream: &mut TcpStream, image_text: &str) -> Result<(), String> {
-    let (method, path, request_json) = read_http_request(stream)?;
-    let normalized_request_json = normalize_native_request_json(&path, &request_json);
-    match unsafe { execute_native_route_from_image_text(image_text, &method, &path, &normalized_request_json) } {
+    let (method, path, content_type, body_text) = read_http_request(stream)?;
+    let image_json = serde_json::from_str::<serde_json::Value>(image_text).ok();
+    let route_info = image_json
+        .as_ref()
+        .and_then(|image| native_route_info_from_image(image, &method, &path));
+    let request_json = if body_text.trim().is_empty() {
+        "{}".to_owned()
+    } else if content_type.starts_with("application/x-www-form-urlencoded") {
+        form_body_to_json(image_json.as_ref(), route_info.as_ref(), &body_text)
+    } else {
+        body_text
+    };
+
+    match unsafe { execute_native_route_from_image_text(image_text, &method, &path, &request_json) } {
         Ok(body) => {
             let body_text = String::from_utf8_lossy(&body).into_owned();
             if body_text.contains("\"kind\":\"redirect\"") {
@@ -3807,8 +3944,9 @@ fn handle_http_connection(stream: &mut TcpStream, image_text: &str) -> Result<()
                     b"{\"error\":\"missing_route\"}",
                 )
             } else {
+                let response_kind = route_info.as_ref().map(|info| info.response_kind.as_str());
                 let (status_line, error_body) =
-                    native_route_error_http_response(&path, &normalized_request_json, &message);
+                    native_route_error_http_response(response_kind, &message);
                 write_http_response(
                     stream,
                     &status_line,
@@ -3867,7 +4005,7 @@ fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
         let output_bytes = match result {
             Ok(output_bytes) => output_bytes,
             Err(message) => {
-                eprintln!("{message}");
+                eprintln!("{}", native_route_visible_error(&message));
                 return ExitCode::from(1);
             }
         };

@@ -963,6 +963,68 @@ semanticAppendUniqueTexts values additions = {
   result
 }
 
+semanticTextHasPrefix : Str -> Str -> Bool
+semanticTextHasPrefix value prefix = match textPrefix value prefix {
+  Ok tail ->
+    true,
+  Err notMatching ->
+    false
+}
+
+semanticSurfaceIdsWithPrefix : [Str] -> Str -> [Str]
+semanticSurfaceIdsWithPrefix surfaces prefix = {
+  let mut matches = emptyRenderedTexts;
+  for surface in surfaces {
+    if semanticTextHasPrefix surface prefix then {
+      matches = semanticAppendNonEmptyUniqueText matches surface;
+      matches
+    } else {
+      matches
+    }
+  };
+  matches
+}
+
+semanticSchemaNodeIds : HostedModuleAst -> [Str]
+semanticSchemaNodeIds modl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    nodeIds = appendRenderedText nodeIds (semanticSchemaNodeId recordDecl);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticDeclNodeIds : HostedModuleAst -> [Str]
+semanticDeclNodeIds modl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    nodeIds = appendRenderedText nodeIds (semanticDeclNodeId decl);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticForeignNodeIds : HostedModuleAst -> [Str]
+semanticForeignNodeIds modl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for foreignDecl in moduleForeignDeclarations modl {
+    nodeIds = appendRenderedText nodeIds (semanticForeignNodeId foreignDecl);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticRouteNodeIds : HostedModuleAst -> [Str]
+semanticRouteNodeIds modl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    nodeIds = appendRenderedText nodeIds (semanticRouteNodeId routeDecl);
+    nodeIds
+  };
+  nodeIds
+}
+
 semanticSchemaFieldNodeIds : HostedRecordDeclAst -> [Str]
 semanticSchemaFieldNodeIds recordDecl = {
   let mut nodeIds = emptyRenderedTexts;
@@ -999,10 +1061,6 @@ semanticAppendSchemaImpactSurface modl surfaces schemaName = {
   }
 }
 
-semanticAppendDeclImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]
-semanticAppendDeclImpactSurface modl surfaces declNameText =
-  if semanticNonEmptyContainsText (semanticDeclNames modl) declNameText then semanticAppendNonEmptyUniqueText surfaces (textConcat ["decl:", declNameText]) else surfaces
-
 semanticAppendToolServerImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]
 semanticAppendToolServerImpactSurface modl surfaces serverName =
   if semanticNonEmptyContainsText (semanticToolServerNames modl) serverName then semanticAppendNonEmptyUniqueText surfaces (textConcat ["toolserver:", serverName]) else surfaces
@@ -1021,10 +1079,65 @@ semanticDeclIdsUsingTarget modl targetId = {
   nodeIds
 }
 
+semanticDeclDirectDependencySurfaces : HostedModuleAst -> HostedDeclAst -> [Str]
+semanticDeclDirectDependencySurfaces modl decl = {
+  let mut surfaces = [semanticDeclNodeId decl];
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclUseTargetNodeIds modl decl);
+  surfaces
+}
+
+semanticDeclDirectDependencySurfacesByName : HostedModuleAst -> Str -> [Str]
+semanticDeclDirectDependencySurfacesByName modl declNameText = {
+  let mut surfaces = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    if declName decl == declNameText then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticDeclDirectDependencySurfaces modl decl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
+semanticAppendNestedDeclDependencySurfaces : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendNestedDeclDependencySurfaces modl surfaces targetId =
+  match textPrefix targetId "decl:" {
+    Ok declNameText ->
+      semanticAppendUniqueTexts surfaces (semanticDeclDirectDependencySurfacesByName modl declNameText),
+    Err notDeclTarget ->
+      surfaces
+  }
+
+semanticDeclDependencySurfaces : HostedModuleAst -> HostedDeclAst -> [Str]
+semanticDeclDependencySurfaces modl decl = {
+  let directSurfaces = semanticDeclDirectDependencySurfaces modl decl;
+  let mut surfaces = directSurfaces;
+  for targetId in directSurfaces {
+    surfaces = semanticAppendNestedDeclDependencySurfaces modl surfaces targetId;
+    surfaces
+  };
+  surfaces
+}
+
+semanticDeclDependencySurfacesByName : HostedModuleAst -> Str -> [Str]
+semanticDeclDependencySurfacesByName modl declNameText = {
+  let mut surfaces = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    if declName decl == declNameText then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticDeclDependencySurfaces modl decl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces
+}
+
 semanticRouteAffectedSurfaces : HostedModuleAst -> HostedRouteDeclAst -> [Str]
 semanticRouteAffectedSurfaces modl routeDecl = {
   let mut surfaces = [semanticRouteNodeId routeDecl];
-  surfaces = semanticAppendDeclImpactSurface modl surfaces (routeDeclHandlerName routeDecl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclDependencySurfacesByName modl (routeDeclHandlerName routeDecl));
   surfaces = semanticAppendSchemaImpactSurface modl surfaces (routeDeclRequestType routeDecl);
   surfaces = semanticAppendSchemaImpactSurface modl surfaces (routeDeclResponseType routeDecl);
   surfaces
@@ -1033,7 +1146,7 @@ semanticRouteAffectedSurfaces modl routeDecl = {
 semanticHookAffectedSurfaces : HostedModuleAst -> HostedHookDeclAst -> [Str]
 semanticHookAffectedSurfaces modl hookDecl = {
   let mut surfaces = [semanticHookNodeId hookDecl];
-  surfaces = semanticAppendDeclImpactSurface modl surfaces (hookDeclHandlerName hookDecl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclDependencySurfacesByName modl (hookDeclHandlerName hookDecl));
   surfaces = semanticAppendSchemaImpactSurface modl surfaces (hookDeclRequestType hookDecl);
   surfaces = semanticAppendSchemaImpactSurface modl surfaces (hookDeclResponseType hookDecl);
   surfaces
@@ -1230,8 +1343,7 @@ semanticHookAffectedSurfacesByHandlerName modl handlerName = {
 semanticDeclAffectedSurfaces : HostedModuleAst -> HostedDeclAst -> [Str]
 semanticDeclAffectedSurfaces modl decl = {
   let declId = semanticDeclNodeId decl;
-  let mut surfaces = [declId];
-  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclUseTargetNodeIds modl decl);
+  let mut surfaces = semanticDeclDependencySurfaces modl decl;
   surfaces = semanticAppendUniqueTexts surfaces (semanticDeclIdsUsingTarget modl declId);
   surfaces = semanticAppendUniqueTexts surfaces (semanticRouteAffectedSurfacesByHandlerName modl (declName decl));
   surfaces = semanticAppendUniqueTexts surfaces (semanticHookAffectedSurfacesByHandlerName modl (declName decl));
@@ -1587,10 +1699,32 @@ semanticContextImpactIndex modl =
     , jsonFieldRaw "mergeGates" (jsonArray (semanticContextImpactIndexMergeGates modl))
     ]
 
-semanticContextSurfaceIndexRoutes : [HostedRouteDeclAst] -> [Str]
-semanticContextSurfaceIndexRoutes routeDecls = {
+semanticContextVerificationGuidance : Str
+semanticContextVerificationGuidance =
+  jsonObject
+    [ jsonFieldRaw "focusedCommands" (semanticJsonTextArray ["bash scripts/verify-affected.sh --changed-file <source.clasp>", "bash scripts/test-selfhost.sh"])
+    , jsonFieldRaw "scenarioCommands" (semanticJsonTextArray ["bash examples/lead-app/scripts/verify.sh"])
+    , jsonFieldText "fullCommand" "bash scripts/verify-all.sh"
+    , jsonFieldRaw "requiresFullBeforeDone" "true"
+    ]
+
+semanticRouteVerificationGuidance : HostedRouteDeclAst -> [Str] -> Str
+semanticRouteVerificationGuidance routeDecl affectedSurfaces =
+  jsonObject
+    [ jsonFieldText "scope" "route"
+    , jsonFieldText "routeId" (semanticRouteNodeId routeDecl)
+    , jsonFieldRaw "requiredSurfaces" (semanticJsonTextArray affectedSurfaces)
+    , jsonFieldRaw "focusedCommands" (semanticJsonTextArray ["bash scripts/verify-affected.sh --changed-file <source.clasp>", "bash scripts/test-selfhost.sh"])
+    , jsonFieldRaw "scenarioCommands" (semanticJsonTextArray ["bash examples/lead-app/scripts/verify.sh"])
+    , jsonFieldText "fullCommand" "bash scripts/verify-all.sh"
+    , jsonFieldRaw "requiresFullBeforeDone" "true"
+    ]
+
+semanticContextSurfaceIndexRoutes : HostedModuleAst -> [Str]
+semanticContextSurfaceIndexRoutes modl = {
   let mut entries = emptyRenderedTexts;
-  for routeDecl in routeDecls {
+  for routeDecl in moduleRouteDeclarations modl {
+    let affectedSurfaces = semanticRouteAffectedSurfaces modl routeDecl;
     entries =
       appendRenderedText
         entries
@@ -1604,6 +1738,15 @@ semanticContextSurfaceIndexRoutes routeDecls = {
           , jsonFieldText "responseType" (routeDeclResponseType routeDecl)
           , jsonFieldText "responseKind" (semanticRouteResponseKind (routeDeclResponseType routeDecl))
           , jsonFieldText "handler" (routeDeclHandlerName routeDecl)
+          , jsonFieldText "requestSchemaId" (textConcat ["schema:", routeDeclRequestType routeDecl])
+          , jsonFieldText "responseSchemaId" (textConcat ["schema:", routeDeclResponseType routeDecl])
+          , jsonFieldText "handlerId" (textConcat ["decl:", routeDeclHandlerName routeDecl])
+          , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+          , jsonFieldRaw "affectedRoutes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "route:"))
+          , jsonFieldRaw "affectedSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "schema:"))
+          , jsonFieldRaw "affectedDeclarations" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "decl:"))
+          , jsonFieldRaw "affectedForeignBoundaries" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "foreign:"))
+          , jsonFieldRaw "verificationGuidance" (semanticRouteVerificationGuidance routeDecl affectedSurfaces)
           ]);
     entries
   };
@@ -1686,7 +1829,7 @@ semanticContextSurfaceIndexForeignBoundaries foreignDecls = {
 semanticContextSurfaceIndex : HostedModuleAst -> Str
 semanticContextSurfaceIndex modl =
   jsonObject
-    [ jsonFieldRaw "routes" (jsonArray (semanticContextSurfaceIndexRoutes (moduleRouteDeclarations modl)))
+    [ jsonFieldRaw "routes" (jsonArray (semanticContextSurfaceIndexRoutes modl))
     , jsonFieldRaw "workflows" (jsonArray (semanticContextSurfaceIndexWorkflows (moduleWorkflowDeclarations modl)))
     , jsonFieldRaw "tools" (jsonArray (semanticContextSurfaceIndexTools (moduleToolDeclarations modl)))
     , jsonFieldRaw "agents" (jsonArray (semanticContextSurfaceIndexAgents (moduleAgentDeclarations modl)))
@@ -1987,27 +2130,155 @@ semanticContextEdges modl = {
   edges
 }
 
-renderContextModuleJson : HostedModuleAst -> Str
-renderContextModuleJson modl = {
+semanticSourceNodeId : HostedModuleAst -> Str
+semanticSourceNodeId modl = textConcat ["source:", moduleNameOf modl]
+
+semanticContextSourceIdentity : HostedModuleAst -> Str -> Str
+semanticContextSourceIdentity modl sourceFingerprint =
+  jsonObject
+    [ jsonFieldText "sourceId" (semanticSourceNodeId modl)
+    , jsonFieldText "moduleId" (textConcat ["module:", moduleNameOf modl])
+    , jsonFieldText "moduleName" (moduleNameOf modl)
+    , jsonFieldText "sourceFingerprint" sourceFingerprint
+    , jsonFieldText "stableGraphIdentity" (textConcat ["source:", moduleNameOf modl, ":", sourceFingerprint])
+    ]
+
+semanticContextModuleIdentity : HostedModuleAst -> Str
+semanticContextModuleIdentity modl =
+  jsonObject
+    [ jsonFieldText "moduleId" (textConcat ["module:", moduleNameOf modl])
+    , jsonFieldText "name" (moduleNameOf modl)
+    , jsonFieldText "stableGraphIdentity" (textConcat ["module:", moduleNameOf modl])
+    , jsonFieldRaw "rootIds" (semanticJsonTextArray (semanticAirRootIds modl))
+    ]
+
+semanticContextProjectSourceIds : [HostedModuleAst] -> [Str]
+semanticContextProjectSourceIds modules = {
+  let mut sourceIds = emptyRenderedTexts;
+  for modl in modules {
+    sourceIds = appendRenderedText sourceIds (semanticSourceNodeId modl);
+    sourceIds
+  };
+  sourceIds
+}
+
+semanticContextProjectModuleIds : [HostedModuleAst] -> [Str]
+semanticContextProjectModuleIds modules = {
+  let mut moduleIds = emptyRenderedTexts;
+  for modl in modules {
+    moduleIds = appendRenderedText moduleIds (textConcat ["module:", moduleNameOf modl]);
+    moduleIds
+  };
+  moduleIds
+}
+
+semanticContextProjectIdentity : HostedModuleAst -> [HostedModuleAst] -> Str
+semanticContextProjectIdentity entryModule sourceModules =
+  jsonObject
+    [ jsonFieldText "entryModule" (moduleNameOf entryModule)
+    , jsonFieldText "entryModuleId" (textConcat ["module:", moduleNameOf entryModule])
+    , jsonFieldRaw "sourceIds" (semanticJsonTextArray (semanticContextProjectSourceIds sourceModules))
+    , jsonFieldRaw "moduleIds" (semanticJsonTextArray (semanticContextProjectModuleIds sourceModules))
+    ]
+
+semanticContextSourceModuleRole : Str -> HostedModuleAst -> Str
+semanticContextSourceModuleRole entryModuleName modl =
+  if moduleNameOf modl == entryModuleName then "entry" else "import"
+
+semanticContextSourceModuleEntry : Str -> Str -> HostedModuleAst -> Str
+semanticContextSourceModuleEntry entryModuleName sourceFingerprint modl =
+  jsonObject
+    [ jsonFieldText "sourceId" (semanticSourceNodeId modl)
+    , jsonFieldText "moduleId" (textConcat ["module:", moduleNameOf modl])
+    , jsonFieldText "moduleName" (moduleNameOf modl)
+    , jsonFieldText "role" (semanticContextSourceModuleRole entryModuleName modl)
+    , jsonFieldText "sourceFingerprint" sourceFingerprint
+    , jsonFieldRaw "imports" (semanticJsonTextArray (moduleImports modl))
+    , jsonFieldRaw "schemas" (semanticJsonTextArray (semanticSchemaNodeIds modl))
+    , jsonFieldRaw "routes" (semanticJsonTextArray (semanticRouteNodeIds modl))
+    , jsonFieldRaw "declarations" (semanticJsonTextArray (semanticDeclNodeIds modl))
+    , jsonFieldRaw "foreignBoundaries" (semanticJsonTextArray (semanticForeignNodeIds modl))
+    ]
+
+semanticContextSourceModuleEntriesFromBundle : Str -> Str -> [Str]
+semanticContextSourceModuleEntriesFromBundle bundle entryModuleName = {
+  let mut entries = emptyRenderedTexts;
+  for source in textSplit bundle projectBundleSeparator {
+    let trimmed = trimSpaces source;
+    if trimmed == "" then {
+      entries
+    } else {
+      let modl = sourceModule trimmed;
+      entries = appendRenderedText entries (semanticContextSourceModuleEntry entryModuleName (textFingerprint64Hex trimmed) modl);
+      entries
+    }
+  };
+  entries
+}
+
+semanticSourceModulesFromBundle : Str -> [HostedModuleAst]
+semanticSourceModulesFromBundle bundle = {
+  let mut modulesReversed = emptyHostedModules;
+  for source in textSplit bundle projectBundleSeparator {
+    let trimmed = trimSpaces source;
+    if trimmed == "" then {
+      modulesReversed
+    } else {
+      modulesReversed = prepend (sourceModule trimmed) modulesReversed;
+      modulesReversed
+    }
+  };
+  reverse modulesReversed
+}
+
+semanticSourceFingerprintForModule : Str -> Str -> Str
+semanticSourceFingerprintForModule bundle moduleName = {
+  for source in textSplit bundle projectBundleSeparator {
+    let trimmed = trimSpaces source;
+    if trimmed == "" then {
+      ""
+    } else {
+      let modl = sourceModule trimmed;
+      if moduleNameOf modl == moduleName then return textFingerprint64Hex trimmed else ""
+    }
+  };
+  textFingerprint64Hex moduleName
+}
+
+renderContextModuleJsonWithSources : HostedModuleAst -> Str -> [HostedModuleAst] -> [Str] -> Str
+renderContextModuleJsonWithSources modl sourceFingerprint sourceModules sourceModuleEntries = {
   let nodes = semanticContextNodes modl;
   let edges = semanticContextEdges modl;
   jsonObject
     [ jsonFieldText "format" "clasp-context-v1"
     , jsonFieldText "module" (moduleNameOf modl)
+    , jsonFieldRaw "sourceIdentity" (semanticContextSourceIdentity modl sourceFingerprint)
+    , jsonFieldRaw "moduleIdentity" (semanticContextModuleIdentity modl)
+    , jsonFieldRaw "projectIdentity" (semanticContextProjectIdentity modl sourceModules)
+    , jsonFieldRaw "sourceModules" (jsonArray sourceModuleEntries)
     , jsonFieldRaw "nodeCount" (encode (length nodes))
     , jsonFieldRaw "edgeCount" (encode (length edges))
     , jsonFieldRaw "surfaceIndex" (semanticContextSurfaceIndex modl)
     , jsonFieldRaw "impactIndex" (semanticContextImpactIndex modl)
+    , jsonFieldRaw "verificationGuidance" semanticContextVerificationGuidance
     , jsonFieldRaw "nodes" (jsonArray nodes)
     , jsonFieldRaw "edges" (jsonArray edges)
     ]
 }
 
+renderContextModuleJson : HostedModuleAst -> Str
+renderContextModuleJson modl =
+  renderContextModuleJsonWithSources modl (textFingerprint64Hex (moduleNameOf modl)) [modl] [semanticContextSourceModuleEntry (moduleNameOf modl) (textFingerprint64Hex (moduleNameOf modl)) modl]
+
 renderAirSourceText : Str -> Str
 renderAirSourceText source = renderAirModuleJson (sourceModule source)
 
 renderContextSourceText : Str -> Str
-renderContextSourceText source = renderContextModuleJson (sourceModule source)
+renderContextSourceText source = {
+  let modl = sourceModule source;
+  let sourceFingerprint = textFingerprint64Hex source;
+  renderContextModuleJsonWithSources modl sourceFingerprint [modl] [semanticContextSourceModuleEntry (moduleNameOf modl) sourceFingerprint modl]
+}
 
 semanticProjectBundleHasSeparator : Str -> Bool
 semanticProjectBundleHasSeparator bundle = if firstText (remainingTexts (textSplit bundle projectBundleSeparator)) == "" then false else true
@@ -2027,9 +2298,13 @@ renderAirProjectText bundle = if semanticProjectBundleIsSingleSourceModule bundl
 }
 
 renderContextProjectText : Str -> Str
-renderContextProjectText bundle = if semanticProjectBundleIsSingleSourceModule bundle then renderContextModuleJson (semanticProjectBundleSourceModule bundle) else match resolveProjectBundle bundle {
+renderContextProjectText bundle = if semanticProjectBundleIsSingleSourceModule bundle then renderContextSourceText bundle else match resolveProjectBundle bundle {
   HostedProjectBundleOk modl ->
-    renderContextModuleJson modl,
+    renderContextModuleJsonWithSources
+      modl
+      (semanticSourceFingerprintForModule bundle (moduleNameOf modl))
+      (semanticSourceModulesFromBundle bundle)
+      (semanticContextSourceModuleEntriesFromBundle bundle (moduleNameOf modl)),
   HostedProjectBundleError message ->
     jsonObject [jsonFieldText "format" "clasp-context-v1", jsonFieldText "error" message]
 }

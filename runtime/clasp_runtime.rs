@@ -474,6 +474,20 @@ struct ClaspRtVariantConstructorSchema {
 #[derive(Clone)]
 struct ClaspRtVariantSchema {
     constructors: HashMap<String, ClaspRtVariantConstructorSchema>,
+    constructor_names: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ClaspRtDecodeError {
+    message: String,
+}
+
+impl ClaspRtDecodeError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -2885,12 +2899,20 @@ fn interpret_native_expr(
             }
             let decoded = unsafe {
                 let json_bytes = string_bytes(value as *mut ClaspRtString);
-                let decoded_value = json_root_value(json_bytes)
-                    .and_then(|value_slice| decode_json_to_runtime_value(&*image, typ, json_bytes, value_slice));
+                let decoded_value = match json_root_value(json_bytes) {
+                    Some(value_slice) => decode_json_to_runtime_value(&*image, typ, json_bytes, value_slice, None),
+                    None => Err(ClaspRtDecodeError::new("value must be valid JSON")),
+                };
                 release_header(runtime, value);
                 decoded_value
             };
-            decoded.unwrap_or(null_mut())
+            match decoded {
+                Ok(decoded_value) => decoded_value,
+                Err(error) => {
+                    set_native_route_error(format!("model_boundary:{}", error.message));
+                    null_mut()
+                }
+            }
         }
     }
 }
@@ -3744,15 +3766,6 @@ unsafe fn interpret_mock_lead_summary_model_binding(arg: *mut ClaspRtHeader) -> 
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(priority);
-    let priority = match priority.as_str() {
-        "High" | "high" => "High".to_owned(),
-        "Medium" | "medium" => "Medium".to_owned(),
-        "Low" | "low" => "Low".to_owned(),
-        _ => {
-            set_native_route_error("priority must be one of: low, medium, high".to_owned());
-            return null_mut();
-        }
-    };
     let segment_tag = match segment.as_str() {
         "enterprise" => "Enterprise",
         "growth" => "Growth",
@@ -3762,15 +3775,6 @@ unsafe fn interpret_mock_lead_summary_model_binding(arg: *mut ClaspRtHeader) -> 
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| segment_tag.to_owned());
-    let segment_tag = match segment_tag.as_str() {
-        "Enterprise" | "enterprise" => "Enterprise".to_owned(),
-        "Growth" | "growth" => "Growth".to_owned(),
-        "Startup" | "startup" => "Startup".to_owned(),
-        _ => {
-            set_native_route_error("segment must be one of: startup, growth, enterprise".to_owned());
-            return null_mut();
-        }
-    };
     let follow_up_required = env::var("CLASP_MOCK_LEAD_SUMMARY_FOLLOW_UP_REQUIRED")
         .ok()
         .and_then(|value| match value.to_ascii_lowercase().as_str() {
@@ -4983,6 +4987,7 @@ fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, 
         let type_name = json_string_owned(bytes, json_object_lookup(bytes, layout, "name")?)?;
         let constructors_value = json_object_lookup(bytes, layout, "constructors")?;
         let mut constructors = HashMap::new();
+        let mut constructor_names = Vec::new();
         for constructor_index in 0..json_array_length(bytes, constructors_value) {
             let constructor = json_array_item(bytes, constructors_value, constructor_index)?;
             let constructor_name = json_string_owned(bytes, json_object_lookup(bytes, constructor, "name")?)?;
@@ -4993,6 +4998,7 @@ fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, 
                 let payload_type = json_string_owned(bytes, json_object_lookup(bytes, payload, "type")?)?;
                 payloads.push(parse_schema_type_text(&payload_type)?);
             }
+            constructor_names.push(constructor_name.clone());
             constructors.insert(
                 constructor_name.clone(),
                 ClaspRtVariantConstructorSchema {
@@ -5001,7 +5007,7 @@ fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, 
                 },
             );
         }
-        schemas.insert(type_name, ClaspRtVariantSchema { constructors });
+        schemas.insert(type_name, ClaspRtVariantSchema { constructors, constructor_names });
     }
     Some(schemas)
 }
@@ -5049,75 +5055,197 @@ unsafe fn release_owned_named_headers(values: Vec<(String, *mut ClaspRtHeader)>)
     }
 }
 
+fn decode_subject(field_name: Option<&str>) -> &str {
+    field_name.unwrap_or("value")
+}
+
+fn variant_enum_wire_tags(variant_schema: &ClaspRtVariantSchema) -> Option<Vec<String>> {
+    let mut tags = Vec::with_capacity(variant_schema.constructor_names.len());
+    for constructor_name in &variant_schema.constructor_names {
+        let constructor = variant_schema.constructors.get(constructor_name)?;
+        if !constructor.payloads.is_empty() {
+            return None;
+        }
+        tags.push(normalize_variant_wire_tag(&constructor.name));
+    }
+    Some(tags)
+}
+
+fn decode_expected_message(
+    image: &ClaspRtNativeModuleImage,
+    typ: &ClaspRtSchemaType,
+    field_name: Option<&str>,
+) -> String {
+    let subject = decode_subject(field_name);
+    match typ {
+        ClaspRtSchemaType::Int => format!("{subject} must be an integer"),
+        ClaspRtSchemaType::Bool => format!("{subject} must be a boolean"),
+        ClaspRtSchemaType::Str => format!("{subject} must be a string"),
+        ClaspRtSchemaType::List(_) => format!("{subject} must be a list"),
+        ClaspRtSchemaType::Named(name) => {
+            if image.record_schemas.contains_key(name) {
+                format!("{subject} must be an object")
+            } else if let Some(variant_schema) = image.variant_schemas.get(name) {
+                if let Some(tags) = variant_enum_wire_tags(variant_schema) {
+                    format!("{subject} must be one of: {}", tags.join(", "))
+                } else {
+                    format!("{subject} must be a {name} value")
+                }
+            } else {
+                format!("{subject} must be a {name} value")
+            }
+        }
+    }
+}
+
 unsafe fn decode_named_json_to_runtime(
     image: &ClaspRtNativeModuleImage,
     name: &str,
     bytes: &[u8],
     value_slice: JsonSlice,
-) -> Option<*mut ClaspRtHeader> {
+    field_name: Option<&str>,
+) -> Result<*mut ClaspRtHeader, ClaspRtDecodeError> {
     match name {
-        "Int" => json_i64_value(bytes, value_slice).map(|raw| clasp_rt_build_int_header(raw)),
-        "Bool" => json_bool_value(bytes, value_slice).map(|raw| clasp_rt_build_bool_header(raw)),
+        "Int" => json_i64_value(bytes, value_slice)
+            .map(|raw| clasp_rt_build_int_header(raw))
+            .ok_or_else(|| ClaspRtDecodeError::new(decode_expected_message(image, &ClaspRtSchemaType::Int, field_name))),
+        "Bool" => json_bool_value(bytes, value_slice)
+            .map(|raw| clasp_rt_build_bool_header(raw))
+            .ok_or_else(|| ClaspRtDecodeError::new(decode_expected_message(image, &ClaspRtSchemaType::Bool, field_name))),
         "Str" => {
             let decoded = json_string_value(bytes, value_slice);
             if decoded.is_null() {
-                None
+                Err(ClaspRtDecodeError::new(decode_expected_message(
+                    image,
+                    &ClaspRtSchemaType::Str,
+                    field_name,
+                )))
             } else {
-                Some(decoded as *mut ClaspRtHeader)
+                Ok(decoded as *mut ClaspRtHeader)
             }
         }
         other => {
             if let Some(record_schema) = image.record_schemas.get(other) {
                 if bytes.get(value_slice.start) != Some(&b'{') {
-                    return None;
+                    return Err(ClaspRtDecodeError::new(format!(
+                        "{} must be an object",
+                        decode_subject(field_name)
+                    )));
                 }
                 let mut fields = Vec::with_capacity(record_schema.fields.len());
                 for field in &record_schema.fields {
                     let Some(field_slice) = json_object_lookup(bytes, value_slice, &field.name) else {
                         release_owned_named_headers(fields);
-                        return None;
+                        return Err(ClaspRtDecodeError::new(decode_expected_message(
+                            image,
+                            &field.typ,
+                            Some(&field.name),
+                        )));
                     };
-                    let Some(field_value) = decode_json_to_runtime_value(image, &field.typ, bytes, field_slice) else {
-                        release_owned_named_headers(fields);
-                        return None;
+                    let field_value = match decode_json_to_runtime_value(
+                        image,
+                        &field.typ,
+                        bytes,
+                        field_slice,
+                        Some(&field.name),
+                    ) {
+                        Ok(field_value) => field_value,
+                        Err(error) => {
+                            release_owned_named_headers(fields);
+                            return Err(error);
+                        }
                     };
                     fields.push((field.name.clone(), field_value));
                 }
-                return Some(clasp_rt_build_record_header(other, fields));
+                return Ok(clasp_rt_build_record_header(other, fields));
             }
 
             if let Some(variant_schema) = image.variant_schemas.get(other) {
                 if bytes.get(value_slice.start) == Some(&b'"') {
-                    let tag = json_string_owned(bytes, value_slice)?;
-                    let constructor = variant_constructor_for_wire_tag(variant_schema, &tag)?;
+                    let tag = json_string_owned(bytes, value_slice).ok_or_else(|| {
+                        ClaspRtDecodeError::new(decode_expected_message(
+                            image,
+                            &ClaspRtSchemaType::Named(other.to_owned()),
+                            field_name,
+                        ))
+                    })?;
+                    let constructor = variant_constructor_for_wire_tag(variant_schema, &tag).ok_or_else(|| {
+                        ClaspRtDecodeError::new(decode_expected_message(
+                            image,
+                            &ClaspRtSchemaType::Named(other.to_owned()),
+                            field_name,
+                        ))
+                    })?;
                     if !constructor.payloads.is_empty() {
-                        return None;
+                        return Err(ClaspRtDecodeError::new(format!(
+                            "{} must be a {other} value",
+                            decode_subject(field_name)
+                        )));
                     }
-                    return Some(clasp_rt_build_variant_header(&constructor.name, Vec::new()));
+                    return Ok(clasp_rt_build_variant_header(&constructor.name, Vec::new()));
                 }
 
                 if bytes.get(value_slice.start) != Some(&b'{') {
-                    return None;
+                    return Err(ClaspRtDecodeError::new(decode_expected_message(
+                        image,
+                        &ClaspRtSchemaType::Named(other.to_owned()),
+                        field_name,
+                    )));
                 }
-                let tag = json_string_owned(bytes, json_object_lookup(bytes, value_slice, "$tag")?)?;
-                let constructor = variant_constructor_for_wire_tag(variant_schema, &tag)?;
+                let tag_slice = json_object_lookup(bytes, value_slice, "$tag").ok_or_else(|| {
+                    ClaspRtDecodeError::new(decode_expected_message(
+                        image,
+                        &ClaspRtSchemaType::Named(other.to_owned()),
+                        field_name,
+                    ))
+                })?;
+                let tag = json_string_owned(bytes, tag_slice).ok_or_else(|| {
+                    ClaspRtDecodeError::new(decode_expected_message(
+                        image,
+                        &ClaspRtSchemaType::Named(other.to_owned()),
+                        field_name,
+                    ))
+                })?;
+                let constructor = variant_constructor_for_wire_tag(variant_schema, &tag).ok_or_else(|| {
+                    ClaspRtDecodeError::new(decode_expected_message(
+                        image,
+                        &ClaspRtSchemaType::Named(other.to_owned()),
+                        field_name,
+                    ))
+                })?;
                 let mut payloads = Vec::with_capacity(constructor.payloads.len());
                 for (index, payload_type) in constructor.payloads.iter().enumerate() {
                     let payload_key = format!("${index}");
                     let Some(payload_slice) = json_object_lookup(bytes, value_slice, &payload_key) else {
                         release_owned_headers(payloads);
-                        return None;
+                        return Err(ClaspRtDecodeError::new(decode_expected_message(
+                            image,
+                            payload_type,
+                            Some(&payload_key),
+                        )));
                     };
-                    let Some(payload_value) = decode_json_to_runtime_value(image, payload_type, bytes, payload_slice) else {
-                        release_owned_headers(payloads);
-                        return None;
+                    let payload_value = match decode_json_to_runtime_value(
+                        image,
+                        payload_type,
+                        bytes,
+                        payload_slice,
+                        Some(&payload_key),
+                    ) {
+                        Ok(payload_value) => payload_value,
+                        Err(error) => {
+                            release_owned_headers(payloads);
+                            return Err(error);
+                        }
                     };
                     payloads.push(payload_value);
                 }
-                return Some(clasp_rt_build_variant_header(&constructor.name, payloads));
+                return Ok(clasp_rt_build_variant_header(&constructor.name, payloads));
             }
 
-            None
+            Err(ClaspRtDecodeError::new(format!(
+                "{} uses unknown schema type {other}",
+                decode_subject(field_name)
+            )))
         }
     }
 }
@@ -5127,38 +5255,53 @@ unsafe fn decode_json_to_runtime_value(
     typ: &ClaspRtSchemaType,
     bytes: &[u8],
     value_slice: JsonSlice,
-) -> Option<*mut ClaspRtHeader> {
+    field_name: Option<&str>,
+) -> Result<*mut ClaspRtHeader, ClaspRtDecodeError> {
     match typ {
-        ClaspRtSchemaType::Int => json_i64_value(bytes, value_slice).map(|raw| clasp_rt_build_int_header(raw)),
-        ClaspRtSchemaType::Bool => json_bool_value(bytes, value_slice).map(|raw| clasp_rt_build_bool_header(raw)),
+        ClaspRtSchemaType::Int => json_i64_value(bytes, value_slice)
+            .map(|raw| clasp_rt_build_int_header(raw))
+            .ok_or_else(|| ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name))),
+        ClaspRtSchemaType::Bool => json_bool_value(bytes, value_slice)
+            .map(|raw| clasp_rt_build_bool_header(raw))
+            .ok_or_else(|| ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name))),
         ClaspRtSchemaType::Str => {
             let decoded = json_string_value(bytes, value_slice);
             if decoded.is_null() {
-                None
+                Err(ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)))
             } else {
-                Some(decoded as *mut ClaspRtHeader)
+                Ok(decoded as *mut ClaspRtHeader)
             }
         }
         ClaspRtSchemaType::List(item_type) => {
             if bytes.get(value_slice.start) != Some(&b'[') {
-                return None;
+                return Err(ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)));
             }
             let item_count = json_array_length(bytes, value_slice);
             let mut decoded_items = Vec::with_capacity(item_count);
             for index in 0..item_count {
                 let Some(item_slice) = json_array_item(bytes, value_slice, index) else {
                     release_owned_headers(decoded_items);
-                    return None;
+                    return Err(ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)));
                 };
-                let Some(decoded_item) = decode_json_to_runtime_value(image, item_type, bytes, item_slice) else {
-                    release_owned_headers(decoded_items);
-                    return None;
+                let item_field = format!("{}[{index}]", decode_subject(field_name));
+                let decoded_item = match decode_json_to_runtime_value(
+                    image,
+                    item_type,
+                    bytes,
+                    item_slice,
+                    Some(&item_field),
+                ) {
+                    Ok(decoded_item) => decoded_item,
+                    Err(error) => {
+                        release_owned_headers(decoded_items);
+                        return Err(error);
+                    }
                 };
                 decoded_items.push(decoded_item);
             }
-            Some(clasp_rt_build_list_header(decoded_items))
+            Ok(clasp_rt_build_list_header(decoded_items))
         }
-        ClaspRtSchemaType::Named(name) => decode_named_json_to_runtime(image, name, bytes, value_slice),
+        ClaspRtSchemaType::Named(name) => decode_named_json_to_runtime(image, name, bytes, value_slice, field_name),
     }
 }
 
@@ -6848,11 +6991,13 @@ pub unsafe extern "C" fn clasp_rt_call_native_route_json(
     let Some(request_type) = parse_schema_type_text(&route.request_type) else {
         return native_route_error_result("invalid_route_request_type");
     };
-    let Some(request_header) = decode_json_to_runtime_value(&*image, &request_type, request_bytes, request_value) else {
-        return native_route_error_result("invalid_route_request_payload");
-    };
-
     clear_native_route_error();
+    let request_header = match decode_json_to_runtime_value(&*image, &request_type, request_bytes, request_value, None) {
+        Ok(request_header) => request_header,
+        Err(error) => {
+            return native_route_error_result(&format!("request_boundary:{}", error.message));
+        }
+    };
 
     let handler_name = build_runtime_string(route.handler.as_bytes());
     if handler_name.is_null() {

@@ -154,6 +154,19 @@ run_clasp_backend_static_verify() {
   bash "$project_root/benchmarks/verify-clasp-backend-check.sh" "$workspace" "$@"
 }
 
+check_pristine_task_fails_verification() {
+  local task_id="$1"
+  local workspace="$workspace_root/$task_id-pristine-fails"
+  shift || true
+
+  run_benchmark_prepare "$task_id" "$workspace" "$@" >/dev/null
+
+  if run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null 2>&1; then
+    echo "expected $task_id to fail verification before the benchmark change is applied" >&2
+    return 1
+  fi
+}
+
 check_default_clasp_benchmark_path_requires_recovery() {
   local task_id="clasp-secret-handling"
   local workspace="$workspace_root/$task_id-default-blocked"
@@ -246,12 +259,14 @@ check_product_only_clasp_solution() {
 
   cp "$project_root/examples/lead-app/Shared/Lead.clasp" "$workspace/Shared/Lead.clasp"
 
-  run_clasp_backend_static_verify "$workspace"
+  run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
 
   if [[ -e "$workspace/server.mjs" ]]; then
     echo "expected $workspace/server.mjs to be omitted from native benchmark workspaces" >&2
     exit 1
   fi
+  assert_files_match "$workspace/Main.clasp" "$task_root/Main.clasp"
+  assert_files_match "$workspace/scripts/verify.sh" "$task_root/scripts/verify.sh"
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
   assert_files_match "$workspace/test/native-http-test.mjs" "$task_root/test/native-http-test.mjs"
 }
@@ -267,7 +282,241 @@ check_product_only_typescript_solution() {
 
   run_benchmark_verify "$task_id" "$workspace" --harness prep-check --model local >/dev/null
 
+  if [[ -e "$workspace/src/server/store.ts" ]]; then
+    echo "expected $workspace/src/server/store.ts to be omitted from the lead-segment workspace" >&2
+    exit 1
+  fi
+  assert_files_match "$workspace/src/server/main.ts" "$task_root/src/server/main.ts"
+  assert_files_match "$workspace/src/server/runtime.ts" "$task_root/src/server/runtime.ts"
+  assert_files_match "$workspace/src/server/dev.ts" "$task_root/src/server/dev.ts"
+  assert_files_match "$workspace/scripts/verify.sh" "$task_root/scripts/verify.sh"
   assert_files_match "$workspace/test/lead-app.test.mjs" "$task_root/test/lead-app.test.mjs"
+}
+
+check_lead_segment_acceptance_surface() {
+  local clasp_test="$project_root/benchmarks/tasks/clasp-lead-segment/repo/test/lead-app.test.mjs"
+  local ts_test="$project_root/benchmarks/tasks/ts-lead-segment/repo/test/lead-app.test.mjs"
+
+  for test_file in "$clasp_test" "$ts_test"; do
+    assert_contains "$test_file" "Segment: enterprise"
+    assert_contains "$test_file" "segment must be one of: startup, growth, enterprise"
+    assert_contains "$test_file" "priority must be one of: low, medium, high"
+    assert_contains "$test_file" "Ready for product demo next week."
+  done
+
+  assert_contains "$clasp_test" 'formFieldNames(landingPage.body), ["company", "contact", "budget", "segment"]'
+  assert_contains "$clasp_test" "SynthSpeak (high, enterprise)"
+  assert_contains "$clasp_test" "CLASP_MOCK_LEAD_SUMMARY_SEGMENT"
+  assert_contains "$ts_test" 'assert.match(landingHtml, /name="segment"/);'
+  assert_contains "$ts_test" 'SynthSpeak \(high, enterprise\)'
+  assert_contains "$ts_test" 'segment: "global-5000"'
+}
+
+check_lead_host_binding_manifest() {
+  local example_manifest="$project_root/examples/lead-app/host-bindings.manifest.json"
+  local task_manifest="$project_root/benchmarks/tasks/clasp-lead-segment/host-bindings.manifest.json"
+  local workspace="$workspace_root/clasp-lead-segment"
+  local workspace_manifest="$workspace/benchmark-prep/host-bindings.manifest.json"
+  local workspace_surfaces="$workspace/benchmark-prep/Main.surfaces.json"
+  local workspace_test="$workspace/test/lead-app.test.mjs"
+
+  assert_file_exists "$example_manifest"
+  assert_file_exists "$task_manifest"
+  assert_file_exists "$workspace_manifest"
+  assert_file_exists "$workspace_surfaces"
+  assert_files_match "$example_manifest" "$task_manifest"
+  assert_files_match "$task_manifest" "$workspace_manifest"
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/host-bindings.manifest.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.surfaces.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" 'App-owned edit surface'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" '`Shared/Lead.clasp`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" 'route host inputs, host/runtime binding contracts, model JSON shapes, and runtime-owned failure behavior'
+
+  node - "$workspace_manifest" "$workspace_test" "$workspace_surfaces" <<'EOF'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+
+const [manifestPath, testPath, surfacesPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const testSource = fs.readFileSync(testPath, "utf8");
+const surfaces = JSON.parse(fs.readFileSync(surfacesPath, "utf8"));
+
+assert.equal(manifest.format, "clasp-lead-host-bindings-v1");
+assert.equal(manifest.scope.benchmarkTask, "clasp-lead-segment");
+assert.equal(surfaces.format, "clasp-benchmark-surfaces-v1");
+assert.deepEqual(surfaces.appOwnedEditSurface, ["Shared/Lead.clasp"]);
+assert.ok(
+  surfaces.sourceModules.some(
+    (sourceModule) =>
+      sourceModule.path === "Shared/Lead.clasp" &&
+      sourceModule.role === "app-owned-edit-surface"
+  ),
+  "semantic surfaces should mark Shared/Lead.clasp as the app-owned edit surface"
+);
+assert.equal(surfaces.artifacts.hostBindingManifest, "benchmark-prep/host-bindings.manifest.json");
+
+const createRoute = manifest.routeHostInputs.find(
+  (route) => route.method === "POST" && route.path === "/leads"
+);
+assert.ok(createRoute, "missing POST /leads route input contract");
+assert.equal(createRoute.requestType, "LeadIntake");
+assert.deepEqual(
+  createRoute.hostInput.fields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
+);
+assert.deepEqual(
+  createRoute.hostInput.fields.find((field) => field.name === "segment").wireValues,
+  ["startup", "growth", "enterprise"]
+);
+assert.ok(
+  createRoute.runtimeOwnedFailures.some(
+    (failure) =>
+      failure.status === 400 &&
+      failure.phase === "request_boundary" &&
+      failure.body === "segment must be one of: startup, growth, enterprise"
+  ),
+  "missing request-boundary segment failure contract"
+);
+
+const createSurfaceRoute = surfaces.routes.find(
+  (route) => route.method === "POST" && route.path === "/leads"
+);
+assert.ok(createSurfaceRoute, "semantic surfaces missing POST /leads route");
+assert.equal(createSurfaceRoute.requestType, "LeadIntake");
+assert.equal(createSurfaceRoute.responseType, "Page");
+assert.equal(createSurfaceRoute.handler, "createLeadPage");
+assert.equal(createSurfaceRoute.requestDecoder, "$decode_LeadIntake");
+assert.deepEqual(
+  createSurfaceRoute.hostInput.fields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
+);
+
+const createForm = surfaces.forms.find(
+  (form) => form.method === "POST" && form.action === "/leads"
+);
+assert.ok(createForm, "semantic surfaces missing POST /leads form");
+assert.deepEqual(
+  createForm.fields.map((field) => `${field.name}:${field.inputType}`),
+  ["company:text", "contact:text", "budget:number"]
+);
+assert.deepEqual(
+  createForm.expectedHostFields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
+);
+assert.ok(
+  surfaces.pages.some(
+    (page) => page.routeName === "createLeadRoute" && page.path === "/leads"
+  ),
+  "semantic surfaces should expose page routes"
+);
+assert.ok(
+  surfaces.decodeBoundaries.some(
+    (boundary) =>
+      boundary.decl === "summarizeLead" &&
+      boundary.targetType === "LeadSummary" &&
+      boundary.sourceCallee === "mockLeadSummaryModel"
+  ),
+  "semantic surfaces should expose the model decode boundary"
+);
+assert.ok(
+  surfaces.decodeBoundaries.some(
+    (boundary) =>
+      boundary.decl === "createLead" &&
+      boundary.targetType === "LeadRecord" &&
+      boundary.sourceCallee === "storeLead"
+  ),
+  "semantic surfaces should expose the host storage decode boundary"
+);
+
+const mockModel = manifest.mockModelCalls.find(
+  (binding) => binding.name === "mockLeadSummaryModel"
+);
+assert.ok(mockModel, "missing mockLeadSummaryModel contract");
+assert.equal(mockModel.signature, "LeadIntake -> Str");
+assert.equal(mockModel.expectedJsonShape, "LeadSummary");
+assert.ok(
+  mockModel.runtimeOwnedFailures.some(
+    (failure) =>
+      failure.status === 502 &&
+      failure.phase === "model_boundary" &&
+      failure.body === "segment must be one of: startup, growth, enterprise"
+  ),
+  "missing model-boundary segment failure contract"
+);
+assert.ok(
+  surfaces.hostBindings.some(
+    (binding) =>
+      binding.name === "mockLeadSummaryModel" &&
+      binding.role === "mock-model" &&
+      binding.expectedJsonShape === "LeadSummary"
+  ),
+  "semantic surfaces should expose mock model host binding"
+);
+assert.ok(
+  surfaces.hostBindings.some(
+    (binding) =>
+      binding.name === "storeLead" &&
+      binding.role === "host-binding" &&
+      binding.decodedAs === "LeadRecord"
+  ),
+  "semantic surfaces should expose storage host binding"
+);
+
+assert.deepEqual(
+  manifest.expectedJsonShapes.LeadIntake.fields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
+);
+assert.deepEqual(
+  manifest.expectedJsonShapes.LeadSummary.fields.map((field) => `${field.name}:${field.type}`),
+  ["summary:Str", "priority:LeadPriority", "segment:LeadSegment", "followUpRequired:Bool"]
+);
+assert.deepEqual(
+  manifest.expectedJsonShapes.LeadRecord.fields.map((field) => `${field.name}:${field.type}`),
+  [
+    "leadId:Str",
+    "company:Str",
+    "contact:Str",
+    "summary:Str",
+    "priority:LeadPriority",
+    "segment:LeadSegment",
+    "followUpRequired:Bool",
+    "reviewStatus:ReviewStatus",
+    "reviewNote:Str"
+  ]
+);
+assert.deepEqual(
+  surfaces.records.find((record) => record.name === "LeadIntake").fields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int"]
+);
+assert.deepEqual(
+  surfaces.expectedJsonShapes.LeadIntake.fields.map((field) => `${field.name}:${field.type}`),
+  ["company:Str", "contact:Str", "budget:Int", "segment:LeadSegment"]
+);
+assert.ok(
+  surfaces.contractGaps.some(
+    (gap) =>
+      gap.kind === "missing-field" &&
+      gap.schema === "LeadIntake" &&
+      gap.field === "segment" &&
+      gap.expected === "LeadSegment"
+  ),
+  "semantic surfaces should identify the missing segment field"
+);
+assert.ok(
+  surfaces.contractGaps.some(
+    (gap) =>
+      gap.kind === "missing-schema" &&
+      gap.schema === "LeadSegment" &&
+      gap.expected === "enum"
+  ),
+  "semantic surfaces should identify the missing LeadSegment enum"
+);
+
+assert.match(testSource, /formFieldNames\(landingPage\.body\), \["company", "contact", "budget", "segment"\]/);
+assert.match(testSource, /Segment: enterprise/);
+assert.match(testSource, /segment must be one of: startup, growth, enterprise/);
+assert.match(testSource, /CLASP_MOCK_LEAD_SUMMARY_SEGMENT/);
+EOF
 }
 
 check_product_only_typescript_persistence_solution() {
@@ -407,8 +656,12 @@ check_incomplete_task ts-audit-log
 check_incomplete_task clasp-compiler-maintenance
 check_incomplete_task clasp-syntax-compact
 check_incomplete_task clasp-syntax-verbose
+check_pristine_task_fails_verification clasp-lead-segment --allow-bootstrap-recovery true
+check_pristine_task_fails_verification ts-lead-segment
 check_nested_clasp_benchmark_prep
 check_fixture_seed_override
+check_lead_segment_acceptance_surface
+check_lead_host_binding_manifest
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'const binaryPath = process.env.CLASP_BENCH_BINARY;'

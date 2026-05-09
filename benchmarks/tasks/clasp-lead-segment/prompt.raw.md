@@ -13,6 +13,7 @@ Implement lead segments end to end.
 
 - This task is intentionally local to the workspace.
 - Start with `test/lead-app.test.mjs` and the shared lead contract or rendering file in this workspace.
+- Use `benchmark-prep/host-bindings.manifest.json` for route/form inputs, mock model JSON shapes, and runtime-owned 400/502 failures before reading host glue.
 - Do not inspect the parent repo unless `bash scripts/verify.sh` exposes a benchmark harness or language-runtime bug rather than an app bug.
 - The intended app-level fix is to express the constraint in the shared schema and thread it through the existing server-rendered flow.
 

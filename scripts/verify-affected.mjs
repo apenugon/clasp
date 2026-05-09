@@ -259,6 +259,344 @@ const COMMANDS = {
   affectedNodeCheck: "node --check scripts/verify-affected.mjs",
 };
 
+const contextArtifactLimitPerFile = parsePositiveInt(process.env.CLASP_VERIFY_AFFECTED_CONTEXT_ARTIFACT_LIMIT, 4);
+const planSurfaceLimit = parsePositiveInt(process.env.CLASP_VERIFY_AFFECTED_PLAN_SURFACE_LIMIT, 12);
+
+function fileExists(relativePath) {
+  try {
+    return fs.existsSync(path.resolve(projectRoot, relativePath));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function readDirIfExists(absolutePath) {
+  try {
+    return fs.readdirSync(absolutePath, { withFileTypes: true });
+  } catch (_error) {
+    return [];
+  }
+}
+
+function withinProjectRoot(absolutePath) {
+  const relative = path.relative(projectRoot, absolutePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function addUnique(values, value) {
+  if (typeof value !== "string" || value.length === 0 || values.includes(value)) {
+    return;
+  }
+  values.push(value);
+}
+
+function addManyUnique(values, additions) {
+  if (!Array.isArray(additions)) {
+    return;
+  }
+  for (const addition of additions) {
+    addUnique(values, addition);
+  }
+}
+
+function truncateList(values, limit = planSurfaceLimit) {
+  const safeValues = Array.isArray(values) ? values : [];
+  if (safeValues.length <= limit) {
+    return safeValues;
+  }
+  return [...safeValues.slice(0, limit), `...${safeValues.length - limit} more`];
+}
+
+function isClaspSourceFile(file) {
+  return file.endsWith(".clasp");
+}
+
+function exampleVerifyCommandForFile(file) {
+  const match = /^examples\/([^/]+)\//.exec(file);
+  if (!match) {
+    return null;
+  }
+  const scriptPath = `examples/${match[1]}/scripts/verify.sh`;
+  return fileExists(scriptPath) ? `bash ${scriptPath}` : null;
+}
+
+function benchmarkTaskRepoMatch(file) {
+  const match = /^benchmarks\/tasks\/([^/]+)\/repo\/(.+)/.exec(file);
+  if (!match) {
+    return null;
+  }
+  return {
+    taskId: match[1],
+    repoPath: match[2],
+  };
+}
+
+function benchmarkTaskMetadata(taskId) {
+  const taskPath = path.resolve(projectRoot, "benchmarks", "tasks", taskId, "task.json");
+  try {
+    return JSON.parse(fs.readFileSync(taskPath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function benchmarkTaskVerifyCommand(taskId) {
+  const scriptPath = `benchmarks/tasks/${taskId}/repo/scripts/verify.sh`;
+  return fileExists(scriptPath) ? `CLASP_PROJECT_ROOT=$PWD bash ${scriptPath}` : null;
+}
+
+function contextArtifactCandidatesForFile(file) {
+  const candidates = [];
+  if (file.endsWith(".context.json")) {
+    addUnique(candidates, file);
+  }
+
+  const absoluteFile = path.resolve(projectRoot, file);
+  let currentDir = path.dirname(absoluteFile);
+  const visited = new Set();
+
+  while (withinProjectRoot(currentDir) && !visited.has(currentDir)) {
+    visited.add(currentDir);
+    for (const candidateDir of [currentDir, path.join(currentDir, "benchmark-prep")]) {
+      for (const entry of readDirIfExists(candidateDir)) {
+        if (!entry.isFile() || !entry.name.endsWith(".context.json")) {
+          continue;
+        }
+        const relative = path.relative(projectRoot, path.join(candidateDir, entry.name)).replace(/\\/g, "/");
+        addUnique(candidates, relative);
+      }
+    }
+    if (currentDir === projectRoot) {
+      break;
+    }
+    currentDir = path.dirname(currentDir);
+  }
+
+  return candidates.slice(0, contextArtifactLimitPerFile);
+}
+
+function textAttr(attrs, name) {
+  const attr = Array.isArray(attrs) ? attrs.find((entry) => entry?.name === name) : null;
+  return typeof attr?.value === "string" ? attr.value : "";
+}
+
+function collectContextSurfaces(graph) {
+  const routes = [];
+  const schemas = [];
+  const declarations = [];
+  const foreignBoundaries = [];
+  const workflows = [];
+  const tools = [];
+
+  for (const route of graph?.surfaceIndex?.routes ?? []) {
+    addUnique(routes, route.id || (route.name ? `route:${route.name}` : ""));
+    addUnique(schemas, route.requestSchemaId || "");
+    addUnique(schemas, route.responseSchemaId || "");
+    addUnique(declarations, route.handlerId || "");
+    addManyUnique(routes, route.affectedRoutes);
+    addManyUnique(schemas, route.affectedSchemas);
+    addManyUnique(declarations, route.affectedDeclarations);
+    addManyUnique(foreignBoundaries, route.affectedForeignBoundaries);
+    addManyUnique(routes, (route.affectedSurfaces || []).filter((surface) => surface.startsWith("route:")));
+    addManyUnique(schemas, (route.affectedSurfaces || []).filter((surface) => surface.startsWith("schema:")));
+    addManyUnique(declarations, (route.affectedSurfaces || []).filter((surface) => surface.startsWith("decl:")));
+    addManyUnique(foreignBoundaries, (route.affectedSurfaces || []).filter((surface) => surface.startsWith("foreign:")));
+  }
+
+  for (const workflow of graph?.surfaceIndex?.workflows ?? []) {
+    addUnique(workflows, workflow.id || (workflow.name ? `workflow:${workflow.name}` : ""));
+  }
+  for (const tool of graph?.surfaceIndex?.tools ?? []) {
+    addUnique(tools, tool.id || (tool.name ? `tool:${tool.name}` : ""));
+  }
+  for (const foreign of graph?.surfaceIndex?.foreignBoundaries ?? []) {
+    addUnique(foreignBoundaries, foreign.id || (foreign.name ? `foreign:${foreign.name}` : ""));
+  }
+
+  for (const node of graph?.nodes ?? []) {
+    if (typeof node?.id !== "string") {
+      continue;
+    }
+    switch (node.kind) {
+      case "route":
+        addUnique(routes, node.id);
+        break;
+      case "schema":
+      case "record":
+        addUnique(schemas, node.id.startsWith("schema:") ? node.id : `schema:${textAttr(node.attrs, "name") || node.id}`);
+        break;
+      case "decl":
+        addUnique(declarations, node.id);
+        break;
+      case "foreign":
+        addUnique(foreignBoundaries, node.id);
+        break;
+      case "workflow":
+        addUnique(workflows, node.id);
+        break;
+      case "tool":
+        addUnique(tools, node.id);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    routes,
+    schemas,
+    declarations,
+    foreignBoundaries,
+    workflows,
+    tools,
+  };
+}
+
+function collectContextScenarioCommands(graph) {
+  const commands = [];
+  addManyUnique(commands, graph?.verificationGuidance?.scenarioCommands);
+  for (const route of graph?.surfaceIndex?.routes ?? []) {
+    addManyUnique(commands, route?.verificationGuidance?.scenarioCommands);
+  }
+  return commands.filter((command) => typeof command === "string" && !command.includes("<") && !command.includes("verify-all.sh"));
+}
+
+function summarizeContextArtifact(relativePath) {
+  const absolutePath = path.resolve(projectRoot, relativePath);
+  try {
+    const graph = JSON.parse(fs.readFileSync(absolutePath, "utf8"));
+    return {
+      path: relativePath,
+      status: "ok",
+      format: typeof graph.format === "string" ? graph.format : "unknown",
+      module: typeof graph.module === "string" ? graph.module : "",
+      entry: typeof graph.entry === "string" ? path.relative(projectRoot, graph.entry).replace(/\\/g, "/") : "",
+      sourceModules: Array.isArray(graph.sourceModules)
+        ? graph.sourceModules
+            .map((entry) => ({
+              moduleName: entry.moduleName || "",
+              role: entry.role || "",
+              sourceId: entry.sourceId || "",
+              moduleId: entry.moduleId || "",
+              sourceFingerprint: entry.sourceFingerprint || "",
+            }))
+            .filter((entry) => entry.moduleName || entry.sourceId || entry.moduleId)
+        : [],
+      surfaces: collectContextSurfaces(graph),
+      scenarioCommands: collectContextScenarioCommands(graph),
+    };
+  } catch (error) {
+    return {
+      path: relativePath,
+      status: "error",
+      error: error instanceof Error ? error.message : String(error),
+      format: "unknown",
+      sourceModules: [],
+      surfaces: {
+        routes: [],
+        schemas: [],
+        declarations: [],
+        foreignBoundaries: [],
+        workflows: [],
+        tools: [],
+      },
+      scenarioCommands: [],
+    };
+  }
+}
+
+function collectSemanticContexts(changedFiles) {
+  const artifactByPath = new Map();
+  const byChangedFile = [];
+
+  for (const file of changedFiles) {
+    const artifactPaths = contextArtifactCandidatesForFile(file);
+    for (const artifactPath of artifactPaths) {
+      if (!artifactByPath.has(artifactPath)) {
+        artifactByPath.set(artifactPath, summarizeContextArtifact(artifactPath));
+      }
+    }
+    byChangedFile.push({
+      file,
+      artifactPaths,
+    });
+  }
+
+  return {
+    artifacts: Array.from(artifactByPath.values()),
+    byChangedFile,
+  };
+}
+
+function surfacesFromArtifacts(semanticContexts, artifactPaths) {
+  const result = {
+    routes: [],
+    schemas: [],
+    declarations: [],
+    foreignBoundaries: [],
+    workflows: [],
+    tools: [],
+  };
+  const artifactsByPath = new Map(semanticContexts.artifacts.map((artifact) => [artifact.path, artifact]));
+  for (const artifactPath of artifactPaths) {
+    const artifact = artifactsByPath.get(artifactPath);
+    if (!artifact || artifact.status !== "ok") {
+      continue;
+    }
+    addManyUnique(result.routes, artifact.surfaces.routes);
+    addManyUnique(result.schemas, artifact.surfaces.schemas);
+    addManyUnique(result.declarations, artifact.surfaces.declarations);
+    addManyUnique(result.foreignBoundaries, artifact.surfaces.foreignBoundaries);
+    addManyUnique(result.workflows, artifact.surfaces.workflows);
+    addManyUnique(result.tools, artifact.surfaces.tools);
+  }
+  return result;
+}
+
+function surfaceText(surfaces) {
+  const parts = [];
+  for (const [label, values] of [
+    ["routes", surfaces.routes],
+    ["schemas", surfaces.schemas],
+    ["declarations", surfaces.declarations],
+    ["foreign boundaries", surfaces.foreignBoundaries],
+    ["workflows", surfaces.workflows],
+    ["tools", surfaces.tools],
+  ]) {
+    if (values.length > 0) {
+      parts.push(`${label}: ${truncateList(values).join(", ")}`);
+    }
+  }
+  return parts.length > 0 ? parts.join("; ") : "no named surfaces found";
+}
+
+function buildPlanExplanations(changedFiles, routePlan, semanticContexts) {
+  const commandByFile = new Map();
+  for (const selectedCommand of routePlan.selectedCommands) {
+    for (const file of selectedCommand.matchedFiles) {
+      if (!commandByFile.has(file)) {
+        commandByFile.set(file, []);
+      }
+      addUnique(commandByFile.get(file), selectedCommand.command);
+    }
+  }
+
+  return semanticContexts.byChangedFile
+    .filter((entry) => entry.artifactPaths.length > 0)
+    .map((entry) => {
+      const surfaces = surfacesFromArtifacts(semanticContexts, entry.artifactPaths);
+      const artifactText = entry.artifactPaths.join(", ");
+      return {
+        kind: "semantic-context",
+        file: entry.file,
+        artifacts: entry.artifactPaths,
+        surfaces,
+        selectedCommands: commandByFile.get(entry.file) || [],
+        explanation: `Context artifact ${artifactText} identifies semantic surfaces for ${entry.file}: ${surfaceText(surfaces)}.`,
+      };
+    });
+}
+
 function addSelected(selectedByCommand, id, command, reason, file) {
   if (!selectedByCommand.has(command)) {
     selectedByCommand.set(command, {
@@ -314,6 +652,13 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "source-verify", COMMANDS.sourceVerify, "source/compiler path", file);
     }
 
+    const exampleVerifyCommand = isClaspSourceFile(file) ? exampleVerifyCommandForFile(file) : null;
+    if (exampleVerifyCommand) {
+      matched = true;
+      reason(file, "clasp-app-flow", "Clasp example app source uses its scenario verifier for source check, compile, and app-flow behavior");
+      addSelected(selectedByCommand, `example-app:${exampleVerifyCommand}`, exampleVerifyCommand, "Clasp app-flow path", file);
+    }
+
     if (file.startsWith("runtime/")) {
       matched = true;
       reason(file, "runtime", "runtime path uses native runtime and native claspc coverage");
@@ -332,6 +677,29 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       matched = true;
       reason(file, "feedback-loop", "feedback-loop example path uses resume-loop regression coverage");
       addSelected(selectedByCommand, "feedback-resume", COMMANDS.feedbackResume, "feedback-loop path", file);
+    }
+
+    const benchmarkMatch = benchmarkTaskRepoMatch(file);
+    if (benchmarkMatch) {
+      matched = true;
+      const task = benchmarkTaskMetadata(benchmarkMatch.taskId);
+      const taskLanguage = task?.language || "unknown";
+      reason(
+        file,
+        "benchmark-task-repo",
+        `benchmark task repo path for ${benchmarkMatch.taskId} (${taskLanguage}) uses benchmark prep plus task app-flow verification when available`,
+      );
+      addSelected(selectedByCommand, "benchmark-task-prep", COMMANDS.benchmarkTaskPrep, "benchmark task repo path", file);
+      const taskVerifyCommand = benchmarkTaskVerifyCommand(benchmarkMatch.taskId);
+      if (taskVerifyCommand && (taskLanguage === "clasp" || isClaspSourceFile(file))) {
+        addSelected(
+          selectedByCommand,
+          `benchmark-task:${benchmarkMatch.taskId}`,
+          taskVerifyCommand,
+          "benchmark task app-flow path",
+          file,
+        );
+      }
     }
 
     if (file.startsWith("benchmarks/")) {
@@ -461,12 +829,15 @@ function buildErrorReport(message) {
     inputFallbackMode: "argument-error",
     usedGitFallback: false,
     changedFiles: [],
+    semanticContextArtifacts: [],
+    semanticContextByChangedFile: [],
     selectedCommands: [],
     routingReasons: [],
     unmatchedFiles: [],
     verificationFallbackMode: "none",
     usedVerifyFastFallback: false,
     planOnly: false,
+    planExplanations: [],
     commandRecords: [],
     commandCount: 0,
     executedCommandCount: 0,
@@ -513,7 +884,9 @@ function main() {
   }
 
   const changedFiles = uniqueNormalized(rawChangedFiles);
+  const semanticContexts = collectSemanticContexts(changedFiles);
   const routePlan = routeChangedFiles(changedFiles, inputFallbackMode);
+  const planExplanations = args.planOnly ? buildPlanExplanations(changedFiles, routePlan, semanticContexts) : [];
   const commandRecords = [];
   let exitStatus = 0;
 
@@ -536,12 +909,15 @@ function main() {
     inputFallbackMode,
     usedGitFallback,
     changedFiles,
+    semanticContextArtifacts: semanticContexts.artifacts,
+    semanticContextByChangedFile: semanticContexts.byChangedFile,
     selectedCommands: routePlan.selectedCommands,
     routingReasons: routePlan.routingReasons,
     unmatchedFiles: routePlan.unmatchedFiles,
     verificationFallbackMode: routePlan.verificationFallbackMode,
     usedVerifyFastFallback: routePlan.usedVerifyFastFallback,
     planOnly: args.planOnly,
+    planExplanations,
     commandRecords,
     commandCount: routePlan.selectedCommands.length,
     executedCommandCount: commandRecords.length,

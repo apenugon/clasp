@@ -57,11 +57,46 @@ run_verify() {
   printf '%s\n' "$invalid_budget_status" | grep -F '400' >/dev/null
   grep -F 'budget must be an integer' "$server_body" >/dev/null
 
+  missing_segment_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+    --data '{"company":"Missing Segment Co","contact":"Casey","budget":25000}' \
+    "http://$lead_server_addr/api/leads")"
+  printf '%s\n' "$missing_segment_status" | grep -F '400' >/dev/null
+  grep -F 'segment must be one of: startup, growth, enterprise' "$server_body" >/dev/null
+
+  invalid_segment_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+    --data '{"company":"Bad Segment Co","contact":"Casey","budget":25000,"segment":"global-5000"}' \
+    "http://$lead_server_addr/api/leads")"
+  printf '%s\n' "$invalid_segment_status" | grep -F '400' >/dev/null
+  grep -F 'segment must be one of: startup, growth, enterprise' "$server_body" >/dev/null
+  curl -sS "http://$lead_server_addr/api/lead/primary" | grep -F '"company":"SynthSpeak API"' >/dev/null
+
   unknown_lead_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/json' \
     --data '{"leadId":"lead-404","note":"Missing"}' \
     "http://$lead_server_addr/api/review")"
   printf '%s\n' "$unknown_lead_status" | grep -F '502' >/dev/null
   grep -F 'Unknown lead: lead-404' "$server_body" >/dev/null
+
+  kill "$server_pid" >/dev/null 2>&1 || true
+  wait "$server_pid" >/dev/null 2>&1 || true
+  server_pid=""
+
+  lead_model_server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
+  lead_model_server_addr="127.0.0.1:$lead_model_server_port"
+  CLASP_MOCK_LEAD_SUMMARY_SEGMENT=Global5000 "$binary_path" serve "$lead_model_server_addr" >/dev/null 2>&1 &
+  server_pid=$!
+
+  for _ in $(seq 1 50); do
+    if curl -sS -o /dev/null "http://$lead_model_server_addr/api/inbox" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  invalid_model_segment_status="$(curl -sS -o "$server_body" -w '%{http_code}' -X POST -H 'content-type: application/x-www-form-urlencoded' \
+    --data 'company=Bad%20Model%20Co&contact=Riley&budget=25000&segment=growth' \
+    "http://$lead_model_server_addr/leads")"
+  printf '%s\n' "$invalid_model_segment_status" | grep -F '502' >/dev/null
+  grep -F 'segment must be one of: startup, growth, enterprise' "$server_body" >/dev/null
 
   printf '%s\n' '{"status":"ok","implementation":"clasp-native","example":"lead-app"}'
 }

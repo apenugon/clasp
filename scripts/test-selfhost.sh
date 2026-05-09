@@ -6,7 +6,11 @@ tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-selfhost.XXXXXX")"
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+if claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh")"; then
+  :
+else
+  claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+fi
 time_bin="$(which time 2>/dev/null || true)"
 selfhost_entry_cache_root="$test_root/selfhost-entry-cache-root"
 selfhost_entry_check_output="$test_root/selfhost.entry.check.json"
@@ -16,6 +20,7 @@ semantic_source_path="$test_root/semantic-context.clasp"
 semantic_check_output="$test_root/semantic.check.txt"
 semantic_air_output="$test_root/semantic.air.json"
 semantic_context_output="$test_root/semantic.context.json"
+lead_app_context_output="$test_root/lead-app.context.json"
 large_selfhost_project_root="$test_root/large-selfhost-project"
 large_selfhost_cache_root="$test_root/large-selfhost-cache"
 large_selfhost_check_output="$test_root/large-selfhost.check.json"
@@ -113,6 +118,32 @@ if (!route) {
 if (route.responseKind !== "json") {
   throw new Error(`unexpected route responseKind: ${route.responseKind}`);
 }
+if (graph.sourceIdentity?.sourceId !== "source:Main" || graph.moduleIdentity?.moduleId !== "module:Main") {
+  throw new Error("missing stable source/module identity for Main context");
+}
+if (!Array.isArray(graph.sourceModules) || graph.sourceModules[0]?.sourceFingerprint?.length !== 16) {
+  throw new Error("missing sourceModules source fingerprint");
+}
+if (route.requestSchemaId !== "schema:LeadRequest" || route.responseSchemaId !== "schema:LeadSummary") {
+  throw new Error("missing route request/response schema identities");
+}
+if (route.handlerId !== "decl:summarizeLead") {
+  throw new Error(`unexpected route handler identity: ${route.handlerId}`);
+}
+for (const expectedSurface of ["schema:LeadRequest", "schema:LeadSummary", "decl:summarizeLead", "foreign:mockLeadSummaryModel"]) {
+  if (!route.affectedSurfaces?.includes(expectedSurface)) {
+    throw new Error(`route affected surfaces missing ${expectedSurface}`);
+  }
+}
+if (!route.affectedForeignBoundaries?.includes("foreign:mockLeadSummaryModel")) {
+  throw new Error("missing route affected foreign boundary");
+}
+if (!route.verificationGuidance?.focusedCommands?.includes("bash scripts/verify-affected.sh --changed-file <source.clasp>")) {
+  throw new Error("missing route affected verifier guidance");
+}
+if (!graph.verificationGuidance?.scenarioCommands?.includes("bash examples/lead-app/scripts/verify.sh")) {
+  throw new Error("missing lead-app scenario verification guidance");
+}
 const hasForeignUse = graph.edges?.some(
   (edge) => edge.kind === "uses" && edge.from === "decl:summarizeLead" && edge.to === "foreign:mockLeadSummaryModel",
 );
@@ -124,6 +155,57 @@ const hasSchemaUse = graph.edges?.some(
 );
 if (!hasSchemaUse) {
   throw new Error("missing declaration uses edge to LeadSummary schema");
+}
+EOF
+
+XDG_CACHE_HOME="$semantic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$project_root/src/embedded.compiler.native.image.json" \
+  contextProjectText \
+  "--project-entry=$project_root/examples/lead-app/Main.clasp" \
+  "$lead_app_context_output"
+node - "$lead_app_context_output" <<'EOF'
+const fs = require("node:fs");
+
+const graph = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const entryModule = graph.sourceModules?.find((entry) => entry.moduleName === "Main");
+const sharedModule = graph.sourceModules?.find((entry) => entry.moduleName === "Shared.Lead");
+if (entryModule?.role !== "entry" || sharedModule?.role !== "import") {
+  throw new Error("lead-app context missing stable entry/import source module identities");
+}
+const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "createLeadRecordRoute");
+if (!route) {
+  throw new Error("missing createLeadRecordRoute in lead-app context");
+}
+for (const [field, expected] of [
+  ["requestSchemaId", "schema:LeadIntake"],
+  ["responseSchemaId", "schema:LeadRecord"],
+  ["handlerId", "decl:createLead"],
+]) {
+  if (route[field] !== expected) {
+    throw new Error(`lead-app route ${field} expected ${expected}, got ${route[field]}`);
+  }
+}
+for (const expectedSurface of [
+  "route:createLeadRecordRoute",
+  "schema:LeadIntake",
+  "schema:LeadRecord",
+  "decl:createLead",
+  "decl:summarizeLead",
+  "foreign:storeLead",
+  "foreign:mockLeadSummaryModel",
+]) {
+  if (!route.affectedSurfaces?.includes(expectedSurface)) {
+    throw new Error(`lead-app route affected surfaces missing ${expectedSurface}`);
+  }
+}
+for (const expectedForeign of ["foreign:storeLead", "foreign:mockLeadSummaryModel"]) {
+  if (!route.affectedForeignBoundaries?.includes(expectedForeign)) {
+    throw new Error(`lead-app route affected foreign boundaries missing ${expectedForeign}`);
+  }
+}
+if (!route.verificationGuidance?.scenarioCommands?.includes("bash examples/lead-app/scripts/verify.sh")) {
+  throw new Error("lead-app route missing scenario test guidance");
 }
 EOF
 

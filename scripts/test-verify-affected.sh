@@ -17,10 +17,74 @@ test_root="$(mktemp -d "$tmp_root/verify-affected.XXXXXX")"
 project_copy="$test_root/project"
 mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler" \
   "$project_copy/runtime" "$project_copy/examples/swarm-native" "$project_copy/examples/feedback-loop" \
-  "$project_copy/benchmarks" "$test_root/bin"
+  "$project_copy/examples/lead-app/Shared" "$project_copy/examples/lead-app/scripts" \
+  "$project_copy/examples/lead-app/benchmark-prep" \
+  "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared" \
+  "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts" \
+  "$test_root/bin"
 
 cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
+touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
+touch "$project_copy/examples/lead-app/scripts/verify.sh"
+touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"
+touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"
+cat > "$project_copy/benchmarks/tasks/clasp-lead-segment/task.json" <<'JSON'
+{"id":"clasp-lead-segment","language":"clasp","repo":"repo","verify":["bash","scripts/verify.sh"]}
+JSON
+cat > "$project_copy/examples/lead-app/benchmark-prep/Main.context.json" <<'JSON'
+{
+  "format": "clasp-context-v1",
+  "module": "Main",
+  "sourceModules": [
+    {
+      "sourceId": "source:Main",
+      "moduleId": "module:Main",
+      "moduleName": "Main",
+      "role": "entry",
+      "sourceFingerprint": "0123456789abcdef"
+    },
+    {
+      "sourceId": "source:Shared.Lead",
+      "moduleId": "module:Shared.Lead",
+      "moduleName": "Shared.Lead",
+      "role": "import",
+      "sourceFingerprint": "fedcba9876543210"
+    }
+  ],
+  "surfaceIndex": {
+    "routes": [
+      {
+        "id": "route:createLeadRecordRoute",
+        "name": "createLeadRecordRoute",
+        "requestSchemaId": "schema:LeadIntake",
+        "responseSchemaId": "schema:LeadRecord",
+        "handlerId": "decl:createLead",
+        "affectedSurfaces": [
+          "route:createLeadRecordRoute",
+          "schema:LeadIntake",
+          "schema:LeadRecord",
+          "decl:createLead",
+          "decl:summarizeLead",
+          "foreign:storeLead",
+          "foreign:mockLeadSummaryModel"
+        ],
+        "affectedForeignBoundaries": ["foreign:storeLead", "foreign:mockLeadSummaryModel"],
+        "verificationGuidance": {
+          "scenarioCommands": ["bash examples/lead-app/scripts/verify.sh"]
+        }
+      }
+    ],
+    "foreignBoundaries": [
+      {"id": "foreign:storeLead", "name": "storeLead"},
+      {"id": "foreign:mockLeadSummaryModel", "name": "mockLeadSummaryModel"}
+    ]
+  },
+  "verificationGuidance": {
+    "scenarioCommands": ["bash examples/lead-app/scripts/verify.sh"]
+  }
+}
+JSON
 
 cat > "$test_root/bin/bash" <<EOF
 #!$bash_bin
@@ -64,8 +128,9 @@ function logHas(fragment) {
   return log.some((line) => line.includes(fragment));
 }
 
+const expectedVerdict = scenario.endsWith("-plan") ? "planned" : "passed";
 assert(report.schemaVersion === 1, "schema version should be stable");
-assert(report.finalVerdict === "passed", `expected pass, got ${report.finalVerdict}`);
+assert(report.finalVerdict === expectedVerdict, `expected ${expectedVerdict}, got ${report.finalVerdict}`);
 assert(report.exitStatus === 0, "exit status should be zero");
 assert(Array.isArray(report.commandRecords), "command records should be present");
 assert(report.executedCommandCount === report.commandRecords.length, "executed command count should match records");
@@ -113,6 +178,34 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
     break;
+  case "source-benchmark-mixed":
+    assert(report.changedFiles.includes("src/Compiler/SemanticArtifacts.clasp"), "source context artifact file should be present");
+    assert(report.changedFiles.includes("benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"), "benchmark app source should be present");
+    assert(hasCommand("bash scripts/test-selfhost.sh"), "mixed source+benchmark should keep selfhost/source coverage");
+    assert(hasCommand("bash src/scripts/verify.sh"), "mixed source+benchmark should keep hosted source verification");
+    assert(hasCommand("bash benchmarks/test-task-prep.sh"), "mixed source+benchmark should run benchmark prep coverage");
+    assert(hasCommand("benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"), "mixed source+benchmark should run task app-flow verification");
+    assert(report.selectedCommands.filter((command) => command.command === "bash benchmarks/test-task-prep.sh").length === 1, "benchmark prep command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known source+benchmark inputs should not use verify-fast fallback");
+    break;
+  case "app-context-plan":
+    assert(report.planOnly === true, "context scenario should be plan-only");
+    assert(report.finalVerdict === "planned", `expected planned verdict, got ${report.finalVerdict}`);
+    assert(report.executedCommandCount === 0, "plan-only should not execute commands");
+    assert(report.changedFiles.includes("examples/lead-app/Shared/Lead.clasp"), "app source should be normalized");
+    assert(hasCommand("bash examples/lead-app/scripts/verify.sh"), "context-aware app route should include app-flow verifier");
+    assert(!hasCommand("bash scripts/test-selfhost.sh"), "app-only route should avoid source/compiler selfhost coverage");
+    assert(report.semanticContextArtifacts.some((artifact) => artifact.path === "examples/lead-app/benchmark-prep/Main.context.json" && artifact.status === "ok"), "context artifact should be recorded");
+    assert(report.semanticContextByChangedFile.some((entry) => entry.file === "examples/lead-app/Shared/Lead.clasp" && entry.artifactPaths.includes("examples/lead-app/benchmark-prep/Main.context.json")), "changed file should be linked to context artifact");
+    assert(report.planExplanations.length > 0, "plan-only report should include semantic explanations");
+    {
+      const explanation = JSON.stringify(report.planExplanations);
+      assert(explanation.includes("route:createLeadRecordRoute"), "plan explanation should name affected route surface");
+      assert(explanation.includes("schema:LeadIntake"), "plan explanation should name request schema surface");
+      assert(explanation.includes("decl:summarizeLead"), "plan explanation should name affected declaration surface");
+      assert(explanation.includes("foreign:mockLeadSummaryModel"), "plan explanation should name foreign boundary surface");
+    }
+    break;
   case "goal-manager-fast-script":
     assert(report.changedFiles.includes("scripts/test-goal-manager-fast.sh"), "GoalManager harness should be present");
     assert(report.changedFiles.includes("scripts/test-swarm-ready-gate.sh"), "swarm-ready harness should be present");
@@ -131,6 +224,13 @@ switch (scenario) {
     assert(report.verificationFallbackMode === "git-unavailable-empty-input" || report.verificationFallbackMode === "empty-input", `unexpected verification fallback mode: ${report.verificationFallbackMode}`);
     assert(report.changedFiles.length === 0, "empty no-git scenario should have no changed files");
     assert(hasCommand("bash scripts/verify-fast.sh"), "empty input should run verify-fast");
+    break;
+  case "empty-git":
+    assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
+    assert(report.inputFallbackMode === "git-empty", `expected git-empty, got ${report.inputFallbackMode}`);
+    assert(report.verificationFallbackMode === "empty-input", `expected empty-input, got ${report.verificationFallbackMode}`);
+    assert(report.changedFiles.length === 0, "empty git scenario should have no changed files");
+    assert(hasCommand("bash scripts/verify-fast.sh"), "empty git input should run verify-fast");
     break;
   default:
     assert(false, `unknown scenario ${scenario}`);
@@ -167,6 +267,20 @@ CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
   run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
 assert_report "$script_report" "$script_log" verification-script
 
+source_benchmark_report="$test_root/source-benchmark-report.json"
+source_benchmark_log="$test_root/source-benchmark.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$source_benchmark_log" \
+  run_verify_affected \
+    --changed-file src/Compiler/SemanticArtifacts.clasp \
+    --changed-file benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp > "$source_benchmark_report"
+assert_report "$source_benchmark_report" "$source_benchmark_log" source-benchmark-mixed
+
+app_context_report="$test_root/app-context-report.json"
+app_context_log="$test_root/app-context.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$app_context_log" \
+  run_verify_affected --plan-only --changed-file examples/lead-app/Shared/Lead.clasp > "$app_context_report"
+assert_report "$app_context_report" "$app_context_log" app-context-plan
+
 goal_manager_report="$test_root/goal-manager-report.json"
 goal_manager_log="$test_root/goal-manager.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
@@ -178,3 +292,15 @@ empty_log="$test_root/empty.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$empty_log" \
   run_verify_affected > "$empty_report"
 assert_report "$empty_report" "$empty_log" empty-no-git
+
+git -C "$project_copy" init -q >/dev/null
+git -C "$project_copy" config user.email "verify-affected@example.test"
+git -C "$project_copy" config user.name "verify affected"
+git -C "$project_copy" add .
+git -C "$project_copy" commit -m "fixture" >/dev/null
+
+empty_git_report="$test_root/empty-git-report.json"
+empty_git_log="$test_root/empty-git.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$empty_git_log" \
+  run_verify_affected > "$empty_git_report"
+assert_report "$empty_git_report" "$empty_git_log" empty-git

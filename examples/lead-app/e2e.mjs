@@ -68,6 +68,42 @@ export async function runLeadHttpE2e(binaryPath) {
           segment: "enterprise"
         })
       });
+      assert.equal(invalidBudget.status, 400);
+      assert.match(invalidBudget.text, /budget must be an integer/);
+
+      const missingSegment = await fetchText(baseUrl, "/leads", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          company: "No Segment Co",
+          contact: "Nia",
+          budget: "75000"
+        })
+      });
+      assert.equal(missingSegment.status, 400);
+      assert.match(missingSegment.text, /segment must be one of: startup, growth, enterprise/);
+
+      const invalidSegment = await fetchText(baseUrl, "/leads", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          company: "Bad Segment Co",
+          contact: "Blake",
+          budget: "75000",
+          segment: "global-5000"
+        })
+      });
+      assert.equal(invalidSegment.status, 400);
+      assert.match(invalidSegment.text, /segment must be one of: startup, growth, enterprise/);
+
+      const primaryAfterRejected = await fetchText(baseUrl, "/lead/primary");
+      assert.equal(primaryAfterRejected.status, 200);
+      assert.match(primaryAfterRejected.text, /SynthSpeak/);
+      assert.doesNotMatch(primaryAfterRejected.text, /No Segment Co|Bad Segment Co/);
 
       const unknownLead = await fetchText(baseUrl, "/review", {
         method: "POST",
@@ -94,6 +130,13 @@ export async function runLeadHttpE2e(binaryPath) {
         reviewedHasNote: reviewed.text.includes("Schedule executive discovery"),
         invalidBudgetStatus: invalidBudget.status,
         invalidBudgetMessage: invalidBudget.text,
+        missingSegmentStatus: missingSegment.status,
+        missingSegmentMessage: missingSegment.text,
+        invalidSegmentStatus: invalidSegment.status,
+        invalidSegmentMessage: invalidSegment.text,
+        rejectedLeadStored:
+          primaryAfterRejected.text.includes("No Segment Co") ||
+          primaryAfterRejected.text.includes("Bad Segment Co"),
         unknownLeadStatus: unknownLead.status,
         unknownLeadMessage: unknownLead.text,
         missingStatus: missing.status,

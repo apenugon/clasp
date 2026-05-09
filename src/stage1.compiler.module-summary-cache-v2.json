@@ -5,7 +5,7 @@
   "summaries": [
     {
       "moduleName": "Compiler.AstText",
-      "cacheKey": "3c39877d5051fbfe.cache",
+      "cacheKey": "a3338ad125313a67.cache",
       "sourceFingerprint": "49a566ef4954112b",
       "declFingerprints": {
         "astTextAppendChar": "b6356c40d145790b",
@@ -50,7 +50,7 @@
     },
     {
       "moduleName": "Compiler.Ast",
-      "cacheKey": "ed95d3c04c684bbb.cache",
+      "cacheKey": "26bd9cb0a91e4216.cache",
       "sourceFingerprint": "936af0de8b9dc03f",
       "declFingerprints": {
         "renderStringLiteral": "c2e6c2c04b0295ae",
@@ -347,7 +347,7 @@
     },
     {
       "moduleName": "Compiler.Checker",
-      "cacheKey": "7ca7a0f7a56a7626.cache",
+      "cacheKey": "ebedc13f5454bd71.cache",
       "sourceFingerprint": "d627df62cb88c01d",
       "declFingerprints": {
         "keepNoTypeBinding": "d5431165551067a3",
@@ -603,7 +603,7 @@
     },
     {
       "moduleName": "Compiler.Json",
-      "cacheKey": "36a4c4b711fab940.cache",
+      "cacheKey": "3f09273f85d7b11b.cache",
       "sourceFingerprint": "1928aa5d2c3c6c44",
       "declFingerprints": {
         "keepNoJsonRenderedText": "c4f6254976f93445",
@@ -625,7 +625,7 @@
     },
     {
       "moduleName": "Compiler.CheckedCore",
-      "cacheKey": "9289a9f262733376.cache",
+      "cacheKey": "5bce4dfa88f8c7b9.cache",
       "sourceFingerprint": "3300fc55a112bc4d",
       "declFingerprints": {
         "keepNoCheckedCoreParamArtifact": "1e55f4bbe876dec1",
@@ -692,7 +692,7 @@
     },
     {
       "moduleName": "Compiler.Lower",
-      "cacheKey": "61068aca3176cd15.cache",
+      "cacheKey": "dfafc57d46adc138.cache",
       "sourceFingerprint": "7504e9f545535f75",
       "declFingerprints": {
         "keepNoLowerExpr": "f430839ca1ae06ff",
@@ -752,7 +752,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript",
-      "cacheKey": "fac8bb62f4b1ace0.cache",
+      "cacheKey": "ba4c122f8287acc3.cache",
       "sourceFingerprint": "44fc03fe15a38afd",
       "declFingerprints": {
         "appendJsRenderedText": "b9235dcf1f49c218",
@@ -843,7 +843,7 @@
     },
     {
       "moduleName": "Compiler.Project",
-      "cacheKey": "187d4f499e9a9dc6.cache",
+      "cacheKey": "04fdf00c07f143b7.cache",
       "sourceFingerprint": "c120a288f2c2ec24",
       "declFingerprints": {
         "keepNoHostedModule": "9c8611c5b49d0668",
@@ -876,8 +876,8 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts",
-      "cacheKey": "696ad44d3e5bc27d.cache",
-      "sourceFingerprint": "4d8329d8d058a13d",
+      "cacheKey": "75c45bdf9a41a445.cache",
+      "sourceFingerprint": "920d3edc6216fcd8",
       "declFingerprints": {
         "semanticJsonTextArray": "e5936281e18d7322",
         "semanticJsonNode": "b8f843aa40ba62ae",
@@ -965,14 +965,24 @@
         "semanticDeclUseEdges": "512023898846162c",
         "semanticAppendNonEmptyUniqueText": "6ae53b1607d6c138",
         "semanticAppendUniqueTexts": "4b27a12ddd81a091",
+        "semanticTextHasPrefix": "d30416ec73dbe315",
+        "semanticSurfaceIdsWithPrefix": "9f9f259bc8170e2d",
+        "semanticSchemaNodeIds": "f2c90dce825d99b3",
+        "semanticDeclNodeIds": "a0f8587ef02ccd09",
+        "semanticForeignNodeIds": "3ce82197164e968b",
+        "semanticRouteNodeIds": "9b064521dd913a09",
         "semanticSchemaFieldNodeIds": "2e19665b28ebb68c",
         "semanticSchemaFieldNodeIdsByName": "dbf22d33cb0107d7",
         "semanticAppendSchemaImpactSurface": "48ff469986481c5b",
-        "semanticAppendDeclImpactSurface": "edec89871f649a14",
         "semanticAppendToolServerImpactSurface": "1a11fb6003a5b4d2",
         "semanticDeclIdsUsingTarget": "5dfa34736479a51b",
-        "semanticRouteAffectedSurfaces": "393ca3177b879e7d",
-        "semanticHookAffectedSurfaces": "0d557a84f4658ef7",
+        "semanticDeclDirectDependencySurfaces": "c044c2642a3569b0",
+        "semanticDeclDirectDependencySurfacesByName": "dcfee2c69ae6b945",
+        "semanticAppendNestedDeclDependencySurfaces": "6197eaaa69f6a403",
+        "semanticDeclDependencySurfaces": "359066d736984cf0",
+        "semanticDeclDependencySurfacesByName": "c3aa0ee070bfc176",
+        "semanticRouteAffectedSurfaces": "035f281b37ef1563",
+        "semanticHookAffectedSurfaces": "e90ab7ab42921609",
         "semanticToolAffectedSurfaces": "9151cd598cd3f6e3",
         "semanticToolAffectedSurfacesByName": "bc3268c25c8e5669",
         "semanticToolsAffectedSurfacesByNames": "464cd1a6f8556576",
@@ -987,7 +997,7 @@
         "semanticSchemaAffectedSurfaces": "ac26cb149cd3b217",
         "semanticRouteAffectedSurfacesByHandlerName": "1eceeee2b89962db",
         "semanticHookAffectedSurfacesByHandlerName": "af80f4088f169c39",
-        "semanticDeclAffectedSurfaces": "b3c6b8718d7825b9",
+        "semanticDeclAffectedSurfaces": "31368dde98593647",
         "semanticVerifierNamesForToolName": "ffd6aebe7abf93bf",
         "semanticVerifierNamesForToolNames": "612c457b0e5a27ce",
         "semanticVerifierIdsForNames": "d21990d1f61c7746",
@@ -1010,12 +1020,14 @@
         "semanticContextImpactIndexVerifiers": "11f434256b91d076",
         "semanticContextImpactIndexMergeGates": "9058a4cddb50313e",
         "semanticContextImpactIndex": "49587d4fd78ea6cb",
-        "semanticContextSurfaceIndexRoutes": "9190da6748ea3586",
+        "semanticContextVerificationGuidance": "848bc09d12ba084a",
+        "semanticRouteVerificationGuidance": "567fdab23050006f",
+        "semanticContextSurfaceIndexRoutes": "53f287fd44c5b6c6",
         "semanticContextSurfaceIndexWorkflows": "b610e574efaad74e",
         "semanticContextSurfaceIndexTools": "e225a741fad38a05",
         "semanticContextSurfaceIndexAgents": "bd9079d051360c13",
         "semanticContextSurfaceIndexForeignBoundaries": "cb507b0bfeb38c9c",
-        "semanticContextSurfaceIndex": "03c26b2b4718e93d",
+        "semanticContextSurfaceIndex": "8c4918e19fb2e12c",
         "semanticContextModuleNode": "8d4f564c63aa8d20",
         "semanticContextTypeNodes": "b2be5027ab22f294",
         "semanticContextRecordNodes": "0a9aa112d51dac3a",
@@ -1035,20 +1047,32 @@
         "semanticContextMergeGateNodes": "3329ed8b4a1eb399",
         "semanticContextNodes": "b452a527dbf2dc1a",
         "semanticContextEdges": "9d495750fe65f758",
-        "renderContextModuleJson": "452472f77205e042",
+        "semanticSourceNodeId": "7f7d5ea8de08a128",
+        "semanticContextSourceIdentity": "6e7bfd1c0138a90a",
+        "semanticContextModuleIdentity": "ff2c94b1e1a13cc2",
+        "semanticContextProjectSourceIds": "022f0eeb0113c898",
+        "semanticContextProjectModuleIds": "99e5fd057aba624c",
+        "semanticContextProjectIdentity": "c396dcd0a7dbe975",
+        "semanticContextSourceModuleRole": "a27cea4e96512bb4",
+        "semanticContextSourceModuleEntry": "bea6f5a6690519fb",
+        "semanticContextSourceModuleEntriesFromBundle": "3ffb1d72a58238b6",
+        "semanticSourceModulesFromBundle": "72774caf40ce9c73",
+        "semanticSourceFingerprintForModule": "2e0f488c7bcf103d",
+        "renderContextModuleJsonWithSources": "5f3304c55601c47d",
+        "renderContextModuleJson": "33e766935a263d04",
         "renderAirSourceText": "7d77cb397eec5306",
-        "renderContextSourceText": "08c71bd58b4ef4f5",
+        "renderContextSourceText": "3b35761b8120b961",
         "semanticProjectBundleHasSeparator": "2de3fa6ca3694863",
         "semanticProjectBundleIsSingleSourceModule": "0833f021ccd51347",
         "semanticProjectBundleSourceModule": "f0228db08db04aff",
         "renderAirProjectText": "2308c460d8ee4504",
-        "renderContextProjectText": "0d8a1017c4d171c1"
+        "renderContextProjectText": "2cdf0d10daf7d7dd"
       },
-      "summary": "semanticJsonTextArray : [Str] -> Str\nsemanticJsonNode : Str -> Str -> [JsonField] -> Str\nsemanticJsonEdge : Str -> Str -> Str -> Str\nsemanticRouteResponseKind : Str -> Str\nsemanticPermissionText : HostedPolicyPermissionAst -> Str\nsemanticPermissionTexts : [HostedPolicyPermissionAst] -> [Str]\nsemanticGuideEntryNodeId : Str -> HostedGuideEntryAst -> Str\nsemanticProjectionFieldNodeId : Str -> HostedProjectionFieldDeclAst -> Str\nsemanticConstructorNodeId : Str -> HostedConstructorDeclAst -> Str\nsemanticRecordFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str\nsemanticSchemaFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str\nsemanticImportNodeId : Str -> Str\nsemanticTypeNodeId : HostedTypeDeclAst -> Str\nsemanticRecordNodeId : HostedRecordDeclAst -> Str\nsemanticSchemaNodeId : HostedRecordDeclAst -> Str\nsemanticForeignNodeId : HostedForeignDeclAst -> Str\nsemanticDeclNodeId : HostedDeclAst -> Str\nsemanticGuideNodeId : HostedGuideDeclAst -> Str\nsemanticPolicyNodeId : HostedPolicyDeclAst -> Str\nsemanticProjectionNodeId : HostedProjectionDeclAst -> Str\nsemanticAgentRoleNodeId : HostedAgentRoleDeclAst -> Str\nsemanticAgentNodeId : HostedAgentDeclAst -> Str\nsemanticWorkflowNodeId : HostedWorkflowDeclAst -> Str\nsemanticRouteNodeId : HostedRouteDeclAst -> Str\nsemanticHookNodeId : HostedHookDeclAst -> Str\nsemanticToolServerNodeId : HostedToolServerDeclAst -> Str\nsemanticToolNodeId : HostedToolDeclAst -> Str\nsemanticVerifierNodeId : HostedVerifierDeclAst -> Str\nsemanticMergeGateNodeId : HostedMergeGateDeclAst -> Str\nsemanticConstructorNodeIds : HostedTypeDeclAst -> [Str]\nsemanticRecordFieldNodeIds : HostedRecordDeclAst -> [Str]\nsemanticGuideEntryNodeIds : HostedGuideDeclAst -> [Str]\nsemanticProjectionFieldNodeIds : HostedProjectionDeclAst -> [Str]\nsemanticAirModuleNode : HostedModuleAst -> Str\nsemanticAirImportNodes : [Str] -> [Str]\nsemanticAirTypeNodes : [HostedTypeDeclAst] -> [Str]\nsemanticAirRecordNodes : [HostedRecordDeclAst] -> [Str]\nsemanticAirForeignNodes : [HostedForeignDeclAst] -> [Str]\nsemanticAirDeclNodes : [HostedDeclAst] -> [Str]\nsemanticAirGuideNodes : [HostedGuideDeclAst] -> [Str]\nsemanticAirPolicyNodes : [HostedPolicyDeclAst] -> [Str]\nsemanticAirProjectionNodes : [HostedProjectionDeclAst] -> [Str]\nsemanticAirAgentRoleNodes : [HostedAgentRoleDeclAst] -> [Str]\nsemanticAirAgentNodes : [HostedAgentDeclAst] -> [Str]\nsemanticAirWorkflowNodes : [HostedWorkflowDeclAst] -> [Str]\nsemanticAirRouteNodes : [HostedRouteDeclAst] -> [Str]\nsemanticAirHookNodes : [HostedHookDeclAst] -> [Str]\nsemanticAirToolServerNodes : [HostedToolServerDeclAst] -> [Str]\nsemanticAirToolNodes : [HostedToolDeclAst] -> [Str]\nsemanticAirVerifierNodes : [HostedVerifierDeclAst] -> [Str]\nsemanticAirMergeGateNodes : [HostedMergeGateDeclAst] -> [Str]\nsemanticAirRootIds : HostedModuleAst -> [Str]\nsemanticAirNodes : HostedModuleAst -> [Str]\nrenderAirModuleJson : HostedModuleAst -> Str\nsemanticRecordNames : HostedModuleAst -> [Str]\nsemanticTypeNames : HostedModuleAst -> [Str]\nsemanticDeclNames : HostedModuleAst -> [Str]\nsemanticForeignNames : HostedModuleAst -> [Str]\nsemanticGuideNames : HostedModuleAst -> [Str]\nsemanticPolicyNames : HostedModuleAst -> [Str]\nsemanticProjectionNames : HostedModuleAst -> [Str]\nsemanticAgentRoleNames : HostedModuleAst -> [Str]\nsemanticAgentNames : HostedModuleAst -> [Str]\nsemanticWorkflowNames : HostedModuleAst -> [Str]\nsemanticRouteNames : HostedModuleAst -> [Str]\nsemanticHookNames : HostedModuleAst -> [Str]\nsemanticToolServerNames : HostedModuleAst -> [Str]\nsemanticToolNames : HostedModuleAst -> [Str]\nsemanticVerifierNames : HostedModuleAst -> [Str]\nsemanticMergeGateNames : HostedModuleAst -> [Str]\nsemanticContainsText : [Str] -> Str -> Bool\nsemanticNonEmptyContainsText : [Str] -> Str -> Bool\nsemanticAppendUniqueText : [Str] -> Str -> [Str]\nsemanticAppendNamedTargetEdge : [Str] -> [Str] -> Str -> Str -> Str -> Str -> [Str]\nsemanticDeclUseTargetNodeId : HostedModuleAst -> Str -> Str\nsemanticAppendDeclUseTarget : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticExprListUseTargetNodeIds : HostedModuleAst -> [HostedExprAst] -> [Str]\nsemanticRecordFieldUseTargetNodeIds : HostedModuleAst -> HostedRecordFieldExprAst -> [Str]\nsemanticRecordFieldsUseTargetNodeIds : HostedModuleAst -> [HostedRecordFieldExprAst] -> [Str]\nsemanticMatchBranchUseTargetNodeIds : HostedModuleAst -> HostedMatchBranchAst -> [Str]\nsemanticMatchBranchesUseTargetNodeIds : HostedModuleAst -> [HostedMatchBranchAst] -> [Str]\nsemanticExprUseTargetNodeIds : HostedModuleAst -> HostedExprAst -> [Str]\nsemanticDeclUseTargetNodeIds : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticDeclUseEdges : HostedModuleAst -> [Str]\nsemanticAppendNonEmptyUniqueText : [Str] -> Str -> [Str]\nsemanticAppendUniqueTexts : [Str] -> [Str] -> [Str]\nsemanticSchemaFieldNodeIds : HostedRecordDeclAst -> [Str]\nsemanticSchemaFieldNodeIdsByName : HostedModuleAst -> Str -> [Str]\nsemanticAppendSchemaImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticAppendDeclImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticAppendToolServerImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticDeclIdsUsingTarget : HostedModuleAst -> Str -> [Str]\nsemanticRouteAffectedSurfaces : HostedModuleAst -> HostedRouteDeclAst -> [Str]\nsemanticHookAffectedSurfaces : HostedModuleAst -> HostedHookDeclAst -> [Str]\nsemanticToolAffectedSurfaces : HostedModuleAst -> HostedToolDeclAst -> [Str]\nsemanticToolAffectedSurfacesByName : HostedModuleAst -> Str -> [Str]\nsemanticToolsAffectedSurfacesByNames : HostedModuleAst -> [Str] -> [Str]\nsemanticWorkflowAffectedSurfaces : HostedModuleAst -> HostedWorkflowDeclAst -> [Str]\nsemanticProjectionAffectedSurfaces : HostedModuleAst -> HostedProjectionDeclAst -> [Str]\nsemanticRouteIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticHookIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticToolIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticToolNamesForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticWorkflowIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticProjectionSurfacesForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticSchemaAffectedSurfaces : HostedModuleAst -> HostedRecordDeclAst -> [Str]\nsemanticRouteAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]\nsemanticHookAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]\nsemanticDeclAffectedSurfaces : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticVerifierNamesForToolName : HostedModuleAst -> Str -> [Str]\nsemanticVerifierNamesForToolNames : HostedModuleAst -> [Str] -> [Str]\nsemanticVerifierIdsForNames : HostedModuleAst -> [Str] -> [Str]\nsemanticMergeGateIdsForVerifierName : HostedModuleAst -> Str -> [Str]\nsemanticMergeGateIdsForVerifierNames : HostedModuleAst -> [Str] -> [Str]\nsemanticToolNamesForVerifierNames : HostedModuleAst -> [Str] -> [Str]\nsemanticToolServerNamesForPolicyName : HostedModuleAst -> Str -> [Str]\nsemanticToolNamesForServerNames : HostedModuleAst -> [Str] -> [Str]\nsemanticPolicyAffectedSurfaces : HostedModuleAst -> HostedPolicyDeclAst -> [Str]\nsemanticToolNamesForPolicyName : HostedModuleAst -> Str -> [Str]\nsemanticVerifierAffectedSurfaces : HostedModuleAst -> HostedVerifierDeclAst -> [Str]\nsemanticMergeGateAffectedSurfaces : HostedModuleAst -> HostedMergeGateDeclAst -> [Str]\nsemanticImpactEntry : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Str\nsemanticContextImpactIndexSchemas : HostedModuleAst -> [Str]\nsemanticContextImpactIndexDecls : HostedModuleAst -> [Str]\nsemanticContextImpactIndexRoutes : HostedModuleAst -> [Str]\nsemanticContextImpactIndexTools : HostedModuleAst -> [Str]\nsemanticContextImpactIndexWorkflows : HostedModuleAst -> [Str]\nsemanticContextImpactIndexPolicies : HostedModuleAst -> [Str]\nsemanticContextImpactIndexVerifiers : HostedModuleAst -> [Str]\nsemanticContextImpactIndexMergeGates : HostedModuleAst -> [Str]\nsemanticContextImpactIndex : HostedModuleAst -> Str\nsemanticContextSurfaceIndexRoutes : [HostedRouteDeclAst] -> [Str]\nsemanticContextSurfaceIndexWorkflows : [HostedWorkflowDeclAst] -> [Str]\nsemanticContextSurfaceIndexTools : [HostedToolDeclAst] -> [Str]\nsemanticContextSurfaceIndexAgents : [HostedAgentDeclAst] -> [Str]\nsemanticContextSurfaceIndexForeignBoundaries : [HostedForeignDeclAst] -> [Str]\nsemanticContextSurfaceIndex : HostedModuleAst -> Str\nsemanticContextModuleNode : HostedModuleAst -> Str\nsemanticContextTypeNodes : [HostedTypeDeclAst] -> [Str]\nsemanticContextRecordNodes : [HostedRecordDeclAst] -> [Str]\nsemanticContextForeignNodes : [HostedForeignDeclAst] -> [Str]\nsemanticContextDeclNodes : [HostedDeclAst] -> [Str]\nsemanticContextGuideNodes : [HostedGuideDeclAst] -> [Str]\nsemanticContextPolicyNodes : [HostedPolicyDeclAst] -> [Str]\nsemanticContextProjectionNodes : [HostedProjectionDeclAst] -> [Str]\nsemanticContextAgentRoleNodes : [HostedAgentRoleDeclAst] -> [Str]\nsemanticContextAgentNodes : [HostedAgentDeclAst] -> [Str]\nsemanticContextWorkflowNodes : [HostedWorkflowDeclAst] -> [Str]\nsemanticContextRouteNodes : [HostedRouteDeclAst] -> [Str]\nsemanticContextHookNodes : [HostedHookDeclAst] -> [Str]\nsemanticContextToolServerNodes : [HostedToolServerDeclAst] -> [Str]\nsemanticContextToolNodes : [HostedToolDeclAst] -> [Str]\nsemanticContextVerifierNodes : [HostedVerifierDeclAst] -> [Str]\nsemanticContextMergeGateNodes : [HostedMergeGateDeclAst] -> [Str]\nsemanticContextNodes : HostedModuleAst -> [Str]\nsemanticContextEdges : HostedModuleAst -> [Str]\nrenderContextModuleJson : HostedModuleAst -> Str\nrenderAirSourceText : Str -> Str\nrenderContextSourceText : Str -> Str\nsemanticProjectBundleHasSeparator : Str -> Bool\nsemanticProjectBundleIsSingleSourceModule : Str -> Bool\nsemanticProjectBundleSourceModule : Str -> HostedModuleAst\nrenderAirProjectText : Str -> Str\nrenderContextProjectText : Str -> Str"
+      "summary": "semanticJsonTextArray : [Str] -> Str\nsemanticJsonNode : Str -> Str -> [JsonField] -> Str\nsemanticJsonEdge : Str -> Str -> Str -> Str\nsemanticRouteResponseKind : Str -> Str\nsemanticPermissionText : HostedPolicyPermissionAst -> Str\nsemanticPermissionTexts : [HostedPolicyPermissionAst] -> [Str]\nsemanticGuideEntryNodeId : Str -> HostedGuideEntryAst -> Str\nsemanticProjectionFieldNodeId : Str -> HostedProjectionFieldDeclAst -> Str\nsemanticConstructorNodeId : Str -> HostedConstructorDeclAst -> Str\nsemanticRecordFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str\nsemanticSchemaFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str\nsemanticImportNodeId : Str -> Str\nsemanticTypeNodeId : HostedTypeDeclAst -> Str\nsemanticRecordNodeId : HostedRecordDeclAst -> Str\nsemanticSchemaNodeId : HostedRecordDeclAst -> Str\nsemanticForeignNodeId : HostedForeignDeclAst -> Str\nsemanticDeclNodeId : HostedDeclAst -> Str\nsemanticGuideNodeId : HostedGuideDeclAst -> Str\nsemanticPolicyNodeId : HostedPolicyDeclAst -> Str\nsemanticProjectionNodeId : HostedProjectionDeclAst -> Str\nsemanticAgentRoleNodeId : HostedAgentRoleDeclAst -> Str\nsemanticAgentNodeId : HostedAgentDeclAst -> Str\nsemanticWorkflowNodeId : HostedWorkflowDeclAst -> Str\nsemanticRouteNodeId : HostedRouteDeclAst -> Str\nsemanticHookNodeId : HostedHookDeclAst -> Str\nsemanticToolServerNodeId : HostedToolServerDeclAst -> Str\nsemanticToolNodeId : HostedToolDeclAst -> Str\nsemanticVerifierNodeId : HostedVerifierDeclAst -> Str\nsemanticMergeGateNodeId : HostedMergeGateDeclAst -> Str\nsemanticConstructorNodeIds : HostedTypeDeclAst -> [Str]\nsemanticRecordFieldNodeIds : HostedRecordDeclAst -> [Str]\nsemanticGuideEntryNodeIds : HostedGuideDeclAst -> [Str]\nsemanticProjectionFieldNodeIds : HostedProjectionDeclAst -> [Str]\nsemanticAirModuleNode : HostedModuleAst -> Str\nsemanticAirImportNodes : [Str] -> [Str]\nsemanticAirTypeNodes : [HostedTypeDeclAst] -> [Str]\nsemanticAirRecordNodes : [HostedRecordDeclAst] -> [Str]\nsemanticAirForeignNodes : [HostedForeignDeclAst] -> [Str]\nsemanticAirDeclNodes : [HostedDeclAst] -> [Str]\nsemanticAirGuideNodes : [HostedGuideDeclAst] -> [Str]\nsemanticAirPolicyNodes : [HostedPolicyDeclAst] -> [Str]\nsemanticAirProjectionNodes : [HostedProjectionDeclAst] -> [Str]\nsemanticAirAgentRoleNodes : [HostedAgentRoleDeclAst] -> [Str]\nsemanticAirAgentNodes : [HostedAgentDeclAst] -> [Str]\nsemanticAirWorkflowNodes : [HostedWorkflowDeclAst] -> [Str]\nsemanticAirRouteNodes : [HostedRouteDeclAst] -> [Str]\nsemanticAirHookNodes : [HostedHookDeclAst] -> [Str]\nsemanticAirToolServerNodes : [HostedToolServerDeclAst] -> [Str]\nsemanticAirToolNodes : [HostedToolDeclAst] -> [Str]\nsemanticAirVerifierNodes : [HostedVerifierDeclAst] -> [Str]\nsemanticAirMergeGateNodes : [HostedMergeGateDeclAst] -> [Str]\nsemanticAirRootIds : HostedModuleAst -> [Str]\nsemanticAirNodes : HostedModuleAst -> [Str]\nrenderAirModuleJson : HostedModuleAst -> Str\nsemanticRecordNames : HostedModuleAst -> [Str]\nsemanticTypeNames : HostedModuleAst -> [Str]\nsemanticDeclNames : HostedModuleAst -> [Str]\nsemanticForeignNames : HostedModuleAst -> [Str]\nsemanticGuideNames : HostedModuleAst -> [Str]\nsemanticPolicyNames : HostedModuleAst -> [Str]\nsemanticProjectionNames : HostedModuleAst -> [Str]\nsemanticAgentRoleNames : HostedModuleAst -> [Str]\nsemanticAgentNames : HostedModuleAst -> [Str]\nsemanticWorkflowNames : HostedModuleAst -> [Str]\nsemanticRouteNames : HostedModuleAst -> [Str]\nsemanticHookNames : HostedModuleAst -> [Str]\nsemanticToolServerNames : HostedModuleAst -> [Str]\nsemanticToolNames : HostedModuleAst -> [Str]\nsemanticVerifierNames : HostedModuleAst -> [Str]\nsemanticMergeGateNames : HostedModuleAst -> [Str]\nsemanticContainsText : [Str] -> Str -> Bool\nsemanticNonEmptyContainsText : [Str] -> Str -> Bool\nsemanticAppendUniqueText : [Str] -> Str -> [Str]\nsemanticAppendNamedTargetEdge : [Str] -> [Str] -> Str -> Str -> Str -> Str -> [Str]\nsemanticDeclUseTargetNodeId : HostedModuleAst -> Str -> Str\nsemanticAppendDeclUseTarget : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticExprListUseTargetNodeIds : HostedModuleAst -> [HostedExprAst] -> [Str]\nsemanticRecordFieldUseTargetNodeIds : HostedModuleAst -> HostedRecordFieldExprAst -> [Str]\nsemanticRecordFieldsUseTargetNodeIds : HostedModuleAst -> [HostedRecordFieldExprAst] -> [Str]\nsemanticMatchBranchUseTargetNodeIds : HostedModuleAst -> HostedMatchBranchAst -> [Str]\nsemanticMatchBranchesUseTargetNodeIds : HostedModuleAst -> [HostedMatchBranchAst] -> [Str]\nsemanticExprUseTargetNodeIds : HostedModuleAst -> HostedExprAst -> [Str]\nsemanticDeclUseTargetNodeIds : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticDeclUseEdges : HostedModuleAst -> [Str]\nsemanticAppendNonEmptyUniqueText : [Str] -> Str -> [Str]\nsemanticAppendUniqueTexts : [Str] -> [Str] -> [Str]\nsemanticTextHasPrefix : Str -> Str -> Bool\nsemanticSurfaceIdsWithPrefix : [Str] -> Str -> [Str]\nsemanticSchemaNodeIds : HostedModuleAst -> [Str]\nsemanticDeclNodeIds : HostedModuleAst -> [Str]\nsemanticForeignNodeIds : HostedModuleAst -> [Str]\nsemanticRouteNodeIds : HostedModuleAst -> [Str]\nsemanticSchemaFieldNodeIds : HostedRecordDeclAst -> [Str]\nsemanticSchemaFieldNodeIdsByName : HostedModuleAst -> Str -> [Str]\nsemanticAppendSchemaImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticAppendToolServerImpactSurface : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticDeclIdsUsingTarget : HostedModuleAst -> Str -> [Str]\nsemanticDeclDirectDependencySurfaces : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticDeclDirectDependencySurfacesByName : HostedModuleAst -> Str -> [Str]\nsemanticAppendNestedDeclDependencySurfaces : HostedModuleAst -> [Str] -> Str -> [Str]\nsemanticDeclDependencySurfaces : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticDeclDependencySurfacesByName : HostedModuleAst -> Str -> [Str]\nsemanticRouteAffectedSurfaces : HostedModuleAst -> HostedRouteDeclAst -> [Str]\nsemanticHookAffectedSurfaces : HostedModuleAst -> HostedHookDeclAst -> [Str]\nsemanticToolAffectedSurfaces : HostedModuleAst -> HostedToolDeclAst -> [Str]\nsemanticToolAffectedSurfacesByName : HostedModuleAst -> Str -> [Str]\nsemanticToolsAffectedSurfacesByNames : HostedModuleAst -> [Str] -> [Str]\nsemanticWorkflowAffectedSurfaces : HostedModuleAst -> HostedWorkflowDeclAst -> [Str]\nsemanticProjectionAffectedSurfaces : HostedModuleAst -> HostedProjectionDeclAst -> [Str]\nsemanticRouteIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticHookIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticToolIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticToolNamesForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticWorkflowIdsForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticProjectionSurfacesForSchemaName : HostedModuleAst -> Str -> [Str]\nsemanticSchemaAffectedSurfaces : HostedModuleAst -> HostedRecordDeclAst -> [Str]\nsemanticRouteAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]\nsemanticHookAffectedSurfacesByHandlerName : HostedModuleAst -> Str -> [Str]\nsemanticDeclAffectedSurfaces : HostedModuleAst -> HostedDeclAst -> [Str]\nsemanticVerifierNamesForToolName : HostedModuleAst -> Str -> [Str]\nsemanticVerifierNamesForToolNames : HostedModuleAst -> [Str] -> [Str]\nsemanticVerifierIdsForNames : HostedModuleAst -> [Str] -> [Str]\nsemanticMergeGateIdsForVerifierName : HostedModuleAst -> Str -> [Str]\nsemanticMergeGateIdsForVerifierNames : HostedModuleAst -> [Str] -> [Str]\nsemanticToolNamesForVerifierNames : HostedModuleAst -> [Str] -> [Str]\nsemanticToolServerNamesForPolicyName : HostedModuleAst -> Str -> [Str]\nsemanticToolNamesForServerNames : HostedModuleAst -> [Str] -> [Str]\nsemanticPolicyAffectedSurfaces : HostedModuleAst -> HostedPolicyDeclAst -> [Str]\nsemanticToolNamesForPolicyName : HostedModuleAst -> Str -> [Str]\nsemanticVerifierAffectedSurfaces : HostedModuleAst -> HostedVerifierDeclAst -> [Str]\nsemanticMergeGateAffectedSurfaces : HostedModuleAst -> HostedMergeGateDeclAst -> [Str]\nsemanticImpactEntry : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Str\nsemanticContextImpactIndexSchemas : HostedModuleAst -> [Str]\nsemanticContextImpactIndexDecls : HostedModuleAst -> [Str]\nsemanticContextImpactIndexRoutes : HostedModuleAst -> [Str]\nsemanticContextImpactIndexTools : HostedModuleAst -> [Str]\nsemanticContextImpactIndexWorkflows : HostedModuleAst -> [Str]\nsemanticContextImpactIndexPolicies : HostedModuleAst -> [Str]\nsemanticContextImpactIndexVerifiers : HostedModuleAst -> [Str]\nsemanticContextImpactIndexMergeGates : HostedModuleAst -> [Str]\nsemanticContextImpactIndex : HostedModuleAst -> Str\nsemanticContextVerificationGuidance : Str\nsemanticRouteVerificationGuidance : HostedRouteDeclAst -> [Str] -> Str\nsemanticContextSurfaceIndexRoutes : HostedModuleAst -> [Str]\nsemanticContextSurfaceIndexWorkflows : [HostedWorkflowDeclAst] -> [Str]\nsemanticContextSurfaceIndexTools : [HostedToolDeclAst] -> [Str]\nsemanticContextSurfaceIndexAgents : [HostedAgentDeclAst] -> [Str]\nsemanticContextSurfaceIndexForeignBoundaries : [HostedForeignDeclAst] -> [Str]\nsemanticContextSurfaceIndex : HostedModuleAst -> Str\nsemanticContextModuleNode : HostedModuleAst -> Str\nsemanticContextTypeNodes : [HostedTypeDeclAst] -> [Str]\nsemanticContextRecordNodes : [HostedRecordDeclAst] -> [Str]\nsemanticContextForeignNodes : [HostedForeignDeclAst] -> [Str]\nsemanticContextDeclNodes : [HostedDeclAst] -> [Str]\nsemanticContextGuideNodes : [HostedGuideDeclAst] -> [Str]\nsemanticContextPolicyNodes : [HostedPolicyDeclAst] -> [Str]\nsemanticContextProjectionNodes : [HostedProjectionDeclAst] -> [Str]\nsemanticContextAgentRoleNodes : [HostedAgentRoleDeclAst] -> [Str]\nsemanticContextAgentNodes : [HostedAgentDeclAst] -> [Str]\nsemanticContextWorkflowNodes : [HostedWorkflowDeclAst] -> [Str]\nsemanticContextRouteNodes : [HostedRouteDeclAst] -> [Str]\nsemanticContextHookNodes : [HostedHookDeclAst] -> [Str]\nsemanticContextToolServerNodes : [HostedToolServerDeclAst] -> [Str]\nsemanticContextToolNodes : [HostedToolDeclAst] -> [Str]\nsemanticContextVerifierNodes : [HostedVerifierDeclAst] -> [Str]\nsemanticContextMergeGateNodes : [HostedMergeGateDeclAst] -> [Str]\nsemanticContextNodes : HostedModuleAst -> [Str]\nsemanticContextEdges : HostedModuleAst -> [Str]\nsemanticSourceNodeId : HostedModuleAst -> Str\nsemanticContextSourceIdentity : HostedModuleAst -> Str -> Str\nsemanticContextModuleIdentity : HostedModuleAst -> Str\nsemanticContextProjectSourceIds : [HostedModuleAst] -> [Str]\nsemanticContextProjectModuleIds : [HostedModuleAst] -> [Str]\nsemanticContextProjectIdentity : HostedModuleAst -> [HostedModuleAst] -> Str\nsemanticContextSourceModuleRole : Str -> HostedModuleAst -> Str\nsemanticContextSourceModuleEntry : Str -> Str -> HostedModuleAst -> Str\nsemanticContextSourceModuleEntriesFromBundle : Str -> Str -> [Str]\nsemanticSourceModulesFromBundle : Str -> [HostedModuleAst]\nsemanticSourceFingerprintForModule : Str -> Str -> Str\nrenderContextModuleJsonWithSources : HostedModuleAst -> Str -> [HostedModuleAst] -> [Str] -> Str\nrenderContextModuleJson : HostedModuleAst -> Str\nrenderAirSourceText : Str -> Str\nrenderContextSourceText : Str -> Str\nsemanticProjectBundleHasSeparator : Str -> Bool\nsemanticProjectBundleIsSingleSourceModule : Str -> Bool\nsemanticProjectBundleSourceModule : Str -> HostedModuleAst\nrenderAirProjectText : Str -> Str\nrenderContextProjectText : Str -> Str"
     },
     {
       "moduleName": "Compiler.Driver.Frontend",
-      "cacheKey": "26e8ea203326880c.cache",
+      "cacheKey": "e1dce99c637da593.cache",
       "sourceFingerprint": "5b307be01b252461",
       "declFingerprints": {
         "frontendDriverSourceLoweredDecls": "a68438dc249b51a0",
@@ -1073,7 +1097,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeJson",
-      "cacheKey": "720aac2e5965d745.cache",
+      "cacheKey": "44b39dbaf6ab63cc.cache",
       "sourceFingerprint": "6da706fa406cfa34",
       "declFingerprints": {
         "appendNativeJsonText": "b06dd689089b87d6",
@@ -1094,7 +1118,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeSurface",
-      "cacheKey": "4c5ba878d7c9c778.cache",
+      "cacheKey": "551718679290e1a1.cache",
       "sourceFingerprint": "45062b98c4057c47",
       "declFingerprints": {
         "appendNativeSurfaceText": "3240ebc669264298",
@@ -1131,7 +1155,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeDecls",
-      "cacheKey": "aaa104c4763d8b79.cache",
+      "cacheKey": "cdb370f720ca254e.cache",
       "sourceFingerprint": "2707fca712035592",
       "declFingerprints": {
         "appendNativeDeclRenderedText": "85927e38635a89b8",
@@ -1157,7 +1181,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeMetadata",
-      "cacheKey": "e0c3660394aeeabf.cache",
+      "cacheKey": "f7b0a961883073b2.cache",
       "sourceFingerprint": "8a8d3b533e024097",
       "declFingerprints": {
         "appendNativeMetadataText": "8265febaefffcfa8",
@@ -1238,7 +1262,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native",
-      "cacheKey": "fb165aaedb97d217.cache",
+      "cacheKey": "2d08fda8c077c2ec.cache",
       "sourceFingerprint": "6b22fc6c421f712a",
       "declFingerprints": {
         "appendNativeRenderedText": "031da1a51b657b78",
@@ -1378,7 +1402,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Native",
-      "cacheKey": "3e0c2ad707fce335.cache",
+      "cacheKey": "7167e74c2b5ec1f2.cache",
       "sourceFingerprint": "d618d474010b08fc",
       "declFingerprints": {
         "nativeDriverSourceLoweredDecls": "e4f2f7b3dc4a4ee0",
@@ -1409,7 +1433,7 @@
     },
     {
       "moduleName": "Compiler.SnapshotFixture",
-      "cacheKey": "e84f9171ee117c91.cache",
+      "cacheKey": "01796a68c680753c.cache",
       "sourceFingerprint": "02952be3932ed617",
       "declFingerprints": {
         "compilerSnapshotCheckEntrypoint": "d8fb81e3859e0248",
@@ -1439,7 +1463,7 @@
     },
     {
       "moduleName": "Main",
-      "cacheKey": "c379cb6b1d310409.cache",
+      "cacheKey": "117575afc4d95394.cache",
       "sourceFingerprint": "043bae6f37167fea",
       "declFingerprints": {
         "checkEntrypoint": "deec79af7e4f42cf",

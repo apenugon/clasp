@@ -1,0 +1,406 @@
+{
+  "format": "clasp-lead-host-bindings-v1",
+  "manifestId": "lead-segment-clickable-inbox-host-bindings",
+  "scope": {
+    "app": "examples/lead-app",
+    "benchmarkTask": "clasp-lead-segment",
+    "surface": "clickable-lead-inbox-segment",
+    "note": "This manifest covers the shared lead-segment benchmark route and host-binding surface."
+  },
+  "sourceFiles": [
+    "Main.clasp",
+    "Shared/Lead.clasp"
+  ],
+  "routeHostInputs": [
+    {
+      "name": "landingRoute",
+      "method": "GET",
+      "path": "/",
+      "requestType": "Empty",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "none",
+        "fields": []
+      }
+    },
+    {
+      "name": "inboxRoute",
+      "method": "GET",
+      "path": "/inbox",
+      "requestType": "Empty",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "none",
+        "fields": []
+      }
+    },
+    {
+      "name": "primaryLeadRoute",
+      "method": "GET",
+      "path": "/lead/primary",
+      "requestType": "Empty",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "none",
+        "fields": []
+      }
+    },
+    {
+      "name": "secondaryLeadRoute",
+      "method": "GET",
+      "path": "/lead/secondary",
+      "requestType": "Empty",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "none",
+        "fields": []
+      }
+    },
+    {
+      "name": "createLeadRoute",
+      "method": "POST",
+      "path": "/leads",
+      "requestType": "LeadIntake",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "form-or-json",
+        "contentTypes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "fields": [
+          {
+            "name": "company",
+            "type": "Str",
+            "required": true
+          },
+          {
+            "name": "contact",
+            "type": "Str",
+            "required": true
+          },
+          {
+            "name": "budget",
+            "type": "Int",
+            "required": true
+          },
+          {
+            "name": "segment",
+            "type": "LeadSegment",
+            "required": true,
+            "wireValues": [
+              "startup",
+              "growth",
+              "enterprise"
+            ]
+          }
+        ]
+      },
+      "runtimeOwnedFailures": [
+        {
+          "phase": "request_boundary",
+          "status": 400,
+          "body": "budget must be an integer"
+        },
+        {
+          "phase": "request_boundary",
+          "status": 400,
+          "body": "segment must be one of: startup, growth, enterprise"
+        }
+      ]
+    },
+    {
+      "name": "reviewLeadRoute",
+      "method": "POST",
+      "path": "/review",
+      "requestType": "LeadReview",
+      "responseType": "Page",
+      "responseKind": "page",
+      "hostInput": {
+        "body": "form-or-json",
+        "contentTypes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "fields": [
+          {
+            "name": "leadId",
+            "type": "Str",
+            "required": true
+          },
+          {
+            "name": "note",
+            "type": "Str",
+            "required": true
+          }
+        ]
+      },
+      "runtimeOwnedFailures": [
+        {
+          "phase": "host_binding",
+          "status": 502,
+          "bodyPrefix": "Unknown lead:"
+        }
+      ]
+    }
+  ],
+  "mockModelCalls": [
+    {
+      "name": "mockLeadSummaryModel",
+      "runtimeName": "mockLeadSummaryModel",
+      "signature": "LeadIntake -> Str",
+      "inputType": "LeadIntake",
+      "hostReturn": "json-string",
+      "decodedAs": "LeadSummary",
+      "expectedInputShape": "LeadIntake",
+      "expectedJsonShape": "LeadSummary",
+      "runtimeOwnedFailures": [
+        {
+          "phase": "model_boundary",
+          "status": 502,
+          "body": "priority must be one of: low, medium, high"
+        },
+        {
+          "phase": "model_boundary",
+          "status": 502,
+          "body": "segment must be one of: startup, growth, enterprise"
+        }
+      ]
+    }
+  ],
+  "hostBindings": [
+    {
+      "name": "storeLead",
+      "runtimeName": "storeLead",
+      "signature": "LeadIntake -> LeadSummary -> Str",
+      "hostReturn": "json-string",
+      "decodedAs": "LeadRecord"
+    },
+    {
+      "name": "loadInbox",
+      "runtimeName": "loadInbox",
+      "signature": "Empty -> Str",
+      "hostReturn": "json-string",
+      "decodedAs": "InboxSnapshot"
+    },
+    {
+      "name": "loadPrimaryLead",
+      "runtimeName": "loadPrimaryLead",
+      "signature": "Empty -> Str",
+      "hostReturn": "json-string",
+      "decodedAs": "LeadRecord"
+    },
+    {
+      "name": "loadSecondaryLead",
+      "runtimeName": "loadSecondaryLead",
+      "signature": "Empty -> Str",
+      "hostReturn": "json-string",
+      "decodedAs": "LeadRecord"
+    },
+    {
+      "name": "reviewLead",
+      "runtimeName": "reviewLead",
+      "signature": "LeadReview -> Str",
+      "hostReturn": "json-string",
+      "decodedAs": "LeadRecord",
+      "runtimeOwnedFailures": [
+        {
+          "phase": "host_binding",
+          "status": 502,
+          "bodyPrefix": "Unknown lead:"
+        }
+      ]
+    }
+  ],
+  "expectedJsonShapes": {
+    "Empty": {
+      "kind": "record",
+      "fields": []
+    },
+    "LeadPriority": {
+      "kind": "enum",
+      "wireValues": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "LeadSegment": {
+      "kind": "enum",
+      "wireValues": [
+        "startup",
+        "growth",
+        "enterprise"
+      ]
+    },
+    "ReviewStatus": {
+      "kind": "enum",
+      "wireValues": [
+        "new",
+        "reviewed"
+      ]
+    },
+    "LeadIntake": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "company",
+          "type": "Str"
+        },
+        {
+          "name": "contact",
+          "type": "Str"
+        },
+        {
+          "name": "budget",
+          "type": "Int"
+        },
+        {
+          "name": "segment",
+          "type": "LeadSegment"
+        }
+      ]
+    },
+    "LeadReview": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "leadId",
+          "type": "Str"
+        },
+        {
+          "name": "note",
+          "type": "Str"
+        }
+      ]
+    },
+    "LeadSummary": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "summary",
+          "type": "Str"
+        },
+        {
+          "name": "priority",
+          "type": "LeadPriority"
+        },
+        {
+          "name": "segment",
+          "type": "LeadSegment"
+        },
+        {
+          "name": "followUpRequired",
+          "type": "Bool"
+        }
+      ]
+    },
+    "LeadRecord": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "leadId",
+          "type": "Str"
+        },
+        {
+          "name": "company",
+          "type": "Str"
+        },
+        {
+          "name": "contact",
+          "type": "Str"
+        },
+        {
+          "name": "summary",
+          "type": "Str"
+        },
+        {
+          "name": "priority",
+          "type": "LeadPriority"
+        },
+        {
+          "name": "segment",
+          "type": "LeadSegment"
+        },
+        {
+          "name": "followUpRequired",
+          "type": "Bool"
+        },
+        {
+          "name": "reviewStatus",
+          "type": "ReviewStatus"
+        },
+        {
+          "name": "reviewNote",
+          "type": "Str"
+        }
+      ]
+    },
+    "InboxSnapshot": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "headline",
+          "type": "Str"
+        },
+        {
+          "name": "primaryLeadLabel",
+          "type": "Str"
+        },
+        {
+          "name": "secondaryLeadLabel",
+          "type": "Str"
+        }
+      ]
+    }
+  },
+  "runtimeOwnedFailureBehavior": {
+    "requestBoundary": {
+      "owner": "native route host",
+      "status": 400,
+      "pageBody": "plain text diagnostic",
+      "jsonBody": {
+        "error": "<diagnostic>"
+      }
+    },
+    "modelBoundary": {
+      "owner": "native runtime decode after host binding",
+      "status": 502,
+      "pageBody": "plain text diagnostic",
+      "jsonBody": {
+        "error": "<diagnostic>"
+      }
+    },
+    "hostBindingThrow": {
+      "owner": "native route host",
+      "status": 502,
+      "pageBody": "plain text diagnostic",
+      "jsonBody": {
+        "error": "<diagnostic>"
+      }
+    }
+  },
+  "acceptanceSignals": [
+    {
+      "file": "test/lead-app.test.mjs",
+      "asserts": "formFieldNames(landingPage.body) == [\"company\", \"contact\", \"budget\", \"segment\"]"
+    },
+    {
+      "file": "test/lead-app.test.mjs",
+      "asserts": "created and primary lead pages include Segment: enterprise"
+    },
+    {
+      "file": "test/lead-app.test.mjs",
+      "asserts": "invalid request segment returns 400"
+    },
+    {
+      "file": "test/lead-app.test.mjs",
+      "asserts": "invalid model segment returns 502"
+    }
+  ]
+}

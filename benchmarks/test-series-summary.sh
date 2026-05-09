@@ -6,6 +6,8 @@ results_root="$project_root/benchmarks/results"
 tmp_bin="$(mktemp -d)"
 synthetic_files=()
 
+mkdir -p "$results_root"
+
 cleanup() {
   rm -rf "$tmp_bin"
   if [[ ${#synthetic_files[@]} -gt 0 ]]; then
@@ -520,24 +522,81 @@ public_app_signal_output="$(
     --skip-run true \
     --notes public-app \
     --harness codex \
-    --model gpt-5.4
+    --model gpt-5.4 \
+    --mode raw-repo
 )"
-grep -Fq '"suite":"main-public-app-comparison"' <<<"$public_app_signal_output"
-grep -Fq '"passed":true' <<<"$public_app_signal_output"
-grep -Fq '"meetsTarget":true' <<<"$public_app_signal_output"
-grep -Fq '"scoreName":"throughputDeltaPct"' <<<"$public_app_signal_output"
-grep -Fq '"scoreValue":38' <<<"$public_app_signal_output"
+node - "$public_app_signal_output" <<'NODE'
+const signal = JSON.parse(process.argv[2]);
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+const requiredFields = [
+  'suite',
+  'summary',
+  'passed',
+  'meetsTarget',
+  'scoreName',
+  'scoreValue',
+  'targetName',
+  'targetValue',
+];
+for (const field of requiredFields) {
+  assert(Object.prototype.hasOwnProperty.call(signal, field), `missing benchmark signal field: ${field}`);
+}
+
+assert(signal.suite === 'main-public-app-comparison', `unexpected suite: ${signal.suite}`);
+assert(signal.passed === true, 'expected public app signal to pass');
+assert(signal.meetsTarget === true, 'expected public app signal to meet target');
+assert(signal.scoreName === 'throughputDeltaPct', `unexpected scoreName: ${signal.scoreName}`);
+assert(signal.scoreValue === 38, `unexpected scoreValue: ${signal.scoreValue}`);
+assert(signal.targetName === 'minThroughputDeltaPct', `unexpected targetName: ${signal.targetName}`);
+assert(signal.targetValue === 0, `unexpected targetValue: ${signal.targetValue}`);
+
+const managerCheckpoint = {
+  wave: 1,
+  ...signal,
+  command: ['node', 'benchmarks/run-public-app-signal.mjs', '--count', '1', '--mode', 'raw-repo'],
+};
+assert(Number.isInteger(managerCheckpoint.wave), 'manager checkpoint wave must be an integer');
+assert(Array.isArray(managerCheckpoint.command), 'manager checkpoint command must be an array');
+assert(Number.isInteger(managerCheckpoint.scoreValue), 'manager checkpoint score must be an integer');
+assert(Number.isInteger(managerCheckpoint.targetValue), 'manager checkpoint target must be an integer');
+NODE
 
 missing_public_app_signal_output="$(
   node "$project_root/benchmarks/run-public-app-signal.mjs" \
     --skip-run true \
     --notes does-not-exist \
     --harness codex \
-    --model gpt-5.4
+    --model gpt-5.4 \
+    --mode raw-repo
 )"
-grep -Fq '"passed":false' <<<"$missing_public_app_signal_output"
-grep -Fq '"meetsTarget":false' <<<"$missing_public_app_signal_output"
-grep -Fq 'did not produce a full Clasp vs TypeScript comparison' <<<"$missing_public_app_signal_output"
+node - "$missing_public_app_signal_output" <<'NODE'
+const signal = JSON.parse(process.argv[2]);
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(signal.suite === 'main-public-app-comparison', `unexpected suite: ${signal.suite}`);
+assert(signal.passed === false, 'expected missing public app signal to fail');
+assert(signal.meetsTarget === false, 'expected missing public app signal not to meet target');
+assert(signal.scoreName === 'throughputDeltaPct', `unexpected scoreName: ${signal.scoreName}`);
+assert(signal.scoreValue === -100, `unexpected scoreValue: ${signal.scoreValue}`);
+assert(signal.targetName === 'minThroughputDeltaPct', `unexpected targetName: ${signal.targetName}`);
+assert(signal.targetValue === 0, `unexpected targetValue: ${signal.targetValue}`);
+assert(signal.summary.includes('No public app benchmark results matched'), `missing actionable no-result summary: ${signal.summary}`);
+assert(signal.summary.includes('suite=main-public-app-comparison'), `summary missing suite: ${signal.summary}`);
+assert(signal.summary.includes('resultCount=0'), `summary missing resultCount=0: ${signal.summary}`);
+assert(signal.summary.includes('missingTasks=clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench'), `summary missing expected missing tasks: ${signal.summary}`);
+assert(signal.summary.includes('target minThroughputDeltaPct>=0'), `summary missing target: ${signal.summary}`);
+NODE
 
 durable_workflow_summary_output="$(
   node "$project_root/benchmarks/run-benchmark.mjs" summarize \

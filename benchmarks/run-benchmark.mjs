@@ -540,6 +540,7 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
   const contextPath = path.join(prepRoot, `${moduleName}.context.json`);
   const airPath = path.join(prepRoot, `${moduleName}.air.json`);
   const uiPath = path.join(prepRoot, `${moduleName}.ui.json`);
+  const surfacesPath = path.join(prepRoot, `${moduleName}.surfaces.json`);
   const explainPath = task.surfaceForm === "verbose"
     ? path.join(prepRoot, `${moduleName}.explain.txt`)
     : null;
@@ -559,19 +560,52 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     await writeFile(explainPath, explanation, "utf8");
   }
 
+  const hostBindingManifestPath = await copyClaspHostBindingManifest(task, prepRoot);
+  const hostBindingManifest = hostBindingManifestPath
+    ? JSON.parse(await readFile(hostBindingManifestPath, "utf8"))
+    : null;
+  const surfaces = synthesizeClaspBenchmarkSurfaces({
+    task,
+    workspace,
+    entryPath,
+    prepRoot,
+    moduleName,
+    nativeImage,
+    uiGraph,
+    hostBindingManifestPath,
+    hostBindingManifest
+  });
+  await writeFile(surfacesPath, JSON.stringify(surfaces, null, 2) + "\n", "utf8");
+
   const guidePath = path.join(workspace, "LANGUAGE_GUIDE.md");
   const guide = renderClaspLanguageGuide({
     workspace,
     entryPath,
     prepRoot,
     moduleName,
+    surfacesPath,
     explainPath,
+    hostBindingManifestPath,
+    hostBindingManifest,
+    appOwnedEditSurface: surfaces.appOwnedEditSurface,
     context,
     air,
     uiGraph
   });
 
   await writeFile(guidePath, guide, "utf8");
+}
+
+async function copyClaspHostBindingManifest(task, prepRoot) {
+  if (typeof task.hostBindingManifest !== "string" || task.hostBindingManifest.length === 0) {
+    return null;
+  }
+
+  const sourcePath = path.join(task.dir, task.hostBindingManifest);
+  const targetPath = path.join(prepRoot, "host-bindings.manifest.json");
+
+  await cp(sourcePath, targetPath, { force: true });
+  return targetPath;
 }
 
 async function resolveClaspEntrypoint(task, workspace) {
@@ -766,27 +800,502 @@ function synthesizeClaspAir(entryPath, nativeImage) {
   };
 }
 
+function synthesizeClaspBenchmarkSurfaces({
+  task,
+  workspace,
+  entryPath,
+  prepRoot,
+  moduleName,
+  nativeImage,
+  uiGraph,
+  hostBindingManifestPath,
+  hostBindingManifest
+}) {
+  const appOwnedEditSurface = normalizeTaskStringList(
+    task.appOwnedEditSurface ?? task.appOwnedEditSurfaces
+  );
+  const entry = path.relative(workspace, entryPath);
+  const sourceFiles = collectWorkspaceClaspSourceFiles(workspace);
+  const surfaceTypeNames = collectSurfaceTypeNames(nativeImage, hostBindingManifest);
+  const records = collectBenchmarkRecords(nativeImage, surfaceTypeNames);
+  const enums = collectBenchmarkEnums(nativeImage, surfaceTypeNames);
+  const routes = collectBenchmarkRoutes(nativeImage, hostBindingManifest);
+  const forms = collectBenchmarkForms(nativeImage, hostBindingManifest);
+  const pages = collectBenchmarkPages(routes, uiGraph);
+  const hostBindings = collectBenchmarkHostBindings(nativeImage, hostBindingManifest);
+  const expectedJsonShapes = hostBindingManifest?.expectedJsonShapes ?? {};
+
+  return {
+    format: "clasp-benchmark-surfaces-v1",
+    taskId: task.id,
+    entry,
+    appOwnedEditSurface,
+    artifacts: {
+      context: path.join("benchmark-prep", `${moduleName}.context.json`),
+      air: path.join("benchmark-prep", `${moduleName}.air.json`),
+      ui: path.join("benchmark-prep", `${moduleName}.ui.json`),
+      hostBindingManifest: hostBindingManifestPath
+        ? path.relative(workspace, hostBindingManifestPath)
+        : null
+    },
+    sourceModules: sourceFiles.map((sourceFile) => ({
+      path: sourceFile,
+      role: sourceModuleRole(sourceFile, entry, appOwnedEditSurface)
+    })),
+    records,
+    enums,
+    routes,
+    pages,
+    forms,
+    decodeBoundaries: collectBenchmarkDecodeBoundaries(nativeImage),
+    hostBindings,
+    expectedJsonShapes,
+    contractGaps: collectHostContractGaps(records, enums, expectedJsonShapes, appOwnedEditSurface)
+  };
+}
+
+function normalizeTaskStringList(value) {
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === "string" && item.length > 0);
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    return [value];
+  }
+
+  return [];
+}
+
+function sourceModuleRole(sourceFile, entry, appOwnedEditSurface) {
+  if (appOwnedEditSurface.includes(sourceFile)) {
+    return "app-owned-edit-surface";
+  }
+
+  if (sourceFile === entry) {
+    return "entry";
+  }
+
+  return "support";
+}
+
+function collectSurfaceTypeNames(nativeImage, hostBindingManifest) {
+  const typeNames = new Set();
+
+  for (const codec of nativeImage.runtime?.jsonCodecs ?? []) {
+    addSurfaceTypeName(typeNames, codec.type);
+  }
+
+  for (const boundary of nativeImage.runtime?.boundaries ?? []) {
+    if (boundary.kind === "route") {
+      addSurfaceTypeName(typeNames, boundary.request);
+      addSurfaceTypeName(typeNames, boundary.response);
+    }
+  }
+
+  for (const route of hostBindingManifest?.routeHostInputs ?? []) {
+    addSurfaceTypeName(typeNames, route.requestType);
+    addSurfaceTypeName(typeNames, route.responseType);
+    for (const field of route.hostInput?.fields ?? []) {
+      addSurfaceTypeName(typeNames, field.type);
+    }
+  }
+
+  for (const binding of hostBindingManifest?.mockModelCalls ?? []) {
+    addSurfaceTypeName(typeNames, binding.inputType);
+    addSurfaceTypeName(typeNames, binding.decodedAs);
+    addSurfaceTypeName(typeNames, binding.expectedInputShape);
+    addSurfaceTypeName(typeNames, binding.expectedJsonShape);
+    addFunctionTypeNames(typeNames, binding.signature);
+  }
+
+  for (const binding of hostBindingManifest?.hostBindings ?? []) {
+    addSurfaceTypeName(typeNames, binding.decodedAs);
+    addFunctionTypeNames(typeNames, binding.signature);
+  }
+
+  for (const [shapeName, shape] of Object.entries(hostBindingManifest?.expectedJsonShapes ?? {})) {
+    addSurfaceTypeName(typeNames, shapeName);
+    for (const field of shape.fields ?? []) {
+      addSurfaceTypeName(typeNames, field.type);
+    }
+  }
+
+  return typeNames;
+}
+
+function addFunctionTypeNames(typeNames, signature) {
+  if (typeof signature !== "string") {
+    return;
+  }
+
+  for (const candidate of signature.match(/[A-Z][A-Za-z0-9_]*/g) ?? []) {
+    addSurfaceTypeName(typeNames, candidate);
+  }
+}
+
+function addSurfaceTypeName(typeNames, typeName) {
+  if (typeof typeName !== "string" || typeName.length === 0) {
+    return;
+  }
+
+  const normalized = typeName.replace(/^\[/, "").replace(/\]$/, "");
+  if (isPrimitiveSurfaceType(normalized)) {
+    return;
+  }
+
+  typeNames.add(normalized);
+}
+
+function isPrimitiveSurfaceType(typeName) {
+  return ["Str", "Int", "Bool", "Page", "View", "Prompt", "Redirect", "Result"].includes(typeName);
+}
+
+function collectBenchmarkRecords(nativeImage, surfaceTypeNames) {
+  return (nativeImage.abi?.recordLayouts ?? [])
+    .filter((layout) => surfaceTypeNames.size === 0 || surfaceTypeNames.has(layout.name))
+    .map((layout) => ({
+      name: layout.name,
+      fields: (layout.fields ?? []).map((field) => ({
+        name: field.name,
+        type: field.type,
+        storage: field.storage
+      }))
+    }))
+    .sort(compareByName);
+}
+
+function collectBenchmarkEnums(nativeImage, surfaceTypeNames) {
+  return (nativeImage.abi?.variantLayouts ?? [])
+    .filter((layout) => surfaceTypeNames.size === 0 || surfaceTypeNames.has(layout.name))
+    .map((layout) => ({
+      name: layout.name,
+      constructors: (layout.constructors ?? []).map((constructor) => constructor.name),
+      wireValues: (layout.constructors ?? []).map((constructor) => constructorWireValue(constructor.name))
+    }))
+    .sort(compareByName);
+}
+
+function constructorWireValue(name) {
+  if (typeof name !== "string" || name.length === 0) {
+    return "";
+  }
+
+  return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
+}
+
+function collectBenchmarkRoutes(nativeImage, hostBindingManifest) {
+  const manifestRoutes = hostBindingManifest?.routeHostInputs ?? [];
+
+  return (nativeImage.runtime?.boundaries ?? [])
+    .filter((boundary) => boundary.kind === "route")
+    .map((boundary) => {
+      const manifestRoute = findManifestRoute(manifestRoutes, boundary.method, boundary.path, boundary.name);
+
+      return {
+        name: boundary.name,
+        method: boundary.method,
+        path: boundary.path,
+        requestType: boundary.request,
+        responseType: boundary.response,
+        responseKind: boundary.responseKind ?? routeResponseKind(boundary.response),
+        handler: boundary.handler,
+        requestDecoder: boundary.decode,
+        responseEncoder: boundary.encode,
+        hostInput: manifestRoute?.hostInput ?? null,
+        runtimeOwnedFailures: manifestRoute?.runtimeOwnedFailures ?? []
+      };
+    })
+    .sort((left, right) => `${left.method} ${left.path}`.localeCompare(`${right.method} ${right.path}`));
+}
+
+function findManifestRoute(manifestRoutes, method, routePath, name) {
+  return manifestRoutes.find((route) => route.name === name) ??
+    manifestRoutes.find((route) => route.method === method && route.path === routePath) ??
+    null;
+}
+
+function routeResponseKind(responseType) {
+  if (responseType === "Page") {
+    return "page";
+  }
+
+  if (responseType === "Redirect") {
+    return "redirect";
+  }
+
+  return "json";
+}
+
+function collectBenchmarkPages(routes, uiGraph) {
+  const uiByRoute = new Map((uiGraph ?? []).map((page) => [page.routeName, page]));
+
+  return routes
+    .filter((route) => route.responseKind === "page" || route.responseType === "Page")
+    .map((route) => {
+      const uiPage = uiByRoute.get(route.name);
+      return {
+        routeName: route.name,
+        method: route.method,
+        path: route.path,
+        handler: route.handler,
+        title: uiPage?.title ?? null
+      };
+    });
+}
+
+function collectBenchmarkForms(nativeImage, hostBindingManifest) {
+  const manifestRoutes = hostBindingManifest?.routeHostInputs ?? [];
+  const forms = [];
+
+  for (const decl of nativeImage.decls ?? []) {
+    const body = decl.body;
+    walkBenchmarkExpr(body, (expr) => {
+      if (!isLocalCall(expr, "form")) {
+        return;
+      }
+
+      const method = stringLiteralValue(expr.args?.[0]);
+      const action = stringLiteralValue(expr.args?.[1]);
+      const manifestRoute = findManifestRoute(manifestRoutes, method, action, null);
+      forms.push({
+        decl: decl.name,
+        method,
+        action,
+        fields: collectInputFields(expr),
+        expectedHostFields: manifestRoute?.hostInput?.fields ?? []
+      });
+    });
+  }
+
+  return forms.sort((left, right) => `${left.method} ${left.action}`.localeCompare(`${right.method} ${right.action}`));
+}
+
+function collectInputFields(expr) {
+  const fields = [];
+
+  walkBenchmarkExpr(expr, (candidate) => {
+    if (!isLocalCall(candidate, "input")) {
+      return;
+    }
+
+    fields.push({
+      name: stringLiteralValue(candidate.args?.[0]),
+      inputType: stringLiteralValue(candidate.args?.[1]),
+      defaultValue: stringLiteralValue(candidate.args?.[2])
+    });
+  });
+
+  return fields;
+}
+
+function collectBenchmarkDecodeBoundaries(nativeImage) {
+  const boundaries = [];
+
+  for (const decl of nativeImage.decls ?? []) {
+    walkBenchmarkExpr(decl.body, (expr) => {
+      if (expr.kind !== "intrinsic" || expr.name !== "decode") {
+        return;
+      }
+
+      boundaries.push({
+        decl: decl.name,
+        targetType: expr.type,
+        source: summarizeBenchmarkExpr(expr.value),
+        sourceCallee: localCallName(expr.value)
+      });
+    });
+  }
+
+  return boundaries.sort((left, right) => left.decl.localeCompare(right.decl));
+}
+
+function collectBenchmarkHostBindings(nativeImage, hostBindingManifest) {
+  const runtimeBindings = new Map(
+    (nativeImage.runtime?.bindings ?? []).map((binding) => [binding.name, binding])
+  );
+  const bindings = [];
+
+  for (const binding of hostBindingManifest?.mockModelCalls ?? []) {
+    const runtimeBinding = runtimeBindings.get(binding.name);
+    bindings.push({
+      name: binding.name,
+      role: "mock-model",
+      type: runtimeBinding?.type ?? binding.signature ?? "",
+      runtimeName: binding.runtimeName ?? runtimeBinding?.runtime ?? binding.name,
+      inputType: binding.inputType ?? null,
+      decodedAs: binding.decodedAs ?? null,
+      expectedJsonShape: binding.expectedJsonShape ?? null,
+      runtimeOwnedFailures: binding.runtimeOwnedFailures ?? []
+    });
+  }
+
+  for (const binding of hostBindingManifest?.hostBindings ?? []) {
+    const runtimeBinding = runtimeBindings.get(binding.name);
+    bindings.push({
+      name: binding.name,
+      role: "host-binding",
+      type: runtimeBinding?.type ?? binding.signature ?? "",
+      runtimeName: binding.runtimeName ?? runtimeBinding?.runtime ?? binding.name,
+      decodedAs: binding.decodedAs ?? null,
+      runtimeOwnedFailures: binding.runtimeOwnedFailures ?? []
+    });
+  }
+
+  if (bindings.length > 0) {
+    return bindings.sort(compareByName);
+  }
+
+  return (nativeImage.runtime?.bindings ?? [])
+    .filter((binding) => isHostBindingName(binding.name))
+    .map((binding) => ({
+      name: binding.name,
+      role: "foreign",
+      type: binding.type,
+      runtimeName: binding.runtime ?? binding.name,
+      decodedAs: null,
+      runtimeOwnedFailures: []
+    }))
+    .sort(compareByName);
+}
+
+function collectHostContractGaps(records, enums, expectedJsonShapes, appOwnedEditSurface) {
+  const gaps = [];
+  const recordsByName = new Map(records.map((record) => [record.name, record]));
+  const enumsByName = new Map(enums.map((enumShape) => [enumShape.name, enumShape]));
+
+  for (const [shapeName, shape] of Object.entries(expectedJsonShapes ?? {})) {
+    if (shape.kind === "record") {
+      const record = recordsByName.get(shapeName);
+      if (!record) {
+        gaps.push(hostContractGap("missing-schema", shapeName, null, shape.kind, appOwnedEditSurface));
+        continue;
+      }
+
+      const fieldsByName = new Map(record.fields.map((field) => [field.name, field]));
+      for (const expectedField of shape.fields ?? []) {
+        const field = fieldsByName.get(expectedField.name);
+        if (!field) {
+          gaps.push(hostContractGap("missing-field", shapeName, expectedField.name, expectedField.type, appOwnedEditSurface));
+        } else if (field.type !== expectedField.type) {
+          gaps.push(hostContractGap("field-type-mismatch", shapeName, expectedField.name, expectedField.type, appOwnedEditSurface));
+        }
+      }
+    } else if (shape.kind === "enum") {
+      const enumShape = enumsByName.get(shapeName);
+      if (!enumShape) {
+        gaps.push(hostContractGap("missing-schema", shapeName, null, shape.kind, appOwnedEditSurface));
+        continue;
+      }
+
+      const actualWireValues = new Set(enumShape.wireValues);
+      for (const wireValue of shape.wireValues ?? []) {
+        if (!actualWireValues.has(wireValue)) {
+          gaps.push(hostContractGap("missing-wire-value", shapeName, wireValue, "enum-wire-value", appOwnedEditSurface));
+        }
+      }
+    }
+  }
+
+  return gaps;
+}
+
+function hostContractGap(kind, schema, field, expected, appOwnedEditSurface) {
+  return {
+    kind,
+    schema,
+    field,
+    expected,
+    appOwnedEditSurface
+  };
+}
+
+function walkBenchmarkExpr(expr, visit) {
+  if (!expr || typeof expr !== "object") {
+    return;
+  }
+
+  visit(expr);
+
+  for (const value of Object.values(expr)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        walkBenchmarkExpr(item, visit);
+      }
+    } else if (value && typeof value === "object") {
+      walkBenchmarkExpr(value, visit);
+    }
+  }
+}
+
+function isLocalCall(expr, name) {
+  return expr?.kind === "call" &&
+    expr.callee?.kind === "local" &&
+    expr.callee.name === name;
+}
+
+function stringLiteralValue(expr) {
+  return expr?.kind === "string" ? expr.value : null;
+}
+
+function localCallName(expr) {
+  return expr?.kind === "call" && expr.callee?.kind === "local"
+    ? expr.callee.name
+    : null;
+}
+
+function summarizeBenchmarkExpr(expr) {
+  if (!expr || typeof expr !== "object") {
+    return "";
+  }
+
+  if (expr.kind === "call") {
+    return `${expr.callee?.name ?? expr.callee?.kind ?? "call"}(...)`;
+  }
+
+  if (expr.kind === "local") {
+    return expr.name;
+  }
+
+  if (expr.kind === "intrinsic") {
+    return expr.name;
+  }
+
+  return expr.kind ?? "expr";
+}
+
+function compareByName(left, right) {
+  return String(left.name ?? "").localeCompare(String(right.name ?? ""));
+}
+
 function renderClaspLanguageGuide({
   workspace,
   entryPath,
   prepRoot,
   moduleName,
+  surfacesPath,
   explainPath,
+  hostBindingManifestPath,
+  hostBindingManifest,
+  appOwnedEditSurface,
   context,
   air,
   uiGraph
 }) {
   const sourceFiles = collectWorkspaceClaspSourceFiles(workspace);
   const routes = collectContextRoutes(context);
-  const foreignDecls = collectContextForeignDecls(context);
+  const foreignDecls = collectContextForeignDecls(context, hostBindingManifest);
   const artifactPaths = [
     path.join(prepRoot, `${moduleName}.context.json`),
     path.join(prepRoot, `${moduleName}.air.json`),
-    path.join(prepRoot, `${moduleName}.ui.json`)
+    path.join(prepRoot, `${moduleName}.ui.json`),
+    surfacesPath
   ];
 
   if (explainPath) {
     artifactPaths.push(explainPath);
+  }
+  if (hostBindingManifestPath) {
+    artifactPaths.push(hostBindingManifestPath);
   }
 
   const relativeArtifactPaths = artifactPaths.map((targetPath) => path.relative(workspace, targetPath));
@@ -808,6 +1317,14 @@ function renderClaspLanguageGuide({
     }
   }
 
+  if ((appOwnedEditSurface ?? []).length > 0) {
+    lines.push("", "## App-owned edit surface", "");
+    for (const sourceFile of appOwnedEditSurface) {
+      lines.push(`- \`${sourceFile}\``);
+    }
+    lines.push("- Prefer these files for product behavior changes before changing test or harness files.");
+  }
+
   lines.push("", "## Semantic pack");
   lines.push("");
   for (const artifactPath of relativeArtifactPaths) {
@@ -822,6 +1339,22 @@ function renderClaspLanguageGuide({
       `- \`${path.relative(workspace, explainPath)}\` is the compiler-generated human-readable rendering of the entry module.`
     );
   }
+
+  if (hostBindingManifestPath) {
+    lines.push(
+      "",
+      "## Host binding manifest",
+      "",
+      `- \`${path.relative(workspace, hostBindingManifestPath)}\` lists route host inputs, host/runtime binding contracts, model JSON shapes, and runtime-owned failure behavior for this task.`
+    );
+  }
+
+  lines.push(
+    "",
+    "## Benchmark surfaces",
+    "",
+    `- \`${path.relative(workspace, surfacesPath)}\` summarizes source modules, records/enums, typed routes, pages/forms, decode boundaries, host bindings, and expected host JSON shapes.`
+  );
 
   lines.push("", "## Routes and boundaries", "");
 
@@ -908,9 +1441,22 @@ function collectContextRoutes(context) {
     });
 }
 
-function collectContextForeignDecls(context) {
+function collectContextForeignDecls(context, hostBindingManifest = null) {
+  const manifestNames = new Set([
+    ...((hostBindingManifest?.mockModelCalls ?? []).map((binding) => binding.name)),
+    ...((hostBindingManifest?.hostBindings ?? []).map((binding) => binding.name))
+  ]);
+
   return (context.nodes ?? [])
     .filter((node) => node.kind === "foreign")
+    .filter((node) => {
+      if (manifestNames.size === 0) {
+        return true;
+      }
+
+      const attrs = attrsToRecord(node.attrs);
+      return manifestNames.has(String(attrs.name ?? ""));
+    })
     .map((node) => {
       const attrs = attrsToRecord(node.attrs);
       return {
