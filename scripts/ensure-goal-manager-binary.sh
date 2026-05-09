@@ -8,12 +8,14 @@ goal_manager_split_entry_source="$project_root/examples/swarm-native/GoalManager
 goal_manager_swarm_source_dir="$project_root/examples/swarm-native"
 
 select_default_goal_manager_source() {
-  if [[ -f "$goal_manager_wrapper_source" ]]; then
+  if [[ -f "$goal_manager_flat_source" ]]; then
+    printf '%s\n' "$goal_manager_flat_source"
+  elif [[ -f "$goal_manager_wrapper_source" ]]; then
     printf '%s\n' "$goal_manager_wrapper_source"
   elif [[ -f "$goal_manager_split_entry_source" ]]; then
     printf '%s\n' "$goal_manager_split_entry_source"
   else
-    printf '%s\n' "$goal_manager_flat_source"
+    printf '%s\n' "$goal_manager_wrapper_source"
   fi
 }
 

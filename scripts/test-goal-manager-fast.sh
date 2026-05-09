@@ -19,7 +19,7 @@ export CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_A
 goal_manager_live_pid=""
 goal_manager_monolithic_source="$project_root/examples/swarm-native/GoalManager.clasp"
 goal_manager_wrapper_source="$project_root/examples/swarm-native/GoalManager.wrapper.clasp"
-goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$goal_manager_wrapper_source}"
+goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$goal_manager_monolithic_source}"
 goal_manager_live_binary="$project_root/.clasp-loops/.cache/goal-manager-live/swarm-goal-manager"
 goal_manager_actual_binary="$project_root/.clasp-loops/.cache/goal-manager-planner-memory/swarm-goal-manager"
 

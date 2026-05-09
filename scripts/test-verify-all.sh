@@ -221,8 +221,8 @@ goal_manager_binary_two="$(
 [[ "$goal_manager_binary_one" == "$goal_manager_binary_two" ]]
 [[ -x "$goal_manager_binary_one" ]]
 cmp -s "$goal_manager_binary_one" "$goal_manager_alias"
-grep -F "compile-source=$test_root/examples/swarm-native/GoalManager.wrapper.clasp" "$goal_manager_fast_log" >/dev/null
-"$goal_manager_alias" | grep -F "compiled-source=$test_root/examples/swarm-native/GoalManager.wrapper.clasp" >/dev/null
+grep -F "compile-source=$test_root/examples/swarm-native/GoalManager.clasp" "$goal_manager_fast_log" >/dev/null
+"$goal_manager_alias" | grep -F "compiled-source=$test_root/examples/swarm-native/GoalManager.clasp" >/dev/null
 [[ "$(grep -c '^compile-source=' "$goal_manager_fast_log")" == "1" ]]
 [[ -f "$(dirname "$goal_manager_binary_one")/compile.lock" ]]
 [[ ! -e "$goal_manager_cache/compile.lock" ]]
@@ -293,6 +293,7 @@ goal_manager_binary_after_claspc_change="$(
 [[ "$goal_manager_binary_after_claspc_change" != "$goal_manager_binary_after_dependency_change" ]]
 [[ "$(grep -c '^compile-source=' "$goal_manager_fast_log")" == "4" ]]
 
+mv "$test_root/examples/swarm-native/GoalManager.clasp" "$test_root/examples/swarm-native/GoalManager.clasp.off"
 mv "$test_root/examples/swarm-native/GoalManager.wrapper.clasp" "$test_root/examples/swarm-native/GoalManager.wrapper.clasp.off"
 goal_manager_split_fallback_log="$test_root/fake-fast-split-fallback.log"
 goal_manager_split_fallback_binary="$(
@@ -304,6 +305,7 @@ goal_manager_split_fallback_binary="$(
 [[ -x "$goal_manager_split_fallback_binary" ]]
 grep -F "compile-source=$test_root/examples/swarm-native/GoalManagerProgram2.split.clasp" "$goal_manager_split_fallback_log" >/dev/null
 mv "$test_root/examples/swarm-native/GoalManager.wrapper.clasp.off" "$test_root/examples/swarm-native/GoalManager.wrapper.clasp"
+mv "$test_root/examples/swarm-native/GoalManager.clasp.off" "$test_root/examples/swarm-native/GoalManager.clasp"
 
 goal_manager_xdg_cache="$test_root/xdg-goal-manager-cache"
 goal_manager_xdg_binary="$(

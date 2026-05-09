@@ -417,6 +417,11 @@ launchChildLoop spec = {
     Ok outcome.process
   else if outcome.status == "completed-fail" then
     Ok outcome.process
+  else if outcome.status == "retry-exhausted" then
+    if outcome.process.pid == 0 then
+      watchedProcessError outcome.message
+    else
+      Ok outcome.process
   else
     watchedProcessError outcome.message
 }

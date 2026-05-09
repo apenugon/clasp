@@ -14,6 +14,25 @@ record WatchedProcess = {
   updatedAtMs : Int
 }
 
+record MonitoredLoopSpec = {
+  cwd : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  watchPollMs : Int,
+  awaitTimeoutMs : Int,
+  retryCount : Int,
+  maxRetries : Int,
+  command : [Str]
+}
+
+record MonitoredLoopOutcome = {
+  status : Str,
+  retryExhausted : Bool,
+  message : Str,
+  process : WatchedProcess
+}
+
 record PlannerTaskSpec = {
   taskId : Str,
   role : Str,
@@ -301,6 +320,7 @@ emptySwarmMailboxMessages = []
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
@@ -1054,8 +1074,223 @@ spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Watched
 spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+watchWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result WatchedProcess
+watchWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
+  watchedProcessResult (watchCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
+
 sleepMsValue : Int -> Result Str
 sleepMsValue delayMs = sleepMsRaw delayMs
+
+monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
+monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries command =
+  MonitoredLoopSpec {
+    cwd = cwd,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    watchPollMs = watchPollMs,
+    awaitTimeoutMs = awaitTimeoutMs,
+    retryCount = retryCount,
+    maxRetries = maxRetries,
+    command = command
+  }
+
+monitoredLoopTextIncludes : Str -> Str -> Bool
+monitoredLoopTextIncludes value needle = length (textSplit value needle) > 1
+
+monitoredLoopPlaceholderProcess : MonitoredLoopSpec -> WatchedProcess
+monitoredLoopPlaceholderProcess spec =
+  WatchedProcess {
+    pid = 0,
+    running = false,
+    completed = false,
+    exitCode = 1,
+    stdoutPath = spec.stdoutPath,
+    stderrPath = spec.stderrPath,
+    heartbeatPath = spec.heartbeatPath,
+    updatedAtMs = 0
+  }
+
+monitoredLoopRetryExhausted : MonitoredLoopSpec -> Bool
+monitoredLoopRetryExhausted spec =
+  spec.retryCount >= spec.maxRetries
+
+monitoredLoopRetryableStatus : Str -> Bool
+monitoredLoopRetryableStatus status =
+  if status == "completed-fail" then
+    true
+  else if status == "missing-heartbeat" then
+    true
+  else
+    status == "malformed-unresolved-heartbeat"
+
+monitoredLoopOutcomeFor : MonitoredLoopSpec -> Str -> Str -> WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopOutcomeFor spec status message process = {
+  let exhausted = monitoredLoopRetryExhausted spec in
+  let retryable = monitoredLoopRetryableStatus status in
+  MonitoredLoopOutcome {
+    status = if retryable then if exhausted then "retry-exhausted" else status else status,
+    retryExhausted = if retryable then exhausted else false,
+    message = message,
+    process = process
+  }
+}
+
+monitoredLoopMissingHeartbeat : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopMissingHeartbeat spec =
+  monitoredLoopOutcomeFor
+    spec
+    "missing-heartbeat"
+    (textConcat ["missing heartbeat: ", spec.heartbeatPath])
+    (monitoredLoopPlaceholderProcess spec)
+
+monitoredLoopMalformedHeartbeat : MonitoredLoopSpec -> Str -> MonitoredLoopOutcome
+monitoredLoopMalformedHeartbeat spec message =
+  monitoredLoopOutcomeFor
+    spec
+    "malformed-unresolved-heartbeat"
+    message
+    (monitoredLoopPlaceholderProcess spec)
+
+monitoredLoopClassifyProcess : MonitoredLoopSpec -> WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopClassifyProcess spec process =
+  if process.running then
+    if process.completed then
+      if process.exitCode == 0 then
+        monitoredLoopOutcomeFor spec "completed-pass" "" process
+      else
+        monitoredLoopOutcomeFor spec "completed-fail" "" process
+    else
+      monitoredLoopOutcomeFor spec "running" "" process
+  else if process.completed then
+    if process.exitCode == 0 then
+      monitoredLoopOutcomeFor spec "completed-pass" "" process
+    else
+      monitoredLoopOutcomeFor spec "completed-fail" "" process
+  else
+    monitoredLoopOutcomeFor
+      spec
+      "malformed-unresolved-heartbeat"
+      "heartbeat did not resolve to running or completed"
+      process
+
+monitoredLoopClassifyResult : MonitoredLoopSpec -> Result WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopClassifyResult spec result =
+  match result {
+    Ok process -> monitoredLoopClassifyProcess spec process,
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec
+  }
+
+monitoredLoopHeartbeatTextLooksResolved : Str -> Bool
+monitoredLoopHeartbeatTextLooksResolved raw =
+  if monitoredLoopTextIncludes raw "\"running\"" then
+    if monitoredLoopTextIncludes raw "\"completed\"" then
+      if monitoredLoopTextIncludes raw "\"exitCode\"" then
+        true
+      else
+        false
+    else
+      false
+  else
+    false
+
+monitoredLoopHeartbeatPrecheckError : Str -> Result Str
+monitoredLoopHeartbeatPrecheckError message = Err message
+
+monitoredLoopHeartbeatPrecheck : MonitoredLoopSpec -> Result Str
+monitoredLoopHeartbeatPrecheck spec =
+  if fileExists spec.heartbeatPath == false then
+    monitoredLoopHeartbeatPrecheckError "missing heartbeat"
+  else
+    match readFile spec.heartbeatPath {
+      Err message -> monitoredLoopHeartbeatPrecheckError message,
+      Ok raw ->
+        if monitoredLoopHeartbeatTextLooksResolved raw then
+          Ok raw
+        else
+          monitoredLoopHeartbeatPrecheckError "heartbeat did not resolve to running or completed"
+    }
+
+monitoredLoopReconcile : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopReconcile spec =
+  match monitoredLoopHeartbeatPrecheck spec {
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec,
+    Ok raw ->
+      monitoredLoopClassifyResult spec (reconcileWatchedProcess spec.heartbeatPath)
+  }
+
+monitoredLoopAwait : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopAwait spec =
+  match monitoredLoopHeartbeatPrecheck spec {
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec,
+    Ok raw ->
+      if spec.awaitTimeoutMs <= 0 then
+        monitoredLoopClassifyResult spec (awaitWatchedProcess spec.heartbeatPath spec.watchPollMs)
+      else
+        match awaitWatchedProcessTimeout spec.heartbeatPath spec.watchPollMs spec.awaitTimeoutMs {
+          Ok process -> monitoredLoopClassifyProcess spec process,
+          Err message ->
+            if message == "timeout" then
+              match reconcileWatchedProcess spec.heartbeatPath {
+                Ok process ->
+                  if process.completed then
+                    monitoredLoopClassifyProcess spec process
+                  else if process.running then
+                    monitoredLoopOutcomeFor spec "timeout" "timeout" process
+                  else
+                    monitoredLoopMalformedHeartbeat spec "heartbeat did not resolve to running or completed",
+                Err reconcileMessage ->
+                  monitoredLoopMalformedHeartbeat spec reconcileMessage
+              }
+            else if fileExists spec.heartbeatPath then
+              monitoredLoopMalformedHeartbeat spec message
+            else
+              monitoredLoopMissingHeartbeat spec
+        }
+  }
+
+monitoredLoopSpawn : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopSpawn spec =
+  monitoredLoopClassifyResult
+    spec
+    (spawnWatchedProcess
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command)
+
+monitoredLoopWatch : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopWatch spec =
+  monitoredLoopClassifyResult
+    spec
+    (watchWatchedProcess
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command)
+
+monitoredLoopLaunchOrResume : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopLaunchOrResume spec =
+  if fileExists spec.heartbeatPath then
+    monitoredLoopReconcile spec
+  else
+    monitoredLoopSpawn spec
 
 childLoopStateError : Str -> Result ChildLoopState
 childLoopStateError message = Err message
@@ -1600,12 +1835,61 @@ childLoopHeartbeatPath taskId state =
   else
     taskBuilderHeartbeatPath taskId state.attempt
 
+childLoopMonitorSpecForTaskId : Str -> MonitoredLoopSpec
+childLoopMonitorSpecForTaskId taskId =
+  monitoredLoopSpec
+    managerProjectRoot
+    (taskProcessStdoutPath taskId)
+    (taskProcessStderrPath taskId)
+    (taskProcessHeartbeatPath taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    (readChildLoopManagerRetries taskId)
+    childLoopMaxManagerRetries
+    emptyTexts
+
+childLoopMonitorSpec : PlannerTaskSpec -> MonitoredLoopSpec
+childLoopMonitorSpec spec =
+  monitoredLoopSpec
+    managerProjectRoot
+    (taskProcessStdoutPath spec.taskId)
+    (taskProcessStderrPath spec.taskId)
+    (taskProcessHeartbeatPath spec.taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    (readChildLoopManagerRetries spec.taskId)
+    childLoopMaxManagerRetries
+    (childLoopCommandArgs spec)
+
+childLoopLaunchMonitorSpec : Str -> MonitoredLoopSpec
+childLoopLaunchMonitorSpec taskId =
+  monitoredLoopSpec
+    "."
+    (taskProcessStdoutPath taskId)
+    (taskProcessStderrPath taskId)
+    (taskProcessHeartbeatPath taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    0
+    999999
+    emptyTexts
+
+childLoopLaunchOutcome : Str -> MonitoredLoopOutcome
+childLoopLaunchOutcome taskId =
+  monitoredLoopReconcile (childLoopLaunchMonitorSpec taskId)
+
 childLoopLaunchState : Str -> Result WatchedProcess
-childLoopLaunchState taskId =
-  if fileExists (taskProcessHeartbeatPath taskId) then
-    reconcileWatchedProcess (taskProcessHeartbeatPath taskId)
-  else
+childLoopLaunchState taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "missing-heartbeat" then
     watchedProcessError "missing launch heartbeat"
+  else if outcome.status == "malformed-unresolved-heartbeat" then
+    watchedProcessError outcome.message
+  else if outcome.status == "retry-exhausted" then
+    watchedProcessError outcome.message
+  else
+    Ok outcome.process
+}
 
 childLoopPhaseHeartbeatCompleted : Str -> Bool
 childLoopPhaseHeartbeatCompleted taskId =
@@ -1642,36 +1926,32 @@ childLoopLaunchHeartbeatStale process =
   process.updatedAtMs == 0
 
 childLoopLaunchRunning : Str -> Bool
-childLoopLaunchRunning taskId =
-  match childLoopLaunchState taskId {
-    Ok process ->
-      if process.running then
-        if childLoopLaunchHeartbeatStale process then
-          childLoopPhaseHeartbeatCompleted taskId == false
-        else
-          process.completed == false
-      else
-        false,
-    Err message ->
-      false
-  }
+childLoopLaunchRunning taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "running" then
+    if childLoopLaunchHeartbeatStale outcome.process then
+      childLoopPhaseHeartbeatCompleted taskId == false
+    else
+      true
+  else
+    false
+}
 
 childLoopLaunchCompleted : Str -> Bool
-childLoopLaunchCompleted taskId =
-  match childLoopLaunchState taskId {
-    Ok process ->
-      if process.running then
-        if childLoopLaunchHeartbeatStale process then
-          childLoopPhaseHeartbeatCompleted taskId
-        else
-          false
-      else if process.completed then
-        true
-      else
-        childLoopPhaseHeartbeatCompleted taskId,
-    Err message ->
+childLoopLaunchCompleted taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "completed-pass" then
+    true
+  else if outcome.status == "completed-fail" then
+    true
+  else if outcome.status == "running" then
+    if childLoopLaunchHeartbeatStale outcome.process then
       childLoopPhaseHeartbeatCompleted taskId
-  }
+    else
+      false
+  else
+    childLoopPhaseHeartbeatCompleted taskId
+}
 
 childLoopLaunchPending : Str -> Bool
 childLoopLaunchPending taskId =
@@ -1682,6 +1962,24 @@ childLoopLaunchPending taskId =
       childLoopLaunchRunning taskId
   else
     false
+
+awaitChildLoopOutcome : [Str] -> MonitoredLoopOutcome
+awaitChildLoopOutcome taskIds = {
+  let taskId = firstTextOrEmpty taskIds in
+  let heartbeatError = heartbeatTaskLeases taskIds in
+  let outcome = monitoredLoopAwait (childLoopMonitorSpecForTaskId taskId) in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "child-loop-await:",
+        taskId,
+        ":status=",
+        outcome.status,
+        ":retry-exhausted=",
+        encode outcome.retryExhausted
+      ]) in
+  outcome
+}
 
 childLoopTerminal : Str -> Bool
 childLoopTerminal taskId =
@@ -5064,49 +5362,35 @@ resumePlannerWave : ManagerState -> Str
 resumePlannerWave state =
   if fileExists (plannerReportPathFor state.wave) then
     continueWithPlanResolved state.wave state.benchmarkRuns latestBenchmarkSummaryText (readPlannerReportForWave state.wave)
-  else
-    match tasks swarmStateRoot {
-      Err message ->
-        runPlanner,
-      Ok taskValues ->
-        let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave state.wave) in
-        if taskStatusIsActive plannerTaskStatus then {
-          match managerNext objectiveRef {
-            Ok action -> {
-              let actionRecoversPlanner =
+  else {
+    let recoveryTrace =
+      match tasks swarmStateRoot {
+        Err message ->
+          "",
+        Ok taskValues ->
+          let plannerTaskStatus = taskStatusFor (filter taskInObjective taskValues) (plannerTaskIdForWave state.wave) in
+          if taskStatusIsActive plannerTaskStatus then
+            match managerNext objectiveRef {
+              Ok action ->
                 if action.action == "recover-lease" then
-                  action.taskId == plannerTaskIdForWave state.wave
+                  if action.taskId == plannerTaskIdForWave state.wave then
+                    appendManagerTrace
+                      (textConcat ["planner-wave-", encode state.wave, ":resume-recover-expired-planner-lease:", plannerTaskStatus])
+                  else
+                    ""
                 else
-                  false in
-              if actionRecoversPlanner then {
-                let traceError =
-                  appendManagerTrace
-                    (textConcat ["planner-wave-", encode state.wave, ":resume-recover-expired-planner-lease:", plannerTaskStatus]) in
-                if traceError != "" then
-                  plannerFailure "manager trace write failed" traceError
-                else
-                  runPlanner
-              } else {
-                let traceError = appendManagerTrace (textConcat ["planner-wave-", encode state.wave, ":resume-waiting-for-active-planner:", plannerTaskStatus]) in
-                if traceError != "" then
-                  plannerFailure "manager trace write failed" traceError
-                else
-                  encode (statusView state)
-              }
-            },
-            Err message -> {
-              let traceError =
-                appendManagerTrace
-                  (textConcat ["planner-wave-", encode state.wave, ":resume-manager-next-failed:", message]) in
-              if traceError != "" then
-                plannerFailure "manager trace write failed" traceError
-              else
-                encode (statusView state)
+                  "",
+              Err message ->
+                ""
             }
-          }
-        } else
-          runPlanner
-    }
+          else
+            ""
+      } in
+    if recoveryTrace != "" then
+      plannerFailure "manager trace write failed" recoveryTrace
+    else
+      runPlanner
+  }
 
 completePlannerTaskIfNeeded : Int -> Str
 completePlannerTaskIfNeeded wave =
@@ -5587,14 +5871,32 @@ launchReadyTask wave report spec = {
 }
 
 launchChildLoop : PlannerTaskSpec -> Result WatchedProcess
-launchChildLoop spec =
-  spawnWatchedProcess
-    managerProjectRoot
-    (taskProcessStdoutPath spec.taskId)
-    (taskProcessStderrPath spec.taskId)
-    (taskProcessHeartbeatPath spec.taskId)
-    childLoopWatchPollMs
-    (childLoopCommandArgs spec)
+launchChildLoop spec = {
+  let outcome = monitoredLoopSpawn (childLoopMonitorSpec spec) in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "child-loop-launch:",
+        spec.taskId,
+        ":status=",
+        outcome.status,
+        ":retry-exhausted=",
+        encode outcome.retryExhausted
+      ]) in
+  if outcome.status == "running" then
+    Ok outcome.process
+  else if outcome.status == "completed-pass" then
+    Ok outcome.process
+  else if outcome.status == "completed-fail" then
+    Ok outcome.process
+  else if outcome.status == "retry-exhausted" then
+    if outcome.process.pid == 0 then
+      watchedProcessError outcome.message
+    else
+      Ok outcome.process
+  else
+    watchedProcessError outcome.message
+}
 
 retryChildLoopMissingReport : PlannerTaskSpec -> VerifierReport -> Str
 retryChildLoopMissingReport spec report =
@@ -5960,7 +6262,18 @@ executeReadyTasks report wave benchmarkRuns = {
                   } else
                     launchError
                 };
-                if launchError != "" then
+                let launchReturnTrace =
+                  appendManagerTrace
+                    (textConcat
+                      [
+                        "launch-ready:return:error=",
+                        launchError,
+                        ":active=",
+                        encode (length activeTaskIds)
+                      ]) in
+                if launchReturnTrace != "" then
+                  finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" launchReturnTrace)
+                else if launchError != "" then
                   finalizeWithReport failureState (syntheticFailureReport "planned task launch failed" launchError)
                 else {
                   let runningState =
@@ -5978,15 +6291,17 @@ executeReadyTasks report wave benchmarkRuns = {
                     finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
                   else if length activeTaskIds > 0 then
                     {
-                      let heartbeatError = heartbeatTaskLeases activeTaskIds;
-                      match awaitWatchedProcess
-                        (taskProcessHeartbeatPath (firstTextOrEmpty activeTaskIds))
-                        childLoopWatchPollMs {
-                        Err message ->
-                          continueAfterPlannedTaskBlocker report wave benchmarkRuns (syntheticFailureReport "task wait failed" message),
-                        Ok process ->
-                          executeReadyTasks report wave benchmarkRuns
-                      }
+                      let waitOutcome = awaitChildLoopOutcome activeTaskIds in
+                      let traceTimeout =
+                        if waitOutcome.status == "timeout" then
+                          appendManagerTrace
+                            (textConcat ["task-wait-timeout:", firstTextOrEmpty activeTaskIds])
+                        else
+                          "" in
+                      if traceTimeout != "" then
+                        finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                      else
+                        executeReadyTasks report wave benchmarkRuns
                     }
                   else
                     match tasks swarmStateRoot {
@@ -6048,12 +6363,17 @@ executeReadyTasks report wave benchmarkRuns = {
                             if length readyPlannedIds > 0 then
                               executeReadyTasks report wave benchmarkRuns
                             else if length pendingLaunchIds > 0 then
-                              match awaitWatchedProcess
-                                (taskProcessHeartbeatPath (firstTextOrEmpty pendingLaunchIds))
-                                childLoopWatchPollMs {
-                                Err message ->
-                                  finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
-                                Ok process ->
+                              {
+                                let waitOutcome = awaitChildLoopOutcome pendingLaunchIds in
+                                let traceTimeout =
+                                  if waitOutcome.status == "timeout" then
+                                    appendManagerTrace
+                                      (textConcat ["task-launch-wait-timeout:", firstTextOrEmpty pendingLaunchIds])
+                                  else
+                                    "" in
+                                if traceTimeout != "" then
+                                  finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                                else
                                   executeReadyTasks report wave benchmarkRuns
                               }
                             else if length failedIds > 0 then

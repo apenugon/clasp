@@ -1466,6 +1466,35 @@ fn require_unexpired_lease_owner(
     Ok((task, spec))
 }
 
+fn require_completion_lease_owner(
+    connection: &Connection,
+    task_id: &str,
+    actor: &str,
+) -> Result<(SwarmTaskState, Option<SwarmTaskSpecRecord>), String> {
+    let Some(task) = load_task_state(connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    let spec = load_task_spec(connection, task_id)?;
+    if task.lease_actor.is_empty() {
+        return Err(format!(
+            "swarm task `{task_id}` cannot complete: no lease owner is recorded"
+        ));
+    }
+    if task.status != "leased" && task.status != "active" && task.status != "completed" {
+        return Err(format!(
+            "swarm task `{task_id}` cannot complete: lease ownership is not valid for status `{}`",
+            task.status
+        ));
+    }
+    if task.lease_actor.as_str() != actor {
+        return Err(format!(
+            "swarm task `{task_id}` cannot complete: lease is owned by `{}`",
+            task.lease_actor
+        ));
+    }
+    Ok((task, spec))
+}
+
 fn require_recorded_lease_owner(
     connection: &Connection,
     task_id: &str,
@@ -3905,7 +3934,7 @@ fn execute_event_command(
     } else if kind == "worker_heartbeat" {
         let _ = require_active_lease_owner(&connection, task_id, actor, "record a heartbeat", at_ms)?;
     } else if kind == "task_completed" {
-        let _ = require_active_lease_owner(&connection, task_id, actor, "complete", at_ms)?;
+        let _ = require_completion_lease_owner(&connection, task_id, actor)?;
     } else if kind == "task_failed" {
         let _ = require_recorded_lease_owner(&connection, task_id, actor, "fail")?;
     } else if kind == "task_requeued" {
