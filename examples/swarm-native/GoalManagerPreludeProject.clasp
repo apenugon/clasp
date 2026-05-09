@@ -32,10 +32,46 @@ readTextOrEmpty path = match readFile path {
 }
 
 currentWorkingDir : Str
-currentWorkingDir = match runCommand "." ["pwd"] {
+currentWorkingDir = match runCommand "." ["pwd", "-P"] {
   Ok process -> firstTextOrEmpty (textSplit process.stdout "\n"),
   Err message -> "."
 }
+
+canonicalizePathScript : Str
+canonicalizePathScript = textJoin "\n" [
+  "set -euo pipefail",
+  "path=\"$1\"",
+  "if [ -z \"$path\" ]; then",
+  "  exit 2",
+  "fi",
+  "if command -v realpath >/dev/null 2>&1; then",
+  "  realpath -m -- \"$path\"",
+  "else",
+  "  if [ -d \"$path\" ]; then",
+  "    (cd \"$path\" && pwd -P)",
+  "  else",
+  "    parent=\"$(dirname -- \"$path\")\"",
+  "    name=\"$(basename -- \"$path\")\"",
+  "    mkdir -p \"$parent\"",
+  "    parent_abs=\"$(cd \"$parent\" && pwd -P)\"",
+  "    printf '%s/%s\n' \"$parent_abs\" \"$name\"",
+  "  fi",
+  "fi"
+]
+
+canonicalizePath : Str -> Str
+canonicalizePath value =
+  if value == "" then
+    ""
+  else
+    match runCommand "." ["bash", "-lc", canonicalizePathScript, "canonicalize-path", value] {
+      Ok process ->
+        if process.exitCode == 0 then
+          firstTextOrEmpty (textSplit process.stdout "\n")
+        else
+          value,
+      Err message -> value
+    }
 
 recordedServiceRoot : Str
 recordedServiceRoot = readTextOrEmpty serviceRootRecordPath
@@ -46,8 +82,8 @@ recordedServiceId = readTextOrEmpty serviceIdRecordPath
 recordedProjectRoot : Str
 recordedProjectRoot = readTextOrEmpty projectRootRecordPath
 
-managerProjectRoot : Str
-managerProjectRoot = {
+managerProjectRootRaw : Str
+managerProjectRootRaw = {
   let configured = readEnvText "CLASP_MANAGER_PROJECT_ROOT_JSON" "" in
   if configured != "" then
     configured
@@ -56,6 +92,9 @@ managerProjectRoot = {
   else
     currentWorkingDir
 }
+
+managerProjectRoot : Str
+managerProjectRoot = canonicalizePath managerProjectRootRaw
 
 isAbsolutePath : Str -> Bool
 isAbsolutePath value = match textPrefix value "/" {
@@ -81,8 +120,47 @@ resolveWorkspacePath value =
   else
     pathJoin [currentWorkingDir, value]
 
+requestedWorkspaceRoot : Str
+requestedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+
+canonicalRequestedWorkspaceRoot : Str
+canonicalRequestedWorkspaceRoot = canonicalizePath requestedWorkspaceRoot
+
+canonicalManagerProjectRoot : Str
+canonicalManagerProjectRoot = canonicalizePath managerProjectRoot
+
+managerWorkspaceFallbackRoot : Str
+managerWorkspaceFallbackRoot = canonicalizePath (pathJoin [stateRootPath, "manager-workspace"])
+
+workspaceRootNeedsManagerFallback : Bool
+workspaceRootNeedsManagerFallback =
+  if canonicalRequestedWorkspaceRoot == "" then
+    false
+  else if canonicalRequestedWorkspaceRoot == "/" then
+    true
+  else
+    canonicalRequestedWorkspaceRoot == canonicalManagerProjectRoot
+
 resolvedWorkspaceRoot : Str
-resolvedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+resolvedWorkspaceRoot =
+  if workspaceRootNeedsManagerFallback then
+    managerWorkspaceFallbackRoot
+  else
+    canonicalRequestedWorkspaceRoot
+
+taskWorkspaceCacheRoot : Str
+taskWorkspaceCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-workspaces"]
+
+taskWorkspaceBaselineCacheRoot : Str
+taskWorkspaceBaselineCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-baselines"]
+
+resolvedTaskWorkspaceActualRoot : Str -> Str
+resolvedTaskWorkspaceActualRoot taskId =
+  pathJoin [taskWorkspaceCacheRoot, taskId]
+
+resolvedTaskWorkspaceBaselineActualRoot : Str -> Str
+resolvedTaskWorkspaceBaselineActualRoot taskId =
+  pathJoin [taskWorkspaceBaselineCacheRoot, taskId]
 
 resolvedPlannerSchemaPath : Str
 resolvedPlannerSchemaPath = resolveProjectPath plannerSchemaPath

@@ -266,6 +266,49 @@ do
   fi
 done
 
+no_report_state_root="$test_root_abs/loop-no-report-zero-state"
+no_report_workspace_root="$fixture_project/.clasp-task-workspaces/no-report-zero-task"
+no_report_baseline_root="$fixture_project/.clasp-task-baselines/no-report-zero-task"
+mkdir -p "$no_report_state_root" "$no_report_workspace_root" "$no_report_baseline_root"
+printf 'base\n' >"$no_report_baseline_root/workspace.txt"
+cp -a "$no_report_baseline_root/." "$no_report_workspace_root/"
+printf 'no-report-change\n' >"$no_report_workspace_root/workspace.txt"
+cat >"$no_report_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-running","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$no_report_state_root/builder-1.json" <<'JSON'
+{"summary":"builder completed before verifier transport reported success without a report","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"verifier transport completed without report","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$no_report_state_root/baseline.ready"
+printf 'transport claimed success without writing verifier report\n' >"$no_report_state_root/verifier-1.stdout.jsonl"
+: >"$no_report_state_root/verifier-1.stderr.log"
+cat >"$no_report_state_root/verifier-1.heartbeat.json" <<JSON
+{"pid":0,"running":false,"completed":true,"exitCode":0,"stdoutPath":"$no_report_state_root/verifier-1.stdout.jsonl","stderrPath":"$no_report_state_root/verifier-1.stderr.log","heartbeatPath":"$no_report_state_root/verifier-1.heartbeat.json","updatedAtMs":0}
+JSON
+
+no_report_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$no_report_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$no_report_baseline_root\"" \
+  CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"' \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$no_report_state_root"
+)"
+
+printf '%s\n' "$no_report_output" | grep -Fx 'fail:1' >/dev/null
+test -f "$no_report_state_root/feedback.json"
+test ! -e "$no_report_state_root/verifier-1.json"
+grep -F '"summary":"verifier step failed before producing a durable report"' "$no_report_state_root/feedback.json" >/dev/null
+grep -F 'exit_status=0' "$no_report_state_root/feedback.json" >/dev/null
+grep -F '"phase":"failed"' "$no_report_state_root/state.json" >/dev/null
+grep -F '"verdict":"fail"' "$no_report_state_root/state.json" >/dev/null
+test ! -e "$no_report_state_root/builder-reran.marker"
+if grep -F '"phase":"verifier-running"' "$no_report_state_root/state.json" >/dev/null; then
+  printf 'zero-exit missing-report resume left state at verifier-running\n' >&2
+  exit 1
+fi
+
 manager_list_state_root="$test_root_abs/loop-manager-list-state"
 manager_list_workspace_root="$fixture_project/.clasp-task-workspaces/manager-list-task"
 manager_list_baseline_root="$fixture_project/.clasp-task-baselines/manager-list-task"

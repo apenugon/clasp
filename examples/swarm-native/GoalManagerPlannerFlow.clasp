@@ -84,6 +84,27 @@ resumePlannerWave state =
           runPlanner
     }
 
+retryCurrentPlannerAfterLeaseBlocker : ManagerState -> Str -> Str -> Str
+retryCurrentPlannerAfterLeaseBlocker state summary detail =
+  match fail (plannerHandleForWave state.wave) {
+    Err failMessage ->
+      plannerFailure "planner lease recovery fail transition failed" (textConcat [failMessage, " after ", detail]),
+    Ok failedValue ->
+      match retry (plannerHandleForWave state.wave) {
+        Err retryMessage ->
+          plannerFailure "planner lease recovery retry failed" (textConcat [retryMessage, " after ", detail]),
+        Ok retriedValue -> {
+          let nextState =
+            managerStateFor "needs-planner" "pending" false "" emptyTexts state.wave state.benchmarkRuns false in
+          let stateError = writeManagerState nextState in
+          if stateError != "" then
+            plannerFailure "planner lease recovery state write failed" stateError
+          else
+            runPlanner
+        }
+      }
+  }
+
 completePlannerTaskIfNeeded : Int -> Str
 completePlannerTaskIfNeeded wave =
   match tasks swarmStateRoot {
@@ -234,7 +255,7 @@ runPlanner = {
                     "planner-direct",
                     plannerPromptPath,
                     codexBin,
-                    managerProjectRoot,
+                    resolvedWorkspaceRoot,
                     codexModel,
                     codexReasoningConfig,
                     codexSandbox,
@@ -261,7 +282,7 @@ runPlanner = {
                   else
                     runPlanner
                 } else
-                  plannerFailure "planner lease failed" message
+                  retryCurrentPlannerAfterLeaseBlocker state "planner lease failed" message
               } else if length (textSplit message "lease held by `manager`") > 1 then {
                 let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":recoverable-lease-blocker:planner lease failed:", message]) in
                 if traceError != "" then
@@ -276,7 +297,7 @@ runPlanner = {
                   else
                     runPlanner
                 } else
-                  plannerFailure "planner lease failed" message
+                  retryCurrentPlannerAfterLeaseBlocker state "planner lease failed" message
               } else
                 plannerFailure "planner lease failed" message,
             Ok leaseValue -> {

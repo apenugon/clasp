@@ -55,7 +55,7 @@ plannerInputFingerprintSourceFor wave benchmarkSummary =
     textConcat ["planner-policy:", plannerPolicyText],
     textConcat ["schema-path:", resolvedPlannerSchemaPath],
     textConcat ["project-root:", managerProjectRoot],
-    textConcat ["workspace-root:", workspaceRoot],
+    textConcat ["workspace-root:", resolvedWorkspaceRoot],
     textConcat ["wave:", encode wave],
     textConcat ["benchmark-enabled:", encode benchmarkEnabled],
     textConcat ["benchmark-summary:", benchmarkSummary],
@@ -70,7 +70,7 @@ plannerInputStateFor wave benchmarkSummary =
     goalText = goalText,
     plannerPolicy = plannerPolicyText,
     schemaPath = resolvedPlannerSchemaPath,
-    workspaceRoot = workspaceRoot,
+    workspaceRoot = resolvedWorkspaceRoot,
     mailboxSummary = mailboxSummary
   }
 

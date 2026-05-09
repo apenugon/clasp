@@ -1374,10 +1374,46 @@ readTextOrEmpty path = match readFile path {
 }
 
 currentWorkingDir : Str
-currentWorkingDir = match runCommand "." ["pwd"] {
+currentWorkingDir = match runCommand "." ["pwd", "-P"] {
   Ok process -> firstTextOrEmpty (textSplit process.stdout "\n"),
   Err message -> "."
 }
+
+canonicalizePathScript : Str
+canonicalizePathScript = textJoin "\n" [
+  "set -euo pipefail",
+  "path=\"$1\"",
+  "if [ -z \"$path\" ]; then",
+  "  exit 2",
+  "fi",
+  "if command -v realpath >/dev/null 2>&1; then",
+  "  realpath -m -- \"$path\"",
+  "else",
+  "  if [ -d \"$path\" ]; then",
+  "    (cd \"$path\" && pwd -P)",
+  "  else",
+  "    parent=\"$(dirname -- \"$path\")\"",
+  "    name=\"$(basename -- \"$path\")\"",
+  "    mkdir -p \"$parent\"",
+  "    parent_abs=\"$(cd \"$parent\" && pwd -P)\"",
+  "    printf '%s/%s\n' \"$parent_abs\" \"$name\"",
+  "  fi",
+  "fi"
+]
+
+canonicalizePath : Str -> Str
+canonicalizePath value =
+  if value == "" then
+    ""
+  else
+    match runCommand "." ["bash", "-lc", canonicalizePathScript, "canonicalize-path", value] {
+      Ok process ->
+        if process.exitCode == 0 then
+          firstTextOrEmpty (textSplit process.stdout "\n")
+        else
+          value,
+      Err message -> value
+    }
 
 recordedServiceRoot : Str
 recordedServiceRoot = readTextOrEmpty serviceRootRecordPath
@@ -1388,8 +1424,8 @@ recordedServiceId = readTextOrEmpty serviceIdRecordPath
 recordedProjectRoot : Str
 recordedProjectRoot = readTextOrEmpty projectRootRecordPath
 
-managerProjectRoot : Str
-managerProjectRoot = {
+managerProjectRootRaw : Str
+managerProjectRootRaw = {
   let configured = readEnvText "CLASP_MANAGER_PROJECT_ROOT_JSON" "" in
   if configured != "" then
     configured
@@ -1398,6 +1434,9 @@ managerProjectRoot = {
   else
     currentWorkingDir
 }
+
+managerProjectRoot : Str
+managerProjectRoot = canonicalizePath managerProjectRootRaw
 
 isAbsolutePath : Str -> Bool
 isAbsolutePath value = match textPrefix value "/" {
@@ -1423,8 +1462,33 @@ resolveWorkspacePath value =
   else
     pathJoin [currentWorkingDir, value]
 
+requestedWorkspaceRoot : Str
+requestedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+
+canonicalRequestedWorkspaceRoot : Str
+canonicalRequestedWorkspaceRoot = canonicalizePath requestedWorkspaceRoot
+
+canonicalManagerProjectRoot : Str
+canonicalManagerProjectRoot = canonicalizePath managerProjectRoot
+
+managerWorkspaceFallbackRoot : Str
+managerWorkspaceFallbackRoot = canonicalizePath (pathJoin [stateRootPath, "manager-workspace"])
+
+workspaceRootNeedsManagerFallback : Bool
+workspaceRootNeedsManagerFallback =
+  if canonicalRequestedWorkspaceRoot == "" then
+    false
+  else if canonicalRequestedWorkspaceRoot == "/" then
+    true
+  else
+    canonicalRequestedWorkspaceRoot == canonicalManagerProjectRoot
+
 resolvedWorkspaceRoot : Str
-resolvedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+resolvedWorkspaceRoot =
+  if workspaceRootNeedsManagerFallback then
+    managerWorkspaceFallbackRoot
+  else
+    canonicalRequestedWorkspaceRoot
 
 resolvedPlannerSchemaPath : Str
 resolvedPlannerSchemaPath = resolveProjectPath plannerSchemaPath
@@ -2467,7 +2531,7 @@ ensureTaskWorkspace taskId = {
                   "tar -cf - ",
                   workspaceCloneExcludeFlags,
                   "-C ",
-                  workspaceRoot,
+                  resolvedWorkspaceRoot,
                   " . | tar -xf - -C ",
                   taskWorkspaceActualRoot taskId
                 ]
@@ -2726,7 +2790,7 @@ promoteVerifiedTaskWorkspace spec =
     "promote-task-workspace",
     taskWorkspaceActualRoot spec.taskId,
     taskWorkspaceBaselineActualRoot spec.taskId,
-    workspaceRoot,
+    resolvedWorkspaceRoot,
     taskPromotionConflictPath spec.taskId,
     taskPromotionDiffPath spec.taskId
   ] {
@@ -2922,7 +2986,7 @@ plannerInputFingerprintSourceFor wave benchmarkSummary =
     textConcat ["planner-policy:", plannerPolicyText],
     textConcat ["schema-path:", resolvedPlannerSchemaPath],
     textConcat ["project-root:", managerProjectRoot],
-    textConcat ["workspace-root:", workspaceRoot],
+    textConcat ["workspace-root:", resolvedWorkspaceRoot],
     textConcat ["wave:", encode wave],
     textConcat ["benchmark-enabled:", encode benchmarkEnabled],
     textConcat ["benchmark-summary:", benchmarkSummary],
@@ -2938,7 +3002,7 @@ plannerInputStateFor wave benchmarkSummary =
     goalText = goalText,
     plannerPolicy = plannerPolicyText,
     schemaPath = resolvedPlannerSchemaPath,
-    workspaceRoot = workspaceRoot,
+    workspaceRoot = resolvedWorkspaceRoot,
     mailboxSummary = mailboxSummary
   }
 
@@ -3114,7 +3178,7 @@ benchmarkCommandArgs wave benchmarkRuns =
       "env",
       textConcat ["CLASP_MANAGER_STATE_ROOT=", stateRootPath],
       textConcat ["CLASP_MANAGER_PROJECT_ROOT=", managerProjectRoot],
-      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", workspaceRoot],
+      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", resolvedWorkspaceRoot],
       textConcat ["CLASP_MANAGER_BENCHMARK_WAVE=", encode wave],
       textConcat ["CLASP_MANAGER_BENCHMARK_RUNS=", encode benchmarkRuns]
     ]
@@ -4306,17 +4370,43 @@ managerWorkspaceSnapshotScript = textJoin "\n" [
   "set -euo pipefail",
   "src=\"$1\"",
   "dst=\"$2\"",
-  "if [ -z \"$dst\" ] || [ \"$dst\" = \"/\" ]; then",
+  "if [ -z \"$src\" ] || [ -z \"$dst\" ]; then",
+  "  printf 'refusing empty workspace snapshot path: src=%s dst=%s\n' \"$src\" \"$dst\" >&2",
+  "  exit 2",
+  "fi",
+  "canonical_path() {",
+  "  if command -v realpath >/dev/null 2>&1; then",
+  "    realpath -m -- \"$1\"",
+  "  elif [ -d \"$1\" ]; then",
+  "    (cd \"$1\" && pwd -P)",
+  "  else",
+  "    parent=\"$(dirname -- \"$1\")\"",
+  "    name=\"$(basename -- \"$1\")\"",
+  "    mkdir -p \"$parent\"",
+  "    parent_abs=\"$(cd \"$parent\" && pwd -P)\"",
+  "    printf '%s/%s\n' \"$parent_abs\" \"$name\"",
+  "  fi",
+  "}",
+  "src_canon=\"$(canonical_path \"$src\")\"",
+  "dst_canon=\"$(canonical_path \"$dst\")\"",
+  "if [ -z \"$dst_canon\" ] || [ \"$dst_canon\" = \"/\" ]; then",
   "  printf 'refusing unsafe workspace root: %s\n' \"$dst\" >&2",
   "  exit 2",
   "fi",
-  "if [ \"$src\" = \"$dst\" ]; then",
+  "if [ \"$src_canon\" = \"$dst_canon\" ]; then",
   "  printf 'workspace root must differ from project root: %s\n' \"$dst\" >&2",
   "  exit 2",
   "fi",
-  "rm -rf \"$dst\"",
-  "mkdir -p \"$dst\"",
-  textConcat ["tar -cf - ", workspaceCloneExcludeFlags, "-C \"$src\" . | tar -xf - -C \"$dst\""]
+  "extra_exclude=()",
+  "case \"$dst_canon\" in",
+  "  \"$src_canon\"/*)",
+  "    dst_rel=\"${dst_canon#\"$src_canon\"/}\"",
+  "    extra_exclude+=(--exclude=\"$dst_rel\" --exclude=\"$dst_rel/*\")",
+  "    ;;",
+  "esac",
+  "rm -rf \"$dst_canon\"",
+  "mkdir -p \"$dst_canon\"",
+  textConcat ["tar -cf - ", workspaceCloneExcludeFlags, "\"${extra_exclude[@]}\" -C \"$src_canon\" . | tar -xf - -C \"$dst_canon\""]
 ]
 
 managerWorkspaceManifestText : Int -> Str
@@ -4558,7 +4648,7 @@ plannerCommandFor wave benchmarkSummary =
       "exec",
       "--json",
       "--cd",
-      managerProjectRoot,
+      resolvedWorkspaceRoot,
       "-m",
       codexModel,
       "-c",
@@ -4979,6 +5069,27 @@ recoverablePlannerTransportFailure detail =
   else
     textIncludes detail "exitCode=124"
 
+retryCurrentPlannerAfterLeaseBlocker : ManagerState -> Str -> Str -> Str
+retryCurrentPlannerAfterLeaseBlocker state summary detail =
+  match fail (plannerHandleForWave state.wave) {
+    Err failMessage ->
+      plannerFailure "planner lease recovery fail transition failed" (textConcat [failMessage, " after ", detail]),
+    Ok failedValue ->
+      match retry (plannerHandleForWave state.wave) {
+        Err retryMessage ->
+          plannerFailure "planner lease recovery retry failed" (textConcat [retryMessage, " after ", detail]),
+        Ok retriedValue -> {
+          let nextState =
+            managerStateFor "needs-planner" "pending" false "" emptyTexts state.wave state.benchmarkRuns false in
+          let stateError = writeManagerState nextState in
+          if stateError != "" then
+            plannerFailure "planner lease recovery state write failed" stateError
+          else
+            runPlanner
+        }
+      }
+  }
+
 continueAfterPlannerLeaseBlocker : Str -> Str -> Str
 continueAfterPlannerLeaseBlocker summary detail = {
   let state = readManagerState in
@@ -5006,7 +5117,7 @@ continueAfterPlannerLeaseBlocker summary detail = {
         runPlanner
     }
   } else
-    plannerFailure summary detail
+    retryCurrentPlannerAfterLeaseBlocker state summary detail
 }
 
 continueAfterPlannerTransportBlocker : Str -> Str -> Str

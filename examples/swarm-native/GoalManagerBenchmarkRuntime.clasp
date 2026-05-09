@@ -64,7 +64,7 @@ benchmarkCommandArgs wave benchmarkRuns =
       "env",
       textConcat ["CLASP_MANAGER_STATE_ROOT=", stateRootPath],
       textConcat ["CLASP_MANAGER_PROJECT_ROOT=", managerProjectRoot],
-      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", workspaceRoot],
+      textConcat ["CLASP_MANAGER_WORKSPACE_ROOT=", resolvedWorkspaceRoot],
       textConcat ["CLASP_MANAGER_BENCHMARK_WAVE=", encode wave],
       textConcat ["CLASP_MANAGER_BENCHMARK_RUNS=", encode benchmarkRuns]
     ]

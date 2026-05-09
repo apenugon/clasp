@@ -1934,6 +1934,44 @@ finishPass attempt report =
         textConcat ["pass:", encode attempt]
   }
 
+persistFinalFailure : Int -> VerifierReport -> Str
+persistFinalFailure attempt report = {
+  let stateError = writeLoopState (loopState attempt "failed" "fail" false attempt attempt false true report.summary true) in
+  if stateError != "" then
+    textConcat ["state-error:", stateError]
+  else
+    match writeFile feedbackPath (encode report) {
+      Ok written ->
+        textConcat ["fail:", encode attempt],
+      Err message ->
+        textConcat ["feedback-error:", message]
+    }
+}
+
+missingVerifierReportFailure : Int -> ProcessResult -> VerifierReport
+missingVerifierReportFailure attempt result =
+  syntheticFailureReport
+    "verifier step failed before producing a durable report"
+    (textJoin "\n" [
+      textConcat ["exit_status=", encode result.exitCode],
+      textConcat ["report_path=", verifierReportPath attempt],
+      textConcat ["stderr_tail=", result.stderr],
+      textConcat ["stdout_tail=", result.stdout]
+    ])
+
+finalizeVerifierRun : Int -> ProcessResult -> Str
+finalizeVerifierRun attempt result =
+  if fileExists (verifierReportPath attempt) then {
+    let report = readVerifierReport attempt in
+    if report.verdict == "pass" then
+      finishPass attempt report
+    else
+      persistFailureAndContinue attempt report
+  } else if result.exitCode == 0 then
+    persistFinalFailure attempt (missingVerifierReportFailure attempt result)
+  else
+    persistFailureAndContinue attempt (missingVerifierReportFailure attempt result)
+
 runVerifierPhase : Int -> Str
 runVerifierPhase attempt =
   if attempt > maxAttempts then
@@ -1950,12 +1988,7 @@ runVerifierPhase attempt =
         let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
         let verifierStep = stepHandle "verifier" attempt in
         let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
-        if verifierRun.exitCode == 0 then
-          textConcat ["pass:", encode attempt]
-        else if attempt == maxAttempts then
-          textConcat ["fail:", encode attempt]
-        else
-          runBuilderPhase (incrementAttempt attempt)
+        finalizeVerifierRun attempt verifierRun
       }
     }
   }

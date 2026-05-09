@@ -13,7 +13,7 @@ codexCommand schemaPath reportPath prompt = [
   "exec",
   "--json",
   "--cd",
-  managerProjectRoot,
+  resolvedWorkspaceRoot,
   "-m",
   codexModel,
   "-c",
@@ -49,10 +49,10 @@ plannerBenchmarkContextFor wave benchmarkSummary =
     textConcat ["Current wave: ", encode wave, " of ", encode maxWaves]
 
 plannerTaskWorkspaceCacheRoot : Str
-plannerTaskWorkspaceCacheRoot = pathJoin [workspaceRoot, ".clasp-task-workspaces"]
+plannerTaskWorkspaceCacheRoot = taskWorkspaceCacheRoot
 
 plannerTaskWorkspaceBaselineCacheRoot : Str
-plannerTaskWorkspaceBaselineCacheRoot = pathJoin [workspaceRoot, ".clasp-task-baselines"]
+plannerTaskWorkspaceBaselineCacheRoot = taskWorkspaceBaselineCacheRoot
 
 managerHealthSummaryText : Int -> Str
 managerHealthSummaryText wave =
@@ -90,7 +90,7 @@ plannerCommandFor wave benchmarkSummary =
       "exec",
       "--json",
       "--cd",
-      managerProjectRoot,
+      resolvedWorkspaceRoot,
       "-m",
       codexModel,
       "-c",

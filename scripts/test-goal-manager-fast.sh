@@ -86,6 +86,16 @@ json_number_field() {
   grep -o "\"$field\":[0-9]*" "$path" 2>/dev/null | head -1 | cut -d: -f2
 }
 
+file_hash_or_missing() {
+  local path="$1"
+
+  if [[ -e "$path" ]]; then
+    sha256sum "$path" | awk '{print "file:" $1}'
+  else
+    printf 'missing\n'
+  fi
+}
+
 service_supervisor_pid_for() {
   local state_root="$1"
   local supervisor_config="$state_root/service/supervisor.config.json"
@@ -149,6 +159,7 @@ stop_goal_manager_service() {
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 fake_codex_bin="$test_root_abs/codex"
 fake_child_claspc_bin="$test_root_abs/fake-claspc"
+fake_passing_benchmark_bin="$test_root_abs/fake-benchmark-passing"
 fake_slow_benchmark_bin="$test_root_abs/fake-benchmark-slow"
 fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
@@ -627,6 +638,25 @@ printf 'fake child loop completed\n'
 EOF
 chmod +x "$fake_child_claspc_bin"
 
+cat >"$fake_passing_benchmark_bin" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${CLASP_MANAGER_BENCHMARK_WAVE:-}" != "1" ]]; then
+  printf 'unexpected benchmark wave: %s\n' "${CLASP_MANAGER_BENCHMARK_WAVE:-}" >&2
+  exit 2
+fi
+if [[ "${CLASP_MANAGER_BENCHMARK_RUNS:-}" != "0" ]]; then
+  printf 'unexpected benchmark run count: %s\n' "${CLASP_MANAGER_BENCHMARK_RUNS:-}" >&2
+  exit 2
+fi
+
+cat <<'JSON'
+{"suite":"appbench","summary":"wave 1 benchmark meets target.","passed":true,"meetsTarget":true,"scoreName":"timeToGreenMs","scoreValue":100,"targetName":"maxTimeToGreenMs","targetValue":120}
+JSON
+EOF
+chmod +x "$fake_passing_benchmark_bin"
+
 cat >"$fake_slow_benchmark_bin" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -803,6 +833,58 @@ run_task_workspace_harness() {
 }
 
 if [[ "${CLASP_GOAL_MANAGER_FAST_STATUS_ONLY:-0}" != "1" ]]; then
+trace_case "safe-manager-workspace-root-fallback"
+safe_root_state="$test_root_abs/safe-root-state"
+safe_root_output="$test_root_abs/safe-root-output.txt"
+safe_root_manifest="$safe_root_state/manager-workspace/.clasp-manager-workspace-manifest.json"
+safe_root_agents_hash_before="$(sha256sum "$project_root/AGENTS.md" | awk '{print $1}')"
+safe_root_workspace_hash_before="$(sha256sum "$project_root/workspace.txt" | awk '{print $1}')"
+safe_root_goal_manager_hash_before="$(sha256sum "$project_root/examples/swarm-native/GoalManager.clasp" | awk '{print $1}')"
+safe_root_project_ready_hash_before="$(file_hash_or_missing "$project_root/.clasp-manager-workspace-ready")"
+safe_root_project_manifest_hash_before="$(file_hash_or_missing "$project_root/.clasp-manager-workspace-manifest.json")"
+(
+  cd "$project_root"
+  run_actual_goal_manager "$safe_root_state" "." \
+    CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+    CLASP_MANAGER_MAX_WAVES_JSON='1' \
+    >"$safe_root_output" 2>&1
+)
+grep -F '"phase":"completed"' "$safe_root_output" >/dev/null
+grep -F '"verdict":"pass"' "$safe_root_output" >/dev/null
+if grep -F 'workspace-root-error' "$safe_root_output" "$safe_root_state/status.json" "$safe_root_state/feedback.json" >/dev/null 2>&1; then
+  echo "manager reported workspace-root-error for project-root workspace fallback" >&2
+  sed -n '1,120p' "$safe_root_output" >&2 || true
+  exit 1
+fi
+test -f "$safe_root_state/status.json"
+test -f "$safe_root_state/service.ready"
+test -f "$safe_root_state/manager-workspace/.clasp-manager-workspace-ready"
+test -f "$safe_root_manifest"
+node - "$safe_root_manifest" "$project_root" "$safe_root_state/manager-workspace" <<'NODE'
+const fs = require('fs');
+const manifestPath = process.argv[2];
+const expectedProjectRoot = fs.realpathSync(process.argv[3]);
+const expectedWorkspaceRoot = fs.realpathSync(process.argv[4]);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+if (manifest.kind !== 'clasp-manager-workspace') {
+  throw new Error(`unexpected manifest kind: ${manifest.kind}`);
+}
+if (manifest.workspaceRoot !== '.') {
+  throw new Error(`expected requested workspace '.', got ${manifest.workspaceRoot}`);
+}
+if (manifest.projectRoot !== expectedProjectRoot) {
+  throw new Error(`expected projectRoot ${expectedProjectRoot}, got ${manifest.projectRoot}`);
+}
+if (manifest.actualWorkspaceRoot !== expectedWorkspaceRoot) {
+  throw new Error(`expected actualWorkspaceRoot ${expectedWorkspaceRoot}, got ${manifest.actualWorkspaceRoot}`);
+}
+NODE
+[[ "$(file_hash_or_missing "$project_root/.clasp-manager-workspace-ready")" == "$safe_root_project_ready_hash_before" ]]
+[[ "$(file_hash_or_missing "$project_root/.clasp-manager-workspace-manifest.json")" == "$safe_root_project_manifest_hash_before" ]]
+[[ "$(sha256sum "$project_root/AGENTS.md" | awk '{print $1}')" == "$safe_root_agents_hash_before" ]]
+[[ "$(sha256sum "$project_root/workspace.txt" | awk '{print $1}')" == "$safe_root_workspace_hash_before" ]]
+[[ "$(sha256sum "$project_root/examples/swarm-native/GoalManager.clasp" | awk '{print $1}')" == "$safe_root_goal_manager_hash_before" ]]
+
 trace_case "benchmark-resume-noisy-stdout"
 benchmark_resume_state="$test_root_abs/benchmark-resume-state"
 benchmark_resume_workspace="$test_root_abs/benchmark-resume-workspace"
@@ -849,6 +931,55 @@ grep -F 'fake benchmark log before signal' "$benchmark_resume_state/benchmark-1.
 grep -Fx 'fixed-after-feedback' "$benchmark_resume_workspace/workspace.txt" >/dev/null
 grep -Fx 'fixed-after-feedback' "$benchmark_resume_workspace/notes/child-artifact.txt" >/dev/null
 test ! -e "$benchmark_resume_workspace/.clasp-test-tmp/noise.txt"
+
+trace_case "benchmark-checkpoint-pass-status"
+benchmark_pass_state="$test_root_abs/benchmark-pass-state"
+benchmark_pass_workspace="$test_root_abs/benchmark-pass-workspace"
+benchmark_pass_output="$test_root_abs/benchmark-pass-output.txt"
+benchmark_pass_status="$test_root_abs/benchmark-pass-status.json"
+mkdir -p "$benchmark_pass_workspace"
+run_actual_goal_manager "$benchmark_pass_state" "$benchmark_pass_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$fake_passing_benchmark_bin\"]" \
+  >"$benchmark_pass_output" 2>&1
+benchmark_pass_status_result="$(
+  run_actual_goal_manager_status "$benchmark_pass_state" "$benchmark_pass_workspace" \
+    CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+    CLASP_MANAGER_MAX_WAVES_JSON='1' \
+    CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$fake_passing_benchmark_bin\"]"
+)"
+printf '%s\n' "$benchmark_pass_status_result" >"$benchmark_pass_status"
+test -f "$benchmark_pass_state/benchmark-1.json"
+test -f "$benchmark_pass_state/benchmark-latest.json"
+node - "$benchmark_pass_status" "$benchmark_pass_state/benchmark-1.json" "$benchmark_pass_state/benchmark-latest.json" <<'NODE'
+const fs = require('fs');
+const [statusPath, checkpointPath, latestPath] = process.argv.slice(2);
+const status = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
+const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(status.state.phase === 'completed', `expected completed phase, got ${status.state.phase}`);
+assert(status.state.verdict === 'pass', `expected pass verdict, got ${status.state.verdict}`);
+assert(status.state.completed === true, 'expected completed=true');
+assert(status.state.final === true, 'expected final=true');
+assert(status.state.benchmarkRuns === 1, `expected benchmarkRuns=1, got ${status.state.benchmarkRuns}`);
+assert(status.benchmarkTargetMet === true, 'expected status benchmarkTargetMet=true');
+assert(status.benchmarkSummary === 'wave 1 benchmark meets target.', `unexpected benchmark summary: ${status.benchmarkSummary}`);
+for (const [label, value] of [['benchmark-1', checkpoint], ['benchmark-latest', latest]]) {
+  assert(value.wave === 1, `${label} expected wave=1, got ${value.wave}`);
+  assert(value.suite === 'appbench', `${label} expected suite=appbench, got ${value.suite}`);
+  assert(value.meetsTarget === true, `${label} expected meetsTarget=true`);
+  assert(value.summary === 'wave 1 benchmark meets target.', `${label} unexpected summary: ${value.summary}`);
+}
+assert(JSON.stringify(checkpoint) === JSON.stringify(latest), 'latest checkpoint should match benchmark-1');
+NODE
 fi
 
 trace_case "status-waiting-reasons-dependency-blocked"
@@ -1020,6 +1151,7 @@ run_goal_manager "$failed_benchmark_state" "$failed_benchmark_workspace" \
 grep -F '"phase":"completed"' "$failed_benchmark_output" >/dev/null
 grep -F '"verdict":"pass"' "$failed_benchmark_output" >/dev/null
 grep -F '"wave":2' "$failed_benchmark_state/status.json" >/dev/null
+grep -F '"benchmarkRuns":1' "$failed_benchmark_state/status.json" >/dev/null
 test ! -f "$failed_benchmark_state/benchmark-1.json"
 test -f "$failed_benchmark_state/benchmark-2.json"
 grep -F '"summary":"fake first wave failed"' "$failed_benchmark_state/loop-benchmark-gap/feedback.json" >/dev/null
