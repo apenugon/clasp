@@ -1,5 +1,6 @@
 module GoalManagerTaskStatusRuntime
 
+import GoalManagerMonitoredLoop
 import GoalManagerWatch
 import GoalManagerPrelude
 import GoalManagerConfig
@@ -29,36 +30,97 @@ childLoopHeartbeatPath taskId state =
   else
     taskBuilderHeartbeatPath taskId state.attempt
 
+childLoopLaunchMonitorSpec : Str -> MonitoredLoopSpec
+childLoopLaunchMonitorSpec taskId =
+  monitoredLoopSpec
+    "."
+    (taskProcessStdoutPath taskId)
+    (taskProcessStderrPath taskId)
+    (taskProcessHeartbeatPath taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    0
+    999999
+    emptyTexts
+
+childLoopLaunchOutcome : Str -> MonitoredLoopOutcome
+childLoopLaunchOutcome taskId =
+  monitoredLoopReconcile (childLoopLaunchMonitorSpec taskId)
+
 childLoopLaunchState : Str -> Result WatchedProcess
-childLoopLaunchState taskId =
-  if fileExists (taskProcessHeartbeatPath taskId) then
-    reconcileWatchedProcess (taskProcessHeartbeatPath taskId)
-  else
+childLoopLaunchState taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "missing-heartbeat" then
     watchedProcessError "missing launch heartbeat"
+  else if outcome.status == "malformed-unresolved-heartbeat" then
+    watchedProcessError outcome.message
+  else if outcome.status == "retry-exhausted" then
+    watchedProcessError outcome.message
+  else
+    Ok outcome.process
+}
+
+childLoopPhaseHeartbeatCompleted : Str -> Bool
+childLoopPhaseHeartbeatCompleted taskId =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if state.final then
+          true
+        else if state.completed then
+          true
+        else {
+          let heartbeatPath = childLoopHeartbeatPath taskId state in
+          if fileExists heartbeatPath then
+            match reconcileWatchedProcess heartbeatPath {
+              Ok process ->
+                if process.running then
+                  false
+                else
+                  process.completed,
+              Err message ->
+                false
+            }
+          else
+            false
+        },
+      Err message ->
+        false
+    }
+  else
+    false
+
+childLoopLaunchHeartbeatStale : WatchedProcess -> Bool
+childLoopLaunchHeartbeatStale process =
+  process.updatedAtMs == 0
 
 childLoopLaunchRunning : Str -> Bool
-childLoopLaunchRunning taskId =
-  match childLoopLaunchState taskId {
-    Ok process ->
-      if process.running then
-        process.completed == false
-      else
-        false,
-    Err message ->
-      false
-  }
+childLoopLaunchRunning taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "running" then
+    if childLoopLaunchHeartbeatStale outcome.process then
+      childLoopPhaseHeartbeatCompleted taskId == false
+    else
+      true
+  else
+    false
+}
 
 childLoopLaunchCompleted : Str -> Bool
-childLoopLaunchCompleted taskId =
-  match childLoopLaunchState taskId {
-    Ok process ->
-      if process.running then
-        false
-      else
-        process.completed,
-    Err message ->
+childLoopLaunchCompleted taskId = {
+  let outcome = childLoopLaunchOutcome taskId in
+  if outcome.status == "completed-pass" then
+    true
+  else if outcome.status == "completed-fail" then
+    true
+  else if outcome.status == "running" then
+    if childLoopLaunchHeartbeatStale outcome.process then
+      childLoopPhaseHeartbeatCompleted taskId
+    else
       false
-  }
+  else
+    childLoopPhaseHeartbeatCompleted taskId
+}
 
 childLoopLaunchPending : Str -> Bool
 childLoopLaunchPending taskId =

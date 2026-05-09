@@ -1409,6 +1409,7 @@ JSON
 run_goal_manager "$missing_launch_state" "$missing_launch_workspace"   CLASP_MANAGER_TRACE_JSON='true'   CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON='2'   CLASP_MANAGER_MAX_WAVES_JSON='1'   >"$missing_launch_output" 2>&1
 grep -F '"phase":"completed"' "$missing_launch_output" >/dev/null
 grep -F '"verdict":"pass"' "$missing_launch_output" >/dev/null
+grep -F 'launch-outcome=missing-heartbeat' "$missing_launch_state/trace.log" >/dev/null
 grep -F 'child-loop-retry:heartbeat-gap:missing-launch-heartbeat:retry=1' "$missing_launch_state/trace.log" >/dev/null
 grep -Fx '1' "$missing_launch_state/child-loop-retries-heartbeat-gap.json" >/dev/null
 grep -F '"summary":"fake child loop completed"' "$missing_launch_loop/feedback.json" >/dev/null
@@ -1434,6 +1435,7 @@ JSON
 run_goal_manager "$invalid_launch_state" "$invalid_launch_workspace"   CLASP_MANAGER_TRACE_JSON='true'   CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON='2'   CLASP_MANAGER_MAX_WAVES_JSON='1'   >"$invalid_launch_output" 2>&1
 grep -F '"phase":"completed"' "$invalid_launch_output" >/dev/null
 grep -F '"verdict":"pass"' "$invalid_launch_output" >/dev/null
+grep -F 'launch-outcome=malformed-unresolved-heartbeat' "$invalid_launch_state/trace.log" >/dev/null
 grep -F 'child-loop-retry:invalid-heartbeat:missing-launch-heartbeat:retry=1' "$invalid_launch_state/trace.log" >/dev/null
 grep -Fx '1' "$invalid_launch_state/child-loop-retries-invalid-heartbeat.json" >/dev/null
 grep -F '"summary":"fake child loop completed"' "$invalid_launch_state/loop-invalid-heartbeat/feedback.json" >/dev/null
@@ -1542,6 +1544,7 @@ grep -F '"verdict":"pass"' "$heartbeat_child_output" >/dev/null
 "$claspc_bin" --json swarm status "$heartbeat_child_state" benchmark-gap >"$heartbeat_child_status"
 grep -F '"status":"completed"' "$heartbeat_child_status" >/dev/null
 grep -F '"heartbeatSeen":true' "$heartbeat_child_status" >/dev/null
+grep -F 'child-loop-await:benchmark-gap:status=timeout' "$heartbeat_child_state/trace.log" >/dev/null
 if grep -F 'task-complete-expired-lease-recovered:benchmark-gap' "$heartbeat_child_state/trace.log" >/dev/null 2>&1; then
   echo "manager heartbeats should keep long child leases fresh instead of relying on completion recovery" >&2
   exit 1

@@ -1,5 +1,7 @@
 module GoalManagerTaskExecutionHelpers
 
+import GoalManagerMonitoredLoop
+import GoalManagerChildLoopMonitor
 import GoalManagerBootstrapTasks
 import GoalManagerTaskWorkspaceRuntime
 import GoalManagerBenchmarkCommand
@@ -23,37 +25,6 @@ plannedTaskStalledReport report =
   syntheticFailureReport
     "planned task execution stalled"
     (textConcat ["No running or ready planned task remained for ", report.objectiveSummary, "."])
-
-taskManagerRetryPath : Str -> Str
-taskManagerRetryPath taskId = pathJoin [stateRootPath, textConcat ["child-loop-retries-", taskId, ".json"]]
-
-readChildLoopManagerRetries : Str -> Int
-readChildLoopManagerRetries taskId =
-  if fileExists (taskManagerRetryPath taskId) then
-    match readFile (taskManagerRetryPath taskId) {
-      Ok raw -> decode Int raw,
-      Err message -> 0
-    }
-  else
-    0
-
-writeChildLoopManagerRetries : Str -> Int -> Str
-writeChildLoopManagerRetries taskId retryCount =
-  match writeFile (taskManagerRetryPath taskId) (encode retryCount) {
-    Ok written -> "",
-    Err message -> message
-  }
-
-childLoopMaxManagerRetries : Int
-childLoopMaxManagerRetries =
-  if childMaxAttempts <= 1 then
-    0
-  else
-    decrementManagerCounter childMaxAttempts
-
-childLoopManagerRetryAvailable : Str -> Bool
-childLoopManagerRetryAvailable taskId =
-  readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
 
 childLoopHasBuilderProgress : Str -> Bool
 childLoopHasBuilderProgress taskId =
@@ -261,36 +232,18 @@ promotionFailureReport spec message =
     capability_statuses = emptyCapabilityStatuses
   }
 
-heartbeatTaskLease : Str -> Str
-heartbeatTaskLease taskId =
-  match heartbeat (taskHandleFor taskId) {
-    Err message -> {
-      let traced = appendManagerTrace (textConcat ["task-heartbeat:nonfatal:", taskId, ":", message]) in
-      ""
-    },
-    Ok heartbeatValue ->
-      ""
-  }
-
-heartbeatTaskLeases : [Str] -> Str
-heartbeatTaskLeases taskIds = {
-  let mut ignored = "";
-  for taskId in taskIds {
-    ignored = heartbeatTaskLease taskId;
-    ignored
-  };
-  ""
-}
-
-awaitChildLoopProcess : [Str] -> Result WatchedProcess
-awaitChildLoopProcess taskIds = {
-  let taskId = firstTextOrEmpty taskIds in
-  let heartbeatError = heartbeatTaskLeases taskIds in
-  if childLoopAwaitTimeoutMs <= 0 then
-    awaitWatchedProcess (taskProcessHeartbeatPath taskId) childLoopWatchPollMs
-  else
-    awaitWatchedProcessTimeout (taskProcessHeartbeatPath taskId) childLoopWatchPollMs childLoopAwaitTimeoutMs
-}
+childLoopMonitorSpec : PlannerTaskSpec -> MonitoredLoopSpec
+childLoopMonitorSpec spec =
+  monitoredLoopSpec
+    managerProjectRoot
+    (taskProcessStdoutPath spec.taskId)
+    (taskProcessStderrPath spec.taskId)
+    (taskProcessHeartbeatPath spec.taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    (readChildLoopManagerRetries spec.taskId)
+    childLoopMaxManagerRetries
+    (childLoopCommandArgs spec)
 
 recoverExpiredTaskFailureRecording : PlannerTaskSpec -> Str -> Str
 recoverExpiredTaskFailureRecording spec message =
@@ -446,11 +399,24 @@ launchReadyTask wave report spec = {
 }
 
 launchChildLoop : PlannerTaskSpec -> Result WatchedProcess
-launchChildLoop spec =
-  spawnWatchedProcess
-    managerProjectRoot
-    (taskProcessStdoutPath spec.taskId)
-    (taskProcessStderrPath spec.taskId)
-    (taskProcessHeartbeatPath spec.taskId)
-    childLoopWatchPollMs
-    (childLoopCommandArgs spec)
+launchChildLoop spec = {
+  let outcome = monitoredLoopSpawn (childLoopMonitorSpec spec) in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "child-loop-launch:",
+        spec.taskId,
+        ":status=",
+        outcome.status,
+        ":retry-exhausted=",
+        encode outcome.retryExhausted
+      ]) in
+  if outcome.status == "running" then
+    Ok outcome.process
+  else if outcome.status == "completed-pass" then
+    Ok outcome.process
+  else if outcome.status == "completed-fail" then
+    Ok outcome.process
+  else
+    watchedProcessError outcome.message
+}

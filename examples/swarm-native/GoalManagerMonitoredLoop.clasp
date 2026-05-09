@@ -1,0 +1,234 @@
+module GoalManagerMonitoredLoop
+
+import GoalManagerWatch
+import GoalManagerTypes
+
+record MonitoredLoopSpec = {
+  cwd : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  watchPollMs : Int,
+  awaitTimeoutMs : Int,
+  retryCount : Int,
+  maxRetries : Int,
+  command : [Str]
+}
+
+record MonitoredLoopOutcome = {
+  status : Str,
+  retryExhausted : Bool,
+  message : Str,
+  process : WatchedProcess
+}
+
+monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
+monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries command =
+  MonitoredLoopSpec {
+    cwd = cwd,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    watchPollMs = watchPollMs,
+    awaitTimeoutMs = awaitTimeoutMs,
+    retryCount = retryCount,
+    maxRetries = maxRetries,
+    command = command
+  }
+
+monitoredLoopTextIncludes : Str -> Str -> Bool
+monitoredLoopTextIncludes value needle = length (textSplit value needle) > 1
+
+monitoredLoopPlaceholderProcess : MonitoredLoopSpec -> WatchedProcess
+monitoredLoopPlaceholderProcess spec =
+  WatchedProcess {
+    pid = 0,
+    running = false,
+    completed = false,
+    exitCode = 1,
+    stdoutPath = spec.stdoutPath,
+    stderrPath = spec.stderrPath,
+    heartbeatPath = spec.heartbeatPath,
+    updatedAtMs = 0
+  }
+
+monitoredLoopRetryExhausted : MonitoredLoopSpec -> Bool
+monitoredLoopRetryExhausted spec =
+  spec.retryCount >= spec.maxRetries
+
+monitoredLoopRetryableStatus : Str -> Bool
+monitoredLoopRetryableStatus status =
+  if status == "completed-fail" then
+    true
+  else if status == "missing-heartbeat" then
+    true
+  else
+    status == "malformed-unresolved-heartbeat"
+
+monitoredLoopOutcomeFor : MonitoredLoopSpec -> Str -> Str -> WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopOutcomeFor spec status message process = {
+  let exhausted = monitoredLoopRetryExhausted spec in
+  let retryable = monitoredLoopRetryableStatus status in
+  MonitoredLoopOutcome {
+    status = if retryable then if exhausted then "retry-exhausted" else status else status,
+    retryExhausted = if retryable then exhausted else false,
+    message = message,
+    process = process
+  }
+}
+
+monitoredLoopMissingHeartbeat : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopMissingHeartbeat spec =
+  monitoredLoopOutcomeFor
+    spec
+    "missing-heartbeat"
+    (textConcat ["missing heartbeat: ", spec.heartbeatPath])
+    (monitoredLoopPlaceholderProcess spec)
+
+monitoredLoopMalformedHeartbeat : MonitoredLoopSpec -> Str -> MonitoredLoopOutcome
+monitoredLoopMalformedHeartbeat spec message =
+  monitoredLoopOutcomeFor
+    spec
+    "malformed-unresolved-heartbeat"
+    message
+    (monitoredLoopPlaceholderProcess spec)
+
+monitoredLoopClassifyProcess : MonitoredLoopSpec -> WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopClassifyProcess spec process =
+  if process.running then
+    if process.completed then
+      if process.exitCode == 0 then
+        monitoredLoopOutcomeFor spec "completed-pass" "" process
+      else
+        monitoredLoopOutcomeFor spec "completed-fail" "" process
+    else
+      monitoredLoopOutcomeFor spec "running" "" process
+  else if process.completed then
+    if process.exitCode == 0 then
+      monitoredLoopOutcomeFor spec "completed-pass" "" process
+    else
+      monitoredLoopOutcomeFor spec "completed-fail" "" process
+  else
+    monitoredLoopOutcomeFor
+      spec
+      "malformed-unresolved-heartbeat"
+      "heartbeat did not resolve to running or completed"
+      process
+
+monitoredLoopClassifyResult : MonitoredLoopSpec -> Result WatchedProcess -> MonitoredLoopOutcome
+monitoredLoopClassifyResult spec result =
+  match result {
+    Ok process -> monitoredLoopClassifyProcess spec process,
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec
+  }
+
+monitoredLoopHeartbeatTextLooksResolved : Str -> Bool
+monitoredLoopHeartbeatTextLooksResolved raw =
+  if monitoredLoopTextIncludes raw "\"running\"" then
+    if monitoredLoopTextIncludes raw "\"completed\"" then
+      if monitoredLoopTextIncludes raw "\"exitCode\"" then
+        true
+      else
+        false
+    else
+      false
+  else
+    false
+
+monitoredLoopHeartbeatPrecheckError : Str -> Result Str
+monitoredLoopHeartbeatPrecheckError message = Err message
+
+monitoredLoopHeartbeatPrecheck : MonitoredLoopSpec -> Result Str
+monitoredLoopHeartbeatPrecheck spec =
+  if fileExists spec.heartbeatPath == false then
+    monitoredLoopHeartbeatPrecheckError "missing heartbeat"
+  else
+    match readFile spec.heartbeatPath {
+      Err message -> monitoredLoopHeartbeatPrecheckError message,
+      Ok raw ->
+        if monitoredLoopHeartbeatTextLooksResolved raw then
+          Ok raw
+        else
+          monitoredLoopHeartbeatPrecheckError "heartbeat did not resolve to running or completed"
+    }
+
+monitoredLoopReconcile : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopReconcile spec =
+  match monitoredLoopHeartbeatPrecheck spec {
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec,
+    Ok raw ->
+      monitoredLoopClassifyResult spec (reconcileWatchedProcess spec.heartbeatPath)
+  }
+
+monitoredLoopAwait : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopAwait spec =
+  match monitoredLoopHeartbeatPrecheck spec {
+    Err message ->
+      if fileExists spec.heartbeatPath then
+        monitoredLoopMalformedHeartbeat spec message
+      else
+        monitoredLoopMissingHeartbeat spec,
+    Ok raw ->
+      if spec.awaitTimeoutMs <= 0 then
+        monitoredLoopClassifyResult spec (awaitWatchedProcess spec.heartbeatPath spec.watchPollMs)
+      else
+        match awaitWatchedProcessTimeout spec.heartbeatPath spec.watchPollMs spec.awaitTimeoutMs {
+          Ok process -> monitoredLoopClassifyProcess spec process,
+          Err message ->
+            if message == "timeout" then
+              match reconcileWatchedProcess spec.heartbeatPath {
+                Ok process ->
+                  if process.completed then
+                    monitoredLoopClassifyProcess spec process
+                  else if process.running then
+                    monitoredLoopOutcomeFor spec "timeout" "timeout" process
+                  else
+                    monitoredLoopMalformedHeartbeat spec "heartbeat did not resolve to running or completed",
+                Err reconcileMessage ->
+                  monitoredLoopMalformedHeartbeat spec reconcileMessage
+              }
+            else if fileExists spec.heartbeatPath then
+              monitoredLoopMalformedHeartbeat spec message
+            else
+              monitoredLoopMissingHeartbeat spec
+        }
+  }
+
+monitoredLoopSpawn : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopSpawn spec =
+  monitoredLoopClassifyResult
+    spec
+    (spawnWatchedProcess
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command)
+
+monitoredLoopWatch : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopWatch spec =
+  monitoredLoopClassifyResult
+    spec
+    (watchWatchedProcess
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command)
+
+monitoredLoopLaunchOrResume : MonitoredLoopSpec -> MonitoredLoopOutcome
+monitoredLoopLaunchOrResume spec =
+  if fileExists spec.heartbeatPath then
+    monitoredLoopReconcile spec
+  else
+    monitoredLoopSpawn spec

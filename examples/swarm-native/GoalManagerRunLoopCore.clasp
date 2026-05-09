@@ -6,6 +6,7 @@ import GoalManagerBootstrapTasks
 import GoalManagerStateView
 import GoalManagerFinalize
 import GoalManagerTaskExecutionHelpers
+import GoalManagerChildLoopMonitor
 import GoalManagerTaskExecutionRuntime
 import GoalManagerStateRuntime
 import GoalManagerBenchmarkCheckpoint
@@ -446,22 +447,17 @@ executeReadyTasks report wave benchmarkRuns = {
                   if stateError != "" then
                     finalizeWithReport failureState (syntheticFailureReport "manager state write failed" stateError)
                   else if length launched.activeTaskIds > 0 then {
-                    match awaitChildLoopProcess launched.activeTaskIds {
-                      Err message ->
-                        if message == "timeout" then {
-                          let traceTimeout =
-                            appendManagerTrace
-                              (textConcat ["task-wait-timeout:", firstTextOrEmpty launched.activeTaskIds]) in
-                          if traceTimeout != "" then
-                            finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
-                          else
-                            executeReadyTasks report wave benchmarkRuns
-                        }
-                        else
-                          finalizeWithReport failureState (syntheticFailureReport "task wait failed" message),
-                      Ok process ->
-                        executeReadyTasks report wave benchmarkRuns
-                    }
+                    let waitOutcome = awaitChildLoopOutcome launched.activeTaskIds in
+                    let traceTimeout =
+                      if waitOutcome.status == "timeout" then
+                        appendManagerTrace
+                          (textConcat ["task-wait-timeout:", firstTextOrEmpty launched.activeTaskIds])
+                      else
+                        "" in
+                    if traceTimeout != "" then
+                      finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                    else
+                      executeReadyTasks report wave benchmarkRuns
                   }
                   else
                     match tasks swarmStateRoot {
@@ -471,20 +467,17 @@ executeReadyTasks report wave benchmarkRuns = {
                         let finalTasks = filter taskInObjective finalRawTaskValues;
                         let finalStatus = finalPlannedTaskStatus report finalTasks readyTasks plannedIds in
                         if length finalStatus.pendingLaunchIds > 0 then
-                          match awaitChildLoopProcess finalStatus.pendingLaunchIds {
-                            Err message ->
-                              if message == "timeout" then {
-                                let traceTimeout =
-                                  appendManagerTrace
-                                    (textConcat ["task-launch-wait-timeout:", firstTextOrEmpty finalStatus.pendingLaunchIds]) in
-                                if traceTimeout != "" then
-                                  finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
-                                else
-                                  executeReadyTasks report wave benchmarkRuns
-                              }
+                          {
+                            let waitOutcome = awaitChildLoopOutcome finalStatus.pendingLaunchIds in
+                            let traceTimeout =
+                              if waitOutcome.status == "timeout" then
+                                appendManagerTrace
+                                  (textConcat ["task-launch-wait-timeout:", firstTextOrEmpty finalStatus.pendingLaunchIds])
                               else
-                                finalizeWithReport failureState (syntheticFailureReport "task launch wait failed" message),
-                            Ok process ->
+                                "" in
+                            if traceTimeout != "" then
+                              finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                            else
                               executeReadyTasks report wave benchmarkRuns
                           }
                         else if length finalStatus.readyPlannedIds > 0 then

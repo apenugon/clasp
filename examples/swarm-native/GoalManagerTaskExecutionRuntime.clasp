@@ -2,6 +2,7 @@ module GoalManagerTaskExecutionRuntime
 
 import GoalManagerFinalize
 import GoalManagerTaskExecutionHelpers
+import GoalManagerChildLoopMonitor
 import GoalManagerTaskStatusRuntime
 import GoalManagerTaskSet
 import GoalManagerMailboxMessages
@@ -21,6 +22,7 @@ reconcilePlannedTasks report wave objectiveTasks = {
     let reportReady = childLoopReportReady spec.taskId in
     let loopRunning = childLoopRunning spec.taskId in
     let launchHeartbeatExists = fileExists (taskProcessHeartbeatPath spec.taskId) in
+    let launchOutcome = childLoopLaunchOutcome spec.taskId in
     let launchRunning =
       if launchHeartbeatExists then
         childLoopLaunchRunning spec.taskId
@@ -47,7 +49,9 @@ reconcilePlannedTasks report wave objectiveTasks = {
           ":launch-running=",
           encode launchRunning,
           ":launch-completed=",
-          encode launchCompleted
+          encode launchCompleted,
+          ":launch-outcome=",
+          launchOutcome.status
         ]) in
     if traceError != "" then
       {

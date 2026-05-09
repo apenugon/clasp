@@ -1,0 +1,156 @@
+module Main
+
+import GoalManagerChildLoopMonitor
+import GoalManagerTaskStatusRuntime
+import GoalManagerMonitoredLoop
+import GoalManagerPrelude
+import GoalManagerTypes
+import Swarm
+
+writeTextFile : Str -> Str -> Str
+writeTextFile path contents =
+  match writeFile path contents {
+    Ok written -> "",
+    Err message -> message
+  }
+
+writeWatchedHeartbeat : Str -> Bool -> Bool -> Int -> Int -> Str
+writeWatchedHeartbeat path running completed exitCode updatedAtMs =
+  writeTextFile
+    path
+    (encode
+      (WatchedProcess {
+        pid = 123,
+        running = running,
+        completed = completed,
+        exitCode = exitCode,
+        stdoutPath = textConcat [path, ".stdout"],
+        stderrPath = textConcat [path, ".stderr"],
+        heartbeatPath = path,
+        updatedAtMs = updatedAtMs
+      }))
+
+writeChildState : Str -> Str -> Bool -> Bool -> Str
+writeChildState taskId phase completed final =
+  writeTextFile
+    (taskStatusPath taskId)
+    (encode
+      (ChildLoopState {
+        attempt = 1,
+        phase = phase,
+        verdict = if completed then "pass" else "pending",
+        completed = completed,
+        builderRuns = 1,
+        verifierRuns = 0,
+        healthy = true,
+        needsAttention = false,
+        attentionReason = "",
+        final = final
+      }))
+
+prepareTaskRoot : Str -> Str
+prepareTaskRoot taskId =
+  match mkdirAll (taskReportStateRoot taskId) {
+    Ok made -> "",
+    Err message -> message
+  }
+
+statusLine : Str -> MonitoredLoopOutcome -> Str
+statusLine label outcome =
+  textConcat [label, "=", outcome.status]
+
+boolLine : Str -> Bool -> Str
+boolLine label value =
+  textConcat [label, "=", encode value]
+
+firstError : [Str] -> Str
+firstError errors =
+  textJoin "" errors
+
+ensureLeaseTask : Str -> Str
+ensureLeaseTask taskId =
+  match objectiveCreate swarmStateRoot objectiveId "Exercise manager child loop lease heartbeats." 4 4 {
+    Err message ->
+      message,
+    Ok objective ->
+      match taskCreate objectiveRef taskId "Keep a live child task lease fresh while awaiting." emptyTexts 1 5000 {
+        Err createMessage ->
+          createMessage,
+        Ok task ->
+          match lease (taskHandleFor taskId) {
+            Err leaseMessage -> leaseMessage,
+            Ok leased -> ""
+          }
+      }
+  }
+
+spawnLeaseChild : Str -> MonitoredLoopOutcome
+spawnLeaseChild taskId =
+  monitoredLoopSpawn
+    (monitoredLoopSpec
+      "."
+      (taskProcessStdoutPath taskId)
+      (taskProcessStderrPath taskId)
+      (taskProcessHeartbeatPath taskId)
+      childLoopWatchPollMs
+      childLoopAwaitTimeoutMs
+      0
+      2
+      ["bash", "-lc", "sleep 0.25"])
+
+taskHeartbeatSeen : Str -> Bool
+taskHeartbeatSeen taskId =
+  match status (taskHandleFor taskId) {
+    Ok task -> task.heartbeatSeen,
+    Err message -> false
+  }
+
+runHarness : Str
+runHarness = {
+  let missingTask = "missing-launch" in
+  let malformedTask = "malformed-launch" in
+  let unresolvedTask = "unresolved-launch" in
+  let liveTask = "stale-live-launch" in
+  let completedTask = "stale-completed-launch" in
+  let leaseTask = "lease-fresh" in
+  let setupError =
+    firstError [
+      prepareTaskRoot missingTask,
+      prepareTaskRoot malformedTask,
+      prepareTaskRoot unresolvedTask,
+      prepareTaskRoot liveTask,
+      prepareTaskRoot completedTask,
+      prepareTaskRoot leaseTask,
+      ensureLeaseTask leaseTask,
+      writeTextFile (taskProcessHeartbeatPath malformedTask) "{",
+      writeTextFile (taskProcessHeartbeatPath unresolvedTask) "{}",
+      writeWatchedHeartbeat (taskProcessHeartbeatPath liveTask) true false 1 0,
+      writeChildState liveTask "builder-running" false false,
+      writeWatchedHeartbeat (taskBuilderHeartbeatPath liveTask 1) true false 1 123,
+      writeWatchedHeartbeat (taskProcessHeartbeatPath completedTask) true false 1 0,
+      writeChildState completedTask "builder-running" false false,
+      writeWatchedHeartbeat (taskBuilderHeartbeatPath completedTask 1) false true 0 124
+    ] in
+  if setupError != "" then
+    textConcat ["error:", setupError]
+  else
+    let leaseSpawnOutcome = spawnLeaseChild leaseTask in
+    let leaseAwaitOutcome = awaitChildLoopOutcome [leaseTask] in
+    textJoin
+      "\n"
+      [
+        statusLine "missing-launch" (childLoopLaunchOutcome missingTask),
+        statusLine "malformed-launch" (childLoopLaunchOutcome malformedTask),
+        statusLine "unresolved-launch" (childLoopLaunchOutcome unresolvedTask),
+        boolLine "stale-live-running" (childLoopLaunchRunning liveTask),
+        boolLine "stale-live-completed" (childLoopLaunchCompleted liveTask),
+        boolLine "stale-inner-completed-running" (childLoopLaunchRunning completedTask),
+        boolLine "stale-inner-completed-completed" (childLoopLaunchCompleted completedTask),
+        statusLine "lease-spawn" leaseSpawnOutcome,
+        statusLine "lease-await" leaseAwaitOutcome,
+        boolLine "lease-heartbeat-seen" (taskHeartbeatSeen leaseTask)
+      ]
+}
+
+main : Str
+main = runHarness

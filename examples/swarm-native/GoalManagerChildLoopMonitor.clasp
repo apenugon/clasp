@@ -1,0 +1,108 @@
+module GoalManagerChildLoopMonitor
+
+import GoalManagerMonitoredLoop
+import GoalManagerWatch
+import GoalManagerCounters
+import GoalManagerPreludeProject
+import GoalManagerPrelude
+import GoalManagerConfig
+import GoalManagerTypes
+import Swarm
+
+taskManagerRetryPath : Str -> Str
+taskManagerRetryPath taskId = pathJoin [stateRootPath, textConcat ["child-loop-retries-", taskId, ".json"]]
+
+readChildLoopManagerRetries : Str -> Int
+readChildLoopManagerRetries taskId =
+  if fileExists (taskManagerRetryPath taskId) then
+    match readFile (taskManagerRetryPath taskId) {
+      Ok raw -> decode Int raw,
+      Err message -> 0
+    }
+  else
+    0
+
+writeChildLoopManagerRetries : Str -> Int -> Str
+writeChildLoopManagerRetries taskId retryCount =
+  match writeFile (taskManagerRetryPath taskId) (encode retryCount) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+childLoopMaxManagerRetries : Int
+childLoopMaxManagerRetries =
+  if childMaxAttempts <= 1 then
+    0
+  else
+    decrementManagerCounter childMaxAttempts
+
+childLoopManagerRetryAvailable : Str -> Bool
+childLoopManagerRetryAvailable taskId =
+  readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
+
+heartbeatTaskLease : Str -> Str
+heartbeatTaskLease taskId =
+  match heartbeat (taskHandleFor taskId) {
+    Err message -> {
+      let traced = appendManagerTrace (textConcat ["task-heartbeat:nonfatal:", taskId, ":", message]) in
+      ""
+    },
+    Ok heartbeatValue ->
+      ""
+  }
+
+heartbeatTaskLeases : [Str] -> Str
+heartbeatTaskLeases taskIds = {
+  let mut ignored = "";
+  for taskId in taskIds {
+    ignored = heartbeatTaskLease taskId;
+    ignored
+  };
+  ""
+}
+
+childLoopMonitorSpecForTaskId : Str -> MonitoredLoopSpec
+childLoopMonitorSpecForTaskId taskId =
+  monitoredLoopSpec
+    managerProjectRoot
+    (taskProcessStdoutPath taskId)
+    (taskProcessStderrPath taskId)
+    (taskProcessHeartbeatPath taskId)
+    childLoopWatchPollMs
+    childLoopAwaitTimeoutMs
+    (readChildLoopManagerRetries taskId)
+    childLoopMaxManagerRetries
+    emptyTexts
+
+awaitChildLoopOutcome : [Str] -> MonitoredLoopOutcome
+awaitChildLoopOutcome taskIds = {
+  let taskId = firstTextOrEmpty taskIds in
+  let heartbeatError = heartbeatTaskLeases taskIds in
+  let outcome = monitoredLoopAwait (childLoopMonitorSpecForTaskId taskId) in
+  let traceError =
+    appendManagerTrace
+      (textConcat [
+        "child-loop-await:",
+        taskId,
+        ":status=",
+        outcome.status,
+        ":retry-exhausted=",
+        encode outcome.retryExhausted
+      ]) in
+  outcome
+}
+
+awaitChildLoopProcess : [Str] -> Result WatchedProcess
+awaitChildLoopProcess taskIds = {
+  let outcome = awaitChildLoopOutcome taskIds in
+  if outcome.status == "missing-heartbeat" then
+    watchedProcessError outcome.message
+  else if outcome.status == "malformed-unresolved-heartbeat" then
+    watchedProcessError outcome.message
+  else if outcome.status == "retry-exhausted" then
+    watchedProcessError outcome.message
+  else if outcome.status == "timeout" then
+    watchedProcessError "timeout"
+  else
+    Ok outcome.process
+}

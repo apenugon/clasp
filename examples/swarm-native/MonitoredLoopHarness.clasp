@@ -1,0 +1,140 @@
+module Main
+
+import GoalManagerMonitoredLoop
+import GoalManagerTypes
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "monitored-loop-harness-state"
+  else
+    pathJoin argv
+
+heartbeatPathFor : Str -> Str
+heartbeatPathFor name = pathJoin [stateRoot, textConcat [name, ".heartbeat.json"]]
+
+stdoutPathFor : Str -> Str
+stdoutPathFor name = pathJoin [stateRoot, textConcat [name, ".stdout.log"]]
+
+stderrPathFor : Str -> Str
+stderrPathFor name = pathJoin [stateRoot, textConcat [name, ".stderr.log"]]
+
+specFor : Str -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
+specFor name retryCount maxRetries timeoutMs command =
+  monitoredLoopSpec
+    "."
+    (stdoutPathFor name)
+    (stderrPathFor name)
+    (heartbeatPathFor name)
+    25
+    timeoutMs
+    retryCount
+    maxRetries
+    command
+
+writeHeartbeat : Str -> Bool -> Bool -> Int -> Str
+writeHeartbeat name running completed exitCode =
+  match writeFile
+    (heartbeatPathFor name)
+    (encode
+      (WatchedProcess {
+        pid = 0,
+        running = running,
+        completed = completed,
+        exitCode = exitCode,
+        stdoutPath = stdoutPathFor name,
+        stderrPath = stderrPathFor name,
+        heartbeatPath = heartbeatPathFor name,
+        updatedAtMs = timeUnixMs
+      })) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+writeMalformedHeartbeat : Str -> Str
+writeMalformedHeartbeat name =
+  match writeFile (heartbeatPathFor name) "{" {
+    Ok written -> "",
+    Err message -> message
+  }
+
+writeUnresolvedHeartbeat : Str -> Str
+writeUnresolvedHeartbeat name =
+  match writeFile (heartbeatPathFor name) "{}" {
+    Ok written -> "",
+    Err message -> message
+  }
+
+statusLine : Str -> MonitoredLoopOutcome -> Str
+statusLine name outcome =
+  textConcat [
+    name,
+    "=",
+    outcome.status,
+    ":retryExhausted=",
+    encode outcome.retryExhausted
+  ]
+
+firstError : [Str] -> Str
+firstError errors = {
+  let mut found = "";
+  for message in errors {
+    if found != "" then
+      found
+    else if message != "" then {
+      found = message;
+      found
+    } else
+      found
+  };
+  found
+}
+
+runHarness : Str
+runHarness = {
+  let passWrite = writeHeartbeat "completed-pass" false true 0 in
+  let failWrite = writeHeartbeat "completed-fail" false true 7 in
+  let malformedWrite = writeMalformedHeartbeat "malformed" in
+  let unresolvedWrite = writeUnresolvedHeartbeat "unresolved" in
+  let setupError = firstError [passWrite, failWrite, malformedWrite, unresolvedWrite] in
+  if setupError != "" then
+    textConcat ["error:", setupError]
+  else {
+    let passOutcome = monitoredLoopReconcile (specFor "completed-pass" 0 2 100 emptyTexts) in
+    let failOutcome = monitoredLoopReconcile (specFor "completed-fail" 0 2 100 emptyTexts) in
+    let missingOutcome = monitoredLoopReconcile (specFor "missing" 0 2 100 emptyTexts) in
+    let retryOutcome = monitoredLoopReconcile (specFor "retry-exhausted" 0 0 100 emptyTexts) in
+    let malformedOutcome = monitoredLoopReconcile (specFor "malformed" 0 2 100 emptyTexts) in
+    let unresolvedOutcome = monitoredLoopReconcile (specFor "unresolved" 0 2 100 emptyTexts) in
+    let runningSpec = specFor "running" 0 2 50 ["bash", "-lc", "sleep 0.25"] in
+    let runningOutcome = monitoredLoopSpawn runningSpec in
+    let timeoutOutcome = monitoredLoopAwait runningSpec in
+    let completedAfterTimeoutOutcome =
+      monitoredLoopAwait (specFor "running" 0 2 1000 ["bash", "-lc", "sleep 0.25"]) in
+    let watchOutcome = monitoredLoopWatch (specFor "watch-pass" 0 2 100 ["bash", "-lc", "exit 0"]) in
+    let resumeExistingOutcome = monitoredLoopLaunchOrResume (specFor "completed-pass" 0 2 100 emptyTexts) in
+    let launchOrResumeNewOutcome =
+      monitoredLoopLaunchOrResume (specFor "launch-or-resume-new" 0 2 50 ["bash", "-lc", "sleep 0.25"]) in
+    textJoin "\n" [
+      statusLine "running" runningOutcome,
+      statusLine "completed-pass" passOutcome,
+      statusLine "completed-fail" failOutcome,
+      statusLine "timeout" timeoutOutcome,
+      statusLine "missing" missingOutcome,
+      statusLine "malformed" malformedOutcome,
+      statusLine "unresolved" unresolvedOutcome,
+      statusLine "retry-exhausted" retryOutcome,
+      statusLine "completed-after-timeout" completedAfterTimeoutOutcome,
+      statusLine "watch-pass" watchOutcome,
+      statusLine "resume-existing" resumeExistingOutcome,
+      statusLine "launch-or-resume-new" launchOrResumeNewOutcome
+    ]
+  }
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runHarness
+  }

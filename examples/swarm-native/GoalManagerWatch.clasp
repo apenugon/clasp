@@ -47,6 +47,10 @@ spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Watched
 spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+watchWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result WatchedProcess
+watchWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
+  watchedProcessResult (watchCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
+
 sleepMsValue : Int -> Result Str
 sleepMsValue delayMs = sleepMsRaw delayMs
 
