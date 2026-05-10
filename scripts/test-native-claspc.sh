@@ -581,6 +581,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$prompt" == "-" ]]; then
+  prompt="$(cat)"
+fi
+
 if [[ -z "$report_path" ]]; then
   printf 'missing report path\n' >&2
   exit 1
@@ -2636,12 +2640,29 @@ printf '%s\n' "$goal_manager_promotion_conflict_output" | grep -F '"verdict":"fa
 grep -F '"summary":"one or more planned tasks failed"' "$goal_manager_promotion_conflict_state_root_abs/feedback.json" >/dev/null
 grep -R -F '"summary":"task promotion failed"' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json >/dev/null
 grep -R -F 'promotion conflict: task workspace would overwrite files changed since snapshot' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json >/dev/null
+grep -R -F 'promotionLedger=' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json >/dev/null
 grep -R -F 'recoverableDiffKind=promotion-workspace' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json >/dev/null
+goal_manager_promotion_ledger="$(
+  grep -Roh 'promotionLedger=[^"]*' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json | head -1 | cut -d= -f2-
+)"
 goal_manager_promotion_recoverable_diff="$(
   grep -Roh 'recoverableDiff=[^"]*' "$goal_manager_promotion_conflict_state_root_abs"/loop-*/feedback.json | head -1 | cut -d= -f2-
 )"
+test -f "$goal_manager_promotion_ledger"
 test -f "$goal_manager_promotion_recoverable_diff"
 grep -F 'fixed-after-feedback' "$goal_manager_promotion_recoverable_diff" >/dev/null
+node - "$goal_manager_promotion_ledger" <<'NODE'
+const fs = require('fs');
+const ledger = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (ledger.schema !== 'clasp-task-workspace-promotion-ledger-v1') throw new Error('bad manager promotion ledger schema');
+if (ledger.status !== 'conflict' || ledger.conflicted !== true) throw new Error('expected manager promotion conflict ledger');
+if (!ledger.filesSkippedDueToConflict.includes('workspace.txt')) throw new Error('manager promotion ledger missing workspace conflict');
+if (!ledger.changesSkippedDueToConflict.some((change) => change.path === 'workspace.txt' && change.action === 'modify')) throw new Error('manager promotion ledger missing workspace modify conflict action');
+if (!ledger.baseline?.fingerprint?.startsWith('sha256:')) throw new Error('manager promotion ledger missing baseline fingerprint');
+if (!ledger.workspace?.fingerprint?.startsWith('sha256:')) throw new Error('manager promotion ledger missing workspace fingerprint');
+if (!ledger.baseline?.manifest || !ledger.workspace?.manifest) throw new Error('manager promotion ledger missing stable manifest evidence fields');
+if (!ledger.recoverableDiffPath || !fs.existsSync(ledger.recoverableDiffPath)) throw new Error('manager promotion ledger missing recoverable diff');
+NODE
 if grep -F '"summary":"planned task reconciliation failed"' "$goal_manager_promotion_conflict_state_root_abs/feedback.json" >/dev/null 2>&1; then
   echo "promotion conflicts should be task-level recoverable failures, not manager reconciliation failures" >&2
   exit 1

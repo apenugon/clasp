@@ -45,6 +45,12 @@ mailboxPath = pathJoin [stateRootPath, "mailbox.json"]
 plannerReportPathFor : Int -> Str
 plannerReportPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".json"]]
 
+plannerStdoutPathFor : Int -> Str
+plannerStdoutPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".stdout.log"]]
+
+plannerStderrPathFor : Int -> Str
+plannerStderrPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".stderr.log"]]
+
 plannerInputPath : Str
 plannerInputPath = pathJoin [stateRootPath, "planner-input.json"]
 
@@ -157,6 +163,10 @@ taskFeedbackPath taskId = pathJoin [taskReportStateRoot taskId, "feedback.json"]
 taskBuilderReportPath : Str -> Int -> Str
 taskBuilderReportPath taskId attempt =
   pathJoin [taskReportStateRoot taskId, textConcat ["builder-", encode attempt, ".json"]]
+
+taskVerifierReportPath : Str -> Int -> Str
+taskVerifierReportPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["verifier-", encode attempt, ".json"]]
 
 taskStatusPath : Str -> Str
 taskStatusPath taskId = pathJoin [taskReportStateRoot taskId, "state.json"]

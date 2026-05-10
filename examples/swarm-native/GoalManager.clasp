@@ -97,6 +97,25 @@ record BuilderReport = {
   feedback : BuilderFeedback
 }
 
+record RetryRecoveryRecord = {
+  schema : Str,
+  attempt : Int,
+  taskId : Str,
+  phase : Str,
+  retryable : Bool,
+  retryableStatus : Str,
+  cause : Str,
+  reportPaths : [Str],
+  command : [Str],
+  runStatus : Str,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  evidence : [Str],
+  createdAtMs : Int
+}
+
 record SwarmMailboxMessage = {
   source : Str,
   taskId : Str,
@@ -317,6 +336,9 @@ emptyBenchmarkSignal =
 
 emptySwarmMailboxMessages : [SwarmMailboxMessage]
 emptySwarmMailboxMessages = []
+
+emptyRetryRecoveryRecords : [RetryRecoveryRecord]
+emptyRetryRecoveryRecords = []
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
@@ -822,6 +844,10 @@ taskBuilderReportPath : Str -> Int -> Str
 taskBuilderReportPath taskId attempt =
   pathJoin [taskReportStateRoot taskId, textConcat ["builder-", encode attempt, ".json"]]
 
+taskVerifierReportPath : Str -> Int -> Str
+taskVerifierReportPath taskId attempt =
+  pathJoin [taskReportStateRoot taskId, textConcat ["verifier-", encode attempt, ".json"]]
+
 taskDiffPath : Str -> Int -> Str
 taskDiffPath taskId attempt =
   pathJoin [taskReportStateRoot taskId, textConcat ["changes-", encode attempt, ".diff"]]
@@ -840,6 +866,153 @@ taskProcessHeartbeatPath taskId = pathJoin [taskReportStateRoot taskId, "loop.pr
 
 taskManagerRetryPath : Str -> Str
 taskManagerRetryPath taskId = pathJoin [stateRootPath, textConcat ["child-loop-retries-", taskId, ".json"]]
+
+retryRecoveryRecordSchema : Str
+retryRecoveryRecordSchema = "clasp-swarm-retry-recovery-record-v1"
+
+retryRecoveryRecordsPath : Str -> Str
+retryRecoveryRecordsPath taskId =
+  pathJoin [stateRootPath, textConcat ["retry-recovery-", taskId, ".json"]]
+
+readRetryRecoveryRecords : Str -> [RetryRecoveryRecord]
+readRetryRecoveryRecords taskId =
+  if fileExists (retryRecoveryRecordsPath taskId) then
+    match readFile (retryRecoveryRecordsPath taskId) {
+      Ok raw -> decode [RetryRecoveryRecord] raw,
+      Err message -> emptyRetryRecoveryRecords
+    }
+  else
+    emptyRetryRecoveryRecords
+
+writeRetryRecoveryRecords : Str -> [RetryRecoveryRecord] -> Str
+writeRetryRecoveryRecords taskId records =
+  match writeFile (retryRecoveryRecordsPath taskId) (encode records) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+retryableStatusIsRetryable : Str -> Bool
+retryableStatusIsRetryable status =
+  if status == "retryable" then
+    true
+  else if status == "retrying" then
+    true
+  else if status == "pending-retry" then
+    true
+  else
+    false
+
+retryRecoveryRecord : Int -> Str -> Str -> Str -> Str -> [Str] -> [Str] -> Str -> Int -> Str -> Str -> Str -> [Str] -> RetryRecoveryRecord
+retryRecoveryRecord attempt taskId phase retryableStatus cause reportPaths command runStatus exitCode stdoutPath stderrPath heartbeatPath evidence =
+  RetryRecoveryRecord {
+    schema = retryRecoveryRecordSchema,
+    attempt = attempt,
+    taskId = taskId,
+    phase = phase,
+    retryable = retryableStatusIsRetryable retryableStatus,
+    retryableStatus = retryableStatus,
+    cause = cause,
+    reportPaths = reportPaths,
+    command = command,
+    runStatus = runStatus,
+    exitCode = exitCode,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    evidence = evidence,
+    createdAtMs = timeUnixMs
+  }
+
+appendRetryRecoveryRecord : RetryRecoveryRecord -> Str
+appendRetryRecoveryRecord record =
+  writeRetryRecoveryRecords
+    record.taskId
+    (append (readRetryRecoveryRecords record.taskId) [record])
+
+latestRetryRecoveryRecord : Str -> RetryRecoveryRecord
+latestRetryRecoveryRecord taskId = {
+  let mut latest =
+    retryRecoveryRecord
+      0
+      taskId
+      ""
+      "none"
+      ""
+      emptyTexts
+      emptyTexts
+      ""
+      0
+      ""
+      ""
+      ""
+      emptyTexts;
+  for record in readRetryRecoveryRecords taskId {
+    latest = record;
+    latest
+  };
+  latest
+}
+
+appendRetryRecordEvidenceDetails : [Str] -> [Str] -> [Str]
+appendRetryRecordEvidenceDetails details values = {
+  let mut rendered = details;
+  for value in values {
+    if value == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat ["retryRecordEvidence=", value]];
+      rendered
+    }
+  };
+  rendered
+}
+
+appendRetryRecordReportPathDetails : [Str] -> [Str] -> [Str]
+appendRetryRecordReportPathDetails details values = {
+  let mut rendered = details;
+  for value in values {
+    if value == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat ["retryRecordReportPath=", value]];
+      rendered
+    }
+  };
+  rendered
+}
+
+retryRecoverySummaryText : RetryRecoveryRecord -> Str
+retryRecoverySummaryText record =
+  textConcat [
+    "phase=",
+    record.phase,
+    ":attempt=",
+    encode record.attempt,
+    ":status=",
+    record.retryableStatus,
+    ":cause=",
+    record.cause
+  ]
+
+retryRecoveryMailboxDetails : Str -> [Str]
+retryRecoveryMailboxDetails taskId =
+  if length (readRetryRecoveryRecords taskId) == 0 then
+    emptyTexts
+  else {
+    let latest = latestRetryRecoveryRecord taskId in
+    appendRetryRecordEvidenceDetails
+      (appendRetryRecordReportPathDetails
+        [
+          textConcat ["retryRecordPath=", retryRecoveryRecordsPath taskId],
+          textConcat ["retryRecordLatest=", retryRecoverySummaryText latest],
+          textConcat ["retryRecordRun=", latest.runStatus, ":exitCode=", encode latest.exitCode],
+          textConcat ["retryRecordStdout=", latest.stdoutPath],
+          textConcat ["retryRecordStderr=", latest.stderrPath],
+          textConcat ["retryRecordHeartbeat=", latest.heartbeatPath]
+        ]
+        latest.reportPaths)
+      latest.evidence
+  }
 
 taskBuilderHeartbeatPath : Str -> Int -> Str
 taskBuilderHeartbeatPath taskId attempt =
@@ -1561,6 +1734,10 @@ taskPromotionConflictPath : Str -> Str
 taskPromotionConflictPath taskId =
   pathJoin [taskReportStateRoot taskId, "promotion-conflict.marker"]
 
+taskPromotionLedgerPath : Str -> Str
+taskPromotionLedgerPath taskId =
+  pathJoin [taskReportStateRoot taskId, "promotion-ledger.json"]
+
 taskRecoverableDiffDetails : Str -> [Str]
 taskRecoverableDiffDetails taskId =
   if fileExists (taskLatestDiffPath taskId) then
@@ -1721,6 +1898,7 @@ builderReportMailboxDetails spec report = {
   details = appendPrefixedMailboxDetails details "follow-up=" report.feedback.follow_ups;
   details = appendPrefixedMailboxDetails details "warning=" report.feedback.warnings;
   details = append details (taskRecoverableDiffDetails spec.taskId);
+  details = append details (retryRecoveryMailboxDetails spec.taskId);
   details
 }
 
@@ -1736,6 +1914,7 @@ verifierReportMailboxDetails spec report = {
   details = appendCapabilityMailboxDetails details report.capability_statuses;
   details = append details (taskBuilderReportContextDetails spec.taskId);
   details = append details (taskRecoverableDiffDetails spec.taskId);
+  details = append details (retryRecoveryMailboxDetails spec.taskId);
   details
 }
 
@@ -1930,6 +2109,86 @@ childLoopMonitorSpec spec =
     (readChildLoopManagerRetries spec.taskId)
     childLoopMaxManagerRetries
     (childLoopCommandArgs spec)
+
+nonZeroAttemptOr : Int -> Int -> Int
+nonZeroAttemptOr value fallback =
+  if value == 0 then
+    fallback
+  else
+    value
+
+childLoopRetryPhaseForTask : Str -> Str -> Str
+childLoopRetryPhaseForTask taskId fallback =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if textIncludes state.phase "verifier" then
+          "verifier"
+        else if textIncludes state.phase "builder" then
+          "builder"
+        else
+          fallback,
+      Err message -> fallback
+    }
+  else
+    fallback
+
+childLoopRetryAttemptForTask : Str -> Str -> Int -> Int
+childLoopRetryAttemptForTask taskId phase fallback =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if phase == "verifier" then
+          nonZeroAttemptOr state.verifierRuns state.attempt
+        else if phase == "builder" then
+          nonZeroAttemptOr state.builderRuns state.attempt
+        else
+          nonZeroAttemptOr state.attempt fallback,
+      Err message -> fallback
+    }
+  else
+    fallback
+
+childLoopRetryReportPaths : Str -> Int -> [Str]
+childLoopRetryReportPaths taskId attempt =
+  [
+    taskFeedbackPath taskId,
+    taskStatusPath taskId,
+    taskBuilderReportPath taskId attempt,
+    taskVerifierReportPath taskId attempt,
+    taskDiffPath taskId attempt
+  ]
+
+recordChildLoopRecovery : PlannerTaskSpec -> Int -> Str -> Str -> Str -> [Str] -> Str
+recordChildLoopRecovery spec managerRetryCount fallbackPhase retryableStatus cause evidence = {
+  let outcome = childLoopLaunchOutcome spec.taskId in
+  let fallbackAttempt = incrementManagerCounter managerRetryCount in
+  let phase = childLoopRetryPhaseForTask spec.taskId fallbackPhase in
+  let attempt = childLoopRetryAttemptForTask spec.taskId phase fallbackAttempt in
+  let exitCode = outcome.process.exitCode in
+  let record =
+    retryRecoveryRecord
+      attempt
+      spec.taskId
+      phase
+      retryableStatus
+      cause
+      (childLoopRetryReportPaths spec.taskId attempt)
+      (childLoopCommandArgs spec)
+      outcome.status
+      exitCode
+      (taskProcessStdoutPath spec.taskId)
+      (taskProcessStderrPath spec.taskId)
+      (taskProcessHeartbeatPath spec.taskId)
+      (append
+        evidence
+        [
+          textConcat ["managerRetryCount=", encode managerRetryCount],
+          textConcat ["launchOutcome=", outcome.status],
+          childLoopLaunchSummary spec.taskId
+        ]) in
+  appendRetryRecoveryRecord record
+}
 
 childLoopLaunchMonitorSpec : Str -> MonitoredLoopSpec
 childLoopLaunchMonitorSpec taskId =
@@ -2609,8 +2868,12 @@ taskWorkspacePromotionScript = textJoin "\n" [
   "dest=\"$3\"",
   "conflict_marker=\"$4\"",
   "diff_out=\"$5\"",
-  "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\"",
-  "rm -f \"$conflict_marker\" \"$diff_out\"",
+  "ledger_out=\"$6\"",
+  "task_id=\"$7\"",
+  "workspace_manifest=\"${8:-}\"",
+  "baseline_manifest=\"${9:-}\"",
+  "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\" \"$(dirname \"$ledger_out\")\"",
+  "rm -f \"$conflict_marker\" \"$diff_out\" \"$ledger_out\"",
   "if [ ! -d \"$src\" ]; then",
   "  printf 'missing task workspace: %s\n' \"$src\" >&2",
   "  exit 2",
@@ -2680,10 +2943,70 @@ taskWorkspacePromotionScript = textJoin "\n" [
   "    rm -f \"$tmp_diff\" \"$diff_out\"",
   "  fi",
   "}",
+  "write_promotion_ledger() {",
+  "  status=\"$1\"",
+  "  applied_file=\"$2\"",
+  "  skipped_file=\"$3\"",
+  "  node - \"$ledger_out\" \"$task_id\" \"$base\" \"$src\" \"$dest\" \"$baseline_manifest\" \"$workspace_manifest\" \"$conflict_marker\" \"$diff_out\" \"$status\" \"$applied_file\" \"$skipped_file\" \"$base_files\" \"$src_files\" <<'NODE'",
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "const crypto = require('crypto');",
+  "const [ledgerPath, taskId, baselineRoot, workspaceRoot, destinationRoot, baselineManifestPath, workspaceManifestPath, conflictMarkerPath, recoverableDiffPath, status, appliedListPath, skippedListPath, baselineFilesPath, workspaceFilesPath] = process.argv.slice(2);",
+  "function readList(filePath) {",
+  "  if (!filePath || !fs.existsSync(filePath)) return [];",
+  "  return fs.readFileSync(filePath, 'utf8').split(/\\r?\\n/).filter(Boolean);",
+  "}",
+  "function rootFingerprint(root, listPath) {",
+  "  const hash = crypto.createHash('sha256');",
+  "  for (const rel of readList(listPath)) {",
+  "    const fullPath = path.join(root, rel);",
+  "    hash.update(rel);",
+  "    hash.update('\\0');",
+  "    if (fs.existsSync(fullPath)) hash.update(fs.readFileSync(fullPath));",
+  "    hash.update('\\0');",
+  "  }",
+  "  return `sha256:${hash.digest('hex')}`;",
+  "}",
+  "function manifestInfo(filePath) {",
+  "  if (!filePath || !fs.existsSync(filePath)) return { path: filePath || '', exists: false, fingerprint: '' };",
+  "  const bytes = fs.readFileSync(filePath);",
+  "  return { path: filePath, exists: true, fingerprint: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` };",
+  "}",
+  "function changeAction(rel) {",
+  "  const baseExists = fs.existsSync(path.join(baselineRoot, rel));",
+  "  const workspaceExists = fs.existsSync(path.join(workspaceRoot, rel));",
+  "  if (baseExists && !workspaceExists) return 'delete';",
+  "  if (!baseExists && workspaceExists) return 'add';",
+  "  return 'modify';",
+  "}",
+  "function changeList(paths) {",
+  "  return paths.map((rel) => ({ path: rel, action: changeAction(rel) }));",
+  "}",
+  "const filesApplied = readList(appliedListPath);",
+  "const filesSkippedDueToConflict = readList(skippedListPath);",
+  "const ledger = {",
+  "  schema: 'clasp-task-workspace-promotion-ledger-v1',",
+  "  taskId,",
+  "  status,",
+  "  conflicted: filesSkippedDueToConflict.length > 0,",
+  "  baseline: { root: baselineRoot, fingerprint: rootFingerprint(baselineRoot, baselineFilesPath), manifest: manifestInfo(baselineManifestPath) },",
+  "  workspace: { root: workspaceRoot, fingerprint: rootFingerprint(workspaceRoot, workspaceFilesPath), manifest: manifestInfo(workspaceManifestPath) },",
+  "  destinationRoot,",
+  "  filesApplied,",
+  "  filesSkippedDueToConflict,",
+  "  changesApplied: changeList(filesApplied),",
+  "  changesSkippedDueToConflict: changeList(filesSkippedDueToConflict),",
+  "  conflictMarkerPath,",
+  "  recoverableDiffPath",
+  "};",
+  "fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\\n`);",
+  "NODE",
+  "}",
   "base_files=\"$tmp/base-files\"",
   "src_files=\"$tmp/src-files\"",
   "changed=\"$tmp/changed-files\"",
   "conflicts=\"$tmp/conflicts\"",
+  "applied=\"$tmp/applied\"",
   "list_files \"$base\" >\"$base_files\"",
   "list_files \"$src\" >\"$src_files\"",
   "comm -12 \"$base_files\" \"$src_files\" | while IFS= read -r rel; do",
@@ -2692,33 +3015,45 @@ taskWorkspacePromotionScript = textJoin "\n" [
   "  fi",
   "done >\"$changed\"",
   "comm -13 \"$base_files\" \"$src_files\" >>\"$changed\"",
+  "comm -23 \"$base_files\" \"$src_files\" >>\"$changed\"",
   "sort -u -o \"$changed\" \"$changed\"",
   ": >\"$conflicts\"",
+  ": >\"$applied\"",
   "while IFS= read -r rel; do",
   "  [ -n \"$rel\" ] || continue",
-  "  if [ -e \"$dest/$rel\" ] && ! cmp -s \"$dest/$rel\" \"$src/$rel\"; then",
-  "    if [ -e \"$base/$rel\" ]; then",
-  "      if ! cmp -s \"$dest/$rel\" \"$base/$rel\"; then",
-  "        printf '%s\n' \"$rel\" >>\"$conflicts\"",
-  "      fi",
+  "  if [ -e \"$src/$rel\" ]; then",
+  "    if [ -e \"$dest/$rel\" ] && cmp -s \"$dest/$rel\" \"$src/$rel\"; then",
+  "      :",
+  "    elif [ -e \"$base/$rel\" ]; then",
+  "      if [ ! -e \"$dest/$rel\" ] || ! cmp -s \"$dest/$rel\" \"$base/$rel\"; then printf '%s\n' \"$rel\" >>\"$conflicts\"; fi",
   "    else",
-  "      printf '%s\n' \"$rel\" >>\"$conflicts\"",
+  "      if [ -e \"$dest/$rel\" ]; then printf '%s\n' \"$rel\" >>\"$conflicts\"; fi",
   "    fi",
+  "  else",
+  "    if [ -e \"$dest/$rel\" ] && ! cmp -s \"$dest/$rel\" \"$base/$rel\"; then printf '%s\n' \"$rel\" >>\"$conflicts\"; fi",
   "  fi",
   "done <\"$changed\"",
+  "write_recoverable_diff",
+  "while IFS= read -r rel; do",
+  "  [ -n \"$rel\" ] || continue",
+  "  if grep -F -x -- \"$rel\" \"$conflicts\" >/dev/null 2>&1; then continue; fi",
+  "  if [ -e \"$src/$rel\" ]; then",
+  "    mkdir -p \"$dest/$(dirname \"$rel\")\"",
+  "    cp -p \"$src/$rel\" \"$dest/$rel\"",
+  "  else",
+  "    rm -f \"$dest/$rel\"",
+  "  fi",
+  "  printf '%s\n' \"$rel\" >>\"$applied\"",
+  "done <\"$changed\"",
   "if [ -s \"$conflicts\" ]; then",
-  "  write_recoverable_diff",
   "  {",
   "    printf 'promotion conflict: task workspace would overwrite files changed since snapshot\n'",
   "    cat \"$conflicts\"",
   "  } >\"$conflict_marker\"",
+  "  write_promotion_ledger conflict \"$applied\" \"$conflicts\"",
   "  exit 0",
   "fi",
-  "while IFS= read -r rel; do",
-  "  [ -n \"$rel\" ] || continue",
-  "  mkdir -p \"$dest/$(dirname \"$rel\")\"",
-  "  cp -p \"$src/$rel\" \"$dest/$rel\"",
-  "done <\"$changed\""
+  "write_promotion_ledger applied \"$applied\" \"$conflicts\""
 ]
 
 taskPromotionDiffScript : Str
@@ -2798,7 +3133,9 @@ promoteVerifiedTaskWorkspace spec =
     taskWorkspaceBaselineActualRoot spec.taskId,
     resolvedWorkspaceRoot,
     taskPromotionConflictPath spec.taskId,
-    taskPromotionDiffPath spec.taskId
+    taskPromotionDiffPath spec.taskId,
+    taskPromotionLedgerPath spec.taskId,
+    spec.taskId
   ] {
     Err message ->
       textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", message],
@@ -3568,18 +3905,46 @@ childHealthWaitingReasons taskIds = {
     [statusWaitingReason "child-health" unhealthyTaskIds emptyTexts details]
 }
 
+retryRecoveryWaitingReasonForTask : Str -> [StatusWaitingReason]
+retryRecoveryWaitingReasonForTask taskId =
+  if taskId == "" then
+    emptyStatusWaitingReasons
+  else if length (readRetryRecoveryRecords taskId) == 0 then
+    emptyStatusWaitingReasons
+  else
+    [
+      StatusWaitingReason {
+        kind = "retry-recovery-records",
+        taskIds = [taskId],
+        relatedTaskIds = emptyTexts,
+        details = [
+          textConcat [taskId, ":", retryRecoverySummaryText (latestRetryRecoveryRecord taskId)],
+          textConcat [taskId, ":retryRecordPath=", retryRecoveryRecordsPath taskId]
+        ]
+      }
+    ]
+
 statusWaitingReasons : ManagerState -> [Str] -> [SwarmTask] -> [StatusWaitingReason]
-statusWaitingReasons state plannedTaskIds trackedTasks =
+statusWaitingReasons state plannedTaskIds trackedTasks = {
+  let trackedTaskIds =
+    if length plannedTaskIds == 0 then
+      map taskIdOf trackedTasks
+    else
+      plannedTaskIds;
   append
     (append
       (append
         (append
-          (plannerWaitingReasons state)
-          (benchmarkWaitingReasons state plannedTaskIds))
-        (dependencyWaitingReasons trackedTasks))
-      (budgetWaitingReasons trackedTasks))
-    (childHealthWaitingReasons
-      (if length plannedTaskIds == 0 then map taskIdOf trackedTasks else plannedTaskIds))
+          (append
+            (plannerWaitingReasons state)
+            (benchmarkWaitingReasons state plannedTaskIds))
+          (dependencyWaitingReasons trackedTasks))
+        (budgetWaitingReasons trackedTasks))
+      (childHealthWaitingReasons trackedTaskIds))
+    (append
+      (retryRecoveryWaitingReasonForTask state.plannerTaskId)
+      (retryRecoveryWaitingReasonForTask state.activeTaskId))
+}
 
 plannerTaskIdOf : PlannerTaskSpec -> Str
 plannerTaskIdOf task = task.taskId
@@ -4600,12 +4965,21 @@ ensureManagerReady =
     }
 
 codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath prompt = [
+codexCommand schemaPath reportPath promptPath = [
+  "bash",
+  "-lc",
+  textJoin "\n" [
+    "prompt_path=\"$1\"",
+    "shift",
+    "exec \"$@\" - < \"$prompt_path\""
+  ],
+  "planner-stdin",
+  promptPath,
   codexBin,
   "exec",
   "--json",
   "--cd",
-    resolvedWorkspaceRoot,
+  resolvedWorkspaceRoot,
   "-m",
   codexModel,
   "-c",
@@ -4617,8 +4991,7 @@ codexCommand schemaPath reportPath prompt = [
   "--output-schema",
   schemaPath,
   "-o",
-  reportPath,
-  prompt
+  reportPath
 ]
 
 plannerBenchmarkContextFor : Int -> Str -> Str
@@ -4658,6 +5031,10 @@ plannerPromptFor wave benchmarkSummary = textJoin "\n" [
   "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."
 ]
 
+plannerPromptPathForWave : Int -> Str
+plannerPromptPathForWave wave =
+  pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]]
+
 plannerTimeoutShell : Str
 plannerTimeoutShell =
   textJoin "\n" [
@@ -4665,7 +5042,8 @@ plannerTimeoutShell =
     "timeout_ms=\"$1\"",
     "stdout_path=\"$2\"",
     "stderr_path=\"$3\"",
-    "shift 3",
+    "prompt_path=\"$4\"",
+    "shift 4",
     "mkdir -p \"$(dirname \"$stdout_path\")\" \"$(dirname \"$stderr_path\")\"",
     "if ! command -v timeout >/dev/null 2>&1; then",
     "  printf '%s\n' 'missing timeout command for planner execution' >\"$stderr_path\"",
@@ -4675,7 +5053,7 @@ plannerTimeoutShell =
     "secs=$(( (timeout_ms + 999) / 1000 ))",
     "if [ \"$secs\" -lt 1 ]; then secs=1; fi",
     "set +e",
-    "timeout -k 15s \"${secs}s\" \"$@\" >\"$stdout_path\" 2>\"$stderr_path\"",
+    "timeout -k 15s \"${secs}s\" \"$@\" - < \"$prompt_path\" >\"$stdout_path\" 2>\"$stderr_path\"",
     "status=$?",
     "set -e",
     "if [ \"$status\" -eq 124 ] || [ \"$status\" -eq 137 ]; then",
@@ -4705,8 +5083,7 @@ plannerCodexArgsFor wave benchmarkSummary =
       "--output-schema",
       resolvedPlannerSchemaPath,
       "-o",
-      plannerReportPathFor wave,
-      plannerPromptFor wave benchmarkSummary
+      plannerReportPathFor wave
     ]
 
 plannerCommandFor : Int -> Str -> SwarmCommand
@@ -4721,7 +5098,8 @@ plannerCommandFor wave benchmarkSummary =
         "clasp-planner-timeout",
         encode plannerTimeoutMs,
         plannerStdoutPathFor wave,
-        plannerStderrPathFor wave
+        plannerStderrPathFor wave,
+        plannerPromptPathForWave wave
       ]
       (plannerCodexArgsFor wave benchmarkSummary))
 ensureObjective : Str
@@ -5130,6 +5508,46 @@ recoverablePlannerTransportFailure detail =
   else
     textIncludes detail "exitCode=124"
 
+plannerAttemptForWave : Int -> Int
+plannerAttemptForWave wave =
+  match status (plannerHandleForWave wave) {
+    Ok task -> nonZeroAttemptOr task.attempts wave,
+    Err message -> wave
+  }
+
+plannerRecoveryReportPaths : Int -> [Str]
+plannerRecoveryReportPaths wave =
+  [
+    plannerReportPathFor wave,
+    plannerInputPath,
+    statusPath,
+    feedbackPath,
+    plannerStdoutPathFor wave,
+    plannerStderrPathFor wave
+  ]
+
+recordPlannerRecovery : ManagerState -> Str -> [Str] -> Str
+recordPlannerRecovery state cause command =
+  appendRetryRecoveryRecord
+    (retryRecoveryRecord
+      (plannerAttemptForWave state.wave)
+      (plannerTaskIdForWave state.wave)
+      "planner"
+      "retrying"
+      cause
+      (plannerRecoveryReportPaths state.wave)
+      command
+      "retry"
+      0
+      (plannerStdoutPathFor state.wave)
+      (plannerStderrPathFor state.wave)
+      ""
+      [
+        textConcat ["wave=", encode state.wave],
+        textConcat ["managerPhase=", state.phase],
+        textConcat ["managerStatusPath=", statusPath]
+      ])
+
 retryCurrentPlannerAfterLeaseBlocker : ManagerState -> Str -> Str -> Str
 retryCurrentPlannerAfterLeaseBlocker state summary detail =
   match fail (plannerHandleForWave state.wave) {
@@ -5151,10 +5569,13 @@ retryCurrentPlannerAfterLeaseBlocker state summary detail =
       }
   }
 
-continueAfterPlannerLeaseBlocker : Str -> Str -> Str
-continueAfterPlannerLeaseBlocker summary detail = {
+continueAfterPlannerLeaseBlocker : Str -> Str -> [Str] -> Str
+continueAfterPlannerLeaseBlocker summary detail command = {
   let state = readManagerState in
-  if state.wave < maxWaves then {
+  let recordError = recordPlannerRecovery state (textConcat [summary, ": ", detail]) command in
+  if recordError != "" then
+    plannerFailure "planner retry record write failed" recordError
+  else if state.wave < maxWaves then {
     let traceError =
       appendManagerTrace
         (textConcat [
@@ -5181,9 +5602,13 @@ continueAfterPlannerLeaseBlocker summary detail = {
     retryCurrentPlannerAfterLeaseBlocker state summary detail
 }
 
-continueAfterPlannerTransportBlocker : Str -> Str -> Str
-continueAfterPlannerTransportBlocker summary detail = {
+continueAfterPlannerTransportBlocker : Str -> Str -> [Str] -> Str
+continueAfterPlannerTransportBlocker summary detail command = {
   let state = readManagerState in
+  let recordError = recordPlannerRecovery state (textConcat [summary, ": ", detail]) command in
+  if recordError != "" then
+    plannerFailure "planner retry record write failed" recordError
+  else
   let traceError =
     appendManagerTrace
       (textConcat [
@@ -5217,9 +5642,13 @@ continueAfterPlannerTransportBlocker summary detail = {
     }
 }
 
-continueAfterPlannerValidationBlocker : Str -> Str -> Str
-continueAfterPlannerValidationBlocker summary detail = {
+continueAfterPlannerValidationBlocker : Str -> Str -> [Str] -> Str
+continueAfterPlannerValidationBlocker summary detail command = {
   let state = readManagerState in
+  let recordError = recordPlannerRecovery state (textConcat [summary, ": ", detail]) command in
+  if recordError != "" then
+    plannerFailure "planner retry record write failed" recordError
+  else
   let traceError =
     appendManagerTrace
       (textConcat [
@@ -5672,52 +6101,59 @@ runPlanner = {
             else
               continueWithPlan
           }
-        else
-          match lease (plannerHandleForWave wave) {
+        else {
+          match writeFile (plannerPromptPathForWave wave) (plannerPromptFor wave benchmarkSummary) {
             Err message ->
-              if recoverablePlannerLeaseFailure message then
-                continueAfterPlannerLeaseBlocker "planner lease failed" message
-              else
-                plannerFailure "planner lease failed" message,
-            Ok leaseValue -> {
+              plannerFailure "planner prompt write failed" message,
+            Ok promptWritten -> {
               let plannerCommand = plannerCommandFor wave benchmarkSummary in
-              let runTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":run-command:start"]) in
-              if runTrace != "" then
-                plannerFailure "manager trace write failed" runTrace
-              else
-              match runCommand plannerCommand.cwd plannerCommand.command {
+              match lease (plannerHandleForWave wave) {
                 Err message ->
-                  if recoverablePlannerTransportFailure message then
-                    continueAfterPlannerTransportBlocker "planner run failed" message
+                  if recoverablePlannerLeaseFailure message then
+                    continueAfterPlannerLeaseBlocker "planner lease failed" message plannerCommand.command
                   else
-                    plannerFailure "planner run failed" message,
-                Ok process ->
-                  if process.exitCode != 0 then {
-                    let detail = plannerProcessFailureDetail wave process in
-                    if recoverablePlannerTransportFailure detail then
-                      continueAfterPlannerTransportBlocker "planner run failed" detail
-                    else
-                      plannerFailure "planner run failed" detail
-                  } else if fileExists (plannerReportPathFor wave) then
-                    {
-                      let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":report-ready"]) in
-                      if traceError != "" then
-                        plannerFailure "manager trace write failed" traceError
+                    plannerFailure "planner lease failed" message,
+                Ok leaseValue -> {
+                  let runTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":run-command:start"]) in
+                  if runTrace != "" then
+                    plannerFailure "manager trace write failed" runTrace
+                  else
+                  match runCommand plannerCommand.cwd plannerCommand.command {
+                    Err message ->
+                      if recoverablePlannerTransportFailure message then
+                        continueAfterPlannerTransportBlocker "planner run failed" message plannerCommand.command
                       else
-                        continueWithPlan
-                    }
-                  else {
-                    let detail = textConcat [process.stderr, process.stdout] in
-                    if recoverablePlannerTransportFailure detail then
-                      continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail
-                    else {
-                      let failed = fail (plannerHandleForWave wave) in
-                      plannerFailure "planner step failed before producing a durable report" detail
-                    }
+                        plannerFailure "planner run failed" message,
+                    Ok process ->
+                      if process.exitCode != 0 then {
+                        let detail = plannerProcessFailureDetail wave process in
+                        if recoverablePlannerTransportFailure detail then
+                          continueAfterPlannerTransportBlocker "planner run failed" detail plannerCommand.command
+                        else
+                          plannerFailure "planner run failed" detail
+                      } else if fileExists (plannerReportPathFor wave) then
+                        {
+                          let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":report-ready"]) in
+                          if traceError != "" then
+                            plannerFailure "manager trace write failed" traceError
+                          else
+                            continueWithPlan
+                        }
+                      else {
+                        let detail = textConcat [process.stderr, process.stdout] in
+                        if recoverablePlannerTransportFailure detail then
+                          continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail plannerCommand.command
+                        else {
+                          let failed = fail (plannerHandleForWave wave) in
+                          plannerFailure "planner step failed before producing a durable report" detail
+                        }
+                      }
                   }
+                }
               }
             }
           }
+        }
       }
     }
   }
@@ -5801,13 +6237,24 @@ promotionFailureReport spec message =
   syntheticFailureReport
     "task promotion failed"
     (if fileExists (taskPromotionDiffPath spec.taskId) then
-      textConcat [
-        message,
-        "\nrecoverableDiff=",
-        taskPromotionDiffPath spec.taskId,
-        "\nrecoverableDiffKind=promotion-workspace",
-        "\nrecoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
-      ]
+      if fileExists (taskPromotionLedgerPath spec.taskId) then
+        textConcat [
+          message,
+          "\npromotionLedger=",
+          taskPromotionLedgerPath spec.taskId,
+          "\nrecoverableDiff=",
+          taskPromotionDiffPath spec.taskId,
+          "\nrecoverableDiffKind=promotion-workspace",
+          "\nrecoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+        ]
+      else
+        textConcat [
+          message,
+          "\nrecoverableDiff=",
+          taskPromotionDiffPath spec.taskId,
+          "\nrecoverableDiffKind=promotion-workspace",
+          "\nrecoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+        ]
     else
       message)
 
@@ -5822,15 +6269,28 @@ promotionFailureFinding spec =
 promotionFailureFindingsJson : PlannerTaskSpec -> Str
 promotionFailureFindingsJson spec =
   if fileExists (taskPromotionDiffPath spec.taskId) then
-    textConcat [
-      encode (promotionFailureFinding spec),
-      ",",
-      encode (textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId]),
-      ",",
-      encode "recoverableDiffKind=promotion-workspace",
-      ",",
-      encode "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
-    ]
+    if fileExists (taskPromotionLedgerPath spec.taskId) then
+      textConcat [
+        encode (promotionFailureFinding spec),
+        ",",
+        encode (textConcat ["promotionLedger=", taskPromotionLedgerPath spec.taskId]),
+        ",",
+        encode (textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId]),
+        ",",
+        encode "recoverableDiffKind=promotion-workspace",
+        ",",
+        encode "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+      ]
+    else
+      textConcat [
+        encode (promotionFailureFinding spec),
+        ",",
+        encode (textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId]),
+        ",",
+        encode "recoverableDiffKind=promotion-workspace",
+        ",",
+        encode "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+      ]
   else
     encode (promotionFailureFinding spec)
 
@@ -6077,6 +6537,20 @@ retryChildLoopMissingReport spec report =
   else {
     let preserveProgress = childLoopHasBuilderProgress spec.taskId in
     let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let recordError =
+      recordChildLoopRecovery
+        spec
+        nextRetry
+        "child-loop"
+        "retrying"
+        "missing durable report"
+        [
+          textConcat ["preserveBuilderProgress=", encode preserveProgress],
+          textConcat ["verifierSummary=", report.summary]
+        ] in
+    if recordError != "" then
+      textConcat ["task child loop retry record write failed: ", spec.taskId, ": ", recordError]
+    else
     let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
     if retryWriteError != "" then
       textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
@@ -6145,6 +6619,17 @@ retryChildLoopMissingLaunchHeartbeat wave report spec failureReport =
     recordPlannedTaskFailure spec failureReport
   else {
     let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let recordError =
+      recordChildLoopRecovery
+        spec
+        nextRetry
+        "child-loop"
+        "retrying"
+        "missing launch heartbeat"
+        [textConcat ["verifierSummary=", failureReport.summary]] in
+    if recordError != "" then
+      textConcat ["task child loop retry record write failed: ", spec.taskId, ": ", recordError]
+    else
     let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
     if retryWriteError != "" then
       textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
@@ -6212,7 +6697,7 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
       if validation.valid == false then
         if plannerState.phase == "planner-running" then
           if recoverablePlannerValidationFailure validation then
-            continueAfterPlannerValidationBlocker "planner validation failed" (planValidationFailureDetail validation)
+            continueAfterPlannerValidationBlocker "planner validation failed" (planValidationFailureDetail validation) emptyTexts
           else
             finalizeWithReport failureState (planValidationFailureReport validation)
         else
@@ -6830,9 +7315,9 @@ resumeManagerOnce = {
     textConcat ["error:", traceState]
   else if state.final then
     if recoverableFinalPlannerLeaseState state then
-      continueAfterPlannerLeaseBlocker "planner lease failed" "recovering final failed planner lease state"
+      continueAfterPlannerLeaseBlocker "planner lease failed" "recovering final failed planner lease state" emptyTexts
     else if recoverableFinalPlannerTransportState state then
-      continueAfterPlannerTransportBlocker readFeedbackSummary (recoverableFinalPlannerTransportDetail state)
+      continueAfterPlannerTransportBlocker readFeedbackSummary (recoverableFinalPlannerTransportDetail state) emptyTexts
     else
       statusOutput
   else if state.phase == "completed" then

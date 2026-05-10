@@ -1,6 +1,7 @@
 module GoalManagerStateView
 
 import GoalManagerTaskStatusRuntime
+import GoalManagerChildLoopMonitor
 import GoalManagerStateRuntime
 import GoalManagerBenchmarkCheckpoint
 import GoalManagerTaskReportIO
@@ -262,18 +263,46 @@ childHealthWaitingReasons taskIds = {
     [statusWaitingReason "child-health" unhealthyTaskIds emptyTexts details]
 }
 
+retryRecoveryWaitingReasonForTask : Str -> [StatusWaitingReason]
+retryRecoveryWaitingReasonForTask taskId =
+  if taskId == "" then
+    emptyStatusWaitingReasons
+  else if length (readRetryRecoveryRecords taskId) == 0 then
+    emptyStatusWaitingReasons
+  else
+    [
+      StatusWaitingReason {
+        kind = "retry-recovery-records",
+        taskIds = [taskId],
+        relatedTaskIds = emptyTexts,
+        details = [
+          textConcat [taskId, ":", retryRecoverySummaryText (latestRetryRecoveryRecord taskId)],
+          textConcat [taskId, ":retryRecordPath=", retryRecoveryRecordsPath taskId]
+        ]
+      }
+    ]
+
 statusWaitingReasons : ManagerState -> [Str] -> [SwarmTask] -> [StatusWaitingReason]
-statusWaitingReasons state plannedTaskIds trackedTasks =
+statusWaitingReasons state plannedTaskIds trackedTasks = {
+  let trackedTaskIds =
+    if length plannedTaskIds == 0 then
+      map taskIdOf trackedTasks
+    else
+      plannedTaskIds;
   append
     (append
       (append
         (append
-          (plannerWaitingReasons state)
-          (benchmarkWaitingReasons state plannedTaskIds))
-        (dependencyWaitingReasons trackedTasks))
-      (budgetWaitingReasons trackedTasks))
-    (childHealthWaitingReasons
-      (if length plannedTaskIds == 0 then map taskIdOf trackedTasks else plannedTaskIds))
+          (append
+            (plannerWaitingReasons state)
+            (benchmarkWaitingReasons state plannedTaskIds))
+          (dependencyWaitingReasons trackedTasks))
+        (budgetWaitingReasons trackedTasks))
+      (childHealthWaitingReasons trackedTaskIds))
+    (append
+      (retryRecoveryWaitingReasonForTask state.plannerTaskId)
+      (retryRecoveryWaitingReasonForTask state.activeTaskId))
+}
 
 statusView : ManagerState -> StatusView
 statusView state =

@@ -74,6 +74,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$prompt" == "-" ]]; then
+  prompt="$(cat)"
+fi
+
 if [[ -z "$report_path" ]]; then
   printf 'missing report path\n' >&2
   exit 1

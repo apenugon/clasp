@@ -305,6 +305,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$prompt" == "-" ]]; then
+  prompt="$(cat)"
+fi
+
 if [[ -z "$report_path" ]]; then
   printf 'missing report path\n' >&2
   exit 1
@@ -828,11 +832,13 @@ run_task_workspace_harness() {
   local workspace_root="$2"
   local task_workspace_base="$3"
   local mode="${4:-ensure}"
+  local task_id="${5:-benchmark-gap}"
 
   env \
     XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
     CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON="\"$task_workspace_base\"" \
+    CLASP_TASK_WORKSPACE_HARNESS_TASK_ID_JSON="\"$task_id\"" \
     CLASP_TASK_WORKSPACE_HARNESS_MODE_JSON="\"$mode\"" \
     "$claspc_bin" run "$project_root/examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp" -- "$state_root"
 }
@@ -1255,6 +1261,175 @@ grep -F 'ok' "$valid_reuse_output_two" >/dev/null
 grep -Fx 'preserve-valid-reuse' "$valid_reuse_actual/reuse-marker.txt" >/dev/null
 grep -Fx 'preserve-valid-reuse' "$valid_reuse_baseline/reuse-marker.txt" >/dev/null
 grep -F '"snapshotPolicyId":"workspace-snapshot-v1:' "$valid_reuse_actual/.clasp-task-workspace-manifest.json" >/dev/null
+
+trace_case "task-workspace-promotion-ledger-disjoint"
+promotion_ledger_state="$test_root_abs/promotion-ledger-state"
+promotion_ledger_workspace="$test_root_abs/promotion-ledger-workspace"
+promotion_ledger_base="$test_root_abs/promotion-ledger-base"
+promotion_ledger_output_one="$test_root_abs/promotion-ledger-output-one.txt"
+promotion_ledger_output_two="$test_root_abs/promotion-ledger-output-two.txt"
+mkdir -p "$promotion_ledger_workspace"
+run_task_workspace_harness "$promotion_ledger_state" "$promotion_ledger_workspace" "$promotion_ledger_base" ensure ledger-one \
+  >"$promotion_ledger_output_one" 2>&1
+run_task_workspace_harness "$promotion_ledger_state" "$promotion_ledger_workspace" "$promotion_ledger_base" ensure ledger-two \
+  >"$promotion_ledger_output_two" 2>&1
+grep -F 'ok' "$promotion_ledger_output_one" >/dev/null
+grep -F 'ok' "$promotion_ledger_output_two" >/dev/null
+printf '%s\n' 'ledger-one-applied' >"$promotion_ledger_workspace/.clasp-task-workspaces/ledger-one/one.txt"
+printf '%s\n' 'ledger-two-applied' >"$promotion_ledger_workspace/.clasp-task-workspaces/ledger-two/two.txt"
+run_task_workspace_harness "$promotion_ledger_state" "$promotion_ledger_workspace" "$promotion_ledger_base" promote ledger-one \
+  >"$promotion_ledger_output_one" 2>&1
+run_task_workspace_harness "$promotion_ledger_state" "$promotion_ledger_workspace" "$promotion_ledger_base" promote ledger-two \
+  >"$promotion_ledger_output_two" 2>&1
+grep -F 'ok' "$promotion_ledger_output_one" >/dev/null
+grep -F 'ok' "$promotion_ledger_output_two" >/dev/null
+grep -Fx 'ledger-one-applied' "$promotion_ledger_workspace/one.txt" >/dev/null
+grep -Fx 'ledger-two-applied' "$promotion_ledger_workspace/two.txt" >/dev/null
+node - "$promotion_ledger_state/loop-ledger-one/promotion-ledger.json" "$promotion_ledger_state/loop-ledger-two/promotion-ledger.json" <<'NODE'
+const fs = require('fs');
+const [onePath, twoPath] = process.argv.slice(2);
+function read(path) {
+  const ledger = JSON.parse(fs.readFileSync(path, 'utf8'));
+  if (ledger.schema !== 'clasp-task-workspace-promotion-ledger-v1') throw new Error(`bad schema in ${path}`);
+  if (ledger.status !== 'applied' || ledger.conflicted !== false) throw new Error(`expected applied ledger in ${path}`);
+  if (!ledger.baseline?.fingerprint?.startsWith('sha256:')) throw new Error(`missing baseline fingerprint in ${path}`);
+  if (!ledger.workspace?.fingerprint?.startsWith('sha256:')) throw new Error(`missing workspace fingerprint in ${path}`);
+  if (!ledger.baseline?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error(`missing baseline manifest fingerprint in ${path}`);
+  if (!ledger.workspace?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error(`missing workspace manifest fingerprint in ${path}`);
+  if (ledger.filesSkippedDueToConflict.length !== 0) throw new Error(`unexpected skipped files in ${path}`);
+  return ledger;
+}
+const one = read(onePath);
+const two = read(twoPath);
+if (one.taskId !== 'ledger-one' || !one.filesApplied.includes('one.txt')) throw new Error('ledger-one did not record one.txt');
+if (two.taskId !== 'ledger-two' || !two.filesApplied.includes('two.txt')) throw new Error('ledger-two did not record two.txt');
+if (!one.changesApplied.some((change) => change.path === 'one.txt' && change.action === 'add')) throw new Error('ledger-one did not record one.txt add action');
+if (!two.changesApplied.some((change) => change.path === 'two.txt' && change.action === 'add')) throw new Error('ledger-two did not record two.txt add action');
+NODE
+
+trace_case "task-workspace-promotion-ledger-disjoint-deletion"
+promotion_delete_state="$test_root_abs/promotion-delete-state"
+promotion_delete_workspace="$test_root_abs/promotion-delete-workspace"
+promotion_delete_base="$test_root_abs/promotion-delete-base"
+promotion_delete_output_delete="$test_root_abs/promotion-delete-output-delete.txt"
+promotion_delete_output_add="$test_root_abs/promotion-delete-output-add.txt"
+mkdir -p "$promotion_delete_workspace"
+printf '%s\n' 'delete baseline' >"$promotion_delete_workspace/delete-me.txt"
+run_task_workspace_harness "$promotion_delete_state" "$promotion_delete_workspace" "$promotion_delete_base" ensure ledger-delete \
+  >"$promotion_delete_output_delete" 2>&1
+run_task_workspace_harness "$promotion_delete_state" "$promotion_delete_workspace" "$promotion_delete_base" ensure ledger-delete-add \
+  >"$promotion_delete_output_add" 2>&1
+grep -F 'ok' "$promotion_delete_output_delete" >/dev/null
+grep -F 'ok' "$promotion_delete_output_add" >/dev/null
+rm -f "$promotion_delete_workspace/.clasp-task-workspaces/ledger-delete/delete-me.txt"
+printf '%s\n' 'disjoint add survives' >"$promotion_delete_workspace/.clasp-task-workspaces/ledger-delete-add/added.txt"
+run_task_workspace_harness "$promotion_delete_state" "$promotion_delete_workspace" "$promotion_delete_base" promote ledger-delete-add \
+  >"$promotion_delete_output_add" 2>&1
+run_task_workspace_harness "$promotion_delete_state" "$promotion_delete_workspace" "$promotion_delete_base" promote ledger-delete \
+  >"$promotion_delete_output_delete" 2>&1
+grep -F 'ok' "$promotion_delete_output_add" >/dev/null
+grep -F 'ok' "$promotion_delete_output_delete" >/dev/null
+grep -Fx 'disjoint add survives' "$promotion_delete_workspace/added.txt" >/dev/null
+test ! -e "$promotion_delete_workspace/delete-me.txt"
+node - "$promotion_delete_state/loop-ledger-delete/promotion-ledger.json" "$promotion_delete_state/loop-ledger-delete-add/promotion-ledger.json" <<'NODE'
+const fs = require('fs');
+const [deleteLedgerPath, addLedgerPath] = process.argv.slice(2);
+const deleteLedger = JSON.parse(fs.readFileSync(deleteLedgerPath, 'utf8'));
+const addLedger = JSON.parse(fs.readFileSync(addLedgerPath, 'utf8'));
+if (deleteLedger.status !== 'applied' || deleteLedger.conflicted !== false) throw new Error('expected applied deletion ledger');
+if (addLedger.status !== 'applied' || addLedger.conflicted !== false) throw new Error('expected applied add ledger');
+if (!deleteLedger.filesApplied.includes('delete-me.txt')) throw new Error('deletion ledger missing deleted path');
+if (!deleteLedger.changesApplied.some((change) => change.path === 'delete-me.txt' && change.action === 'delete')) throw new Error('deletion ledger missing delete action');
+if (!addLedger.changesApplied.some((change) => change.path === 'added.txt' && change.action === 'add')) throw new Error('add ledger missing add action');
+if (deleteLedger.filesSkippedDueToConflict.length !== 0) throw new Error('unexpected deletion conflicts');
+NODE
+
+trace_case "task-workspace-promotion-ledger-conflict-isolated"
+promotion_ledger_conflict_state="$test_root_abs/promotion-ledger-conflict-state"
+promotion_ledger_conflict_workspace="$test_root_abs/promotion-ledger-conflict-workspace"
+promotion_ledger_conflict_base="$test_root_abs/promotion-ledger-conflict-base"
+promotion_ledger_conflict_output_a="$test_root_abs/promotion-ledger-conflict-output-a.txt"
+promotion_ledger_conflict_output_b="$test_root_abs/promotion-ledger-conflict-output-b.txt"
+mkdir -p "$promotion_ledger_conflict_workspace"
+printf '%s\n' 'baseline' >"$promotion_ledger_conflict_workspace/shared.txt"
+run_task_workspace_harness "$promotion_ledger_conflict_state" "$promotion_ledger_conflict_workspace" "$promotion_ledger_conflict_base" ensure ledger-conflict-a \
+  >"$promotion_ledger_conflict_output_a" 2>&1
+run_task_workspace_harness "$promotion_ledger_conflict_state" "$promotion_ledger_conflict_workspace" "$promotion_ledger_conflict_base" ensure ledger-conflict-b \
+  >"$promotion_ledger_conflict_output_b" 2>&1
+grep -F 'ok' "$promotion_ledger_conflict_output_a" >/dev/null
+grep -F 'ok' "$promotion_ledger_conflict_output_b" >/dev/null
+printf '%s\n' 'branch-a' >"$promotion_ledger_conflict_workspace/.clasp-task-workspaces/ledger-conflict-a/shared.txt"
+printf '%s\n' 'branch-b' >"$promotion_ledger_conflict_workspace/.clasp-task-workspaces/ledger-conflict-b/shared.txt"
+printf '%s\n' 'branch-b-unique' >"$promotion_ledger_conflict_workspace/.clasp-task-workspaces/ledger-conflict-b/unique-b.txt"
+run_task_workspace_harness "$promotion_ledger_conflict_state" "$promotion_ledger_conflict_workspace" "$promotion_ledger_conflict_base" promote ledger-conflict-a \
+  >"$promotion_ledger_conflict_output_a" 2>&1
+run_task_workspace_harness "$promotion_ledger_conflict_state" "$promotion_ledger_conflict_workspace" "$promotion_ledger_conflict_base" promote ledger-conflict-b \
+  >"$promotion_ledger_conflict_output_b" 2>&1
+grep -F 'ok' "$promotion_ledger_conflict_output_a" >/dev/null
+grep -F 'error:task workspace promotion failed' "$promotion_ledger_conflict_output_b" >/dev/null
+grep -Fx 'branch-a' "$promotion_ledger_conflict_workspace/shared.txt" >/dev/null
+grep -Fx 'branch-b-unique' "$promotion_ledger_conflict_workspace/unique-b.txt" >/dev/null
+test -f "$promotion_ledger_conflict_state/loop-ledger-conflict-b/promotion-conflict.marker"
+test -f "$promotion_ledger_conflict_state/loop-ledger-conflict-b/promotion-recoverable.diff"
+node - "$promotion_ledger_conflict_state/loop-ledger-conflict-b/promotion-ledger.json" "$promotion_ledger_conflict_state/loop-ledger-conflict-b/promotion-conflict.marker" "$promotion_ledger_conflict_state/loop-ledger-conflict-b/promotion-recoverable.diff" <<'NODE'
+const fs = require('fs');
+const [ledgerPath, markerPath, diffPath] = process.argv.slice(2);
+const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+if (ledger.schema !== 'clasp-task-workspace-promotion-ledger-v1') throw new Error('bad conflict ledger schema');
+if (ledger.taskId !== 'ledger-conflict-b') throw new Error('bad conflict task id');
+if (ledger.status !== 'conflict' || ledger.conflicted !== true) throw new Error('expected conflict status');
+if (!ledger.filesApplied.includes('unique-b.txt')) throw new Error('conflict ledger did not preserve unique file');
+if (!ledger.filesSkippedDueToConflict.includes('shared.txt')) throw new Error('conflict ledger did not isolate shared conflict');
+if (!ledger.changesApplied.some((change) => change.path === 'unique-b.txt' && change.action === 'add')) throw new Error('conflict ledger did not record unique add action');
+if (!ledger.changesSkippedDueToConflict.some((change) => change.path === 'shared.txt' && change.action === 'modify')) throw new Error('conflict ledger did not record shared modify conflict action');
+if (ledger.conflictMarkerPath !== markerPath) throw new Error('conflict marker path mismatch');
+if (ledger.recoverableDiffPath !== diffPath) throw new Error('recoverable diff path mismatch');
+if (!ledger.baseline?.fingerprint?.startsWith('sha256:')) throw new Error('missing baseline fingerprint');
+if (!ledger.workspace?.fingerprint?.startsWith('sha256:')) throw new Error('missing workspace fingerprint');
+if (!ledger.baseline?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error('missing baseline manifest fingerprint');
+if (!ledger.workspace?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error('missing workspace manifest fingerprint');
+NODE
+
+trace_case "task-workspace-promotion-ledger-delete-conflict-isolated"
+promotion_delete_conflict_state="$test_root_abs/promotion-delete-conflict-state"
+promotion_delete_conflict_workspace="$test_root_abs/promotion-delete-conflict-workspace"
+promotion_delete_conflict_base="$test_root_abs/promotion-delete-conflict-base"
+promotion_delete_conflict_output_delete="$test_root_abs/promotion-delete-conflict-output-delete.txt"
+promotion_delete_conflict_output_edit="$test_root_abs/promotion-delete-conflict-output-edit.txt"
+mkdir -p "$promotion_delete_conflict_workspace"
+printf '%s\n' 'delete conflict baseline' >"$promotion_delete_conflict_workspace/delete-conflict.txt"
+run_task_workspace_harness "$promotion_delete_conflict_state" "$promotion_delete_conflict_workspace" "$promotion_delete_conflict_base" ensure ledger-delete-conflict-delete \
+  >"$promotion_delete_conflict_output_delete" 2>&1
+run_task_workspace_harness "$promotion_delete_conflict_state" "$promotion_delete_conflict_workspace" "$promotion_delete_conflict_base" ensure ledger-delete-conflict-edit \
+  >"$promotion_delete_conflict_output_edit" 2>&1
+grep -F 'ok' "$promotion_delete_conflict_output_delete" >/dev/null
+grep -F 'ok' "$promotion_delete_conflict_output_edit" >/dev/null
+rm -f "$promotion_delete_conflict_workspace/.clasp-task-workspaces/ledger-delete-conflict-delete/delete-conflict.txt"
+printf '%s\n' 'delete branch unique' >"$promotion_delete_conflict_workspace/.clasp-task-workspaces/ledger-delete-conflict-delete/delete-branch-unique.txt"
+printf '%s\n' 'edited by another branch' >"$promotion_delete_conflict_workspace/.clasp-task-workspaces/ledger-delete-conflict-edit/delete-conflict.txt"
+run_task_workspace_harness "$promotion_delete_conflict_state" "$promotion_delete_conflict_workspace" "$promotion_delete_conflict_base" promote ledger-delete-conflict-edit \
+  >"$promotion_delete_conflict_output_edit" 2>&1
+run_task_workspace_harness "$promotion_delete_conflict_state" "$promotion_delete_conflict_workspace" "$promotion_delete_conflict_base" promote ledger-delete-conflict-delete \
+  >"$promotion_delete_conflict_output_delete" 2>&1
+grep -F 'ok' "$promotion_delete_conflict_output_edit" >/dev/null
+grep -F 'error:task workspace promotion failed' "$promotion_delete_conflict_output_delete" >/dev/null
+grep -Fx 'edited by another branch' "$promotion_delete_conflict_workspace/delete-conflict.txt" >/dev/null
+grep -Fx 'delete branch unique' "$promotion_delete_conflict_workspace/delete-branch-unique.txt" >/dev/null
+test -f "$promotion_delete_conflict_state/loop-ledger-delete-conflict-delete/promotion-conflict.marker"
+test -f "$promotion_delete_conflict_state/loop-ledger-delete-conflict-delete/promotion-recoverable.diff"
+node - "$promotion_delete_conflict_state/loop-ledger-delete-conflict-delete/promotion-ledger.json" <<'NODE'
+const fs = require('fs');
+const ledger = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (ledger.status !== 'conflict' || ledger.conflicted !== true) throw new Error('expected delete conflict ledger');
+if (!ledger.filesApplied.includes('delete-branch-unique.txt')) throw new Error('delete conflict ledger did not preserve unique file');
+if (!ledger.filesSkippedDueToConflict.includes('delete-conflict.txt')) throw new Error('delete conflict ledger missing delete conflict path');
+if (!ledger.changesApplied.some((change) => change.path === 'delete-branch-unique.txt' && change.action === 'add')) throw new Error('delete conflict ledger missing unique add action');
+if (!ledger.changesSkippedDueToConflict.some((change) => change.path === 'delete-conflict.txt' && change.action === 'delete')) throw new Error('delete conflict ledger missing delete conflict action');
+if (!ledger.baseline?.fingerprint?.startsWith('sha256:')) throw new Error('delete conflict ledger missing baseline fingerprint');
+if (!ledger.workspace?.fingerprint?.startsWith('sha256:')) throw new Error('delete conflict ledger missing workspace fingerprint');
+if (!ledger.baseline?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error('delete conflict ledger missing baseline manifest fingerprint');
+if (!ledger.workspace?.manifest?.fingerprint?.startsWith('sha256:')) throw new Error('delete conflict ledger missing workspace manifest fingerprint');
+NODE
 
 trace_case "active-child-wait-does-not-spin"
 active_wait_state="$test_root_abs/active-wait-state"
@@ -1863,12 +2038,29 @@ grep -F '"verdict":"fail"' "$promotion_conflict_output" >/dev/null
 grep -F '"summary":"one or more planned tasks failed"' "$promotion_conflict_state/feedback.json" >/dev/null
 grep -R -F '"summary":"task promotion failed"' "$promotion_conflict_state"/loop-*/feedback.json >/dev/null
 grep -R -F 'promotion conflict: task workspace would overwrite files changed since snapshot' "$promotion_conflict_state"/loop-*/feedback.json >/dev/null
+grep -R -F 'promotionLedger=' "$promotion_conflict_state"/loop-*/feedback.json >/dev/null
 grep -R -F 'recoverableDiffKind=promotion-workspace' "$promotion_conflict_state"/loop-*/feedback.json >/dev/null
+promotion_ledger="$(
+  grep -Roh 'promotionLedger=[^"]*' "$promotion_conflict_state"/loop-*/feedback.json | head -1 | cut -d= -f2-
+)"
 promotion_recoverable_diff="$(
   grep -Roh 'recoverableDiff=[^"]*' "$promotion_conflict_state"/loop-*/feedback.json | head -1 | cut -d= -f2-
 )"
+test -f "$promotion_ledger"
 test -f "$promotion_recoverable_diff"
 grep -F 'fixed-after-feedback' "$promotion_recoverable_diff" >/dev/null
+node - "$promotion_ledger" <<'NODE'
+const fs = require('fs');
+const ledger = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (ledger.schema !== 'clasp-task-workspace-promotion-ledger-v1') throw new Error('bad manager promotion ledger schema');
+if (ledger.status !== 'conflict' || ledger.conflicted !== true) throw new Error('expected manager promotion conflict ledger');
+if (!ledger.filesSkippedDueToConflict.includes('workspace.txt')) throw new Error('manager promotion ledger missing workspace conflict');
+if (!ledger.changesSkippedDueToConflict.some((change) => change.path === 'workspace.txt' && change.action === 'modify')) throw new Error('manager promotion ledger missing workspace modify conflict action');
+if (!ledger.baseline?.fingerprint?.startsWith('sha256:')) throw new Error('manager promotion ledger missing baseline fingerprint');
+if (!ledger.workspace?.fingerprint?.startsWith('sha256:')) throw new Error('manager promotion ledger missing workspace fingerprint');
+if (!ledger.baseline?.manifest || !ledger.workspace?.manifest) throw new Error('manager promotion ledger missing stable manifest evidence fields');
+if (!ledger.recoverableDiffPath || !fs.existsSync(ledger.recoverableDiffPath)) throw new Error('manager promotion ledger missing recoverable diff');
+NODE
 if grep -F '"summary":"planned task reconciliation failed"' "$promotion_conflict_state/feedback.json" >/dev/null 2>&1; then
   echo "promotion conflicts should be task-level recoverable failures, not manager reconciliation failures" >&2
   exit 1

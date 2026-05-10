@@ -34,5 +34,10 @@ grep -F 'stale-inner-completed-completed=true' "$output" >/dev/null
 grep -F 'lease-spawn=running' "$output" >/dev/null
 grep -F 'lease-await=timeout' "$output" >/dev/null
 grep -F 'lease-heartbeat-seen=true' "$output" >/dev/null
+grep -F 'retry-record-count=1' "$output" >/dev/null
+grep -F 'retry-record-latest=phase=child-loop:attempt=2:status=retrying:cause=timeout waiting for child' "$output" >/dev/null
+grep -F 'retry-record-mailbox-has-path=true' "$output" >/dev/null
+grep -F 'retry-record-status-has-kind=true' "$output" >/dev/null
+grep -F 'planner-record-latest=phase=planner:attempt=1:status=retrying:cause=lease blocker' "$output" >/dev/null
 
 printf 'goal-manager-child-loop-monitor-ok\n'

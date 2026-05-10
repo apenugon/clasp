@@ -3,6 +3,7 @@ module GoalManagerRunLoopCore
 import GoalManagerBootstrapSetup
 import GoalManagerBootstrapPlanner
 import GoalManagerBootstrapTasks
+import GoalManagerPlannerReuse
 import GoalManagerStateView
 import GoalManagerFinalize
 import GoalManagerTaskExecutionHelpers
@@ -296,29 +297,34 @@ runPlanner = {
               continueWithPlan
           }
         else
-          match lease (plannerHandleForWave wave) {
+          match writeFile (plannerPromptPathForWave wave) (plannerPromptFor wave benchmarkSummary) {
             Err message ->
-              plannerFailure "planner lease failed" message,
-            Ok leaseValue ->
-              match toolRun (plannerHandleForWave wave) (plannerCommandFor wave benchmarkSummary) {
+              plannerFailure "planner prompt write failed" message,
+            Ok promptWritten ->
+              match lease (plannerHandleForWave wave) {
                 Err message ->
-                  plannerFailure "planner run failed" message,
-                Ok runValue ->
-                  if fileExists (plannerReportPathFor wave) then
-                    match complete (plannerHandleForWave wave) {
-                      Err message ->
-                        plannerFailure "planner completion failed" message,
-                      Ok completedValue -> {
-                        let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
-                        if traceError != "" then
-                          plannerFailure "manager trace write failed" traceError
-                        else
-                          continueWithPlan
+                  plannerFailure "planner lease failed" message,
+                Ok leaseValue ->
+                  match toolRun (plannerHandleForWave wave) (plannerCommandFor wave benchmarkSummary) {
+                    Err message ->
+                      plannerFailure "planner run failed" message,
+                    Ok runValue ->
+                      if fileExists (plannerReportPathFor wave) then
+                        match complete (plannerHandleForWave wave) {
+                          Err message ->
+                            plannerFailure "planner completion failed" message,
+                          Ok completedValue -> {
+                            let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":completed-report-ready"]) in
+                            if traceError != "" then
+                              plannerFailure "manager trace write failed" traceError
+                            else
+                              continueWithPlan
+                          }
+                        }
+                      else {
+                        let failed = fail (plannerHandleForWave wave) in
+                        plannerFailure "planner step failed before producing a durable report" runValue.stderrArtifactPath
                       }
-                    }
-                  else {
-                    let failed = fail (plannerHandleForWave wave) in
-                    plannerFailure "planner step failed before producing a durable report" runValue.stderrArtifactPath
                   }
               }
           }

@@ -1,6 +1,7 @@
 module Main
 
 import GoalManagerChildLoopMonitor
+import GoalManagerStateView
 import GoalManagerTaskStatusRuntime
 import GoalManagerMonitoredLoop
 import GoalManagerPrelude
@@ -63,6 +64,43 @@ boolLine : Str -> Bool -> Str
 boolLine label value =
   textConcat [label, "=", encode value]
 
+intLine : Str -> Int -> Str
+intLine label value =
+  textConcat [label, "=", encode value]
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+textListIncludes : [Str] -> Str -> Bool
+textListIncludes values needle = {
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else if textIncludes value needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+waitingReasonsIncludeKind : [StatusWaitingReason] -> Str -> Bool
+waitingReasonsIncludeKind reasons kind = {
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else if reason.kind == kind then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
 firstError : [Str] -> Str
 firstError errors =
   textJoin "" errors
@@ -105,6 +143,42 @@ taskHeartbeatSeen taskId =
     Err message -> false
   }
 
+writeHarnessRetryRecord : Str -> Str
+writeHarnessRetryRecord taskId =
+  appendRetryRecoveryRecord
+    (retryRecoveryRecord
+      2
+      taskId
+      "child-loop"
+      "retrying"
+      "timeout waiting for child"
+      [taskFeedbackPath taskId, taskStatusPath taskId]
+      ["claspc", "run", "examples/feedback-loop/Main.clasp"]
+      "timeout"
+      124
+      (taskProcessStdoutPath taskId)
+      (taskProcessStderrPath taskId)
+      (taskProcessHeartbeatPath taskId)
+      ["managerRetryCount=1", "launchOutcome=timeout"])
+
+writeHarnessPlannerRecord : Str
+writeHarnessPlannerRecord =
+  appendRetryRecoveryRecord
+    (retryRecoveryRecord
+      1
+      (plannerTaskIdForWave 1)
+      "planner"
+      "retrying"
+      "lease blocker"
+      [plannerReportPathFor 1, plannerStdoutPathFor 1, plannerStderrPathFor 1]
+      ["codex", "exec"]
+      "retry"
+      0
+      (plannerStdoutPathFor 1)
+      (plannerStderrPathFor 1)
+      ""
+      ["wave=1"])
+
 runHarness : Str
 runHarness = {
   let missingTask = "missing-launch" in
@@ -113,6 +187,7 @@ runHarness = {
   let liveTask = "stale-live-launch" in
   let completedTask = "stale-completed-launch" in
   let leaseTask = "lease-fresh" in
+  let retryTask = "retry-record-task" in
   let setupError =
     firstError [
       prepareTaskRoot missingTask,
@@ -121,6 +196,7 @@ runHarness = {
       prepareTaskRoot liveTask,
       prepareTaskRoot completedTask,
       prepareTaskRoot leaseTask,
+      prepareTaskRoot retryTask,
       ensureLeaseTask leaseTask,
       writeTextFile (taskProcessHeartbeatPath malformedTask) "{",
       writeTextFile (taskProcessHeartbeatPath unresolvedTask) "{}",
@@ -129,13 +205,19 @@ runHarness = {
       writeWatchedHeartbeat (taskBuilderHeartbeatPath liveTask 1) true false 1 123,
       writeWatchedHeartbeat (taskProcessHeartbeatPath completedTask) true false 1 0,
       writeChildState completedTask "builder-running" false false,
-      writeWatchedHeartbeat (taskBuilderHeartbeatPath completedTask 1) false true 0 124
+      writeWatchedHeartbeat (taskBuilderHeartbeatPath completedTask 1) false true 0 124,
+      writeHarnessRetryRecord retryTask,
+      writeHarnessPlannerRecord
     ] in
   if setupError != "" then
     textConcat ["error:", setupError]
   else
     let leaseSpawnOutcome = spawnLeaseChild leaseTask in
     let leaseAwaitOutcome = awaitChildLoopOutcome [leaseTask] in
+    let latestRetryRecord = latestRetryRecoveryRecord retryTask in
+    let plannerRetryRecord = latestRetryRecoveryRecord (plannerTaskIdForWave 1) in
+    let retryMailboxDetails = retryRecoveryMailboxDetails retryTask in
+    let retryWaitingReasons = retryRecoveryWaitingReasonForTask retryTask in
     textJoin
       "\n"
       [
@@ -148,7 +230,12 @@ runHarness = {
         boolLine "stale-inner-completed-completed" (childLoopLaunchCompleted completedTask),
         statusLine "lease-spawn" leaseSpawnOutcome,
         statusLine "lease-await" leaseAwaitOutcome,
-        boolLine "lease-heartbeat-seen" (taskHeartbeatSeen leaseTask)
+        boolLine "lease-heartbeat-seen" (taskHeartbeatSeen leaseTask),
+        intLine "retry-record-count" (length (readRetryRecoveryRecords retryTask)),
+        textConcat ["retry-record-latest=", retryRecoverySummaryText latestRetryRecord],
+        boolLine "retry-record-mailbox-has-path" (textListIncludes retryMailboxDetails "retryRecordPath="),
+        boolLine "retry-record-status-has-kind" (waitingReasonsIncludeKind retryWaitingReasons "retry-recovery-records"),
+        textConcat ["planner-record-latest=", retryRecoverySummaryText plannerRetryRecord]
       ]
 }
 

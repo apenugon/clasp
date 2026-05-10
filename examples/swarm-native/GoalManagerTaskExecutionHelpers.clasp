@@ -219,12 +219,21 @@ promotionFailureReport spec message =
     summary = "task promotion failed",
     findings =
       if fileExists (taskPromotionDiffPath spec.taskId) then
-        [
-          message,
-          textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId],
-          "recoverableDiffKind=promotion-workspace",
-          "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
-        ]
+        if fileExists (taskPromotionLedgerPath spec.taskId) then
+          [
+            message,
+            textConcat ["promotionLedger=", taskPromotionLedgerPath spec.taskId],
+            textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId],
+            "recoverableDiffKind=promotion-workspace",
+            "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+          ]
+        else
+          [
+            message,
+            textConcat ["recoverableDiff=", taskPromotionDiffPath spec.taskId],
+            "recoverableDiffKind=promotion-workspace",
+            "recoverableDiffUse=Feed this diff and its verifier report into the next planner wave instead of rediscovering the same branch from scratch."
+          ]
       else
         [message],
     tests_run = emptyTexts,
@@ -244,6 +253,141 @@ childLoopMonitorSpec spec =
     (readChildLoopManagerRetries spec.taskId)
     childLoopMaxManagerRetries
     (childLoopCommandArgs spec)
+
+nonZeroAttemptOr : Int -> Int -> Int
+nonZeroAttemptOr value fallback =
+  if value == 0 then
+    fallback
+  else
+    value
+
+childLoopRetryPhaseForTask : Str -> Str -> Str
+childLoopRetryPhaseForTask taskId fallback =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if textIncludes state.phase "verifier" then
+          "verifier"
+        else if textIncludes state.phase "builder" then
+          "builder"
+        else
+          fallback,
+      Err message -> fallback
+    }
+  else
+    fallback
+
+childLoopRetryAttemptForTask : Str -> Str -> Int -> Int
+childLoopRetryAttemptForTask taskId phase fallback =
+  if fileExists (taskStatusPath taskId) then
+    match readChildLoopStatePath (taskStatusPath taskId) {
+      Ok state ->
+        if phase == "verifier" then
+          nonZeroAttemptOr state.verifierRuns state.attempt
+        else if phase == "builder" then
+          nonZeroAttemptOr state.builderRuns state.attempt
+        else
+          nonZeroAttemptOr state.attempt fallback,
+      Err message -> fallback
+    }
+  else
+    fallback
+
+childLoopRetryReportPaths : Str -> Int -> [Str]
+childLoopRetryReportPaths taskId attempt =
+  [
+    taskFeedbackPath taskId,
+    taskStatusPath taskId,
+    taskBuilderReportPath taskId attempt,
+    taskVerifierReportPath taskId attempt,
+    taskDiffPath taskId attempt
+  ]
+
+recordChildLoopRecovery : PlannerTaskSpec -> Int -> Str -> Str -> Str -> [Str] -> Str
+recordChildLoopRecovery spec managerRetryCount fallbackPhase retryableStatus cause evidence = {
+  let outcome = childLoopLaunchOutcome spec.taskId in
+  let fallbackAttempt = incrementManagerCounter managerRetryCount in
+  let phase =
+    if fileExists (taskStatusPath spec.taskId) then
+      match readChildLoopStatePath (taskStatusPath spec.taskId) {
+        Ok state ->
+          if length (textSplit state.phase "verifier") > 1 then
+            "verifier"
+          else if length (textSplit state.phase "builder") > 1 then
+            "builder"
+          else
+            fallbackPhase,
+        Err message -> fallbackPhase
+      }
+    else
+      fallbackPhase in
+  let attempt =
+    if fileExists (taskStatusPath spec.taskId) then
+      match readChildLoopStatePath (taskStatusPath spec.taskId) {
+        Ok state ->
+          if phase == "verifier" then
+            if state.verifierRuns == 0 then
+              state.attempt
+            else
+              state.verifierRuns
+          else if phase == "builder" then
+            if state.builderRuns == 0 then
+              state.attempt
+            else
+              state.builderRuns
+          else
+            if state.attempt == 0 then
+              fallbackAttempt
+            else
+              state.attempt,
+        Err message -> fallbackAttempt
+      }
+    else
+      fallbackAttempt in
+  let exitCode = outcome.process.exitCode in
+  let reportPaths =
+    [
+      taskFeedbackPath spec.taskId,
+      taskStatusPath spec.taskId,
+      taskBuilderReportPath spec.taskId attempt,
+      taskVerifierReportPath spec.taskId attempt,
+      taskDiffPath spec.taskId attempt
+    ] in
+  let recordEvidence =
+    append
+      evidence
+      [
+        textConcat ["managerRetryCount=", encode managerRetryCount],
+        textConcat ["launchOutcome=", outcome.status],
+        childLoopLaunchSummary spec.taskId
+      ] in
+  let record =
+    RetryRecoveryRecord {
+      schema = retryRecoveryRecordSchema,
+      attempt = attempt,
+      taskId = spec.taskId,
+      phase = phase,
+      retryable =
+        if retryableStatus == "retryable" then
+          true
+        else if retryableStatus == "retrying" then
+          true
+        else
+          retryableStatus == "pending-retry",
+      retryableStatus = retryableStatus,
+      cause = cause,
+      reportPaths = reportPaths,
+      command = childLoopCommandArgs spec,
+      runStatus = outcome.status,
+      exitCode = exitCode,
+      stdoutPath = taskProcessStdoutPath spec.taskId,
+      stderrPath = taskProcessStderrPath spec.taskId,
+      heartbeatPath = taskProcessHeartbeatPath spec.taskId,
+      evidence = recordEvidence,
+      createdAtMs = timeUnixMs
+    } in
+  appendRetryRecoveryRecord record
+}
 
 recoverExpiredTaskFailureRecording : PlannerTaskSpec -> Str -> Str
 recoverExpiredTaskFailureRecording spec message =
@@ -286,6 +430,20 @@ retryChildLoopMissingReport spec report =
   else {
     let preserveProgress = childLoopHasBuilderProgress spec.taskId in
     let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let recordError =
+      recordChildLoopRecovery
+        spec
+        nextRetry
+        "child-loop"
+        "retrying"
+        "missing durable report"
+        [
+          textConcat ["preserveBuilderProgress=", encode preserveProgress],
+          textConcat ["verifierSummary=", report.summary]
+        ] in
+    if recordError != "" then
+      textConcat ["task child loop retry record write failed: ", spec.taskId, ": ", recordError]
+    else
     let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
     if retryWriteError != "" then
       textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]
@@ -340,6 +498,17 @@ retryChildLoopMissingLaunchHeartbeat wave report spec failureReport =
     recordPlannedTaskFailure spec failureReport
   else {
     let nextRetry = incrementManagerCounter (readChildLoopManagerRetries spec.taskId) in
+    let recordError =
+      recordChildLoopRecovery
+        spec
+        nextRetry
+        "child-loop"
+        "retrying"
+        "missing launch heartbeat"
+        [textConcat ["verifierSummary=", failureReport.summary]] in
+    if recordError != "" then
+      textConcat ["task child loop retry record write failed: ", spec.taskId, ": ", recordError]
+    else
     let retryWriteError = writeChildLoopManagerRetries spec.taskId nextRetry in
     if retryWriteError != "" then
       textConcat ["task child loop retry count write failed: ", spec.taskId, ": ", retryWriteError]

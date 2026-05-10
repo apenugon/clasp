@@ -2,6 +2,7 @@ module GoalManagerMailboxMessages
 
 import GoalManagerStateRuntime
 import GoalManagerBenchmarkRuntime
+import GoalManagerChildLoopMonitor
 import GoalManagerPlannerMaterialize
 import GoalManagerPlannerMemory
 import GoalManagerPlannerRoles
@@ -56,6 +57,7 @@ builderReportMailboxDetails spec report = {
   details = appendPrefixedMailboxDetails details "follow-up=" report.feedback.follow_ups;
   details = appendPrefixedMailboxDetails details "warning=" report.feedback.warnings;
   details = append details (taskRecoverableDiffDetails spec.taskId);
+  details = append details (retryRecoveryMailboxDetails spec.taskId);
   details
 }
 
@@ -71,6 +73,7 @@ verifierReportMailboxDetails spec report = {
   details = appendCapabilityMailboxDetails details report.capability_statuses;
   details = append details (taskBuilderReportContextDetails spec.taskId);
   details = append details (taskRecoverableDiffDetails spec.taskId);
+  details = append details (retryRecoveryMailboxDetails spec.taskId);
   details
 }
 

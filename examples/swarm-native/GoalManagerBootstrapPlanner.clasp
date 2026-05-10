@@ -7,8 +7,21 @@ import GoalManagerPrelude
 import GoalManagerConfig
 import Swarm
 
+plannerPromptPathForWave : Int -> Str
+plannerPromptPathForWave wave =
+  pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]]
+
 codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath prompt = [
+codexCommand schemaPath reportPath promptPath = [
+  "bash",
+  "-lc",
+  textJoin "\n" [
+    "prompt_path=\"$1\"",
+    "shift",
+    "exec \"$@\" - < \"$prompt_path\""
+  ],
+  "planner-stdin",
+  promptPath,
   codexBin,
   "exec",
   "--json",
@@ -25,8 +38,7 @@ codexCommand schemaPath reportPath prompt = [
   "--output-schema",
   schemaPath,
   "-o",
-  reportPath,
-  prompt
+  reportPath
 ]
 
 plannerBenchmarkContextFor : Int -> Str -> Str
@@ -103,5 +115,5 @@ plannerCommandFor wave benchmarkSummary =
       resolvedPlannerSchemaPath,
       "-o",
       plannerReportPathFor wave,
-      plannerPromptFor wave benchmarkSummary
+      plannerPromptPathForWave wave
     ]

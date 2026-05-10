@@ -296,6 +296,9 @@ focusedVerifySelectionPath attempt = pathJoin [stateRoot, textConcat ["focused-v
 builderReportPath : Int -> Str
 builderReportPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".json"]]
 
+builderPromptPath : Int -> Str
+builderPromptPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".prompt.md"]]
+
 builderStdoutPath : Int -> Str
 builderStdoutPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode attempt, ".stdout.jsonl"]]
 
@@ -304,6 +307,9 @@ builderStderrPath attempt = pathJoin [stateRoot, textConcat ["builder-", encode 
 
 verifierReportPath : Int -> Str
 verifierReportPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".json"]]
+
+verifierPromptPath : Int -> Str
+verifierPromptPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".prompt.md"]]
 
 verifierStdoutPath : Int -> Str
 verifierStdoutPath attempt = pathJoin [stateRoot, textConcat ["verifier-", encode attempt, ".stdout.jsonl"]]
@@ -1025,8 +1031,22 @@ incrementAttempt value =
 codexReasoningConfig : Str
 codexReasoningConfig = textConcat ["model_reasoning_effort=\"", codexReasoning, "\""]
 
+codexPromptStdinShell : Str
+codexPromptStdinShell =
+  textJoin "\n" [
+    "set -e",
+    "prompt_path=\"$1\"",
+    "shift",
+    "exec \"$@\" - < \"$prompt_path\""
+  ]
+
 codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath prompt = [
+codexCommand schemaPath reportPath promptPath = [
+  "bash",
+  "-lc",
+  codexPromptStdinShell,
+  "clasp-feedback-loop-codex-stdin",
+  promptPath,
   codexBin,
   "exec",
   "--json",
@@ -1043,19 +1063,22 @@ codexCommand schemaPath reportPath prompt = [
   "--output-schema",
   schemaPath,
   "-o",
-  reportPath,
-  prompt
+  reportPath
 ]
 
 loopCodexCommand : Str -> Str -> [Str]
-loopCodexCommand reportPath prompt = [
+loopCodexCommand reportPath promptPath = [
+  "bash",
+  "-lc",
+  codexPromptStdinShell,
+  "clasp-feedback-loop-codex-stdin",
+  promptPath,
   codexBin,
   "exec",
   "--cd",
   workspaceRoot,
   "-o",
-  reportPath,
-  prompt
+  reportPath
 ]
 
 baselineExcludeFlags : Str
@@ -1663,6 +1686,7 @@ builderPrompt attempt =
     textConcat ["Read the task file at ", taskFile, "."],
     "Drive the repository toward the full task goal. Prefer coherent capability-closing changes over tiny local patches.",
     "Work only in the current checkout. Add or update tests. Run the narrowest checks that cover your changes. Do not run bash scripts/verify-all.sh.",
+    "Bound expensive validation commands: wrap broad `claspc check`, `claspc run`, and large harness invocations in explicit timeouts, and fall back to smaller module/scenario checks instead of leaving the loop wedged.",
     "Capability categories to close:",
     capabilityChecklistText,
     builderEscalationText attempt,
@@ -1684,6 +1708,15 @@ verifierPrompt attempt =
     verifierVerificationInstructions attempt,
     textConcat ["Attempt: ", encode attempt]
   ]
+
+writePromptArtifact : Str -> Str -> Str
+writePromptArtifact path prompt =
+  match writeFile path prompt {
+    Err message ->
+      message,
+    Ok written ->
+      ""
+  }
 
 verifierShellCommand : Int -> [Str]
 verifierShellCommand attempt =
@@ -1753,7 +1786,7 @@ verifierShellCommand attempt =
       ],
       "clasp-feedback-loop-verifier"
     ]
-    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
+    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt))
 
 markBaselineReady : ProcessResult
 markBaselineReady =
@@ -1985,10 +2018,15 @@ runVerifierPhase attempt =
       if selectionError != "" then
         selectionError
       else {
-        let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
-        let verifierStep = stepHandle "verifier" attempt in
-        let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
-        finalizeVerifierRun attempt verifierRun
+        let promptError = writePromptArtifact (verifierPromptPath attempt) (verifierPrompt attempt) in
+        if promptError != "" then
+          textConcat ["verifier prompt write failed: ", promptError]
+        else {
+          let tracedStart = tracePoint (textConcat ["verifier:start:", encode attempt]) in
+          let verifierStep = stepHandle "verifier" attempt in
+          let verifierRun = ensureStepReportWithTimeoutNoState verifierStep (verifierShellCommand attempt) verifierTimeoutMs in
+          finalizeVerifierRun attempt verifierRun
+        }
       }
     }
   }
@@ -2006,27 +2044,34 @@ runBuilderPhase attempt =
       if fileExists builderStep.reportPath then
         runVerifierPhase attempt
       else {
-        let builderRun =
-          if watchModeEnabled then
-            ensureStepReport
-              builderStep
-              (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
-              (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
-              (loopState attempt "builder-running" "pending" false attempt 0 true false "" false)
-          else
-            runStepDirect
-              builderStep
-              (codexCommand builderSchemaPath builderStep.reportPath (builderPrompt attempt))
-              (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
-              (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
-        if fileExists builderStep.reportPath then
-          runVerifierPhase attempt
-        else
+        let promptError = writePromptArtifact (builderPromptPath attempt) (builderPrompt attempt) in
+        if promptError != "" then
           persistFailureAndContinue
             attempt
-            (syntheticFailureReport
-              "builder step failed before producing a durable report"
-              builderRun.stderr)
+            (syntheticFailureReport "builder prompt write failed" promptError)
+        else {
+          let builderRun =
+            if watchModeEnabled then
+              ensureStepReport
+                builderStep
+                (codexCommand builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
+                (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
+                (loopState attempt "builder-running" "pending" false attempt 0 true false "" false)
+            else
+              runStepDirect
+                builderStep
+                (codexCommand builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
+                (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
+                (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
+          if fileExists builderStep.reportPath then
+            runVerifierPhase attempt
+          else
+            persistFailureAndContinue
+              attempt
+              (syntheticFailureReport
+                "builder step failed before producing a durable report"
+                builderRun.stderr)
+        }
       }
     }
   }

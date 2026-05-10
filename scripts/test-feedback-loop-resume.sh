@@ -10,6 +10,7 @@ export XDG_CACHE_HOME="$test_root_abs/xdg-cache"
 # This fixture asserts focused verifier resume behavior. Parent swarm verifiers
 # may export a full-signoff tier, so pin the scenario explicitly.
 export CLASP_LOOP_VERIFICATION_TIER_JSON='"focused"'
+export CLASP_TEST_REJECT_CODEX_PROMPT_ARG=1
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
@@ -61,11 +62,19 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
+      if [[ "${CLASP_TEST_REJECT_CODEX_PROMPT_ARG:-0}" == "1" && "$1" != "-" ]]; then
+        printf 'codex prompt was passed as argv instead of stdin\n' >&2
+        exit 91
+      fi
       prompt="$1"
       shift
       ;;
   esac
 done
+
+if [[ "$prompt" == "-" ]]; then
+  prompt="$(cat)"
+fi
 
 if [[ -z "$report_path" ]]; then
   printf 'missing report path\n' >&2
@@ -76,6 +85,13 @@ state_root="$(dirname "$report_path")"
 mkdir -p "$state_root"
 
 if [[ "$prompt" == *"builder subagent"* ]]; then
+  if [[ "${CLASP_TEST_ALLOW_BUILDER_STDIN:-0}" == "1" ]]; then
+    printf 'builder\n' >>"$state_root/codex-invocations.log"
+    cat >"$report_path" <<'JSON'
+{"summary":"builder read prompt from stdin","files_touched":[],"tests_run":["fake builder stdin"],"residual_risks":[],"feedback":{"summary":"builder prompt was streamed through stdin","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+    exit 0
+  fi
   printf 'builder was re-run during verifier resume\n' >"$state_root/builder-reran.marker"
   exit 65
 fi
@@ -232,6 +248,7 @@ resume_output="$(
 
 printf '%s\n' "$resume_output" | grep -Fx 'pass:1' >/dev/null
 test -f "$state_root/verifier-1.json"
+test -f "$state_root/verifier-1.prompt.md"
 test -f "$state_root/focused-verify-1.json"
 grep -F '"source":"manager-env"' "$state_root/focused-verify-1.json" >/dev/null
 grep -F '"changedSurfaceCategories"' "$state_root/focused-verify-1.json" >/dev/null
@@ -265,6 +282,30 @@ do
     exit 1
   fi
 done
+
+builder_stdin_state_root="$test_root_abs/loop-builder-stdin-state"
+builder_stdin_workspace_root="$fixture_project/.clasp-task-workspaces/builder-stdin-task"
+builder_stdin_baseline_root="$fixture_project/.clasp-task-baselines/builder-stdin-task"
+mkdir -p "$builder_stdin_state_root" "$builder_stdin_workspace_root" "$builder_stdin_baseline_root"
+printf 'builder stdin baseline\n' >"$builder_stdin_baseline_root/workspace.txt"
+cp -a "$builder_stdin_baseline_root/." "$builder_stdin_workspace_root/"
+
+builder_stdin_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$builder_stdin_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$builder_stdin_baseline_root\"" \
+  CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"bash scripts/test-feedback-loop-resume.sh"' \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_ALLOW_BUILDER_STDIN='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$builder_stdin_state_root"
+)"
+
+printf '%s\n' "$builder_stdin_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$builder_stdin_state_root/builder-1.prompt.md"
+test -f "$builder_stdin_state_root/verifier-1.prompt.md"
+grep -Fx 'builder' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
+grep -Fx 'verifier' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
 
 no_report_state_root="$test_root_abs/loop-no-report-zero-state"
 no_report_workspace_root="$fixture_project/.clasp-task-workspaces/no-report-zero-task"

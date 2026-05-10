@@ -77,6 +77,25 @@ record BuilderReport = {
   feedback : BuilderFeedback
 }
 
+record RetryRecoveryRecord = {
+  schema : Str,
+  attempt : Int,
+  taskId : Str,
+  phase : Str,
+  retryable : Bool,
+  retryableStatus : Str,
+  cause : Str,
+  reportPaths : [Str],
+  command : [Str],
+  runStatus : Str,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  evidence : [Str],
+  createdAtMs : Int
+}
+
 record SwarmMailboxMessage = {
   source : Str,
   taskId : Str,
@@ -314,3 +333,6 @@ emptyBenchmarkSignal =
 
 emptySwarmMailboxMessages : [SwarmMailboxMessage]
 emptySwarmMailboxMessages = []
+
+emptyRetryRecoveryRecords : [RetryRecoveryRecord]
+emptyRetryRecoveryRecords = []

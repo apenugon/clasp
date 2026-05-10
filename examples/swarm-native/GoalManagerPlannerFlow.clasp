@@ -8,6 +8,7 @@ import GoalManagerFinalize
 import GoalManagerBenchmarkFlow
 import GoalManagerPlannerReuse
 import GoalManagerPlannerMemory
+import GoalManagerChildLoopMonitor
 import GoalManagerTaskExecutionRuntime
 import GoalManagerTaskSet
 import GoalManagerStateRuntime
@@ -86,6 +87,10 @@ resumePlannerWave state =
 
 retryCurrentPlannerAfterLeaseBlocker : ManagerState -> Str -> Str -> Str
 retryCurrentPlannerAfterLeaseBlocker state summary detail =
+  let recordError = recordPlannerRecovery state (textConcat [summary, ": ", detail]) emptyTexts in
+  if recordError != "" then
+    plannerFailure "planner retry record write failed" recordError
+  else
   match fail (plannerHandleForWave state.wave) {
     Err failMessage ->
       plannerFailure "planner lease recovery fail transition failed" (textConcat [failMessage, " after ", detail]),
@@ -171,6 +176,68 @@ completePlannerTaskIfNeeded wave =
         }
   }
 
+plannerNonZeroAttemptOr : Int -> Int -> Int
+plannerNonZeroAttemptOr value fallback =
+  if value == 0 then
+    fallback
+  else
+    value
+
+plannerAttemptForWave : Int -> Int
+plannerAttemptForWave wave =
+  match status (plannerHandleForWave wave) {
+    Ok task -> plannerNonZeroAttemptOr task.attempts wave,
+    Err message -> wave
+  }
+
+plannerRecoveryReportPaths : Int -> [Str]
+plannerRecoveryReportPaths wave =
+  [
+    plannerReportPathFor wave,
+    plannerInputPath,
+    statusPath,
+    feedbackPath,
+    plannerStdoutPathFor wave,
+    plannerStderrPathFor wave
+  ]
+
+writePlannerRunEvidence : Int -> Str -> Str -> Str
+writePlannerRunEvidence wave stdoutText stderrText =
+  match writeFile (plannerStdoutPathFor wave) stdoutText {
+    Err message -> message,
+    Ok stdoutWritten ->
+      match writeFile (plannerStderrPathFor wave) stderrText {
+        Err message -> message,
+        Ok stderrWritten -> ""
+      }
+  }
+
+recordPlannerRecovery : ManagerState -> Str -> [Str] -> Str
+recordPlannerRecovery state cause command =
+  appendRetryRecoveryRecord
+    (RetryRecoveryRecord {
+      schema = retryRecoveryRecordSchema,
+      attempt = plannerAttemptForWave state.wave,
+      taskId = plannerTaskIdForWave state.wave,
+      phase = "planner",
+      retryable = retryableStatusIsRetryable "retrying",
+      retryableStatus = "retrying",
+      cause = cause,
+      reportPaths = plannerRecoveryReportPaths state.wave,
+      command = command,
+      runStatus = "retry",
+      exitCode = 0,
+      stdoutPath = plannerStdoutPathFor state.wave,
+      stderrPath = plannerStderrPathFor state.wave,
+      heartbeatPath = "",
+      evidence = [
+        textConcat ["wave=", encode state.wave],
+        textConcat ["managerPhase=", state.phase],
+        textConcat ["managerStatusPath=", statusPath]
+      ],
+      createdAtMs = timeUnixMs
+    })
+
 runPlanner : Str
 runPlanner = {
   let state = readManagerState in
@@ -249,17 +316,28 @@ runPlanner = {
                     "bash",
                     "-lc",
                     textJoin "\n" [
-                      "prompt=$(cat \"$1\")",
-                      "exec \"$2\" exec --json --cd \"$3\" -m \"$4\" -c \"$5\" --skip-git-repo-check --sandbox \"$6\" --ephemeral --output-schema \"$7\" -o \"$8\" \"$prompt\""
+                      "prompt_path=\"$1\"",
+                      "shift",
+                      "exec \"$@\" - < \"$prompt_path\""
                     ],
                     "planner-direct",
                     plannerPromptPath,
                     codexBin,
+                    "exec",
+                    "--json",
+                    "--cd",
                     resolvedWorkspaceRoot,
+                    "-m",
                     codexModel,
+                    "-c",
                     codexReasoningConfig,
+                    "--skip-git-repo-check",
+                    "--sandbox",
                     codexSandbox,
+                    "--ephemeral",
+                    "--output-schema",
                     resolvedPlannerSchemaPath,
+                    "-o",
                     plannerReportPathFor wave
                   ] in
               let commandTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":command-ready"]) in
@@ -269,6 +347,10 @@ runPlanner = {
           match lease (plannerHandleForWave wave) {
             Err message ->
               if length (textSplit message "task run budget exhausted") > 1 then {
+                let recordError = recordPlannerRecovery state (textConcat ["planner lease failed: ", message]) plannerCommand.command in
+                if recordError != "" then
+                  plannerFailure "planner retry record write failed" recordError
+                else
                 let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":recoverable-lease-blocker:planner lease failed:", message]) in
                 if traceError != "" then
                   plannerFailure "manager trace write failed" traceError
@@ -284,6 +366,10 @@ runPlanner = {
                 } else
                   retryCurrentPlannerAfterLeaseBlocker state "planner lease failed" message
               } else if length (textSplit message "lease held by `manager`") > 1 then {
+                let recordError = recordPlannerRecovery state (textConcat ["planner lease failed: ", message]) plannerCommand.command in
+                if recordError != "" then
+                  plannerFailure "planner retry record write failed" recordError
+                else
                 let traceError = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":recoverable-lease-blocker:planner lease failed:", message]) in
                 if traceError != "" then
                   plannerFailure "manager trace write failed" traceError
@@ -311,6 +397,10 @@ runPlanner = {
                 else
                 match runCommand plannerCommand.cwd plannerCommand.command {
                   Err message -> {
+                    let evidenceError = writePlannerRunEvidence wave "" message in
+                    if evidenceError != "" then
+                      plannerFailure "planner run evidence write failed" evidenceError
+                    else
                     let recoverableTransport =
                       if textIncludes message "We're currently experiencing high demand" then
                         true
@@ -325,6 +415,10 @@ runPlanner = {
                       else
                         textIncludes message "exitCode=124" in
                     if recoverableTransport then {
+                      let recordError = recordPlannerRecovery state (textConcat ["planner run failed: ", message]) plannerCommand.command in
+                      if recordError != "" then
+                        plannerFailure "planner retry record write failed" recordError
+                      else
                       let traceError =
                         appendManagerTrace
                           (textConcat ["planner-wave-", encode wave, ":recoverable-transport-blocker:planner run failed:", message]) in
@@ -353,6 +447,10 @@ runPlanner = {
                       plannerFailure "planner run failed" message
                   },
                   Ok process ->
+                    let evidenceError = writePlannerRunEvidence wave process.stdout process.stderr in
+                    if evidenceError != "" then
+                      plannerFailure "planner run evidence write failed" evidenceError
+                    else
                     if process.exitCode != 0 then {
                       let detail = textConcat [process.stderr, process.stdout] in
                       let recoverableTransport =
@@ -369,6 +467,10 @@ runPlanner = {
                         else
                           textIncludes detail "exitCode=124" in
                       if recoverableTransport then {
+                        let recordError = recordPlannerRecovery state (textConcat ["planner run failed: ", detail]) plannerCommand.command in
+                        if recordError != "" then
+                          plannerFailure "planner retry record write failed" recordError
+                        else
                         let traceError =
                           appendManagerTrace
                             (textConcat ["planner-wave-", encode wave, ":recoverable-transport-blocker:planner run failed:", detail]) in
@@ -474,6 +576,10 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
                 ":limit=",
                 encode validation.plannerTaskLimit
               ] in
+            let recordError = recordPlannerRecovery plannerState (textConcat ["planner validation failed: ", detail]) emptyTexts in
+            if recordError != "" then
+              plannerFailure "planner retry record write failed" recordError
+            else
             let traceError =
               appendManagerTrace
                 (textConcat ["planner-wave-", encode wave, ":recoverable-validation-blocker:planner validation failed:", detail]) in
