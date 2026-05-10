@@ -2411,6 +2411,29 @@ keep = "stable"
     }
 
     #[test]
+    fn promoted_module_summary_cache_text_prefers_project_root_file() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let previous_project_root = std::env::var_os("CLASP_PROJECT_ROOT");
+        let root = unique_test_root("promoted-module-summary-project-root");
+        let cache_path = root.join("src").join("stage1.compiler.module-summary-cache-v2.json");
+        fs::create_dir_all(cache_path.parent().expect("cache parent")).expect("create cache parent");
+        fs::write(&cache_path, "{\"cacheVersion\":\"module-summary-cache-v2\",\"summaries\":[]}\n")
+            .expect("write project cache");
+        std::env::set_var("CLASP_PROJECT_ROOT", &root);
+
+        assert_eq!(
+            super::promoted_module_summary_cache_text(),
+            "{\"cacheVersion\":\"module-summary-cache-v2\",\"summaries\":[]}\n"
+        );
+
+        match previous_project_root {
+            Some(value) => std::env::set_var("CLASP_PROJECT_ROOT", value),
+            None => std::env::remove_var("CLASP_PROJECT_ROOT"),
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn promoted_module_summary_cache_populates_runtime_cache() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         std::env::remove_var("CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE");
@@ -2907,9 +2930,39 @@ fn parse_promoted_module_summary_entries(cache_text: &str) -> HashMap<String, Pr
     entries
 }
 
+fn promoted_module_summary_cache_candidate_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(project_root) = env::var("CLASP_PROJECT_ROOT") {
+        paths.push(
+            PathBuf::from(project_root)
+                .join("src")
+                .join("stage1.compiler.module-summary-cache-v2.json"),
+        );
+    }
+    if let Ok(current_dir) = env::current_dir() {
+        paths.push(
+            current_dir
+                .join("src")
+                .join("stage1.compiler.module-summary-cache-v2.json"),
+        );
+    }
+    paths
+}
+
+fn promoted_module_summary_cache_text() -> String {
+    for path in promoted_module_summary_cache_candidate_paths() {
+        if let Ok(text) = fs::read_to_string(path) {
+            return text;
+        }
+    }
+    PROMOTED_COMPILER_MODULE_SUMMARY_CACHE.to_owned()
+}
+
 fn promoted_module_summary_entries() -> &'static HashMap<String, PromotedModuleSummaryEntry> {
-    PROMOTED_MODULE_SUMMARY_ENTRIES
-        .get_or_init(|| parse_promoted_module_summary_entries(PROMOTED_COMPILER_MODULE_SUMMARY_CACHE))
+    PROMOTED_MODULE_SUMMARY_ENTRIES.get_or_init(|| {
+        let cache_text = promoted_module_summary_cache_text();
+        parse_promoted_module_summary_entries(&cache_text)
+    })
 }
 
 fn read_promoted_module_summary(
