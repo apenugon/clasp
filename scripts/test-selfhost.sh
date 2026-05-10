@@ -211,6 +211,48 @@ const sharedModule = graph.sourceModules?.find((entry) => entry.moduleName === "
 if (entryModule?.role !== "entry" || sharedModule?.role !== "import") {
   throw new Error("lead-app context missing stable entry/import source module identities");
 }
+const dependencyGraph = graph.dependencyGraph;
+if (dependencyGraph?.format !== "clasp-dependency-graph-v1") {
+  throw new Error(`lead-app context missing dependencyGraph: ${dependencyGraph?.format}`);
+}
+const entryDependencyNode = dependencyGraph.nodes?.find((entry) => entry.id === "source:Main");
+const sharedDependencyNode = dependencyGraph.nodes?.find((entry) => entry.id === "source:Shared.Lead");
+if (entryDependencyNode?.moduleId !== "module:Main" || entryDependencyNode?.role !== "entry") {
+  throw new Error("dependencyGraph missing stable Main source-module node");
+}
+if (sharedDependencyNode?.moduleId !== "module:Shared.Lead" || sharedDependencyNode?.role !== "import") {
+  throw new Error("dependencyGraph missing stable imported Shared.Lead source-module node");
+}
+if (!entryDependencyNode.imports?.includes("Shared.Lead")) {
+  throw new Error("dependencyGraph Main source-module node missing Shared.Lead import");
+}
+const hasSharedImportEdge = dependencyGraph.edges?.some(
+  (edge) => edge.kind === "imports" && edge.from === "source:Main" && edge.to === "source:Shared.Lead",
+);
+if (!hasSharedImportEdge) {
+  throw new Error("dependencyGraph missing Main -> Shared.Lead import edge");
+}
+for (const expectedSchema of ["schema:LeadIntake", "schema:LeadRecord"]) {
+  if (!sharedDependencyNode.affectedSchemas?.includes(expectedSchema)) {
+    throw new Error(`dependencyGraph imported module affectedSchemas missing ${expectedSchema}`);
+  }
+}
+for (const expectedRoute of ["route:createLeadRecordRoute", "route:createLeadRoute"]) {
+  if (!sharedDependencyNode.affectedRoutes?.includes(expectedRoute)) {
+    throw new Error(`dependencyGraph imported module affectedRoutes missing ${expectedRoute}`);
+  }
+  const hasAffectsEdge = dependencyGraph.edges?.some(
+    (edge) => edge.kind === "affects" && edge.from === "source:Shared.Lead" && edge.to === expectedRoute,
+  );
+  if (!hasAffectsEdge) {
+    throw new Error(`dependencyGraph missing Shared.Lead affects edge to ${expectedRoute}`);
+  }
+}
+for (const expectedForeign of ["foreign:storeLead", "foreign:mockLeadSummaryModel"]) {
+  if (!sharedDependencyNode.affectedForeignBoundaries?.includes(expectedForeign)) {
+    throw new Error(`dependencyGraph imported module affectedForeignBoundaries missing ${expectedForeign}`);
+  }
+}
 const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "createLeadRecordRoute");
 if (!route) {
   throw new Error("missing createLeadRecordRoute in lead-app context");

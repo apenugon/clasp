@@ -116,6 +116,146 @@ wait_for_path_contains() {
   return 1
 }
 
+assert_native_swarm_verification_trace() {
+  local label="$1"
+  local payload="$2"
+  local payload_path="$test_root/$label.native-swarm.json"
+
+  printf '%s\n' "$payload" >"$payload_path"
+  node - "$payload_path" <<'EOF'
+const fs = require("node:fs");
+
+const payloadPath = process.argv[2];
+const report = JSON.parse(fs.readFileSync(payloadPath, "utf8"));
+
+function fail(message) {
+  throw new Error(`${payloadPath}: ${message}`);
+}
+
+function assert(condition, message) {
+  if (!condition) fail(message);
+}
+
+function sameList(actual, expected, label) {
+  assert(Array.isArray(actual), `${label} is not an array`);
+  assert(
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `${label} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+  );
+}
+
+function artifactText(path, expected, label) {
+  assert(typeof path === "string" && path.length > 0, `${label} missing artifact path`);
+  assert(fs.existsSync(path), `${label} artifact does not exist: ${path}`);
+  const text = fs.readFileSync(path, "utf8");
+  assert(text === expected, `${label} artifact expected ${JSON.stringify(expected)}, got ${JSON.stringify(text)}`);
+}
+
+function checkTrace(result, expected, label) {
+  assert(result && Array.isArray(result.trace), `${label} missing verification trace`);
+  assert(result.trace.length === expected.length, `${label} trace length ${result.trace.length}`);
+  let previousRunId = 0;
+  result.trace.forEach((entry, index) => {
+    const exp = expected[index];
+    assert(entry.verifierName === exp.verifierName, `${label} verifier ${index}`);
+    assert(Number.isInteger(entry.runId) && entry.runId > previousRunId, `${label} run id order ${index}`);
+    assert(entry.status === exp.status, `${label} status ${index}`);
+    assert(entry.exitCode === exp.exitCode, `${label} exit code ${index}`);
+    assert(entry.timedOut === exp.timedOut, `${label} timeout flag ${index}`);
+    assert(entry.failedVerifierClassification === exp.failedVerifierClassification, `${label} failure classification ${index}`);
+    artifactText(entry.stdoutArtifactPath, exp.stdout, `${label} stdout ${entry.verifierName}`);
+    artifactText(entry.stderrArtifactPath, exp.stderr, `${label} stderr ${entry.verifierName}`);
+    previousRunId = entry.runId;
+  });
+}
+
+checkTrace(
+  report.verificationPlanResult,
+  [
+    {
+      verifierName: "native-smoke",
+      status: "passed",
+      exitCode: 0,
+      timedOut: false,
+      failedVerifierClassification: "none",
+      stdout: "verifier-ok",
+      stderr: "",
+    },
+    {
+      verifierName: "native-regression",
+      status: "passed",
+      exitCode: 0,
+      timedOut: false,
+      failedVerifierClassification: "none",
+      stdout: "regression-ok",
+      stderr: "",
+    },
+  ],
+  "passing plan",
+);
+
+checkTrace(
+  report.failedVerificationPlan.verificationPlanResult,
+  [
+    {
+      verifierName: "native-plan-pass",
+      status: "passed",
+      exitCode: 0,
+      timedOut: false,
+      failedVerifierClassification: "none",
+      stdout: "plan-pass-ok",
+      stderr: "",
+    },
+    {
+      verifierName: "native-plan-fail",
+      status: "failed",
+      exitCode: 4,
+      timedOut: false,
+      failedVerifierClassification: "exit-code",
+      stdout: "plan-fail-out",
+      stderr: "plan-fail-err",
+    },
+  ],
+  "failed plan",
+);
+
+checkTrace(
+  report.timedOutVerificationPlan.verificationPlanResult,
+  [
+    {
+      verifierName: "native-plan-timeout",
+      status: "timed_out",
+      exitCode: 124,
+      timedOut: true,
+      failedVerifierClassification: "timeout",
+      stdout: "timeout-verifier-out",
+      stderr: "timeout-verifier-err",
+    },
+  ],
+  "timed-out plan",
+);
+
+const typed = report.typedInspection;
+assert(typed, "missing typed inspection");
+sameList(typed.passedPlanTraceVerifiers, ["native-smoke", "native-regression"], "passed trace verifiers");
+sameList(typed.passedPlanTraceClassifications, ["none", "none"], "passed trace classifications");
+sameList(typed.failedPlanTraceVerifiers, ["native-plan-pass", "native-plan-fail"], "failed trace verifiers");
+sameList(typed.failedPlanTraceClassifications, ["none", "exit-code"], "failed trace classifications");
+sameList(typed.timedOutPlanTraceVerifiers, ["native-plan-timeout"], "timed-out trace verifiers");
+sameList(typed.timedOutPlanTraceClassifications, ["timeout"], "timed-out trace classifications");
+sameList(
+  typed.passedPlanTraceStdoutArtifactPaths,
+  report.verificationPlanResult.trace.map((entry) => entry.stdoutArtifactPath),
+  "typed stdout trace paths",
+);
+sameList(
+  typed.passedPlanTraceStderrArtifactPaths,
+  report.verificationPlanResult.trace.map((entry) => entry.stderrArtifactPath),
+  "typed stderr trace paths",
+);
+EOF
+}
+
 json_number_field() {
   local path="$1"
   local field="$2"
@@ -847,6 +987,39 @@ if (sharedModule?.role !== "import") {
 const route = graph.surfaceIndex?.routes?.find((entry) => entry.name === "createLeadRecordRoute");
 if (!route?.affectedSurfaces?.includes("foreign:storeLead")) {
   throw new Error("lead-app context missing imported foreign boundary impact");
+}
+const dependencyGraph = graph.dependencyGraph;
+if (dependencyGraph?.format !== "clasp-dependency-graph-v1") {
+  throw new Error(`lead-app context missing dependencyGraph: ${dependencyGraph?.format}`);
+}
+const entryDependencyNode = dependencyGraph.nodes?.find((entry) => entry.id === "source:Main");
+const sharedDependencyNode = dependencyGraph.nodes?.find((entry) => entry.id === "source:Shared.Lead");
+if (entryDependencyNode?.moduleId !== "module:Main" || entryDependencyNode?.role !== "entry") {
+  throw new Error("dependencyGraph missing stable Main source-module node");
+}
+if (sharedDependencyNode?.moduleId !== "module:Shared.Lead" || sharedDependencyNode?.role !== "import") {
+  throw new Error("dependencyGraph missing stable imported Shared.Lead source-module node");
+}
+if (!dependencyGraph.edges?.some((edge) => edge.kind === "imports" && edge.from === "source:Main" && edge.to === "source:Shared.Lead")) {
+  throw new Error("dependencyGraph missing Main -> Shared.Lead import edge");
+}
+for (const expectedSchema of ["schema:LeadIntake", "schema:LeadRecord"]) {
+  if (!sharedDependencyNode.affectedSchemas?.includes(expectedSchema)) {
+    throw new Error(`dependencyGraph imported module affectedSchemas missing ${expectedSchema}`);
+  }
+}
+for (const expectedRoute of ["route:createLeadRecordRoute", "route:createLeadRoute"]) {
+  if (!sharedDependencyNode.affectedRoutes?.includes(expectedRoute)) {
+    throw new Error(`dependencyGraph imported module affectedRoutes missing ${expectedRoute}`);
+  }
+  if (!dependencyGraph.edges?.some((edge) => edge.kind === "affects" && edge.from === "source:Shared.Lead" && edge.to === expectedRoute)) {
+    throw new Error(`dependencyGraph missing Shared.Lead affects edge to ${expectedRoute}`);
+  }
+}
+for (const expectedForeign of ["foreign:storeLead", "foreign:mockLeadSummaryModel"]) {
+  if (!sharedDependencyNode.affectedForeignBoundaries?.includes(expectedForeign)) {
+    throw new Error(`dependencyGraph imported module affectedForeignBoundaries missing ${expectedForeign}`);
+  }
 }
 EOF
 
@@ -1884,6 +2057,7 @@ printf '%s\n' "$swarm_native_run_output" | grep -F '"failedToolRunStatus":"faile
 printf '%s\n' "$swarm_native_run_output" | grep -F '"failedVerifier":"native-smoke-fail","failedVerifierStatus":"failed","failedVerifierRequiredVerifiers":["native-smoke-fail"]' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"],"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
 printf '%s\n' "$swarm_native_run_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke","native-regression"],"mergeReadyVerdict":"missing"' >/dev/null
+assert_native_swarm_verification_trace "claspc-run" "$swarm_native_run_output"
 
 swarm_timed_run_output="$(
   CLASP_SWARM_CWD="$project_root" \
@@ -1962,6 +2136,7 @@ printf '%s\n' "$swarm_native_output" | grep -F '"typedInspection":{"passedTaskId
 printf '%s\n' "$swarm_native_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"],"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
 printf '%s\n' "$swarm_native_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke","native-regression"],"mergeReadyVerdict":"missing"' >/dev/null
+assert_native_swarm_verification_trace "compiled-native" "$swarm_native_output"
 
 swarm_feedback_loop_state_root_abs="$test_root_abs/swarm-feedback-loop-state"
 swarm_feedback_loop_workspace_root_abs="$test_root_abs/swarm-feedback-loop-workspace"

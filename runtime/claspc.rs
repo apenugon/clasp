@@ -4501,6 +4501,246 @@ fn run_explain(options: &CliOptions, embedded_path: &Path, bundle_build: &Projec
     ExitCode::SUCCESS
 }
 
+fn json_value_string(value: &serde_json::Value, field: &str) -> String {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn json_value_string_array(value: &serde_json::Value, field: &str) -> Vec<String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn push_unique_text(values: &mut Vec<String>, value: String) {
+    if !value.is_empty() && !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn push_unique_texts(values: &mut Vec<String>, next_values: Vec<String>) {
+    for value in next_values {
+        push_unique_text(values, value);
+    }
+}
+
+fn context_surface_map(graph: &serde_json::Value, pointer: &str, id_field: &str) -> HashMap<String, Vec<String>> {
+    graph
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let id = json_value_string(entry, id_field);
+                    if id.is_empty() {
+                        None
+                    } else {
+                        Some((id, json_value_string_array(entry, "affectedSurfaces")))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn context_module_type_ids(graph: &serde_json::Value) -> HashMap<String, Vec<String>> {
+    let mut by_module = HashMap::new();
+    if let Some(edges) = graph.get("edges").and_then(serde_json::Value::as_array) {
+        for edge in edges {
+            if json_value_string(edge, "kind") != "declares" {
+                continue;
+            }
+            let from = json_value_string(edge, "from");
+            let to = json_value_string(edge, "to");
+            if from.starts_with("module:") && to.starts_with("type:") {
+                push_unique_text(by_module.entry(from).or_insert_with(Vec::new), to);
+            }
+        }
+    }
+    by_module
+}
+
+fn context_foreign_users(graph: &serde_json::Value) -> HashMap<String, Vec<String>> {
+    let mut users = HashMap::new();
+    if let Some(edges) = graph.get("edges").and_then(serde_json::Value::as_array) {
+        for edge in edges {
+            if json_value_string(edge, "kind") != "uses" {
+                continue;
+            }
+            let to = json_value_string(edge, "to");
+            if to.starts_with("foreign:") {
+                let from = json_value_string(edge, "from");
+                push_unique_text(users.entry(to).or_insert_with(Vec::new), from);
+            }
+        }
+    }
+    users
+}
+
+fn context_filter_prefix(values: &[String], prefix: &str) -> Vec<String> {
+    values
+        .iter()
+        .filter(|value| value.starts_with(prefix))
+        .cloned()
+        .collect()
+}
+
+fn context_dependency_graph_value(graph: &serde_json::Value) -> Option<serde_json::Value> {
+    let source_modules = graph.get("sourceModules")?.as_array()?;
+    let schema_surfaces = context_surface_map(graph, "/surfaceIndex/schemas", "id");
+    let type_surfaces = context_surface_map(graph, "/surfaceIndex/types", "id");
+    let route_surfaces = context_surface_map(graph, "/surfaceIndex/routes", "id");
+    let declaration_surfaces = context_surface_map(graph, "/impactIndex/declarations", "sourceId");
+    let module_type_ids = context_module_type_ids(graph);
+    let foreign_users = context_foreign_users(graph);
+    let source_names = source_modules
+        .iter()
+        .map(|entry| json_value_string(entry, "moduleName"))
+        .collect::<HashSet<_>>();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    for source_module in source_modules {
+        let source_id = json_value_string(source_module, "sourceId");
+        let module_id = json_value_string(source_module, "moduleId");
+        if source_id.is_empty() || module_id.is_empty() {
+            continue;
+        }
+
+        let mut declared_surfaces = Vec::new();
+        push_unique_texts(
+            &mut declared_surfaces,
+            module_type_ids.get(&module_id).cloned().unwrap_or_default(),
+        );
+        push_unique_texts(&mut declared_surfaces, json_value_string_array(source_module, "schemas"));
+        push_unique_texts(&mut declared_surfaces, json_value_string_array(source_module, "routes"));
+        push_unique_texts(&mut declared_surfaces, json_value_string_array(source_module, "declarations"));
+        push_unique_texts(
+            &mut declared_surfaces,
+            json_value_string_array(source_module, "foreignBoundaries"),
+        );
+
+        let mut affected_surfaces = declared_surfaces.clone();
+        for surface_id in &declared_surfaces {
+            if let Some(values) = schema_surfaces.get(surface_id) {
+                push_unique_texts(&mut affected_surfaces, values.clone());
+            }
+            if let Some(values) = type_surfaces.get(surface_id) {
+                push_unique_texts(&mut affected_surfaces, values.clone());
+            }
+            if let Some(values) = route_surfaces.get(surface_id) {
+                push_unique_texts(&mut affected_surfaces, values.clone());
+            }
+            if let Some(values) = declaration_surfaces.get(surface_id) {
+                push_unique_texts(&mut affected_surfaces, values.clone());
+            }
+            if surface_id.starts_with("foreign:") {
+                if let Some(user_decls) = foreign_users.get(surface_id) {
+                    for user_decl in user_decls {
+                        if let Some(values) = declaration_surfaces.get(user_decl) {
+                            push_unique_texts(&mut affected_surfaces, values.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        nodes.push(serde_json::json!({
+            "id": source_id.clone(),
+            "kind": "sourceModule",
+            "moduleId": module_id.clone(),
+            "moduleName": json_value_string(source_module, "moduleName"),
+            "role": json_value_string(source_module, "role"),
+            "imports": json_value_string_array(source_module, "imports"),
+            "declaredSurfaces": declared_surfaces,
+            "affectedSurfaces": affected_surfaces.clone(),
+            "affectedRoutes": context_filter_prefix(&affected_surfaces, "route:"),
+            "affectedSchemas": context_filter_prefix(&affected_surfaces, "schema:"),
+            "affectedForeignBoundaries": context_filter_prefix(&affected_surfaces, "foreign:"),
+        }));
+
+        for import_name in json_value_string_array(source_module, "imports") {
+            edges.push(serde_json::json!({
+                "from": source_id.clone(),
+                "to": if source_names.contains(&import_name) {
+                    format!("source:{import_name}")
+                } else {
+                    format!("import:{import_name}")
+                },
+                "kind": "imports",
+            }));
+        }
+        for surface_id in &affected_surfaces {
+            if surface_id.starts_with("route:")
+                || surface_id.starts_with("schema:")
+                || surface_id.starts_with("foreign:")
+            {
+                edges.push(serde_json::json!({
+                    "from": source_id.clone(),
+                    "to": surface_id,
+                    "kind": "affects",
+                }));
+            }
+        }
+    }
+
+    Some(serde_json::json!({
+        "format": "clasp-dependency-graph-v1",
+        "entryModuleId": graph.pointer("/projectIdentity/entryModuleId")
+            .or_else(|| graph.pointer("/moduleIdentity/moduleId"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+        "entrySourceId": graph.pointer("/sourceIdentity/sourceId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+        "nodeCount": nodes.len(),
+        "edgeCount": edges.len(),
+        "nodes": nodes,
+        "edges": edges,
+    }))
+}
+
+fn augment_context_dependency_graph_output(output_bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(mut graph) = serde_json::from_slice::<serde_json::Value>(&output_bytes) else {
+        return output_bytes;
+    };
+    if graph.get("format").and_then(serde_json::Value::as_str) != Some("clasp-context-v1")
+        || graph
+            .get("dependencyGraph")
+            .and_then(|value| value.get("format"))
+            .and_then(serde_json::Value::as_str)
+            == Some("clasp-dependency-graph-v1")
+    {
+        return output_bytes;
+    }
+    let Some(dependency_graph) = context_dependency_graph_value(&graph) else {
+        return output_bytes;
+    };
+    let Some(object) = graph.as_object_mut() else {
+        return output_bytes;
+    };
+    object.insert("dependencyGraph".to_owned(), dependency_graph);
+    match serde_json::to_vec(&graph) {
+        Ok(mut bytes) => {
+            bytes.push(b'\n');
+            bytes
+        }
+        Err(_) => output_bytes,
+    }
+}
+
 fn run_build(
     options: &CliOptions,
     embedded_path: &Path,
@@ -4518,6 +4758,11 @@ fn run_build(
     let output_bytes = match result {
         Ok(output_bytes) => output_bytes,
         Err(message) => return fail(&message, options.json),
+    };
+    let output_bytes = if matches!(options.command, Command::Context) {
+        augment_context_dependency_graph_output(output_bytes)
+    } else {
+        output_bytes
     };
 
     let output_path = options
@@ -4594,7 +4839,12 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     if let Some(bundle) = cacheable_bundle {
         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
             let output_path = Path::new(args.last().expect("missing output path"));
-            if let Err(message) = write_output(output_path, &cached) {
+            let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
+                augment_context_dependency_graph_output(cached)
+            } else {
+                cached
+            };
+            if let Err(message) = write_output(output_path, &output_bytes) {
                 eprintln!("{message}");
                 return ExitCode::from(1);
             }
@@ -4680,6 +4930,11 @@ fn run_exec_image(args: &[String]) -> ExitCode {
             eprintln!("{message}");
             return ExitCode::from(1);
         }
+    };
+    let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
+        augment_context_dependency_graph_output(output_bytes)
+    } else {
+        output_bytes
     };
 
     let output_path = Path::new(args.last().expect("missing output path"));

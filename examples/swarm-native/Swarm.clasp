@@ -212,6 +212,17 @@ record VerificationPlan = {
   requiredVerifierNames : [Str]
 }
 
+record VerificationTraceEntry = {
+  verifierName : Str,
+  runId : Int,
+  status : Str,
+  exitCode : Int,
+  timedOut : Bool,
+  stdoutArtifactPath : Str,
+  stderrArtifactPath : Str,
+  failedVerifierClassification : Str
+}
+
 record VerificationPlanMailboxSummary = {
   historyCount : Int,
   tailCount : Int,
@@ -231,8 +242,21 @@ record VerificationPlanResult = {
   steps : [VerifierStepResult],
   passed : Bool,
   failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
   mailbox : SwarmMailbox,
   mailboxSummary : VerificationPlanMailboxSummary
+}
+
+record VerificationPlanExecution = {
+  handle : TaskHandle,
+  mailboxLimit : Int,
+  timeoutMs : Int,
+  useTimeout : Bool,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
+  error : Str
 }
 
 record ReviewStepResult = {
@@ -578,6 +602,41 @@ artifactKind artifact = artifact.kind
 artifactPath : SwarmArtifact -> Str
 artifactPath artifact = artifact.path
 
+verificationTraceFailureClassification : SwarmRun -> Str
+verificationTraceFailureClassification run =
+  if runPassed run then
+    "none"
+  else
+    if run.timedOut then
+      "timeout"
+    else
+      "exit-code"
+
+verificationTraceEntry : Str -> SwarmRun -> VerificationTraceEntry
+verificationTraceEntry verifierName run =
+  VerificationTraceEntry {
+    verifierName = textConcat [verifierName],
+    runId = run.runId,
+    status = textConcat [run.status],
+    exitCode = run.exitCode,
+    timedOut = run.timedOut,
+    stdoutArtifactPath = textConcat [run.stdoutArtifactPath],
+    stderrArtifactPath = textConcat [run.stderrArtifactPath],
+    failedVerifierClassification = textConcat [verificationTraceFailureClassification run]
+  }
+
+verificationTraceVerifierName : VerificationTraceEntry -> Str
+verificationTraceVerifierName entry = entry.verifierName
+
+verificationTraceFailedVerifierClassification : VerificationTraceEntry -> Str
+verificationTraceFailedVerifierClassification entry = entry.failedVerifierClassification
+
+verificationTraceStdoutArtifactPath : VerificationTraceEntry -> Str
+verificationTraceStdoutArtifactPath entry = entry.stdoutArtifactPath
+
+verificationTraceStderrArtifactPath : VerificationTraceEntry -> Str
+verificationTraceStderrArtifactPath entry = entry.stderrArtifactPath
+
 verificationPlanMailboxSummary : SwarmMailbox -> VerificationPlanMailboxSummary
 verificationPlanMailboxSummary mailbox =
   VerificationPlanMailboxSummary {
@@ -725,101 +784,117 @@ runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit =
       verifierStepResultError message
   }
 
-executeVerificationPlan : TaskHandle -> VerificationPlan -> Int -> Result VerificationPlanResult
-executeVerificationPlan handle plan mailboxLimit = {
-  let mut steps = [];
-  let mut passed = true;
-  let mut failedVerifiers = [];
-  let mut error = "";
-  for command in plan.commands {
-    if error == "" then {
-      match runVerifierStep handle command.verifierName command.command mailboxLimit {
-        Ok stepValue ->
-          {
-            steps = append steps [stepValue];
-            if runPassed stepValue.run then {
-              error
-            } else {
-              passed = false;
-              failedVerifiers = append failedVerifiers [command.verifierName];
-              error
-            }
-          },
-        Err message ->
-          {
-            error = message;
-            error
-          }
-      }
-    } else {
-      error
+emptyVerifierStepResults : [VerifierStepResult]
+emptyVerifierStepResults = []
+
+emptyVerifierNames : [Str]
+emptyVerifierNames = []
+
+emptyVerificationTraceEntries : [VerificationTraceEntry]
+emptyVerificationTraceEntries = []
+
+emptyVerificationPlanExecution : TaskHandle -> Int -> Int -> Bool -> VerificationPlanExecution
+emptyVerificationPlanExecution handle mailboxLimit timeoutMs useTimeout =
+  VerificationPlanExecution {
+    handle = handle,
+    mailboxLimit = mailboxLimit,
+    timeoutMs = timeoutMs,
+    useTimeout = useTimeout,
+    steps = emptyVerifierStepResults,
+    passed = true,
+    failedVerifiers = emptyVerifierNames,
+    trace = emptyVerificationTraceEntries,
+    error = ""
+  }
+
+verificationPlanExecutionError : VerificationPlanExecution -> Str -> VerificationPlanExecution
+verificationPlanExecutionError state message =
+  VerificationPlanExecution {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    useTimeout = state.useTimeout,
+    steps = state.steps,
+    passed = state.passed,
+    failedVerifiers = state.failedVerifiers,
+    trace = state.trace,
+    error = message
+  }
+
+verificationPlanExecutionAppend : VerificationPlanExecution -> Str -> VerifierStepResult -> VerificationPlanExecution
+verificationPlanExecutionAppend state verifierName step =
+  VerificationPlanExecution {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    useTimeout = state.useTimeout,
+    steps = append state.steps [step],
+    passed = if runPassed step.run then state.passed else false,
+    failedVerifiers = if runPassed step.run then state.failedVerifiers else append state.failedVerifiers [verifierName],
+    trace = append state.trace [verificationTraceEntry verifierName step.run],
+    error = state.error
+  }
+
+verificationPlanRunStep : VerificationPlanExecution -> VerificationCommand -> Result VerifierStepResult
+verificationPlanRunStep state command =
+  if state.useTimeout then
+    runVerifierStepWithTimeout state.handle command.verifierName command.command state.timeoutMs state.mailboxLimit
+  else
+    runVerifierStep state.handle command.verifierName command.command state.mailboxLimit
+
+verificationPlanExecutionStep : VerificationPlanExecution -> VerificationCommand -> VerificationPlanExecution
+verificationPlanExecutionStep state command =
+  if state.error != "" then
+    state
+  else
+    match verificationPlanRunStep state command {
+      Ok stepValue ->
+        verificationPlanExecutionAppend state command.verifierName stepValue,
+      Err message ->
+        verificationPlanExecutionError state message
     }
-  };
-  if error != "" then
-    verificationPlanResultError error
+
+executeVerificationPlan : TaskHandle -> VerificationPlan -> Int -> Result VerificationPlanResult
+executeVerificationPlan handle plan mailboxLimit =
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit 0 false) plan.commands in
+  if execution.error != "" then
+    verificationPlanResultError execution.error
   else
     match taskMailbox handle mailboxLimit {
       Ok mailboxValue ->
         Ok (VerificationPlanResult {
           plan = plan,
-          steps = steps,
-          passed = passed,
-          failedVerifiers = failedVerifiers,
+          steps = execution.steps,
+          passed = execution.passed,
+          failedVerifiers = execution.failedVerifiers,
+          trace = execution.trace,
           mailbox = mailboxValue,
           mailboxSummary = verificationPlanMailboxSummary mailboxValue
         }),
       Err message ->
         verificationPlanResultError message
     }
-}
 
 executeVerificationPlanWithTimeout : TaskHandle -> VerificationPlan -> Int -> Int -> Result VerificationPlanResult
-executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit = {
-  let mut steps = [];
-  let mut passed = true;
-  let mut failedVerifiers = [];
-  let mut error = "";
-  for command in plan.commands {
-    if error == "" then {
-      match runVerifierStepWithTimeout handle command.verifierName command.command timeoutMs mailboxLimit {
-        Ok stepValue ->
-          {
-            steps = append steps [stepValue];
-            if runPassed stepValue.run then {
-              error
-            } else {
-              passed = false;
-              failedVerifiers = append failedVerifiers [command.verifierName];
-              error
-            }
-          },
-        Err message ->
-          {
-            error = message;
-            error
-          }
-      }
-    } else {
-      error
-    }
-  };
-  if error != "" then
-    verificationPlanResultError error
+executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit =
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit timeoutMs true) plan.commands in
+  if execution.error != "" then
+    verificationPlanResultError execution.error
   else
     match taskMailbox handle mailboxLimit {
       Ok mailboxValue ->
         Ok (VerificationPlanResult {
           plan = plan,
-          steps = steps,
-          passed = passed,
-          failedVerifiers = failedVerifiers,
+          steps = execution.steps,
+          passed = execution.passed,
+          failedVerifiers = execution.failedVerifiers,
+          trace = execution.trace,
           mailbox = mailboxValue,
           mailboxSummary = verificationPlanMailboxSummary mailboxValue
         }),
       Err message ->
         verificationPlanResultError message
     }
-}
 
 policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
 policySetForVerificationPlan handle mergegateName requiredApprovals plan =
