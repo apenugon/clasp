@@ -1119,6 +1119,16 @@ semanticForeignNodeIds modl = {
   nodeIds
 }
 
+semanticTypeNodeIds : HostedModuleAst -> [Str]
+semanticTypeNodeIds modl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for typeDecl in moduleTypeDeclarations modl {
+    nodeIds = appendRenderedText nodeIds (semanticTypeNodeId typeDecl);
+    nodeIds
+  };
+  nodeIds
+}
+
 semanticRouteNodeIds : HostedModuleAst -> [Str]
 semanticRouteNodeIds modl = {
   let mut nodeIds = emptyRenderedTexts;
@@ -1470,6 +1480,21 @@ semanticDeclAffectedSurfaces modl decl = {
   surfaces = semanticAppendUniqueTexts surfaces (semanticDeclIdsUsingTarget modl declId);
   surfaces = semanticAppendUniqueTexts surfaces (semanticRouteAffectedSurfacesByHandlerName modl (declName decl));
   surfaces = semanticAppendUniqueTexts surfaces (semanticHookAffectedSurfacesByHandlerName modl (declName decl));
+  surfaces
+}
+
+semanticForeignAffectedSurfaces : HostedModuleAst -> HostedForeignDeclAst -> [Str]
+semanticForeignAffectedSurfaces modl foreignDecl = {
+  let foreignId = semanticForeignNodeId foreignDecl;
+  let mut surfaces = [foreignId];
+  for decl in moduleDeclarations modl {
+    if semanticContainsText (semanticDeclUseTargetNodeIds modl decl) foreignId then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticDeclAffectedSurfaces modl decl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
   surfaces
 }
 
@@ -2473,6 +2498,174 @@ semanticContextSourceModuleEntry entryModuleName sourceFingerprint modl =
     , jsonFieldRaw "foreignBoundaries" (semanticJsonTextArray (semanticForeignNodeIds modl))
     ]
 
+semanticDependencyGraphModuleDeclaredSurfaces : HostedModuleAst -> [Str]
+semanticDependencyGraphModuleDeclaredSurfaces modl = {
+  let mut surfaces = emptyRenderedTexts;
+  surfaces = semanticAppendUniqueTexts surfaces (semanticTypeNodeIds modl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticSchemaNodeIds modl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticRouteNodeIds modl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticDeclNodeIds modl);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticForeignNodeIds modl);
+  surfaces
+}
+
+semanticDependencyGraphModuleAffectedSurfaces : HostedModuleAst -> HostedModuleAst -> [Str]
+semanticDependencyGraphModuleAffectedSurfaces mergedModule sourceModule = {
+  let mut surfaces = semanticDependencyGraphModuleDeclaredSurfaces sourceModule;
+  for typeDecl in moduleTypeDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticTypeAffectedSurfaces mergedModule typeDecl);
+    surfaces
+  };
+  for recordDecl in moduleRecordDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticSchemaAffectedSurfaces mergedModule recordDecl);
+    surfaces
+  };
+  for foreignDecl in moduleForeignDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticForeignAffectedSurfaces mergedModule foreignDecl);
+    surfaces
+  };
+  for decl in moduleDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticDeclAffectedSurfaces mergedModule decl);
+    surfaces
+  };
+  for routeDecl in moduleRouteDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticRouteAffectedSurfaces mergedModule routeDecl);
+    surfaces
+  };
+  for hookDecl in moduleHookDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticHookAffectedSurfaces mergedModule hookDecl);
+    surfaces
+  };
+  for toolDecl in moduleToolDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticToolAffectedSurfaces mergedModule toolDecl);
+    surfaces
+  };
+  for workflowDecl in moduleWorkflowDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticWorkflowAffectedSurfaces mergedModule workflowDecl);
+    surfaces
+  };
+  for projectionDecl in moduleProjectionDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticProjectionAffectedSurfaces mergedModule projectionDecl);
+    surfaces
+  };
+  for policyDecl in modulePolicyDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticPolicyAffectedSurfaces mergedModule policyDecl);
+    surfaces
+  };
+  for verifierDecl in moduleVerifierDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticVerifierAffectedSurfaces mergedModule verifierDecl);
+    surfaces
+  };
+  for mergeGateDecl in moduleMergeGateDeclarations sourceModule {
+    surfaces = semanticAppendUniqueTexts surfaces (semanticMergeGateAffectedSurfaces mergedModule mergeGateDecl);
+    surfaces
+  };
+  surfaces
+}
+
+semanticDependencyGraphModuleNode : HostedModuleAst -> HostedModuleAst -> HostedModuleAst -> Str
+semanticDependencyGraphModuleNode entryModule mergedModule sourceModule = {
+  let affectedSurfaces = semanticDependencyGraphModuleAffectedSurfaces mergedModule sourceModule;
+  jsonObject
+    [ jsonFieldText "id" (semanticSourceNodeId sourceModule)
+    , jsonFieldText "kind" "sourceModule"
+    , jsonFieldText "moduleId" (textConcat ["module:", moduleNameOf sourceModule])
+    , jsonFieldText "moduleName" (moduleNameOf sourceModule)
+    , jsonFieldText "role" (semanticContextSourceModuleRole (moduleNameOf entryModule) sourceModule)
+    , jsonFieldRaw "imports" (semanticJsonTextArray (moduleImports sourceModule))
+    , jsonFieldRaw "declaredSurfaces" (semanticJsonTextArray (semanticDependencyGraphModuleDeclaredSurfaces sourceModule))
+    , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+    , jsonFieldRaw "affectedRoutes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "route:"))
+    , jsonFieldRaw "affectedSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "schema:"))
+    , jsonFieldRaw "affectedForeignBoundaries" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "foreign:"))
+    ]
+}
+
+semanticDependencyGraphModuleNodes : HostedModuleAst -> HostedModuleAst -> [HostedModuleAst] -> [Str]
+semanticDependencyGraphModuleNodes entryModule mergedModule sourceModules = {
+  let mut nodes = emptyRenderedTexts;
+  for sourceModule in sourceModules {
+    nodes = appendRenderedText nodes (semanticDependencyGraphModuleNode entryModule mergedModule sourceModule);
+    nodes
+  };
+  nodes
+}
+
+semanticDependencyGraphHasSourceModule : [HostedModuleAst] -> Str -> Bool
+semanticDependencyGraphHasSourceModule sourceModules moduleName = {
+  for sourceModule in sourceModules {
+    if moduleNameOf sourceModule == moduleName then return true else false
+  };
+  false
+}
+
+semanticDependencyGraphImportTargetId : [HostedModuleAst] -> Str -> Str
+semanticDependencyGraphImportTargetId sourceModules importName =
+  if semanticDependencyGraphHasSourceModule sourceModules importName then textConcat ["source:", importName] else semanticImportNodeId importName
+
+semanticDependencyGraphImportEdges : [HostedModuleAst] -> [Str]
+semanticDependencyGraphImportEdges sourceModules = {
+  let mut edges = emptyRenderedTexts;
+  for sourceModule in sourceModules {
+    for importName in moduleImports sourceModule {
+      edges =
+        appendRenderedText
+          edges
+          (semanticJsonEdge (semanticSourceNodeId sourceModule) (semanticDependencyGraphImportTargetId sourceModules importName) "imports");
+      edges
+    };
+    edges
+  };
+  edges
+}
+
+semanticDependencyGraphSurfaceLinkEligible : Str -> Bool
+semanticDependencyGraphSurfaceLinkEligible surfaceId =
+  if semanticTextHasPrefix surfaceId "route:" then true else if semanticTextHasPrefix surfaceId "schema:" then true else if semanticTextHasPrefix surfaceId "foreign:" then true else false
+
+semanticDependencyGraphAffectedSurfaceEdgesForModule : HostedModuleAst -> HostedModuleAst -> [Str]
+semanticDependencyGraphAffectedSurfaceEdgesForModule mergedModule sourceModule = {
+  let mut edges = emptyRenderedTexts;
+  for surfaceId in semanticDependencyGraphModuleAffectedSurfaces mergedModule sourceModule {
+    if semanticDependencyGraphSurfaceLinkEligible surfaceId then {
+      edges = appendRenderedText edges (semanticJsonEdge (semanticSourceNodeId sourceModule) surfaceId "affects");
+      edges
+    } else {
+      edges
+    }
+  };
+  edges
+}
+
+semanticDependencyGraphAffectedSurfaceEdges : HostedModuleAst -> [HostedModuleAst] -> [Str]
+semanticDependencyGraphAffectedSurfaceEdges mergedModule sourceModules = {
+  let mut edges = emptyRenderedTexts;
+  for sourceModule in sourceModules {
+    edges = append edges (semanticDependencyGraphAffectedSurfaceEdgesForModule mergedModule sourceModule);
+    edges
+  };
+  edges
+}
+
+semanticDependencyGraphEdges : HostedModuleAst -> [HostedModuleAst] -> [Str]
+semanticDependencyGraphEdges mergedModule sourceModules =
+  append (semanticDependencyGraphImportEdges sourceModules) (semanticDependencyGraphAffectedSurfaceEdges mergedModule sourceModules)
+
+semanticDependencyGraph : HostedModuleAst -> [HostedModuleAst] -> Str
+semanticDependencyGraph mergedModule sourceModules = {
+  let nodes = semanticDependencyGraphModuleNodes mergedModule mergedModule sourceModules;
+  let edges = semanticDependencyGraphEdges mergedModule sourceModules;
+  jsonObject
+    [ jsonFieldText "format" "clasp-dependency-graph-v1"
+    , jsonFieldText "entryModuleId" (textConcat ["module:", moduleNameOf mergedModule])
+    , jsonFieldText "entrySourceId" (semanticSourceNodeId mergedModule)
+    , jsonFieldRaw "nodeCount" (encode (length nodes))
+    , jsonFieldRaw "edgeCount" (encode (length edges))
+    , jsonFieldRaw "nodes" (jsonArray nodes)
+    , jsonFieldRaw "edges" (jsonArray edges)
+    ]
+}
+
 semanticContextSourceModuleEntriesFromBundle : Str -> Str -> [Str]
 semanticContextSourceModuleEntriesFromBundle bundle entryModuleName = {
   let mut entries = emptyRenderedTexts;
@@ -2532,6 +2725,7 @@ renderContextModuleJsonWithSources modl sourceFingerprint sourceModules sourceMo
     , jsonFieldRaw "nodeCount" (encode (length nodes))
     , jsonFieldRaw "edgeCount" (encode (length edges))
     , jsonFieldRaw "surfaceIndex" (semanticContextSurfaceIndex modl)
+    , jsonFieldRaw "dependencyGraph" (semanticDependencyGraph modl sourceModules)
     , jsonFieldRaw "impactIndex" (semanticContextImpactIndex modl)
     , jsonFieldRaw "verificationGuidance" semanticContextVerificationGuidance
     , jsonFieldRaw "nodes" (jsonArray nodes)
