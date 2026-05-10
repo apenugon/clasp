@@ -76,6 +76,18 @@ if [[ "$prompt" == "-" ]]; then
   prompt="$(cat)"
 fi
 
+if [[ -n "${CLASP_TEST_PROMPT_CAPTURE:-}" ]]; then
+  printf '%s' "$prompt" >"$CLASP_TEST_PROMPT_CAPTURE"
+fi
+
+if [[ -n "${CLASP_TEST_BUILDER_PROMPT_CAPTURE:-}" && "$prompt" == *"builder subagent"* ]]; then
+  printf '%s' "$prompt" >"$CLASP_TEST_BUILDER_PROMPT_CAPTURE"
+fi
+
+if [[ -n "${CLASP_TEST_VERIFIER_PROMPT_CAPTURE:-}" && "$prompt" == *"verifier subagent"* ]]; then
+  printf '%s' "$prompt" >"$CLASP_TEST_VERIFIER_PROMPT_CAPTURE"
+fi
+
 if [[ -z "$report_path" ]]; then
   printf 'missing report path\n' >&2
   exit 2
@@ -106,7 +118,7 @@ if [[ "$prompt" == *"Run the full signoff command before reporting pass:"* ]]; t
   exit 68
 fi
 
-if [[ ! -f "$state_root/changes-1.diff" ]]; then
+if ! compgen -G "$state_root/changes-*.diff" >/dev/null; then
   printf 'missing refreshed baseline diff before verifier launch\n' >&2
   exit 67
 fi
@@ -307,6 +319,54 @@ test -f "$builder_stdin_state_root/verifier-1.prompt.md"
 grep -Fx 'builder' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
 grep -Fx 'verifier' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
 
+oversized_feedback_state_root="$test_root_abs/loop-oversized-feedback-state"
+oversized_feedback_workspace_root="$fixture_project/.clasp-task-workspaces/oversized-feedback-task"
+oversized_feedback_baseline_root="$fixture_project/.clasp-task-baselines/oversized-feedback-task"
+oversized_feedback_prompt="$test_root_abs/oversized-builder.prompt"
+mkdir -p "$oversized_feedback_state_root" "$oversized_feedback_workspace_root" "$oversized_feedback_baseline_root"
+printf 'oversized feedback baseline\n' >"$oversized_feedback_baseline_root/workspace.txt"
+cp -a "$oversized_feedback_baseline_root/." "$oversized_feedback_workspace_root/"
+cat >"$oversized_feedback_state_root/state.json" <<'JSON'
+{"attempt":2,"phase":"needs-builder","verdict":"retry","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":false,"needsAttention":true,"attentionReason":"verifier did not pass","final":false}
+JSON
+printf 'ready\n' >"$oversized_feedback_state_root/baseline.ready"
+node - "$oversized_feedback_state_root/feedback.json" <<'NODE'
+const fs = require('node:fs');
+const feedbackPath = process.argv[2];
+const huge = 'X'.repeat(1500000);
+fs.writeFileSync(feedbackPath, JSON.stringify({
+  verdict: 'fail',
+  summary: 'oversized verifier stdout should be compacted',
+  findings: [`stdout_tail=${huge}`],
+  tests_run: [],
+  follow_up: ['inspect bounded log artifacts'],
+  capability_statuses: []
+}));
+NODE
+
+oversized_feedback_output="$(
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$oversized_feedback_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$oversized_feedback_baseline_root\"" \
+  CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"bash scripts/test-feedback-loop-resume.sh"' \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+  CLASP_LOOP_FEEDBACK_PROMPT_MAX_CHARS_JSON='1000' \
+  CLASP_TEST_ALLOW_BUILDER_STDIN='1' \
+  CLASP_TEST_BUILDER_PROMPT_CAPTURE="$oversized_feedback_prompt" \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$oversized_feedback_state_root"
+)"
+
+printf '%s\n' "$oversized_feedback_output" | grep -Fx 'pass:2' >/dev/null
+test -f "$oversized_feedback_prompt"
+test "$(wc -c <"$oversized_feedback_prompt")" -lt 20000
+grep -F 'Verifier feedback from the previous attempt was compacted because the raw feedback exceeded the prompt budget.' "$oversized_feedback_prompt" >/dev/null
+grep -F 'oversized verifier stdout should be compacted' "$oversized_feedback_prompt" >/dev/null
+if grep -F 'stdout_tail=XXXXXXXXXXXXXXXX' "$oversized_feedback_prompt" >/dev/null; then
+  printf 'oversized feedback leaked raw stdout into the builder prompt\n' >&2
+  exit 1
+fi
+
 no_report_state_root="$test_root_abs/loop-no-report-zero-state"
 no_report_workspace_root="$fixture_project/.clasp-task-workspaces/no-report-zero-task"
 no_report_baseline_root="$fixture_project/.clasp-task-baselines/no-report-zero-task"
@@ -321,7 +381,11 @@ cat >"$no_report_state_root/builder-1.json" <<'JSON'
 {"summary":"builder completed before verifier transport reported success without a report","files_touched":["workspace.txt"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"verifier transport completed without report","ergonomics":[],"follow_ups":[],"warnings":[]}}
 JSON
 printf 'ready\n' >"$no_report_state_root/baseline.ready"
-printf 'transport claimed success without writing verifier report\n' >"$no_report_state_root/verifier-1.stdout.jsonl"
+node - "$no_report_state_root/verifier-1.stdout.jsonl" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+fs.writeFileSync(path, `transport claimed success without writing verifier report\n${'Y'.repeat(20000)}`);
+NODE
 : >"$no_report_state_root/verifier-1.stderr.log"
 cat >"$no_report_state_root/verifier-1.heartbeat.json" <<JSON
 {"pid":0,"running":false,"completed":true,"exitCode":0,"stdoutPath":"$no_report_state_root/verifier-1.stdout.jsonl","stderrPath":"$no_report_state_root/verifier-1.stderr.log","heartbeatPath":"$no_report_state_root/verifier-1.heartbeat.json","updatedAtMs":0}
@@ -342,6 +406,11 @@ test -f "$no_report_state_root/feedback.json"
 test ! -e "$no_report_state_root/verifier-1.json"
 grep -F '"summary":"verifier step failed before producing a durable report"' "$no_report_state_root/feedback.json" >/dev/null
 grep -F 'exit_status=0' "$no_report_state_root/feedback.json" >/dev/null
+grep -F 'stdout_omitted=' "$no_report_state_root/feedback.json" >/dev/null
+if grep -F 'YYYYYYYYYYYYYYYY' "$no_report_state_root/feedback.json" >/dev/null; then
+  printf 'missing-report feedback leaked oversized verifier stdout\n' >&2
+  exit 1
+fi
 grep -F '"phase":"failed"' "$no_report_state_root/state.json" >/dev/null
 grep -F '"verdict":"fail"' "$no_report_state_root/state.json" >/dev/null
 test ! -e "$no_report_state_root/builder-reran.marker"

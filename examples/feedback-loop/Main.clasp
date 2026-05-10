@@ -191,6 +191,12 @@ focusedVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FOCUSED_VERIFIER_TIMEOUT_MS_JS
 fullVerifierTimeoutMs : Int
 fullVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FULL_VERIFIER_TIMEOUT_MS_JSON" 0
 
+feedbackPromptMaxChars : Int
+feedbackPromptMaxChars = readEnvInt "CLASP_LOOP_FEEDBACK_PROMPT_MAX_CHARS_JSON" 20000
+
+failureOutputMaxChars : Int
+failureOutputMaxChars = readEnvInt "CLASP_LOOP_FAILURE_OUTPUT_MAX_CHARS_JSON" 12000
+
 maxAttempts : Int
 maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
 
@@ -655,6 +661,21 @@ readVerifierReport attempt = match readFile (verifierReportPath attempt) {
     }
 }
 
+readVerifierReportPath : Str -> VerifierReport
+readVerifierReportPath path = match readFile path {
+  Ok raw ->
+    decode VerifierReport raw,
+  Err message ->
+    VerifierReport {
+      verdict = "fail",
+      summary = textConcat ["missing verifier report: ", message],
+      findings = [message],
+      tests_run = emptyTexts,
+      follow_up = ["leave a verifier report at the configured path"],
+      capability_statuses = emptyCapabilityStatuses
+    }
+}
+
 readFeedbackText : Int -> Str
 readFeedbackText attempt = match readFile feedbackPath {
   Ok raw ->
@@ -763,10 +784,27 @@ builderEscalationText attempt =
       "Do not spend this attempt on docs-only, wrapper-only, or single-harness-only fixes unless the previous verifier report makes clear that such a fix is the only remaining blocker."
     ]
 
+feedbackPromptTooLarge : Str -> Bool
+feedbackPromptTooLarge raw = length raw > feedbackPromptMaxChars
+
+compactFeedbackReport : Str -> Str -> VerifierReport -> Str
+compactFeedbackReport raw path report =
+  textJoin "\n" [
+    "Verifier feedback from the previous attempt was compacted because the raw feedback exceeded the prompt budget.",
+    textConcat ["Raw feedback path: ", path],
+    textConcat ["Raw feedback chars: ", encode (length raw)],
+    textConcat ["Prompt feedback budget chars: ", encode feedbackPromptMaxChars],
+    textConcat ["verdict: ", report.verdict],
+    textConcat ["summary: ", report.summary],
+    "Large findings/stdout/stderr were intentionally omitted from this prompt. Inspect the raw feedback path and referenced stdout/stderr artifacts with bounded commands if details are needed."
+  ]
+
 builderFeedbackSection : Int -> Str
 builderFeedbackSection attempt =
   if readFeedbackText attempt == "" then
     "No previous verifier feedback is present yet."
+  else if feedbackPromptTooLarge (readFeedbackText attempt) then
+    compactFeedbackReport (readFeedbackText attempt) feedbackPath (readVerifierReportPath feedbackPath)
   else
     textJoin "\n" [
       "Verifier feedback from the previous attempt:",
@@ -1982,15 +2020,36 @@ persistFinalFailure attempt report = {
 }
 
 missingVerifierReportFailure : Int -> ProcessResult -> VerifierReport
-missingVerifierReportFailure attempt result =
+missingVerifierReportFailure attempt result = {
+  let stderrDetail =
+    if length result.stderr > failureOutputMaxChars then
+      textConcat [
+        "stderr_omitted=",
+        encode (length result.stderr),
+        " chars; see ",
+        verifierStderrPath attempt
+      ]
+    else
+      textConcat ["stderr_tail=", result.stderr] in
+  let stdoutDetail =
+    if length result.stdout > failureOutputMaxChars then
+      textConcat [
+        "stdout_omitted=",
+        encode (length result.stdout),
+        " chars; see ",
+        verifierStdoutPath attempt
+      ]
+    else
+      textConcat ["stdout_tail=", result.stdout] in
   syntheticFailureReport
     "verifier step failed before producing a durable report"
     (textJoin "\n" [
       textConcat ["exit_status=", encode result.exitCode],
       textConcat ["report_path=", verifierReportPath attempt],
-      textConcat ["stderr_tail=", result.stderr],
-      textConcat ["stdout_tail=", result.stdout]
+      stderrDetail,
+      stdoutDetail
     ])
+}
 
 finalizeVerifierRun : Int -> ProcessResult -> Str
 finalizeVerifierRun attempt result =
