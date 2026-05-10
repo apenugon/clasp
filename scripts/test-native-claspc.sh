@@ -226,6 +226,9 @@ frontend_output="$test_root/hello.mjs"
 backend_project_dir="$test_root/backend-project"
 backend_project_path="$backend_project_dir/Main.clasp"
 backend_binary="$test_root/backend-app"
+boundary_project_dir="$test_root/boundary-project"
+boundary_project_path="$boundary_project_dir/Main.clasp"
+boundary_binary="$test_root/boundary-app"
 cli_project_dir="$test_root/cli-project"
 cli_project_path="$cli_project_dir/Main.clasp"
 cli_binary="$test_root/cli-app"
@@ -380,6 +383,35 @@ redirectToInbox lead = redirect "/lead/inbox"
 route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
 route inboxRoute = GET "/lead/inbox" LeadRequest -> Page showInbox
 route redirectRoute = POST "/lead/redirect" LeadRequest -> Redirect redirectToInbox
+
+main : Str
+main = "ok"
+EOF
+
+mkdir -p "$boundary_project_dir"
+cat >"$boundary_project_path" <<'EOF'
+module Main
+
+type Priority = Low | Medium | High
+
+record LeadRequest = {
+  company : Str,
+  contact : Str,
+  budget : Int
+}
+
+record LeadSummary = {
+  summary : Str,
+  priority : Priority,
+  followUpRequired : Bool
+}
+
+foreign mockLeadSummaryModel : LeadRequest -> Str = "mockLeadSummaryModel"
+
+summarizeLead : LeadRequest -> LeadSummary
+summarizeLead lead = decode LeadSummary (mockLeadSummaryModel lead)
+
+route summarizeLeadRoute = POST "/lead/summary" LeadRequest -> LeadSummary summarizeLead
 
 main : Str
 main = "ok"
@@ -868,6 +900,25 @@ curl -sS -D "$server_headers" -o "$server_body" -X POST -H 'content-type: applic
 grep -F 'HTTP/1.1 303 See Other' "$server_headers" >/dev/null
 grep -Fi 'Location: /lead/inbox' "$server_headers" >/dev/null
 grep -F '{"kind":"redirect","location":"/lead/inbox"}' "$server_body" >/dev/null
+stop_server
+
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$boundary_project_path" -o "$boundary_binary"
+[[ -x "$boundary_binary" ]]
+server_port="$(node -e 'const net=require("node:net"); const server=net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
+server_addr="127.0.0.1:$server_port"
+env CLASP_NATIVE_ROUTE_DIAGNOSTICS=1 CLASP_MOCK_LEAD_SUMMARY_PRIORITY=Urgent "$boundary_binary" serve "$server_addr" >"$server_log" 2>&1 &
+server_pid=$!
+for _ in $(seq 1 50); do
+  if curl -sS -o /dev/null -X POST -H 'content-type: application/json' --data '{"company":"Acme","contact":"Ava","budget":90000}' "http://$server_addr/lead/summary" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+curl -sS -D "$server_headers" -o "$server_body" -X POST -H 'content-type: application/json' --data '{"company":"Acme","contact":"Ava","budget":90000}' "http://$server_addr/lead/summary" >/dev/null
+grep -F 'HTTP/1.1 502 Bad Gateway' "$server_headers" >/dev/null
+grep -F '{"error":"route_dispatch_failed"}' "$server_body" >/dev/null
+grep -Fi 'X-Clasp-Boundary-Phase: model_boundary' "$server_headers" >/dev/null
+grep -Fi 'X-Clasp-Boundary-Diagnostic: priority must be one of: low, medium, high' "$server_headers" >/dev/null
 stop_server
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$cli_project_path" -o "$cli_binary"

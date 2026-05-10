@@ -17,6 +17,7 @@ if [[ -z "$workflow_assistance_slug" ]]; then
   workflow_assistance_slug="unspecified"
 fi
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "$project_root/scripts/normalize-tmpdir.sh"
 bundle_manifest="$project_root/benchmarks/bundles/${note_prefix}--claude-code--${model//\//-}--${mode}--workflow-assistance-${workflow_assistance_slug}.json"
 recovery_args=()
 

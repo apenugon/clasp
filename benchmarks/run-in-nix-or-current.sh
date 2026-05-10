@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_root="${1:?project root is required}"
 shift
+source "$project_root/scripts/normalize-tmpdir.sh"
 
 if [[ $# -eq 0 ]]; then
   echo "run-in-nix-or-current.sh requires a command" >&2

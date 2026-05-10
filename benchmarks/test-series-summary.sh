@@ -2,6 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_root/scripts/normalize-tmpdir.sh"
 results_root="$project_root/benchmarks/results"
 tmp_bin="$(mktemp -d)"
 synthetic_files=()
@@ -225,6 +226,84 @@ write_result "2026-03-01T10-14-13.000Z--clasp-interop-boundary--codex.json" "cla
 write_result "2026-03-01T10-14-14.000Z--clasp-interop-boundary--codex.json" "clasp-interop-boundary" "clasp" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:14.000Z" 85 115 105 true 0
 write_result "2026-03-01T10-14-15.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "cache-trust-a-1" "2026-03-01T10:14:15.000Z" 145 155 145 false 1
 write_result "2026-03-01T10-14-16.000Z--ts-interop-boundary--codex.json" "ts-interop-boundary" "typescript" "codex" "gpt-5.4" "cache-trust-a-2" "2026-03-01T10:14:16.000Z" 135 160 150 true 0
+
+missing_finished_result_path="$results_root/2026-03-01T10-17-00.000Z--malformed-missing-finishedAt--codex.json"
+checkpoint_in_results_path="$results_root/2026-03-01T10-17-01.000Z--checkpoint-json--codex.json"
+malformed_json_path="$results_root/2026-03-01T10-17-02.000Z--invalid-json--codex.json"
+synthetic_files+=("$missing_finished_result_path" "$checkpoint_in_results_path" "$malformed_json_path")
+cat >"$missing_finished_result_path" <<'EOF'
+{
+  "taskId": "clasp-lead-segment",
+  "suite": "clickable-lead-inbox",
+  "language": "clasp",
+  "harness": "codex",
+  "model": "gpt-5.5",
+  "startedAt": "2026-03-01T10:17:00.000Z",
+  "durationMs": 1,
+  "humanInterventions": 0,
+  "notes": "public-app-gpt55-missing",
+  "tokenUsage": { "prompt": 0, "completion": 0, "retry": 0, "debug": 0, "total": 0 },
+  "verification": { "passed": true, "command": ["bash", "scripts/verify.sh"], "exitCode": 0 }
+}
+EOF
+cat >"$checkpoint_in_results_path" <<'EOF'
+{
+  "format": "clasp-benchmark-checkpoint-v1",
+  "suite": "main-public-app-comparison",
+  "summary": "checkpoint files are not benchmark results"
+}
+EOF
+printf '{ invalid json\n' >"$malformed_json_path"
+
+loader_diagnostics_output="$(
+  node --input-type=module - "$project_root" <<'NODE'
+const projectRoot = process.argv[2];
+const benchmark = await import(`${projectRoot}/benchmarks/run-benchmark.mjs`);
+const resultSet = await benchmark.loadResultSet();
+const invalidByName = new Map(resultSet.invalidResultFiles.map((entry) => [entry.fileName, entry]));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(!resultSet.results.some((entry) => entry.fileName.includes('10-17-')), 'invalid result files must not be loaded as results');
+assert(invalidByName.get('2026-03-01T10-17-00.000Z--malformed-missing-finishedAt--codex.json')?.issues.some((issue) => issue.includes('finishedAt')), 'missing finishedAt should be reported');
+assert(invalidByName.get('2026-03-01T10-17-01.000Z--checkpoint-json--codex.json')?.reason === 'non-result-json', 'checkpoint JSON should be classified as non-result JSON');
+assert(invalidByName.get('2026-03-01T10-17-02.000Z--invalid-json--codex.json')?.reason === 'invalid-json', 'malformed JSON should be reported');
+console.log(JSON.stringify({
+  invalidResultFiles: resultSet.invalidResultFiles.filter((entry) => entry.fileName.includes('10-17-'))
+}));
+NODE
+)"
+node - "$loader_diagnostics_output" <<'NODE'
+const diagnostics = JSON.parse(process.argv[2]);
+if (diagnostics.invalidResultFiles.length !== 3) {
+  throw new Error(`expected three invalid diagnostics, got ${diagnostics.invalidResultFiles.length}`);
+}
+NODE
+
+public_app_gpt55_signal_output="$(
+  node "$project_root/benchmarks/run-public-app-signal.mjs" \
+    --skip-run true \
+    --notes public-app-gpt55-missing \
+    --harness codex \
+    --model gpt-5.5 \
+    --mode raw-repo
+)"
+node - "$public_app_gpt55_signal_output" <<'NODE'
+const signal = JSON.parse(process.argv[2]);
+if (signal.suite !== 'main-public-app-comparison') {
+  throw new Error(`unexpected public app suite: ${signal.suite}`);
+}
+if (signal.failureKind !== 'missing-results') {
+  throw new Error(`expected missing-results, got ${signal.failureKind}`);
+}
+if (signal.summary.includes('localeCompare') || signal.failureKind === 'benchmark-command-failure') {
+  throw new Error(`public app signal regressed to benchmark-command failure: ${signal.summary}`);
+}
+NODE
 
 durable_result_path="$results_root/2026-03-01T10-12-30.000Z--clasp-durable-workflow--scenario.json"
 synthetic_files+=("$durable_result_path")
@@ -809,6 +888,37 @@ grep -Fq '    sourceBenchmark: interop-boundary-comparison' <<<"$caching_trust_s
 grep -Fq '    claspPassRate: 100%' <<<"$caching_trust_summary_output"
 grep -Fq '    tsPassRate: 50%' <<<"$caching_trust_summary_output"
 grep -Fq '    timeToGreenDeltaMs: -205' <<<"$caching_trust_summary_output"
+
+missing_summary_tmp="$tmp_bin/nix-shell-deleted-summary"
+rm -rf "$missing_summary_tmp"
+stale_tmp_summary_output="$(
+  TMPDIR="$missing_summary_tmp" node "$project_root/benchmarks/run-benchmark.mjs" summarize \
+    --harness codex \
+    --model gpt-5.4 \
+    --notes remediation-a
+)"
+grep -Fq $'clasp-lead-segment\tcodex\tgpt-5.4' <<<"$stale_tmp_summary_output"
+[[ ! -e "$missing_summary_tmp" ]]
+
+missing_runner_tmp="$tmp_bin/nix-shell-deleted-runner"
+runner_tmp_capture="$tmp_bin/runner-tmpdir.txt"
+rm -rf "$missing_runner_tmp"
+TMPDIR="$missing_runner_tmp" CLASP_BENCHMARK_USE_CURRENT_SHELL=1 \
+  bash "$project_root/benchmarks/run-in-nix-or-current.sh" "$project_root" \
+  bash -lc 'printf "%s" "$TMPDIR" > "$1"; test -d "$TMPDIR" && test -w "$TMPDIR" && test -x "$TMPDIR"' \
+  bash "$runner_tmp_capture"
+[[ "$(< "$runner_tmp_capture")" == "$missing_runner_tmp" ]]
+[[ -d "$missing_runner_tmp" ]]
+
+missing_resolver_tmp="$tmp_bin/nix-shell-deleted-resolver"
+resolver_true_bin="$(type -P true)"
+rm -rf "$missing_resolver_tmp"
+resolver_output="$(
+  TMPDIR="$missing_resolver_tmp" CLASP_CLASPC="$resolver_true_bin" \
+    bash "$project_root/scripts/resolve-claspc.sh"
+)"
+[[ "$resolver_output" == "$resolver_true_bin" ]]
+[[ -d "$missing_resolver_tmp" ]]
 
 cat >"$tmp_bin/nix" <<EOF
 #!/usr/bin/env bash

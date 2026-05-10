@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 
 import {
   buildBenchmarkSuiteComparisons,
-  loadResults,
+  loadResultSet,
   matchesSummaryFilter,
   publicAppBenchmark
 } from "./run-benchmark.mjs";
@@ -194,7 +194,8 @@ function checkpointForSignal(signal, options, notePrefix, resultSetStatus, invoc
         missingTaskIds: resultSetStatus.missingTaskIds,
         matchingResultCount: resultSetStatus.matchingResultCount,
         seriesResultCount: resultSetStatus.seriesResultCount,
-        runFailures: resultSetStatus.runFailures
+        runFailures: resultSetStatus.runFailures,
+        invalidResultFiles: resultSetStatus.invalidResultFiles
       }
       : null,
     invocation: {
@@ -280,10 +281,13 @@ async function loadBundle(bundleManifestPath) {
 
 async function loadResultsOrEmpty() {
   try {
-    return await loadResults();
+    return await loadResultSet();
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      return [];
+      return {
+        results: [],
+        invalidResultFiles: []
+      };
     }
 
     throw error;
@@ -435,7 +439,7 @@ function summarizeRunFailures(runFailures) {
     .join(",")}.`;
 }
 
-function publicAppResultSetStatus(results, options, notePrefix, runFailures) {
+function publicAppResultSetStatus(results, options, notePrefix, runFailures, invalidResultFiles = []) {
   const expectedTaskIds = publicAppExpectedTaskIds();
   const matchingResults = results.filter((result) =>
     matchesSummaryFilter(result, {
@@ -464,7 +468,8 @@ function publicAppResultSetStatus(results, options, notePrefix, runFailures) {
     missingTaskIds,
     matchingResultCount: matchingResults.length,
     seriesResultCount: seriesResults.length,
-    runFailures
+    runFailures,
+    invalidResultFiles
   };
 }
 
@@ -566,7 +571,8 @@ async function main() {
       invocation = await runPublicAppSeries(options, notePrefix);
     }
 
-    const loadedResults = await loadResultsOrEmpty();
+    const loadedResultSet = await loadResultsOrEmpty();
+    const loadedResults = loadedResultSet.results;
     const results = invocation.invocationStartedAt === null
       ? loadedResults
       : loadedResults.filter((result) =>
@@ -577,7 +583,8 @@ async function main() {
       results,
       options,
       notePrefix,
-      invocation.runFailures
+      invocation.runFailures,
+      loadedResultSet.invalidResultFiles
     );
 
     if (options.repoVerification === "failed") {

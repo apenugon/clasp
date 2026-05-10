@@ -2770,8 +2770,13 @@ async function loadTasks() {
 }
 
 async function loadResults() {
+  return (await loadResultSet()).results;
+}
+
+async function loadResultSet() {
   const entries = await readdir(resultsRoot, { withFileTypes: true });
   const results = [];
+  const invalidResultFiles = [];
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) {
@@ -2779,14 +2784,150 @@ async function loadResults() {
     }
 
     const resultPath = path.join(resultsRoot, entry.name);
-    const result = JSON.parse(await readFile(resultPath, "utf8"));
-    results.push({
+    let result;
+
+    try {
+      result = JSON.parse(await readFile(resultPath, "utf8"));
+    } catch (error) {
+      invalidResultFiles.push(invalidResultFileRecord(
+        entry.name,
+        "invalid-json",
+        [`invalid JSON: ${errorMessage(error)}`]
+      ));
+      continue;
+    }
+
+    if (!isPlainRecord(result)) {
+      invalidResultFiles.push(invalidResultFileRecord(
+        entry.name,
+        "invalid-result-schema",
+        ["result must be a JSON object"]
+      ));
+      continue;
+    }
+
+    const candidate = {
       ...result,
       fileName: entry.name
-    });
+    };
+    const issues = validateBenchmarkResult(candidate);
+
+    if (issues.length > 0) {
+      invalidResultFiles.push(invalidResultFileRecord(
+        entry.name,
+        invalidBenchmarkResultReason(result),
+        issues
+      ));
+      continue;
+    }
+
+    results.push(candidate);
   }
 
-  return results.sort((left, right) => left.finishedAt.localeCompare(right.finishedAt));
+  return {
+    results: results.sort(compareResultFinishedAt),
+    invalidResultFiles: invalidResultFiles.sort(compareInvalidResultFile)
+  };
+}
+
+function invalidResultFileRecord(fileName, reason, issues) {
+  return {
+    file: posixJoin("benchmarks", "results", fileName),
+    fileName,
+    reason,
+    issues
+  };
+}
+
+function invalidBenchmarkResultReason(result) {
+  if (isPlainRecord(result) && typeof result.format === "string") {
+    return "non-result-json";
+  }
+
+  return "invalid-result-schema";
+}
+
+function validateBenchmarkResult(result) {
+  const issues = [];
+
+  for (const field of [
+    "taskId",
+    "suite",
+    "language",
+    "harness",
+    "model",
+    "startedAt",
+    "finishedAt",
+    "fileName"
+  ]) {
+    requireNonEmptyString(result, field, issues);
+  }
+
+  requireDateTimeString(result, "startedAt", issues);
+  requireDateTimeString(result, "finishedAt", issues);
+  requireNonNegativeInteger(result, "durationMs", issues);
+  requireNonNegativeInteger(result, "humanInterventions", issues);
+  validateTokenUsage(result.tokenUsage, issues);
+  validateVerification(result.verification, issues);
+
+  if (result.protocol !== undefined && result.protocol !== null && !isPlainRecord(result.protocol)) {
+    issues.push("protocol must be an object when present");
+  }
+
+  return issues;
+}
+
+function validateTokenUsage(tokenUsage, issues) {
+  if (!isPlainRecord(tokenUsage)) {
+    issues.push("tokenUsage must be an object");
+    return;
+  }
+
+  for (const field of ["prompt", "completion", "retry", "debug", "total"]) {
+    const value = tokenUsage[field];
+    if (!Number.isInteger(value) || value < 0) {
+      issues.push(`tokenUsage.${field} must be a non-negative integer`);
+    }
+  }
+}
+
+function validateVerification(verification, issues) {
+  if (!isPlainRecord(verification)) {
+    issues.push("verification must be an object");
+    return;
+  }
+
+  if (typeof verification.passed !== "boolean") {
+    issues.push("verification.passed must be a boolean");
+  }
+  if (!Array.isArray(verification.command) || verification.command.some((item) => typeof item !== "string")) {
+    issues.push("verification.command must be an array of strings");
+  }
+  if (!Number.isInteger(verification.exitCode)) {
+    issues.push("verification.exitCode must be an integer");
+  }
+}
+
+function requireNonEmptyString(record, field, issues) {
+  if (typeof record[field] !== "string" || record[field].length === 0) {
+    issues.push(`${field} must be a non-empty string`);
+  }
+}
+
+function requireDateTimeString(record, field, issues) {
+  if (typeof record[field] !== "string" || !Number.isFinite(Date.parse(record[field]))) {
+    issues.push(`${field} must be a valid date-time string`);
+  }
+}
+
+function requireNonNegativeInteger(record, field, issues) {
+  if (!Number.isInteger(record[field]) || record[field] < 0) {
+    issues.push(`${field} must be a non-negative integer`);
+  }
+}
+
+function isPlainRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 async function loadTask(taskId) {
@@ -3131,6 +3272,10 @@ async function fileExists(targetPath) {
 }
 
 function matchesSummaryFilter(result, options) {
+  if (!isPlainRecord(result)) {
+    return false;
+  }
+
   if (options.taskId && result.taskId !== options.taskId) {
     return false;
   }
@@ -3220,7 +3365,28 @@ function compareRunOrder(left, right) {
     return leftSeries.runNumber - rightSeries.runNumber;
   }
 
-  return left.finishedAt.localeCompare(right.finishedAt);
+  return compareResultFinishedAt(left, right);
+}
+
+function compareResultFinishedAt(left, right) {
+  return compareText(left?.finishedAt, right?.finishedAt) ||
+    compareResultFileName(left, right);
+}
+
+function compareResultFileName(left, right) {
+  return compareText(left?.fileName, right?.fileName);
+}
+
+function compareInvalidResultFile(left, right) {
+  return compareText(left?.fileName, right?.fileName);
+}
+
+function compareText(left, right) {
+  return String(left ?? "").localeCompare(String(right ?? ""));
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createStableId(value) {
@@ -3634,6 +3800,7 @@ if (invokedAsScript) {
 
 export {
   buildBenchmarkSuiteComparisons,
+  loadResultSet,
   loadResults,
   matchesSummaryFilter,
   publicAppBenchmark

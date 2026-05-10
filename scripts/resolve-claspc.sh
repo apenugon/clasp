@@ -2,6 +2,9 @@
 set -euo pipefail
 
 project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+if [[ -f "$project_root/scripts/normalize-tmpdir.sh" ]]; then
+  source "$project_root/scripts/normalize-tmpdir.sh"
+fi
 explicit_bin="${CLASP_CLASPC:-${CLASPC_BIN:-}}"
 local_debug_bin="$project_root/runtime/target/debug/claspc"
 nix_reentry="${CLASP_RESOLVE_CLASPC_NIX_REENTRY:-0}"

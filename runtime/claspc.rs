@@ -1819,9 +1819,10 @@ mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
         form_body_to_json, merge_json_arrays, native_image_cache_dir, parse_cli,
-        native_image_decl_module_cache_context_fingerprint, native_route_error_http_response,
-        native_route_info_from_image, plan_incremental_project_summary, read_cached_native_image,
-        replace_extension, split_decl_name_chunks, write_cached_native_image, Command,
+        native_image_decl_module_cache_context_fingerprint, native_route_error_diagnostic_headers,
+        native_route_error_http_response, native_route_info_from_image,
+        plan_incremental_project_summary, read_cached_native_image, replace_extension,
+        split_decl_name_chunks, write_cached_native_image, Command,
         NativeImageDeclModuleEntry, NativeImageDeclModulePlan, ProjectBundleBuild, ProjectBundleModule,
         PROJECT_BUNDLE_SEPARATOR,
     };
@@ -1958,7 +1959,31 @@ mod tests {
         assert_eq!(status, "502 Bad Gateway");
         assert_eq!(
             String::from_utf8(body).expect("utf8 body"),
-            "{\"error\":\"segment must be one of: startup, growth, enterprise\"}"
+            "{\"error\":\"route_dispatch_failed\"}"
+        );
+
+        let hidden_headers = native_route_error_diagnostic_headers(
+            "model_boundary:segment must be one of: startup, growth, enterprise",
+            false,
+        );
+        assert!(
+            hidden_headers.is_empty(),
+            "boundary diagnostics should be opt-in"
+        );
+
+        let diagnostic_headers = native_route_error_diagnostic_headers(
+            "model_boundary:segment must be one of: startup, growth, enterprise",
+            true,
+        );
+        assert_eq!(
+            diagnostic_headers,
+            vec![
+                ("X-Clasp-Boundary-Phase", "model_boundary".to_owned()),
+                (
+                    "X-Clasp-Boundary-Diagnostic",
+                    "segment must be one of: startup, growth, enterprise".to_owned()
+                ),
+            ]
         );
     }
 
@@ -3792,11 +3817,59 @@ fn form_body_to_json(
     serde_json::to_string(&serde_json::Value::Object(fields)).unwrap_or_else(|_| "{}".to_owned())
 }
 
+fn native_route_boundary_diagnostic(message: &str) -> Option<(&'static str, &str)> {
+    if let Some(detail) = message.strip_prefix("request_boundary:") {
+        return Some(("request_boundary", detail));
+    }
+
+    if let Some(detail) = message.strip_prefix("model_boundary:") {
+        return Some(("model_boundary", detail));
+    }
+
+    None
+}
+
 fn native_route_visible_error(message: &str) -> &str {
-    message
-        .strip_prefix("request_boundary:")
-        .or_else(|| message.strip_prefix("model_boundary:"))
+    native_route_boundary_diagnostic(message)
+        .map(|(_, detail)| detail)
         .unwrap_or(message)
+}
+
+fn native_route_diagnostics_enabled() -> bool {
+    std::env::var("CLASP_NATIVE_ROUTE_DIAGNOSTICS")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes"
+        })
+        .unwrap_or(false)
+}
+
+fn native_route_header_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '\r' | '\n' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn native_route_error_diagnostic_headers(
+    message: &str,
+    diagnostics_enabled: bool,
+) -> Vec<(&'static str, String)> {
+    if !diagnostics_enabled {
+        return Vec::new();
+    }
+
+    match native_route_boundary_diagnostic(message) {
+        Some((phase, detail)) => vec![
+            ("X-Clasp-Boundary-Phase", phase.to_owned()),
+            ("X-Clasp-Boundary-Diagnostic", native_route_header_value(detail)),
+        ],
+        None => Vec::new(),
+    }
 }
 
 fn native_route_error_body(response_kind: Option<&str>, message: &str) -> Vec<u8> {
@@ -3823,9 +3896,14 @@ fn native_route_error_http_response(response_kind: Option<&str>, message: &str) 
     }
 
     if let Some(detail) = message.strip_prefix("model_boundary:") {
+        let visible = if response_kind == Some("page") {
+            detail
+        } else {
+            "route_dispatch_failed"
+        };
         return (
             "502 Bad Gateway".to_owned(),
-            native_route_error_body(response_kind, detail),
+            native_route_error_body(response_kind, visible),
         );
     }
 
@@ -3992,10 +4070,15 @@ fn handle_http_connection(stream: &mut TcpStream, image_text: &str) -> Result<()
                 let response_kind = route_info.as_ref().map(|info| info.response_kind.as_str());
                 let (status_line, error_body) =
                     native_route_error_http_response(response_kind, &message);
+                let mut headers = vec![("Content-Type", "application/json".to_owned())];
+                headers.extend(native_route_error_diagnostic_headers(
+                    &message,
+                    native_route_diagnostics_enabled(),
+                ));
                 write_http_response(
                     stream,
                     &status_line,
-                    &[("Content-Type", "application/json".to_owned())],
+                    &headers,
                     &error_body,
                 )
             }
