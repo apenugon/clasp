@@ -700,6 +700,12 @@ mailboxPath = pathJoin [stateRootPath, "mailbox.json"]
 plannerReportPathFor : Int -> Str
 plannerReportPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".json"]]
 
+plannerStdoutPathFor : Int -> Str
+plannerStdoutPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".stdout.log"]]
+
+plannerStderrPathFor : Int -> Str
+plannerStderrPathFor wave = pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".stderr.log"]]
+
 plannerInputPath : Str
 plannerInputPath = pathJoin [stateRootPath, "planner-input.json"]
 
@@ -3061,6 +3067,16 @@ plannerRunFailureDetail run =
     textConcat ["stderrTail=", readProcessOutputTailText run.stderrArtifactPath]
   ]
 
+plannerProcessFailureDetail : Int -> ProcessResult -> Str
+plannerProcessFailureDetail wave process =
+  textJoin "\n" [
+    textConcat ["exitCode=", encode process.exitCode],
+    textConcat ["stdoutArtifactPath=", plannerStdoutPathFor wave],
+    textConcat ["stderrArtifactPath=", plannerStderrPathFor wave],
+    textConcat ["stdoutTail=", readProcessOutputTailText (plannerStdoutPathFor wave)],
+    textConcat ["stderrTail=", readProcessOutputTailText (plannerStderrPathFor wave)]
+  ]
+
 plannerFailureEvidenceText : Str -> Str
 plannerFailureEvidenceText detail =
   if detail == "" then
@@ -4639,11 +4655,37 @@ plannerPromptFor wave benchmarkSummary = textJoin "\n" [
   "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."
 ]
 
-plannerCommandFor : Int -> Str -> SwarmCommand
-plannerCommandFor wave benchmarkSummary =
-  commandSpec
-    managerProjectRoot
-    [
+plannerTimeoutShell : Str
+plannerTimeoutShell =
+  textJoin "\n" [
+    "set -u",
+    "timeout_ms=\"$1\"",
+    "stdout_path=\"$2\"",
+    "stderr_path=\"$3\"",
+    "shift 3",
+    "mkdir -p \"$(dirname \"$stdout_path\")\" \"$(dirname \"$stderr_path\")\"",
+    "if ! command -v timeout >/dev/null 2>&1; then",
+    "  printf '%s\n' 'missing timeout command for planner execution' >\"$stderr_path\"",
+    "  cat \"$stderr_path\" >&2",
+    "  exit 127",
+    "fi",
+    "secs=$(( (timeout_ms + 999) / 1000 ))",
+    "if [ \"$secs\" -lt 1 ]; then secs=1; fi",
+    "set +e",
+    "timeout -k 15s \"${secs}s\" \"$@\" >\"$stdout_path\" 2>\"$stderr_path\"",
+    "status=$?",
+    "set -e",
+    "if [ \"$status\" -eq 124 ] || [ \"$status\" -eq 137 ]; then",
+    "  printf 'planner command timed out after %sms\n' \"$timeout_ms\" >>\"$stderr_path\"",
+    "fi",
+    "cat \"$stdout_path\"",
+    "cat \"$stderr_path\" >&2",
+    "exit \"$status\""
+  ]
+
+plannerCodexArgsFor : Int -> Str -> [Str]
+plannerCodexArgsFor wave benchmarkSummary =
+  [
       codexBin,
       "exec",
       "--json",
@@ -4663,6 +4705,22 @@ plannerCommandFor wave benchmarkSummary =
       plannerReportPathFor wave,
       plannerPromptFor wave benchmarkSummary
     ]
+
+plannerCommandFor : Int -> Str -> SwarmCommand
+plannerCommandFor wave benchmarkSummary =
+  commandSpec
+    managerProjectRoot
+    (append
+      [
+        "bash",
+        "-c",
+        plannerTimeoutShell,
+        "clasp-planner-timeout",
+        encode plannerTimeoutMs,
+        plannerStdoutPathFor wave,
+        plannerStderrPathFor wave
+      ]
+      (plannerCodexArgsFor wave benchmarkSummary))
 ensureObjective : Str
 ensureObjective = match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
   Ok created -> "",
@@ -5632,7 +5690,7 @@ runPlanner = {
                     plannerFailure "planner run failed" message,
                 Ok process ->
                   if process.exitCode != 0 then {
-                    let detail = textConcat [process.stderr, process.stdout] in
+                    let detail = plannerProcessFailureDetail wave process in
                     if recoverablePlannerTransportFailure detail then
                       continueAfterPlannerTransportBlocker "planner run failed" detail
                     else

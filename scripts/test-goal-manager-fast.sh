@@ -1723,7 +1723,7 @@ grep -F '"verdict":"pass"' "$planner_validation_output" >/dev/null
 grep -F '"wave":1' "$planner_validation_state/status.json" >/dev/null
 grep -F 'recoverable-validation-blocker' "$planner_validation_state/trace.log" >/dev/null
 
-trace_case "planner-slow-direct-completes-same-wave"
+trace_case "planner-timeout-retries-same-wave"
 planner_timeout_state="$test_root_abs/planner-timeout-state"
 planner_timeout_workspace="$test_root_abs/planner-timeout-workspace"
 planner_timeout_output="$test_root_abs/planner-timeout-output.txt"
@@ -1733,6 +1733,9 @@ grep -F '"phase":"completed"' "$planner_timeout_output" >/dev/null
 grep -F '"verdict":"pass"' "$planner_timeout_output" >/dev/null
 grep -F '"wave":1' "$planner_timeout_state/status.json" >/dev/null
 grep -F 'planner-wave-1:run-command:start' "$planner_timeout_state/trace.log" >/dev/null
+grep -F 'recoverable-transport-blocker' "$planner_timeout_state/trace.log" >/dev/null
+grep -F 'exitCode=124' "$planner_timeout_state/trace.log" >/dev/null
+grep -F 'planner command timed out after 1000ms' "$planner_timeout_state/trace.log" >/dev/null
 else
 trace_case "stale-goal-manager-binary-skips-fresh-planner-recovery-regressions"
 fi
