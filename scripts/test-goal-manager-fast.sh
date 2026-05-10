@@ -344,6 +344,11 @@ if [[ "$prompt" == *"planner subagent"* || "$report_basename" == planner-*.json 
 ' >&2
     exit 45
   fi
+  if [[ "${CLASP_TEST_EXPECT_PLANNER_NO_BROAD_VERIFY:-0}" == "1" && "$prompt" != *"Do not run repo-wide verification, benchmarks, builds, package installs, or other long commands from the planner."* ]]; then
+    printf 'planner prompt missing no-broad-verification contract
+' >&2
+    exit 54
+  fi
   if [[ -n "${CLASP_TEST_EXPECT_PLANNER_TASK_LIMIT:-}" ]]; then
     expected_limit_line="Plan 1-${CLASP_TEST_EXPECT_PLANNER_TASK_LIMIT} bounded tasks with explicit dependencies and task prompts."
     if [[ "$prompt" != *"$expected_limit_line"* ]]; then
@@ -1112,6 +1117,7 @@ tiered_output="$test_root_abs/tiered-output.txt"
 mkdir -p "$tiered_workspace"
 run_goal_manager "$tiered_state" "$tiered_workspace" \
   CLASP_TEST_EXPECT_PLANNER_HEALTH='1' \
+  CLASP_TEST_EXPECT_PLANNER_NO_BROAD_VERIFY='1' \
   CLASP_TEST_EXPECT_FOCUSED_VERIFY_TIER='1' \
   CLASP_MANAGER_MAX_WAVES_JSON='1' \
   >"$tiered_output" 2>&1
