@@ -24,6 +24,7 @@ reject_pattern() {
 }
 
 bash -n "$project_root/scripts/test-native-claspc.sh"
+bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
 
@@ -53,10 +54,22 @@ require_pattern "examples/swarm-native/GoalManager.clasp" 'CLASP_MANAGER_CHILD_A
 require_pattern "examples/swarm-native/GoalManager.clasp" 'planner external resource blocked'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'external-resource-blocker'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'already exists'
+require_pattern "examples/swarm-native/GoalManager.clasp" 'plannerReportFromRaw : Str -> Result PlannerReport'
+require_pattern "examples/swarm-native/GoalManager.clasp" 'planner report missing required fields'
+require_pattern "examples/swarm-native/GoalManagerReportIO.clasp" 'plannerReportFromRaw : Str -> Result PlannerReport'
+require_pattern "examples/swarm-native/PlannerReportDecodeHarness.clasp" 'malformed-empty-tasks'
+require_pattern "examples/swarm-native/PlannerReportDecodeHarness.clasp" '{\"tasks\":[]}'
+require_pattern "examples/swarm-native/PlannerReportDecodeHarness.clasp" 'legacy-task'
+require_pattern "scripts/test-goal-manager-planner-report-decode.sh" 'current-empty-tasks=ok:0:current empty'
+reject_pattern "examples/swarm-native/GoalManager.clasp" 'plannerReportFromRaw : Str -> PlannerReport'
+reject_pattern "examples/swarm-native/GoalManagerReportIO.clasp" 'plannerReportFromRaw : Str -> PlannerReport'
+reject_pattern "examples/swarm-native/GoalManager.scratch.clasp" 'plannerReportFromRaw : Str -> PlannerReport'
 require_pattern "runtime/claspc.rs" 'embedded_final_status_output'
 require_pattern "runtime/clasp_runtime.rs" 'finalStatusPath'
 require_pattern "scripts/test-goal-manager-fast.sh" 'runtime failed to execute native compiler export'
 require_pattern "scripts/test-goal-manager-fast.sh" 'CLASP_TEST_FAKE_PLANNER_USAGE_LIMIT_FAILS'
+require_pattern "scripts/test-goal-manager-fast.sh" 'CLASP_TEST_FAKE_PLANNER_MALFORMED_REPORT'
+require_pattern "scripts/test-goal-manager-fast.sh" 'malformed planner report should not crash the native export boundary'
 require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'childLoopAwaitTimeoutMs = readEnvInt "CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON" 10000'
 require_pattern "examples/swarm-native/GoalManagerBootstrapTasks.clasp" 'CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON='
 require_pattern "examples/swarm-native/GoalManagerChildLoopMonitor.clasp" 'heartbeatTaskLease'

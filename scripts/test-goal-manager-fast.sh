@@ -428,6 +428,12 @@ JSONL
     fi
   fi
   sleep "$planner_sleep_secs"
+  if [[ "${CLASP_TEST_FAKE_PLANNER_MALFORMED_REPORT:-0}" == "1" ]]; then
+    cat >"$report_path" <<'JSON'
+{"tasks":[]}
+JSON
+    exit 0
+  fi
   if [[ "$planner_overbudget_fails" =~ ^[0-9]+$ ]] && (( planner_overbudget_fails > 0 )); then
     planner_overbudget_count="0"
     if [[ -f "$planner_overbudget_marker" ]]; then
@@ -1934,6 +1940,27 @@ goal_manager_live_pid=""
 grep -F '"phase":"completed"' "$bounded_await_output" >/dev/null
 grep -F '"verdict":"pass"' "$bounded_await_output" >/dev/null
 grep -F '"summary":"fake child loop completed"' "$bounded_await_state/loop-benchmark-gap/feedback.json" >/dev/null
+
+trace_case "malformed-planner-report-finalizes-without-export-crash"
+malformed_planner_state="$test_root_abs/malformed-planner-state"
+malformed_planner_workspace="$test_root_abs/malformed-planner-workspace"
+malformed_planner_output="$test_root_abs/malformed-planner-output.txt"
+mkdir -p "$malformed_planner_workspace"
+run_goal_manager "$malformed_planner_state" "$malformed_planner_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_PLANNER_MALFORMED_REPORT='1' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$malformed_planner_output" 2>&1
+grep -F '"phase":"failed"' "$malformed_planner_output" >/dev/null
+grep -F '"verdict":"fail"' "$malformed_planner_output" >/dev/null
+grep -F '"final":true' "$malformed_planner_state/status.json" >/dev/null
+grep -F '"summary":"planner report decode failed"' "$malformed_planner_state/feedback.json" >/dev/null
+grep -F 'planner report missing required fields' "$malformed_planner_state/feedback.json" >/dev/null
+if grep -F 'runtime failed to execute native compiler export' "$malformed_planner_output" >/dev/null 2>&1; then
+  echo "malformed planner report should not crash the native export boundary" >&2
+  exit 1
+fi
 
 trace_case "planner-validation-retries-same-wave"
 planner_validation_state="$test_root_abs/planner-validation-state"

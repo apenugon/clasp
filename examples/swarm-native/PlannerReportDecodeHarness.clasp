@@ -1,0 +1,24 @@
+module Main
+
+import GoalManagerReportIO
+import GoalManagerTypes
+
+reportStatus : Str -> Str -> Str
+reportStatus label raw =
+  match plannerReportFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok report ->
+    textConcat [label, "=ok:", encode (length report.tasks), ":", report.objectiveSummary]
+  }
+
+main : Str
+main =
+  textJoin
+    "\n"
+    [
+      reportStatus "malformed-empty-tasks" "{\"tasks\":[]}",
+      reportStatus "current-empty-tasks" "{\"objectiveSummary\":\"current empty\",\"strategy\":\"none\",\"tasks\":[],\"testsRun\":[],\"residualRisks\":[]}",
+      reportStatus "current-task" "{\"objectiveSummary\":\"current one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"role\":\"generalist\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\",\"coordinationFocus\":[]}],\"testsRun\":[],\"residualRisks\":[]}",
+      reportStatus "legacy-task" "{\"objectiveSummary\":\"legacy one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\"}],\"testsRun\":[],\"residualRisks\":[]}"
+    ]

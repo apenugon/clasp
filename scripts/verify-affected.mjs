@@ -252,6 +252,7 @@ const COMMANDS = {
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
+  goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
   feedbackResume: "bash scripts/test-feedback-loop-resume.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
@@ -261,6 +262,16 @@ const COMMANDS = {
 
 const contextArtifactLimitPerFile = parsePositiveInt(process.env.CLASP_VERIFY_AFFECTED_CONTEXT_ARTIFACT_LIMIT, 4);
 const planSurfaceLimit = parsePositiveInt(process.env.CLASP_VERIFY_AFFECTED_PLAN_SURFACE_LIMIT, 12);
+const plannerReportDecodeFiles = new Set([
+  "examples/swarm-native/GoalManager.clasp",
+  "examples/swarm-native/GoalManager.scratch.clasp",
+  "examples/swarm-native/GoalManagerPlannerIO.clasp",
+  "examples/swarm-native/GoalManagerPreludeDecode.clasp",
+  "examples/swarm-native/GoalManagerProgram2.clasp",
+  "examples/swarm-native/GoalManagerReportIO.clasp",
+  "examples/swarm-native/PlannerReportDecodeHarness.clasp",
+  "scripts/test-goal-manager-planner-report-decode.sh",
+]);
 
 function fileExists(relativePath) {
   try {
@@ -671,6 +682,27 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       reason(file, "swarm-native", "native swarm example path uses native claspc and ready-gate coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
+    }
+
+    if (plannerReportDecodeFiles.has(file)) {
+      matched = true;
+      reason(file, "goal-manager-planner-report-decode", "planner report decoding uses focused malformed/current/legacy report coverage");
+      addSelected(
+        selectedByCommand,
+        "goal-manager-planner-report-decode",
+        COMMANDS.goalManagerPlannerReportDecode,
+        "planner report decode path",
+        file,
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "planner report decode shell syntax",
+          file,
+        );
+      }
     }
 
     if (file.startsWith("examples/feedback-loop/")) {

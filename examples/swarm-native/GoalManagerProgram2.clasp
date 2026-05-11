@@ -852,12 +852,58 @@ legacyPlannerReportToCurrent report = {
   }
 }
 
-plannerReportFromRaw : Str -> PlannerReport
-plannerReportFromRaw raw = decode PlannerReport raw
+plannerReportRawContains : Str -> Str -> Bool
+plannerReportRawContains raw needle = length (textSplit raw needle) > 1
+
+plannerReportRawHasRequiredFields : Str -> Bool
+plannerReportRawHasRequiredFields raw =
+  if plannerReportRawContains raw "\"objectiveSummary\"" then
+    if plannerReportRawContains raw "\"strategy\"" then
+      if plannerReportRawContains raw "\"tasks\"" then
+        if plannerReportRawContains raw "\"testsRun\"" then
+          plannerReportRawContains raw "\"residualRisks\""
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+plannerReportRawLooksCurrent : Str -> Bool
+plannerReportRawLooksCurrent raw =
+  if plannerReportRawHasRequiredFields raw then
+    if plannerReportRawContains raw "\"coordinationFocus\"" then
+      true
+    else if plannerReportRawContains raw "\"role\"" then
+      true
+    else if plannerReportRawContains raw "\"tasks\":[]" then
+      true
+    else
+      plannerReportRawContains raw "\"tasks\": []"
+  else
+    false
+
+plannerReportRawLooksLegacy : Str -> Bool
+plannerReportRawLooksLegacy raw =
+  if plannerReportRawHasRequiredFields raw then
+    plannerReportRawContains raw "\"taskPrompt\""
+  else
+    false
+
+plannerReportFromRaw : Str -> Result PlannerReport
+plannerReportFromRaw raw =
+  if plannerReportRawLooksCurrent raw then
+    Ok (decode PlannerReport raw)
+  else if plannerReportRawLooksLegacy raw then
+    Ok (legacyPlannerReportToCurrent (decode LegacyPlannerReport raw))
+  else
+    plannerReportError "planner report missing required fields"
 
 readPlannerReportPath : Str -> Result PlannerReport
 readPlannerReportPath path = match readFile path {
-  Ok raw -> Ok (plannerReportFromRaw raw),
+  Ok raw -> plannerReportFromRaw raw,
   Err message -> plannerReportError message
 }
 

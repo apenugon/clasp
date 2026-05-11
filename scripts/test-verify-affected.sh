@@ -218,6 +218,17 @@ switch (scenario) {
     assert(logHas("scripts/test-goal-manager-fast.sh"), "fake GoalManager fast command should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
     break;
+  case "planner-report-decode":
+    assert(report.changedFiles.includes("examples/swarm-native/GoalManagerReportIO.clasp"), "planner report IO source should be present");
+    assert(report.changedFiles.includes("scripts/test-goal-manager-planner-report-decode.sh"), "planner report decode harness should be present");
+    assert(hasCommand("bash scripts/test-goal-manager-planner-report-decode.sh"), "planner report decode route should run focused coverage");
+    assert(hasCommand("bash -n 'scripts/test-goal-manager-planner-report-decode.sh'"), "planner report decode harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-native-claspc.sh"), "swarm-native source should retain native claspc coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm-native source should retain ready-gate coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-goal-manager-planner-report-decode.sh").length === 1, "planner report decode command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known planner report decode paths should not use verify-fast fallback");
+    assert(logHas("scripts/test-goal-manager-planner-report-decode.sh"), "fake planner report decode command should execute");
+    break;
   case "empty-no-git":
     assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
     assert(report.inputFallbackMode === "git-unavailable" || report.inputFallbackMode === "git-empty", `unexpected input fallback mode: ${report.inputFallbackMode}`);
@@ -286,6 +297,14 @@ goal_manager_log="$test_root/goal-manager.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
   run_verify_affected --changed-file scripts/test-goal-manager-fast.sh --changed-file scripts/test-swarm-ready-gate.sh > "$goal_manager_report"
 assert_report "$goal_manager_report" "$goal_manager_log" goal-manager-fast-script
+
+planner_report_decode_report="$test_root/planner-report-decode-report.json"
+planner_report_decode_log="$test_root/planner-report-decode.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$planner_report_decode_log" \
+  run_verify_affected \
+    --changed-file examples/swarm-native/GoalManagerReportIO.clasp \
+    --changed-file scripts/test-goal-manager-planner-report-decode.sh > "$planner_report_decode_report"
+assert_report "$planner_report_decode_report" "$planner_report_decode_log" planner-report-decode
 
 empty_report="$test_root/empty-report.json"
 empty_log="$test_root/empty.log"
