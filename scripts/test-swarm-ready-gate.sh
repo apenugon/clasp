@@ -125,6 +125,8 @@ require_pattern "runtime/claspc.rs" 'decl-module summary-plan skipped; all chunk
 require_pattern "runtime/claspc.rs" 'CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE'
 reject_pattern "scripts/resolve-claspc.sh" 'stage1.compiler.module-summary-cache-v2.json" -nt "$binary_path"'
 require_pattern "scripts/ensure-goal-manager-binary.sh" 'goal_manager_relaxed_build_plan_cache="${CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE:-1}"'
+require_pattern "benchmarks/run-benchmark.mjs" 'env.CLASP_CLASPC || env.CLASPC_BIN'
+reject_pattern "benchmarks/run-benchmark.mjs" 'unset CLASP_CLASPC CLASPC_BIN'
 
 require_pattern "scripts/test-native-claspc.sh" 'feedback_loop_live_state_root'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_loop_builder_running_output'

@@ -82,6 +82,9 @@ assert_not_contains() {
   fi
 }
 
+assert_contains "$project_root/benchmarks/run-benchmark.mjs" 'env.CLASP_CLASPC || env.CLASPC_BIN'
+assert_not_contains "$project_root/benchmarks/run-benchmark.mjs" 'unset CLASP_CLASPC CLASPC_BIN'
+
 assert_files_match() {
   local left="$1"
   local right="$2"

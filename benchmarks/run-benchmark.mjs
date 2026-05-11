@@ -657,12 +657,25 @@ async function renderClaspJsonArtifact(command, inputPath, outputPath, env) {
   return artifact;
 }
 
+function claspCompilerCommandPrefix(env) {
+  const explicitClaspc = env.CLASP_CLASPC || env.CLASPC_BIN || "";
+  const lines = [
+    "set -euo pipefail",
+    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`
+  ];
+
+  if (explicitClaspc.length > 0) {
+    lines.push(`claspc_bin=${shellQuote(explicitClaspc)}`);
+  } else {
+    lines.push(`claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`);
+  }
+
+  return lines;
+}
+
 async function runClaspCompilerCommandCapture(command, inputPath, outputPath, env) {
   const script = [
-    "set -euo pipefail",
-    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    "unset CLASP_CLASPC CLASPC_BIN",
-    `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
+    ...claspCompilerCommandPrefix(env),
     `"${"$"}claspc_bin" --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
   ].join(" && ");
   return runProcessCapture(
@@ -710,10 +723,7 @@ async function renderClaspExplain(entryPath, env) {
 
 async function runClaspStdoutCommand(command, inputPath, env) {
   const script = [
-    "set -euo pipefail",
-    `cd ${shellQuote(env.CLASP_PROJECT_ROOT)}`,
-    "unset CLASP_CLASPC CLASPC_BIN",
-    `claspc_bin="$(${shellQuote(path.join(env.CLASP_PROJECT_ROOT, "scripts", "resolve-claspc.sh"))})"`,
+    ...claspCompilerCommandPrefix(env),
     `"${"$"}claspc_bin" ${command} ${shellQuote(inputPath)}`
   ].join(" && ");
   return runProcessCapture(
