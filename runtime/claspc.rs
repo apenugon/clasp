@@ -1819,6 +1819,7 @@ mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
         form_body_to_json, merge_json_arrays, native_image_cache_dir, parse_cli,
+        embedded_final_status_path, final_status_output_bytes,
         native_image_decl_module_cache_context_fingerprint, native_route_error_diagnostic_headers,
         native_route_error_http_response, native_route_info_from_image,
         plan_incremental_project_summary, read_cached_native_image, replace_extension,
@@ -1836,6 +1837,33 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn embedded_final_status_path_defaults_to_state_root_status_json() {
+        let args = vec!["goal-manager".to_owned(), "/tmp/example-state".to_owned()];
+        assert_eq!(
+            embedded_final_status_path(&args),
+            Some(PathBuf::from("/tmp/example-state/status.json"))
+        );
+    }
+
+    #[test]
+    fn final_status_output_bytes_requires_final_true() {
+        let temp_root = unique_test_root("final-status-output");
+        fs::create_dir_all(&temp_root).expect("expected temp root");
+        let status_path = temp_root.join("status.json");
+
+        fs::write(&status_path, r#"{"phase":"completed","final":false}"#).expect("expected status write");
+        assert!(final_status_output_bytes(&status_path).is_none());
+
+        fs::write(&status_path, r#"{"phase":"completed","final":true}"#).expect("expected status write");
+        assert_eq!(
+            final_status_output_bytes(&status_path),
+            Some(r#"{"phase":"completed","final":true}"#.as_bytes().to_vec())
+        );
+
+        let _ = fs::remove_dir_all(temp_root);
     }
 
     #[test]
@@ -4163,6 +4191,44 @@ fn run_embedded_server(image_text: &str, addr: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn runtime_json_env_string(name: &str) -> Option<String> {
+    let raw = env::var(name).ok()?;
+    if raw.trim_start().starts_with('"') {
+        serde_json::from_str::<String>(&raw).ok()
+    } else {
+        Some(raw)
+    }
+}
+
+fn embedded_final_status_path(args: &[String]) -> Option<PathBuf> {
+    if let Some(path) = runtime_json_env_string("CLASP_RT_FINAL_STATUS_PATH_JSON") {
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    args.get(1).map(|state_root| Path::new(state_root).join("status.json"))
+}
+
+fn final_status_output_bytes(status_path: &Path) -> Option<Vec<u8>> {
+    let payload = fs::read(status_path).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    if value
+        .get("final")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        Some(payload)
+    } else {
+        None
+    }
+}
+
+fn embedded_final_status_output(args: &[String]) -> Option<Vec<u8>> {
+    let status_path = embedded_final_status_path(args)?;
+    final_status_output_bytes(&status_path)
+}
+
 fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
     if args.get(1).map(|value| value.as_str()) == Some("serve") {
         if args.len() != 3 {
@@ -4186,6 +4252,18 @@ fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
         let output_bytes = match result {
             Ok(output_bytes) => output_bytes,
             Err(message) => {
+                if message.contains("runtime failed to execute native compiler export") {
+                    if let Some(output_bytes) = embedded_final_status_output(args) {
+                        if let Err(err) = std::io::stdout().write_all(&output_bytes) {
+                            eprintln!("failed to write stdout: {err}");
+                            return ExitCode::from(1);
+                        }
+                        if !output_bytes.ends_with(b"\n") {
+                            let _ = std::io::stdout().write_all(b"\n");
+                        }
+                        return ExitCode::SUCCESS;
+                    }
+                }
                 eprintln!("{}", native_route_visible_error(&message));
                 return ExitCode::from(1);
             }

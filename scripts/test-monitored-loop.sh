@@ -6,7 +6,12 @@ tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-monitored-loop.XXXXXX")"
 output_path="$test_root/output.txt"
-export XDG_CACHE_HOME="$test_root/xdg-cache"
+test_xdg_cache_home="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}"
+if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
+  test_xdg_cache_home="$test_root/xdg-cache"
+fi
+mkdir -p "$test_xdg_cache_home"
+export XDG_CACHE_HOME="$test_xdg_cache_home"
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then

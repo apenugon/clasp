@@ -115,8 +115,8 @@
     },
     {
       "path": "benchmarks/README.md",
-      "size": 26526,
-      "sha256": "0e462f4b941c60e17a250815200e0fe2f2d7f96095e867beca1be18bdf4eca3c"
+      "size": 27725,
+      "sha256": "5624e94c59c93cc406a5f8b112040b79d9b8411a1d1d572e1fa428d2f3a8b35e"
     },
     {
       "path": "benchmarks/result-schema.json",
@@ -125,8 +125,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 88425,
-      "sha256": "75ea903f044db48726387aa4ae3d0f1ca53815020c936bf31ad54c1fe49b7f71"
+      "size": 123652,
+      "sha256": "c52cbc12b938ccfe9a5ea9bb22563c0a142023d3d10c168bff8ede3a107e51f0"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -135,8 +135,8 @@
     },
     {
       "path": "benchmarks/run-claude-series.sh",
-      "size": 2800,
-      "sha256": "f0b5f125d05df8fed8a05ad802511d7abb68855918b685f50511a650c360b59d"
+      "size": 2851,
+      "sha256": "e62a4b389afebb5451a3f91e702c059e50c731b7826b506baae1c37f91d91468"
     },
     {
       "path": "benchmarks/run-codex-harness.sh",
@@ -145,8 +145,8 @@
     },
     {
       "path": "benchmarks/run-codex-series.sh",
-      "size": 2809,
-      "sha256": "5e2cb322aff3d89b42a0b314b385c9ba062b4dce24ae6b4784358636e8821164"
+      "size": 2860,
+      "sha256": "013686450a4a44340a3469146fc3e6e360511bff1214ebb78c42c7ea14552eaf"
     },
     {
       "path": "benchmarks/tasks/clasp-external-adaptation/prompt.md",
@@ -294,19 +294,24 @@
       "sha256": "58039763e97c5d1422caa9231f4758c1493bd8578d7f8ff73a564c140b8a9973"
     },
     {
+      "path": "benchmarks/tasks/clasp-lead-segment/host-bindings.manifest.json",
+      "size": 9112,
+      "sha256": "b81e52105ae55ea39084cd65cb6677430674b06534ba6f4a717bb2a13f419d55"
+    },
+    {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.md",
-      "size": 1884,
-      "sha256": "c63b60d611309cab8b4dbdc0a12531028430a43644d6595cfe13f6317adf32a6"
+      "size": 2043,
+      "sha256": "64a4553eaf3e2496a2e2571f4cc09400e77c3bf90b400183a207a004fc6b4191"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.oracle.md",
-      "size": 2050,
-      "sha256": "9a33a2dbbfb3e54db603480a194ca3892a5a13cba6d7c0f71abb81e99231ec7b"
+      "size": 2209,
+      "sha256": "6c16f1c84c743f5cc37812d13bcb4048f0c2d0bfb16ac4878e7f0b81538b3595"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/prompt.raw.md",
-      "size": 1925,
-      "sha256": "529deee32d9a01c9057e7c5c61ed6668e1ba47a0f8b13317848bbea69bc2f1ca"
+      "size": 2084,
+      "sha256": "254e2a96fc6b359bc471e1335c6096612cf912ffb69bea1fa184417b48ca05cb"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/.ignore",
@@ -320,8 +325,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/LANGUAGE_GUIDE.md",
-      "size": 2562,
-      "sha256": "a816ba51afb3aa78b2eb351b17e3fd990cfe2c54074efb47433300bed04a1b8b"
+      "size": 2561,
+      "sha256": "07c54b57f5fd3748b87e4642dfe870df992a58e1bd04e97d846c0f4eda3e1ac9"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/repo/Main.clasp",
@@ -350,8 +355,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-segment/task.json",
-      "size": 319,
-      "sha256": "7756e3881e0b51f056e595129934061d185145f7c4129992670c6781e0b81b9b"
+      "size": 423,
+      "sha256": "6d241432b69e182bfe5211c1c68e5ba49a44b2bae36920ecd00aa4a0346b7c95"
     },
     {
       "path": "benchmarks/tasks/clasp-legal-assistant-appbench/prompt.md",

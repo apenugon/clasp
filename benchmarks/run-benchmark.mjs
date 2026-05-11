@@ -652,7 +652,9 @@ async function runClaspCompilerCommand(command, inputPath, outputPath, env) {
 
 async function renderClaspJsonArtifact(command, inputPath, outputPath, env) {
   await runClaspCompilerCommand(command, inputPath, outputPath, env);
-  return JSON.parse(await readFile(outputPath, "utf8"));
+  const artifact = JSON.parse(await readFile(outputPath, "utf8"));
+  await writeFile(outputPath, JSON.stringify(artifact, null, 2) + "\n", "utf8");
+  return artifact;
 }
 
 async function runClaspCompilerCommandCapture(command, inputPath, outputPath, env) {

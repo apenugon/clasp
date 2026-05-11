@@ -7638,6 +7638,35 @@ fn service_status_is_final(status: &str) -> bool {
     status == "completed" || status == "failed"
 }
 
+fn workflow_status_is_final(status_path: &str) -> bool {
+    if status_path.is_empty() || !Path::new(status_path).exists() {
+        return false;
+    }
+
+    let Ok(payload) = fs::read_to_string(status_path) else {
+        return false;
+    };
+    if payload.trim().is_empty() {
+        return false;
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&payload) else {
+        return false;
+    };
+    if value
+        .get("final")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    matches!(
+        value.get("phase").and_then(serde_json::Value::as_str),
+        Some("completed" | "failed")
+    )
+}
+
 fn upgrade_transaction_json(
     service_root: &str,
     service_id: &str,
@@ -8205,6 +8234,11 @@ fn run_service_supervisor_from_config(config_path: &str) -> Result<(), String> {
     let service_id = json_string_field(&config, "serviceId")?;
     let service_path = json_string_field(&config, "servicePath")?;
     let lock_path = json_string_field(&config, "lockPath")?;
+    let final_status_path = config
+        .get("finalStatusPath")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
     let ready_path = json_string_field(&config, "readyPath")?;
     let ready_contains = json_string_field(&config, "readyContains")?;
     let watch_poll_ms = json_i64_field(&config, "watchPollMs")?.max(50) as u64;
@@ -8308,6 +8342,24 @@ fn run_service_supervisor_from_config(config_path: &str) -> Result<(), String> {
                     .get("exitCode")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(-1);
+                if workflow_status_is_final(&final_status_path) {
+                    write_json_file_atomic(
+                        &service_path,
+                        &service_status_json(
+                            &service_root,
+                            &service_id,
+                            generation,
+                            "completed",
+                            owner_pid,
+                            &heartbeat_path.to_string_lossy(),
+                            config_path,
+                            "",
+                            exit_code,
+                        ),
+                    )?;
+                    remove_file_if_exists(&lock_path)?;
+                    return Ok(());
+                }
                 write_json_file_atomic(
                     &service_path,
                     &service_status_json(
@@ -8379,7 +8431,7 @@ fn run_service_supervisor_from_config(config_path: &str) -> Result<(), String> {
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
 
-        if exit_code == 0 {
+        if exit_code == 0 || workflow_status_is_final(&final_status_path) {
             write_json_file_atomic(
                 &service_path,
                 &service_status_json(
@@ -8466,6 +8518,10 @@ fn supervise_command_json(cwd: &str, args: &[String]) -> Result<String, String> 
     let service_path = service_root_path.join("service.json");
     let lock_path = service_root_path.join("supervisor.lock");
     let config_path = service_root_path.join("supervisor.config.json");
+    let final_status_path = Path::new(&ready_path)
+        .parent()
+        .map(|parent| parent.join("status.json").display().to_string())
+        .unwrap_or_default();
     clear_stale_service_supervisor_lock(&lock_path.to_string_lossy())?;
     if !lock_path.exists() {
         clear_stale_service_status_for_restart(&service_path)?;
@@ -8477,6 +8533,7 @@ fn supervise_command_json(cwd: &str, args: &[String]) -> Result<String, String> 
         "serviceId": service_id,
         "servicePath": service_path.display().to_string(),
         "lockPath": lock_path.display().to_string(),
+        "finalStatusPath": final_status_path,
         "readyPath": ready_path,
         "readyContains": ready_contains,
         "watchPollMs": watch_poll_ms as i64,
@@ -11335,7 +11392,7 @@ mod tests {
         std::fs::write(
             &script_path,
             format!(
-                "#!/bin/sh\ncount=0\nif [ -f {count} ]; then count=$(cat {count}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {count}\nprintf ready > {ready}\nif [ \"$count\" -eq 1 ]; then exit 7; fi\nprintf done\\n\n",
+                "#!/bin/sh\ncount=0\nif [ -f {count} ]; then count=$(cat {count}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {count}\nprintf ready > {ready}\nsleep 0.15\nif [ \"$count\" -eq 1 ]; then exit 7; fi\nprintf done\\n\n",
                 count = count_path.display(),
                 ready = ready_path.display(),
             ),
@@ -11399,6 +11456,72 @@ mod tests {
         assert!(!lock_path.exists(), "expected service supervisor lock to be released");
         assert!(config_path.exists(), "expected config to remain for inspection");
         supervisor.join().expect("expected service supervisor thread to join");
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn service_supervisor_stops_after_domain_final_status_even_when_process_fails() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-service-supervisor-domain-final-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected service temp root");
+        let service_root = temp_root.join("service");
+        let service_path = service_root.join("service.json");
+        let lock_path = service_root.join("supervisor.lock");
+        let config_path = service_root.join("supervisor.config.json");
+        let script_path = temp_root.join("service.sh");
+        let ready_path = temp_root.join("service.ready");
+        let final_status_path = temp_root.join("status.json");
+        let count_path = temp_root.join("count.txt");
+        std::fs::create_dir_all(&service_root).expect("expected service root");
+
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\ncount=0\nif [ -f {count} ]; then count=$(cat {count}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {count}\nprintf ready > {ready}\nprintf '%s' '{{\"phase\":\"failed\",\"final\":true}}' > {final_status}\nexit 7\n",
+                count = count_path.display(),
+                ready = ready_path.display(),
+                final_status = final_status_path.display(),
+            ),
+        )
+        .expect("expected service script write");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("expected service script metadata")
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("expected executable service script permissions");
+
+        let config = serde_json::json!({
+            "cwd": temp_root.display().to_string(),
+            "serviceRoot": service_root.display().to_string(),
+            "serviceId": "goal-manager-service",
+            "servicePath": service_path.display().to_string(),
+            "lockPath": lock_path.display().to_string(),
+            "finalStatusPath": final_status_path.display().to_string(),
+            "readyPath": ready_path.display().to_string(),
+            "readyContains": "ready",
+            "watchPollMs": 50,
+            "readyPollMs": 25,
+            "readyTimeoutMs": 1000,
+            "restartDelayMs": 25,
+            "command": [script_path.display().to_string()],
+        });
+        std::fs::write(&config_path, config.to_string()).expect("expected supervisor config write");
+
+        run_service_supervisor_from_config(config_path.to_str().expect("config path text"))
+            .expect("expected final domain status to stop supervisor");
+
+        let service: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&service_path).expect("service text"))
+                .expect("service json");
+        let count = std::fs::read_to_string(&count_path).expect("expected restart counter");
+        assert_eq!(service["status"].as_str(), Some("completed"));
+        assert_eq!(service["generation"].as_i64(), Some(1));
+        assert_eq!(service["exitCode"].as_i64(), Some(7));
+        assert_eq!(count.trim(), "1");
+        assert!(!lock_path.exists(), "expected service supervisor lock to be released");
 
         let _ = std::fs::remove_dir_all(temp_root);
     }

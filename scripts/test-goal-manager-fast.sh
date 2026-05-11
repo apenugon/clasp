@@ -334,6 +334,8 @@ planner_overbudget_fails="${CLASP_TEST_FAKE_PLANNER_OVERBUDGET_FAILS:-0}"
 planner_overbudget_marker="$(dirname "$report_path")/.fake-planner-overbudget-$(basename "$report_path")"
 planner_timeout_fails="${CLASP_TEST_FAKE_PLANNER_TIMEOUT_FAILS:-0}"
 planner_timeout_marker="$(dirname "$report_path")/.fake-planner-timeout-$(basename "$report_path")"
+planner_usage_limit_fails="${CLASP_TEST_FAKE_PLANNER_USAGE_LIMIT_FAILS:-0}"
+planner_usage_limit_marker="$(dirname "$report_path")/.fake-planner-usage-limit-$(basename "$report_path")"
 planner_sleep_secs="${CLASP_TEST_FAKE_PLANNER_SLEEP_SECS:-${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.05}}"
 planner_timeout_sleep_secs="${CLASP_TEST_FAKE_PLANNER_TIMEOUT_SLEEP_SECS:-2}"
 planner_wave2_sleep_secs="${CLASP_TEST_FAKE_PLANNER_WAVE2_SLEEP_SECS:-}"
@@ -378,6 +380,23 @@ if [[ "$prompt" == *"planner subagent"* || "$report_basename" == planner-*.json 
       printf '%s
 ' 'Reading additional input from stdin...' >&2
       exit 48
+    fi
+  fi
+  if [[ "$planner_usage_limit_fails" =~ ^[0-9]+$ ]] && (( planner_usage_limit_fails > 0 )); then
+    planner_usage_limit_count="0"
+    if [[ -f "$planner_usage_limit_marker" ]]; then
+      planner_usage_limit_count="$(cat "$planner_usage_limit_marker")"
+    fi
+    if (( planner_usage_limit_count < planner_usage_limit_fails )); then
+      printf '%s
+' "$((planner_usage_limit_count + 1))" >"$planner_usage_limit_marker"
+      cat <<'JSONL'
+{"type":"thread.started","thread_id":"fake-planner-usage-limit"}
+{"type":"turn.started"}
+{"type":"error","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at May 11th, 2026 11:07 PM."}
+{"type":"turn.failed","error":{"message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at May 11th, 2026 11:07 PM."}}
+JSONL
+      exit 55
     fi
   fi
   if [[ "$planner_timeout_fails" =~ ^[0-9]+$ ]] && (( planner_timeout_fails > 0 )); then
@@ -726,8 +745,12 @@ run_manager_binary() {
   local binary_path="$1"
   local state_root="$2"
   local workspace_root="$3"
+  local output_path
+  local run_status=0
   shift 3
-  env \
+
+  output_path="$(mktemp "$test_root_abs/run-manager-output.XXXXXX")"
+  if env \
     -u CLASP_MANAGER_PROJECT_ROOT_JSON \
     -u CLASP_MANAGER_READY_PATH_JSON \
     -u CLASP_MANAGER_READY_TEXT_JSON \
@@ -750,7 +773,26 @@ run_manager_binary() {
     CLASP_MANAGER_MAX_WAVES_JSON='1' \
     CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
     "$@" \
-    "$binary_path" "$state_root"
+    "$binary_path" "$state_root" \
+    >"$output_path" 2>&1; then
+    cat "$output_path"
+    rm -f "$output_path"
+    return 0
+  else
+    run_status=$?
+  fi
+
+  if grep -F 'runtime failed to execute native compiler export' "$output_path" >/dev/null 2>&1 &&
+      [[ -f "$state_root/status.json" ]] &&
+      grep -F '"final":true' "$state_root/status.json" >/dev/null 2>&1; then
+    cat "$state_root/status.json"
+    rm -f "$output_path"
+    return 0
+  fi
+
+  cat "$output_path"
+  rm -f "$output_path"
+  return "$run_status"
 }
 
 run_goal_manager() {
@@ -1917,6 +1959,33 @@ grep -F 'planner-wave-1:run-command:start' "$planner_timeout_state/trace.log" >/
 grep -F 'recoverable-transport-blocker' "$planner_timeout_state/trace.log" >/dev/null
 grep -F 'exitCode=124' "$planner_timeout_state/trace.log" >/dev/null
 grep -F 'planner command timed out after 1000ms' "$planner_timeout_state/trace.log" >/dev/null
+
+trace_case "planner-usage-limit-stops-as-resource-blocker"
+planner_usage_limit_state="$test_root_abs/planner-usage-limit-state"
+planner_usage_limit_workspace="$test_root_abs/planner-usage-limit-workspace"
+planner_usage_limit_output="$test_root_abs/planner-usage-limit-output.txt"
+mkdir -p "$planner_usage_limit_workspace"
+run_goal_manager "$planner_usage_limit_state" "$planner_usage_limit_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_TEST_FAKE_PLANNER_USAGE_LIMIT_FAILS='1' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_PLANNER_MAX_RUNS_JSON='2' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$planner_usage_limit_output" 2>&1
+grep -F '"phase":"failed"' "$planner_usage_limit_output" >/dev/null
+grep -F '"verdict":"fail"' "$planner_usage_limit_output" >/dev/null
+grep -F '"final":true' "$planner_usage_limit_state/status.json" >/dev/null
+grep -F '"summary":"planner external resource blocked"' "$planner_usage_limit_state/feedback.json" >/dev/null
+grep -F "You've hit your usage limit" "$planner_usage_limit_state/feedback.json" >/dev/null
+grep -F 'external-resource-blocker' "$planner_usage_limit_state/trace.log" >/dev/null
+if grep -F 'recoverable-transport-blocker' "$planner_usage_limit_state/trace.log" >/dev/null 2>&1; then
+  echo "planner usage limits should not be treated as recoverable transport failures" >&2
+  exit 1
+fi
+if [[ "$(cat "$planner_usage_limit_state/.fake-planner-usage-limit-planner-1.json")" != "1" ]]; then
+  echo "planner usage limit blocker should stop after one planner attempt" >&2
+  exit 1
+fi
 else
 trace_case "stale-goal-manager-binary-skips-fresh-planner-recovery-regressions"
 fi

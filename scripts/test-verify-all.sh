@@ -37,6 +37,8 @@ cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affect
 cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
+cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
+cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
@@ -67,6 +69,10 @@ grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremen
 grep -F 'export XDG_CACHE_HOME="$test_root/xdg-cache"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-monitored-loop.sh" >/dev/null
+grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-monitored-loop.sh" >/dev/null
+grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-child-loop-monitor.sh" >/dev/null
+grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-goal-manager-child-loop-monitor.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null

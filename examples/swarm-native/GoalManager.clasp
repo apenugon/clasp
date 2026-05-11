@@ -5116,12 +5116,12 @@ ensureTask taskId detail dependencies = match tasks swarmStateRoot {
     else
       match taskCreate objectiveRef taskId detail dependencies 1 taskLeaseTimeoutMs {
         Ok created -> "",
-        Err message -> message
+        Err message -> if textIncludes message "already exists" then "" else message
       },
   Err message ->
     match taskCreate objectiveRef taskId detail dependencies 1 taskLeaseTimeoutMs {
       Ok created -> "",
-      Err createMessage -> createMessage
+      Err createMessage -> if textIncludes createMessage "already exists" then "" else createMessage
     }
 }
 
@@ -5139,7 +5139,7 @@ ensurePlannerTaskFor wave = match tasks swarmStateRoot {
         plannerTaskMaxRuns
         taskLeaseTimeoutMs {
         Ok created -> "",
-        Err message -> message
+        Err message -> if textIncludes message "already exists" then "" else message
       },
   Err message ->
     match taskCreate
@@ -5150,7 +5150,7 @@ ensurePlannerTaskFor wave = match tasks swarmStateRoot {
       plannerTaskMaxRuns
       taskLeaseTimeoutMs {
       Ok created -> "",
-      Err createMessage -> createMessage
+      Err createMessage -> if textIncludes createMessage "already exists" then "" else createMessage
     }
 }
 
@@ -6120,14 +6120,36 @@ runPlanner = {
                   else
                   match runCommand plannerCommand.cwd plannerCommand.command {
                     Err message ->
-                      if recoverablePlannerTransportFailure message then
+                      if textIncludes message "We're currently experiencing high demand" then
+                        continueAfterPlannerTransportBlocker "planner run failed" message plannerCommand.command
+                      else if textIncludes message "usage limit" then {
+                        let traceError =
+                          appendManagerTrace
+                            (textConcat ["planner-wave-", encode wave, ":external-resource-blocker:planner external resource blocked:", message]) in
+                        if traceError != "" then
+                          plannerFailure "manager trace write failed" traceError
+                        else
+                          plannerFailure "planner external resource blocked" message
+                      }
+                      else if recoverablePlannerTransportFailure message then
                         continueAfterPlannerTransportBlocker "planner run failed" message plannerCommand.command
                       else
                         plannerFailure "planner run failed" message,
                     Ok process ->
                       if process.exitCode != 0 then {
                         let detail = plannerProcessFailureDetail wave process in
-                        if recoverablePlannerTransportFailure detail then
+                        if textIncludes detail "We're currently experiencing high demand" then
+                          continueAfterPlannerTransportBlocker "planner run failed" detail plannerCommand.command
+                        else if textIncludes detail "usage limit" then {
+                        let traceError =
+                          appendManagerTrace
+                              (textConcat ["planner-wave-", encode wave, ":external-resource-blocker:planner external resource blocked:", detail]) in
+                        if traceError != "" then
+                          plannerFailure "manager trace write failed" traceError
+                        else
+                            plannerFailure "planner external resource blocked" detail
+                      }
+                        else if recoverablePlannerTransportFailure detail then
                           continueAfterPlannerTransportBlocker "planner run failed" detail plannerCommand.command
                         else
                           plannerFailure "planner run failed" detail
@@ -6141,7 +6163,18 @@ runPlanner = {
                         }
                       else {
                         let detail = textConcat [process.stderr, process.stdout] in
-                        if recoverablePlannerTransportFailure detail then
+                        if textIncludes detail "We're currently experiencing high demand" then
+                          continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail plannerCommand.command
+                        else if textIncludes detail "usage limit" then {
+                          let traceError =
+                            appendManagerTrace
+                              (textConcat ["planner-wave-", encode wave, ":external-resource-blocker:planner external resource blocked:", detail]) in
+                          if traceError != "" then
+                            plannerFailure "manager trace write failed" traceError
+                          else
+                            plannerFailure "planner external resource blocked" detail
+                        }
+                        else if recoverablePlannerTransportFailure detail then
                           continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail plannerCommand.command
                         else {
                           let failed = fail (plannerHandleForWave wave) in
