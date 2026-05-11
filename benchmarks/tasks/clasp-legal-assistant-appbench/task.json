@@ -6,6 +6,8 @@
   "defaultBenchmarkPath": true,
   "repo": "repo",
   "entry": "Main.clasp",
+  "appOwnedEditSurface": ["Main.clasp", "Process.clasp"],
+  "doNotEditSurface": ["web-search-fixture.mjs", "scripts/verify.sh"],
   "prompt": "prompt.md",
   "prepare": [],
   "verify": ["bash", "scripts/verify.sh"]

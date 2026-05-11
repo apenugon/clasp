@@ -7,6 +7,8 @@
   "repo": "repo",
   "prompt": "prompt.md",
   "entry": "app/Main.clasp",
+  "appOwnedEditSurface": ["app/Shared/Lead.clasp"],
+  "doNotEditSurface": ["app/Main.clasp", "test/priority.test.mjs", "test/rejection.test.mjs", "scripts/verify.sh"],
   "prepare": [],
   "verify": ["bash", "scripts/verify.sh"]
 }

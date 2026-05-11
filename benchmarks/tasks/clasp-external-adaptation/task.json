@@ -6,6 +6,8 @@
   "defaultBenchmarkPath": true,
   "repo": "repo",
   "entry": "Main.clasp",
+  "appOwnedEditSurface": ["demo.mjs"],
+  "doNotEditSurface": ["Main.clasp", "Shared/Lead.clasp", "bindings.mjs", "test/objective.test.mjs", "scripts/verify.sh"],
   "prompt": "prompt.md",
   "prepare": [],
   "verify": ["bash", "scripts/verify.sh"]

@@ -115,8 +115,12 @@ export async function runLeadHttpE2e(binaryPath) {
           note: "This should fail"
         })
       });
+      assert.equal(unknownLead.status, 502);
+      assert.match(unknownLead.text, /Unknown lead: lead-404/);
 
       const missing = await fetchText(baseUrl, "/missing");
+      assert.equal(missing.status, 404);
+      assert.match(missing.text, /missing_route/);
 
       return {
         landingStatus: landing.status,
@@ -148,9 +152,49 @@ export async function runLeadHttpE2e(binaryPath) {
   }
 }
 
+export async function runLeadBoundaryE2e(binaryPath) {
+  const compiled = compileNativeBinary("examples/lead-app/Main.clasp", binaryPath, "lead-app-boundary-e2e");
+
+  try {
+    return await withNativeServer(compiled.binaryPath, "/api/inbox", async ({ baseUrl }) => {
+      const invalidModelSegment = await fetchText(baseUrl, "/leads", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          company: "Bad Model Co",
+          contact: "Riley",
+          budget: "25000",
+          segment: "growth"
+        })
+      });
+      assert.equal(invalidModelSegment.status, 502);
+      assert.match(invalidModelSegment.text, /segment must be one of: startup, growth, enterprise/);
+
+      const primaryAfterRejected = await fetchText(baseUrl, "/lead/primary");
+      assert.equal(primaryAfterRejected.status, 200);
+      assert.doesNotMatch(primaryAfterRejected.text, /Bad Model Co/);
+
+      return {
+        invalidModelSegmentStatus: invalidModelSegment.status,
+        invalidModelSegmentMessage: invalidModelSegment.text,
+        rejectedModelLeadStored: primaryAfterRejected.text.includes("Bad Model Co")
+      };
+    }, {
+      env: {
+        CLASP_MOCK_LEAD_SUMMARY_SEGMENT: "Global5000"
+      }
+    });
+  } finally {
+    compiled.cleanup();
+  }
+}
+
 async function runCli() {
   const summary = await runLeadHttpE2e(process.argv[2]);
-  console.log(JSON.stringify(summary));
+  const boundarySummary = await runLeadBoundaryE2e(process.argv[2]);
+  console.log(JSON.stringify({ ...summary, ...boundarySummary }));
 }
 
 if (import.meta.url === new URL(process.argv[1], "file:").href) {

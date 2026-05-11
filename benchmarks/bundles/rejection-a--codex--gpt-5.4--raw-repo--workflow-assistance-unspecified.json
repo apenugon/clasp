@@ -62,8 +62,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 123756,
-      "sha256": "d78c4d6017b8f72b5312848417bc3fa45f5b645c468f4d11cd891fcfc606a259"
+      "size": 127688,
+      "sha256": "6f748a36184ba098f751a2e0142bf231478a5550a0690a0850ecd127b44f6f97"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
@@ -89,6 +89,11 @@
       "path": "benchmarks/tasks/clasp-lead-rejection/prompt.md",
       "size": 1807,
       "sha256": "c226c77b63ace7de9fce0ea30badfba779eb3d85e4ed7a36da64621340f06b66"
+    },
+    {
+      "path": "benchmarks/tasks/clasp-lead-rejection/prompt.raw.md",
+      "size": 1758,
+      "sha256": "967cc71ed9647af9e4c3046aaa241dc67fc4c4459959a0a9e28108ee910bc221"
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/repo/.ignore",
@@ -127,8 +132,8 @@
     },
     {
       "path": "benchmarks/tasks/clasp-lead-rejection/task.json",
-      "size": 322,
-      "sha256": "58039763e97c5d1422caa9231f4758c1493bd8578d7f8ff73a564c140b8a9973"
+      "size": 490,
+      "sha256": "beeedfedcb6c47e6ca8021589ad2d8d40515a095fbde4fafd410dd4bb80383ea"
     },
     {
       "path": "benchmarks/tasks/ts-lead-rejection/prompt.md",

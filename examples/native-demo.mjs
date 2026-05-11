@@ -8,7 +8,14 @@ import { fileURLToPath } from "node:url";
 const examplesRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(examplesRoot, "..");
 
+function claspcProgram() {
+  return process.env.CLASPC_BIN ?? process.env.CLASP_CLASPC ?? "claspc";
+}
+
 function commandError(program, args, result) {
+  if (result.error) {
+    return new Error(`${program} ${args.join(" ")} failed: ${result.error.message}`);
+  }
   const stderr = (result.stderr ?? "").trim();
   const stdout = (result.stdout ?? "").trim();
   const details = stderr || stdout || `exit code ${result.status ?? "unknown"}`;
@@ -25,13 +32,14 @@ export function compileNativeBinary(entryPath, explicitBinaryPath, binaryName) {
 
   const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "clasp-native-demo-"));
   const binaryPath = path.join(tmpRoot, binaryName);
-  const result = spawnSync("claspc", ["compile", entryPath, "-o", binaryPath], {
+  const program = claspcProgram();
+  const result = spawnSync(program, ["compile", entryPath, "-o", binaryPath], {
     cwd: projectRoot,
     encoding: "utf8",
   });
   if (result.status !== 0) {
     rmSync(tmpRoot, { recursive: true, force: true });
-    throw commandError("claspc", ["compile", entryPath, "-o", binaryPath], result);
+    throw commandError(program, ["compile", entryPath, "-o", binaryPath], result);
   }
   return {
     binaryPath,
@@ -51,13 +59,14 @@ export function compileNativeImage(entryPath, explicitImagePath, imageName) {
 
   const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "clasp-native-image-"));
   const imagePath = path.join(tmpRoot, imageName);
-  const result = spawnSync("claspc", ["native-image", entryPath, "-o", imagePath], {
+  const program = claspcProgram();
+  const result = spawnSync(program, ["native-image", entryPath, "-o", imagePath], {
     cwd: projectRoot,
     encoding: "utf8",
   });
   if (result.status !== 0) {
     rmSync(tmpRoot, { recursive: true, force: true });
-    throw commandError("claspc", ["native-image", entryPath, "-o", imagePath], result);
+    throw commandError(program, ["native-image", entryPath, "-o", imagePath], result);
   }
   return {
     imagePath,
@@ -88,12 +97,13 @@ export function execImage(imagePath, exportName, outputPath, sourcePath = null) 
     args.push(sourcePath);
   }
   args.push(outputPath);
-  const result = spawnSync("claspc", args, {
+  const program = claspcProgram();
+  const result = spawnSync(program, args, {
     cwd: projectRoot,
     encoding: "utf8",
   });
   if (result.status !== 0) {
-    throw commandError("claspc", args, result);
+    throw commandError(program, args, result);
   }
 }
 
@@ -132,15 +142,20 @@ async function waitForServer(baseUrl) {
   throw new Error(`native demo server did not become ready at ${baseUrl}`);
 }
 
-export async function withNativeServer(binaryPath, readinessPath, run) {
+export async function withNativeServer(binaryPath, readinessPath, run, options = {}) {
+  const { env = {} } = options;
   const port = await findFreePort();
   const addr = `127.0.0.1:${port}`;
-  const process = spawn(binaryPath, ["serve", addr], {
+  const child = spawn(binaryPath, ["serve", addr], {
     cwd: projectRoot,
     stdio: ["ignore", "ignore", "pipe"],
+    env: {
+      ...process.env,
+      ...env,
+    },
   });
   let stderr = "";
-  process.stderr.on("data", (chunk) => {
+  child.stderr.on("data", (chunk) => {
     stderr += chunk.toString();
   });
 
@@ -156,8 +171,13 @@ export async function withNativeServer(binaryPath, readinessPath, run) {
     }
     throw error;
   } finally {
-    process.kill("SIGTERM");
-    await new Promise((resolve) => process.once("exit", resolve));
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => {
+        child.once("exit", resolve);
+        setTimeout(resolve, 1000);
+      });
+    }
   }
 }
 

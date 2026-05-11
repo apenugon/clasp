@@ -7,6 +7,7 @@
   "repo": "repo",
   "entry": "Main.clasp",
   "appOwnedEditSurface": ["Shared/Lead.clasp"],
+  "doNotEditSurface": ["Main.clasp", "test/lead-app.test.mjs", "scripts/verify.sh"],
   "hostBindingManifest": "host-bindings.manifest.json",
   "prompt": "prompt.md",
   "prepare": [],

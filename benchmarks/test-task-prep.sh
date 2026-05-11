@@ -788,6 +788,33 @@ check_persistence_prompt_modes() {
   rm -f "$latest_result"
 }
 
+check_public_app_raw_prompt_fairness() {
+  local priority_workspace="$workspace_root/clasp-lead-priority-raw"
+  local priority_output
+  local task_dir
+
+  for task_id in \
+    clasp-lead-priority \
+    clasp-lead-rejection \
+    clasp-external-adaptation \
+    clasp-legal-assistant-appbench
+  do
+    task_dir="$project_root/benchmarks/tasks/$task_id"
+    assert_file_exists "$task_dir/prompt.raw.md"
+  done
+
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-priority/prompt.raw.md" 'type Priority ='
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-priority/prompt.raw.md" 'priorityHint : Priority'
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-priority/prompt.raw.md" 'priority : Priority'
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-rejection/prompt.raw.md" 'type Priority ='
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-rejection/prompt.raw.md" 'priorityHint : Priority'
+  assert_not_contains "$project_root/benchmarks/tasks/clasp-lead-rejection/prompt.raw.md" 'priority : Priority'
+
+  priority_output="$(run_benchmark_prepare clasp-lead-priority "$priority_workspace" --mode raw-repo)"
+  grep -Fq 'Prompt: ' <<<"$priority_output"
+  grep -Fq 'benchmarks/tasks/clasp-lead-priority/prompt.raw.md' <<<"$priority_output"
+}
+
 check_nested_clasp_benchmark_prep() {
   local task_id="clasp-lead-priority"
   local workspace="$workspace_root/$task_id"
@@ -813,6 +840,129 @@ check_nested_clasp_benchmark_prep() {
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.context.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.agent-pack.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`POST /lead/summary` request `LeadRequest` -> response `LeadSummary`'
+}
+
+check_public_app_semantic_pack_coverage() {
+  local legal_workspace="$workspace_root/clasp-legal-assistant-appbench"
+
+  run_benchmark_prepare clasp-legal-assistant-appbench "$legal_workspace" >/dev/null
+
+  node - "$workspace_root" <<'EOF'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const workspaceRoot = process.argv[2];
+const publicAppTasks = [
+  {
+    id: "clasp-lead-priority",
+    entry: "app/Main.clasp",
+    appOwned: ["app/Shared/Lead.clasp"],
+    doNotEdit: ["app/Main.clasp", "test/priority.test.mjs", "scripts/verify.sh"]
+  },
+  {
+    id: "clasp-lead-rejection",
+    entry: "app/Main.clasp",
+    appOwned: ["app/Shared/Lead.clasp"],
+    doNotEdit: ["app/Main.clasp", "test/priority.test.mjs", "test/rejection.test.mjs", "scripts/verify.sh"]
+  },
+  {
+    id: "clasp-lead-segment",
+    entry: "Main.clasp",
+    appOwned: ["Shared/Lead.clasp"],
+    doNotEdit: ["Main.clasp", "test/lead-app.test.mjs", "scripts/verify.sh"]
+  },
+  {
+    id: "clasp-external-adaptation",
+    entry: "Main.clasp",
+    appOwned: ["demo.mjs"],
+    doNotEdit: ["Main.clasp", "Shared/Lead.clasp", "bindings.mjs", "test/objective.test.mjs", "scripts/verify.sh"]
+  },
+  {
+    id: "clasp-legal-assistant-appbench",
+    entry: "Main.clasp",
+    appOwned: ["Main.clasp", "Process.clasp"],
+    doNotEdit: ["web-search-fixture.mjs", "scripts/verify.sh"]
+  }
+];
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function assertMetadata(metadata, task) {
+  assert.equal(metadata.taskId, task.id);
+  assert.equal(metadata.entry, task.entry);
+  assert.deepEqual(metadata.verifierCommand, ["bash", "scripts/verify.sh"]);
+  assert.deepEqual(metadata.appOwnedEditSurface, task.appOwned);
+  assert.deepEqual(metadata.doNotEditSurface, task.doNotEdit);
+  assert.equal(metadata.artifacts.context, "benchmark-prep/Main.context.json");
+  assert.equal(metadata.artifacts.air, "benchmark-prep/Main.air.json");
+  assert.equal(metadata.artifacts.surfaces, "benchmark-prep/Main.surfaces.json");
+  assert.equal(metadata.artifacts.agentPack, "benchmark-prep/Main.agent-pack.json");
+}
+
+for (const task of publicAppTasks) {
+  const workspace = path.join(workspaceRoot, task.id);
+  const contextPath = path.join(workspace, "benchmark-prep", "Main.context.json");
+  const airPath = path.join(workspace, "benchmark-prep", "Main.air.json");
+  const surfacesPath = path.join(workspace, "benchmark-prep", "Main.surfaces.json");
+  const agentPackPath = path.join(workspace, "benchmark-prep", "Main.agent-pack.json");
+  const guidePath = path.join(workspace, "LANGUAGE_GUIDE.md");
+
+  for (const artifactPath of [contextPath, airPath, surfacesPath, agentPackPath, guidePath]) {
+    assert.ok(fs.existsSync(artifactPath), `missing semantic pack artifact for ${task.id}: ${artifactPath}`);
+  }
+
+  const context = readJson(contextPath);
+  const air = readJson(airPath);
+  const surfaces = readJson(surfacesPath);
+  const agentPack = readJson(agentPackPath);
+  const guide = fs.readFileSync(guidePath, "utf8");
+
+  assertMetadata(context.benchmarkPrep, task);
+  assertMetadata(air.benchmarkPrep, task);
+
+  assert.equal(surfaces.taskId, task.id);
+  assert.equal(surfaces.entry, task.entry);
+  assert.deepEqual(surfaces.verifierCommand, ["bash", "scripts/verify.sh"]);
+  assert.deepEqual(surfaces.appOwnedEditSurface, task.appOwned);
+  assert.deepEqual(surfaces.doNotEditSurface, task.doNotEdit);
+  assert.equal(surfaces.artifacts.context, "benchmark-prep/Main.context.json");
+  assert.equal(surfaces.artifacts.air, "benchmark-prep/Main.air.json");
+  assert.equal(surfaces.artifacts.surfaces, "benchmark-prep/Main.surfaces.json");
+  assert.equal(surfaces.artifacts.agentPack, "benchmark-prep/Main.agent-pack.json");
+  assert.ok(
+    surfaces.summaries.routeBoundaryCount + surfaces.summaries.hostBoundaryCount > 0,
+    `${task.id} should summarize at least one route or host boundary`
+  );
+  assert.ok(
+    Array.isArray(surfaces.summaries.decodeBoundaries),
+    `${task.id} should expose a decode-boundary summary array`
+  );
+
+  assert.equal(agentPack.task.id, task.id);
+  assert.equal(agentPack.task.entry, task.entry);
+  assert.deepEqual(agentPack.task.verifierCommand, ["bash", "scripts/verify.sh"]);
+  assert.deepEqual(agentPack.editTargets.primary, task.appOwned);
+  assert.deepEqual(agentPack.editTargets.doNotEdit, task.doNotEdit);
+  assert.equal(agentPack.artifacts.context, "benchmark-prep/Main.context.json");
+  assert.equal(agentPack.artifacts.air, "benchmark-prep/Main.air.json");
+  assert.equal(agentPack.artifacts.surfaces, "benchmark-prep/Main.surfaces.json");
+  assert.equal(agentPack.artifacts.agentPack, "benchmark-prep/Main.agent-pack.json");
+  assert.deepEqual(agentPack.verifier.command, ["bash", "scripts/verify.sh"]);
+  assert.deepEqual(agentPack.summaries, surfaces.summaries);
+
+  assert.match(guide, /App-owned edit surface/);
+  assert.match(guide, /Do-not-edit runtime\/test surfaces/);
+  for (const appPath of task.appOwned) {
+    assert.ok(guide.includes(`\`${appPath}\``), `${task.id} guide missing app-owned surface ${appPath}`);
+  }
+  for (const guardedPath of task.doNotEdit) {
+    assert.ok(guide.includes(`\`${guardedPath}\``), `${task.id} guide missing do-not-edit surface ${guardedPath}`);
+  }
+}
+EOF
 }
 
 check_default_clasp_benchmark_path_requires_recovery
@@ -852,6 +1002,7 @@ check_nested_clasp_benchmark_prep
 check_fixture_seed_override
 check_lead_segment_acceptance_surface
 check_lead_host_binding_manifest
+check_public_app_semantic_pack_coverage
 
 clasp_workspace="$workspace_root/clasp-lead-segment"
 assert_contains "$clasp_workspace/test/lead-app.test.mjs" 'const binaryPath = process.env.CLASP_BENCH_BINARY;'
@@ -1031,3 +1182,4 @@ check_product_only_typescript_persistence_solution
 check_product_only_clasp_workflow_correctness_solution
 check_oracle_prompt_mode
 check_persistence_prompt_modes
+check_public_app_raw_prompt_fairness

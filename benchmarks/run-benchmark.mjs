@@ -545,10 +545,28 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
   const explainPath = task.surfaceForm === "verbose"
     ? path.join(prepRoot, `${moduleName}.explain.txt`)
     : null;
+  const prepMetadata = buildClaspBenchmarkPrepMetadata({
+    task,
+    workspace,
+    entryPath,
+    moduleName,
+    contextPath,
+    airPath,
+    uiPath,
+    surfacesPath,
+    agentPackPath,
+    hostBindingManifestPath: task.hostBindingManifest
+      ? path.join(prepRoot, "host-bindings.manifest.json")
+      : null
+  });
 
   await mkdir(prepRoot, { recursive: true });
   const context = await renderClaspJsonArtifact("context", entryPath, contextPath, env);
   const air = await renderClaspJsonArtifact("air", entryPath, airPath, env);
+  context.benchmarkPrep = prepMetadata;
+  air.benchmarkPrep = prepMetadata;
+  await writeFile(contextPath, JSON.stringify(context, null, 2) + "\n", "utf8");
+  await writeFile(airPath, JSON.stringify(air, null, 2) + "\n", "utf8");
   const nativeImage = await renderClaspNativeImage(entryPath, prepRoot, env);
 
   const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
@@ -569,6 +587,7 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     entryPath,
     prepRoot,
     moduleName,
+    context,
     nativeImage,
     uiGraph,
     hostBindingManifestPath,
@@ -601,6 +620,7 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     hostBindingManifestPath,
     hostBindingManifest,
     appOwnedEditSurface: surfaces.appOwnedEditSurface,
+    doNotEditSurface: surfaces.doNotEditSurface,
     context,
     air,
     uiGraph
@@ -750,6 +770,7 @@ function synthesizeClaspBenchmarkSurfaces({
   entryPath,
   prepRoot,
   moduleName,
+  context,
   nativeImage,
   uiGraph,
   hostBindingManifestPath,
@@ -757,6 +778,9 @@ function synthesizeClaspBenchmarkSurfaces({
 }) {
   const appOwnedEditSurface = normalizeTaskStringList(
     task.appOwnedEditSurface ?? task.appOwnedEditSurfaces
+  );
+  const doNotEditSurface = normalizeTaskStringList(
+    task.doNotEditSurface ?? task.doNotEditSurfaces
   );
   const entry = path.relative(workspace, entryPath);
   const sourceFiles = collectWorkspaceClaspSourceFiles(workspace);
@@ -766,14 +790,17 @@ function synthesizeClaspBenchmarkSurfaces({
   const routes = collectBenchmarkRoutes(nativeImage, hostBindingManifest);
   const forms = collectBenchmarkForms(nativeImage, hostBindingManifest);
   const pages = collectBenchmarkPages(routes, uiGraph);
-  const hostBindings = collectBenchmarkHostBindings(nativeImage, hostBindingManifest);
+  const decodeBoundaries = collectBenchmarkDecodeBoundaries(nativeImage);
+  const hostBindings = collectBenchmarkHostBindings(nativeImage, hostBindingManifest, context);
   const expectedJsonShapes = hostBindingManifest?.expectedJsonShapes ?? {};
 
   return {
     format: "clasp-benchmark-surfaces-v1",
     taskId: task.id,
     entry,
+    verifierCommand: normalizeTaskCommand(task.verify),
     appOwnedEditSurface,
+    doNotEditSurface,
     artifacts: {
       context: path.join("benchmark-prep", `${moduleName}.context.json`),
       air: path.join("benchmark-prep", `${moduleName}.air.json`),
@@ -783,17 +810,25 @@ function synthesizeClaspBenchmarkSurfaces({
         ? path.relative(workspace, hostBindingManifestPath)
         : null
     },
-    sourceModules: sourceFiles.map((sourceFile) => ({
+    sourceModules: sourceFiles.map((sourceFile) => compactObject({
       path: sourceFile,
-      role: sourceModuleRole(sourceFile, entry, appOwnedEditSurface)
+      role: sourceModuleRole(sourceFile, entry, appOwnedEditSurface),
+      doNotEdit: doNotEditSurface.includes(sourceFile) ? true : null
     })),
     records,
     enums,
     routes,
     pages,
     forms,
-    decodeBoundaries: collectBenchmarkDecodeBoundaries(nativeImage),
+    decodeBoundaries,
     hostBindings,
+    summaries: summarizeClaspBenchmarkSurfaces({
+      routes,
+      forms,
+      pages,
+      decodeBoundaries,
+      hostBindings
+    }),
     expectedJsonShapes,
     contractGaps: collectHostContractGaps(records, enums, expectedJsonShapes, appOwnedEditSurface)
   };
@@ -841,6 +876,7 @@ function synthesizeClaspAgentActionPack({
     artifacts,
     editTargets: {
       primary: surfaces.appOwnedEditSurface ?? [],
+      doNotEdit: surfaces.doNotEditSurface ?? [],
       sourceModules: collectAgentPackSourceModules(surfaces, context, entry)
     },
     compilerContext: {
@@ -858,6 +894,7 @@ function synthesizeClaspAgentActionPack({
       boundaries: packBoundaries,
       decodeBoundaries: surfaces.decodeBoundaries ?? []
     },
+    summaries: surfaces.summaries ?? {},
     contractGaps: surfaces.contractGaps ?? [],
     actionItems: collectAgentPackActionItems(surfaces, context, task),
     verifier: {
@@ -877,6 +914,45 @@ function normalizeTaskStringList(value) {
   }
 
   return [];
+}
+
+function buildClaspBenchmarkPrepMetadata({
+  task,
+  workspace,
+  entryPath,
+  contextPath,
+  airPath,
+  uiPath,
+  surfacesPath,
+  agentPackPath,
+  hostBindingManifestPath
+}) {
+  const artifactPath = (targetPath) => targetPath
+    ? path.relative(workspace, targetPath)
+    : null;
+
+  return {
+    taskId: task.id,
+    title: task.title ?? "",
+    suite: task.suite ?? "",
+    language: task.language ?? "",
+    entry: path.relative(workspace, entryPath),
+    verifierCommand: normalizeTaskCommand(task.verify),
+    appOwnedEditSurface: normalizeTaskStringList(
+      task.appOwnedEditSurface ?? task.appOwnedEditSurfaces
+    ),
+    doNotEditSurface: normalizeTaskStringList(
+      task.doNotEditSurface ?? task.doNotEditSurfaces
+    ),
+    artifacts: {
+      context: artifactPath(contextPath),
+      air: artifactPath(airPath),
+      ui: artifactPath(uiPath),
+      surfaces: artifactPath(surfacesPath),
+      agentPack: artifactPath(agentPackPath),
+      hostBindingManifest: artifactPath(hostBindingManifestPath)
+    }
+  };
 }
 
 function sourceModuleRole(sourceFile, entry, appOwnedEditSurface) {
@@ -1122,7 +1198,7 @@ function collectBenchmarkDecodeBoundaries(nativeImage) {
   return boundaries.sort((left, right) => left.decl.localeCompare(right.decl));
 }
 
-function collectBenchmarkHostBindings(nativeImage, hostBindingManifest) {
+function collectBenchmarkHostBindings(nativeImage, hostBindingManifest, context = null) {
   const runtimeBindings = new Map(
     (nativeImage.runtime?.bindings ?? []).map((binding) => [binding.name, binding])
   );
@@ -1158,8 +1234,15 @@ function collectBenchmarkHostBindings(nativeImage, hostBindingManifest) {
     return bindings.sort(compareByName);
   }
 
+  const contextBoundaryNames = new Set(
+    (context?.surfaceIndex?.foreignBoundaries ?? [])
+      .map((boundary) => boundary.name)
+      .filter((name) => typeof name === "string" && name.length > 0)
+  );
+
   return (nativeImage.runtime?.bindings ?? [])
     .filter((binding) => isHostBindingName(binding.name))
+    .filter((binding) => contextBoundaryNames.size === 0 || contextBoundaryNames.has(binding.name))
     .map((binding) => ({
       name: binding.name,
       role: "foreign",
@@ -1169,6 +1252,42 @@ function collectBenchmarkHostBindings(nativeImage, hostBindingManifest) {
       runtimeOwnedFailures: []
     }))
     .sort(compareByName);
+}
+
+function summarizeClaspBenchmarkSurfaces({
+  routes,
+  forms,
+  pages,
+  decodeBoundaries,
+  hostBindings
+}) {
+  return {
+    routeBoundaryCount: routes.length,
+    pageSurfaceCount: pages.length,
+    formSurfaceCount: forms.length,
+    decodeBoundaryCount: decodeBoundaries.length,
+    hostBoundaryCount: hostBindings.length,
+    routeBoundaries: routes.map((route) => compactObject({
+      name: route.name,
+      method: route.method,
+      path: route.path,
+      requestType: route.requestType,
+      responseType: route.responseType,
+      responseKind: route.responseKind
+    })),
+    decodeBoundaries: decodeBoundaries.map((boundary) => compactObject({
+      decl: boundary.decl,
+      targetType: boundary.targetType,
+      sourceCallee: boundary.sourceCallee
+    })),
+    hostBoundaries: hostBindings.map((binding) => compactObject({
+      name: binding.name,
+      role: binding.role,
+      boundaryKind: agentPackBoundaryKind(binding),
+      decodedAs: binding.decodedAs,
+      expectedJsonShape: binding.expectedJsonShape
+    }))
+  };
 }
 
 function collectHostContractGaps(records, enums, expectedJsonShapes, appOwnedEditSurface) {
@@ -1633,6 +1752,7 @@ function renderClaspLanguageGuide({
   hostBindingManifestPath,
   hostBindingManifest,
   appOwnedEditSurface,
+  doNotEditSurface,
   context,
   air,
   uiGraph
@@ -1680,6 +1800,14 @@ function renderClaspLanguageGuide({
       lines.push(`- \`${sourceFile}\``);
     }
     lines.push("- Prefer these files for product behavior changes before changing test or harness files.");
+  }
+
+  if ((doNotEditSurface ?? []).length > 0) {
+    lines.push("", "## Do-not-edit runtime/test surfaces", "");
+    for (const sourceFile of doNotEditSurface) {
+      lines.push(`- \`${sourceFile}\``);
+    }
+    lines.push("- Treat these as benchmark, runtime, or verifier surfaces unless the local verifier proves the harness is wrong.");
   }
 
   lines.push("", "## Semantic pack");
