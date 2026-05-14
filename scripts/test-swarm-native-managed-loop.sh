@@ -49,6 +49,28 @@ function sameList(actual, expected, label) {
   );
 }
 
+function artifactText(path, expected, label) {
+  assert(typeof path === "string" && path.length > 0, `${label} missing artifact path`);
+  assert(fs.existsSync(path), `${label} artifact missing: ${path}`);
+  const text = fs.readFileSync(path, "utf8");
+  assert(text === expected, `${label} expected ${JSON.stringify(expected)}, got ${JSON.stringify(text)}`);
+}
+
+function checkTrace(actual, expected, label) {
+  assert(Array.isArray(actual), `${label} is not an array`);
+  assert(actual.length === expected.length, `${label} length ${actual.length}`);
+  actual.forEach((entry, index) => {
+    const exp = expected[index];
+    assert(entry.verifierName === exp.verifierName, `${label} verifier ${index}`);
+    assert(entry.status === exp.status, `${label} status ${index}`);
+    assert(entry.exitCode === exp.exitCode, `${label} exit ${index}`);
+    assert(entry.timedOut === false, `${label} timedOut ${index}`);
+    assert(entry.failedVerifierClassification === exp.classification, `${label} classification ${index}`);
+    artifactText(entry.stdoutArtifactPath, exp.stdout, `${label} stdout ${entry.verifierName}`);
+    artifactText(entry.stderrArtifactPath, "", `${label} stderr ${entry.verifierName}`);
+  });
+}
+
 const managed = report.managed;
 assert(managed, "missing managed report");
 assert(managed.phase === "completed", `managed phase ${managed.phase}`);
@@ -62,17 +84,38 @@ assert(managed.objectiveId === "managed-loop", `managed objective ${managed.obje
 assert(managed.taskId === "managed-attempt", `managed task ${managed.taskId}`);
 assert(managed.taskStatus === "completed", `managed taskStatus ${managed.taskStatus}`);
 assert(managed.objectiveProjectedStatus === "completed", `managed projected status ${managed.objectiveProjectedStatus}`);
+assert(managed.verificationPlanName === "managed-two-verifier-plan", `managed verification plan ${managed.verificationPlanName}`);
+sameList(managed.requiredVerifiers, ["managed-primary", "managed-secondary"], "managed required verifiers");
+sameList(managed.failedVerifiers, ["managed-primary"], "managed failed verifiers");
+sameList(managed.verificationTraceClassifications, ["none", "none"], "managed final trace classifications");
+sameList(managed.failedVerificationTraceClassifications, ["exit-code", "none"], "managed failed trace classifications");
+checkTrace(
+  managed.verificationTrace,
+  [
+    { verifierName: "managed-primary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-primary-pass" },
+    { verifierName: "managed-secondary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-secondary-pass" },
+  ],
+  "managed final verification trace",
+);
+checkTrace(
+  managed.failedVerificationTrace,
+  [
+    { verifierName: "managed-primary", status: "failed", exitCode: 6, classification: "exit-code", stdout: "managed-primary-first-fail" },
+    { verifierName: "managed-secondary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-secondary-pass" },
+  ],
+  "managed failed verification trace",
+);
 assert(managed.managerAction === "objective-complete", `managed action ${managed.managerAction}`);
 assert(managed.latestRunStatus === "passed", `managed latest run status ${managed.latestRunStatus}`);
 assert(managed.latestVerifierStatus === "passed", `managed latest verifier status ${managed.latestVerifierStatus}`);
-assert(managed.latestVerifier === "managed-smoke", `managed latest verifier ${managed.latestVerifier}`);
+assert(managed.latestVerifier === "managed-secondary", `managed latest verifier ${managed.latestVerifier}`);
 assert(managed.latestFailureClassification === "exit-code", `managed failure classification ${managed.latestFailureClassification}`);
 assert(managed.approvalCount === 1, `managed approval count ${managed.approvalCount}`);
 assert(managed.mergegateVerdict === "pass", `managed mergegate ${managed.mergegateVerdict}`);
 sameList(managed.readyTaskIds, [], "managed ready task ids");
 sameList(managed.blockerTaskIds, [], "managed blocker task ids");
-assert(managed.mailboxSummary.runCount === 4, `managed run count ${managed.mailboxSummary.runCount}`);
-assert(managed.mailboxSummary.artifactCount === 8, `managed artifact count ${managed.mailboxSummary.artifactCount}`);
+assert(managed.mailboxSummary.runCount === 6, `managed run count ${managed.mailboxSummary.runCount}`);
+assert(managed.mailboxSummary.artifactCount === 12, `managed artifact count ${managed.mailboxSummary.artifactCount}`);
 assert(managed.mailboxSummary.latestVerifierStatus === "passed", "managed mailbox latest verifier status");
 for (const artifactPath of managed.mailboxSummary.artifactPaths) {
   assert(fs.existsSync(artifactPath), `managed artifact path missing: ${artifactPath}`);
@@ -91,6 +134,9 @@ assert(blocked.objectiveId === "blocked-loop", `blocked objective ${blocked.obje
 assert(blocked.taskId === "blocked-child", `blocked task ${blocked.taskId}`);
 assert(blocked.taskStatus === "created", `blocked task status ${blocked.taskStatus}`);
 assert(blocked.objectiveProjectedStatus === "waiting", `blocked projected status ${blocked.objectiveProjectedStatus}`);
+sameList(blocked.requiredVerifiers, ["blocked-smoke"], "blocked required verifiers");
+sameList(blocked.failedVerifiers, [], "blocked failed verifiers");
+sameList(blocked.verificationTrace, [], "blocked verification trace");
 assert(blocked.managerAction === "wait", `blocked manager action ${blocked.managerAction}`);
 sameList(blocked.readyTaskIds, [], "blocked ready task ids");
 sameList(blocked.blockerTaskIds, ["missing-parent"], "blocked blocker task ids");
@@ -111,5 +157,8 @@ assert(budget.taskStatus === "failed", `budget task status ${budget.taskStatus}`
 assert(budget.latestRunStatus === "failed", `budget latest run ${budget.latestRunStatus}`);
 assert(budget.latestVerifierStatus === "", `budget verifier status ${budget.latestVerifierStatus}`);
 assert(budget.latestFailureClassification === "exit-code", `budget classification ${budget.latestFailureClassification}`);
+sameList(budget.requiredVerifiers, ["budget-unused"], "budget required verifiers");
+sameList(budget.failedVerifiers, [], "budget failed verifiers");
+sameList(budget.verificationTrace, [], "budget verification trace");
 assert(budget.mailboxSummary.runCount === 11, `budget run count ${budget.mailboxSummary.runCount}`);
 EOF

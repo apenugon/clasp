@@ -31,8 +31,8 @@ budgetStateRootPath = pathJoin [stateRootPath, "budget"]
 managedStatusPath : Str
 managedStatusPath = pathJoin [managedStateRootPath, "managed-loop-report.json"]
 
-firstVerifierMarkerPath : Str
-firstVerifierMarkerPath = pathJoin [managedStateRootPath, "first-verifier-failed.once"]
+primaryVerifierMarkerPath : Str
+primaryVerifierMarkerPath = pathJoin [managedStateRootPath, "primary-verifier-failed.once"]
 
 managedRoot : SwarmRoot
 managedRoot = swarmRoot managedStateRootPath
@@ -45,28 +45,51 @@ budgetRoot = swarmRoot budgetStateRootPath
 
 managedBuilderCommand : SwarmCommand
 managedBuilderCommand =
-  commandSpec "." ["bash", "-lc", "printf managed-builder-ok"]
+  commandSpec "." ["bash", "-c", "printf managed-builder-ok"]
 
-managedVerifierCommand : SwarmCommand
-managedVerifierCommand =
+managedPrimaryVerifierCommand : SwarmCommand
+managedPrimaryVerifierCommand =
   commandSpec "." [
     "bash",
-    "-lc",
+    "-c",
     textConcat [
       "if [ ! -f ",
-      firstVerifierMarkerPath,
-      " ]; then printf managed-verifier-first-fail; touch ",
-      firstVerifierMarkerPath,
-      "; exit 6; else printf managed-verifier-second-pass; fi"
+      primaryVerifierMarkerPath,
+      " ]; then printf managed-primary-first-fail; touch ",
+      primaryVerifierMarkerPath,
+      "; exit 6; else printf managed-primary-pass; fi"
     ]
   ]
 
+managedSecondaryVerifierCommand : SwarmCommand
+managedSecondaryVerifierCommand =
+  commandSpec "." ["bash", "-c", "printf managed-secondary-pass"]
+
+managedVerificationPlan : VerificationPlan
+managedVerificationPlan =
+  verificationPlan "managed-two-verifier-plan" [
+    verificationCommand "managed-primary" managedPrimaryVerifierCommand,
+    verificationCommand "managed-secondary" managedSecondaryVerifierCommand
+  ]
+
 dummyCommand : SwarmCommand
-dummyCommand = commandSpec "." ["bash", "-lc", "printf unused"]
+dummyCommand = commandSpec "." ["bash", "-c", "printf unused"]
+
+blockedVerificationPlan : VerificationPlan
+blockedVerificationPlan =
+  verificationPlan "blocked-plan" [
+    verificationCommand "blocked-smoke" dummyCommand
+  ]
+
+budgetVerificationPlan : VerificationPlan
+budgetVerificationPlan =
+  verificationPlan "budget-plan" [
+    verificationCommand "budget-unused" dummyCommand
+  ]
 
 budgetFailingBuilderCommand : SwarmCommand
 budgetFailingBuilderCommand =
-  commandSpec "." ["bash", "-lc", "printf budget-builder-fail; exit 7"]
+  commandSpec "." ["bash", "-c", "printf budget-builder-fail; exit 7"]
 
 managedSpec : ManagedLoopSpec
 managedSpec =
@@ -87,14 +110,12 @@ managedSpec =
     builderCommand = managedBuilderCommand,
     builderTimeoutMs = 0,
     useBuilderTimeout = false,
-    verifierName = "managed-smoke",
-    verifierCommand = managedVerifierCommand,
+    verificationPlan = managedVerificationPlan,
     verifierTimeoutMs = 0,
     useVerifierTimeout = false,
     approvalName = "merge-ready",
     mergegateName = "trunk",
-    requiredApprovals = ["merge-ready"],
-    requiredVerifiers = ["managed-smoke"]
+    requiredApprovals = ["merge-ready"]
   }
 
 blockedSpec : ManagedLoopSpec
@@ -116,14 +137,12 @@ blockedSpec =
     builderCommand = dummyCommand,
     builderTimeoutMs = 0,
     useBuilderTimeout = false,
-    verifierName = "blocked-smoke",
-    verifierCommand = dummyCommand,
+    verificationPlan = blockedVerificationPlan,
     verifierTimeoutMs = 0,
     useVerifierTimeout = false,
     approvalName = "merge-ready",
     mergegateName = "trunk",
-    requiredApprovals = ["merge-ready"],
-    requiredVerifiers = ["blocked-smoke"]
+    requiredApprovals = ["merge-ready"]
   }
 
 budgetSpec : ManagedLoopSpec
@@ -145,14 +164,12 @@ budgetSpec =
     builderCommand = budgetFailingBuilderCommand,
     builderTimeoutMs = 0,
     useBuilderTimeout = false,
-    verifierName = "budget-unused",
-    verifierCommand = dummyCommand,
+    verificationPlan = budgetVerificationPlan,
     verifierTimeoutMs = 0,
     useVerifierTimeout = false,
     approvalName = "merge-ready",
     mergegateName = "trunk",
-    requiredApprovals = ["merge-ready"],
-    requiredVerifiers = ["budget-unused"]
+    requiredApprovals = ["merge-ready"]
   }
 
 errorText : Str -> Str

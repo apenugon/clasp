@@ -12,6 +12,12 @@ record ManagedLoopTaskSearch = {
   found : Bool
 }
 
+record ManagedLoopFailureContext = {
+  latestFailureClassification : Str,
+  failedVerifiers : [Str],
+  failedVerificationTrace : [VerificationTraceEntry]
+}
+
 managedLoopLocalReportResultError : Str -> Result ManagedLoopReport
 managedLoopLocalReportResultError message = Err message
 
@@ -23,6 +29,17 @@ managedLoopPolicyResultError message = Err message
 
 managedLoopLocalEmptyTexts : [Str]
 managedLoopLocalEmptyTexts = []
+
+managedLoopLocalEmptyTrace : [VerificationTraceEntry]
+managedLoopLocalEmptyTrace = []
+
+managedLoopEmptyFailureContext : ManagedLoopFailureContext
+managedLoopEmptyFailureContext =
+  ManagedLoopFailureContext {
+    latestFailureClassification = "",
+    failedVerifiers = managedLoopLocalEmptyTexts,
+    failedVerificationTrace = managedLoopLocalEmptyTrace
+  }
 
 managedLoopTaskHandle : ManagedLoopSpec -> TaskHandle
 managedLoopTaskHandle spec = taskHandle spec.root spec.taskId spec.actor
@@ -94,7 +111,7 @@ managedLoopEnsureDAG spec dependencies =
     Ok objectiveValue ->
       match managedLoopEnsureTask spec dependencies {
         Ok taskValue ->
-          policySet (managedLoopTaskHandle spec) spec.mergegateName spec.requiredApprovals spec.requiredVerifiers,
+          policySetForVerificationPlan (managedLoopTaskHandle spec) spec.mergegateName spec.requiredApprovals spec.verificationPlan,
         Err message ->
           managedLoopPolicyResultError message
       },
@@ -111,6 +128,48 @@ managedLoopFailureClassification run =
       "timeout"
     else
       "exit-code"
+
+managedLoopFirstTraceFailureClassification : Str -> VerificationTraceEntry -> Str
+managedLoopFirstTraceFailureClassification current entry =
+  if current != "" then
+    current
+  else if entry.failedVerifierClassification == "none" then
+    ""
+  else
+    entry.failedVerifierClassification
+
+managedLoopPlanFailureClassification : VerificationPlanResult -> Str
+managedLoopPlanFailureClassification result = {
+  let classification = fold managedLoopFirstTraceFailureClassification "" result.trace;
+  if classification == "" then
+    "verification-plan"
+  else
+    classification
+}
+
+managedLoopPlanFailureContext : VerificationPlanResult -> ManagedLoopFailureContext
+managedLoopPlanFailureContext result =
+  ManagedLoopFailureContext {
+    latestFailureClassification = managedLoopPlanFailureClassification result,
+    failedVerifiers = result.failedVerifiers,
+    failedVerificationTrace = result.trace
+  }
+
+managedLoopRunFailureContext : SwarmRun -> ManagedLoopFailureContext
+managedLoopRunFailureContext run =
+  ManagedLoopFailureContext {
+    latestFailureClassification = managedLoopFailureClassification run,
+    failedVerifiers = managedLoopLocalEmptyTexts,
+    failedVerificationTrace = managedLoopLocalEmptyTrace
+  }
+
+managedLoopMergegateFailureContext : ManagedLoopFailureContext -> ManagedLoopFailureContext
+managedLoopMergegateFailureContext previous =
+  ManagedLoopFailureContext {
+    latestFailureClassification = "mergegate",
+    failedVerifiers = previous.failedVerifiers,
+    failedVerificationTrace = previous.failedVerificationTrace
+  }
 
 managedLoopNextNumber : Int -> Int
 managedLoopNextNumber value =
@@ -174,8 +233,8 @@ managedLoopPersistReport spec report =
       Err message -> managedLoopLocalReportResultError message
     }
 
-managedLoopBuildReport : ManagedLoopSpec -> Int -> Str -> Bool -> Bool -> Int -> Str -> Str -> Result ManagedLoopReport
-managedLoopBuildReport spec attempt phase completed exhausted requeueCount latestFailureClassification mergegateVerdict =
+managedLoopBuildReport : ManagedLoopSpec -> Int -> Str -> Bool -> Bool -> Int -> ManagedLoopFailureContext -> [VerificationTraceEntry] -> Str -> Result ManagedLoopReport
+managedLoopBuildReport spec attempt phase completed exhausted requeueCount failureContext verificationTrace mergegateVerdict =
   match managerNext (managedLoopObjectiveHandle spec) {
     Ok managerValue ->
       match taskMailbox (managedLoopTaskHandle spec) spec.mailboxLimit {
@@ -198,6 +257,8 @@ managedLoopBuildReport spec attempt phase completed exhausted requeueCount lates
                       taskId = spec.taskId,
                       taskStatus = taskStatusValue.status,
                       objectiveProjectedStatus = objectiveStatusValue.objective.projectedStatus,
+                      verificationPlanName = spec.verificationPlan.name,
+                      requiredVerifiers = spec.verificationPlan.requiredVerifierNames,
                       readyTaskIds = managedLoopReadyTaskIds spec,
                       blockedBy = managerValue.blockedBy,
                       blockerTaskIds = managerValue.blockerTaskIds,
@@ -206,7 +267,12 @@ managedLoopBuildReport spec attempt phase completed exhausted requeueCount lates
                       latestRunName = mailboxValue.latestRunName,
                       latestVerifierStatus = mailboxValue.latestVerifierStatus,
                       latestVerifier = mailboxValue.latestVerifier,
-                      latestFailureClassification = latestFailureClassification,
+                      latestFailureClassification = failureContext.latestFailureClassification,
+                      failedVerifiers = failureContext.failedVerifiers,
+                      verificationTrace = verificationTrace,
+                      verificationTraceClassifications = map verificationTraceFailedVerifierClassification verificationTrace,
+                      failedVerificationTrace = failureContext.failedVerificationTrace,
+                      failedVerificationTraceClassifications = map verificationTraceFailedVerifierClassification failureContext.failedVerificationTrace,
                       approvalCount = length mailboxValue.approvals,
                       mergegateVerdict =
                         if mergegateVerdict == "" then
@@ -235,82 +301,77 @@ managedLoopRunBuilderStep spec =
   else
     runToolStep (managedLoopTaskHandle spec) spec.builderCommand spec.mailboxLimit
 
-managedLoopRunVerifierStep : ManagedLoopSpec -> Result VerifierStepResult
-managedLoopRunVerifierStep spec =
+managedLoopRunVerificationPlan : ManagedLoopSpec -> Result VerificationPlanResult
+managedLoopRunVerificationPlan spec =
   if spec.useVerifierTimeout then
-    runVerifierStepWithTimeout (managedLoopTaskHandle spec) spec.verifierName spec.verifierCommand spec.verifierTimeoutMs spec.mailboxLimit
+    executeVerificationPlanWithTimeout (managedLoopTaskHandle spec) spec.verificationPlan spec.verifierTimeoutMs spec.mailboxLimit
   else
-    runVerifierStep (managedLoopTaskHandle spec) spec.verifierName spec.verifierCommand spec.mailboxLimit
+    executeVerificationPlan (managedLoopTaskHandle spec) spec.verificationPlan spec.mailboxLimit
 
-managedLoopAfterFailedAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Str -> Result ManagedLoopReport
-managedLoopAfterFailedAttempt spec attempt requeueCount phase classification = {
+managedLoopAfterFailedAttempt : ManagedLoopSpec -> Int -> Int -> Str -> ManagedLoopFailureContext -> [VerificationTraceEntry] -> Result ManagedLoopReport
+managedLoopAfterFailedAttempt spec attempt requeueCount phase failureContext verificationTrace = {
   let nextAttempt = managedLoopNextNumber attempt;
   if attempt >= spec.maxAttempts then
-    managedLoopBuildReport spec attempt phase false true requeueCount classification "fail"
+    managedLoopBuildReport spec attempt phase false true requeueCount failureContext verificationTrace "fail"
   else if nextAttempt == attempt then
-    managedLoopBuildReport spec attempt "attempt-counter-exhausted" false true requeueCount classification "fail"
+    managedLoopBuildReport spec attempt "attempt-counter-exhausted" false true requeueCount failureContext verificationTrace "fail"
   else
     match retry (managedLoopTaskHandle spec) {
       Ok retryValue ->
-        managedLoopRunAttempt spec nextAttempt (managedLoopNextNumber requeueCount) classification,
+        managedLoopRunAttempt spec nextAttempt (managedLoopNextNumber requeueCount) failureContext,
       Err message ->
         managedLoopLocalReportResultError message
     }
 }
 
-managedLoopAfterVerifierPass : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
-managedLoopAfterVerifierPass spec attempt requeueCount previousFailureClassification =
-  match approve (managedLoopTaskHandle spec) spec.approvalName {
-    Ok approvalValue ->
-      match mergegateDecide (managedLoopTaskHandle spec) spec.mergegateName spec.requiredVerifiers {
-        Ok decisionValue ->
-          if decisionValue.verdict == "pass" then
-            managedLoopBuildReport spec attempt "completed" true false requeueCount previousFailureClassification decisionValue.verdict
-          else
-            managedLoopAfterFailedAttempt spec attempt requeueCount "mergegate-failed" "mergegate",
-        Err message ->
-          managedLoopLocalReportResultError message
-      },
-    Err message ->
-      managedLoopLocalReportResultError message
-  }
-
-managedLoopRunVerifierAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
-managedLoopRunVerifierAttempt spec attempt requeueCount previousFailureClassification =
-  match managedLoopRunVerifierStep spec {
-    Ok verifierStepValue ->
-      if runPassed verifierStepValue.run then
-        managedLoopAfterVerifierPass spec attempt requeueCount previousFailureClassification
+managedLoopAfterVerificationPlanPass : ManagedLoopSpec -> Int -> Int -> ManagedLoopFailureContext -> [VerificationTraceEntry] -> Result ManagedLoopReport
+managedLoopAfterVerificationPlanPass spec attempt requeueCount previousFailureContext verificationTrace =
+  match approveAndMergeVerificationPlan (managedLoopTaskHandle spec) spec.approvalName spec.mergegateName spec.verificationPlan spec.mailboxLimit {
+    Ok reviewValue ->
+      if reviewValue.mergeDecision.verdict == "pass" then
+        managedLoopBuildReport spec attempt "completed" true false requeueCount previousFailureContext verificationTrace reviewValue.mergeDecision.verdict
       else
-        managedLoopAfterFailedAttempt spec attempt requeueCount "verifier-failed" (managedLoopFailureClassification verifierStepValue.run),
+        managedLoopAfterFailedAttempt spec attempt requeueCount "mergegate-failed" (managedLoopMergegateFailureContext previousFailureContext) verificationTrace,
     Err message ->
       managedLoopLocalReportResultError message
   }
 
-managedLoopRunAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
-managedLoopRunAttempt spec attempt requeueCount previousFailureClassification =
+managedLoopRunVerificationPlanAttempt : ManagedLoopSpec -> Int -> Int -> ManagedLoopFailureContext -> Result ManagedLoopReport
+managedLoopRunVerificationPlanAttempt spec attempt requeueCount previousFailureContext =
+  match managedLoopRunVerificationPlan spec {
+    Ok verificationPlanValue ->
+      if verificationPlanValue.passed then
+        managedLoopAfterVerificationPlanPass spec attempt requeueCount previousFailureContext verificationPlanValue.trace
+      else
+        managedLoopAfterFailedAttempt spec attempt requeueCount "verification-plan-failed" (managedLoopPlanFailureContext verificationPlanValue) verificationPlanValue.trace,
+    Err message ->
+      managedLoopLocalReportResultError message
+  }
+
+managedLoopRunAttempt : ManagedLoopSpec -> Int -> Int -> ManagedLoopFailureContext -> Result ManagedLoopReport
+managedLoopRunAttempt spec attempt requeueCount previousFailureContext =
   if attempt > spec.maxAttempts then
-    managedLoopBuildReport spec attempt "attempt-budget-exhausted" false true requeueCount previousFailureClassification "fail"
+    managedLoopBuildReport spec attempt "attempt-budget-exhausted" false true requeueCount previousFailureContext managedLoopLocalEmptyTrace "fail"
   else
     match managedLoopRunBuilderStep spec {
       Ok builderStepValue ->
         if runPassed builderStepValue.run then
-          managedLoopRunVerifierAttempt spec attempt requeueCount previousFailureClassification
+          managedLoopRunVerificationPlanAttempt spec attempt requeueCount previousFailureContext
         else
-          managedLoopAfterFailedAttempt spec attempt requeueCount "builder-failed" (managedLoopFailureClassification builderStepValue.run),
+          managedLoopAfterFailedAttempt spec attempt requeueCount "builder-failed" (managedLoopRunFailureContext builderStepValue.run) managedLoopLocalEmptyTrace,
       Err message ->
         managedLoopLocalReportResultError message
     }
 
 managedLoopInspect : ManagedLoopSpec -> Result ManagedLoopReport
 managedLoopInspect spec =
-  managedLoopBuildReport spec 0 "inspect" false false 0 "" ""
+  managedLoopBuildReport spec 0 "inspect" false false 0 managedLoopEmptyFailureContext managedLoopLocalEmptyTrace ""
 
 managedLoopRun : ManagedLoopSpec -> Result ManagedLoopReport
 managedLoopRun spec =
   match managedLoopEnsureDAG spec managedLoopLocalEmptyTexts {
     Ok policyValue ->
-      managedLoopRunAttempt spec 1 0 "",
+      managedLoopRunAttempt spec 1 0 managedLoopEmptyFailureContext,
     Err message ->
       managedLoopLocalReportResultError message
   }

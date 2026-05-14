@@ -284,14 +284,12 @@ record ManagedLoopSpec = {
   builderCommand : SwarmCommand,
   builderTimeoutMs : Int,
   useBuilderTimeout : Bool,
-  verifierName : Str,
-  verifierCommand : SwarmCommand,
+  verificationPlan : VerificationPlan,
   verifierTimeoutMs : Int,
   useVerifierTimeout : Bool,
   approvalName : Str,
   mergegateName : Str,
-  requiredApprovals : [Str],
-  requiredVerifiers : [Str]
+  requiredApprovals : [Str]
 }
 
 record ManagedLoopReport = {
@@ -306,6 +304,8 @@ record ManagedLoopReport = {
   taskId : Str,
   taskStatus : Str,
   objectiveProjectedStatus : Str,
+  verificationPlanName : Str,
+  requiredVerifiers : [Str],
   readyTaskIds : [Str],
   blockedBy : [Str],
   blockerTaskIds : [Str],
@@ -315,6 +315,11 @@ record ManagedLoopReport = {
   latestVerifierStatus : Str,
   latestVerifier : Str,
   latestFailureClassification : Str,
+  failedVerifiers : [Str],
+  verificationTrace : [VerificationTraceEntry],
+  verificationTraceClassifications : [Str],
+  failedVerificationTrace : [VerificationTraceEntry],
+  failedVerificationTraceClassifications : [Str],
   approvalCount : Int,
   mergegateVerdict : Str,
   mailboxSummary : VerificationPlanMailboxSummary
