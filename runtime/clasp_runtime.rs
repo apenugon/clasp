@@ -7074,6 +7074,35 @@ fn ensure_parent_dir(path: &str) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|err| err.to_string())
 }
 
+fn write_file_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    let target = Path::new(path);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("clasp-write");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos();
+    let temp_path = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), stamp));
+
+    let write_result = (|| -> Result<(), String> {
+        let mut file = File::create(&temp_path).map_err(|err| err.to_string())?;
+        file.write_all(bytes).map_err(|err| err.to_string())?;
+        file.sync_all().map_err(|err| err.to_string())?;
+        fs::rename(&temp_path, target).map_err(|err| err.to_string())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    write_result
+}
+
 fn create_truncated_output_file(path: &str) -> Result<File, String> {
     ensure_parent_dir(path)?;
     File::create(path).map_err(|err| err.to_string())
@@ -7126,10 +7155,7 @@ fn watched_process_status_json(
 }
 
 fn write_watched_process_heartbeat(path: &str, payload: &str) -> Result<(), String> {
-    ensure_parent_dir(path)?;
-    let temp_path = format!("{path}.tmp");
-    fs::write(&temp_path, payload.as_bytes()).map_err(|err| err.to_string())?;
-    fs::rename(&temp_path, path).map_err(|err| err.to_string())
+    write_file_atomic(path, payload.as_bytes())
 }
 
 fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String), String> {
@@ -7566,10 +7592,7 @@ fn read_json_file(path: &str) -> Result<serde_json::Value, String> {
 }
 
 fn write_json_file_atomic(path: &str, value: &serde_json::Value) -> Result<(), String> {
-    ensure_parent_dir(path)?;
-    let temp_path = format!("{path}.tmp");
-    fs::write(&temp_path, value.to_string().as_bytes()).map_err(|err| err.to_string())?;
-    fs::rename(&temp_path, path).map_err(|err| err.to_string())
+    write_file_atomic(path, value.to_string().as_bytes())
 }
 
 fn json_string_field(value: &serde_json::Value, key: &str) -> Result<String, String> {
@@ -9415,7 +9438,7 @@ pub unsafe extern "C" fn clasp_rt_write_file(
     contents: *mut ClaspRtString,
 ) -> *mut ClaspRtResultString {
     let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
-    match fs::write(&path_string, string_bytes(contents)) {
+    match write_file_atomic(&path_string, string_bytes(contents)) {
         Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
         Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
     }

@@ -37,4 +37,5 @@ benchmarks/workspaces/*
 /status/.clasp-loops/
 /runtime/.clasp-test-tmp/
 runtime/target/
+/src/native-verify-cache/
 /benchmarks/tasks/ts-lead-segment/repo/node_modules/

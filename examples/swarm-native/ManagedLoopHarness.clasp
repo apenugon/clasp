@@ -1,0 +1,202 @@
+module Main
+
+import Swarm
+import ManagedLoop
+
+record ManagedLoopHarnessReport = {
+  managed : ManagedLoopReport,
+  blocked : ManagedLoopReport,
+  budget : ManagedLoopReport,
+  statusPath : Str,
+  statusFileExists : Bool,
+  statusFileMatches : Bool
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-managed-loop-state"
+  else
+    pathJoin argv
+
+managedStateRootPath : Str
+managedStateRootPath = pathJoin [stateRootPath, "managed"]
+
+blockedStateRootPath : Str
+blockedStateRootPath = pathJoin [stateRootPath, "blocked"]
+
+budgetStateRootPath : Str
+budgetStateRootPath = pathJoin [stateRootPath, "budget"]
+
+managedStatusPath : Str
+managedStatusPath = pathJoin [managedStateRootPath, "managed-loop-report.json"]
+
+firstVerifierMarkerPath : Str
+firstVerifierMarkerPath = pathJoin [managedStateRootPath, "first-verifier-failed.once"]
+
+managedRoot : SwarmRoot
+managedRoot = swarmRoot managedStateRootPath
+
+blockedRoot : SwarmRoot
+blockedRoot = swarmRoot blockedStateRootPath
+
+budgetRoot : SwarmRoot
+budgetRoot = swarmRoot budgetStateRootPath
+
+managedBuilderCommand : SwarmCommand
+managedBuilderCommand =
+  commandSpec "." ["bash", "-lc", "printf managed-builder-ok"]
+
+managedVerifierCommand : SwarmCommand
+managedVerifierCommand =
+  commandSpec "." [
+    "bash",
+    "-lc",
+    textConcat [
+      "if [ ! -f ",
+      firstVerifierMarkerPath,
+      " ]; then printf managed-verifier-first-fail; touch ",
+      firstVerifierMarkerPath,
+      "; exit 6; else printf managed-verifier-second-pass; fi"
+    ]
+  ]
+
+dummyCommand : SwarmCommand
+dummyCommand = commandSpec "." ["bash", "-lc", "printf unused"]
+
+budgetFailingBuilderCommand : SwarmCommand
+budgetFailingBuilderCommand =
+  commandSpec "." ["bash", "-lc", "printf budget-builder-fail; exit 7"]
+
+managedSpec : ManagedLoopSpec
+managedSpec =
+  ManagedLoopSpec {
+    root = managedRoot,
+    objectiveId = "managed-loop",
+    objectiveDetail = "Run a bounded builder/verifier loop directly from ordinary Clasp code.",
+    objectiveMaxTasks = 1,
+    objectiveMaxRuns = 8,
+    taskId = "managed-attempt",
+    taskDetail = "Run builder and verifier attempts with bounded requeue.",
+    taskMaxRuns = 8,
+    leaseTimeoutMs = 60000,
+    actor = "manager",
+    maxAttempts = 2,
+    mailboxLimit = 20,
+    statusPath = managedStatusPath,
+    builderCommand = managedBuilderCommand,
+    builderTimeoutMs = 0,
+    useBuilderTimeout = false,
+    verifierName = "managed-smoke",
+    verifierCommand = managedVerifierCommand,
+    verifierTimeoutMs = 0,
+    useVerifierTimeout = false,
+    approvalName = "merge-ready",
+    mergegateName = "trunk",
+    requiredApprovals = ["merge-ready"],
+    requiredVerifiers = ["managed-smoke"]
+  }
+
+blockedSpec : ManagedLoopSpec
+blockedSpec =
+  ManagedLoopSpec {
+    root = blockedRoot,
+    objectiveId = "blocked-loop",
+    objectiveDetail = "Expose blocked dependencies through typed managed-loop status fields.",
+    objectiveMaxTasks = 1,
+    objectiveMaxRuns = 2,
+    taskId = "blocked-child",
+    taskDetail = "Stay blocked on a missing prerequisite task.",
+    taskMaxRuns = 2,
+    leaseTimeoutMs = 60000,
+    actor = "manager",
+    maxAttempts = 1,
+    mailboxLimit = 20,
+    statusPath = "",
+    builderCommand = dummyCommand,
+    builderTimeoutMs = 0,
+    useBuilderTimeout = false,
+    verifierName = "blocked-smoke",
+    verifierCommand = dummyCommand,
+    verifierTimeoutMs = 0,
+    useVerifierTimeout = false,
+    approvalName = "merge-ready",
+    mergegateName = "trunk",
+    requiredApprovals = ["merge-ready"],
+    requiredVerifiers = ["blocked-smoke"]
+  }
+
+budgetSpec : ManagedLoopSpec
+budgetSpec =
+  ManagedLoopSpec {
+    root = budgetRoot,
+    objectiveId = "budget-loop",
+    objectiveDetail = "Stop cleanly at a retry budget above ten attempts.",
+    objectiveMaxTasks = 1,
+    objectiveMaxRuns = 24,
+    taskId = "budget-attempt",
+    taskDetail = "Always fail builder until managed loop maxAttempts is exhausted.",
+    taskMaxRuns = 24,
+    leaseTimeoutMs = 60000,
+    actor = "manager",
+    maxAttempts = 11,
+    mailboxLimit = 40,
+    statusPath = "",
+    builderCommand = budgetFailingBuilderCommand,
+    builderTimeoutMs = 0,
+    useBuilderTimeout = false,
+    verifierName = "budget-unused",
+    verifierCommand = dummyCommand,
+    verifierTimeoutMs = 0,
+    useVerifierTimeout = false,
+    approvalName = "merge-ready",
+    mergegateName = "trunk",
+    requiredApprovals = ["merge-ready"],
+    requiredVerifiers = ["budget-unused"]
+  }
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+readStatusReport : Str
+readStatusReport =
+  match readFile managedStatusPath {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok rootCreated ->
+      match managedLoopRun managedSpec {
+        Ok managedReport ->
+          match managedLoopEnsureDAG blockedSpec ["missing-parent"] {
+            Ok blockedPolicy ->
+              match managedLoopInspect blockedSpec {
+                Ok blockedReport ->
+                  match managedLoopRun budgetSpec {
+                    Ok budgetReport ->
+                      encode (ManagedLoopHarnessReport {
+                        managed = managedReport,
+                        blocked = blockedReport,
+                        budget = budgetReport,
+                        statusPath = managedStatusPath,
+                        statusFileExists = fileExists managedStatusPath,
+                        statusFileMatches = readStatusReport == encode managedReport
+                      }),
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

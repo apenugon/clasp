@@ -34,6 +34,7 @@ full_sequential_verify_commands=$'
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-swarm-ready-gate.sh
+bash scripts/test-swarm-native-managed-loop.sh
 bash scripts/test-monitored-loop.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
 bash scripts/test-feedback-loop-resume.sh

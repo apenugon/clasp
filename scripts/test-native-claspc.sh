@@ -1103,6 +1103,27 @@ env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$cli_project_path" -o
 "$cli_binary" alpha beta | grep -F 'alpha,beta' >/dev/null
 grep -F 'alpha,beta' "$cli_output_path" >/dev/null
 
+write_atomic_dir="$test_root/write-atomic"
+write_atomic_target="$write_atomic_dir/state.json"
+write_atomic_project="$test_root/write-atomic.clasp"
+write_atomic_binary="$test_root/write-atomic-app"
+mkdir -p "$write_atomic_dir"
+printf 'preserved\n' >"$write_atomic_target"
+chmod 500 "$write_atomic_dir"
+cat >"$write_atomic_project" <<EOF
+module Main
+
+main : Str
+main = match writeFile "$(printf '%s' "$write_atomic_target")" "replacement" {
+  Ok written -> "unexpected-success",
+  Err message -> "write-failed"
+}
+EOF
+env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$write_atomic_project" -o "$write_atomic_binary"
+"$write_atomic_binary" | grep -F 'write-failed' >/dev/null
+chmod 700 "$write_atomic_dir"
+grep -Fx 'preserved' "$write_atomic_target" >/dev/null
+
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$imported_cli_project_path" -o "$imported_cli_binary"
 [[ -x "$imported_cli_binary" ]]
 "$imported_cli_binary" | grep -F 'Ada:planner' >/dev/null

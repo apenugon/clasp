@@ -267,6 +267,59 @@ record ReviewStepResult = {
   mailbox : SwarmMailbox
 }
 
+record ManagedLoopSpec = {
+  root : SwarmRoot,
+  objectiveId : Str,
+  objectiveDetail : Str,
+  objectiveMaxTasks : Int,
+  objectiveMaxRuns : Int,
+  taskId : Str,
+  taskDetail : Str,
+  taskMaxRuns : Int,
+  leaseTimeoutMs : Int,
+  actor : Str,
+  maxAttempts : Int,
+  mailboxLimit : Int,
+  statusPath : Str,
+  builderCommand : SwarmCommand,
+  builderTimeoutMs : Int,
+  useBuilderTimeout : Bool,
+  verifierName : Str,
+  verifierCommand : SwarmCommand,
+  verifierTimeoutMs : Int,
+  useVerifierTimeout : Bool,
+  approvalName : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str]
+}
+
+record ManagedLoopReport = {
+  phase : Str,
+  attempt : Int,
+  maxAttempts : Int,
+  completed : Bool,
+  exhausted : Bool,
+  requeued : Bool,
+  requeueCount : Int,
+  objectiveId : Str,
+  taskId : Str,
+  taskStatus : Str,
+  objectiveProjectedStatus : Str,
+  readyTaskIds : [Str],
+  blockedBy : [Str],
+  blockerTaskIds : [Str],
+  managerAction : Str,
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str,
+  latestFailureClassification : Str,
+  approvalCount : Int,
+  mergegateVerdict : Str,
+  mailboxSummary : VerificationPlanMailboxSummary
+}
+
 noDeadlineAtMs : Int
 noDeadlineAtMs = 0
 

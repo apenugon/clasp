@@ -1,0 +1,316 @@
+module ManagedLoop
+
+import Swarm
+
+record ManagedLoopObjectiveSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record ManagedLoopTaskSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+managedLoopLocalReportResultError : Str -> Result ManagedLoopReport
+managedLoopLocalReportResultError message = Err message
+
+managedLoopObjectiveResultError : Str -> Result SwarmObjective
+managedLoopObjectiveResultError message = Err message
+
+managedLoopPolicyResultError : Str -> Result SwarmPolicy
+managedLoopPolicyResultError message = Err message
+
+managedLoopLocalEmptyTexts : [Str]
+managedLoopLocalEmptyTexts = []
+
+managedLoopTaskHandle : ManagedLoopSpec -> TaskHandle
+managedLoopTaskHandle spec = taskHandle spec.root spec.taskId spec.actor
+
+managedLoopObjectiveHandle : ManagedLoopSpec -> ObjectiveHandle
+managedLoopObjectiveHandle spec = objectiveHandle spec.root spec.objectiveId
+
+managedLoopTaskId : SwarmTask -> Str
+managedLoopTaskId task = task.taskId
+
+managedLoopObjectiveSearchStep : ManagedLoopObjectiveSearch -> SwarmObjective -> ManagedLoopObjectiveSearch
+managedLoopObjectiveSearchStep search objective =
+  if search.found then
+    search
+  else
+    ManagedLoopObjectiveSearch {
+      wanted = search.wanted,
+      found = objective.objectiveId == search.wanted
+    }
+
+managedLoopObjectiveListHasId : Str -> [SwarmObjective] -> Bool
+managedLoopObjectiveListHasId wanted objectiveValues =
+  (fold managedLoopObjectiveSearchStep (ManagedLoopObjectiveSearch { wanted = wanted, found = false }) objectiveValues).found
+
+managedLoopTaskSearchStep : ManagedLoopTaskSearch -> SwarmTask -> ManagedLoopTaskSearch
+managedLoopTaskSearchStep search task =
+  if search.found then
+    search
+  else
+    ManagedLoopTaskSearch {
+      wanted = search.wanted,
+      found = task.taskId == search.wanted
+    }
+
+managedLoopTaskListHasId : Str -> [SwarmTask] -> Bool
+managedLoopTaskListHasId wanted taskValues =
+  (fold managedLoopTaskSearchStep (ManagedLoopTaskSearch { wanted = wanted, found = false }) taskValues).found
+
+managedLoopEnsureObjective : ManagedLoopSpec -> Result SwarmObjective
+managedLoopEnsureObjective spec =
+  match objectives spec.root {
+    Ok objectiveValues ->
+      if managedLoopObjectiveListHasId spec.objectiveId objectiveValues then
+        match objectiveStatus (managedLoopObjectiveHandle spec) {
+          Ok statusValue -> Ok statusValue.objective,
+          Err message -> managedLoopObjectiveResultError message
+        }
+      else
+        objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns,
+    Err message ->
+      objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns
+  }
+
+managedLoopEnsureTask : ManagedLoopSpec -> [Str] -> Result SwarmTask
+managedLoopEnsureTask spec dependencies =
+  match tasks spec.root {
+    Ok taskValues ->
+      if managedLoopTaskListHasId spec.taskId taskValues then
+        status (managedLoopTaskHandle spec)
+      else
+        taskCreate (managedLoopObjectiveHandle spec) spec.taskId spec.taskDetail dependencies spec.taskMaxRuns spec.leaseTimeoutMs,
+    Err message ->
+      taskCreate (managedLoopObjectiveHandle spec) spec.taskId spec.taskDetail dependencies spec.taskMaxRuns spec.leaseTimeoutMs
+  }
+
+managedLoopEnsureDAG : ManagedLoopSpec -> [Str] -> Result SwarmPolicy
+managedLoopEnsureDAG spec dependencies =
+  match managedLoopEnsureObjective spec {
+    Ok objectiveValue ->
+      match managedLoopEnsureTask spec dependencies {
+        Ok taskValue ->
+          policySet (managedLoopTaskHandle spec) spec.mergegateName spec.requiredApprovals spec.requiredVerifiers,
+        Err message ->
+          managedLoopPolicyResultError message
+      },
+    Err message ->
+      managedLoopPolicyResultError message
+  }
+
+managedLoopFailureClassification : SwarmRun -> Str
+managedLoopFailureClassification run =
+  if runPassed run then
+    "none"
+  else
+    if run.timedOut then
+      "timeout"
+    else
+      "exit-code"
+
+managedLoopNextNumber : Int -> Int
+managedLoopNextNumber value =
+  if value == 0 then
+    1
+  else if value == 1 then
+    2
+  else if value == 2 then
+    3
+  else if value == 3 then
+    4
+  else if value == 4 then
+    5
+  else if value == 5 then
+    6
+  else if value == 6 then
+    7
+  else if value == 7 then
+    8
+  else if value == 8 then
+    9
+  else if value == 9 then
+    10
+  else if value == 10 then
+    11
+  else if value == 11 then
+    12
+  else if value == 12 then
+    13
+  else if value == 13 then
+    14
+  else if value == 14 then
+    15
+  else if value == 15 then
+    16
+  else if value == 16 then
+    17
+  else if value == 17 then
+    18
+  else if value == 18 then
+    19
+  else if value == 19 then
+    20
+  else
+    value
+
+managedLoopReadyTaskIds : ManagedLoopSpec -> [Str]
+managedLoopReadyTaskIds spec =
+  match ready (managedLoopObjectiveHandle spec) {
+    Ok readyTasks -> map managedLoopTaskId readyTasks,
+    Err message -> managedLoopLocalEmptyTexts
+  }
+
+managedLoopPersistReport : ManagedLoopSpec -> ManagedLoopReport -> Result ManagedLoopReport
+managedLoopPersistReport spec report =
+  if spec.statusPath == "" then
+    Ok report
+  else
+    match writeFile spec.statusPath (encode report) {
+      Ok written -> Ok report,
+      Err message -> managedLoopLocalReportResultError message
+    }
+
+managedLoopBuildReport : ManagedLoopSpec -> Int -> Str -> Bool -> Bool -> Int -> Str -> Str -> Result ManagedLoopReport
+managedLoopBuildReport spec attempt phase completed exhausted requeueCount latestFailureClassification mergegateVerdict =
+  match managerNext (managedLoopObjectiveHandle spec) {
+    Ok managerValue ->
+      match taskMailbox (managedLoopTaskHandle spec) spec.mailboxLimit {
+        Ok mailboxValue ->
+          match objectiveStatus (managedLoopObjectiveHandle spec) {
+            Ok objectiveStatusValue ->
+              match status (managedLoopTaskHandle spec) {
+                Ok taskStatusValue ->
+                  managedLoopPersistReport
+                    spec
+                    (ManagedLoopReport {
+                      phase = phase,
+                      attempt = attempt,
+                      maxAttempts = spec.maxAttempts,
+                      completed = completed,
+                      exhausted = exhausted,
+                      requeued = if requeueCount == 0 then false else true,
+                      requeueCount = requeueCount,
+                      objectiveId = spec.objectiveId,
+                      taskId = spec.taskId,
+                      taskStatus = taskStatusValue.status,
+                      objectiveProjectedStatus = objectiveStatusValue.objective.projectedStatus,
+                      readyTaskIds = managedLoopReadyTaskIds spec,
+                      blockedBy = managerValue.blockedBy,
+                      blockerTaskIds = managerValue.blockerTaskIds,
+                      managerAction = managerValue.action,
+                      latestRunStatus = mailboxValue.latestRunStatus,
+                      latestRunName = mailboxValue.latestRunName,
+                      latestVerifierStatus = mailboxValue.latestVerifierStatus,
+                      latestVerifier = mailboxValue.latestVerifier,
+                      latestFailureClassification = latestFailureClassification,
+                      approvalCount = length mailboxValue.approvals,
+                      mergegateVerdict =
+                        if mergegateVerdict == "" then
+                          managerValue.mergegateVerdict
+                        else
+                          mergegateVerdict,
+                      mailboxSummary = verificationPlanMailboxSummary mailboxValue
+                    }),
+                Err message ->
+                  managedLoopLocalReportResultError message
+              },
+            Err message ->
+              managedLoopLocalReportResultError message
+          },
+        Err message ->
+          managedLoopLocalReportResultError message
+      },
+    Err message ->
+      managedLoopLocalReportResultError message
+  }
+
+managedLoopRunBuilderStep : ManagedLoopSpec -> Result ToolStepResult
+managedLoopRunBuilderStep spec =
+  if spec.useBuilderTimeout then
+    runToolStepWithTimeout (managedLoopTaskHandle spec) spec.builderCommand spec.builderTimeoutMs spec.mailboxLimit
+  else
+    runToolStep (managedLoopTaskHandle spec) spec.builderCommand spec.mailboxLimit
+
+managedLoopRunVerifierStep : ManagedLoopSpec -> Result VerifierStepResult
+managedLoopRunVerifierStep spec =
+  if spec.useVerifierTimeout then
+    runVerifierStepWithTimeout (managedLoopTaskHandle spec) spec.verifierName spec.verifierCommand spec.verifierTimeoutMs spec.mailboxLimit
+  else
+    runVerifierStep (managedLoopTaskHandle spec) spec.verifierName spec.verifierCommand spec.mailboxLimit
+
+managedLoopAfterFailedAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Str -> Result ManagedLoopReport
+managedLoopAfterFailedAttempt spec attempt requeueCount phase classification = {
+  let nextAttempt = managedLoopNextNumber attempt;
+  if attempt >= spec.maxAttempts then
+    managedLoopBuildReport spec attempt phase false true requeueCount classification "fail"
+  else if nextAttempt == attempt then
+    managedLoopBuildReport spec attempt "attempt-counter-exhausted" false true requeueCount classification "fail"
+  else
+    match retry (managedLoopTaskHandle spec) {
+      Ok retryValue ->
+        managedLoopRunAttempt spec nextAttempt (managedLoopNextNumber requeueCount) classification,
+      Err message ->
+        managedLoopLocalReportResultError message
+    }
+}
+
+managedLoopAfterVerifierPass : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
+managedLoopAfterVerifierPass spec attempt requeueCount previousFailureClassification =
+  match approve (managedLoopTaskHandle spec) spec.approvalName {
+    Ok approvalValue ->
+      match mergegateDecide (managedLoopTaskHandle spec) spec.mergegateName spec.requiredVerifiers {
+        Ok decisionValue ->
+          if decisionValue.verdict == "pass" then
+            managedLoopBuildReport spec attempt "completed" true false requeueCount previousFailureClassification decisionValue.verdict
+          else
+            managedLoopAfterFailedAttempt spec attempt requeueCount "mergegate-failed" "mergegate",
+        Err message ->
+          managedLoopLocalReportResultError message
+      },
+    Err message ->
+      managedLoopLocalReportResultError message
+  }
+
+managedLoopRunVerifierAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
+managedLoopRunVerifierAttempt spec attempt requeueCount previousFailureClassification =
+  match managedLoopRunVerifierStep spec {
+    Ok verifierStepValue ->
+      if runPassed verifierStepValue.run then
+        managedLoopAfterVerifierPass spec attempt requeueCount previousFailureClassification
+      else
+        managedLoopAfterFailedAttempt spec attempt requeueCount "verifier-failed" (managedLoopFailureClassification verifierStepValue.run),
+    Err message ->
+      managedLoopLocalReportResultError message
+  }
+
+managedLoopRunAttempt : ManagedLoopSpec -> Int -> Int -> Str -> Result ManagedLoopReport
+managedLoopRunAttempt spec attempt requeueCount previousFailureClassification =
+  if attempt > spec.maxAttempts then
+    managedLoopBuildReport spec attempt "attempt-budget-exhausted" false true requeueCount previousFailureClassification "fail"
+  else
+    match managedLoopRunBuilderStep spec {
+      Ok builderStepValue ->
+        if runPassed builderStepValue.run then
+          managedLoopRunVerifierAttempt spec attempt requeueCount previousFailureClassification
+        else
+          managedLoopAfterFailedAttempt spec attempt requeueCount "builder-failed" (managedLoopFailureClassification builderStepValue.run),
+      Err message ->
+        managedLoopLocalReportResultError message
+    }
+
+managedLoopInspect : ManagedLoopSpec -> Result ManagedLoopReport
+managedLoopInspect spec =
+  managedLoopBuildReport spec 0 "inspect" false false 0 "" ""
+
+managedLoopRun : ManagedLoopSpec -> Result ManagedLoopReport
+managedLoopRun spec =
+  match managedLoopEnsureDAG spec managedLoopLocalEmptyTexts {
+    Ok policyValue ->
+      managedLoopRunAttempt spec 1 0 "",
+    Err message ->
+      managedLoopLocalReportResultError message
+  }

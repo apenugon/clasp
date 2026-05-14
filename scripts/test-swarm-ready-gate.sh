@@ -51,6 +51,7 @@ require_pattern "scripts/verify-all.sh" 'bash scripts/test-feedback-loop-resume.
 require_pattern "examples/feedback-loop/Process.clasp" 'awaitWatchedProcessTimeoutJson'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'heartbeatTaskLease'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON'
+require_pattern "examples/swarm-native/GoalManagerServiceMain.clasp" 'CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON='
 require_pattern "examples/swarm-native/GoalManager.clasp" 'planner external resource blocked'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'external-resource-blocker'
 require_pattern "examples/swarm-native/GoalManager.clasp" 'already exists'

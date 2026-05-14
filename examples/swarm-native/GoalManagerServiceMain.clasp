@@ -102,6 +102,7 @@ managerServiceEnvArgs =
     textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
     textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
+    textConcat ["CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON=", encode childLoopAwaitTimeoutMs],
     textConcat ["CLASP_MANAGER_MAX_TASKS_JSON=", encode maxTaskLoops],
     textConcat ["CLASP_MANAGER_PLANNER_MAX_RUNS_JSON=", encode plannerTaskMaxRuns],
     textConcat ["CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON=", encode plannerTimeoutMs],
