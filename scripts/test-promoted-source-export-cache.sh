@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
+test_root=""
+
+cleanup() {
+  rm -rf "${test_root:-}"
+}
+
+trap cleanup EXIT
+
+mkdir -p "$tmp_root"
+test_root="$(mktemp -d "$tmp_root/test-promoted-source-export-cache.XXXXXX")"
+claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh")"
+
+node --check "$project_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+node "$project_root/scripts/generate-promoted-source-export-cache.mjs" --check >/dev/null
+
+cache_root="$test_root/cache"
+check_output="$test_root/checker.check.json"
+check_log="$test_root/checker.check.log"
+goal_manager_binary="$test_root/swarm-goal-manager"
+goal_manager_log="$test_root/goal-manager.compile.log"
+task_workspace_harness_image="$test_root/task-workspace-runtime-harness.native.image.json"
+task_workspace_harness_log="$test_root/task-workspace-runtime-harness.native-image.log"
+timeout_secs="${CLASP_PROMOTED_SOURCE_EXPORT_TIMEOUT_SECS:-60}"
+
+(
+  cd "$project_root"
+  timeout "$timeout_secs" env XDG_CACHE_HOME="$cache_root" CLASP_NATIVE_TRACE_CACHE=1 \
+    "$claspc_bin" --json check examples/compiler-checker.clasp \
+    >"$check_output" 2>"$check_log"
+)
+
+grep -F '"status":"ok"' "$check_output" >/dev/null
+grep -F '"implementation":"clasp-native"' "$check_output" >/dev/null
+grep -F 'snapshot : CheckSnapshot' "$check_output" >/dev/null
+node - "$project_root" "$project_root/src/stage1.compiler.source-export-cache-v1.json" "$check_output" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [projectRoot, cachePath, checkPath] = process.argv.slice(2);
+const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+const check = JSON.parse(fs.readFileSync(checkPath, "utf8"));
+const entry = cache.entries.find((candidate) => candidate.source === "examples/compiler-checker.clasp");
+if (!entry) {
+  throw new Error("missing promoted compiler-checker source export entry");
+}
+if (check.summary !== entry.output) {
+  throw new Error("promoted compiler-checker summary changed");
+}
+const goalManagerEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/GoalManager.clasp");
+if (!goalManagerEntry) {
+  throw new Error("missing promoted GoalManager native image entry");
+}
+if (goalManagerEntry.exportName !== "nativeImageProjectText") {
+  throw new Error("GoalManager promoted entry should seed nativeImageProjectText");
+}
+if (goalManagerEntry.outputPath !== "src/stage1.goal-manager.native.image.json") {
+  throw new Error("GoalManager promoted entry should use the native image output path");
+}
+const image = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.goal-manager.native.image.json"), "utf8"));
+if (image.format !== "clasp-native-image-v1") {
+  throw new Error("GoalManager promoted native image has an unexpected format");
+}
+const harnessEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp");
+if (!harnessEntry) {
+  throw new Error("missing promoted TaskWorkspaceRuntimeHarness native image entry");
+}
+if (harnessEntry.exportName !== "nativeImageProjectText") {
+  throw new Error("TaskWorkspaceRuntimeHarness promoted entry should seed nativeImageProjectText");
+}
+if (harnessEntry.outputPath !== "src/stage1.task-workspace-runtime-harness.native.image.json") {
+  throw new Error("TaskWorkspaceRuntimeHarness promoted entry should use the native image output path");
+}
+const harnessImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.task-workspace-runtime-harness.native.image.json"), "utf8"));
+if (harnessImage.format !== "clasp-native-image-v1") {
+  throw new Error("TaskWorkspaceRuntimeHarness promoted native image has an unexpected format");
+}
+NODE
+grep -F '[claspc-cache] source-export promoted hit export=checkSourceText key=' "$check_log" >/dev/null
+if grep -F '[claspc-cache] source-export miss export=checkSourceText' "$check_log" >/dev/null; then
+  printf 'compiler-checker check should use the promoted source-export cache before reporting a miss\n' >&2
+  exit 1
+fi
+
+(
+  cd "$project_root"
+  timeout "$timeout_secs" env XDG_CACHE_HOME="$test_root/goal-manager-cache" CLASP_PROJECT_ROOT="$project_root" CLASP_NATIVE_TRACE_CACHE=1 \
+    "$claspc_bin" compile examples/swarm-native/GoalManager.clasp -o "$goal_manager_binary" \
+    >/dev/null 2>"$goal_manager_log"
+)
+
+[[ -x "$goal_manager_binary" ]]
+grep -F '[claspc-cache] source-export promoted hit export=nativeImageProjectText key=' "$goal_manager_log" >/dev/null
+
+(
+  cd "$project_root"
+  timeout "$timeout_secs" env XDG_CACHE_HOME="$test_root/task-workspace-harness-cache" CLASP_PROJECT_ROOT="$project_root" CLASP_NATIVE_TRACE_CACHE=1 \
+    "$claspc_bin" native-image examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp -o "$task_workspace_harness_image" \
+    >/dev/null 2>"$task_workspace_harness_log"
+)
+
+[[ -s "$task_workspace_harness_image" ]]
+grep -F '[claspc-cache] source-export promoted hit export=nativeImageProjectText key=' "$task_workspace_harness_log" >/dev/null
+
+printf 'test-promoted-source-export-cache: ok\n'

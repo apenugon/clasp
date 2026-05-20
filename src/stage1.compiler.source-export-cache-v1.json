@@ -1,0 +1,42 @@
+{
+  "cacheVersion": "source-export-cache-v1",
+  "generatedBy": "scripts/generate-promoted-source-export-cache.mjs",
+  "entries": [
+    {
+      "source": "examples/compiler-parser.clasp",
+      "exportName": "checkSourceText",
+      "cacheKey": "a8e08f8f80ea3794.cache",
+      "output": "appendEntry : Str -> Str -> Str\nfirstSegment : Str -> Str\nremainingSegments : Str -> Str\nclassifyLine : Str -> LineKind\nstepParser : ParserState -> Str -> ParserState\nparseModuleSummary : Str -> ParserState\nbetweenBrackets : Str -> Str\nadvanceCount : SegmentCount -> SegmentCount\nrenderCount : SegmentCount -> Str\ncountSegments : [Str] -> Str\nsummarizeListLiteral : Str -> ListLiteralSummary\nsampleSource : Str\nsampleListLiteral : Str\nsnapshot : ParserState\nlistSnapshot : ListLiteralSummary\nlistSnapshotJson : Str\nsampleImports : Str\nsampleSignatures : Str\nmoduleBody : Str\nfirstDeclarationPayload : Str\nmain : Str"
+    },
+    {
+      "source": "examples/compiler-checker.clasp",
+      "exportName": "checkSourceText",
+      "cacheKey": "f5e90e20c72f6e2e.cache",
+      "output": "renderAtomicType : TypeText -> Str\nrenderType : TypeText -> Str\nsameType : TypeText -> TypeText -> TypeEquality\ninferList : [ExprText] -> InferResult\ninferExpr : ExprText -> InferResult\nrenderResult : InferResult -> Str\nrosterExpr : ExprText\nmatrixExpr : ExprText\nmixedExpr : ExprText\nsnapshot : CheckSnapshot\nsnapshotJson : Str\nmain : Str"
+    },
+    {
+      "source": "examples/compiler-lower.clasp",
+      "exportName": "checkSourceText",
+      "cacheKey": "5d4c82f1cf7d426c.cache",
+      "output": "keepNoLowerExpr : LowerExprText -> Bool\nkeepNoRenderedLowerText : Str -> Bool\nemptyLowerExprs : [LowerExprText]\nemptyRenderedLowerTexts : [Str]\nappendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]\nappendRenderedLowerText : [Str] -> Str -> [Str]\nlowerExprs : [CheckedExprText] -> [LowerExprText]\nlowerExpr : CheckedExprText -> LowerExprText\nrenderLowerExprs : [LowerExprText] -> [Str]\nrenderLowerExpr : LowerExprText -> Str\nnamesExpr : CheckedExprText\nnamesLetExpr : CheckedExprText\nscoreCallExpr : CheckedExprText\nsnapshot : LowerSnapshot\nsnapshotJson : Str\nmain : Str"
+    },
+    {
+      "source": "examples/compiler-emitter.clasp",
+      "exportName": "checkSourceText",
+      "cacheKey": "f8aff3c5ec9b2f09.cache",
+      "output": "appendWithSeparator : JoinState -> Str -> Str -> JoinState\nfinishJoin : JoinState -> Str\nemitExprList : [LowerExprText] -> Str\nemitParamList : [Str] -> Str\nemitExpr : LowerExprText -> Str\nemitDecl : LowerDeclText -> Str\nemitModule : [LowerDeclText] -> Str\narrayExample : LowerExprText\nmoduleExample : [LowerDeclText]\nsnapshot : EmitSnapshot\nsnapshotJson : Str\nmain : Str"
+    },
+    {
+      "source": "examples/swarm-native/GoalManager.clasp",
+      "exportName": "nativeImageProjectText",
+      "cacheKey": "0e17c1267dfece3d.cache",
+      "outputPath": "src/stage1.goal-manager.native.image.json"
+    },
+    {
+      "source": "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
+      "exportName": "nativeImageProjectText",
+      "cacheKey": "e21693878906998b.cache",
+      "outputPath": "src/stage1.task-workspace-runtime-harness.native.image.json"
+    }
+  ]
+}

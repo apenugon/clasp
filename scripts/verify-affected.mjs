@@ -266,6 +266,10 @@ const COMMANDS = {
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
   compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
   runtimeSliceRegression: "bash scripts/test-verify-runtime-slice.sh",
+  promotedSourceExportCacheRegression: "bash scripts/test-promoted-source-export-cache.sh",
+  promotedSourceExportCacheNodeCheck: "node --check scripts/generate-promoted-source-export-cache.mjs",
+  benchmarkCheckpointNodeCheck: "node --check scripts/benchmark-checkpoint.mjs",
+  benchmarkCheckpointRegression: "bash scripts/test-benchmark-checkpoint.sh",
   benchmarkTaskPrep: "bash benchmarks/test-task-prep.sh",
   affectedNodeCheck: "node --check scripts/verify-affected.mjs",
 };
@@ -381,6 +385,24 @@ function benchmarkTaskMetadata(taskId) {
 function benchmarkTaskVerifyCommand(taskId) {
   const scriptPath = `benchmarks/tasks/${taskId}/repo/scripts/verify.sh`;
   return fileExists(scriptPath) ? `CLASP_PROJECT_ROOT=$PWD bash ${scriptPath}` : null;
+}
+
+function isBenchmarkCheckpointFile(file) {
+  return (
+    file === "scripts/benchmark-checkpoint.mjs" ||
+    file === "scripts/test-benchmark-checkpoint.sh" ||
+    /^benchmarks\/checkpoints\/[^/]+\.json$/.test(file)
+  );
+}
+
+function isPromotedSourceExportCacheFile(file) {
+  return (
+    file === "scripts/generate-promoted-source-export-cache.mjs" ||
+    file === "scripts/test-promoted-source-export-cache.sh" ||
+    file === "src/stage1.compiler.source-export-cache-v1.json" ||
+    file === "src/stage1.goal-manager.native.image.json" ||
+    file === "src/stage1.task-workspace-runtime-harness.native.image.json"
+  );
 }
 
 function contextArtifactCandidatesForFile(file) {
@@ -713,8 +735,10 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     const isRuntimeSliceVerificationScript =
       file === "scripts/verify-runtime-slice.sh" || file === "scripts/test-verify-runtime-slice.sh";
     const compilerSlice = compilerSliceForFile(file);
+    const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
+    const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
 
-    if (file.startsWith("src/")) {
+    if (file.startsWith("src/") && !isPromotedSourceExportCache) {
       matched = true;
       reason(file, "source", "source/compiler path uses selfhost and hosted compiler verification");
       addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "source/compiler path", file);
@@ -817,6 +841,70 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime docs", file);
     }
 
+    if (isBenchmarkCheckpoint) {
+      matched = true;
+      reason(
+        file,
+        "benchmark-checkpoint",
+        "benchmark checkpoint paths use checkpoint runner syntax plus focused fixture/schema coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "benchmark checkpoint shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "benchmark-checkpoint-node-check",
+        COMMANDS.benchmarkCheckpointNodeCheck,
+        "benchmark checkpoint runner syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "benchmark-checkpoint-regression",
+        COMMANDS.benchmarkCheckpointRegression,
+        "benchmark checkpoint fixture regression",
+        file,
+      );
+    }
+
+    if (isPromotedSourceExportCache) {
+      matched = true;
+      reason(
+        file,
+        "promoted-source-export-cache",
+        "promoted source-export cache paths use generator syntax plus focused cold-check cache coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "promoted source-export cache shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "promoted-source-export-cache-node-check",
+        COMMANDS.promotedSourceExportCacheNodeCheck,
+        "promoted source-export cache generator syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "promoted-source-export-cache-regression",
+        COMMANDS.promotedSourceExportCacheRegression,
+        "promoted source-export cache regression",
+        file,
+      );
+    }
+
     const benchmarkMatch = benchmarkTaskRepoMatch(file);
     if (benchmarkMatch) {
       matched = true;
@@ -840,7 +928,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       }
     }
 
-    if (file.startsWith("benchmarks/")) {
+    if (!isBenchmarkCheckpoint && file.startsWith("benchmarks/")) {
       matched = true;
       reason(file, "benchmarks", "benchmark path uses benchmark task-prep coverage");
       addSelected(selectedByCommand, "benchmark-task-prep", COMMANDS.benchmarkTaskPrep, "benchmark path", file);

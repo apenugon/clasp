@@ -7,9 +7,13 @@ use std::ffi::{c_char, CStr};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::{align_of, size_of};
+#[cfg(unix)]
+use std::os::raw::c_int;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::ptr::{self, null_mut, NonNull};
-use std::process::{Command as ProcessCommand, Stdio};
+use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -31,6 +35,16 @@ const CLASP_RT_INTERPRETER_MAX_DEPTH: usize = 4096;
 const DOCUMENT_UPLOAD_MAX_BYTES: usize = 64 * 1024;
 const DOCUMENT_REFERENCE_MAX_COUNT: usize = 32;
 const DOCUMENT_EXCERPT_MAX_CHARS: usize = 160;
+#[cfg(unix)]
+const SIGTERM: c_int = 15;
+#[cfg(unix)]
+const SIGKILL: c_int = 9;
+
+#[cfg(unix)]
+extern "C" {
+    fn setsid() -> c_int;
+    fn kill(pid: c_int, sig: c_int) -> c_int;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DocumentReferenceSpec {
@@ -7265,6 +7279,45 @@ fn write_file_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
     write_result
 }
 
+fn configure_killable_process_command(command: &mut ProcessCommand) {
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            if setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+}
+
+#[cfg(unix)]
+fn signal_process_group(child_id: u32, signal: c_int) {
+    if child_id > c_int::MAX as u32 {
+        return;
+    }
+    let pgid = -(child_id as c_int);
+    unsafe {
+        let _ = kill(pgid, signal);
+    }
+}
+
+fn terminate_child_tree(child: &mut Child, child_id: u32) {
+    #[cfg(unix)]
+    {
+        signal_process_group(child_id, SIGTERM);
+        let _ = child.kill();
+        thread::sleep(Duration::from_millis(50));
+        signal_process_group(child_id, SIGKILL);
+        let _ = child.kill();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+}
+
 fn create_truncated_output_file(path: &str) -> Result<File, String> {
     ensure_parent_dir(path)?;
     File::create(path).map_err(|err| err.to_string())
@@ -9647,12 +9700,18 @@ pub unsafe extern "C" fn clasp_rt_append_file(
     contents: *mut ClaspRtString,
 ) -> *mut ClaspRtResultString {
     let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    if ensure_parent_dir(&path_string).is_err() {
+        return clasp_rt_result_err_string(build_runtime_string(b"io_error"));
+    }
     let mut file = match OpenOptions::new().create(true).append(true).open(&path_string) {
         Ok(file) => file,
         Err(_) => return clasp_rt_result_err_string(build_runtime_string(b"io_error")),
     };
 
-    match file.write_all(string_bytes(contents)) {
+    match file
+        .write_all(string_bytes(contents))
+        .and_then(|_| file.sync_all())
+    {
         Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_string.as_bytes())),
         Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
     }
@@ -10373,6 +10432,7 @@ fn spawn_process_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_process_env(&mut command, env_values);
+    configure_killable_process_command(&mut command);
     command.spawn()
 }
 
@@ -10492,18 +10552,21 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
         );
     }
 
-    let mut child = match ProcessCommand::new(&command_values[0])
+    let mut command = ProcessCommand::new(&command_values[0]);
+    command
         .args(&command_values[1..])
         .current_dir(&cwd_string)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    configure_killable_process_command(&mut command);
+
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) => {
             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
         }
     };
+    let child_id = child.id();
 
     let started = Instant::now();
     loop {
@@ -10524,7 +10587,7 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
             },
             Ok(None) => {
                 if started.elapsed() >= Duration::from_millis(timeout_ms_value) {
-                    let _ = child.kill();
+                    terminate_child_tree(&mut child, child_id);
                     match child.wait_with_output() {
                         Ok(output) => {
                             return render_payload(124, &output.stdout, &output.stderr, true, "timeout");
@@ -10616,6 +10679,7 @@ pub unsafe extern "C" fn clasp_rt_run_process_timeout_json(
             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
         }
     };
+    let child_id = child.id();
 
     let started = Instant::now();
     loop {
@@ -10637,7 +10701,7 @@ pub unsafe extern "C" fn clasp_rt_run_process_timeout_json(
             },
             Ok(None) => {
                 if started.elapsed() >= Duration::from_millis(timeout_ms_value) {
-                    let _ = child.kill();
+                    terminate_child_tree(&mut child, child_id);
                     match child.wait_with_output() {
                         Ok(output) => {
                             let payload = render_run_command_timeout_payload(
@@ -11341,6 +11405,87 @@ mod tests {
             release_header(null_mut(), command);
             release_header(null_mut(), result as *mut ClaspRtHeader);
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_process_timeout_json_terminates_process_group() {
+        let temp_root = env::temp_dir().join(format!(
+            "clasp-run-process-timeout-tree-{}",
+            unique_test_suffix()
+        ));
+        fs::create_dir_all(&temp_root).expect("expected timeout tree temp root");
+        let marker_path = temp_root.join("survived.txt");
+
+        unsafe {
+            let cwd = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let timeout_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let path_env = format!("PATH={}", env::var("PATH").unwrap_or_default());
+            let env_values = build_runtime_list_value(vec![
+                build_runtime_string(path_env.as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"/bin/sh") as *mut ClaspRtHeader,
+                build_runtime_string(b"-c") as *mut ClaspRtHeader,
+                build_runtime_string(b"(sleep 0.2; printf leaked > \"$1\") & printf parent-start; sleep 5")
+                    as *mut ClaspRtHeader,
+                build_runtime_string(b"clasp-timeout-child") as *mut ClaspRtHeader,
+                build_runtime_string(marker_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_process_timeout_json(cwd, timeout_ms, env_values, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(124));
+            assert_eq!(parsed["timedOut"].as_bool(), Some(true));
+            assert_eq!(parsed["error"].as_str(), Some("timeout"));
+
+            thread::sleep(Duration::from_millis(350));
+            assert!(
+                !marker_path.exists(),
+                "timed process descendants should not survive timeout"
+            );
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), timeout_ms);
+            release_header(null_mut(), env_values);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+        }
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn append_file_creates_parent_directory_and_preserves_appends() {
+        let temp_root = env::temp_dir().join(format!("clasp-append-file-{}", unique_test_suffix()));
+        let log_path = temp_root.join("nested").join("events.jsonl");
+
+        unsafe {
+            let path = build_runtime_string(log_path.to_string_lossy().as_bytes());
+            let first = build_runtime_string(b"event-one\n");
+            let second = build_runtime_string(b"event-two\n");
+
+            let first_result = clasp_rt_append_file(path, first);
+            assert!((*first_result).is_ok);
+            let second_result = clasp_rt_append_file(path, second);
+            assert!((*second_result).is_ok);
+
+            assert_eq!(
+                fs::read_to_string(&log_path).expect("expected appended log to be readable"),
+                "event-one\nevent-two\n"
+            );
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), first as *mut ClaspRtHeader);
+            release_header(null_mut(), second as *mut ClaspRtHeader);
+            release_header(null_mut(), first_result as *mut ClaspRtHeader);
+            release_header(null_mut(), second_result as *mut ClaspRtHeader);
+        }
+
+        let _ = fs::remove_dir_all(temp_root);
     }
 
     #[test]

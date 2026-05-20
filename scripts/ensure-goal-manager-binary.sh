@@ -205,6 +205,7 @@ compile_goal_manager_binary() {
       timeout --kill-after=5s "$compile_timeout_secs" \
         env \
           RUSTC=/definitely-missing-rustc \
+          CLASP_PROJECT_ROOT="$project_root" \
           CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
           CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
           CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \
@@ -214,6 +215,7 @@ compile_goal_manager_binary() {
     else
       env \
         RUSTC=/definitely-missing-rustc \
+        CLASP_PROJECT_ROOT="$project_root" \
         CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
         CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \

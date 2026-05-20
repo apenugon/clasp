@@ -36,6 +36,8 @@ node benchmarks/run-benchmark.mjs list >/dev/null
 '
 full_sequential_verify_commands=$'
 bash scripts/test-selfhost.sh
+bash scripts/test-source-run-cache.sh
+bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-native-managed-loop.sh
@@ -74,6 +76,7 @@ bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
+bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-task-manifest.sh
 '

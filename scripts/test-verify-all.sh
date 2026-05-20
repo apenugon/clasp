@@ -39,11 +39,14 @@ cp "$project_root/scripts/verify-compiler-slice.sh" "$test_root/scripts/verify-c
 cp "$project_root/scripts/verify-runtime-slice.sh" "$test_root/scripts/verify-runtime-slice.sh"
 cp "$project_root/scripts/verify-affected.sh" "$test_root/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affected.mjs"
+cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$test_root/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$test_root/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test-verify-runtime-slice.sh"
+cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
+cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
@@ -72,6 +75,8 @@ chmod +x "$test_root/bin/fake-claspc"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh all' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -105,10 +110,13 @@ grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager
 grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-goal-manager-child-loop-monitor.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F '[claspc-cache] run-binary fast hit path=' "$test_root/scripts/test-source-run-cache.sh" >/dev/null
 grep -F 'resolved_claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'export CLASP_CLASPC="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'export CLASPC_BIN="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -146,6 +154,14 @@ grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-a
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+grep -F 'src/stage1.goal-manager.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+grep -F 'src/stage1.task-workspace-runtime-harness.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
+grep -F 'source-export promoted hit export=checkSourceText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
+grep -F 'source-export promoted hit export=nativeImageProjectText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-no-git' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'compiler-slice-fixture' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'runtime-slice-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null

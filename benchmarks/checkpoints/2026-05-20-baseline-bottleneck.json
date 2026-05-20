@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "kind": "clasp-baseline-bottleneck-checkpoint",
+  "generatedAt": "2026-05-20T18:08:00.000Z",
+  "projectRoot": "/home/akul_medexfinance_com/clasp/.clasp-loops/workspaces/best-language-swarm-live-20260520175912/.clasp-task-workspaces/T1-baseline-and-bottleneck-map",
+  "mode": "live",
+  "tmpDir": null,
+  "claspc": "/home/akul_medexfinance_com/clasp/runtime/target/debug/claspc",
+  "commandSummary": {
+    "source-run-cold": {
+      "category": "ordinary-source-run-startup",
+      "durationMs": 16463,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "source-run-warm": {
+      "category": "ordinary-source-run-startup",
+      "durationMs": 214,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "compiler-slice-checker": {
+      "category": "verifier-heavy-check",
+      "durationMs": 18855,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "native-incremental-body-change": {
+      "category": "incremental-cache-benchmark",
+      "durationMs": 44592,
+      "exitStatus": 0,
+      "timedOut": false
+    }
+  },
+  "commands": [
+    {
+      "label": "source-run-cold",
+      "category": "ordinary-source-run-startup",
+      "command": "timeout 60 env XDG_CACHE_HOME=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache CLASP_NATIVE_TRACE_CACHE=1 /home/akul_medexfinance_com/clasp/runtime/target/debug/claspc run examples/hello.clasp",
+      "timeoutSeconds": 60,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779300484776,
+      "endedAtMs": 1779300501239,
+      "durationMs": 16463,
+      "stdoutPreview": "Hello from Clasp\n",
+      "stderrPreview": "[claspc-cache] bundle miss entry=/home/akul_medexfinance_com/clasp/.clasp-loops/workspaces/best-language-swarm-live-20260520175912/.clasp-task-workspaces/T1-baseline-and-bottleneck-map/examples/hello.clasp reason=missing-files\n[claspc-cache] run-binary build path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/run-binary-cache-v2/842a8322fb442993\n[claspc-cache] native-image miss path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/native-image-cache-v5/19dd2ecea7a45e8f.json\n[claspc-cache] build-plan miss path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/native-image-build-plan-cache-v5/50fd82b365084d87.cache\n[claspc-cache] decl-module plan modules=1 max_decl_count=3 threshold=4096\n[claspc-cache] decl-module miss module=Main path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/native-image-decl-module-cache-v1/6655517ffb7ede49.json\n[claspc-cache] decl-module miss module=Main path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/native-image-decl-module-cache-v1/4db54c9391f41ca7.json\n[claspc-cache] decl-module summary-plan needed uncached=1\n[claspc-cache] decl-module export module=Main mode=single\n"
+    },
+    {
+      "label": "source-run-warm",
+      "category": "ordinary-source-run-startup",
+      "command": "timeout 60 env XDG_CACHE_HOME=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache CLASP_NATIVE_TRACE_CACHE=1 /home/akul_medexfinance_com/clasp/runtime/target/debug/claspc run examples/hello.clasp",
+      "timeoutSeconds": 60,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779300501239,
+      "endedAtMs": 1779300501454,
+      "durationMs": 214,
+      "stdoutPreview": "Hello from Clasp\n",
+      "stderrPreview": "[claspc-cache] bundle hit entry=/home/akul_medexfinance_com/clasp/.clasp-loops/workspaces/best-language-swarm-live-20260520175912/.clasp-task-workspaces/T1-baseline-and-bottleneck-map/examples/hello.clasp manifest=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/bundle-cache-v1/14f5487b17127191.manifest bundle=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/bundle-cache-v1/14f5487b17127191.bundle\n[claspc-cache] run-binary hit path=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/source-run-cache/claspc-native/run-binary-cache-v2/842a8322fb442993\n"
+    },
+    {
+      "label": "compiler-slice-checker",
+      "category": "verifier-heavy-check",
+      "command": "timeout 120 env CLASP_TEST_TMPDIR=/tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/compiler-slice-tmp CLASP_COMPILER_SLICE_TIMEOUT_SECS=45 CLASP_CLASPC=/home/akul_medexfinance_com/clasp/runtime/target/debug/claspc CLASPC_BIN=/home/akul_medexfinance_com/clasp/runtime/target/debug/claspc bash scripts/verify-compiler-slice.sh checker",
+      "timeoutSeconds": 120,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779300501454,
+      "endedAtMs": 1779300520309,
+      "durationMs": 18855,
+      "stdoutPreview": "verify-compiler-slice: checker check\nverify-compiler-slice: checker run\nverify-compiler-slice: ok (checker)\n",
+      "stderrPreview": ""
+    },
+    {
+      "label": "native-incremental-body-change",
+      "category": "incremental-cache-benchmark",
+      "command": "timeout 240 env CLASP_CLASPC=/home/akul_medexfinance_com/clasp/runtime/target/debug/claspc CLASPC_BIN=/home/akul_medexfinance_com/clasp/runtime/target/debug/claspc bash scripts/measure-native-incremental.sh --scenario native-cli-body-change --report /tmp/nix-shell-663724-0/clasp-benchmark-checkpoint.T1V6Ei/native-incremental-report.json",
+      "timeoutSeconds": 240,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779300520309,
+      "endedAtMs": 1779300564902,
+      "durationMs": 44592,
+      "stdoutPreview": "{\n  \"scenario\": \"native-cli-body-change\",\n  \"changedModules\": [\n    \"Shared.User\"\n  ],\n  \"unchangedModules\": [\n    \"Shared.Render\",\n    \"Main\"\n  ],\n  \"expectedCacheBehavior\": {\n    \"nativeImage\": {\n      \"nativeImage\": \"miss\",\n      \"buildPlan\": \"hit\",\n      \"declModule\": {\n        \"Shared.User\": \"miss\",\n        \"Shared.Render\": \"hit\",\n        \"Main\": \"hit\"\n      }\n    },\n    \"check\": {\n      \"moduleSummary\": {\n        \"Shared.User\": \"validated-hit\",\n        \"Shared.Render\": \"hit\",\n        \"Main\": \"hit\"\n      }\n    }\n  },\n  \"observedCacheBehavior\": {\n    \"nativeImage\": {\n      \"logPath\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.second.log\",\n      \"changedModules\": [\n        \"Shared.User\"\n      ],\n      \"bundle\": \"miss\",\n      \"nativeImage\": \"miss\",\n      \"buildPlan\": \"hit\",\n      \"declModule\": {\n        \"Main\": \"hit\",\n        \"Shared.User\": \"miss\",\n        \"Shared.Render\": \"hit\"\n      }\n    },\n    \"check\": {\n      \"logPath\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.second.log\",\n      \"changedModules\": [\n        \"Shared.User\"\n      ],\n      \"bundle\": \"miss\",\n      \"moduleSummary\": {\n        \"Shared.User\": \"validated-hit\",\n        \"Shared.Render\": \"hit\",\n        \"Main\": \"hit\"\n      }\n    }\n  },\n  \"observedChangedModules\": [\n    \"Shared.User\"\n  ],\n  \"advisoryTimings\": {\n    \"nativeImageCold\": {\n      \"path\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.first.time\",\n      \"realSeconds\": 28.79\n    },\n    \"nativeImageBodyChange\": {\n      \"path\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.second.time\",\n      \"realSeconds\": 0.34\n    },\n    \"checkCold\": {\n      \"path\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.first.time\",\n      \"realSeconds\": 15.01\n    },\n    \"checkBodyChange\": {\n      \"path\": \"/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.second.time\",\n      \"realSeconds\": 0.36\n    }\n  },\n  \"timingExpectations\": {},\n  \"matchesExpectations\": true,\n  \"mismatches\": []\n}\n",
+      "stderrPreview": ""
+    }
+  ],
+  "nativeIncrementalReport": {
+    "scenario": "native-cli-body-change",
+    "changedModules": [
+      "Shared.User"
+    ],
+    "unchangedModules": [
+      "Shared.Render",
+      "Main"
+    ],
+    "expectedCacheBehavior": {
+      "nativeImage": {
+        "nativeImage": "miss",
+        "buildPlan": "hit",
+        "declModule": {
+          "Shared.User": "miss",
+          "Shared.Render": "hit",
+          "Main": "hit"
+        }
+      },
+      "check": {
+        "moduleSummary": {
+          "Shared.User": "validated-hit",
+          "Shared.Render": "hit",
+          "Main": "hit"
+        }
+      }
+    },
+    "observedCacheBehavior": {
+      "nativeImage": {
+        "logPath": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.second.log",
+        "changedModules": [
+          "Shared.User"
+        ],
+        "bundle": "miss",
+        "nativeImage": "miss",
+        "buildPlan": "hit",
+        "declModule": {
+          "Main": "hit",
+          "Shared.User": "miss",
+          "Shared.Render": "hit"
+        }
+      },
+      "check": {
+        "logPath": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.second.log",
+        "changedModules": [
+          "Shared.User"
+        ],
+        "bundle": "miss",
+        "moduleSummary": {
+          "Shared.User": "validated-hit",
+          "Shared.Render": "hit",
+          "Main": "hit"
+        }
+      }
+    },
+    "observedChangedModules": [
+      "Shared.User"
+    ],
+    "advisoryTimings": {
+      "nativeImageCold": {
+        "path": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.first.time",
+        "realSeconds": 28.79
+      },
+      "nativeImageBodyChange": {
+        "path": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/native-image.second.time",
+        "realSeconds": 0.34
+      },
+      "checkCold": {
+        "path": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.first.time",
+        "realSeconds": 15.01
+      },
+      "checkBodyChange": {
+        "path": "/tmp/nix-shell-663724-0/tmp.j2tzkb6AHb/check.second.time",
+        "realSeconds": 0.36
+      }
+    },
+    "timingExpectations": {},
+    "matchesExpectations": true,
+    "mismatches": []
+  },
+  "bottlenecks": [
+    {
+      "rank": 1,
+      "area": "source-run-startup",
+      "evidence": "source-run-cold 16463ms versus source-run-warm 214ms",
+      "opportunity": "Keep pressure on the cold `claspc run` native-image-to-binary path; warm run-binary cache hits are already materially cheaper.",
+      "relatedCommands": [
+        "source-run-cold",
+        "source-run-warm"
+      ]
+    },
+    {
+      "rank": 2,
+      "area": "incremental-cache-cold-path",
+      "evidence": "native incremental advisory timings: nativeImageCold=28.79s, checkCold=15.01s",
+      "opportunity": "Use the native incremental trace to separate build-plan/declaration cache misses from checker module-summary misses before optimizing broad verifier loops.",
+      "relatedCommands": [
+        "native-incremental-body-change"
+      ]
+    }
+  ],
+  "finalStatus": "ok",
+  "failedCommands": []
+}

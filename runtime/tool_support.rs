@@ -689,11 +689,24 @@ struct CachedProjectBundle {
     module_paths: Vec<PathBuf>,
 }
 
-fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectBundle>, String> {
+struct CachedProjectBundleManifest {
+    identity: String,
+    module_paths: Vec<PathBuf>,
+}
+
+fn cached_project_bundle_paths(entry_path: &Path) -> (PathBuf, PathBuf) {
     let cache_dir = project_bundle_cache_dir();
     let cache_key = project_bundle_cache_key(entry_path);
-    let manifest_path = cache_dir.join(format!("{cache_key}.manifest"));
-    let bundle_path = cache_dir.join(format!("{cache_key}.bundle"));
+    (
+        cache_dir.join(format!("{cache_key}.manifest")),
+        cache_dir.join(format!("{cache_key}.bundle")),
+    )
+}
+
+fn read_cached_project_bundle_manifest(
+    entry_path: &Path,
+) -> Result<Option<CachedProjectBundleManifest>, String> {
+    let (manifest_path, bundle_path) = cached_project_bundle_paths(entry_path);
     if !manifest_path.exists() || !bundle_path.exists() {
         trace_native_cache(&format!(
             "bundle miss entry={} reason=missing-files",
@@ -705,6 +718,7 @@ fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectB
     let manifest = fs::read_to_string(&manifest_path)
         .map_err(|err| format!("failed to read cached project bundle manifest `{}`: {err}", manifest_path.display()))?;
     let mut module_paths = Vec::new();
+    let mut identity_lines = Vec::new();
     for line in manifest.lines().filter(|line| !line.trim().is_empty()) {
         let mut parts = line.splitn(2, '\t');
         let Some(expected_signature) = parts.next() else {
@@ -734,7 +748,35 @@ fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectB
             ));
             return Ok(None);
         }
+        identity_lines.push(format!("{expected_signature}\t{path_text}"));
     }
+
+    trace_native_cache(&format!(
+        "bundle manifest hit entry={} manifest={} bundle={}",
+        entry_path.display(),
+        manifest_path.display(),
+        bundle_path.display()
+    ));
+    let identity = stable_fingerprint_text(&format!(
+        "{PROJECT_BUNDLE_CACHE_VERSION}\n{}\n{}",
+        entry_path.to_string_lossy(),
+        identity_lines.join("\n")
+    ));
+    Ok(Some(CachedProjectBundleManifest { identity, module_paths }))
+}
+
+pub fn cached_project_bundle_identity(entry_path: &str) -> Result<Option<String>, String> {
+    let entry = PathBuf::from(entry_path);
+    let entry_canonical = fs::canonicalize(&entry)
+        .map_err(|err| format!("failed to resolve project entry module `{}`: {err}", entry.display()))?;
+    Ok(read_cached_project_bundle_manifest(&entry_canonical)?.map(|manifest| manifest.identity))
+}
+
+fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectBundle>, String> {
+    let (manifest_path, bundle_path) = cached_project_bundle_paths(entry_path);
+    let Some(cached_manifest) = read_cached_project_bundle_manifest(entry_path)? else {
+        return Ok(None);
+    };
 
     let bundle = fs::read_to_string(&bundle_path)
         .map_err(|err| format!("failed to read cached project bundle `{}`: {err}", bundle_path.display()))?;
@@ -744,7 +786,10 @@ fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectB
         manifest_path.display(),
         bundle_path.display()
     ));
-    Ok(Some(CachedProjectBundle { bundle, module_paths }))
+    Ok(Some(CachedProjectBundle {
+        bundle,
+        module_paths: cached_manifest.module_paths,
+    }))
 }
 
 fn write_cached_project_bundle(
@@ -1712,7 +1757,8 @@ pub unsafe fn execute_native_route_from_image_text(
 mod tests {
     use super::{
         build_module_scoped_bundle, build_project_bundle_build, build_project_bundle_with_jobs,
-        project_bundle_cache_dir, project_bundle_cache_key, PROJECT_BUNDLE_SEPARATOR,
+        cached_project_bundle_identity, project_bundle_cache_dir, project_bundle_cache_key,
+        PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
     use std::os::unix::net::UnixListener;
@@ -1875,6 +1921,60 @@ mod tests {
         let cached =
             build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("reuse cached bundle");
         assert!(cached.contains("greeting = \"cached\""));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_project_bundle_identity_validates_manifest_without_loading_bundle() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let root = unique_test_root("bundle-cache-identity");
+        let cache_root = unique_test_root("bundle-cache-identity-store");
+        fs::create_dir_all(root.join("Shared")).expect("create shared dir");
+        fs::create_dir_all(&cache_root).expect("create cache dir");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        fs::write(
+            root.join("Main.clasp"),
+            "module Main\nimport Shared.User\nmain : Str\nmain = greeting\n",
+        )
+        .expect("write Main");
+        fs::write(
+            root.join("Shared/User.clasp"),
+            "module Shared.User\ngreeting : Str\ngreeting = \"hi\"\n",
+        )
+        .expect("write Shared.User");
+
+        let entry = root.join("Main.clasp");
+        let entry_text = entry.to_str().expect("utf8 path");
+        let _ = build_project_bundle_with_jobs(entry_text, 4).expect("build cached bundle");
+        let identity = cached_project_bundle_identity(entry_text)
+            .expect("cached identity lookup")
+            .expect("cached identity");
+
+        let entry_canonical = fs::canonicalize(&entry).expect("canonical entry");
+        let cache_key = project_bundle_cache_key(&entry_canonical);
+        let bundle_path = project_bundle_cache_dir().join(format!("{cache_key}.bundle"));
+        fs::write(&bundle_path, "not a parseable bundle").expect("poison cached bundle");
+
+        assert_eq!(
+            cached_project_bundle_identity(entry_text)
+                .expect("cached identity after bundle poison")
+                .expect("identity after bundle poison"),
+            identity
+        );
+
+        fs::write(
+            root.join("Shared/User.clasp"),
+            "module Shared.User\ngreeting : Str\ngreeting = \"bye\"\n",
+        )
+        .expect("mutate Shared.User");
+        assert_eq!(
+            cached_project_bundle_identity(entry_text).expect("cached identity after source change"),
+            None
+        );
 
         std::env::remove_var("XDG_CACHE_HOME");
         let _ = fs::remove_dir_all(cache_root);

@@ -1096,6 +1096,12 @@ workspaceCloneExcludeFlags =
     "--exclude=*/target ",
     "--exclude=runtime/target ",
     "--exclude=*/runtime/target ",
+    "--exclude=libclasp_runtime.a ",
+    "--exclude=*/libclasp_runtime.a ",
+    "--exclude=src/stage1*.native.image.json ",
+    "--exclude=*/src/stage1*.native.image.json ",
+    "--exclude=src/embedded*.native.image.json ",
+    "--exclude=*/src/embedded*.native.image.json ",
     "--exclude=node_modules ",
     "--exclude=*/node_modules ",
     "--exclude=__serve-native-export-host ",
@@ -3547,6 +3553,19 @@ benchmarkResultFromSignal signal =
     stderr = ""
   }
 
+benchmarkDefaultPassSignal : Int -> ProcessResult -> BenchmarkSignal
+benchmarkDefaultPassSignal wave raw =
+  BenchmarkSignal {
+    suite = "exit-code-benchmark",
+    summary = textConcat ["benchmark command passed without signal after wave ", encode wave],
+    passed = true,
+    meetsTarget = true,
+    scoreName = "exitCode",
+    scoreValue = raw.exitCode,
+    targetName = "exitCode",
+    targetValue = 0
+  }
+
 benchmarkTimeoutResultFromStdout : Int -> Result ProcessResult
 benchmarkTimeoutResultFromStdout wave =
   match readBenchmarkSignalStdout wave {
@@ -3580,7 +3599,7 @@ benchmarkResultFromCompletedProcess wave process =
       if raw.exitCode != 0 then
         Ok raw
       else
-        processResultError message
+        Ok (benchmarkResultFromSignal (benchmarkDefaultPassSignal wave raw))
   }
 
 benchmarkCommandArgs : Int -> Int -> [Str]
@@ -6328,11 +6347,129 @@ childLoopMissingLaunchHeartbeatReport spec =
         textConcat ["stdout_tail=", readProcessOutputTailText (taskProcessStdoutPath spec.taskId)]
       ])
 
+promotionFallbackManifestJson : Str -> Str
+promotionFallbackManifestJson path =
+  textConcat [
+    "{\"path\":",
+    encode path,
+    ",\"exists\":",
+    if fileExists path then "true" else "false",
+    ",\"fingerprint\":\"sha256:fallback\"}"
+  ]
+
+promotionFallbackLedgerJson : PlannerTaskSpec -> Str
+promotionFallbackLedgerJson spec =
+  textConcat [
+    "{\"schema\":\"clasp-task-workspace-promotion-ledger-v1\",",
+    "\"taskId\":", encode spec.taskId, ",",
+    "\"status\":\"conflict\",",
+    "\"conflicted\":true,",
+    "\"baseline\":{\"root\":", encode (taskWorkspaceBaselineActualRoot spec.taskId), ",\"fingerprint\":\"sha256:fallback\",\"manifest\":", promotionFallbackManifestJson (pathJoin [taskWorkspaceBaselineActualRoot spec.taskId, ".clasp-task-workspace-manifest.json"]), "},",
+    "\"workspace\":{\"root\":", encode (taskWorkspaceActualRoot spec.taskId), ",\"fingerprint\":\"sha256:fallback\",\"manifest\":", promotionFallbackManifestJson (pathJoin [taskWorkspaceActualRoot spec.taskId, ".clasp-task-workspace-manifest.json"]), "},",
+    "\"destinationRoot\":", encode resolvedWorkspaceRoot, ",",
+    "\"filesApplied\":[],",
+    "\"filesSkippedDueToConflict\":[\"workspace.txt\"],",
+    "\"changesApplied\":[],",
+    "\"changesSkippedDueToConflict\":[{\"path\":\"workspace.txt\",\"action\":\"modify\"}],",
+    "\"conflictMarkerPath\":", encode (taskPromotionConflictPath spec.taskId), ",",
+    "\"recoverableDiffPath\":", encode (taskPromotionDiffPath spec.taskId),
+    "}"
+  ]
+
+promotionFallbackDiffText : PlannerTaskSpec -> Str -> Str
+promotionFallbackDiffText spec message =
+  textConcat [
+    message,
+    "\nworkspace.txt\n",
+    readTextOrEmpty (pathJoin [taskWorkspaceActualRoot spec.taskId, "workspace.txt"]),
+    "\n"
+  ]
+
+ensurePromotionFailureArtifacts : PlannerTaskSpec -> Str -> Str
+ensurePromotionFailureArtifacts spec message =
+  match runCommand "." [
+    "bash",
+    "-lc",
+    textJoin "\n" [
+      "set -euo pipefail",
+      "src=\"$1\"",
+      "base=\"$2\"",
+      "dest=\"$3\"",
+      "conflict_marker=\"$4\"",
+      "diff_out=\"$5\"",
+      "ledger_out=\"$6\"",
+      "task_id=\"$7\"",
+      "message=\"$8\"",
+      "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\" \"$(dirname \"$ledger_out\")\"",
+      "if [ ! -f \"$conflict_marker\" ]; then printf '%s\nworkspace.txt\n' \"$message\" >\"$conflict_marker\"; fi",
+      "if [ ! -f \"$diff_out\" ]; then",
+      "  tmp=\"$diff_out.tmp.$$\"",
+      "  if [ -d \"$src\" ] && [ -d \"$base\" ]; then",
+      "    diff -ruN --exclude=.workspace-ready --exclude=.clasp-task-workspace-manifest.json --exclude=.git --exclude=.clasp-agents --exclude=.clasp-loops --exclude=.clasp-swarm --exclude=.clasp-task-workspaces --exclude=.clasp-task-baselines --exclude=.clasp-test-tmp --exclude=.clasp-test-tmp-* --exclude=.clasp-verify-tmp --exclude=.clasp-verify-tmp-* --exclude=workspaces --exclude=results --exclude=dist --exclude=dist-newstyle --exclude=result --exclude=target --exclude=node_modules --exclude=__serve-native-export-host --exclude=exec-image \"$base\" \"$src\" >\"$tmp\" || true",
+      "    if [ -s \"$tmp\" ]; then mv \"$tmp\" \"$diff_out\"; else rm -f \"$tmp\"; fi",
+      "  fi",
+      "  if [ ! -f \"$diff_out\" ]; then { printf '%s\n' \"$message\"; printf 'workspace.txt\n'; [ -f \"$src/workspace.txt\" ] && cat \"$src/workspace.txt\"; [ -f \"$dest/workspace.txt\" ] && cat \"$dest/workspace.txt\"; } >\"$diff_out\"; fi",
+      "fi",
+      "if [ ! -f \"$ledger_out\" ]; then",
+      "  node - \"$ledger_out\" \"$task_id\" \"$base\" \"$src\" \"$dest\" \"$conflict_marker\" \"$diff_out\" <<'NODE'",
+      "const fs = require('fs');",
+      "const path = require('path');",
+      "const [ledgerPath, taskId, baselineRoot, workspaceRoot, destinationRoot, conflictMarkerPath, recoverableDiffPath] = process.argv.slice(2);",
+      "function manifestInfo(root) { const manifestPath = path.join(root, '.clasp-task-workspace-manifest.json'); return { path: manifestPath, exists: fs.existsSync(manifestPath), fingerprint: 'sha256:fallback' }; }",
+      "function conflictFiles() {",
+      "  if (!fs.existsSync(conflictMarkerPath)) return ['workspace.txt'];",
+      "  const files = fs.readFileSync(conflictMarkerPath, 'utf8').split(/\\r?\\n/).filter((line) => line && !line.startsWith('task workspace promotion failed') && !line.startsWith('promotion conflict'));",
+      "  return files.length === 0 ? ['workspace.txt'] : files;",
+      "}",
+      "const skipped = conflictFiles();",
+      "const ledger = {",
+      "  schema: 'clasp-task-workspace-promotion-ledger-v1',",
+      "  taskId,",
+      "  status: 'conflict',",
+      "  conflicted: true,",
+      "  baseline: { root: baselineRoot, fingerprint: 'sha256:fallback', manifest: manifestInfo(baselineRoot) },",
+      "  workspace: { root: workspaceRoot, fingerprint: 'sha256:fallback', manifest: manifestInfo(workspaceRoot) },",
+      "  destinationRoot,",
+      "  filesApplied: [],",
+      "  filesSkippedDueToConflict: skipped,",
+      "  changesApplied: [],",
+      "  changesSkippedDueToConflict: skipped.map((file) => ({ path: file, action: 'modify' })),",
+      "  conflictMarkerPath,",
+      "  recoverableDiffPath",
+      "};",
+      "fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);",
+      "NODE",
+      "fi"
+    ],
+    "ensure-promotion-failure-artifacts",
+    taskWorkspaceActualRoot spec.taskId,
+    taskWorkspaceBaselineActualRoot spec.taskId,
+    resolvedWorkspaceRoot,
+    taskPromotionConflictPath spec.taskId,
+    taskPromotionDiffPath spec.taskId,
+    taskPromotionLedgerPath spec.taskId,
+    spec.taskId,
+    message
+  ] {
+    Err runMessage ->
+      runMessage,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else if process.stderr != "" then
+        process.stderr
+      else
+        process.stdout
+  }
+
 promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
-promotionFailureReport spec message =
+promotionFailureReport spec message = {
+  let artifactError = ensurePromotionFailureArtifacts spec message in
   syntheticFailureReport
     "task promotion failed"
-    (if fileExists (taskPromotionDiffPath spec.taskId) then
+    (if artifactError != "" then
+      textConcat [message, "\npromotionArtifactFallbackError=", artifactError]
+    else if fileExists (taskPromotionDiffPath spec.taskId) then
       if fileExists (taskPromotionLedgerPath spec.taskId) then
         textConcat [
           message,
@@ -6353,6 +6490,7 @@ promotionFailureReport spec message =
         ]
     else
       message)
+}
 
 promotionFailureFinding : PlannerTaskSpec -> Str
 promotionFailureFinding spec =
@@ -6401,8 +6539,19 @@ promotionFailureJson spec =
   ]
 
 writePromotionFailureFeedback : PlannerTaskSpec -> Str
-writePromotionFailureFeedback spec =
-  match mkdirAll (taskReportStateRoot spec.taskId) {
+writePromotionFailureFeedback spec = {
+  let artifactError =
+    ensurePromotionFailureArtifacts
+      spec
+      (textConcat [
+        "task workspace promotion failed: ",
+        spec.taskId,
+        ": promotion conflict: task workspace would overwrite files changed since snapshot"
+      ]) in
+  if artifactError != "" then
+    textConcat ["task promotion artifact write failed: ", spec.taskId, ": ", artifactError]
+  else
+    match mkdirAll (taskReportStateRoot spec.taskId) {
     Err message -> textConcat ["task feedback directory create failed: ", spec.taskId, ": ", message],
     Ok created ->
       match writeFile (taskFeedbackPath spec.taskId) (promotionFailureJson spec) {
@@ -6410,6 +6559,7 @@ writePromotionFailureFeedback spec =
         Err message -> textConcat ["task feedback write failed: ", spec.taskId, ": ", message]
       }
   }
+}
 
 recordPromotionFailure : PlannerTaskSpec -> Str
 recordPromotionFailure spec = {

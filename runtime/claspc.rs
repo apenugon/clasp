@@ -15,17 +15,19 @@ use std::thread;
 use std::time::Duration;
 
 use tool_support::{
-    build_project_bundle, build_project_bundle_build, execute_native_export_from_image_path,
-    execute_native_export_from_image_path_args_local_only,
-    execute_native_export_from_image_path_args, execute_native_export_from_image_text,
-    execute_native_route_from_image_text, project_declares_backend_surface, run_native_export_host_server,
-    ProjectBundleBuild, ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
+    build_project_bundle, build_project_bundle_build, cached_project_bundle_identity,
+    execute_native_export_from_image_path, execute_native_export_from_image_path_args,
+    execute_native_export_from_image_path_args_local_only, execute_native_route_from_image_text,
+    project_declares_backend_surface, run_native_export_host_server, ProjectBundleBuild,
+    ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
 };
 
 const EMBEDDED_NATIVE_IMAGE: &str = include_str!("../src/stage1.native.image.json");
 const EMBEDDED_COMPILER_NATIVE_IMAGE: &str = include_str!("../src/stage1.compiler.native.image.json");
 const PROMOTED_COMPILER_MODULE_SUMMARY_CACHE: &str =
     include_str!("../src/stage1.compiler.module-summary-cache-v2.json");
+const PROMOTED_COMPILER_SOURCE_EXPORT_CACHE: &str =
+    include_str!("../src/stage1.compiler.source-export-cache-v1.json");
 const EMBEDDED_IMAGE_MARKER: &[u8] = b"CLASP_EMBEDDED_IMAGE_V1\0";
 const NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
 const CLASPC_MAIN_STACK_BYTES: usize = 64 * 1024 * 1024;
@@ -276,12 +278,21 @@ const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 
 static PROMOTED_MODULE_SUMMARY_ENTRIES: OnceLock<HashMap<String, PromotedModuleSummaryEntry>> =
     OnceLock::new();
+static PROMOTED_SOURCE_EXPORT_ENTRIES: OnceLock<HashMap<String, PromotedSourceExportEntry>> =
+    OnceLock::new();
 
 #[derive(Clone)]
 struct PromotedModuleSummaryEntry {
     source_fingerprint: String,
     summary: String,
     decl_fingerprints: HashMap<String, String>,
+}
+
+#[derive(Clone)]
+struct PromotedSourceExportEntry {
+    export_name: String,
+    output: Option<String>,
+    output_path: Option<String>,
 }
 
 struct ModuleSummaryCacheHit {
@@ -2939,6 +2950,10 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
     if let Some(cached) = read_cached_native_image(image_path, &bundle_build.bundle) {
         return Ok(cached);
     }
+    if let Some(cached) = read_cached_source_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle) {
+        write_cached_native_image(image_path, &bundle_build.bundle, &cached);
+        return Ok(cached);
+    }
 
     if let Some(threshold) = monolithic_bundle_bytes_threshold() {
         if bundle_build.bundle.len() >= threshold {
@@ -4035,6 +4050,85 @@ route customerRoute = GET "/support/customer" Empty -> Customer customer
     }
 
     #[test]
+    fn promoted_source_export_cache_parses_valid_entries() {
+        let entries = super::parse_promoted_source_export_entries(
+            r#"{
+              "cacheVersion": "source-export-cache-v1",
+              "entries": [
+                {"cacheKey": "alpha.cache", "exportName": "checkSourceText", "output": "main : Str"},
+                {"cacheKey": "beta.cache", "exportName": "nativeImageProjectText", "outputPath": "src/stage1.goal-manager.native.image.json"},
+                {"cacheKey": "ignored.cache"},
+                {"output": "missing key"}
+              ]
+            }"#,
+        );
+
+        assert_eq!(entries.len(), 2);
+        let entry = entries.get("alpha.cache").expect("alpha entry");
+        assert_eq!(entry.export_name, "checkSourceText");
+        assert_eq!(entry.output.as_deref(), Some("main : Str"));
+        assert_eq!(
+            entries
+                .get("beta.cache")
+                .and_then(|entry| entry.output_path.as_deref()),
+            Some("src/stage1.goal-manager.native.image.json")
+        );
+    }
+
+    #[test]
+    fn promoted_source_export_cache_text_prefers_project_root_file() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let previous_project_root = std::env::var_os("CLASP_PROJECT_ROOT");
+        let root = unique_test_root("promoted-source-export-project-root");
+        let cache_path = root.join("src").join("stage1.compiler.source-export-cache-v1.json");
+        fs::create_dir_all(cache_path.parent().expect("cache parent")).expect("create cache parent");
+        fs::write(&cache_path, "{\"cacheVersion\":\"source-export-cache-v1\",\"entries\":[]}\n")
+            .expect("write project cache");
+        std::env::set_var("CLASP_PROJECT_ROOT", &root);
+
+        assert_eq!(
+            super::promoted_source_export_cache_text(),
+            "{\"cacheVersion\":\"source-export-cache-v1\",\"entries\":[]}\n"
+        );
+
+        match previous_project_root {
+            Some(value) => std::env::set_var("CLASP_PROJECT_ROOT", value),
+            None => std::env::remove_var("CLASP_PROJECT_ROOT"),
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn promoted_source_export_cache_populates_runtime_cache() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        std::env::remove_var("CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE");
+        let cache_root = unique_test_root("promoted-source-export-cache");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        let entries = super::promoted_source_export_entries();
+        let (cache_key, expected_export) = entries
+            .iter()
+            .find(|(_, entry)| entry.output.is_some())
+            .expect("promoted source export seed should not be empty");
+        let cache_path = cache_root.join(cache_key);
+
+        let output = super::read_promoted_source_export(&cache_path, &expected_export.export_name)
+            .expect("promoted source export");
+
+        let expected_output = expected_export.output.as_ref().expect("inline promoted output");
+        assert_eq!(output, expected_output.as_bytes());
+        assert_eq!(
+            fs::read_to_string(&cache_path).expect("promoted source export written to cache"),
+            *expected_output
+        );
+        assert!(
+            super::read_promoted_source_export(&cache_path, "compileSourceText").is_none(),
+            "promoted source export should not satisfy a different export"
+        );
+
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn source_export_cache_path_changes_for_same_length_bundle_edits() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("source-export-cache-path");
@@ -4331,6 +4425,40 @@ fn run_binary_cache_path(current_exe: &Path, image_path: &str, bundle: &str) -> 
     Some(run_binary_cache_dir().join(cache_key))
 }
 
+fn run_binary_project_cache_path(
+    current_exe: &Path,
+    image_path: &str,
+    project_cache_identity: &str,
+) -> Option<PathBuf> {
+    let launcher_bytes = fs::read(current_exe).ok()?;
+    let image_bytes = fs::read(image_path).ok()?;
+    let cache_key = stable_fingerprint_parts(&[
+        &launcher_bytes,
+        &image_bytes,
+        b"project-bundle-cache",
+        project_cache_identity.as_bytes(),
+    ]);
+    Some(run_binary_cache_dir().join(cache_key))
+}
+
+fn cached_project_run_binary_path(
+    current_exe: &Path,
+    image_path: &str,
+    input_path: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let entry_text = input_path
+        .to_str()
+        .ok_or_else(|| format!("entry path `{}` is not valid UTF-8", input_path.display()))?;
+    let Some(project_cache_identity) = cached_project_bundle_identity(entry_text)? else {
+        return Ok(None);
+    };
+    Ok(run_binary_project_cache_path(
+        current_exe,
+        image_path,
+        &project_cache_identity,
+    ))
+}
+
 fn module_summary_cache_path(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
@@ -4501,6 +4629,45 @@ fn parse_promoted_module_summary_entries(cache_text: &str) -> HashMap<String, Pr
     entries
 }
 
+fn parse_promoted_source_export_entries(cache_text: &str) -> HashMap<String, PromotedSourceExportEntry> {
+    let mut entries = HashMap::new();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(cache_text) else {
+        return entries;
+    };
+    let Some(source_export_entries) = value.get("entries").and_then(serde_json::Value::as_array) else {
+        return entries;
+    };
+
+    for entry in source_export_entries {
+        let Some(cache_key) = entry.get("cacheKey").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(export_name) = entry.get("exportName").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let output = entry
+            .get("output")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let output_path = entry
+            .get("outputPath")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        if output.is_none() && output_path.is_none() {
+            continue;
+        }
+        entries.insert(
+            cache_key.to_owned(),
+            PromotedSourceExportEntry {
+                export_name: export_name.to_owned(),
+                output,
+                output_path,
+            },
+        );
+    }
+    entries
+}
+
 fn promoted_module_summary_cache_candidate_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(project_root) = env::var("CLASP_PROJECT_ROOT") {
@@ -4520,6 +4687,25 @@ fn promoted_module_summary_cache_candidate_paths() -> Vec<PathBuf> {
     paths
 }
 
+fn promoted_source_export_cache_candidate_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(project_root) = env::var("CLASP_PROJECT_ROOT") {
+        paths.push(
+            PathBuf::from(project_root)
+                .join("src")
+                .join("stage1.compiler.source-export-cache-v1.json"),
+        );
+    }
+    if let Ok(current_dir) = env::current_dir() {
+        paths.push(
+            current_dir
+                .join("src")
+                .join("stage1.compiler.source-export-cache-v1.json"),
+        );
+    }
+    paths
+}
+
 fn promoted_module_summary_cache_text() -> String {
     for path in promoted_module_summary_cache_candidate_paths() {
         if let Ok(text) = fs::read_to_string(path) {
@@ -4529,11 +4715,61 @@ fn promoted_module_summary_cache_text() -> String {
     PROMOTED_COMPILER_MODULE_SUMMARY_CACHE.to_owned()
 }
 
+fn promoted_source_export_cache_text() -> String {
+    for path in promoted_source_export_cache_candidate_paths() {
+        if let Ok(text) = fs::read_to_string(path) {
+            return text;
+        }
+    }
+    PROMOTED_COMPILER_SOURCE_EXPORT_CACHE.to_owned()
+}
+
 fn promoted_module_summary_entries() -> &'static HashMap<String, PromotedModuleSummaryEntry> {
     PROMOTED_MODULE_SUMMARY_ENTRIES.get_or_init(|| {
         let cache_text = promoted_module_summary_cache_text();
         parse_promoted_module_summary_entries(&cache_text)
     })
+}
+
+fn promoted_source_export_entries() -> &'static HashMap<String, PromotedSourceExportEntry> {
+    PROMOTED_SOURCE_EXPORT_ENTRIES.get_or_init(|| {
+        let cache_text = promoted_source_export_cache_text();
+        parse_promoted_source_export_entries(&cache_text)
+    })
+}
+
+fn promoted_source_export_output_path_candidates(output_path: &str) -> Vec<PathBuf> {
+    let path = PathBuf::from(output_path);
+    if path.is_absolute() {
+        return vec![path];
+    }
+
+    let mut paths = Vec::new();
+    if let Ok(project_root) = env::var("CLASP_PROJECT_ROOT") {
+        paths.push(PathBuf::from(project_root).join(&path));
+    }
+    if let Ok(current_dir) = env::current_dir() {
+        paths.push(current_dir.join(&path));
+    }
+    paths
+}
+
+fn promoted_source_export_entry_output(entry: &PromotedSourceExportEntry) -> Option<Vec<u8>> {
+    if let Some(output) = &entry.output {
+        return Some(output.clone().into_bytes());
+    }
+
+    let output_path = entry.output_path.as_deref()?;
+    for path in promoted_source_export_output_path_candidates(output_path) {
+        if let Ok(bytes) = fs::read(&path) {
+            trace_native_cache(&format!(
+                "source-export promoted output-path hit path={}",
+                path.display()
+            ));
+            return Some(bytes);
+        }
+    }
+    None
 }
 
 fn read_promoted_module_summary(
@@ -4563,6 +4799,27 @@ fn read_promoted_module_summary(
         validated_for_current_source,
         decl_fingerprints: Some(entry.decl_fingerprints),
     })
+}
+
+fn read_promoted_source_export(
+    cache_path: &Path,
+    export_name: &str,
+) -> Option<Vec<u8>> {
+    if env::var("CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE").is_ok() {
+        return None;
+    }
+    let cache_key = cache_path.file_name()?.to_str()?;
+    let entry = promoted_source_export_entries().get(cache_key)?.clone();
+    if entry.export_name != export_name {
+        return None;
+    }
+    let output = promoted_source_export_entry_output(&entry)?;
+    trace_native_cache(&format!(
+        "source-export promoted hit export={} key={}",
+        export_name, cache_key
+    ));
+    let _ = atomic_write(cache_path, &output);
+    Some(output)
 }
 
 fn read_cached_native_image(image_path: &str, bundle: &str) -> Option<Vec<u8>> {
@@ -4673,6 +4930,9 @@ fn read_cached_source_export(image_path: &str, export_name: &str, bundle: &str) 
             Some(bytes)
         }
         Err(_) => {
+            if let Some(bytes) = read_promoted_source_export(&cache_path, export_name) {
+                return Some(bytes);
+            }
             trace_native_cache(&format!(
                 "source-export miss export={} path={}",
                 export_name,
@@ -6899,6 +7159,27 @@ fn run_main(args: Vec<String>) -> ExitCode {
         Ok(embedded_path) => embedded_path,
         Err(message) => return fail(&message, options.json),
     };
+    let mut run_project_cache_path: Option<PathBuf> = None;
+    if matches!(options.command, Command::Run) && !options.json && options.output_path.is_none() {
+        let current_exe = match env::current_exe() {
+            Ok(path) => path,
+            Err(message) => return fail(&format!("failed to resolve current claspc binary: {message}"), false),
+        };
+        match cached_project_run_binary_path(&current_exe, &embedded_path.to_string_lossy(), &options.input_path) {
+            Ok(Some(path)) => {
+                if path.is_file() {
+                    trace_native_cache(&format!("run-binary fast hit path={}", path.display()));
+                    return match run_backend_binary(&path, &options.program_args) {
+                        Ok(exit_code) => exit_code,
+                        Err(message) => fail(&message, false),
+                    };
+                }
+                run_project_cache_path = Some(path);
+            }
+            Ok(None) => {}
+            Err(message) => return fail(&message, false),
+        }
+    }
 
     let bundle_build = match bundle_build(&options.input_path) {
         Ok(bundle_build) => bundle_build,
@@ -7015,6 +7296,15 @@ fn run_main(args: Vec<String>) -> ExitCode {
                 Err(message) => return fail(&format!("failed to resolve current claspc binary: {message}"), false),
             };
             let output_path = if let Some(path) = options.output_path.clone() {
+                path
+            } else if let Some(path) = run_project_cache_path.clone() {
+                path
+            } else if let Some(path) =
+                match cached_project_run_binary_path(&current_exe, &embedded_path.to_string_lossy(), &options.input_path) {
+                    Ok(path) => path,
+                    Err(message) => return fail(&message, false),
+                }
+            {
                 path
             } else {
                 match run_binary_cache_path(&current_exe, &embedded_path.to_string_lossy(), bundle) {

@@ -42,9 +42,18 @@ assert(report.exitCode === 0, `unexpected process exit code ${report.exitCode}`)
 assert(report.stdout === "child-env:missing:file-text", "process stdout did not include cwd file and isolated child env");
 assert(report.stderr === "err-child-env", "process stderr did not include child env");
 assert(report.parentChildEnv === "ERR:missing", "child env leaked into the parent runtime");
+assert(report.timeoutExitCode === 124, `unexpected timeout exit code ${report.timeoutExitCode}`);
+assert(report.timeoutTimedOut === true, "timed process did not report timedOut");
+assert(report.timeoutError === "timeout", `unexpected timeout error ${report.timeoutError}`);
+assert(report.timeoutMarkerExists === false, "timed process descendant survived past timeout");
+assert(report.eventLogText === "event-one\nevent-two\n", "appendFile did not persist nested event log");
 assert(
   fs.readFileSync(path.join(stateRoot, "output.txt"), "utf8") === "child-env:missing:file-text",
   "persisted output file mismatch",
+);
+assert(
+  fs.readFileSync(path.join(stateRoot, "logs", "events.jsonl"), "utf8") === "event-one\nevent-two\n",
+  "persisted event log mismatch",
 );
 EOF
 

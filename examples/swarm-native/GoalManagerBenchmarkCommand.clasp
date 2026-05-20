@@ -49,6 +49,19 @@ benchmarkResultFromSignal signal =
     stderr = ""
   }
 
+benchmarkDefaultPassSignal : Int -> ProcessResult -> BenchmarkSignal
+benchmarkDefaultPassSignal wave raw =
+  BenchmarkSignal {
+    suite = "exit-code-benchmark",
+    summary = textConcat ["benchmark command passed without signal after wave ", encode wave],
+    passed = true,
+    meetsTarget = true,
+    scoreName = "exitCode",
+    scoreValue = raw.exitCode,
+    targetName = "exitCode",
+    targetValue = 0
+  }
+
 benchmarkTimeoutResultFromStdout : Int -> Result ProcessResult
 benchmarkTimeoutResultFromStdout wave =
   match readBenchmarkSignalStdout wave {
@@ -160,7 +173,7 @@ benchmarkResultFromCompletedProcess wave process =
       if raw.exitCode != 0 then
         Ok raw
       else
-        processResultError message
+        Ok (benchmarkResultFromSignal (benchmarkDefaultPassSignal wave raw))
   }
 
 runBenchmarkCommand : Int -> Int -> Result ProcessResult

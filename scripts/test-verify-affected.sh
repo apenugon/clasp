@@ -20,12 +20,17 @@ mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/
   "$project_copy/examples/agent-task-scenario/scripts" \
   "$project_copy/examples/lead-app/Shared" "$project_copy/examples/lead-app/scripts" \
   "$project_copy/examples/lead-app/benchmark-prep" \
+  "$project_copy/benchmarks/checkpoints" \
   "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared" \
   "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts" \
   "$test_root/bin"
 
 cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
+cp "$project_root/scripts/benchmark-checkpoint.mjs" "$project_copy/scripts/benchmark-checkpoint.mjs"
+cp "$project_root/scripts/test-benchmark-checkpoint.sh" "$project_copy/scripts/test-benchmark-checkpoint.sh"
+cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$project_copy/scripts/generate-promoted-source-export-cache.mjs"
+cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$project_copy/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
@@ -36,6 +41,8 @@ touch "$project_copy/examples/agent-task-scenario/Main.clasp"
 touch "$project_copy/examples/agent-task-scenario/scripts/verify.sh"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"
+printf '{"schemaVersion":1,"kind":"clasp-baseline-bottleneck-checkpoint","finalStatus":"ok"}\n' \
+  > "$project_copy/benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json"
 cat > "$project_copy/benchmarks/tasks/clasp-lead-segment/task.json" <<'JSON'
 {"id":"clasp-lead-segment","language":"clasp","repo":"repo","verify":["bash","scripts/verify.sh"]}
 JSON
@@ -199,6 +206,19 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known compiler slice scripts should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-compiler-slice.sh"), "fake compiler slice smoke command should execute");
     break;
+  case "promoted-source-export-cache":
+    assert(report.changedFiles.includes("scripts/generate-promoted-source-export-cache.mjs"), "promoted source export generator should be present");
+    assert(report.changedFiles.includes("scripts/test-promoted-source-export-cache.sh"), "promoted source export smoke test should be present");
+    assert(report.changedFiles.includes("src/stage1.compiler.source-export-cache-v1.json"), "promoted source export cache should be present");
+    assert(report.changedFiles.includes("src/stage1.goal-manager.native.image.json"), "promoted GoalManager native image should be present");
+    assert(report.changedFiles.includes("src/stage1.task-workspace-runtime-harness.native.image.json"), "promoted task workspace harness native image should be present");
+    assert(hasCommand("node --check scripts/generate-promoted-source-export-cache.mjs"), "promoted source export generator should run node syntax check");
+    assert(hasCommand("bash -n 'scripts/test-promoted-source-export-cache.sh'"), "promoted source export smoke should run shell syntax check");
+    assert(hasCommand("bash scripts/test-promoted-source-export-cache.sh"), "promoted source export cache changes should run focused smoke");
+    assert(!hasCommand("bash scripts/test-selfhost.sh"), "promoted source export cache should avoid broad selfhost routing");
+    assert(report.usedVerifyFastFallback === false, "known promoted source export cache paths should not use verify-fast fallback");
+    assert(logHas("scripts/test-promoted-source-export-cache.sh"), "fake promoted source export smoke command should execute");
+    break;
   case "runtime-slice-script":
     assert(report.changedFiles.includes("scripts/verify-runtime-slice.sh"), "runtime slice verifier should be present");
     assert(report.changedFiles.includes("scripts/test-verify-runtime-slice.sh"), "runtime slice smoke test should be present");
@@ -307,6 +327,17 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known planner report decode paths should not use verify-fast fallback");
     assert(logHas("scripts/test-goal-manager-planner-report-decode.sh"), "fake planner report decode command should execute");
     break;
+  case "benchmark-checkpoint":
+    assert(report.changedFiles.includes("scripts/benchmark-checkpoint.mjs"), "benchmark checkpoint runner should be present");
+    assert(report.changedFiles.includes("scripts/test-benchmark-checkpoint.sh"), "benchmark checkpoint test should be present");
+    assert(report.changedFiles.includes("benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json"), "checkpoint artifact should be present");
+    assert(hasCommand("node --check scripts/benchmark-checkpoint.mjs"), "checkpoint runner should run node syntax check");
+    assert(hasCommand("bash -n 'scripts/test-benchmark-checkpoint.sh'"), "checkpoint test should run shell syntax check");
+    assert(hasCommand("bash scripts/test-benchmark-checkpoint.sh"), "checkpoint route should run focused fixture regression");
+    assert(!hasCommand("bash benchmarks/test-task-prep.sh"), "checkpoint route should avoid broad benchmark prep coverage");
+    assert(report.usedVerifyFastFallback === false, "known benchmark checkpoint inputs should not use verify-fast fallback");
+    assert(logHas("scripts/test-benchmark-checkpoint.sh"), "fake checkpoint regression command should execute");
+    break;
   case "empty-no-git":
     assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
     assert(report.inputFallbackMode === "git-unavailable" || report.inputFallbackMode === "git-empty", `unexpected input fallback mode: ${report.inputFallbackMode}`);
@@ -371,6 +402,17 @@ CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_fixture_log" \
     --changed-file examples/compiler-checker.clasp \
     --changed-file examples/compiler-lower.clasp > "$compiler_slice_fixture_report"
 assert_report "$compiler_slice_fixture_report" "$compiler_slice_fixture_log" compiler-slice-fixture
+
+promoted_source_export_report="$test_root/promoted-source-export-report.json"
+promoted_source_export_log="$test_root/promoted-source-export.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$promoted_source_export_log" \
+  run_verify_affected \
+    --changed-file scripts/generate-promoted-source-export-cache.mjs \
+    --changed-file scripts/test-promoted-source-export-cache.sh \
+    --changed-file src/stage1.compiler.source-export-cache-v1.json \
+    --changed-file src/stage1.goal-manager.native.image.json \
+    --changed-file src/stage1.task-workspace-runtime-harness.native.image.json > "$promoted_source_export_report"
+assert_report "$promoted_source_export_report" "$promoted_source_export_log" promoted-source-export-cache
 
 runtime_slice_script_report="$test_root/runtime-slice-script-report.json"
 runtime_slice_script_log="$test_root/runtime-slice-script.log"
@@ -439,6 +481,15 @@ CLASP_TEST_FAKE_COMMAND_LOG="$planner_report_decode_log" \
     --changed-file examples/swarm-native/GoalManagerReportIO.clasp \
     --changed-file scripts/test-goal-manager-planner-report-decode.sh > "$planner_report_decode_report"
 assert_report "$planner_report_decode_report" "$planner_report_decode_log" planner-report-decode
+
+benchmark_checkpoint_report="$test_root/benchmark-checkpoint-report.json"
+benchmark_checkpoint_log="$test_root/benchmark-checkpoint.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$benchmark_checkpoint_log" \
+  run_verify_affected \
+    --changed-file scripts/benchmark-checkpoint.mjs \
+    --changed-file scripts/test-benchmark-checkpoint.sh \
+    --changed-file benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json > "$benchmark_checkpoint_report"
+assert_report "$benchmark_checkpoint_report" "$benchmark_checkpoint_log" benchmark-checkpoint
 
 empty_report="$test_root/empty-report.json"
 empty_log="$test_root/empty.log"

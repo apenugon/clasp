@@ -160,6 +160,7 @@ claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 fake_codex_bin="$test_root_abs/codex"
 fake_child_claspc_bin="$test_root_abs/fake-claspc"
 fake_passing_benchmark_bin="$test_root_abs/fake-benchmark-passing"
+fake_silent_benchmark_bin="$test_root_abs/fake-benchmark-silent"
 fake_slow_benchmark_bin="$test_root_abs/fake-benchmark-slow"
 fake_replan_benchmark_bin="$test_root_abs/fake-benchmark-replan"
 goal_manager_binary="${CLASP_GOAL_MANAGER_BINARY:-}"
@@ -691,6 +692,21 @@ JSON
 EOF
 chmod +x "$fake_passing_benchmark_bin"
 
+cat >"$fake_silent_benchmark_bin" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${CLASP_MANAGER_BENCHMARK_WAVE:-}" != "1" ]]; then
+  printf 'unexpected benchmark wave: %s\n' "${CLASP_MANAGER_BENCHMARK_WAVE:-}" >&2
+  exit 2
+fi
+if [[ "${CLASP_MANAGER_BENCHMARK_RUNS:-}" != "0" ]]; then
+  printf 'unexpected benchmark run count: %s\n' "${CLASP_MANAGER_BENCHMARK_RUNS:-}" >&2
+  exit 2
+fi
+EOF
+chmod +x "$fake_silent_benchmark_bin"
+
 cat >"$fake_slow_benchmark_bin" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -778,6 +794,13 @@ run_manager_binary() {
     CLASP_MANAGER_MAX_TASKS_JSON='1' \
     CLASP_MANAGER_MAX_WAVES_JSON='1' \
     CLASP_LOOP_WATCH_POLL_MS_JSON='50' \
+    CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON='16' \
+    CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON='16' \
+    CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON='16' \
+    CLASP_MANAGER_CHILD_LOOP_BASELINE_CACHE_TOTAL_MAX_MB_JSON='16' \
+    CLASP_MANAGER_CHILD_LOOP_XDG_CACHE_TOTAL_MAX_MB_JSON='64' \
+    CLASP_MANAGER_ARTIFACTS_CACHE_MAX_MB_JSON='16' \
+    CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON='64' \
     "$@" \
     "$binary_path" "$state_root" \
     >"$output_path" 2>&1; then
@@ -1040,6 +1063,48 @@ for (const [label, value] of [['benchmark-1', checkpoint], ['benchmark-latest', 
 assert(JSON.stringify(checkpoint) === JSON.stringify(latest), 'latest checkpoint should match benchmark-1');
 NODE
 fi
+
+trace_case "benchmark-silent-success-default-pass"
+benchmark_silent_state="$test_root_abs/benchmark-silent-state"
+benchmark_silent_workspace="$test_root_abs/benchmark-silent-workspace"
+benchmark_silent_output="$test_root_abs/benchmark-silent-output.txt"
+benchmark_silent_status="$test_root_abs/benchmark-silent-status.json"
+mkdir -p "$benchmark_silent_workspace"
+run_actual_goal_manager "$benchmark_silent_state" "$benchmark_silent_workspace" \
+  CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$fake_silent_benchmark_bin\"]" \
+  >"$benchmark_silent_output" 2>&1
+benchmark_silent_status_result="$(
+  run_actual_goal_manager_status "$benchmark_silent_state" "$benchmark_silent_workspace" \
+    CLASP_TEST_FAKE_PLANNER_MODE='benchmark-replan' \
+    CLASP_MANAGER_MAX_WAVES_JSON='1' \
+    CLASP_MANAGER_BENCHMARK_COMMAND_JSON="[\"$fake_silent_benchmark_bin\"]"
+)"
+printf '%s\n' "$benchmark_silent_status_result" >"$benchmark_silent_status"
+test -f "$benchmark_silent_state/benchmark-1.json"
+node - "$benchmark_silent_status" "$benchmark_silent_state/benchmark-1.json" <<'NODE'
+const fs = require('fs');
+const [statusPath, checkpointPath] = process.argv.slice(2);
+const status = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+assert(status.state.phase === 'completed', `expected completed phase, got ${status.state.phase}`);
+assert(status.state.verdict === 'pass', `expected pass verdict, got ${status.state.verdict}`);
+assert(status.state.benchmarkRuns === 1, `expected benchmarkRuns=1, got ${status.state.benchmarkRuns}`);
+assert(status.benchmarkTargetMet === true, 'expected status benchmarkTargetMet=true');
+assert(checkpoint.suite === 'exit-code-benchmark', `unexpected fallback suite: ${checkpoint.suite}`);
+assert(checkpoint.summary === 'benchmark command passed without signal after wave 1', `unexpected fallback summary: ${checkpoint.summary}`);
+assert(checkpoint.meetsTarget === true, 'expected fallback meetsTarget=true');
+assert(checkpoint.scoreName === 'exitCode', `unexpected scoreName: ${checkpoint.scoreName}`);
+assert(checkpoint.scoreValue === 0, `unexpected scoreValue: ${checkpoint.scoreValue}`);
+NODE
 
 trace_case "status-waiting-reasons-dependency-blocked"
 dependency_status_state="$test_root_abs/dependency-status-state"

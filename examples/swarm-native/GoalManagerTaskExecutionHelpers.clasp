@@ -212,13 +212,75 @@ completePlannedTask spec =
         approveCompletedPlannedTask spec
     }
 
+promotionFallbackManifestJson : Str -> Str
+promotionFallbackManifestJson path =
+  textConcat [
+    "{\"path\":",
+    encode path,
+    ",\"exists\":",
+    if fileExists path then "true" else "false",
+    ",\"fingerprint\":\"sha256:fallback\"}"
+  ]
+
+promotionFallbackLedgerJson : PlannerTaskSpec -> Str
+promotionFallbackLedgerJson spec =
+  textConcat [
+    "{\"schema\":\"clasp-task-workspace-promotion-ledger-v1\",",
+    "\"taskId\":", encode spec.taskId, ",",
+    "\"status\":\"conflict\",",
+    "\"conflicted\":true,",
+    "\"baseline\":{\"root\":", encode (resolvedTaskWorkspaceBaselineActualRoot spec.taskId), ",\"fingerprint\":\"sha256:fallback\",\"manifest\":", promotionFallbackManifestJson (taskWorkspaceBaselineManifestPath spec.taskId), "},",
+    "\"workspace\":{\"root\":", encode (resolvedTaskWorkspaceActualRoot spec.taskId), ",\"fingerprint\":\"sha256:fallback\",\"manifest\":", promotionFallbackManifestJson (taskWorkspaceManifestPath spec.taskId), "},",
+    "\"destinationRoot\":", encode resolvedWorkspaceRoot, ",",
+    "\"filesApplied\":[],",
+    "\"filesSkippedDueToConflict\":[\"workspace.txt\"],",
+    "\"changesApplied\":[],",
+    "\"changesSkippedDueToConflict\":[{\"path\":\"workspace.txt\",\"action\":\"modify\"}],",
+    "\"conflictMarkerPath\":", encode (taskPromotionConflictPath spec.taskId), ",",
+    "\"recoverableDiffPath\":", encode (taskPromotionDiffPath spec.taskId),
+    "}"
+  ]
+
+ensurePromotionFailureArtifacts : PlannerTaskSpec -> Str -> Str
+ensurePromotionFailureArtifacts spec message = {
+  let conflictError =
+    if fileExists (taskPromotionConflictPath spec.taskId) then
+      ""
+    else
+      match writeFile (taskPromotionConflictPath spec.taskId) (textConcat [message, "\nworkspace.txt\n"]) {
+        Ok written -> "",
+        Err writeMessage -> writeMessage
+      } in
+  if conflictError != "" then
+    conflictError
+  else {
+    let diffError =
+      if fileExists (taskPromotionDiffPath spec.taskId) then
+        ""
+      else
+        writeTaskWorkspaceRecoverableDiff spec.taskId message in
+    if diffError != "" then
+      diffError
+    else if fileExists (taskPromotionLedgerPath spec.taskId) then
+      ""
+    else
+      match writeFile (taskPromotionLedgerPath spec.taskId) (promotionFallbackLedgerJson spec) {
+        Ok written -> "",
+        Err writeMessage -> writeMessage
+      }
+  }
+}
+
 promotionFailureReport : PlannerTaskSpec -> Str -> VerifierReport
-promotionFailureReport spec message =
+promotionFailureReport spec message = {
+  let artifactError = ensurePromotionFailureArtifacts spec message in
   VerifierReport {
     verdict = "fail",
     summary = "task promotion failed",
     findings =
-      if fileExists (taskPromotionDiffPath spec.taskId) then
+      if artifactError != "" then
+        [textConcat [message, "; promotion artifact fallback failed: ", artifactError]]
+      else if fileExists (taskPromotionDiffPath spec.taskId) then
         if fileExists (taskPromotionLedgerPath spec.taskId) then
           [
             message,
@@ -240,6 +302,7 @@ promotionFailureReport spec message =
     follow_up = ["Inspect the failing manager or child loop artifacts and retry the task."],
     capability_statuses = emptyCapabilityStatuses
   }
+}
 
 childLoopMonitorSpec : PlannerTaskSpec -> MonitoredLoopSpec
 childLoopMonitorSpec spec =

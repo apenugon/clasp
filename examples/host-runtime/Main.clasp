@@ -10,7 +10,12 @@ record HostScenarioReport = {
   exitCode : Int,
   stdout : Str,
   stderr : Str,
-  parentChildEnv : Str
+  parentChildEnv : Str,
+  timeoutExitCode : Int,
+  timeoutTimedOut : Bool,
+  timeoutError : Str,
+  timeoutMarkerExists : Bool,
+  eventLogText : Str
 }
 
 stateRoot : Str
@@ -22,11 +27,29 @@ inputPath = pathJoin [stateRoot, "input.txt"]
 outputPath : Str
 outputPath = pathJoin [stateRoot, "output.txt"]
 
+eventLogPath : Str
+eventLogPath = pathJoin [stateRoot, "logs", "events.jsonl"]
+
+timeoutMarkerPath : Str
+timeoutMarkerPath = pathJoin [stateRoot, "timeout-survivor.txt"]
+
+childPathEnv : Str
+childPathEnv = textConcat ["PATH=", readEnvText "PATH"]
+
 childCommand : [Str]
 childCommand = [
   "/bin/sh",
   "-c",
   "IFS= read -r file_text < input.txt; printf $CLASP_CHILD_MESSAGE; printf ':'; printf ${CLASP_HOST_RUNTIME_SCENARIO_ENV:-missing}; printf ':'; printf $file_text; printf err-$CLASP_CHILD_MESSAGE >&2"
+]
+
+timeoutChildCommand : [Str]
+timeoutChildCommand = [
+  "/bin/sh",
+  "-c",
+  "(sleep 0.2; printf leaked > \"$1\") & printf timeout-parent-start; sleep 5",
+  "clasp-timeout-child",
+  timeoutMarkerPath
 ]
 
 readEnvText : Str -> Str
@@ -51,11 +74,16 @@ errorReport message =
     exitCode = 1,
     stdout = "",
     stderr = message,
-    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE"
+    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE",
+    timeoutExitCode = 0,
+    timeoutTimedOut = false,
+    timeoutError = "",
+    timeoutMarkerExists = fileExists timeoutMarkerPath,
+    eventLogText = readFileText eventLogPath
   }
 
-successReport : Str -> ProcessResult -> HostScenarioReport
-successReport cwdText process =
+successReport : Str -> ProcessResult -> TimedProcessResult -> Str -> HostScenarioReport
+successReport cwdText process timeoutProcess eventLog =
   HostScenarioReport {
     cwd = cwdText,
     parentEnv = readEnvText "CLASP_HOST_RUNTIME_SCENARIO_ENV",
@@ -64,7 +92,24 @@ successReport cwdText process =
     exitCode = process.exitCode,
     stdout = process.stdout,
     stderr = process.stderr,
-    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE"
+    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE",
+    timeoutExitCode = timeoutProcess.exitCode,
+    timeoutTimedOut = timeoutProcess.timedOut,
+    timeoutError = timeoutProcess.error,
+    timeoutMarkerExists = fileExists timeoutMarkerPath,
+    eventLogText = eventLog
+  }
+
+appendEventLog : Str -> Str
+appendEventLog marker =
+  match appendFile eventLogPath "event-one\n" {
+    Err message ->
+      textConcat ["ERR:", message],
+    Ok first ->
+      match appendFile eventLogPath "event-two\n" {
+        Err message -> textConcat ["ERR:", message],
+        Ok second -> readFileText eventLogPath
+      }
   }
 
 runScenarioWithCwd : Str -> Str
@@ -85,7 +130,12 @@ runScenarioWithCwd cwdText =
                 Err message ->
                   encode (errorReport message),
                 Ok outputWritten ->
-                  encode (successReport cwdText process)
+                  match runProcessTimeout (makeProcessSpec stateRoot [childPathEnv] timeoutChildCommand) 50 {
+                    Err message ->
+                      encode (errorReport message),
+                    Ok timeoutProcess ->
+                      encode (successReport cwdText process timeoutProcess (appendEventLog "run"))
+                  }
               }
           }
       }
