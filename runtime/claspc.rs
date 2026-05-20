@@ -68,6 +68,177 @@ fn json_string(value: &str) -> String {
     format!("{value:?}")
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DiagnosticLocation {
+    file: String,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CompilerDiagnostic {
+    phase: &'static str,
+    code: &'static str,
+    message: String,
+    primary_location: Option<DiagnosticLocation>,
+}
+
+fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
+    let mut fields = serde_json::Map::new();
+    fields.insert("phase".to_owned(), serde_json::json!(diagnostic.phase));
+    fields.insert("code".to_owned(), serde_json::json!(diagnostic.code));
+    fields.insert("message".to_owned(), serde_json::json!(&diagnostic.message));
+
+    match &diagnostic.primary_location {
+        Some(location) => {
+            fields.insert("file".to_owned(), serde_json::json!(&location.file));
+            fields.insert("line".to_owned(), serde_json::json!(location.line));
+            fields.insert("column".to_owned(), serde_json::json!(location.column));
+            fields.insert(
+                "primarySpan".to_owned(),
+                serde_json::json!({
+                    "file": &location.file,
+                    "start": {
+                        "line": location.line,
+                        "column": location.column,
+                    },
+                    "end": {
+                        "line": location.line,
+                        "column": location.column,
+                    },
+                }),
+            );
+        }
+        None => {
+            fields.insert("file".to_owned(), serde_json::Value::Null);
+            fields.insert("line".to_owned(), serde_json::Value::Null);
+            fields.insert("column".to_owned(), serde_json::Value::Null);
+            fields.insert("primarySpan".to_owned(), serde_json::Value::Null);
+        }
+    }
+
+    serde_json::Value::Object(fields)
+}
+
+fn print_json_diagnostic_error(diagnostic: &CompilerDiagnostic) {
+    println!(
+        "{}",
+        compact_json(serde_json::json!({
+            "status": "error",
+            "implementation": "clasp-native",
+            "error": &diagnostic.message,
+            "diagnostics": [diagnostic_json_value(diagnostic)],
+        }))
+    );
+}
+
+fn render_pretty_diagnostic(diagnostic: &CompilerDiagnostic) -> String {
+    match &diagnostic.primary_location {
+        Some(location) => format!(
+            "CLASP_DIAGNOSTIC phase={} code={} file={} line={} column={} message={}\n{}",
+            diagnostic.phase,
+            diagnostic.code,
+            json_string(&location.file),
+            location.line,
+            location.column,
+            json_string(&diagnostic.message),
+            diagnostic.message,
+        ),
+        None => format!(
+            "CLASP_DIAGNOSTIC phase={} code={} file=null line=null column=null message={}\n{}",
+            diagnostic.phase,
+            diagnostic.code,
+            json_string(&diagnostic.message),
+            diagnostic.message,
+        ),
+    }
+}
+
+fn fail_diagnostic(diagnostic: &CompilerDiagnostic, json: bool) -> ExitCode {
+    if json {
+        print_json_diagnostic_error(diagnostic);
+    } else {
+        eprintln!("{}", render_pretty_diagnostic(diagnostic));
+    }
+    ExitCode::from(1)
+}
+
+fn enhanced_unknown_reference_message(kind: &str, name: &str) -> String {
+    match (kind, name) {
+        ("name", "True") => {
+            "Unknown name `True`. Clasp boolean literals are lowercase; use `true` instead, or define/import `True` if it should be a value.".to_owned()
+        }
+        ("name", "False") => {
+            "Unknown name `False`. Clasp boolean literals are lowercase; use `false` instead, or define/import `False` if it should be a value.".to_owned()
+        }
+        ("name", _) => {
+            format!("Unknown name `{name}`. Define or import `{name}`, or fix the spelling of the reference.")
+        }
+        ("constructor", "True") => {
+            "Unknown constructor `True`. Clasp boolean literals are lowercase; use `true` instead, or declare/import a constructor named `True` if this is a data constructor.".to_owned()
+        }
+        ("constructor", "False") => {
+            "Unknown constructor `False`. Clasp boolean literals are lowercase; use `false` instead, or declare/import a constructor named `False` if this is a data constructor.".to_owned()
+        }
+        ("constructor", _) => {
+            format!("Unknown constructor `{name}`. Declare or import a constructor named `{name}`, or fix the spelling of the constructor reference.")
+        }
+        _ => unreachable!("unknown compiler diagnostic kind"),
+    }
+}
+
+fn enhance_compiler_diagnostic_class(text: &str, kind: &str, prefix: &str) -> String {
+    const SUFFIX: &str = "`.";
+    const BOOLEAN_HINT: &str = " Clasp boolean literals are lowercase;";
+    const NAME_GENERIC_HINT: &str = " Define or import `";
+    const CONSTRUCTOR_GENERIC_HINT: &str = " Declare or import a constructor named `";
+
+    let mut rendered = String::new();
+    let mut remaining = text;
+    while let Some(start) = remaining.find(prefix) {
+        rendered.push_str(&remaining[..start]);
+        let after_prefix = &remaining[start + prefix.len()..];
+        let Some(end) = after_prefix.find(SUFFIX) else {
+            rendered.push_str(&remaining[start..]);
+            return rendered;
+        };
+        let name = &after_prefix[..end];
+        let after_message_index = start + prefix.len() + end + SUFFIX.len();
+        let after_message = &remaining[after_message_index..];
+        if after_message.starts_with(BOOLEAN_HINT)
+            || after_message.starts_with(NAME_GENERIC_HINT)
+            || after_message.starts_with(CONSTRUCTOR_GENERIC_HINT)
+        {
+            rendered.push_str(&remaining[start..after_message_index]);
+        } else {
+            rendered.push_str(&enhanced_unknown_reference_message(kind, name));
+        }
+        remaining = after_message;
+    }
+    rendered.push_str(remaining);
+    rendered
+}
+
+fn enhance_compiler_diagnostic_text(text: &str) -> String {
+    let text = enhance_compiler_diagnostic_class(text, "constructor", "Unknown constructor `");
+    enhance_compiler_diagnostic_class(&text, "name", "Unknown name `")
+}
+
+fn export_returns_compiler_diagnostics(export_name: &str) -> bool {
+    matches!(
+        export_name,
+        "checkSourceText" | "checkProjectText" | "explainSourceText" | "explainProjectText"
+    )
+}
+
+fn enhance_compiler_diagnostic_output_bytes(export_name: &str, output_bytes: Vec<u8>) -> Vec<u8> {
+    if !export_returns_compiler_diagnostics(export_name) {
+        return output_bytes;
+    }
+    let text = String::from_utf8_lossy(&output_bytes);
+    enhance_compiler_diagnostic_text(&text).into_bytes()
+}
+
 const NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT: &str = "nativeImageProjectDeclsText";
 const NATIVE_IMAGE_MONOLITHIC_EXPORT: &str = "nativeImageProjectText";
 const NATIVE_IMAGE_BUILD_PLAN_EXPORT: &str = "nativeImageProjectBuildPlanText";
@@ -93,13 +264,14 @@ const NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS: [(&str, &str); 7] = [
     ("constructor_decls", NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT),
     ("decl_names", NATIVE_IMAGE_DECL_NAMES_EXPORT),
 ];
-const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v1";
-const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v2";
+const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v5";
+const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v5";
 const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v1";
 const MODULE_SUMMARY_CACHE_VERSION: &str = "module-summary-cache-v2";
 const SOURCE_EXPORT_CACHE_VERSION: &str = "source-export-cache-v1";
 const RUN_BINARY_CACHE_VERSION: &str = "run-binary-cache-v2";
-const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 128;
+const DEFAULT_NATIVE_IMAGE_SECTION_JOBS: usize = 2;
+const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 4096;
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 
 static PROMOTED_MODULE_SUMMARY_ENTRIES: OnceLock<HashMap<String, PromotedModuleSummaryEntry>> =
@@ -179,6 +351,49 @@ struct NativeImageBuildPlanCacheEntry {
     modules: Vec<NativeImageBuildPlanCacheModule>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeDecl {
+    name: String,
+    arity: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeConstructor {
+    name: String,
+    payload_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeVariant {
+    name: String,
+    constructors: Vec<LightweightNativeConstructor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeRecord {
+    name: String,
+    fields: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeRuntimeBinding {
+    name: String,
+    runtime: String,
+    symbol: String,
+    binding_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LightweightNativeRouteBoundary {
+    name: String,
+    method: String,
+    path: String,
+    request: String,
+    response: String,
+    response_kind: String,
+    handler: String,
+}
+
 struct IncrementalProjectSummaryPlan {
     module_order: Vec<String>,
     modules: HashMap<String, IncrementalProjectSummaryModulePlan>,
@@ -210,12 +425,363 @@ fn relaxed_native_image_build_plan_cache() -> bool {
 }
 
 fn fail(message: &str, json: bool) -> ExitCode {
+    let message = enhance_compiler_diagnostic_text(message);
     if json {
-        print_json_error(message);
+        print_json_error(&message);
     } else {
         eprintln!("{message}");
     }
     ExitCode::from(1)
+}
+
+fn strip_compiler_error_prefix(message: &str) -> &str {
+    let trimmed = message.trim();
+    trimmed.strip_prefix("ERROR:").unwrap_or(trimmed).trim()
+}
+
+fn first_backticked_after(text: &str, prefix: &str) -> Option<String> {
+    let start = text.find(prefix)?;
+    let after_prefix = &text[start + prefix.len()..];
+    let end = after_prefix.find('`')?;
+    Some(after_prefix[..end].to_owned())
+}
+
+fn diagnostic_context_decl(message: &str) -> Option<String> {
+    let after_prefix = message.strip_prefix("In `")?;
+    let end = after_prefix.find("`: ")?;
+    Some(after_prefix[..end].to_owned())
+}
+
+fn diagnostic_detail(message: &str) -> &str {
+    if let Some(after_prefix) = message.strip_prefix("In `") {
+        if let Some(end) = after_prefix.find("`: ") {
+            return &after_prefix[end + 3..];
+        }
+    }
+    message
+}
+
+fn checker_diagnostic_code(message: &str) -> Option<&'static str> {
+    let detail = diagnostic_detail(message);
+    if detail.starts_with("Type mismatch for `") {
+        Some("E_TYPE_MISMATCH")
+    } else if detail.starts_with("Unknown name `") {
+        Some("E_UNBOUND_NAME")
+    } else if detail.starts_with("Unknown constructor `") {
+        Some("E_UNBOUND_CONSTRUCTOR")
+    } else if detail.starts_with("Unknown type `") {
+        Some("E_UNKNOWN_TYPE")
+    } else if detail.starts_with("Expected a value annotation for `") {
+        Some("E_CANNOT_INFER")
+    } else if detail.starts_with("Non-exhaustive match for `") {
+        Some("E_NON_EXHAUSTIVE_MATCH")
+    } else if detail == "Match expression needs at least one branch." {
+        Some("E_EMPTY_MATCH")
+    } else if detail.contains(" is not iterable.") {
+        Some("E_NOT_ITERABLE")
+    } else if message.starts_with("In `") {
+        Some("E_CHECKER")
+    } else {
+        None
+    }
+}
+
+fn type_mismatch_expected_found(message: &str) -> Option<(&str, &str)> {
+    let detail = diagnostic_detail(message);
+    let after_prefix = detail.strip_prefix("Type mismatch for `")?;
+    let marker = "`: expected ";
+    let start = after_prefix.find(marker)? + marker.len();
+    let after_expected_marker = &after_prefix[start..];
+    let (expected, found) = after_expected_marker.split_once(", found ")?;
+    Some((expected.trim(), found.trim().strip_suffix('.')?.trim()))
+}
+
+fn normalize_instantiated_generic_type_text(text: &str) -> (String, bool) {
+    let mut rendered = String::new();
+    let mut remaining = text;
+    let mut changed = false;
+
+    while let Some(start) = remaining.find("inst.") {
+        rendered.push_str(&remaining[..start]);
+        let after_marker = &remaining[start + "inst.".len()..];
+        let Some(hash_end) = after_marker.find('.') else {
+            rendered.push_str(&remaining[start..]);
+            return (rendered, changed);
+        };
+        let after_hash = &after_marker[hash_end + 1..];
+        let label_end = after_hash
+            .char_indices()
+            .find(|(_, ch)| ch.is_whitespace() || matches!(*ch, ',' | ')' | ']'))
+            .map(|(index, _)| index)
+            .unwrap_or(after_hash.len());
+        let label = &after_hash[..label_end];
+        if label.is_empty() {
+            rendered.push_str(&remaining[start..start + "inst.".len() + hash_end + 1]);
+            remaining = after_hash;
+            continue;
+        }
+        rendered.push_str(label);
+        remaining = &after_hash[label_end..];
+        changed = true;
+    }
+
+    rendered.push_str(remaining);
+    (rendered, changed)
+}
+
+fn is_alpha_equivalent_instantiated_type_mismatch(message: &str) -> bool {
+    let Some((expected, found)) = type_mismatch_expected_found(message) else {
+        return false;
+    };
+    let (normalized_expected, changed_expected) = normalize_instantiated_generic_type_text(expected);
+    let (normalized_found, changed_found) = normalize_instantiated_generic_type_text(found);
+    (changed_expected || changed_found) && normalized_expected == normalized_found
+}
+
+fn bundle_source_entries<'a>(bundle_build: &'a ProjectBundleBuild) -> Vec<(String, &'a str)> {
+    bundle_build
+        .bundle
+        .split(PROJECT_BUNDLE_SEPARATOR)
+        .filter(|source| !source.trim().is_empty())
+        .enumerate()
+        .map(|(index, source)| {
+            let file = bundle_build
+                .modules
+                .get(index)
+                .map(|module| module.canonical_path.clone())
+                .unwrap_or_else(|| format!("<module-{index}>"));
+            (file, source)
+        })
+        .collect()
+}
+
+fn locate_text_in_source(
+    file: &str,
+    source: &str,
+    needle: &str,
+    start_line: Option<usize>,
+) -> Option<DiagnosticLocation> {
+    if needle.is_empty() {
+        return None;
+    }
+    let first_line = start_line.unwrap_or(1);
+    for (index, line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        if line_number < first_line {
+            continue;
+        }
+        if let Some(byte_column) = line.find(needle) {
+            return Some(DiagnosticLocation {
+                file: file.to_owned(),
+                line: line_number,
+                column: line[..byte_column].chars().count() + 1,
+            });
+        }
+    }
+    None
+}
+
+fn line_declares_name(line: &str, name: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix(name) else {
+        return false;
+    };
+    if rest.starts_with('=') {
+        return true;
+    }
+    rest.chars()
+        .next()
+        .map(|ch| ch.is_whitespace())
+        .unwrap_or(false)
+        && rest.contains('=')
+}
+
+fn find_decl_line(source: &str, name: &str) -> Option<usize> {
+    if name.is_empty() {
+        return None;
+    }
+    for (index, line) in source.lines().enumerate() {
+        if line_declares_name(line, name) {
+            return Some(index + 1);
+        }
+    }
+    None
+}
+
+fn locate_decl_in_source(file: &str, source: &str, name: &str) -> Option<DiagnosticLocation> {
+    let line = find_decl_line(source, name)?;
+    locate_text_in_source(file, source, name, Some(line))
+}
+
+fn diagnostic_target_text(message: &str) -> Option<String> {
+    let detail = diagnostic_detail(message);
+    first_backticked_after(detail, "Type mismatch for `")
+        .or_else(|| first_backticked_after(detail, "Unknown name `"))
+        .or_else(|| first_backticked_after(detail, "Unknown constructor `"))
+        .or_else(|| first_backticked_after(detail, "Unknown type `"))
+        .or_else(|| first_backticked_after(detail, "Expected a value annotation for `"))
+}
+
+fn checker_diagnostic_location(
+    message: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Option<DiagnosticLocation> {
+    let context_decl = diagnostic_context_decl(message);
+    let target = diagnostic_target_text(message);
+    for (file, source) in bundle_source_entries(bundle_build) {
+        let context_line = context_decl
+            .as_ref()
+            .and_then(|decl_name| find_decl_line(source, decl_name));
+        if let Some(target_text) = target.as_deref() {
+            if let Some(location) = locate_text_in_source(&file, source, target_text, context_line) {
+                return Some(location);
+            }
+        }
+        if let Some(decl_name) = context_decl.as_deref() {
+            if let Some(location) = locate_decl_in_source(&file, source, decl_name) {
+                return Some(location);
+            }
+        }
+    }
+    None
+}
+
+fn structured_check_diagnostic_from_summary(
+    summary: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Option<CompilerDiagnostic> {
+    let message = strip_compiler_error_prefix(summary);
+    if is_alpha_equivalent_instantiated_type_mismatch(message) {
+        return None;
+    }
+    let code = checker_diagnostic_code(message)?;
+    Some(CompilerDiagnostic {
+        phase: "checker",
+        code,
+        message: message.to_owned(),
+        primary_location: checker_diagnostic_location(message, bundle_build),
+    })
+}
+
+fn looks_like_definition_lhs(lhs: &str) -> bool {
+    let first = lhs.trim().split_whitespace().next().unwrap_or("");
+    first
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        .unwrap_or(false)
+}
+
+fn source_line_indent(line: &str) -> usize {
+    line.chars().take_while(|ch| ch.is_whitespace()).count()
+}
+
+fn empty_equals_has_indented_rhs(lines: &[&str], index: usize, base_indent: usize) -> bool {
+    for line in lines.iter().skip(index + 1) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        return source_line_indent(line) > base_indent;
+    }
+    false
+}
+
+fn empty_rhs_parse_diagnostic_for_source(file: &str, source: &str) -> Option<CompilerDiagnostic> {
+    let lines: Vec<&str> = source.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("module ")
+            || trimmed.starts_with("import ")
+        {
+            continue;
+        }
+        let Some((lhs, rhs)) = line.split_once('=') else {
+            continue;
+        };
+        if rhs.trim().is_empty() && looks_like_definition_lhs(lhs) {
+            if empty_equals_has_indented_rhs(&lines, index, source_line_indent(line)) {
+                continue;
+            }
+            let location = DiagnosticLocation {
+                file: file.to_owned(),
+                line: index + 1,
+                column: line.chars().count() + 1,
+            };
+            return Some(CompilerDiagnostic {
+                phase: "parser",
+                code: "E_PARSE_EMPTY_EXPRESSION",
+                message: "Missing expression after `=`.".to_owned(),
+                primary_location: Some(location),
+            });
+        }
+    }
+    None
+}
+
+fn parse_diagnostic_from_bundle(bundle_build: &ProjectBundleBuild) -> Option<CompilerDiagnostic> {
+    for (file, source) in bundle_source_entries(bundle_build) {
+        if let Some(diagnostic) = empty_rhs_parse_diagnostic_for_source(&file, source) {
+            return Some(diagnostic);
+        }
+    }
+    None
+}
+
+fn first_source_location(path: &Path) -> DiagnosticLocation {
+    let file = path.display().to_string();
+    let source = fs::read_to_string(path).unwrap_or_default();
+    for (index, line) in source.lines().enumerate() {
+        if !line.trim().is_empty() {
+            let column = line
+                .chars()
+                .position(|ch| !ch.is_whitespace())
+                .map(|offset| offset + 1)
+                .unwrap_or(1);
+            return DiagnosticLocation {
+                file,
+                line: index + 1,
+                column,
+            };
+        }
+    }
+    DiagnosticLocation {
+        file,
+        line: 1,
+        column: 1,
+    }
+}
+
+fn structured_diagnostic_from_message(
+    message: &str,
+    input_path: &Path,
+    bundle_build: Option<&ProjectBundleBuild>,
+) -> Option<CompilerDiagnostic> {
+    let enhanced = enhance_compiler_diagnostic_text(strip_compiler_error_prefix(message));
+    if enhanced.contains("missing a `module` header")
+        || enhanced.contains("module header was missing a module name")
+    {
+        return Some(CompilerDiagnostic {
+            phase: "parser",
+            code: "E_PARSE_MODULE_HEADER",
+            message: enhanced,
+            primary_location: Some(first_source_location(input_path)),
+        });
+    }
+    bundle_build.and_then(|build| structured_check_diagnostic_from_summary(&enhanced, build))
+}
+
+fn fail_compiler_message(
+    message: &str,
+    input_path: &Path,
+    bundle_build: Option<&ProjectBundleBuild>,
+    json: bool,
+) -> ExitCode {
+    if let Some(diagnostic) = structured_diagnostic_from_message(message, input_path, bundle_build) {
+        fail_diagnostic(&diagnostic, json)
+    } else {
+        fail(message, json)
+    }
 }
 
 fn default_native_image_jobs() -> usize {
@@ -223,7 +789,12 @@ fn default_native_image_jobs() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or_else(|| thread::available_parallelism().map(|value| value.get()).unwrap_or(4).min(6))
+        .unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(|value| value.get())
+                .unwrap_or(DEFAULT_NATIVE_IMAGE_SECTION_JOBS)
+                .min(DEFAULT_NATIVE_IMAGE_SECTION_JOBS)
+        })
 }
 
 fn monolithic_decl_threshold() -> usize {
@@ -817,6 +1388,628 @@ fn parse_module_validation_source(source: &str) -> Option<ModuleValidationSource
     }
 }
 
+fn clean_lightweight_type_text(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(',')
+        .trim_matches('(')
+        .trim_matches(')')
+        .to_owned()
+}
+
+fn parse_lightweight_type_block(block: &str) -> Option<LightweightNativeVariant> {
+    let body = block.trim().strip_prefix("type ")?;
+    let (name_text, constructors_text) = body.split_once('=')?;
+    let name = name_text.split_whitespace().next()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let constructors = constructors_text
+        .split('|')
+        .filter_map(|constructor_text| {
+            let tokens = constructor_text
+                .split_whitespace()
+                .map(clean_lightweight_type_text)
+                .filter(|token| !token.is_empty())
+                .collect::<Vec<_>>();
+            let constructor_name = tokens.first()?.clone();
+            Some(LightweightNativeConstructor {
+                name: constructor_name,
+                payload_types: tokens.into_iter().skip(1).collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Some(LightweightNativeVariant {
+        name: name.to_owned(),
+        constructors,
+    })
+}
+
+fn parse_lightweight_record_block(block: &str) -> Option<LightweightNativeRecord> {
+    let body = block.trim().strip_prefix("record ")?;
+    let (name_text, fields_text) = body.split_once('=')?;
+    let name = name_text.split_whitespace().next()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let fields_start = fields_text.find('{')?;
+    let fields_end = fields_text.rfind('}')?;
+    if fields_end < fields_start {
+        return None;
+    }
+    let fields_body = &fields_text[fields_start + 1..fields_end];
+    let fields = fields_body
+        .split(',')
+        .filter_map(|field_text| {
+            let (field_name, field_type) = field_text.split_once(':')?;
+            let name = field_name.trim();
+            let typ = field_type.trim();
+            if name.is_empty() || typ.is_empty() {
+                return None;
+            }
+            Some((name.to_owned(), typ.to_owned()))
+        })
+        .collect::<Vec<_>>();
+
+    Some(LightweightNativeRecord {
+        name: name.to_owned(),
+        fields,
+    })
+}
+
+fn normalize_runtime_name(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut seen_text = false;
+    for ch in value.chars() {
+        if ch == '_' {
+            if seen_text && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+        } else if ch.is_ascii_uppercase() {
+            let lower = ch.to_ascii_lowercase();
+            if seen_text {
+                if !normalized.ends_with('_') {
+                    normalized.push('_');
+                }
+                normalized.push(lower);
+            } else {
+                normalized.push(lower);
+                seen_text = true;
+            }
+        } else {
+            normalized.push(ch);
+            seen_text = true;
+        }
+    }
+    if normalized.ends_with('_') {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn native_runtime_binding_symbol(runtime_name: &str) -> String {
+    format!("clasp_rt_{}", normalize_runtime_name(runtime_name))
+}
+
+fn parse_lightweight_foreign_block(block: &str) -> Option<LightweightNativeRuntimeBinding> {
+    let mut body = block.trim().strip_prefix("foreign ")?.trim();
+    if let Some(unsafe_body) = body.strip_prefix("unsafe ") {
+        body = unsafe_body.trim();
+    }
+
+    let (name_text, rest) = body.split_once(':')?;
+    let name = name_text.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let (type_text, runtime_text) = rest.split_once('=')?;
+    let binding_type = type_text.trim();
+    if binding_type.is_empty() {
+        return None;
+    }
+    let runtime_start = runtime_text.find('"')?;
+    let runtime_tail = &runtime_text[runtime_start + 1..];
+    let runtime_end = runtime_tail.find('"')?;
+    let runtime = runtime_tail[..runtime_end].to_owned();
+    if runtime.is_empty() {
+        return None;
+    }
+
+    Some(LightweightNativeRuntimeBinding {
+        name: name.to_owned(),
+        symbol: native_runtime_binding_symbol(&runtime),
+        runtime,
+        binding_type: binding_type.to_owned(),
+    })
+}
+
+fn lightweight_route_response_kind(response_type: &str) -> String {
+    if response_type == "Page" {
+        "page".to_owned()
+    } else if response_type == "Redirect" {
+        "redirect".to_owned()
+    } else {
+        "json".to_owned()
+    }
+}
+
+fn clean_lightweight_route_path(value: &str) -> String {
+    value.trim().trim_matches('"').to_owned()
+}
+
+fn parse_lightweight_route_block(block: &str) -> Option<LightweightNativeRouteBoundary> {
+    let body = block.trim().strip_prefix("route ")?.trim();
+    let (name_text, rest) = body.split_once('=')?;
+    let name = name_text.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let tokens = rest.split_whitespace().collect::<Vec<_>>();
+    if tokens.len() < 6 || tokens.get(3).copied() != Some("->") {
+        return None;
+    }
+
+    let method = tokens[0].trim();
+    let path = clean_lightweight_route_path(tokens[1]);
+    let request = tokens[2].trim();
+    let response = tokens[4].trim();
+    let handler = tokens[5].trim();
+    if method.is_empty()
+        || path.is_empty()
+        || request.is_empty()
+        || response.is_empty()
+        || handler.is_empty()
+    {
+        return None;
+    }
+
+    Some(LightweightNativeRouteBoundary {
+        name: name.to_owned(),
+        method: method.to_owned(),
+        path,
+        request: request.to_owned(),
+        response: response.to_owned(),
+        response_kind: lightweight_route_response_kind(response),
+        handler: handler.to_owned(),
+    })
+}
+
+fn parse_lightweight_decl_arity(source: &str, decl_name: &str) -> usize {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !top_level_source_line(line) {
+            continue;
+        }
+        let Some((head, _)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let parts = head.split_whitespace().collect::<Vec<_>>();
+        if parts.first().copied() == Some(decl_name) {
+            return parts.len().saturating_sub(1);
+        }
+    }
+    0
+}
+
+fn lightweight_builtin_variants() -> Vec<LightweightNativeVariant> {
+    vec![
+        LightweightNativeVariant {
+            name: "Result".to_owned(),
+            constructors: vec![
+                LightweightNativeConstructor {
+                    name: "Ok".to_owned(),
+                    payload_types: vec!["a".to_owned()],
+                },
+                LightweightNativeConstructor {
+                    name: "Err".to_owned(),
+                    payload_types: vec!["Str".to_owned()],
+                },
+            ],
+        },
+        LightweightNativeVariant {
+            name: "Option".to_owned(),
+            constructors: vec![
+                LightweightNativeConstructor {
+                    name: "Some".to_owned(),
+                    payload_types: vec!["a".to_owned()],
+                },
+                LightweightNativeConstructor {
+                    name: "None".to_owned(),
+                    payload_types: Vec::new(),
+                },
+            ],
+        },
+    ]
+}
+
+fn lightweight_record_layout_json(name: &str, fields: &[(&str, &str)]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "fields": fields
+            .iter()
+            .map(|(field_name, field_type)| serde_json::json!({"name": field_name, "type": field_type}))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn lightweight_static_record_layouts() -> Vec<serde_json::Value> {
+    vec![
+        lightweight_record_layout_json("Principal", &[("id", "Str")]),
+        lightweight_record_layout_json("Tenant", &[("id", "Str")]),
+        lightweight_record_layout_json(
+            "ResourceIdentity",
+            &[("resourceType", "Str"), ("resourceId", "Str")],
+        ),
+        lightweight_record_layout_json(
+            "AuditActor",
+            &[("actorType", "Str"), ("actorId", "Str")],
+        ),
+        lightweight_record_layout_json(
+            "AuditAction",
+            &[("actionType", "Str"), ("summary", "Str")],
+        ),
+        lightweight_record_layout_json(
+            "AuditProvenance",
+            &[("source", "Str"), ("requestId", "Str"), ("traceId", "Str")],
+        ),
+        lightweight_record_layout_json(
+            "SqliteConnection",
+            &[
+                ("id", "Str"),
+                ("databasePath", "Str"),
+                ("readOnly", "Bool"),
+                ("memory", "Bool"),
+            ],
+        ),
+        lightweight_record_layout_json(
+            "AuthSession",
+            &[
+                ("sessionId", "Str"),
+                ("principal", "Principal"),
+                ("tenant", "Tenant"),
+                ("resource", "ResourceIdentity"),
+            ],
+        ),
+        lightweight_record_layout_json(
+            "StandardAuditEnvelope",
+            &[
+                ("actor", "AuditActor"),
+                ("resource", "ResourceIdentity"),
+                ("action", "AuditAction"),
+                ("timestamp", "Int"),
+                ("provenance", "AuditProvenance"),
+            ],
+        ),
+    ]
+}
+
+fn lightweight_native_symbol(module_name: &str, name: &str) -> String {
+    format!("clasp_native__{}__{}", module_name.replace('.', "__"), name)
+}
+
+fn compact_json(value: serde_json::Value) -> String {
+    serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned())
+}
+
+fn json_entry_name(value: &serde_json::Value) -> Option<&str> {
+    if let Some(name) = value.as_str() {
+        return Some(name);
+    }
+    value.get("name").and_then(|name| name.as_str())
+}
+
+fn native_decl_entrypoint(decl: &serde_json::Value, module_name: &str) -> Option<serde_json::Value> {
+    let name = decl.get("name").and_then(|value| value.as_str())?;
+    let kind = decl.get("kind").and_then(|value| value.as_str()).unwrap_or("global");
+    let params = decl
+        .get("params")
+        .and_then(|value| value.as_array())
+        .map(|values| values.len())
+        .unwrap_or(0);
+    Some(serde_json::json!({
+        "name": name,
+        "symbol": lightweight_native_symbol(module_name, name),
+        "kind": if kind == "function" || params > 0 { "function" } else { "global" },
+        "arity": params,
+    }))
+}
+
+fn lightweight_constructor_decl_json(constructor: &LightweightNativeConstructor) -> serde_json::Value {
+    let params = (0..constructor.payload_types.len())
+        .map(|index| format!("${index}"))
+        .collect::<Vec<_>>();
+    let args = params
+        .iter()
+        .map(|param| serde_json::json!({"kind": "local", "name": param}))
+        .collect::<Vec<_>>();
+    let body = serde_json::json!({
+        "kind": "construct",
+        "name": constructor.name,
+        "args": args,
+    });
+    if params.is_empty() {
+        serde_json::json!({"kind": "global", "name": constructor.name, "body": body})
+    } else {
+        serde_json::json!({"kind": "function", "name": constructor.name, "params": params, "body": body})
+    }
+}
+
+fn lightweight_native_build_plan(bundle_build: &ProjectBundleBuild) -> Result<(String, NativeImageProjectPlan, NativeImageDeclModulePlan), String> {
+    let module_name = entry_module_name(bundle_build)?.to_owned();
+    let mut decls = Vec::<LightweightNativeDecl>::new();
+    let mut variants = lightweight_builtin_variants();
+    let mut records = Vec::<LightweightNativeRecord>::new();
+    let mut runtime_bindings = Vec::<LightweightNativeRuntimeBinding>::new();
+    let mut route_boundaries = Vec::<LightweightNativeRouteBoundary>::new();
+    let mut decl_module_entries = Vec::<NativeImageDeclModuleEntry>::new();
+    let mut context_parts = vec!["synthetic-native-build-plan-v1".to_owned()];
+
+    for module in &bundle_build.modules {
+        let source = fs::read_to_string(&module.canonical_path).map_err(|err| {
+            format!(
+                "failed to read project module `{}` for synthetic native build plan: {err}",
+                module.canonical_path
+            )
+        })?;
+        let parsed = parse_module_validation_source(&source).ok_or_else(|| {
+            format!(
+                "failed to parse project module `{}` for synthetic native build plan",
+                module.canonical_path
+            )
+        })?;
+
+        let mut module_decl_names = Vec::new();
+        for decl in &parsed.declarations {
+            module_decl_names.push(decl.name.clone());
+            decls.push(LightweightNativeDecl {
+                name: decl.name.clone(),
+                arity: parse_lightweight_decl_arity(&decl.source, &decl.name),
+            });
+        }
+
+        for block in &parsed.interface_blocks {
+            let keyword = leading_keyword(block.trim());
+            match keyword {
+                "type" => {
+                    if let Some(variant) = parse_lightweight_type_block(block) {
+                        if !variants.iter().any(|existing| existing.name == variant.name) {
+                            variants.push(variant);
+                        }
+                    }
+                }
+                "record" => {
+                    if let Some(record) = parse_lightweight_record_block(block) {
+                        if !records.iter().any(|existing| existing.name == record.name) {
+                            records.push(record);
+                        }
+                    }
+                }
+                "foreign" => {
+                    if let Some(binding) = parse_lightweight_foreign_block(block) {
+                        runtime_bindings.push(binding);
+                    }
+                }
+                "route" => {
+                    if let Some(route) = parse_lightweight_route_block(block) {
+                        route_boundaries.push(route);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let interface_fingerprint = conservative_module_interface_fingerprint(&source);
+        context_parts.push(format!("{}:{}", module.module_name, interface_fingerprint));
+        decl_module_entries.push(NativeImageDeclModuleEntry {
+            module_name: module.module_name.clone(),
+            decl_names_text: module_decl_names.join("\n"),
+            interface_fingerprint,
+        });
+    }
+
+    let context_fingerprint = stable_fingerprint_text(&context_parts.join("\n"));
+    let decl_module_plan = NativeImageDeclModulePlan {
+        context_fingerprint: context_fingerprint.clone(),
+        modules: decl_module_entries,
+    };
+
+    let mut export_names = Vec::new();
+    for variant in &variants {
+        for constructor in &variant.constructors {
+            push_unique_text(&mut export_names, constructor.name.clone());
+        }
+    }
+    for decl in &decls {
+        push_unique_text(&mut export_names, decl.name.clone());
+    }
+
+    let mut entrypoints = Vec::new();
+    let mut constructor_decls = Vec::new();
+    for variant in &variants {
+        for constructor in &variant.constructors {
+            entrypoints.push(serde_json::json!({
+                "name": constructor.name,
+                "symbol": lightweight_native_symbol(&module_name, &constructor.name),
+                "kind": if constructor.payload_types.is_empty() { "global" } else { "function" },
+                "arity": constructor.payload_types.len(),
+            }));
+            constructor_decls.push(lightweight_constructor_decl_json(constructor));
+        }
+    }
+    for decl in &decls {
+        entrypoints.push(serde_json::json!({
+            "name": decl.name,
+            "symbol": lightweight_native_symbol(&module_name, &decl.name),
+            "kind": if decl.arity == 0 { "global" } else { "function" },
+            "arity": decl.arity,
+        }));
+    }
+
+    let mut record_layouts = lightweight_static_record_layouts();
+    for record in &records {
+        if record_layouts.iter().any(|layout| {
+            layout
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                == Some(record.name.as_str())
+        }) {
+            continue;
+        }
+        let fields = record
+            .fields
+            .iter()
+            .map(|(name, typ)| serde_json::json!({"name": name, "type": typ}))
+            .collect::<Vec<_>>();
+        record_layouts.push(serde_json::json!({"name": record.name, "fields": fields}));
+    }
+    let variant_layouts = variants
+        .iter()
+        .map(|variant| {
+            let constructors = variant
+                .constructors
+                .iter()
+                .map(|constructor| {
+                    let payloads = constructor
+                        .payload_types
+                        .iter()
+                        .map(|typ| serde_json::json!({"type": typ}))
+                        .collect::<Vec<_>>();
+                    serde_json::json!({"name": constructor.name, "payloads": payloads})
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({"name": variant.name, "constructors": constructors})
+        })
+        .collect::<Vec<_>>();
+    let compatibility_fingerprint = format!("native-compat:{context_fingerprint}");
+    let runtime_binding_values = runtime_bindings
+        .iter()
+        .map(|binding| {
+            serde_json::json!({
+                "name": binding.name,
+                "runtime": binding.runtime,
+                "symbol": binding.symbol,
+                "type": binding.binding_type,
+            })
+        })
+        .collect::<Vec<_>>();
+    let route_boundary_values = route_boundaries
+        .iter()
+        .map(|route| {
+            serde_json::json!({
+                "kind": "route",
+                "name": route.name,
+                "method": route.method,
+                "path": route.path,
+                "request": route.request,
+                "response": route.response,
+                "handler": route.handler,
+                "responseKind": route.response_kind,
+                "encode": format!("$encode_{}", route.response),
+                "decode": format!("$decode_{}", route.request),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let plan = NativeImageProjectPlan {
+        module_name: module_name.clone(),
+        exports: compact_json(serde_json::json!(export_names)),
+        entrypoints: compact_json(serde_json::json!(entrypoints)),
+        abi: compact_json(serde_json::json!({
+            "version": "clasp-native-v1",
+            "wordBytes": 8,
+            "memoryStrategy": "reference_counting",
+            "allocation": {},
+            "ownershipRules": [],
+            "rootDiscoveryRules": [],
+            "lifetimeInvariants": [],
+            "builtinLayouts": [],
+            "recordLayouts": record_layouts,
+            "variantLayouts": variant_layouts,
+            "objectLayouts": [],
+        })),
+        runtime: compact_json(serde_json::json!({
+            "profile": "compiler_backend_minimal",
+            "artifacts": [],
+            "memorySymbols": [],
+            "bindings": runtime_binding_values,
+            "jsonCodecs": [],
+            "binaryCodecs": [],
+            "boundaries": route_boundary_values,
+            "serviceTransports": [],
+            "metadata": {},
+        })),
+        compatibility: compact_json(serde_json::json!({
+            "kind": "clasp-native-compatibility-v1",
+            "interfaceFingerprint": compatibility_fingerprint,
+            "acceptedPreviousFingerprints": [compatibility_fingerprint],
+            "migration": {
+                "kind": "clasp-native-migration-v1",
+                "strategy": "exact-interface-only",
+                "stateType": serde_json::Value::Null,
+                "snapshotSymbol": serde_json::Value::Null,
+                "handoffSymbol": serde_json::Value::Null,
+            },
+        })),
+        constructor_decls: compact_json(serde_json::json!(constructor_decls)),
+        decl_names: String::new(),
+    };
+    let build_plan_text = render_native_image_project_build_plan_text(&plan, &decl_module_plan);
+    Ok((build_plan_text, plan, decl_module_plan))
+}
+
+fn native_image_plan_with_decl_exports(
+    mut plan: NativeImageProjectPlan,
+    decls_text: &str,
+) -> NativeImageProjectPlan {
+    let Ok(decls) = serde_json::from_str::<serde_json::Value>(decls_text) else {
+        return plan;
+    };
+    let Some(decls) = decls.as_array() else {
+        return plan;
+    };
+
+    let mut exports = serde_json::from_str::<serde_json::Value>(&plan.exports)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let mut export_names: HashSet<String> = exports
+        .iter()
+        .filter_map(json_entry_name)
+        .map(|name| name.to_owned())
+        .collect();
+
+    let mut entrypoints = serde_json::from_str::<serde_json::Value>(&plan.entrypoints)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let mut entrypoint_names: HashSet<String> = entrypoints
+        .iter()
+        .filter_map(json_entry_name)
+        .map(|name| name.to_owned())
+        .collect();
+
+    for decl in decls {
+        let Some(name) = decl.get("name").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if export_names.insert(name.to_owned()) {
+            exports.push(serde_json::json!(name));
+        }
+        if entrypoint_names.insert(name.to_owned()) {
+            if let Some(entrypoint) = native_decl_entrypoint(decl, &plan.module_name) {
+                entrypoints.push(entrypoint);
+            }
+        }
+    }
+
+    plan.exports = compact_json(serde_json::json!(exports));
+    plan.entrypoints = compact_json(serde_json::json!(entrypoints));
+    plan
+}
+
 fn module_validation_decl_fingerprints(source: &str) -> Option<HashMap<String, String>> {
     let parsed = parse_module_validation_source(source)?;
     Some(
@@ -1213,6 +2406,19 @@ fn load_cached_or_execute_native_image_build_plan(
         }
     }
 
+    if bundle_build.modules.len() > 1 && env::var("CLASP_NATIVE_DISABLE_SYNTHETIC_BUILD_PLAN").is_err() {
+        match lightweight_native_build_plan(bundle_build) {
+            Ok((build_plan_text, plan, decl_module_plan)) => {
+                trace_native_cache("build-plan synthetic-hit source=rust-project-metadata");
+                write_cached_native_image_build_plan(image_path, bundle_build, &build_plan_text, &decl_module_plan);
+                return Ok((build_plan_text, plan, decl_module_plan));
+            }
+            Err(message) => {
+                trace_native_cache(&format!("build-plan synthetic-miss reason={message}"));
+            }
+        }
+    }
+
     let (build_plan_text, plan, decl_module_plan) = match execute_project_export(
         image_path,
         NATIVE_IMAGE_BUILD_PLAN_EXPORT,
@@ -1441,11 +2647,21 @@ fn execute_parallel_module_decl_section_export(
     if decl_plan.modules.is_empty() {
         return merge_json_arrays(&decl_sections);
     }
-    if decl_plan
+    let largest_decl_module_count = decl_plan
         .modules
         .iter()
-        .any(|module_entry| count_decl_names(&module_entry.decl_names_text) >= monolithic_decl_threshold())
-    {
+        .map(|module_entry| count_decl_names(&module_entry.decl_names_text))
+        .max()
+        .unwrap_or(0);
+    let threshold = monolithic_decl_threshold();
+    trace_native_cache(&format!(
+        "decl-module plan modules={} max_decl_count={} threshold={}",
+        decl_plan.modules.len(),
+        largest_decl_module_count,
+        threshold
+    ));
+    if largest_decl_module_count >= threshold {
+        trace_native_cache("decl-module threshold fallback=monolithic");
         return execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_DECLS_EXPORT, &bundle_build.bundle);
     }
 
@@ -1551,6 +2767,7 @@ fn execute_parallel_module_decl_section_export(
                     })?
                     .scoped_bundle
                     .clone();
+                trace_native_cache(&format!("decl-module export module={module_name} mode=single"));
                 let decl_text = execute_project_module_decls_export(image_path, &module_bundle, &module_name)?;
                 write_cached_native_image_decl_module(
                     image_path,
@@ -1576,6 +2793,7 @@ fn execute_parallel_module_decl_section_export(
                     .scoped_bundle
                     .clone();
                 let worker_image_path = image_path.to_owned();
+                trace_native_cache(&format!("decl-module export module={module_name} mode=worker"));
                 handles.push((
                     index,
                     thread::Builder::new()
@@ -1799,6 +3017,7 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
         }
     };
 
+    let plan = native_image_plan_with_decl_exports(plan, &decls);
     let sections = NativeImageSections {
         module_name: plan.module_name,
         exports: plan.exports,
@@ -1818,7 +3037,8 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
-        form_body_to_json, merge_json_arrays, native_image_cache_dir, parse_cli,
+        empty_rhs_parse_diagnostic_for_source, form_body_to_json, merge_json_arrays,
+        native_image_cache_dir, parse_cli,
         embedded_final_status_path, final_status_output_bytes,
         native_image_decl_module_cache_context_fingerprint, native_route_error_diagnostic_headers,
         native_route_error_http_response, native_route_info_from_image,
@@ -1837,6 +3057,69 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn empty_rhs_parser_diagnostic_reports_missing_expression_at_eof() {
+        let source = "module Main\n\nmain =\n";
+        let diagnostic = empty_rhs_parse_diagnostic_for_source("/tmp/Main.clasp", source)
+            .expect("expected empty rhs diagnostic");
+        assert_eq!(diagnostic.phase, "parser");
+        assert_eq!(diagnostic.code, "E_PARSE_EMPTY_EXPRESSION");
+        assert_eq!(
+            diagnostic.primary_location.as_ref().map(|location| (location.line, location.column)),
+            Some((3, 7))
+        );
+    }
+
+    #[test]
+    fn empty_rhs_parser_diagnostic_allows_indented_multiline_rhs() {
+        let source = r#"module Main
+
+main : Str
+main =
+  if true then
+    "ok"
+  else
+    "fallback"
+"#;
+        assert_eq!(
+            empty_rhs_parse_diagnostic_for_source("/tmp/Main.clasp", source),
+            None
+        );
+    }
+
+    #[test]
+    fn checker_diagnostic_ignores_alpha_equivalent_generic_instantiation_mismatch() {
+        let build = ProjectBundleBuild {
+            bundle: "module Main\n\nidentity : a -> a\nidentity value = value\n".to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `identity`: Type mismatch for `identity`: expected a -> a, found inst.aae962142451c7fc.a -> inst.aae962142451c7fc.a.";
+        assert_eq!(super::structured_check_diagnostic_from_summary(summary, &build), None);
+    }
+
+    #[test]
+    fn checker_diagnostic_keeps_real_generic_shape_mismatches() {
+        let build = ProjectBundleBuild {
+            bundle: "module Main\n\nbad : a -> b\nbad value = value\n".to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `bad`: Type mismatch for `bad`: expected a -> b, found inst.aae962142451c7fc.a -> inst.aae962142451c7fc.a.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected real generic mismatch diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_TYPE_MISMATCH");
     }
 
     #[test]
@@ -1903,6 +3186,39 @@ mod tests {
         assert_eq!(
             replace_extension(&PathBuf::from("src/Main.clasp"), "context.json"),
             PathBuf::from("src/Main.context.json")
+        );
+    }
+
+    #[test]
+    fn unknown_reference_diagnostic_text_points_agents_at_lowercase_booleans() {
+        assert_eq!(
+            super::enhance_compiler_diagnostic_text("In `main`: Unknown name `True`."),
+            "In `main`: Unknown name `True`. Clasp boolean literals are lowercase; use `true` instead, or define/import `True` if it should be a value."
+        );
+        assert_eq!(
+            super::enhance_compiler_diagnostic_text("In `main`: Unknown constructor `True`."),
+            "In `main`: Unknown constructor `True`. Clasp boolean literals are lowercase; use `true` instead, or declare/import a constructor named `True` if this is a data constructor."
+        );
+    }
+
+    #[test]
+    fn unknown_reference_diagnostic_text_adds_generic_repair_action_once() {
+        let enhanced = super::enhance_compiler_diagnostic_text("In `main`: Unknown name `missing`.");
+        assert_eq!(
+            enhanced,
+            "In `main`: Unknown name `missing`. Define or import `missing`, or fix the spelling of the reference."
+        );
+        assert_eq!(super::enhance_compiler_diagnostic_text(&enhanced), enhanced);
+
+        let constructor_enhanced =
+            super::enhance_compiler_diagnostic_text("In `main`: Unknown constructor `Missing`.");
+        assert_eq!(
+            constructor_enhanced,
+            "In `main`: Unknown constructor `Missing`. Declare or import a constructor named `Missing`, or fix the spelling of the constructor reference."
+        );
+        assert_eq!(
+            super::enhance_compiler_diagnostic_text(&constructor_enhanced),
+            constructor_enhanced
         );
     }
 
@@ -2416,6 +3732,233 @@ keep = "stable"
 
         std::env::remove_var("XDG_CACHE_HOME");
         let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn exec_image_project_summary_fast_path_is_limited_to_summary_exports() {
+        assert!(super::exec_image_project_export_uses_incremental_summary(
+            "checkProjectText"
+        ));
+        assert!(super::exec_image_project_export_uses_incremental_summary(
+            "explainProjectText"
+        ));
+        assert!(!super::exec_image_project_export_uses_incremental_summary(
+            "compileProjectText"
+        ));
+        assert!(!super::exec_image_project_export_uses_incremental_summary(
+            "nativeImageProjectBuildPlanText"
+        ));
+    }
+
+    #[test]
+    fn native_image_jobs_default_is_memory_safe_but_overridable() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let previous_jobs = std::env::var_os("CLASP_NATIVE_IMAGE_SECTION_JOBS");
+        std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS");
+
+        let default_jobs = super::default_native_image_jobs();
+        assert!(default_jobs > 0);
+        assert!(default_jobs <= super::DEFAULT_NATIVE_IMAGE_SECTION_JOBS);
+
+        std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS", "5");
+        assert_eq!(super::default_native_image_jobs(), 5);
+
+        match previous_jobs {
+            Some(value) => std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS", value),
+            None => std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS"),
+        }
+    }
+
+    #[test]
+    fn native_image_plan_export_metadata_is_completed_from_decls() {
+        let plan = super::NativeImageProjectPlan {
+            module_name: "Main".to_owned(),
+            exports: "[\"existing\"]".to_owned(),
+            entrypoints: "[{\"name\":\"existing\",\"symbol\":\"sym_existing\",\"kind\":\"global\",\"arity\":0}]"
+                .to_owned(),
+            abi: "{}".to_owned(),
+            runtime: "{}".to_owned(),
+            compatibility: "{}".to_owned(),
+            constructor_decls: "[]".to_owned(),
+            decl_names: String::new(),
+        };
+        let decls = r#"[
+          {"kind":"global","name":"existing","body":{"kind":"literal","value":1}},
+          {"kind":"function","name":"parseExpr","params":["source"],"body":{"kind":"local","name":"source"}}
+        ]"#;
+
+        let completed = super::native_image_plan_with_decl_exports(plan, decls);
+        let exports: serde_json::Value = serde_json::from_str(&completed.exports).expect("exports json");
+        let entrypoints: serde_json::Value =
+            serde_json::from_str(&completed.entrypoints).expect("entrypoints json");
+
+        assert_eq!(exports.as_array().expect("exports array").len(), 2);
+        assert!(exports
+            .as_array()
+            .expect("exports array")
+            .iter()
+            .any(|value| value.as_str() == Some("parseExpr")));
+        assert!(entrypoints
+            .as_array()
+            .expect("entrypoints array")
+            .iter()
+            .any(|entrypoint| entrypoint.get("name").and_then(|value| value.as_str()) == Some("parseExpr")
+                && entrypoint.get("arity").and_then(|value| value.as_u64()) == Some(1)));
+    }
+
+    #[test]
+    fn lightweight_native_build_plan_derives_project_surface_without_compiler_export() {
+        let root = unique_test_root("lightweight-native-build-plan");
+        fs::create_dir_all(&root).expect("create root");
+        let source_path = root.join("Main.clasp");
+        let source = r#"module Main
+
+type MaybeStr = Just Str | Nothing
+record Box = { value: Str }
+
+main : Str
+main = "ok"
+"#;
+        fs::write(&source_path, source).expect("write source");
+        let bundle_build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(source),
+                import_module_names: Vec::new(),
+            }],
+        };
+
+        let (plan_text, plan, decl_module_plan) =
+            super::lightweight_native_build_plan(&bundle_build).expect("lightweight plan");
+        assert!(plan_text.contains("MaybeStr"));
+        assert!(plan.exports.contains("\"main\""));
+        assert!(plan.exports.contains("\"Just\""));
+        assert!(plan.exports.contains("\"Some\""));
+        assert!(plan.abi.contains("\"recordLayouts\""));
+        assert!(plan.abi.contains("\"Box\""));
+        assert!(plan.abi.contains("\"AuthSession\""));
+        let abi: serde_json::Value = serde_json::from_str(&plan.abi).expect("abi json");
+        let record_layouts = abi
+            .get("recordLayouts")
+            .and_then(serde_json::Value::as_array)
+            .expect("record layouts");
+        assert!(record_layouts.iter().any(|layout| {
+            layout.get("name").and_then(serde_json::Value::as_str) == Some("AuthSession")
+                && layout
+                    .get("fields")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|fields| fields.len())
+                    == Some(4)
+        }));
+        assert_eq!(decl_module_plan.modules.len(), 1);
+        assert_eq!(decl_module_plan.modules[0].decl_names_text, "main");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lightweight_native_build_plan_preserves_imported_foreign_runtime_bindings() {
+        let root = unique_test_root("lightweight-native-build-plan-foreign");
+        fs::create_dir_all(&root).expect("create root");
+        let main_path = root.join("Main.clasp");
+        let tools_path = root.join("Tools.clasp");
+        let main_source = r#"module Main
+
+import Tools
+
+main : Result Str
+main = runCommandRaw "." ["printf", "ok"]
+"#;
+        let tools_source = r#"module Tools
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+"#;
+        fs::write(&main_path, main_source).expect("write main source");
+        fs::write(&tools_path, tools_source).expect("write tools source");
+        let bundle_build = ProjectBundleBuild {
+            bundle: [main_source, tools_source].join(PROJECT_BUNDLE_SEPARATOR),
+            modules: vec![
+                ProjectBundleModule {
+                    canonical_path: main_path.to_string_lossy().into_owned(),
+                    module_name: "Main".to_owned(),
+                    source_fingerprint: super::stable_fingerprint_text(main_source),
+                    import_module_names: vec!["Tools".to_owned()],
+                },
+                ProjectBundleModule {
+                    canonical_path: tools_path.to_string_lossy().into_owned(),
+                    module_name: "Tools".to_owned(),
+                    source_fingerprint: super::stable_fingerprint_text(tools_source),
+                    import_module_names: Vec::new(),
+                },
+            ],
+        };
+
+        let (_plan_text, plan, _decl_module_plan) =
+            super::lightweight_native_build_plan(&bundle_build).expect("lightweight plan");
+        let runtime: serde_json::Value = serde_json::from_str(&plan.runtime).expect("runtime json");
+        let bindings = runtime
+            .get("bindings")
+            .and_then(|bindings| bindings.as_array())
+            .expect("runtime bindings");
+        assert!(bindings.iter().any(|binding| {
+            binding.get("name").and_then(|value| value.as_str()) == Some("runCommandRaw")
+                && binding.get("runtime").and_then(|value| value.as_str()) == Some("runCommandJson")
+                && binding.get("symbol").and_then(|value| value.as_str())
+                    == Some("clasp_rt_run_command_json")
+                && binding.get("type").and_then(|value| value.as_str())
+                    == Some("Str -> [Str] -> Result Str")
+        }));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lightweight_native_build_plan_preserves_route_boundaries() {
+        let root = unique_test_root("lightweight-native-build-plan-routes");
+        fs::create_dir_all(&root).expect("create root");
+        let source_path = root.join("Main.clasp");
+        let source = r#"module Main
+
+record Empty = {}
+record Customer = { email: Str }
+
+customer : Empty -> Customer
+customer req = Customer { email = "ops@example.test" }
+
+route customerRoute = GET "/support/customer" Empty -> Customer customer
+"#;
+        fs::write(&source_path, source).expect("write source");
+        let bundle_build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(source),
+                import_module_names: Vec::new(),
+            }],
+        };
+
+        let (_plan_text, plan, _decl_module_plan) =
+            super::lightweight_native_build_plan(&bundle_build).expect("lightweight plan");
+        let runtime: serde_json::Value = serde_json::from_str(&plan.runtime).expect("runtime json");
+        let boundaries = runtime
+            .get("boundaries")
+            .and_then(|boundaries| boundaries.as_array())
+            .expect("route boundaries");
+        assert!(boundaries.iter().any(|boundary| {
+            boundary.get("kind").and_then(|value| value.as_str()) == Some("route")
+                && boundary.get("name").and_then(|value| value.as_str()) == Some("customerRoute")
+                && boundary.get("method").and_then(|value| value.as_str()) == Some("GET")
+                && boundary.get("path").and_then(|value| value.as_str()) == Some("/support/customer")
+                && boundary.get("request").and_then(|value| value.as_str()) == Some("Empty")
+                && boundary.get("response").and_then(|value| value.as_str()) == Some("Customer")
+                && boundary.get("handler").and_then(|value| value.as_str()) == Some("customer")
+                && boundary.get("responseKind").and_then(|value| value.as_str()) == Some("json")
+        }));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -4317,11 +5860,29 @@ fn run_check(options: &CliOptions, embedded_path: &Path, bundle_build: &ProjectB
             };
             match result {
                 Ok(output_bytes) => String::from_utf8_lossy(&output_bytes).into_owned(),
-                Err(message) => return fail(&message, options.json),
+                Err(message) => {
+                    return fail_compiler_message(
+                        &message,
+                        &options.input_path,
+                        Some(bundle_build),
+                        options.json,
+                    )
+                }
             }
         }
-        Err(message) => return fail(&message, options.json),
+        Err(message) => {
+            return fail_compiler_message(
+                &message,
+                &options.input_path,
+                Some(bundle_build),
+                options.json,
+            )
+        }
     };
+    let summary = enhance_compiler_diagnostic_text(&summary);
+    if let Some(diagnostic) = structured_check_diagnostic_from_summary(&summary, bundle_build) {
+        return fail_diagnostic(&diagnostic, options.json);
+    }
 
     if options.json {
         println!(
@@ -4603,6 +6164,10 @@ fn remap_exec_image_project_export_name<'a>(export_name: &'a str, source_text: O
     } else {
         export_name
     }
+}
+
+fn exec_image_project_export_uses_incremental_summary(export_name: &str) -> bool {
+    matches!(export_name, "checkProjectText" | "explainProjectText")
 }
 
 fn run_explain(options: &CliOptions, embedded_path: &Path, bundle_build: &ProjectBundleBuild) -> ExitCode {
@@ -4970,11 +6535,40 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     if let Some(bundle) = cacheable_bundle {
         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
             let output_path = Path::new(args.last().expect("missing output path"));
+            let cached = enhance_compiler_diagnostic_output_bytes(remapped_export_name, cached);
             let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
                 augment_context_dependency_graph_output(cached)
             } else {
                 cached
             };
+            if let Err(message) = write_output(output_path, &output_bytes) {
+                eprintln!("{message}");
+                return ExitCode::from(1);
+            }
+            return ExitCode::SUCCESS;
+        }
+    }
+
+    if let Some(project_entry_path) = project_entry_path {
+        if exec_image_project_export_uses_incremental_summary(export_name) {
+            let bundle_build = match build_project_bundle_build(project_entry_path) {
+                Ok(bundle_build) => bundle_build,
+                Err(message) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(1);
+                }
+            };
+            let summary = match execute_incremental_project_summary(image_path, &bundle_build) {
+                Ok(summary) => summary,
+                Err(message) => {
+                    eprintln!("{}", enhance_compiler_diagnostic_text(&message));
+                    return ExitCode::from(1);
+                }
+            };
+            let summary = enhance_compiler_diagnostic_text(&summary);
+            let output_bytes = summary.into_bytes();
+            write_cached_source_export(image_path, remapped_export_name, &bundle_build.bundle, &output_bytes);
+            let output_path = Path::new(args.last().expect("missing output path"));
             if let Err(message) = write_output(output_path, &output_bytes) {
                 eprintln!("{message}");
                 return ExitCode::from(1);
@@ -5058,10 +6652,11 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     let output_bytes = match result {
         Ok(output_bytes) => output_bytes,
         Err(message) => {
-            eprintln!("{message}");
+            eprintln!("{}", enhance_compiler_diagnostic_text(&message));
             return ExitCode::from(1);
         }
     };
+    let output_bytes = enhance_compiler_diagnostic_output_bytes(remapped_export_name, output_bytes);
     let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
         augment_context_dependency_graph_output(output_bytes)
     } else {
@@ -5184,8 +6779,13 @@ fn run_main(args: Vec<String>) -> ExitCode {
 
     let bundle_build = match bundle_build(&options.input_path) {
         Ok(bundle_build) => bundle_build,
-        Err(message) => return fail(&message, options.json),
+        Err(message) => {
+            return fail_compiler_message(&message, &options.input_path, None, options.json)
+        }
     };
+    if let Some(diagnostic) = parse_diagnostic_from_bundle(&bundle_build) {
+        return fail_diagnostic(&diagnostic, options.json);
+    }
     let bundle = &bundle_build.bundle;
 
     match options.command {
@@ -5195,8 +6795,19 @@ fn run_main(args: Vec<String>) -> ExitCode {
                 let result = execute_source_or_project_export(&embedded_path_text, &bundle_build, "checkProjectText");
                 let summary = match result {
                     Ok(output_bytes) => String::from_utf8_lossy(&output_bytes).into_owned(),
-                    Err(message) => return fail(&message, options.json),
+                    Err(message) => {
+                        return fail_compiler_message(
+                            &message,
+                            &options.input_path,
+                            Some(&bundle_build),
+                            options.json,
+                        )
+                    }
                 };
+                let summary = enhance_compiler_diagnostic_text(&summary);
+                if let Some(diagnostic) = structured_check_diagnostic_from_summary(&summary, &bundle_build) {
+                    return fail_diagnostic(&diagnostic, options.json);
+                }
 
                 if options.json {
                     println!(

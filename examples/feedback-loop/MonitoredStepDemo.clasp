@@ -1,0 +1,53 @@
+module MonitoredStepDemo
+
+import Process
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-monitored-step-state"
+  else
+    pathJoin argv
+
+stdoutPath : Str
+stdoutPath = pathJoin [stateRoot, "step.stdout.log"]
+
+stderrPath : Str
+stderrPath = pathJoin [stateRoot, "step.stderr.log"]
+
+heartbeatPath : Str
+heartbeatPath = pathJoin [stateRoot, "step.heartbeat.json"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+directCommand : [Str]
+directCommand = [
+  "node",
+  "-e",
+  "process.stdout.write('monitored-step-out'); process.stderr.write('monitored-step-err'); process.exit(3);"
+]
+
+stepSpec : WatchedCommandSpec
+stepSpec =
+  watchedCommandSpec
+    "."
+    stdoutPath
+    stderrPath
+    heartbeatPath
+    watchPollMs
+    directCommand
+
+runDemo : Str
+runDemo =
+  match runMonitored stepSpec {
+    Ok result -> encode result,
+    Err message -> textConcat ["error:", message]
+  }
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runDemo
+  }

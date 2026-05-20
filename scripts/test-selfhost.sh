@@ -16,8 +16,11 @@ selfhost_entry_cache_root="$test_root/selfhost-entry-cache-root"
 selfhost_entry_check_output="$test_root/selfhost.entry.check.json"
 selfhost_entry_check_log="$test_root/selfhost.entry.check.log"
 semantic_probe_cache_root="$test_root/semantic-probe-cache"
+diagnostic_probe_cache_root="$test_root/diagnostic-probe-cache"
 semantic_source_path="$test_root/semantic-context.clasp"
+diagnostic_unbound_source_path="$test_root/diagnostic-unbound.clasp"
 semantic_check_output="$test_root/semantic.check.txt"
+diagnostic_unbound_output="$test_root/diagnostic-unbound.check.txt"
 semantic_air_output="$test_root/semantic.air.json"
 semantic_context_output="$test_root/semantic.context.json"
 lead_app_context_output="$test_root/lead-app.context.json"
@@ -64,9 +67,25 @@ EOF
 
 mkdir -p "$selfhost_entry_cache_root"
 mkdir -p "$semantic_probe_cache_root"
+mkdir -p "$diagnostic_probe_cache_root"
 
 node "$project_root/scripts/generate-promoted-module-summary-cache.mjs" --check >/dev/null
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
+
+cat >"$diagnostic_unbound_source_path" <<'EOF'
+module Main
+
+main : Bool
+main = True
+EOF
+
+XDG_CACHE_HOME="$diagnostic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/src/scripts/run-native-tool.sh" \
+  "$project_root/src/embedded.compiler.native.image.json" \
+  checkSourceText \
+  "$diagnostic_unbound_source_path" \
+  "$diagnostic_unbound_output"
+grep -F 'In `main`: Unknown constructor `True`. Clasp boolean literals are lowercase; use `true` instead' "$diagnostic_unbound_output" >/dev/null
 
 XDG_CACHE_HOME="$semantic_probe_cache_root" CLASPC_BIN="$claspc_bin" \
   bash "$project_root/src/scripts/run-native-tool.sh" \

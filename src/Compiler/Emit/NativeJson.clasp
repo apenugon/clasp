@@ -82,6 +82,8 @@ emitNativeExprJson expr = match expr {
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.map", jsonFieldText "callee" callee, jsonFieldRaw "values" (emitNativeExprJson values)],
   LowerListFilter callee values ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.filter", jsonFieldText "callee" callee, jsonFieldRaw "values" (emitNativeExprJson values)],
+  LowerListFind callee values ->
+    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.find", jsonFieldText "callee" callee, jsonFieldRaw "values" (emitNativeExprJson values)],
   LowerListAny callee values ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.any", jsonFieldText "callee" callee, jsonFieldRaw "values" (emitNativeExprJson values)],
   LowerListAll callee values ->

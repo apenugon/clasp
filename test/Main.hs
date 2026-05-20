@@ -1584,7 +1584,7 @@ checkerTests =
               Just typeDecl ->
                 assertEqual
                   "builtin Option constructors"
-                  [ ConstructorDecl "Some" dummySpan dummySpan [TStr]
+                  [ ConstructorDecl "Some" dummySpan dummySpan [TVar "a"]
                   , ConstructorDecl "None" dummySpan dummySpan []
                   ]
                   (normalizeConstructors (typeDeclConstructors typeDecl))
@@ -1592,14 +1592,24 @@ checkerTests =
                 assertFailure "expected compiler-known Option type declaration"
             case find ((== "unwrap") . coreDeclName) (coreModuleDecls checked) of
               Just decl -> do
-                assertEqual "unwrap type" (TFunction [TNamed "Option"] TStr) (coreDeclType decl)
+                assertEqual "unwrap type" (TFunction [TApply "Option" [TStr]] TStr) (coreDeclType decl)
                 case coreDeclBody decl of
-                  CMatch _ TStr (CVar _ (TNamed "Option") "value") [CoreMatchBranch _ (CConstructorPattern _ "Some" [CorePatternBinder "present" _ TStr]) (CVar _ TStr "present"), CoreMatchBranch _ (CConstructorPattern _ "None" []) (CString _ "missing")] ->
+                  CMatch _ TStr (CVar _ (TApply "Option" [TStr]) "value") [CoreMatchBranch _ (CConstructorPattern _ "Some" [CorePatternBinder "present" _ TStr]) (CVar _ TStr "present"), CoreMatchBranch _ (CConstructorPattern _ "None" []) (CString _ "missing")] ->
                     pure ()
                   other ->
                     assertFailure ("expected checked Option match expression, got " <> show other)
               Nothing ->
                 assertFailure "expected unwrap declaration"
+    , testCase "typechecks compiler-known list find helper" $
+        case checkSource "list-find" listFindSource of
+          Left err ->
+            assertFailure ("expected list find source to typecheck:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right checked ->
+            case find ((== "findFirst") . coreDeclName) (coreModuleDecls checked) of
+              Just decl ->
+                assertEqual "findFirst type" (TFunction [TList TStr] (TApply "Option" [TStr])) (coreDeclType decl)
+              Nothing ->
+                assertFailure "expected findFirst declaration"
     , testCase "typechecks compiler-known self-hosting stdlib helpers" $
         case checkSource "compiler-stdlib" compilerStdlibSource of
           Left err ->
@@ -2127,6 +2137,8 @@ checkerTests =
             assertEqual "primary column" (Just 11) (positionColumn . sourceSpanStart <$> diagnosticPrimarySpan err)
           Right _ ->
             assertFailure "expected type mismatch failure"
+    , testCase "rejects list find predicates that do not return Bool" $
+        assertHasCode "E_TYPE_MISMATCH" (checkSource "bad-find" badListFindPredicateSource)
     , testCase "reports duplicate declarations with related location" $
         case checkSource "bad" duplicateDeclSource of
           Left bundle -> do
@@ -3069,6 +3081,16 @@ lowerTests =
                 pure ()
               other ->
                 assertFailure ("unexpected lowered Option constructors: " <> show other)
+    , testCase "lowering preserves list find as a dedicated helper" $
+        case lowerChecked "list-find" listFindSource of
+          Left err ->
+            assertFailure ("expected list find lowering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right lowered ->
+            case findLowerDecl "findFirst" (lowerModuleDecls lowered) of
+              Just (LFunctionDecl _ ["values"] (LCall (LVar "find") [LVar "isTarget", LVar "values"])) ->
+                pure ()
+              other ->
+                assertFailure ("unexpected lowered list find declaration: " <> show other)
     , testCase "lowering preserves match branches as tag dispatch" $
         case lowerChecked "adt" adtSource of
           Left err ->
@@ -4062,6 +4084,13 @@ nativeTests =
                 assertFailure ("expected native global main declaration, got " <> show other)
               Nothing ->
                 assertFailure "expected native main declaration"
+    , testCase "native rendering preserves list find as a dedicated intrinsic" $
+        case renderNativeSource "list-find" listFindSource of
+          Left err ->
+            assertFailure ("expected list find native rendering to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right nativeIr -> do
+            assertBool "expected find intrinsic in native output" ("function findFirst(values) = intrinsic.list.find(isTarget, local(values))" `T.isInfixOf` nativeIr)
+            assertBool "expected Option layout in native output" ("variant_layout Option" `T.isInfixOf` nativeIr)
     , testCase "native lowering preserves if expressions" $
         case nativeSource "if-expression" ifExpressionSource of
           Left err ->
@@ -4470,6 +4499,8 @@ nativeTests =
         assertBool "expected interpreted if support" ("ClaspRtInterpretedExpr::If(" `T.isInfixOf` source)
         assertBool "expected interpreted compare support" ("ClaspRtInterpretedExpr::Compare(" `T.isInfixOf` source)
         assertBool "expected interpreted list append intrinsic" ("ClaspRtInterpretedIntrinsic::ListAppend" `T.isInfixOf` source)
+        assertBool "expected interpreted list find intrinsic" ("ClaspRtInterpretedIntrinsic::ListFind" `T.isInfixOf` source)
+        assertBool "expected interpreted list find image parser" ("\"list.find\"" `T.isInfixOf` source)
         assertBool "expected stage1 primary dict builtin binding" ("emitRuntimeBindingImage \"dictEmpty\" \"dictEmpty\" \"Dict Str a\"" `T.isInfixOf` stage1Primary)
         assertBool "expected stage1 primary dict builtin list" ("for builtinName in [\"textConcat\", \"textJoin\", \"textSplit\", \"textChars\", \"textFingerprint64Hex\", \"textPrefix\", \"textSplitFirst\", \"dictEmpty\", \"dictSet\"" `T.isInfixOf` stage1Primary)
         assertBool "expected embedded primary dict builtin binding" ("emitRuntimeBindingImage \"dictEmpty\" \"dictEmpty\" \"Dict Str a\"" `T.isInfixOf` embeddedPrimary)
@@ -4483,8 +4514,12 @@ docsTests =
     "docs"
     [ testCase "v0 spec documents compiler-known Option and Result bootstrap types" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
-        assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`." `T.isInfixOf` spec)
+        assertBool "expected Option bootstrap type note" ("`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option a = Some a | None`." `T.isInfixOf` spec)
         assertBool "expected Result bootstrap type note" ("`Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result a = Ok a | Err Str`." `T.isInfixOf` spec)
+    , testCase "v0 spec documents the compiler-known list find helper" $ do
+        spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
+        assertBool "expected find helper" ("`map f values`, `filter f values`, `find f values`, `any f values`, `all f values`, and `fold f initial values`" `T.isInfixOf` spec)
+        assertBool "expected find Option result" ("`find` returns `Option a`" `T.isInfixOf` spec)
     , testCase "v0 spec documents the compiler-support text traversal helper" $ do
         spec <- TIO.readFile ("docs" </> "clasp-spec-v0.md")
         assertBool "expected textChars bootstrap helper" ("- `textChars : Str -> [Str]`" `T.isInfixOf` spec)
@@ -6849,6 +6884,24 @@ compileTests =
             assertFailure ("expected list append compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
           Right emitted ->
             assertBool "expected list append spread expression" ("export const main = [...leading, ...trailing];" `T.isInfixOf` emitted)
+    , testCase "compile emits and evaluates list find with Option results" $
+        case compileSource "list-find" listFindSource of
+          Left err ->
+            assertFailure ("expected list find compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected list find loop" ("for (const __item of values)" `T.isInfixOf` emitted)
+            assertBool "expected Some result" ("return [\"Some\", __item];" `T.isInfixOf` emitted)
+            assertBool "expected None result" ("return [\"None\"];" `T.isInfixOf` emitted)
+            let compiledPath = "dist/list-find-expression.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(compiledModule.main);"
+                ]
+            assertEqual "expected find runtime output" "needle:missing" runtimeOutput
     , testCase "compile lowers if expressions to JavaScript conditionals" $
         case compileSource "if-expression" ifExpressionSource of
           Left err ->
@@ -9411,7 +9464,7 @@ builtinOptionSource =
   T.unlines
     [ "module Main"
     , ""
-    , "unwrap : Option -> Str"
+    , "unwrap : Option Str -> Str"
     , "unwrap value = match value {"
     , "  Some present -> present,"
     , "  None -> \"missing\""
@@ -9419,6 +9472,39 @@ builtinOptionSource =
     , ""
     , "main : Str"
     , "main = unwrap (Some \"present\")"
+    ]
+
+listFindSource :: Text
+listFindSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "isTarget : Str -> Bool"
+    , "isTarget value = value == \"needle\""
+    , ""
+    , "findFirst : [Str] -> Option Str"
+    , "findFirst values = find isTarget values"
+    , ""
+    , "summarizeFind : [Str] -> Str"
+    , "summarizeFind values = match findFirst values {"
+    , "  Some found -> found,"
+    , "  None -> \"missing\""
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = textJoin \":\" [summarizeFind [\"hay\", \"needle\"], summarizeFind [\"hay\"]]"
+    ]
+
+badListFindPredicateSource :: Text
+badListFindPredicateSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "notPredicate : Str -> Str"
+    , "notPredicate value = value"
+    , ""
+    , "main : Option Str"
+    , "main = find notPredicate [\"needle\"]"
     ]
 
 hostedNativeDecisionSource :: Text

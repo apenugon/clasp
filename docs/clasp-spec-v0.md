@@ -87,7 +87,7 @@ The current `module Main`-style surface should be treated as provisional. Future
 
 The v0 compiler now implements a first slice of those features through nominal sum types, explicit type parameters on records/ADTs/signatures, constructor-based match expressions, and rank-1 polymorphism for declaration-level schemes, but the design should still assume a broader static-semantics story later.
 
-`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option = Some Str | None`. Modules may use `Option`, `Some`, and `None` without declaring the type locally.
+`Option` is compiler-known in `v0` as a bootstrap absence model equivalent to `type Option a = Some a | None`. Modules may use `Option`, `Some`, and `None` without declaring the type locally.
 
 `Result` is also compiler-known in `v0` as a bootstrap failure model equivalent to `type Result a = Ok a | Err Str`. Modules may use `Result`, `Ok`, and `Err` without declaring the type locally.
 
@@ -526,7 +526,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - `prepend value values` inserts a single element at the front of a list and is polymorphic over the element type.
 - `reverse values` reverses a list and preserves the list item type.
 - `length value` returns the length of a list or string.
-- `map f values`, `filter f values`, `any f values`, `all f values`, and `fold f initial values` provide polymorphic list traversal helpers, and today require a plain function name as their first argument.
+- `map f values`, `filter f values`, `find f values`, `any f values`, `all f values`, and `fold f initial values` provide polymorphic list traversal helpers. `find` returns `Option a`, and these helpers today require a plain function name as their first argument.
 - `Dict Str a` is a compiler-known dictionary surface for state-heavy compiler and swarm code; `dictSet`, `dictGet`, `dictHas`, `dictRemove`, `dictKeys`, and `dictValues` provide immutable update and lookup helpers over string-keyed maps.
 - Record field access becomes JavaScript property access.
 - Record fields may carry a classification label; unlabeled fields default to `public`.

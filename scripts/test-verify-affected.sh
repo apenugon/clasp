@@ -17,6 +17,7 @@ test_root="$(mktemp -d "$tmp_root/verify-affected.XXXXXX")"
 project_copy="$test_root/project"
 mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler" \
   "$project_copy/runtime" "$project_copy/examples/swarm-native" "$project_copy/examples/feedback-loop" \
+  "$project_copy/examples/agent-task-scenario/scripts" \
   "$project_copy/examples/lead-app/Shared" "$project_copy/examples/lead-app/scripts" \
   "$project_copy/examples/lead-app/benchmark-prep" \
   "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared" \
@@ -25,8 +26,12 @@ mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/
 
 cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
+cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verify-compiler-slice.sh"
+cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
 touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
 touch "$project_copy/examples/lead-app/scripts/verify.sh"
+touch "$project_copy/examples/agent-task-scenario/Main.clasp"
+touch "$project_copy/examples/agent-task-scenario/scripts/verify.sh"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"
 cat > "$project_copy/benchmarks/tasks/clasp-lead-segment/task.json" <<'JSON'
@@ -160,6 +165,9 @@ switch (scenario) {
     assert(hasCommand("bash scripts/test-native-runtime.sh"), "runtime route should run native runtime coverage");
     assert(hasCommand("bash scripts/test-native-claspc.sh"), "runtime/swarm route should run native claspc coverage");
     assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm route should run ready-gate coverage");
+    assert(hasCommand("bash scripts/test-monitored-step.sh"), "feedback-loop route should run monitored step coverage");
+    assert(hasCommand("bash scripts/test-monitored-workflow.sh"), "feedback-loop route should run monitored workflow coverage");
+    assert(hasCommand("bash scripts/test-codex-loop-program.sh"), "feedback-loop route should run ordinary Codex loop coverage");
     assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop route should run resume coverage");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
@@ -177,6 +185,50 @@ switch (scenario) {
     assert(hasCommand("bash scripts/test-verify-affected.sh"), "affected helper should run focused regression");
     assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
+    break;
+  case "compiler-slice-script":
+    assert(report.changedFiles.includes("scripts/verify-compiler-slice.sh"), "compiler slice verifier should be present");
+    assert(report.changedFiles.includes("scripts/test-verify-compiler-slice.sh"), "compiler slice smoke test should be present");
+    assert(hasCommand("bash -n 'scripts/verify-compiler-slice.sh'"), "compiler slice verifier should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/test-verify-compiler-slice.sh'"), "compiler slice smoke should run shell syntax check");
+    assert(hasCommand("bash scripts/test-verify-compiler-slice.sh"), "compiler slice script changes should run focused smoke");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-verify-compiler-slice.sh").length === 1, "compiler slice smoke should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known compiler slice scripts should not use verify-fast fallback");
+    assert(logHas("scripts/test-verify-compiler-slice.sh"), "fake compiler slice smoke command should execute");
+    break;
+  case "compiler-slice-fixture":
+    assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");
+    assert(report.changedFiles.includes("examples/compiler-lower.clasp"), "compiler lower fixture should be present");
+    assert(hasCommand("bash scripts/verify-compiler-slice.sh checker"), "checker fixture should run focused compiler slice verifier");
+    assert(hasCommand("bash scripts/verify-compiler-slice.sh lower"), "lower fixture should run focused compiler slice verifier");
+    assert(report.usedVerifyFastFallback === false, "known compiler fixture should not use verify-fast fallback");
+    assert(logHas("scripts/verify-compiler-slice.sh checker"), "fake compiler slice verifier command should execute");
+    assert(logHas("scripts/verify-compiler-slice.sh lower"), "fake lower slice verifier command should execute");
+    break;
+  case "agent-task-scenario":
+    assert(report.changedFiles.includes("examples/agent-task-scenario/Main.clasp"), "agent task scenario source should be present");
+    assert(report.changedFiles.includes("examples/agent-task-scenario/scripts/verify.sh"), "agent task scenario verifier should be present");
+    assert(hasCommand("bash examples/agent-task-scenario/scripts/verify.sh"), "agent task scenario should run its scenario verifier");
+    assert(hasCommand("bash -n 'examples/agent-task-scenario/scripts/verify.sh'"), "agent task scenario verifier should run shell syntax check");
+    assert(report.selectedCommands.filter((command) => command.command === "bash examples/agent-task-scenario/scripts/verify.sh").length === 1, "agent task scenario verifier should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known agent task scenario inputs should not use verify-fast fallback");
+    assert(logHas("examples/agent-task-scenario/scripts/verify.sh"), "fake agent task scenario verifier command should execute");
+    break;
+  case "monitored-workflow-script":
+    assert(report.changedFiles.includes("scripts/test-monitored-workflow.sh"), "monitored workflow harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-monitored-workflow.sh'"), "monitored workflow harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-monitored-workflow.sh"), "monitored workflow harness should run focused coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-monitored-workflow.sh").length === 1, "monitored workflow harness should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known monitored workflow harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-monitored-workflow.sh"), "fake monitored workflow command should execute");
+    break;
+  case "codex-loop-program-script":
+    assert(report.changedFiles.includes("scripts/test-codex-loop-program.sh"), "ordinary Codex loop harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-codex-loop-program.sh'"), "ordinary Codex loop harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-codex-loop-program.sh"), "ordinary Codex loop harness should run focused coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-codex-loop-program.sh").length === 1, "ordinary Codex loop harness should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known ordinary Codex loop harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-codex-loop-program.sh"), "fake ordinary Codex loop command should execute");
     break;
   case "source-benchmark-mixed":
     assert(report.changedFiles.includes("src/Compiler/SemanticArtifacts.clasp"), "source context artifact file should be present");
@@ -277,6 +329,42 @@ script_log="$test_root/script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
   run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
 assert_report "$script_report" "$script_log" verification-script
+
+compiler_slice_script_report="$test_root/compiler-slice-script-report.json"
+compiler_slice_script_log="$test_root/compiler-slice-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_script_log" \
+  run_verify_affected \
+    --changed-file scripts/verify-compiler-slice.sh \
+    --changed-file scripts/test-verify-compiler-slice.sh > "$compiler_slice_script_report"
+assert_report "$compiler_slice_script_report" "$compiler_slice_script_log" compiler-slice-script
+
+compiler_slice_fixture_report="$test_root/compiler-slice-fixture-report.json"
+compiler_slice_fixture_log="$test_root/compiler-slice-fixture.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_fixture_log" \
+  run_verify_affected \
+    --changed-file examples/compiler-checker.clasp \
+    --changed-file examples/compiler-lower.clasp > "$compiler_slice_fixture_report"
+assert_report "$compiler_slice_fixture_report" "$compiler_slice_fixture_log" compiler-slice-fixture
+
+agent_task_scenario_report="$test_root/agent-task-scenario-report.json"
+agent_task_scenario_log="$test_root/agent-task-scenario.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$agent_task_scenario_log" \
+  run_verify_affected \
+    --changed-file examples/agent-task-scenario/Main.clasp \
+    --changed-file examples/agent-task-scenario/scripts/verify.sh > "$agent_task_scenario_report"
+assert_report "$agent_task_scenario_report" "$agent_task_scenario_log" agent-task-scenario
+
+monitored_workflow_script_report="$test_root/monitored-workflow-script-report.json"
+monitored_workflow_script_log="$test_root/monitored-workflow-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$monitored_workflow_script_log" \
+  run_verify_affected --changed-file scripts/test-monitored-workflow.sh > "$monitored_workflow_script_report"
+assert_report "$monitored_workflow_script_report" "$monitored_workflow_script_log" monitored-workflow-script
+
+codex_loop_program_script_report="$test_root/codex-loop-program-script-report.json"
+codex_loop_program_script_log="$test_root/codex-loop-program-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$codex_loop_program_script_log" \
+  run_verify_affected --changed-file scripts/test-codex-loop-program.sh > "$codex_loop_program_script_report"
+assert_report "$codex_loop_program_script_report" "$codex_loop_program_script_log" codex-loop-program-script
 
 source_benchmark_report="$test_root/source-benchmark-report.json"
 source_benchmark_log="$test_root/source-benchmark.log"

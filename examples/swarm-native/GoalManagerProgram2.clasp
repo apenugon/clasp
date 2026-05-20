@@ -2489,8 +2489,8 @@ ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
     "config-error:missing-workspace-root"
-  else if maxTaskLoops < 1 then
-    "config-error:max-tasks-must-be-positive"
+  else if maxTaskLoops < 0 then
+    "config-error:max-tasks-must-be-nonnegative"
   else if childMaxAttempts < 1 then
     "config-error:child-max-attempts-must-be-positive"
   else if maxConcurrentChildren < 1 then
@@ -2641,7 +2641,14 @@ plannerPromptFor wave benchmarkSummary = textJoin "\n" [
   "Current shared swarm mailbox context:",
   mailboxSummaryText wave,
   "Do not assume a fixed role taxonomy beyond the minimal substrate already present. Let coordination patterns emerge from the work and the shared mailbox.",
+  "Planning is a control-plane step, not a verification or implementation step.",
+  "Do not run repo-wide verification, benchmarks, builds, package installs, or other long commands from the planner.",
+  "Do not inspect files, run shell commands, invoke tools, or gather extra repository context from the planner.",
+  "Use only this prompt, the planner policy, benchmark context, and mailbox summary as planner inputs.",
+  "If uncertain, create a bounded inspection or verification task instead of inspecting from the planner.",
+  "If verification is needed, encode it in the planned task prompts and verifier expectations instead of doing it here.",
   "Return JSON matching the planner schema.",
+  "Return the final planner-report JSON immediately; do not stream interim plans or empty task lists.",
   textConcat ["Plan 1-", encode maxTaskLoops, " bounded tasks with explicit dependencies and task prompts."],
   "Each planned task must include an explicit role and a coordinationFocus list.",
   "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."

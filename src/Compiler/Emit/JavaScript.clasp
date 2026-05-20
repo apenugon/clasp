@@ -83,6 +83,8 @@ exprNeedsBuiltinPrelude expr = match expr {
     exprNeedsBuiltinPrelude values,
   LowerListFilter callee values ->
     exprNeedsBuiltinPrelude values,
+  LowerListFind callee values ->
+    exprNeedsBuiltinPrelude values,
   LowerListAny callee values ->
     exprNeedsBuiltinPrelude values,
   LowerListAll callee values ->
@@ -176,6 +178,8 @@ emitExprContainsReturn expr = match expr {
   LowerListMap callee values ->
     emitExprContainsReturn values,
   LowerListFilter callee values ->
+    emitExprContainsReturn values,
+  LowerListFind callee values ->
     emitExprContainsReturn values,
   LowerListAny callee values ->
     emitExprContainsReturn values,
@@ -291,6 +295,8 @@ emitExpr expr = match expr {
     textConcat ["Object.freeze((", emitExpr values, ").map(($item) => ", callee, "($item)))"],
   LowerListFilter callee values ->
     textConcat ["Object.freeze((", emitExpr values, ").filter(($item) => ", callee, "($item)))"],
+  LowerListFind callee values ->
+    textJoin "\n" ["(() => {", textConcat ["  for (const __item of ", emitExpr values, ") {"], textConcat ["    if (", callee, "(__item)) {"], "      return [\"Some\", __item];", "    }", "  }", "  return [\"None\"];", "})()"],
   LowerListAny callee values ->
     textConcat ["(", emitExpr values, ").some(($item) => ", callee, "($item))"],
   LowerListAll callee values ->

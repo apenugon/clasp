@@ -138,6 +138,12 @@ baselineWorkspaceProvided = match envVar "CLASP_LOOP_BASELINE_WORKSPACE_JSON" {
   Err message -> false
 }
 
+baselineCacheRoot : Str
+baselineCacheRoot = readEnvText "CLASP_LOOP_BASELINE_CACHE_ROOT_JSON" (pathJoin [stateRoot, "baseline-cache"])
+
+baselineCacheMaxMb : Int
+baselineCacheMaxMb = readEnvInt "CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON" 0
+
 builderSchemaPath : Str
 builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
 
@@ -478,6 +484,37 @@ processResultFromStep step exitCode =
     stderr = readTextOrEmpty step.stderrPath
   }
 
+stepReportAvailable : StepHandle -> Bool
+stepReportAvailable step =
+  if fileExists step.reportPath then
+    true
+  else {
+    let waited = sleepMs 250 in
+    fileExists step.reportPath
+  }
+
+recoverStepReportFromStdout : StepHandle -> Bool
+recoverStepReportFromStdout step =
+  if fileExists step.reportPath then
+    true
+  else {
+    let recovered = runProcess launcherCwd [
+      "node",
+      "-e",
+      "const fs=require('fs'); const [stdoutPath, reportPath]=process.argv.slice(1); let text=''; try { text=fs.readFileSync(stdoutPath,'utf8'); } catch (err) { process.exit(1); } const lines=text.trimEnd().split(/\\n/).reverse(); for (const line of lines) { try { const event=JSON.parse(line); if (event && event.type === 'agent_message' && typeof event.text === 'string') { fs.writeFileSync(reportPath, event.text.endsWith('\\n') ? event.text : event.text + '\\n'); process.exit(0); } } catch (err) {} } process.exit(1);",
+      step.stdoutPath,
+      step.reportPath
+    ] in
+    fileExists step.reportPath
+  }
+
+stepReportReady : StepHandle -> Bool
+stepReportReady step =
+  if stepReportAvailable step then
+    true
+  else
+    recoverStepReportFromStdout step
+
 spawnStep : StepHandle -> [Str] -> Result WatchedProcess
 spawnStep step command =
   spawn (watchedCommandSpec launcherCwd step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
@@ -577,7 +614,7 @@ ensureStepReport step command launchingState runningState =
   else if fileExists step.heartbeatPath then {
     let reconciled = reconcileStep step in
     let resumed = resumeStep step in
-    if fileExists step.reportPath then
+    if stepReportReady step then
       successProcessResult step
     else
       launchStepAndAwait step command runningState
@@ -587,7 +624,7 @@ ensureStepReport step command launchingState runningState =
       failedProcessResult launchingStateError
     else {
       let launched = launchStepAndAwait step command runningState in
-      if fileExists step.reportPath then
+      if stepReportReady step then
         successProcessResult step
       else
         launched
@@ -601,7 +638,7 @@ ensureStepReportWithTimeout step command launchingState runningState timeoutMs =
   else if fileExists step.heartbeatPath then {
     let reconciled = reconcileStep step in
     let resumed = resumeStepWithTimeout step timeoutMs in
-    if fileExists step.reportPath then
+    if stepReportReady step then
       successProcessResult step
     else
       resumed
@@ -611,7 +648,7 @@ ensureStepReportWithTimeout step command launchingState runningState timeoutMs =
       failedProcessResult launchingStateError
     else {
       let launched = launchStepAndAwaitWithTimeout step command runningState timeoutMs in
-      if fileExists step.reportPath then
+      if stepReportReady step then
         successProcessResult step
       else
         launched
@@ -634,13 +671,13 @@ ensureStepReportWithTimeoutNoState step command timeoutMs =
   else if fileExists step.heartbeatPath then {
     let reconciled = reconcileStep step in
     let resumed = resumeStepWithTimeout step timeoutMs in
-    if fileExists step.reportPath then
+    if stepReportReady step then
       successProcessResult step
     else
       resumed
   } else {
     let launched = launchStepAndAwaitWithTimeoutNoState step command timeoutMs in
-    if fileExists step.reportPath then
+    if stepReportReady step then
       successProcessResult step
     else
       launched
@@ -1924,22 +1961,64 @@ providedBaselineMissing =
       ]
   }
 
+pruneBaselineCache : ProcessResult
+pruneBaselineCache =
+  if baselineCacheMaxMb <= 0 then
+    ProcessResult { exitCode = 0, stdout = baselineCacheRoot, stderr = "" }
+  else
+    runProcess launcherCwd [
+      "bash",
+      "-lc",
+      textJoin "\n" [
+        "root=\"$1\"",
+        "keep=\"$2\"",
+        "max_mb=\"$3\"",
+        "mkdir -p \"$root\" || exit $?",
+        "used_mb() { du -sm \"$root\" 2>/dev/null | awk '{print $1 + 0}'; }",
+        "used=$(used_mb)",
+        "while [ \"$used\" -gt \"$max_mb\" ]; do",
+        "  candidate=$(find \"$root\" -mindepth 1 -maxdepth 1 ! -name \"$keep\" -printf '%T@ %p\\n' 2>/dev/null | sort -n | sed -n '1s/^[^ ]* //p')",
+        "  if [ -z \"$candidate\" ]; then exit 0; fi",
+        "  rm -rf \"$candidate\" || exit $?",
+        "  used=$(used_mb)",
+        "done"
+      ],
+      "baseline-cache-prune",
+      baselineCacheRoot,
+      pathBasename baselineWorkspace,
+      encode baselineCacheMaxMb
+    ]
+
+withBaselineRetention : ProcessResult -> ProcessResult
+withBaselineRetention baselineResult =
+  if baselineResult.exitCode != 0 then
+    baselineResult
+  else {
+    let pruneResult = pruneBaselineCache in
+    if pruneResult.exitCode != 0 then
+      pruneResult
+    else
+      baselineResult
+  }
+
 ensureBaseline : ProcessResult
 ensureBaseline =
-  if baselineWorkspaceProvided then
-    if fileExists baselineWorkspace then
-      markBaselineReady
-    else if baselineCanBeSnapshottedFromWorkspace then
-      createBaselineSnapshot
+  withBaselineRetention (
+    if baselineWorkspaceProvided then
+      if fileExists baselineWorkspace then
+        markBaselineReady
+      else if baselineCanBeSnapshottedFromWorkspace then
+        createBaselineSnapshot
+      else
+        providedBaselineMissing
+    else if fileExists baselineReadyPath then
+      if fileExists baselineWorkspace then
+        ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" }
+      else
+        createBaselineSnapshot
     else
-      providedBaselineMissing
-  else if fileExists baselineReadyPath then
-    if fileExists baselineWorkspace then
-      ProcessResult { exitCode = 0, stdout = baselineWorkspace, stderr = "" }
-    else
       createBaselineSnapshot
-  else
-    createBaselineSnapshot
+  )
 
 runStepDirect : StepHandle -> [Str] -> LoopState -> LoopState -> ProcessResult
 runStepDirect step command launchingState runningState = {

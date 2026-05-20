@@ -1470,6 +1470,7 @@ fn require_completion_lease_owner(
     connection: &Connection,
     task_id: &str,
     actor: &str,
+    at_ms: i64,
 ) -> Result<(SwarmTaskState, Option<SwarmTaskSpecRecord>), String> {
     let Some(task) = load_task_state(connection, task_id)? else {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1484,6 +1485,12 @@ fn require_completion_lease_owner(
         return Err(format!(
             "swarm task `{task_id}` cannot complete: lease ownership is not valid for status `{}`",
             task.status
+        ));
+    }
+    if task.status != "completed" && lease_ownership_is_expired(&task, spec.as_ref(), at_ms) {
+        return Err(format!(
+            "swarm task `{task_id}` cannot complete: lease held by `{}` expired",
+            task.lease_actor
         ));
     }
     if task.lease_actor.as_str() != actor {
@@ -3934,7 +3941,7 @@ fn execute_event_command(
     } else if kind == "worker_heartbeat" {
         let _ = require_active_lease_owner(&connection, task_id, actor, "record a heartbeat", at_ms)?;
     } else if kind == "task_completed" {
-        let _ = require_completion_lease_owner(&connection, task_id, actor)?;
+        let _ = require_completion_lease_owner(&connection, task_id, actor, at_ms)?;
     } else if kind == "task_failed" {
         let _ = require_recorded_lease_owner(&connection, task_id, actor, "fail")?;
     } else if kind == "task_requeued" {
@@ -5503,6 +5510,17 @@ mod tests {
         let manager_next = super::manager_next_json(&connection, "loop").expect("manager next");
         assert_eq!(manager_next.get("action").and_then(|value| value.as_str()), Some("recover-lease"));
         assert_eq!(manager_next.get("taskId").and_then(|value| value.as_str()), Some("repair"));
+
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "complete".to_owned(),
+                root_text.clone(),
+                "repair".to_owned(),
+            ]),
+            Some(ExitCode::from(1))
+        );
 
         assert_eq!(
             maybe_run_swarm(&vec![

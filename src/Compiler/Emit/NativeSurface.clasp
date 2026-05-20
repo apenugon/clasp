@@ -49,7 +49,7 @@ hasHostedSurfaceTypes values = {
 }
 
 nativeSurfaceEmittedTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]
-nativeSurfaceEmittedTypeDecls modl = if moduleUsesBuiltinResult modl then effectiveModuleTypeDecls modl else moduleTypeDeclarations modl
+nativeSurfaceEmittedTypeDecls modl = if moduleUsesCompilerKnownVariantTypes modl then effectiveModuleTypeDecls modl else moduleTypeDeclarations modl
 
 nativeModuleSymbolPrefix : Str -> Str
 nativeModuleSymbolPrefix moduleName = textConcat ["clasp_native__", textJoin "__" (textSplit moduleName ".")]

@@ -1,0 +1,153 @@
+module Main
+
+record TaskInput = {
+  taskId : Str,
+  title : Str,
+  status : Str,
+  priority : Int,
+  blocked : Bool,
+  dependencies : [Str]
+}
+
+record TaskBatch = {
+  objective : Str,
+  tasks : [TaskInput]
+}
+
+record SelectionState = {
+  selected : TaskInput,
+  selectedScore : Int,
+  readyQueue : [Str],
+  blockedQueue : [Str]
+}
+
+record AgentReport = {
+  objective : Str,
+  nextTaskId : Str,
+  action : Str,
+  reason : Str,
+  readyQueue : [Str],
+  blockedQueue : [Str],
+  summary : Str
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyTask : TaskInput
+emptyTask =
+  TaskInput {
+    taskId = "",
+    title = "",
+    status = "none",
+    priority = 0,
+    blocked = true,
+    dependencies = emptyTexts
+  }
+
+emptySelection : SelectionState
+emptySelection =
+  SelectionState {
+    selected = emptyTask,
+    selectedScore = 0,
+    readyQueue = emptyTexts,
+    blockedQueue = emptyTexts
+  }
+
+taskScore : TaskInput -> Int
+taskScore task =
+  if task.status == "done" then
+    0
+  else if task.blocked then
+    0
+  else
+    task.priority
+
+selectionStep : SelectionState -> TaskInput -> SelectionState
+selectionStep state task = {
+  let score = taskScore task;
+  let readyQueue =
+    if score > 0 then
+      append state.readyQueue [task.taskId]
+    else
+      state.readyQueue;
+  let blockedQueue =
+    if task.blocked then
+      append state.blockedQueue [task.taskId]
+    else
+      state.blockedQueue;
+  if score > state.selectedScore then
+    SelectionState {
+      selected = task,
+      selectedScore = score,
+      readyQueue = readyQueue,
+      blockedQueue = blockedQueue
+    }
+  else
+    SelectionState {
+      selected = state.selected,
+      selectedScore = state.selectedScore,
+      readyQueue = readyQueue,
+      blockedQueue = blockedQueue
+    }
+}
+
+selectNextTask : [TaskInput] -> SelectionState
+selectNextTask tasks = {
+  let mut state = emptySelection;
+  for task in tasks {
+    state = selectionStep state task;
+    state
+  };
+  state
+}
+
+nextAction : SelectionState -> Str
+nextAction state =
+  if state.selectedScore > 0 then
+    "run-focused-verifier"
+  else
+    "wait-for-unblocked-task"
+
+selectionReason : TaskInput -> Int -> Str
+selectionReason task score =
+  if score > 0 then
+    textConcat ["selected ", task.taskId, " because priority=", encode score]
+  else
+    "no ready task was available"
+
+scenarioReport : TaskBatch -> AgentReport
+scenarioReport batch = {
+  let state = selectNextTask batch.tasks;
+  let selectedForReport =
+    with state.selected {
+      status = "selected"
+    };
+  let { taskId, title, priority } = selectedForReport in
+  AgentReport {
+    objective = batch.objective,
+    nextTaskId = taskId,
+    action = nextAction state,
+    reason = selectionReason selectedForReport state.selectedScore,
+    readyQueue = state.readyQueue,
+    blockedQueue = state.blockedQueue,
+    summary = textJoin ":" [taskId, title, encode priority, nextAction state]
+  }
+}
+
+sampleTaskData : Str
+sampleTaskData =
+  textConcat
+    [
+      "{\"objective\":\"close wave1 swarm fixture\",\"tasks\":[",
+      "{\"taskId\":\"fixture\",\"title\":\"Add compact agent fixture\",\"status\":\"open\",\"priority\":7,\"blocked\":false,\"dependencies\":[]},",
+      "{\"taskId\":\"native-primitive\",\"title\":\"Wait for native primitive branch\",\"status\":\"open\",\"priority\":9,\"blocked\":true,\"dependencies\":[\"wave1-native-agent-primitive\"]},",
+      "{\"taskId\":\"docs\",\"title\":\"Skip docs until behavior lands\",\"status\":\"done\",\"priority\":3,\"blocked\":false,\"dependencies\":[]}",
+      "]}"
+    ]
+
+sampleBatch : TaskBatch
+sampleBatch = decode TaskBatch sampleTaskData
+
+main : Str
+main = encode (scenarioReport sampleBatch)

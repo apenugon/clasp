@@ -32,12 +32,18 @@ mkdir -p "$test_root/bin" "$test_root/scripts" "$test_root/src/scripts" "$test_r
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+cp "$project_root/scripts/verify-compiler-slice.sh" "$test_root/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/verify-affected.sh" "$test_root/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affected.mjs"
 cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
+cp "$project_root/scripts/test-verify-compiler-slice.sh" "$test_root/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
+cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
+cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
+cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
+cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
@@ -54,9 +60,16 @@ printf 'module Swarm\nswarm : Str\nswarm = "swarm"\n' > "$test_root/examples/swa
 printf '[package]\nname = "fake-runtime"\nversion = "0.0.0"\n' > "$test_root/runtime/Cargo.toml"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/verify-compiler-slice.sh all' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
@@ -69,6 +82,13 @@ grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremen
 grep -F 'export XDG_CACHE_HOME="$test_root/xdg-cache"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'ensure-goal-manager-binary.sh' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE=0' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+if grep -F '"$claspc_bin" --json check "$project_root/examples/swarm-native/GoalManager.clasp"' "$test_root/scripts/test-native-claspc.sh" >/dev/null 2>&1; then
+  printf 'test-native-claspc should rely on ensure-goal-manager-binary instead of a redundant GoalManager check\n' >&2
+  exit 1
+fi
 grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-monitored-loop.sh" >/dev/null
 grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-monitored-loop.sh" >/dev/null
 grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-child-loop-monitor.sh" >/dev/null
@@ -81,15 +101,29 @@ grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'usage: scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
+grep -F 'CLASP_COMPILER_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
+grep -F 'parser checker lower emitter' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
+grep -F 'examples/compiler-checker.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
+grep -F 'examples/compiler-lower.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'verificationFallbackMode' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'usedVerifyFastFallback' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-fast.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'source-no-git' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'compiler-slice-fixture' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null

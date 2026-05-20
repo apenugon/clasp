@@ -488,13 +488,15 @@ executeReadyTasks report wave benchmarkRuns = {
                           }
                         else if length finalStatus.readyPlannedIds > 0 then
                           executeReadyTasks report wave benchmarkRuns
-                        else if length finalStatus.failedIds > 0 then
-                          finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                         else if benchmarkEnabled then
-                          if length finalStatus.completedIds == length report.tasks then
+                          if length finalStatus.completedIds > 0 then
                             runBenchmarkCheckpoint report wave benchmarkRuns
+                          else if length finalStatus.failedIds > 0 then
+                            finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                           else
                             finalizeWithReport failureState (plannedTaskStalledReport report)
+                        else if length finalStatus.failedIds > 0 then
+                          finalizeWithReport failureState (plannedTaskFailureReport finalStatus.failedIds)
                         else if length finalStatus.completedIds == length report.tasks then
                           finalizeWithReport
                             (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)

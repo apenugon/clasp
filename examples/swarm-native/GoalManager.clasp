@@ -4920,8 +4920,8 @@ ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
     "config-error:missing-workspace-root"
-  else if maxTaskLoops < 1 then
-    "config-error:max-tasks-must-be-positive"
+  else if maxTaskLoops < 0 then
+    "config-error:max-tasks-must-be-nonnegative"
   else if plannerTaskMaxRuns < 1 then
     "config-error:planner-max-runs-must-be-positive"
   else if childMaxAttempts < 1 then
@@ -5070,8 +5070,12 @@ plannerPromptFor wave benchmarkSummary = textJoin "\n" [
   managerHealthSummaryText wave,
   "Planning is a control-plane step, not a verification or implementation step.",
   "Do not run repo-wide verification, benchmarks, builds, package installs, or other long commands from the planner.",
+  "Do not inspect files, run shell commands, invoke tools, or gather extra repository context from the planner.",
+  "Use only this prompt, the manager health context, and the benchmark summary as planner inputs.",
+  "If uncertain, create a bounded inspection or verification task instead of inspecting from the planner.",
   "If verification is needed, encode it in the planned task prompts and verifier expectations instead of doing it here.",
   "Return JSON matching the planner schema.",
+  "Return the final planner-report JSON immediately; do not stream interim plans or empty task lists.",
   textConcat ["Plan 1-", encode maxTaskLoops, " bounded tasks with explicit dependencies and task prompts."],
   "Each planned task must include an explicit role and a coordinationFocus list.",
   "When tasks are independent, prefer complementary parallel roles instead of serializing all work through one branch."
@@ -5318,7 +5322,7 @@ childLoopCommandArgs spec =
     textConcat ["CLASP_LOOP_BASELINE_WORKSPACE_JSON=", encode (taskWorkspaceBaselineActualRoot spec.taskId)],
     textConcat ["CLASP_LOOP_BASELINE_CACHE_ROOT_JSON=", encode (pathJoin [taskReportStateRoot spec.taskId, "baseline-cache"])],
     textConcat ["CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
-    textConcat ["XDG_CACHE_HOME=", pathJoin [taskReportStateRoot spec.taskId, "xdg-cache"]],
+    textConcat ["XDG_CACHE_HOME=", managerXdgCacheHome],
     textConcat ["CLASPC_BIN=", resolvedManagerClaspcBin],
     textConcat ["CLASP_CLASPC=", resolvedManagerClaspcBin],
     "CLASP_VERIFY_LOCK_TIMEOUT_SECS=30",
@@ -7112,13 +7116,15 @@ executeReadyTasks report wave benchmarkRuns = {
                                 else
                                   executeReadyTasks report wave benchmarkRuns
                               }
-                            else if length failedIds > 0 then
-                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
                             else if benchmarkEnabled then
-                              if length completedIds == length report.tasks then
+                              if length completedIds > 0 then
                                 runBenchmarkCheckpoint report wave benchmarkRuns
+                              else if length failedIds > 0 then
+                                continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
                               else
                                 continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskStalledReport report)
+                            else if length failedIds > 0 then
+                              continueAfterPlannedTaskBlocker report wave benchmarkRuns (plannedTaskFailureReport failedIds)
                             else if length completedIds == length report.tasks then
                               finalizeWithReport
                                 (managerStateFor "completed" "pass" true "" plannedIds wave benchmarkRuns true)

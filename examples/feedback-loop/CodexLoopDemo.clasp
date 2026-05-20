@@ -1,0 +1,319 @@
+module CodexLoopDemo
+
+import Process
+
+record CodexLoopEvent = {
+  kind : Str,
+  role : Str,
+  status : Str,
+  detail : Str,
+  atMs : Int
+}
+
+record CodexLoopStepSpec = {
+  role : Str,
+  prompt : Str,
+  promptPath : Str,
+  finalPath : Str,
+  statusPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  command : [Str]
+}
+
+record CodexLoopStepRecord = {
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  finalText : Str,
+  promptPath : Str,
+  finalPath : Str,
+  statusPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  completed : Bool,
+  timedOut : Bool,
+  ok : Bool
+}
+
+record CodexLoopReport = {
+  loopId : Str,
+  finalStatus : Str,
+  stateRoot : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  completed : Bool,
+  builder : CodexLoopStepRecord,
+  verifier : CodexLoopStepRecord,
+  summary : Str
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-codex-loop-state"
+  else
+    pathJoin argv
+
+loopId : Str
+loopId = "ordinary-clasp-codex-loop"
+
+watchPollMs : Int
+watchPollMs = 25
+
+statusPath : Str
+statusPath = pathJoin [stateRoot, "codex-loop-status.json"]
+
+eventLogPath : Str
+eventLogPath = pathJoin [stateRoot, "codex-loop-events.jsonl"]
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+codexBinary : Str
+codexBinary = readEnvText "CLASP_CODEX_LOOP_CODEX_BIN_JSON" "codex"
+
+readTextOrEmpty : Str -> Str
+readTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+writeText : Str -> Str -> Str
+writeText path value = match writeFile path value {
+  Ok written -> "",
+  Err message -> message
+}
+
+codexLoopEvent : Str -> Str -> Str -> Str -> CodexLoopEvent
+codexLoopEvent kind role status detail =
+  CodexLoopEvent {
+    kind = kind,
+    role = role,
+    status = status,
+    detail = detail,
+    atMs = timeUnixMs
+  }
+
+appendCodexLoopEvent : Str -> Str -> Str -> Str -> Str
+appendCodexLoopEvent kind role status detail =
+  match appendFile eventLogPath (textConcat [encode (codexLoopEvent kind role status detail), "\n"]) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+stepPromptPath : Str -> Str
+stepPromptPath role = pathJoin [stateRoot, textConcat [role, ".prompt.md"]]
+
+stepFinalPath : Str -> Str
+stepFinalPath role = pathJoin [stateRoot, textConcat [role, ".final.txt"]]
+
+stepStatusPath : Str -> Str
+stepStatusPath role = pathJoin [stateRoot, textConcat [role, ".status.json"]]
+
+stepStdoutPath : Str -> Str
+stepStdoutPath role = pathJoin [stateRoot, textConcat [role, ".stdout.jsonl"]]
+
+stepStderrPath : Str -> Str
+stepStderrPath role = pathJoin [stateRoot, textConcat [role, ".stderr.log"]]
+
+stepHeartbeatPath : Str -> Str
+stepHeartbeatPath role = pathJoin [stateRoot, textConcat [role, ".heartbeat.json"]]
+
+codexExecCommand : Str -> Str -> [Str]
+codexExecCommand finalPath prompt = [
+  codexBinary,
+  "exec",
+  "--skip-git-repo-check",
+  "--output-last-message",
+  finalPath,
+  prompt
+]
+
+codexStepSpec : Str -> Str -> CodexLoopStepSpec
+codexStepSpec role prompt =
+  CodexLoopStepSpec {
+    role = role,
+    prompt = prompt,
+    promptPath = stepPromptPath role,
+    finalPath = stepFinalPath role,
+    statusPath = stepStatusPath role,
+    stdoutPath = stepStdoutPath role,
+    stderrPath = stepStderrPath role,
+    heartbeatPath = stepHeartbeatPath role,
+    command = codexExecCommand (stepFinalPath role) prompt
+  }
+
+builderPrompt : Str
+builderPrompt =
+  textJoin "\n" [
+    "You are the builder subagent for a deterministic Clasp integration loop.",
+    "Return a short final message after producing the requested software change summary.",
+    "This fixture proves that ordinary Clasp code can invoke Codex directly."
+  ]
+
+verifierPrompt : Str
+verifierPrompt =
+  textJoin "\n" [
+    "You are the verifier subagent for a deterministic Clasp integration loop.",
+    "Inspect the builder final message and return a short pass/fail final message.",
+    "This fixture persists final verifier status from ordinary Clasp runtime storage."
+  ]
+
+builderSpec : CodexLoopStepSpec
+builderSpec = codexStepSpec "builder" builderPrompt
+
+verifierSpec : CodexLoopStepSpec
+verifierSpec = codexStepSpec "verifier" verifierPrompt
+
+toWatchedSpec : CodexLoopStepSpec -> WatchedCommandSpec
+toWatchedSpec spec =
+  watchedCommandSpec
+    "."
+    spec.stdoutPath
+    spec.stderrPath
+    spec.heartbeatPath
+    watchPollMs
+    spec.command
+
+stepOk : MonitoredStepResult -> Str -> Bool
+stepOk result finalText =
+  if result.status == "completed-pass" then
+    if result.exitCode == 0 then
+      if result.completed then
+        if result.timedOut then
+          false
+        else
+          finalText != ""
+      else
+        false
+    else
+      false
+  else
+    false
+
+stepRecordFromResult : CodexLoopStepSpec -> MonitoredStepResult -> CodexLoopStepRecord
+stepRecordFromResult spec result = {
+  let finalText = readTextOrEmpty spec.finalPath;
+  CodexLoopStepRecord {
+    role = spec.role,
+    status = result.status,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    finalText = finalText,
+    promptPath = spec.promptPath,
+    finalPath = spec.finalPath,
+    statusPath = spec.statusPath,
+    stdoutPath = result.stdoutPath,
+    stderrPath = result.stderrPath,
+    heartbeatPath = result.heartbeatPath,
+    completed = result.completed,
+    timedOut = result.timedOut,
+    ok = stepOk result finalText
+  }
+}
+
+stepRecordFromError : CodexLoopStepSpec -> Str -> CodexLoopStepRecord
+stepRecordFromError spec message =
+  CodexLoopStepRecord {
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    finalText = readTextOrEmpty spec.finalPath,
+    promptPath = spec.promptPath,
+    finalPath = spec.finalPath,
+    statusPath = spec.statusPath,
+    stdoutPath = spec.stdoutPath,
+    stderrPath = spec.stderrPath,
+    heartbeatPath = spec.heartbeatPath,
+    completed = false,
+    timedOut = false,
+    ok = false
+  }
+
+writeStepStatus : CodexLoopStepRecord -> Str
+writeStepStatus record = writeText record.statusPath (encode record)
+
+runCodexStep : CodexLoopStepSpec -> CodexLoopStepRecord
+runCodexStep spec = {
+  let promptWrite = writeText spec.promptPath spec.prompt;
+  let started = appendCodexLoopEvent "step-started" spec.role "running" spec.promptPath;
+  let record =
+    if promptWrite == "" then
+      match runMonitored (toWatchedSpec spec) {
+        Ok result -> stepRecordFromResult spec result,
+        Err message -> stepRecordFromError spec message
+      }
+    else
+      stepRecordFromError spec promptWrite;
+  let wrote = writeStepStatus record;
+  let completed = appendCodexLoopEvent "step-completed" record.role record.status record.finalPath;
+  record
+}
+
+loopFinalStatus : CodexLoopStepRecord -> CodexLoopStepRecord -> Str
+loopFinalStatus builder verifier =
+  if builder.ok then
+    if verifier.ok then
+      "completed-pass"
+    else
+      "verifier-failed"
+  else
+    "builder-failed"
+
+loopReport : CodexLoopStepRecord -> CodexLoopStepRecord -> CodexLoopReport
+loopReport builder verifier =
+  CodexLoopReport {
+    loopId = loopId,
+    finalStatus = loopFinalStatus builder verifier,
+    stateRoot = stateRoot,
+    statusPath = statusPath,
+    eventLogPath = eventLogPath,
+    completed = true,
+    builder = builder,
+    verifier = verifier,
+    summary = textConcat [
+      "loop=",
+      loopId,
+      " builder=",
+      builder.status,
+      " verifier=",
+      verifier.status,
+      " final=",
+      loopFinalStatus builder verifier
+    ]
+  }
+
+persistLoopReport : CodexLoopReport -> Str
+persistLoopReport report =
+  match writeFile statusPath (encode report) {
+    Ok written -> encode report,
+    Err message -> textConcat ["error:", message]
+  }
+
+runLoop : Str
+runLoop = {
+  let opened = appendCodexLoopEvent "loop-started" loopId "running" codexBinary;
+  let builder = runCodexStep builderSpec;
+  let verifier = runCodexStep verifierSpec;
+  let report = loopReport builder verifier;
+  let closed = appendCodexLoopEvent "loop-completed" loopId report.finalStatus statusPath;
+  persistLoopReport report
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runLoop
+  }

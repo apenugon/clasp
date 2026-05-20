@@ -1012,6 +1012,24 @@ buildFunctionType payloadTypes resultType = {
 typeMismatchMessage : Str -> TypeText -> TypeText -> Str
 typeMismatchMessage name expectedType actualType = textConcat ["Type mismatch for `", name, "`: expected ", renderType expectedType, ", found ", renderType actualType, "."]
 
+unknownNameMessage : Str -> Str
+unknownNameMessage missing =
+  if missing == "True" then
+    "Unknown name `True`. Clasp boolean literals are lowercase; use `true` instead, or define/import `True` if it should be a value."
+  else if missing == "False" then
+    "Unknown name `False`. Clasp boolean literals are lowercase; use `false` instead, or define/import `False` if it should be a value."
+  else
+    textConcat ["Unknown name `", missing, "`. Define or import `", missing, "`, or fix the spelling of the reference."]
+
+unknownConstructorMessage : Str -> Str
+unknownConstructorMessage missing =
+  if missing == "True" then
+    "Unknown constructor `True`. Clasp boolean literals are lowercase; use `true` instead, or declare/import a constructor named `True` if this is a data constructor."
+  else if missing == "False" then
+    "Unknown constructor `False`. Clasp boolean literals are lowercase; use `false` instead, or declare/import a constructor named `False` if this is a data constructor."
+  else
+    textConcat ["Unknown constructor `", missing, "`. Declare or import a constructor named `", missing, "`, or fix the spelling of the constructor reference."]
+
 lookupTypeBinding : [TypeBinding] -> Str -> LookupResult
 lookupTypeBinding env targetName = {
   for binding in env {
@@ -1520,7 +1538,7 @@ inferMapBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (textConcat ["Unknown name `", missing, "`."]),
+            BuiltinCallError (unknownNameMessage missing),
           FoundType functionType ->
             match functionType {
               TFunction inputType resultType ->
@@ -1634,7 +1652,7 @@ inferFilterBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (textConcat ["Unknown name `", missing, "`."]),
+            BuiltinCallError (unknownNameMessage missing),
           FoundType functionType ->
             match functionType {
               TFunction inputType resultType ->
@@ -1801,7 +1819,7 @@ inferFoldBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (textConcat ["Unknown name `", missing, "`."]),
+            BuiltinCallError (unknownNameMessage missing),
           FoundType functionType ->
             match inferExpr typeDecls recordDecls env localEnv fnContext initialExpr {
               InferExprError message ->
@@ -2048,7 +2066,7 @@ inferExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
           FoundType calleeType ->
             applyCallType typeDecls recordDecls env localEnv fnContext callee calleeType args,
           MissingType missing ->
-            InferExprError (textConcat ["Unknown name `", missing, "`."])
+            InferExprError (unknownNameMessage missing)
         }
     },
   HostedConstructor constructorName args ->
@@ -2088,7 +2106,7 @@ inferExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
       FoundType bindingType ->
         InferredExpr bindingType,
       MissingType missing ->
-        InferExprError (textConcat ["Unknown name `", missing, "`."])
+        InferExprError (unknownNameMessage missing)
     }
 }
 
@@ -2103,7 +2121,7 @@ inferLetExpr typeDecls recordDecls env localEnv fnContext binder value body = ma
 inferAssignExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
 inferAssignExpr typeDecls recordDecls env localEnv fnContext binder value body = match lookupTypeBinding localEnv binder {
   MissingType missing ->
-    InferExprError (textConcat ["Unknown name `", missing, "`."]),
+    InferExprError (unknownNameMessage missing),
   FoundType binderType ->
     match inferExprAgainst typeDecls recordDecls env localEnv fnContext binderType value {
       InferExprError message ->
@@ -2529,7 +2547,7 @@ inferConstructorExpr typeDecls recordDecls env localEnv fnContext constructorNam
         InferExprError (textConcat ["Unknown type `", missing, "`."])
     },
   MissingConstructor missing ->
-    InferExprError (textConcat ["Unknown constructor `", missing, "`."])
+    InferExprError (unknownConstructorMessage missing)
 }
 
 inferMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> InferMatchBranchResult
@@ -2993,6 +3011,15 @@ resultErrConstructorName = "Err"
 resultStringBuiltinType : TypeText
 resultStringBuiltinType = TApply resultBuiltinTypeName [TStr]
 
+optionBuiltinTypeName : Str
+optionBuiltinTypeName = "Option"
+
+optionSomeConstructorName : Str
+optionSomeConstructorName = "Some"
+
+optionNoneConstructorName : Str
+optionNoneConstructorName = "None"
+
 prependBuiltinType : TypeText
 prependBuiltinType = TFunction (TVar "a") (TFunction (TList (TVar "a")) (TList (TVar "a")))
 
@@ -3004,6 +3031,9 @@ mapBuiltinType = TFunction (TFunction (TVar "a") (TVar "b")) (TFunction (TList (
 
 filterBuiltinType : TypeText
 filterBuiltinType = TFunction (TFunction (TVar "a") TBool) (TFunction (TList (TVar "a")) (TList (TVar "a")))
+
+findBuiltinType : TypeText
+findBuiltinType = TFunction (TFunction (TVar "a") TBool) (TFunction (TList (TVar "a")) (TApply optionBuiltinTypeName [TVar "a"]))
 
 anyBuiltinType : TypeText
 anyBuiltinType = TFunction (TFunction (TVar "a") TBool) (TFunction (TList (TVar "a")) TBool)
@@ -3115,6 +3145,9 @@ fileExistsBuiltinType = TFunction TStr TBool
 
 readFileBuiltinType : TypeText
 readFileBuiltinType = TFunction TStr resultStringBuiltinType
+
+listDirBuiltinType : TypeText
+listDirBuiltinType = TFunction TStr (TApply resultBuiltinTypeName [TList TStr])
 
 runCommandJsonBuiltinType : TypeText
 runCommandJsonBuiltinType = TFunction TStr (TFunction (TList TStr) resultStringBuiltinType)
@@ -3274,6 +3307,282 @@ builtinResultTypeDecl =
     , hostedConstructorDeclAst resultErrConstructorName [HostedTypeName "Str"]
     ]
 
+builtinOptionTypeDecl : HostedTypeDeclAst
+builtinOptionTypeDecl =
+  hostedTypeDeclAstWithParams
+    optionBuiltinTypeName
+    ["a"]
+    [ hostedConstructorDeclAst optionSomeConstructorName [HostedTypeVar "a"]
+    , hostedConstructorDeclAst optionNoneConstructorName emptyHostedTypes
+    ]
+
+hostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool
+hostedTypeUsesNamedType typeAst targetName = match typeAst {
+  HostedTypeName name ->
+    name == targetName,
+  HostedTypeApply name args ->
+    if name == targetName then true else {
+      for arg in args {
+        if hostedTypeUsesNamedType arg targetName then return true else false
+      };
+      false
+    },
+  HostedTypeVar name ->
+    false,
+  HostedTypeList itemType ->
+    hostedTypeUsesNamedType itemType targetName,
+  HostedTypeFunction input result ->
+    if hostedTypeUsesNamedType input targetName then true else hostedTypeUsesNamedType result targetName
+}
+
+recordDeclUsesNamedType : HostedRecordDeclAst -> Str -> Bool
+recordDeclUsesNamedType recordDecl targetName = {
+  for fieldDecl in recordDeclFields recordDecl {
+    if hostedTypeUsesNamedType (recordFieldDeclType fieldDecl) targetName then return true else false
+  };
+  false
+}
+
+constructorDeclUsesNamedType : HostedConstructorDeclAst -> Str -> Bool
+constructorDeclUsesNamedType constructorDecl targetName = {
+  for payloadType in constructorDeclPayloadTypes constructorDecl {
+    if hostedTypeUsesNamedType payloadType targetName then return true else false
+  };
+  false
+}
+
+typeDeclUsesNamedType : HostedTypeDeclAst -> Str -> Bool
+typeDeclUsesNamedType typeDecl targetName = {
+  if typeDeclName typeDecl == targetName then true else {
+    for constructorDecl in typeDeclConstructors typeDecl {
+      if constructorDeclUsesNamedType constructorDecl targetName then return true else false
+    };
+    false
+  }
+}
+
+annotationUsesNamedType : HostedAnnotationAst -> Str -> Bool
+annotationUsesNamedType annotation targetName = if hasAnnotationAst annotation then hostedTypeUsesNamedType (annotationTypeAst annotation) targetName else false
+
+exprUsesBuiltinResultRuntime : HostedExprAst -> Bool
+exprUsesBuiltinResultRuntime expr = match expr {
+  HostedName name ->
+    false,
+  HostedString value ->
+    false,
+  HostedInt value ->
+    false,
+  HostedBool value ->
+    false,
+  HostedList values ->
+    exprListUsesBuiltinResultRuntime values,
+  HostedCall callee args ->
+    if callee == "listDir" then true else if callee == "textPrefix" then true else if callee == "textSplitFirst" then true else if callee == "dictGet" then true else if callee == "readFile" then true else if callee == "swarmBootstrapJson" then true else if callee == "swarmStartJson" then true else if callee == "swarmLeaseJson" then true else if callee == "swarmReleaseJson" then true else if callee == "swarmHeartbeatJson" then true else if callee == "swarmCompleteJson" then true else if callee == "swarmFailJson" then true else if callee == "swarmRetryJson" then true else if callee == "swarmStopJson" then true else if callee == "swarmResumeJson" then true else if callee == "swarmStatusJson" then true else if callee == "swarmHistoryJson" then true else if callee == "swarmTasksJson" then true else if callee == "swarmSummaryJson" then true else if callee == "swarmTailJson" then true else if callee == "swarmReadyJson" then true else if callee == "swarmManagerNextJson" then true else if callee == "swarmObjectiveCreateJson" then true else if callee == "swarmObjectiveCreateWithDeadlineJson" then true else if callee == "swarmObjectiveStatusJson" then true else if callee == "swarmObjectivesJson" then true else if callee == "swarmTaskCreateJson" then true else if callee == "swarmTaskCreateWithDeadlineJson" then true else if callee == "swarmPolicySetJson" then true else if callee == "swarmToolRunJson" then true else if callee == "swarmVerifierRunJson" then true else if callee == "swarmApproveJson" then true else if callee == "swarmApprovalsJson" then true else if callee == "swarmMergegateDecideJson" then true else if callee == "swarmRunsJson" then true else if callee == "swarmArtifactsJson" then true else if callee == "runCommandJson" then true else if callee == "spawnCommandJson" then true else if callee == "watchCommandJson" then true else if callee == "reconcileWatchedProcessJson" then true else if callee == "awaitWatchedProcessJson" then true else if callee == "handoffCommandJson" then true else if callee == "upgradeCommandJson" then true else if callee == "superviseCommandJson" then true else if callee == "sleepMs" then true else if callee == "writeFile" then true else if callee == "appendFile" then true else if callee == "mkdirAll" then true else if callee == "envVar" then true else exprListUsesBuiltinResultRuntime args,
+  HostedConstructor constructorName args ->
+    exprListUsesBuiltinResultRuntime args,
+  HostedMatch subject branches ->
+    if exprUsesBuiltinResultRuntime subject then true else branchListUsesBuiltinResultRuntime branches,
+  HostedRecord recordName fields ->
+    recordFieldExprListUsesBuiltinResultRuntime fields,
+  HostedFieldAccess subject fieldName ->
+    exprUsesBuiltinResultRuntime subject,
+  HostedLet binder value body ->
+    if exprUsesBuiltinResultRuntime value then true else exprUsesBuiltinResultRuntime body,
+  HostedMutableLet binder value body ->
+    if exprUsesBuiltinResultRuntime value then true else exprUsesBuiltinResultRuntime body,
+  HostedAssign binder value body ->
+    if exprUsesBuiltinResultRuntime value then true else exprUsesBuiltinResultRuntime body,
+  HostedFor binder iterable loopBody body ->
+    if exprUsesBuiltinResultRuntime iterable then true else if exprUsesBuiltinResultRuntime loopBody then true else exprUsesBuiltinResultRuntime body,
+  HostedReturn value ->
+    exprUsesBuiltinResultRuntime value,
+  HostedIf condition thenBranch elseBranch ->
+    if exprUsesBuiltinResultRuntime condition then true else if exprUsesBuiltinResultRuntime thenBranch then true else exprUsesBuiltinResultRuntime elseBranch,
+  HostedEqual left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right,
+  HostedNotEqual left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right,
+  HostedLessThan left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right,
+  HostedLessThanOrEqual left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right,
+  HostedGreaterThan left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right,
+  HostedGreaterThanOrEqual left right ->
+    if exprUsesBuiltinResultRuntime left then true else exprUsesBuiltinResultRuntime right
+}
+
+exprListUsesBuiltinResultRuntime : [HostedExprAst] -> Bool
+exprListUsesBuiltinResultRuntime exprs = {
+  for expr in exprs {
+    if exprUsesBuiltinResultRuntime expr then return true else false
+  };
+  false
+}
+
+recordFieldExprListUsesBuiltinResultRuntime : [HostedRecordFieldExprAst] -> Bool
+recordFieldExprListUsesBuiltinResultRuntime fields = {
+  for field in fields {
+    if exprUsesBuiltinResultRuntime (recordExprFieldValue field) then return true else false
+  };
+  false
+}
+
+branchUsesBuiltinResultRuntime : HostedMatchBranchAst -> Bool
+branchUsesBuiltinResultRuntime branch = exprUsesBuiltinResultRuntime (branchBodyExpr branch)
+
+branchListUsesBuiltinResultRuntime : [HostedMatchBranchAst] -> Bool
+branchListUsesBuiltinResultRuntime branches = {
+  for branch in branches {
+    if branchUsesBuiltinResultRuntime branch then return true else false
+  };
+  false
+}
+
+exprUsesBuiltinOptionRuntime : HostedExprAst -> Bool
+exprUsesBuiltinOptionRuntime expr = match expr {
+  HostedName name ->
+    false,
+  HostedString value ->
+    false,
+  HostedInt value ->
+    false,
+  HostedBool value ->
+    false,
+  HostedList values ->
+    exprListUsesBuiltinOptionRuntime values,
+  HostedCall callee args ->
+    if callee == "find" then true else exprListUsesBuiltinOptionRuntime args,
+  HostedConstructor constructorName args ->
+    exprListUsesBuiltinOptionRuntime args,
+  HostedMatch subject branches ->
+    if exprUsesBuiltinOptionRuntime subject then true else branchListUsesBuiltinOptionRuntime branches,
+  HostedRecord recordName fields ->
+    recordFieldExprListUsesBuiltinOptionRuntime fields,
+  HostedFieldAccess subject fieldName ->
+    exprUsesBuiltinOptionRuntime subject,
+  HostedLet binder value body ->
+    if exprUsesBuiltinOptionRuntime value then true else exprUsesBuiltinOptionRuntime body,
+  HostedMutableLet binder value body ->
+    if exprUsesBuiltinOptionRuntime value then true else exprUsesBuiltinOptionRuntime body,
+  HostedAssign binder value body ->
+    if exprUsesBuiltinOptionRuntime value then true else exprUsesBuiltinOptionRuntime body,
+  HostedFor binder iterable loopBody body ->
+    if exprUsesBuiltinOptionRuntime iterable then true else if exprUsesBuiltinOptionRuntime loopBody then true else exprUsesBuiltinOptionRuntime body,
+  HostedReturn value ->
+    exprUsesBuiltinOptionRuntime value,
+  HostedIf condition thenBranch elseBranch ->
+    if exprUsesBuiltinOptionRuntime condition then true else if exprUsesBuiltinOptionRuntime thenBranch then true else exprUsesBuiltinOptionRuntime elseBranch,
+  HostedEqual left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right,
+  HostedNotEqual left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right,
+  HostedLessThan left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right,
+  HostedLessThanOrEqual left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right,
+  HostedGreaterThan left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right,
+  HostedGreaterThanOrEqual left right ->
+    if exprUsesBuiltinOptionRuntime left then true else exprUsesBuiltinOptionRuntime right
+}
+
+exprListUsesBuiltinOptionRuntime : [HostedExprAst] -> Bool
+exprListUsesBuiltinOptionRuntime exprs = {
+  for expr in exprs {
+    if exprUsesBuiltinOptionRuntime expr then return true else false
+  };
+  false
+}
+
+recordFieldExprListUsesBuiltinOptionRuntime : [HostedRecordFieldExprAst] -> Bool
+recordFieldExprListUsesBuiltinOptionRuntime fields = {
+  for field in fields {
+    if exprUsesBuiltinOptionRuntime (recordExprFieldValue field) then return true else false
+  };
+  false
+}
+
+branchUsesBuiltinOptionRuntime : HostedMatchBranchAst -> Bool
+branchUsesBuiltinOptionRuntime branch = exprUsesBuiltinOptionRuntime (branchBodyExpr branch)
+
+branchListUsesBuiltinOptionRuntime : [HostedMatchBranchAst] -> Bool
+branchListUsesBuiltinOptionRuntime branches = {
+  for branch in branches {
+    if branchUsesBuiltinOptionRuntime branch then return true else false
+  };
+  false
+}
+
+declUsesBuiltinResult : HostedDeclAst -> Bool
+declUsesBuiltinResult decl = if annotationUsesNamedType (declAnnotation decl) resultBuiltinTypeName then true else exprUsesBuiltinResultRuntime (declBody decl)
+
+foreignDeclUsesBuiltinResult : HostedForeignDeclAst -> Bool
+foreignDeclUsesBuiltinResult foreignDecl = hostedTypeUsesNamedType (foreignDeclTypeAst foreignDecl) resultBuiltinTypeName
+
+declUsesBuiltinOption : HostedDeclAst -> Bool
+declUsesBuiltinOption decl = if annotationUsesNamedType (declAnnotation decl) optionBuiltinTypeName then true else exprUsesBuiltinOptionRuntime (declBody decl)
+
+foreignDeclUsesBuiltinOption : HostedForeignDeclAst -> Bool
+foreignDeclUsesBuiltinOption foreignDecl = hostedTypeUsesNamedType (foreignDeclTypeAst foreignDecl) optionBuiltinTypeName
+
+moduleDeclaresBuiltinResult : HostedModuleAst -> Bool
+moduleDeclaresBuiltinResult modl = {
+  for typeDecl in moduleTypeDeclarations modl {
+    if typeDeclName typeDecl == resultBuiltinTypeName then return true else false
+  };
+  false
+}
+
+moduleDeclaresBuiltinOption : HostedModuleAst -> Bool
+moduleDeclaresBuiltinOption modl = {
+  for typeDecl in moduleTypeDeclarations modl {
+    if typeDeclName typeDecl == optionBuiltinTypeName then return true else false
+  };
+  false
+}
+
+moduleUsesBuiltinResult : HostedModuleAst -> Bool
+moduleUsesBuiltinResult modl = {
+  if moduleDeclaresBuiltinResult modl then true else {
+    for typeDecl in moduleTypeDeclarations modl {
+      if typeDeclUsesNamedType typeDecl resultBuiltinTypeName then return true else false
+    };
+    for recordDecl in moduleRecordDeclarations modl {
+      if recordDeclUsesNamedType recordDecl resultBuiltinTypeName then return true else false
+    };
+    for foreignDecl in moduleForeignDeclarations modl {
+      if foreignDeclUsesBuiltinResult foreignDecl then return true else false
+    };
+    for decl in moduleDeclarations modl {
+      if declUsesBuiltinResult decl then return true else false
+    };
+    false
+  }
+}
+
+moduleUsesBuiltinOption : HostedModuleAst -> Bool
+moduleUsesBuiltinOption modl = {
+  if moduleDeclaresBuiltinOption modl then true else {
+    for typeDecl in moduleTypeDeclarations modl {
+      if typeDeclUsesNamedType typeDecl optionBuiltinTypeName then return true else false
+    };
+    for recordDecl in moduleRecordDeclarations modl {
+      if recordDeclUsesNamedType recordDecl optionBuiltinTypeName then return true else false
+    };
+    for foreignDecl in moduleForeignDeclarations modl {
+      if foreignDeclUsesBuiltinOption foreignDecl then return true else false
+    };
+    for decl in moduleDeclarations modl {
+      if declUsesBuiltinOption decl then return true else false
+    };
+    false
+  }
+}
+
+moduleUsesCompilerKnownVariantTypes : HostedModuleAst -> Bool
+moduleUsesCompilerKnownVariantTypes modl = if moduleUsesBuiltinResult modl then true else moduleUsesBuiltinOption modl
+
 principalBuiltinRecordDecl : HostedRecordDeclAst
 principalBuiltinRecordDecl =
   hostedRecordDeclAst "Principal" [hostedRecordFieldDeclAst "id" (HostedTypeName "Str")]
@@ -3307,7 +3616,7 @@ effectiveModuleRecordDecls modl =
     (moduleRecordDeclarations modl)
 
 effectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]
-effectiveModuleTypeDecls modl = append [builtinResultTypeDecl] (moduleTypeDeclarations modl)
+effectiveModuleTypeDecls modl = append [builtinResultTypeDecl] (append (moduleTypeDeclarations modl) [builtinOptionTypeDecl])
 
 principalBuiltinType : TypeText
 principalBuiltinType = TFunction TStr (TNamed "Principal")
@@ -3323,7 +3632,7 @@ authSessionBuiltinType =
   TFunction TStr (TFunction (TNamed "Principal") (TFunction (TNamed "Tenant") (TFunction (TNamed "ResourceIdentity") (TNamed "AuthSession"))))
 
 baseEnv : [TypeBinding]
-baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "prepend" prependBuiltinType, TypeBinding "reverse" reverseBuiltinType, TypeBinding "map" mapBuiltinType, TypeBinding "filter" filterBuiltinType, TypeBinding "any" anyBuiltinType, TypeBinding "all" allBuiltinType, TypeBinding "fold" foldBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "dictEmpty" dictEmptyBuiltinType, TypeBinding "dictSet" dictSetBuiltinType, TypeBinding "dictGet" dictGetBuiltinType, TypeBinding "dictHas" dictHasBuiltinType, TypeBinding "dictRemove" dictRemoveBuiltinType, TypeBinding "dictKeys" dictKeysBuiltinType, TypeBinding "dictValues" dictValuesBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "timeUnixMs" timeUnixMsBuiltinType, TypeBinding "envVar" envVarBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "swarmBootstrapJson" swarmBootstrapJsonBuiltinType, TypeBinding "swarmStartJson" swarmStartJsonBuiltinType, TypeBinding "swarmLeaseJson" swarmLeaseJsonBuiltinType, TypeBinding "swarmReleaseJson" swarmReleaseJsonBuiltinType, TypeBinding "swarmHeartbeatJson" swarmHeartbeatJsonBuiltinType, TypeBinding "swarmCompleteJson" swarmCompleteJsonBuiltinType, TypeBinding "swarmFailJson" swarmFailJsonBuiltinType, TypeBinding "swarmRetryJson" swarmRetryJsonBuiltinType, TypeBinding "swarmStopJson" swarmStopJsonBuiltinType, TypeBinding "swarmResumeJson" swarmResumeJsonBuiltinType, TypeBinding "swarmStatusJson" swarmStatusJsonBuiltinType, TypeBinding "swarmHistoryJson" swarmHistoryJsonBuiltinType, TypeBinding "swarmTasksJson" swarmTasksJsonBuiltinType, TypeBinding "swarmSummaryJson" swarmSummaryJsonBuiltinType, TypeBinding "swarmTailJson" swarmTailJsonBuiltinType, TypeBinding "swarmReadyJson" swarmReadyJsonBuiltinType, TypeBinding "swarmManagerNextJson" swarmManagerNextJsonBuiltinType, TypeBinding "swarmObjectiveCreateJson" swarmObjectiveCreateJsonBuiltinType, TypeBinding "swarmObjectiveCreateWithDeadlineJson" swarmObjectiveCreateWithDeadlineJsonBuiltinType, TypeBinding "swarmObjectiveStatusJson" swarmObjectiveStatusJsonBuiltinType, TypeBinding "swarmObjectivesJson" swarmObjectivesJsonBuiltinType, TypeBinding "swarmTaskCreateJson" swarmTaskCreateJsonBuiltinType, TypeBinding "swarmTaskCreateWithDeadlineJson" swarmTaskCreateWithDeadlineJsonBuiltinType, TypeBinding "swarmPolicySetJson" swarmPolicySetJsonBuiltinType, TypeBinding "swarmToolRunJson" swarmToolRunJsonBuiltinType, TypeBinding "swarmVerifierRunJson" swarmVerifierRunJsonBuiltinType, TypeBinding "swarmApproveJson" swarmApproveJsonBuiltinType, TypeBinding "swarmApprovalsJson" swarmApprovalsJsonBuiltinType, TypeBinding "swarmMergegateDecideJson" swarmMergegateDecideJsonBuiltinType, TypeBinding "swarmRunsJson" swarmRunsJsonBuiltinType, TypeBinding "swarmArtifactsJson" swarmArtifactsJsonBuiltinType, TypeBinding "runCommandJson" runCommandJsonBuiltinType, TypeBinding "spawnCommandJson" spawnCommandJsonBuiltinType, TypeBinding "watchCommandJson" watchCommandJsonBuiltinType, TypeBinding "reconcileWatchedProcessJson" reconcileWatchedProcessJsonBuiltinType, TypeBinding "awaitWatchedProcessJson" awaitWatchedProcessJsonBuiltinType, TypeBinding "handoffCommandJson" handoffCommandJsonBuiltinType, TypeBinding "upgradeCommandJson" upgradeCommandJsonBuiltinType, TypeBinding "superviseCommandJson" superviseCommandJsonBuiltinType, TypeBinding "sleepMs" sleepMsBuiltinType, TypeBinding "writeFile" writeFileBuiltinType, TypeBinding "appendFile" appendFileBuiltinType, TypeBinding "mkdirAll" mkdirAllBuiltinType]
+baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "prepend" prependBuiltinType, TypeBinding "reverse" reverseBuiltinType, TypeBinding "map" mapBuiltinType, TypeBinding "filter" filterBuiltinType, TypeBinding "find" findBuiltinType, TypeBinding "any" anyBuiltinType, TypeBinding "all" allBuiltinType, TypeBinding "fold" foldBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "dictEmpty" dictEmptyBuiltinType, TypeBinding "dictSet" dictSetBuiltinType, TypeBinding "dictGet" dictGetBuiltinType, TypeBinding "dictHas" dictHasBuiltinType, TypeBinding "dictRemove" dictRemoveBuiltinType, TypeBinding "dictKeys" dictKeysBuiltinType, TypeBinding "dictValues" dictValuesBuiltinType, TypeBinding "text" textViewBuiltinType, TypeBinding "element" elementBuiltinType, TypeBinding "styled" styledBuiltinType, TypeBinding "link" linkBuiltinType, TypeBinding "form" formBuiltinType, TypeBinding "input" inputBuiltinType, TypeBinding "submit" submitBuiltinType, TypeBinding "systemPrompt" systemPromptBuiltinType, TypeBinding "assistantPrompt" assistantPromptBuiltinType, TypeBinding "userPrompt" userPromptBuiltinType, TypeBinding "appendPrompt" appendPromptBuiltinType, TypeBinding "promptText" promptTextBuiltinType, TypeBinding "page" pageBuiltinType, TypeBinding "redirect" redirectBuiltinType, TypeBinding "principal" principalBuiltinType, TypeBinding "tenant" tenantBuiltinType, TypeBinding "resourceIdentity" resourceIdentityBuiltinType, TypeBinding "authSession" authSessionBuiltinType, TypeBinding "argv" argvBuiltinType, TypeBinding "timeUnixMs" timeUnixMsBuiltinType, TypeBinding "envVar" envVarBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType, TypeBinding "listDir" listDirBuiltinType, TypeBinding "swarmBootstrapJson" swarmBootstrapJsonBuiltinType, TypeBinding "swarmStartJson" swarmStartJsonBuiltinType, TypeBinding "swarmLeaseJson" swarmLeaseJsonBuiltinType, TypeBinding "swarmReleaseJson" swarmReleaseJsonBuiltinType, TypeBinding "swarmHeartbeatJson" swarmHeartbeatJsonBuiltinType, TypeBinding "swarmCompleteJson" swarmCompleteJsonBuiltinType, TypeBinding "swarmFailJson" swarmFailJsonBuiltinType, TypeBinding "swarmRetryJson" swarmRetryJsonBuiltinType, TypeBinding "swarmStopJson" swarmStopJsonBuiltinType, TypeBinding "swarmResumeJson" swarmResumeJsonBuiltinType, TypeBinding "swarmStatusJson" swarmStatusJsonBuiltinType, TypeBinding "swarmHistoryJson" swarmHistoryJsonBuiltinType, TypeBinding "swarmTasksJson" swarmTasksJsonBuiltinType, TypeBinding "swarmSummaryJson" swarmSummaryJsonBuiltinType, TypeBinding "swarmTailJson" swarmTailJsonBuiltinType, TypeBinding "swarmReadyJson" swarmReadyJsonBuiltinType, TypeBinding "swarmManagerNextJson" swarmManagerNextJsonBuiltinType, TypeBinding "swarmObjectiveCreateJson" swarmObjectiveCreateJsonBuiltinType, TypeBinding "swarmObjectiveCreateWithDeadlineJson" swarmObjectiveCreateWithDeadlineJsonBuiltinType, TypeBinding "swarmObjectiveStatusJson" swarmObjectiveStatusJsonBuiltinType, TypeBinding "swarmObjectivesJson" swarmObjectivesJsonBuiltinType, TypeBinding "swarmTaskCreateJson" swarmTaskCreateJsonBuiltinType, TypeBinding "swarmTaskCreateWithDeadlineJson" swarmTaskCreateWithDeadlineJsonBuiltinType, TypeBinding "swarmPolicySetJson" swarmPolicySetJsonBuiltinType, TypeBinding "swarmToolRunJson" swarmToolRunJsonBuiltinType, TypeBinding "swarmVerifierRunJson" swarmVerifierRunJsonBuiltinType, TypeBinding "swarmApproveJson" swarmApproveJsonBuiltinType, TypeBinding "swarmApprovalsJson" swarmApprovalsJsonBuiltinType, TypeBinding "swarmMergegateDecideJson" swarmMergegateDecideJsonBuiltinType, TypeBinding "swarmRunsJson" swarmRunsJsonBuiltinType, TypeBinding "swarmArtifactsJson" swarmArtifactsJsonBuiltinType, TypeBinding "runCommandJson" runCommandJsonBuiltinType, TypeBinding "spawnCommandJson" spawnCommandJsonBuiltinType, TypeBinding "watchCommandJson" watchCommandJsonBuiltinType, TypeBinding "reconcileWatchedProcessJson" reconcileWatchedProcessJsonBuiltinType, TypeBinding "awaitWatchedProcessJson" awaitWatchedProcessJsonBuiltinType, TypeBinding "handoffCommandJson" handoffCommandJsonBuiltinType, TypeBinding "upgradeCommandJson" upgradeCommandJsonBuiltinType, TypeBinding "superviseCommandJson" superviseCommandJsonBuiltinType, TypeBinding "sleepMs" sleepMsBuiltinType, TypeBinding "writeFile" writeFileBuiltinType, TypeBinding "appendFile" appendFileBuiltinType, TypeBinding "mkdirAll" mkdirAllBuiltinType]
 
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = inferModuleBindingsWithImportedBindings emptyTypeBindings modl

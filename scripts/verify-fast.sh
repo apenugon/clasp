@@ -3,17 +3,31 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fast_parallel_verify_commands=$'
+bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-selfhost.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-native-runtime.sh
 '
 fast_sequential_verify_commands=$'
+bash scripts/verify-compiler-slice.sh all
+bash examples/agent-task-scenario/scripts/verify.sh
+bash scripts/test-monitored-step.sh
+bash scripts/test-monitored-workflow.sh
+bash scripts/test-codex-loop-program.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
+bash scripts/test-verify-compiler-slice.sh
 '
 fallback_verify_commands=$'
+bash scripts/verify-compiler-slice.sh all
+bash scripts/test-native-claspc-diagnostics.sh
+bash examples/agent-task-scenario/scripts/verify.sh
+bash scripts/test-monitored-step.sh
+bash scripts/test-monitored-workflow.sh
+bash scripts/test-codex-loop-program.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
+bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-task-manifest.sh
 '
 

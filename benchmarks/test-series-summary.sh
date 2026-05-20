@@ -763,6 +763,11 @@ assert(checkpoint.score.value === -100, `unexpected missing checkpoint score: ${
 assert(checkpoint.target.value === 0, `unexpected missing checkpoint target: ${checkpoint.target.value}`);
 assert(checkpoint.resultSet.seriesResultCount === 0, `unexpected missing checkpoint result count: ${checkpoint.resultSet.seriesResultCount}`);
 assert(checkpoint.resultSet.missingTaskIds.length === 9, `unexpected missing task count: ${checkpoint.resultSet.missingTaskIds.length}`);
+assert(checkpoint.resultSet.observedTaskIds.length === 0, `unexpected observed task count: ${checkpoint.resultSet.observedTaskIds.length}`);
+assert(
+  checkpoint.resultSet.expectedTaskIds.join(',') === 'clasp-lead-priority,ts-lead-priority,clasp-lead-rejection,ts-lead-rejection,clasp-lead-segment,ts-lead-segment,clasp-external-adaptation,ts-external-adaptation,clasp-legal-assistant-appbench',
+  `unexpected expected task inventory: ${checkpoint.resultSet.expectedTaskIds.join(',')}`,
+);
 NODE
 
 repo_verification_checkpoint_path="$tmp_bin/repo-verification-public-app-checkpoint.json"

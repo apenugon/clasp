@@ -253,6 +253,7 @@ plannerPromptFor wave benchmarkSummary =
     textConcat ["Workspace root: ", workspaceRoot],
     textConcat ["Mailbox summary:\n", mailboxSummaryText wave],
     textConcat ["Planner policy:\n", plannerPolicyText],
+    "Planner execution constraints:\nDo not inspect files, run shell commands, invoke tools, or gather extra repository context from the planner.\nUse only this prompt, the planner policy, benchmark context, and mailbox summary as planner inputs.\nIf uncertain, create a bounded inspection or verification task instead of inspecting from the planner.\nReturn the final planner-report JSON immediately; do not stream interim plans or empty task lists.",
     "Return only schema-valid JSON."
   ]
 

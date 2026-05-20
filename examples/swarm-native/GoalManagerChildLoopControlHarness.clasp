@@ -1,0 +1,175 @@
+module Main
+
+import Swarm
+
+foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
+
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "child-loop-control-harness-state"
+  else
+    pathJoin argv
+
+controlRoot : SwarmRoot
+controlRoot = swarmRoot stateRoot
+
+controlObjectiveId : Str
+controlObjectiveId = "child-loop-control"
+
+controlTaskId : Str
+controlTaskId = "lease-fresh"
+
+controlActor : Str
+controlActor = "manager"
+
+watchPath : Str -> Str -> Str
+watchPath name suffix =
+  pathJoin [stateRoot, textConcat [name, ".", suffix]]
+
+watchStdoutPath : Str -> Str
+watchStdoutPath name = watchPath name "stdout.log"
+
+watchStderrPath : Str -> Str
+watchStderrPath name = watchPath name "stderr.log"
+
+watchHeartbeatPath : Str -> Str
+watchHeartbeatPath name = watchPath name "heartbeat.json"
+
+watchedProcessResult : Result Str -> Result WatchedProcess
+watchedProcessResult value = match value {
+  Ok raw -> Ok (decode WatchedProcess raw),
+  Err message -> watchedProcessError message
+}
+
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+watchedStatus : WatchedProcess -> Str
+watchedStatus process =
+  if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else
+      "completed-fail"
+  else if process.running then
+    "running"
+  else
+    "malformed-unresolved-heartbeat"
+
+statusLine : Str -> Str -> Str
+statusLine label statusValue =
+  textConcat [label, "=", statusValue]
+
+boolLine : Str -> Bool -> Str
+boolLine label value =
+  textConcat [label, "=", encode value]
+
+ensureLeasedTask : Str
+ensureLeasedTask =
+  match objectiveCreate controlRoot controlObjectiveId "Exercise ordinary Clasp control over child-loop task state." 2 2 {
+    Err message ->
+      message,
+    Ok objective ->
+      match taskCreate (objectiveHandle controlRoot controlObjectiveId) controlTaskId "Keep a live child task lease fresh while awaiting a watched process." [] 1 5000 {
+        Err createMessage ->
+          createMessage,
+        Ok task ->
+          match lease (taskHandle controlRoot controlTaskId controlActor) {
+            Err leaseMessage ->
+              leaseMessage,
+            Ok leased ->
+              match heartbeat (taskHandle controlRoot controlTaskId controlActor) {
+                Err heartbeatMessage -> heartbeatMessage,
+                Ok heartbeatValue -> ""
+              }
+          }
+      }
+  }
+
+taskHeartbeatSeen : Bool
+taskHeartbeatSeen =
+  match status (taskHandle controlRoot controlTaskId controlActor) {
+    Ok task -> task.heartbeatSeen,
+    Err message -> false
+  }
+
+spawnRunning : Result WatchedProcess
+spawnRunning =
+  watchedProcessResult
+    (spawnCommandRaw
+      "."
+      (watchStdoutPath "lease")
+      (watchStderrPath "lease")
+      (watchHeartbeatPath "lease")
+      10
+      ["bash", "-lc", "sleep 0.25"])
+
+awaitTimeoutStatus : Str
+awaitTimeoutStatus =
+  match awaitWatchedProcessTimeoutRaw (watchHeartbeatPath "lease") 10 50 {
+    Ok raw -> watchedStatus (decode WatchedProcess raw),
+    Err message -> message
+  }
+
+reconcileStatus : Str
+reconcileStatus =
+  match watchedProcessResult (reconcileWatchedProcessRaw (watchHeartbeatPath "lease")) {
+    Ok process -> watchedStatus process,
+    Err message -> textConcat ["error:", message]
+  }
+
+watchPassStatus : Str
+watchPassStatus =
+  match watchedProcessResult
+    (watchCommandRaw
+      "."
+      (watchStdoutPath "watch-pass")
+      (watchStderrPath "watch-pass")
+      (watchHeartbeatPath "watch-pass")
+      10
+      ["bash", "-lc", "exit 0"]) {
+    Ok process -> watchedStatus process,
+    Err message -> textConcat ["error:", message]
+  }
+
+runHarness : Str
+runHarness = {
+  let setupError = ensureLeasedTask in
+  if setupError != "" then
+    textConcat ["error:", setupError]
+  else
+    match spawnRunning {
+      Err message ->
+        textConcat ["error:", message],
+      Ok process ->
+        textJoin "\n" [
+          statusLine "lease-spawn" (watchedStatus process),
+          statusLine "lease-await" awaitTimeoutStatus,
+          statusLine "lease-reconcile" reconcileStatus,
+          boolLine "lease-heartbeat-seen" taskHeartbeatSeen,
+          statusLine "watch-pass" watchPassStatus
+        ]
+    }
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runHarness
+  }

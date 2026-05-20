@@ -1,0 +1,335 @@
+module MonitoredWorkflowDemo
+
+import Process
+
+record WorkflowEvent = {
+  kind : Str,
+  stepId : Str,
+  status : Str,
+  detail : Str,
+  atMs : Int
+}
+
+record WorkflowStepSpec = {
+  stepId : Str,
+  role : Str,
+  statusPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  command : [Str]
+}
+
+record WorkflowStepRecord = {
+  stepId : Str,
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  statusPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  completed : Bool,
+  timedOut : Bool,
+  ok : Bool,
+  failureHandled : Bool
+}
+
+record WorkflowReport = {
+  workflowId : Str,
+  finalStatus : Str,
+  completed : Bool,
+  failed : Bool,
+  failureHandled : Bool,
+  failedStepId : Str,
+  stepCount : Int,
+  passCount : Int,
+  failCount : Int,
+  statusPath : Str,
+  eventLogPath : Str,
+  steps : [WorkflowStepRecord],
+  summary : Str
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-monitored-workflow-state"
+  else
+    pathJoin argv
+
+workflowId : Str
+workflowId = "ordinary-clasp-monitored-workflow"
+
+workflowStatusPath : Str
+workflowStatusPath = pathJoin [stateRoot, "workflow-status.json"]
+
+eventLogPath : Str
+eventLogPath = pathJoin [stateRoot, "workflow-events.jsonl"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+stepStatusPath : Str -> Str
+stepStatusPath stepId = pathJoin [stateRoot, textConcat [stepId, ".status.json"]]
+
+stepStdoutPath : Str -> Str
+stepStdoutPath stepId = pathJoin [stateRoot, textConcat [stepId, ".stdout.log"]]
+
+stepStderrPath : Str -> Str
+stepStderrPath stepId = pathJoin [stateRoot, textConcat [stepId, ".stderr.log"]]
+
+stepHeartbeatPath : Str -> Str
+stepHeartbeatPath stepId = pathJoin [stateRoot, textConcat [stepId, ".heartbeat.json"]]
+
+workflowEvent : Str -> Str -> Str -> Str -> WorkflowEvent
+workflowEvent kind stepId status detail =
+  WorkflowEvent {
+    kind = kind,
+    stepId = stepId,
+    status = status,
+    detail = detail,
+    atMs = timeUnixMs
+  }
+
+appendWorkflowEvent : Str -> Str -> Str -> Str -> Str
+appendWorkflowEvent kind stepId status detail =
+  match appendFile eventLogPath (textConcat [encode (workflowEvent kind stepId status detail), "\n"]) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+directNodeCommand : Str -> Int -> [Str]
+directNodeCommand script exitCode = [
+  "node",
+  "-e",
+  textConcat [script, " process.exit(", encode exitCode, ");"]
+]
+
+workflowStepSpec : Str -> Str -> [Str] -> WorkflowStepSpec
+workflowStepSpec stepId role command =
+  WorkflowStepSpec {
+    stepId = stepId,
+    role = role,
+    statusPath = stepStatusPath stepId,
+    stdoutPath = stepStdoutPath stepId,
+    stderrPath = stepStderrPath stepId,
+    heartbeatPath = stepHeartbeatPath stepId,
+    command = command
+  }
+
+planStep : WorkflowStepSpec
+planStep =
+  workflowStepSpec
+    "plan"
+    "builder"
+    (directNodeCommand "process.stdout.write('plan-ok');" 0)
+
+verifyStep : WorkflowStepSpec
+verifyStep =
+  workflowStepSpec
+    "verify"
+    "verifier"
+    (directNodeCommand "process.stdout.write('verify-output'); process.stderr.write('verifier failed intentionally');" 17)
+
+failureHandlerStep : WorkflowStepSpec
+failureHandlerStep =
+  workflowStepSpec
+    "failure-handler"
+    "supervisor"
+    (directNodeCommand "process.stdout.write('failure-recorded');" 0)
+
+toWatchedSpec : WorkflowStepSpec -> WatchedCommandSpec
+toWatchedSpec spec =
+  watchedCommandSpec
+    "."
+    spec.stdoutPath
+    spec.stderrPath
+    spec.heartbeatPath
+    watchPollMs
+    spec.command
+
+monitoredOk : MonitoredStepResult -> Bool
+monitoredOk result =
+  if result.status == "completed-pass" then
+    if result.exitCode == 0 then
+      if result.completed then
+        result.timedOut == false
+      else
+        false
+    else
+      false
+  else
+    false
+
+stepRecordFromResult : WorkflowStepSpec -> MonitoredStepResult -> Bool -> WorkflowStepRecord
+stepRecordFromResult spec result failureHandled =
+  WorkflowStepRecord {
+    stepId = spec.stepId,
+    role = spec.role,
+    status = result.status,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    statusPath = spec.statusPath,
+    stdoutPath = result.stdoutPath,
+    stderrPath = result.stderrPath,
+    heartbeatPath = result.heartbeatPath,
+    completed = result.completed,
+    timedOut = result.timedOut,
+    ok = monitoredOk result,
+    failureHandled = failureHandled
+  }
+
+stepRecordFromError : WorkflowStepSpec -> Str -> Bool -> WorkflowStepRecord
+stepRecordFromError spec message failureHandled =
+  WorkflowStepRecord {
+    stepId = spec.stepId,
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    statusPath = spec.statusPath,
+    stdoutPath = spec.stdoutPath,
+    stderrPath = spec.stderrPath,
+    heartbeatPath = spec.heartbeatPath,
+    completed = false,
+    timedOut = false,
+    ok = false,
+    failureHandled = failureHandled
+  }
+
+writeStepStatus : WorkflowStepRecord -> Str
+writeStepStatus record =
+  match writeFile record.statusPath (encode record) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+runWorkflowStep : WorkflowStepSpec -> Bool -> WorkflowStepRecord
+runWorkflowStep spec failureHandled = {
+  let started = appendWorkflowEvent "step-started" spec.stepId "running" spec.role;
+  let record = match runMonitored (toWatchedSpec spec) {
+    Ok result -> stepRecordFromResult spec result failureHandled,
+    Err message -> stepRecordFromError spec message failureHandled
+  };
+  let wrote = writeStepStatus record;
+  let completed = appendWorkflowEvent "step-completed" record.stepId record.status (textConcat ["exit=", encode record.exitCode]);
+  record
+}
+
+workflowPassCount : WorkflowStepRecord -> WorkflowStepRecord -> WorkflowStepRecord -> Int
+workflowPassCount plan verify failureHandler =
+  if plan.ok then
+    if verify.ok then
+      if failureHandler.ok then
+        3
+      else
+        2
+    else if failureHandler.ok then
+      2
+    else
+      1
+  else if verify.ok then
+    if failureHandler.ok then
+      2
+    else
+      1
+  else if failureHandler.ok then
+    1
+  else
+    0
+
+workflowFailCount : WorkflowStepRecord -> WorkflowStepRecord -> WorkflowStepRecord -> Int
+workflowFailCount plan verify failureHandler =
+  if plan.ok then
+    if verify.ok then
+      if failureHandler.ok then
+        0
+      else
+        1
+    else if failureHandler.ok then
+      1
+    else
+      2
+  else if verify.ok then
+    if failureHandler.ok then
+      1
+    else
+      2
+  else if failureHandler.ok then
+    2
+  else
+    3
+
+firstFailedStepId : WorkflowStepRecord -> WorkflowStepRecord -> WorkflowStepRecord -> Str
+firstFailedStepId plan verify failureHandler =
+  if plan.ok then
+    if verify.ok then
+      if failureHandler.ok then
+        ""
+      else
+        failureHandler.stepId
+    else
+      verify.stepId
+  else
+    plan.stepId
+
+workflowFinalStatus : Str -> Bool -> Str
+workflowFinalStatus failedStepId failureHandled =
+  if failedStepId == "" then
+    "completed-pass"
+  else if failureHandled then
+    "failed-handled"
+  else
+    "failed-unhandled"
+
+workflowReport : WorkflowStepRecord -> WorkflowStepRecord -> WorkflowStepRecord -> WorkflowReport
+workflowReport plan verify failureHandler = {
+  let handled = if verify.ok then false else failureHandler.ok;
+  let failedStepId = firstFailedStepId plan verify failureHandler;
+  WorkflowReport {
+    workflowId = workflowId,
+    finalStatus = workflowFinalStatus failedStepId handled,
+    completed = true,
+    failed = failedStepId != "",
+    failureHandled = handled,
+    failedStepId = failedStepId,
+    stepCount = 3,
+    passCount = workflowPassCount plan verify failureHandler,
+    failCount = workflowFailCount plan verify failureHandler,
+    statusPath = workflowStatusPath,
+    eventLogPath = eventLogPath,
+    steps = [plan, verify, failureHandler],
+    summary = textConcat ["workflow=", workflowId, " failedStep=", failedStepId, " final=", workflowFinalStatus failedStepId handled]
+  }
+}
+
+persistWorkflowReport : WorkflowReport -> Str
+persistWorkflowReport report =
+  match writeFile workflowStatusPath (encode report) {
+    Ok written -> encode report,
+    Err message -> textConcat ["error:", message]
+  }
+
+runWorkflow : Str
+runWorkflow = {
+  let opened = appendWorkflowEvent "workflow-started" workflowId "running" "supervised ordinary Clasp workflow";
+  let plan = runWorkflowStep planStep false;
+  let verify = runWorkflowStep verifyStep false;
+  let failureHandledEvent = appendWorkflowEvent "failure-detected" verify.stepId verify.status "running supervisor failure handler";
+  let failureHandler = runWorkflowStep failureHandlerStep true;
+  let report = workflowReport plan verify failureHandler;
+  let closed = appendWorkflowEvent "workflow-completed" workflowId report.finalStatus report.summary;
+  persistWorkflowReport report
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runWorkflow
+  }

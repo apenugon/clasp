@@ -403,6 +403,7 @@ enum ClaspRtInterpretedIntrinsic {
     Length(Box<ClaspRtInterpretedExpr>),
     ListMap(String, Box<ClaspRtInterpretedExpr>),
     ListFilter(String, Box<ClaspRtInterpretedExpr>),
+    ListFind(String, Box<ClaspRtInterpretedExpr>),
     ListAny(String, Box<ClaspRtInterpretedExpr>),
     ListAll(String, Box<ClaspRtInterpretedExpr>),
     ListFold(String, Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
@@ -1553,6 +1554,14 @@ unsafe fn append_list_like_values(
     Some(items)
 }
 
+unsafe fn runtime_value_is_view_like(value: *mut ClaspRtHeader) -> bool {
+    if value.is_null() || (*value).layout_id != CLASP_RT_LAYOUT_RECORD_VALUE {
+        return false;
+    }
+    let record = value as *mut ClaspRtRecordValue;
+    string_bytes((*record).record_name).starts_with(b"View")
+}
+
 unsafe fn prepend_list_like_value(
     value: *mut ClaspRtHeader,
     values: *mut ClaspRtHeader,
@@ -1743,13 +1752,21 @@ fn interpret_legacy_list_builtin_call(
                 return Some(right_value);
             }
             let appended = unsafe { append_list_like_values(left_value, right_value) };
+            let view_appended = if appended.is_none()
+                && unsafe { runtime_value_is_view_like(left_value) }
+                && unsafe { runtime_value_is_view_like(right_value) }
+            {
+                unsafe { clasp_rt_view_append(left_value, right_value) }
+            } else {
+                null_mut()
+            };
             unsafe {
                 release_header(runtime, left_value);
                 release_header(runtime, right_value);
             }
             Some(match appended {
                 Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
-                None => null_mut(),
+                None => view_appended,
             })
         }
         "prepend" if args.len() == 2 => {
@@ -1909,6 +1926,52 @@ fn interpret_legacy_list_builtin_call(
                 }
                 release_header(runtime, values);
                 Some(build_runtime_list_value(filtered_items) as *mut ClaspRtHeader)
+            };
+            result
+        }
+        "find" if args.len() == 2 => {
+            let Some(callee) = local_function_name(&args[0]) else {
+                return Some(null_mut());
+            };
+            let values = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return Some(null_mut());
+                };
+                for item in iterable_items {
+                    retain_header(item);
+                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
+                        interpret_runtime_binding_by_name(image, callee, &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, item);
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, item);
+                        release_header(runtime, values);
+                        return Some(null_mut());
+                    };
+                    release_header(runtime, step_result);
+                    if matches_item {
+                        release_header(runtime, values);
+                        return Some(clasp_rt_build_variant_header("Some", vec![item]));
+                    }
+                    release_header(runtime, item);
+                }
+                release_header(runtime, values);
+                Some(clasp_rt_build_variant_header("None", Vec::new()))
             };
             result
         }
@@ -2188,6 +2251,7 @@ fn interpret_native_expr(
                     runtime_value
                 }
             } else {
+                unsafe { retain_header(value) };
                 value
             }
         }
@@ -2539,13 +2603,21 @@ fn interpret_native_expr(
                 return right_value;
             }
             let appended = unsafe { append_list_like_values(left_value, right_value) };
+            let view_appended = if appended.is_none()
+                && unsafe { runtime_value_is_view_like(left_value) }
+                && unsafe { runtime_value_is_view_like(right_value) }
+            {
+                unsafe { clasp_rt_view_append(left_value, right_value) }
+            } else {
+                null_mut()
+            };
             unsafe {
                 release_header(runtime, left_value);
                 release_header(runtime, right_value);
             }
             match appended {
                 Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
-                None => null_mut(),
+                None => view_appended,
             }
         }
         ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListPrepend(value_expr, values_expr)) => {
@@ -2699,6 +2771,49 @@ fn interpret_native_expr(
                 }
                 release_header(runtime, values);
                 build_runtime_list_value(filtered_items) as *mut ClaspRtHeader
+            };
+            result
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListFind(callee, values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let result = unsafe {
+                let Some(iterable_items) = list_like_borrowed_values(values) else {
+                    release_header(runtime, values);
+                    return null_mut();
+                };
+                for item in iterable_items {
+                    retain_header(item);
+                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
+                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
+                    } else {
+                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
+                    };
+                    if step_result.is_null() {
+                        release_header(runtime, item);
+                        release_header(runtime, values);
+                        return null_mut();
+                    }
+                    let Some(matches_item) = header_bool_value(step_result) else {
+                        release_header(runtime, step_result);
+                        release_header(runtime, item);
+                        release_header(runtime, values);
+                        return null_mut();
+                    };
+                    release_header(runtime, step_result);
+                    if matches_item {
+                        release_header(runtime, values);
+                        return clasp_rt_build_variant_header("Some", vec![item]);
+                    }
+                    release_header(runtime, item);
+                }
+                release_header(runtime, values);
+                clasp_rt_build_variant_header("None", Vec::new())
             };
             result
         }
@@ -2987,6 +3102,7 @@ fn interpret_runtime_binding(
         ("pathBasename", 1) => unsafe { clasp_rt_path_basename(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
+        ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3188,6 +3304,7 @@ fn interpret_builtin_runtime_binding(
         ("pathBasename", 1) => unsafe { clasp_rt_path_basename(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
+        ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3363,6 +3480,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "pathBasename"
             | "pathDirname"
             | "fileExists"
+            | "listDir"
             | "swarmBootstrapJson"
             | "swarmStartJson"
             | "swarmLeaseJson"
@@ -5741,6 +5859,16 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
             let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
             return Some(ClaspRtInterpretedExpr::Intrinsic(
                 ClaspRtInterpretedIntrinsic::ListFilter(
+                    json_string_owned(bytes, callee_slice)?,
+                    Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
+                ),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.find") {
+            let callee_slice = json_object_lookup(bytes, expr_slice, "callee")?;
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListFind(
                     json_string_owned(bytes, callee_slice)?,
                     Box::new(parse_interpreted_expr_json(bytes, values_slice)?),
                 ),
@@ -9433,6 +9561,41 @@ pub unsafe extern "C" fn clasp_rt_file_exists(path: *mut ClaspRtString) -> bool 
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_list_dir(path: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    let entries = match fs::read_dir(&path_string) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return runtime_result_err("missing");
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotADirectory => {
+            return runtime_result_err("not_directory");
+        }
+        Err(_) => return runtime_result_err("io_error"),
+    };
+
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => return runtime_result_err("io_error"),
+        };
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(_) => return runtime_result_err("invalid_utf8"),
+        };
+        names.push(name);
+    }
+    names.sort();
+
+    let items = names
+        .iter()
+        .map(|name| build_runtime_string(name.as_bytes()) as *mut ClaspRtHeader)
+        .collect();
+    runtime_result_ok(clasp_rt_build_list_header(items))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_write_file(
     path: *mut ClaspRtString,
     contents: *mut ClaspRtString,
@@ -10440,6 +10603,14 @@ pub unsafe extern "C" fn clasp_rt_sleep_ms(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_test_suffix() -> String {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("expected system time after unix epoch")
+            .as_nanos();
+        format!("{}-{}", std::process::id(), timestamp)
+    }
 
     unsafe fn build_string_list(values: &[&[u8]]) -> *mut ClaspRtHeader {
         let list = build_runtime_string_list(values.len());
@@ -11569,6 +11740,71 @@ mod tests {
             release_header(null_mut(), path as *mut ClaspRtHeader);
             release_header(null_mut(), builtin_result);
             release_header(null_mut(), binding_result);
+        }
+    }
+
+    #[test]
+    fn builtin_runtime_binding_lists_directory_entries() {
+        let temp_root = env::temp_dir().join(format!("clasp-list-dir-{}", unique_test_suffix()));
+        fs::create_dir_all(&temp_root).expect("expected temp listDir root");
+        fs::write(temp_root.join("beta.txt"), "beta").expect("expected beta fixture write");
+        fs::write(temp_root.join("alpha.txt"), "alpha").expect("expected alpha fixture write");
+
+        unsafe {
+            let path = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let args = [path as *mut ClaspRtHeader];
+
+            let result = interpret_builtin_runtime_binding("listDir", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            let names = list_value_items(result_items[0] as *mut ClaspRtListValue);
+            assert_eq!(names.len(), 2);
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(names[0] as *mut ClaspRtString)),
+                "alpha.txt"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(names[1] as *mut ClaspRtString)),
+                "beta.txt"
+            );
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "listDirRaw".to_owned(),
+                runtime_name: "listDir".to_owned(),
+                binding_type: "Str -> Result [Str]".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+        }
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn list_dir_reports_missing_paths_as_result_error() {
+        let missing_path =
+            env::temp_dir().join(format!("clasp-list-dir-missing-{}", unique_test_suffix()));
+
+        unsafe {
+            let path = build_runtime_string(missing_path.to_string_lossy().as_bytes());
+            let result = clasp_rt_list_dir(path);
+
+            assert_eq!(variant_tag_text(result), Some("Err".to_owned()));
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(result_items[0] as *mut ClaspRtString)),
+                "missing"
+            );
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
         }
     }
 

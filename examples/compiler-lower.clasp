@@ -1,0 +1,98 @@
+module Main
+
+record LowerSnapshot = {
+  listExpr : Str,
+  letExpr : Str,
+  callExpr : Str
+}
+
+type CheckedExprText = CheckedInt Int | CheckedStr Str | CheckedVar Str | CheckedList [CheckedExprText] | CheckedCall Str [CheckedExprText] | CheckedLet Str CheckedExprText CheckedExprText
+type LowerExprText = LowerInt Int | LowerString Str | LowerLocal Str | LowerArray [LowerExprText] | LowerInvoke Str [LowerExprText] | LowerLet Str LowerExprText LowerExprText
+
+keepNoLowerExpr : LowerExprText -> Bool
+keepNoLowerExpr expr = false
+
+keepNoRenderedLowerText : Str -> Bool
+keepNoRenderedLowerText value = false
+
+emptyLowerExprs : [LowerExprText]
+emptyLowerExprs = filter keepNoLowerExpr [LowerLocal ""]
+
+emptyRenderedLowerTexts : [Str]
+emptyRenderedLowerTexts = filter keepNoRenderedLowerText [""]
+
+appendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]
+appendLowerExpr values value = append values [value]
+
+appendRenderedLowerText : [Str] -> Str -> [Str]
+appendRenderedLowerText values value = append values [value]
+
+lowerExprs : [CheckedExprText] -> [LowerExprText]
+lowerExprs values = {
+  let mut lowered = emptyLowerExprs;
+  for value in values {
+    lowered = appendLowerExpr lowered (lowerExpr value);
+    lowered
+  };
+  lowered
+}
+
+lowerExpr : CheckedExprText -> LowerExprText
+lowerExpr expr = match expr {
+  CheckedInt value ->
+    LowerInt value,
+  CheckedStr value ->
+    LowerString value,
+  CheckedVar name ->
+    LowerLocal name,
+  CheckedList values ->
+    LowerArray (lowerExprs values),
+  CheckedCall name args ->
+    LowerInvoke name (lowerExprs args),
+  CheckedLet name value body ->
+    LowerLet name (lowerExpr value) (lowerExpr body)
+}
+
+renderLowerExprs : [LowerExprText] -> [Str]
+renderLowerExprs values = {
+  let mut rendered = emptyRenderedLowerTexts;
+  for value in values {
+    rendered = appendRenderedLowerText rendered (renderLowerExpr value);
+    rendered
+  };
+  rendered
+}
+
+renderLowerExpr : LowerExprText -> Str
+renderLowerExpr expr = match expr {
+  LowerInt value ->
+    textConcat ["int:", encode value],
+  LowerString value ->
+    textConcat ["literal:", value],
+  LowerLocal name ->
+    textConcat ["name:", name],
+  LowerArray values ->
+    textConcat ["list:[", textJoin ", " (renderLowerExprs values), "]"],
+  LowerInvoke name args ->
+    textConcat ["call ", name, "(", textJoin ", " (renderLowerExprs args), ")"],
+  LowerLet name value body ->
+    textConcat ["let ", name, " = ", renderLowerExpr value, " in ", renderLowerExpr body]
+}
+
+namesExpr : CheckedExprText
+namesExpr = CheckedList [CheckedStr "Ada", CheckedStr "Grace"]
+
+namesLetExpr : CheckedExprText
+namesLetExpr = CheckedLet "names" namesExpr (CheckedCall "renderNames" [CheckedVar "names"])
+
+scoreCallExpr : CheckedExprText
+scoreCallExpr = CheckedCall "score" [CheckedInt 7, CheckedVar "weight"]
+
+snapshot : LowerSnapshot
+snapshot = LowerSnapshot { listExpr = renderLowerExpr (lowerExpr namesExpr), letExpr = renderLowerExpr (lowerExpr namesLetExpr), callExpr = renderLowerExpr (lowerExpr scoreCallExpr) }
+
+snapshotJson : Str
+snapshotJson = encode snapshot
+
+main : Str
+main = snapshotJson

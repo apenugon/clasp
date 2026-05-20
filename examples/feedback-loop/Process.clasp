@@ -22,6 +22,20 @@ record WatchedProcess = {
   updatedAtMs : Int
 }
 
+record MonitoredStepResult = {
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  running : Bool,
+  completed : Bool,
+  timedOut : Bool,
+  updatedAtMs : Int
+}
+
 record CommandSpec = { cwd : Str, command : [Str] }
 
 record WatchedCommandSpec = {
@@ -84,6 +98,9 @@ processResultError message = Err message
 
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
+
+monitoredStepError : Str -> Result MonitoredStepResult
+monitoredStepError message = Err message
 
 upgradeTransactionError : Str -> Result UpgradeTransaction
 upgradeTransactionError message = Err message
@@ -151,6 +168,44 @@ upgradeTransactionResult value = match value {
   Err message -> upgradeTransactionError message
 }
 
+processReadTextOrEmpty : Str -> Str
+processReadTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+watchedProcessStatus : WatchedProcess -> Str
+watchedProcessStatus process =
+  if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else
+      "completed-fail"
+  else if process.running then
+    "running"
+  else
+    "stopped"
+
+monitoredStepResultWithStatus : WatchedProcess -> Str -> Int -> Bool -> MonitoredStepResult
+monitoredStepResultWithStatus process status exitCode timedOut =
+  MonitoredStepResult {
+    status = status,
+    exitCode = exitCode,
+    stdout = processReadTextOrEmpty process.stdoutPath,
+    stderr = processReadTextOrEmpty process.stderrPath,
+    stdoutPath = process.stdoutPath,
+    stderrPath = process.stderrPath,
+    heartbeatPath = process.heartbeatPath,
+    running = process.running,
+    completed = process.completed,
+    timedOut = timedOut,
+    updatedAtMs = process.updatedAtMs
+  }
+
+monitoredStepResult : WatchedProcess -> MonitoredStepResult
+monitoredStepResult process =
+  monitoredStepResultWithStatus process (watchedProcessStatus process) process.exitCode false
+
 run : CommandSpec -> Result ProcessResult
 run spec = processResult (runCommandRaw spec.cwd spec.command)
 
@@ -177,6 +232,37 @@ watch spec =
       spec.watchPollMs
       spec.command
   )
+
+runMonitored : WatchedCommandSpec -> Result MonitoredStepResult
+runMonitored spec = match watch spec {
+  Ok process -> Ok (monitoredStepResult process),
+  Err message -> monitoredStepError message
+}
+
+runMonitoredTimeout : WatchedCommandSpec -> Int -> Result MonitoredStepResult
+runMonitoredTimeout spec timeoutMs =
+  if timeoutMs < 1 then
+    runMonitored spec
+  else
+    match spawn spec {
+      Err message ->
+        monitoredStepError message,
+      Ok initial ->
+        match awaitTimeout spec.heartbeatPath spec.watchPollMs timeoutMs {
+          Ok process ->
+            Ok (monitoredStepResult process),
+          Err message ->
+            if message == "timeout" then
+              match reconcile spec.heartbeatPath {
+                Ok process ->
+                  Ok (monitoredStepResultWithStatus process "timeout" 124 true),
+                Err reconcileMessage ->
+                  monitoredStepError reconcileMessage
+              }
+            else
+              monitoredStepError message
+        }
+    }
 
 reconcile : Str -> Result WatchedProcess
 reconcile heartbeatPath = watchedProcessResult (reconcileWatchedProcessRaw heartbeatPath)

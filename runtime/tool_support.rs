@@ -1288,7 +1288,6 @@ fn run_native_export_host_server_inner(image_path_text: &str, socket_path_text: 
             .map_err(|err| format!("failed to create native export host dir `{}`: {err}", parent.display()))?;
     }
 
-    let mut host = unsafe { NativeExportHost::from_image_path(image_path_text)? };
     let _ = fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)
         .map_err(|err| format!("failed to bind native export host `{}`: {err}", socket_path.display()))?;
@@ -1298,11 +1297,37 @@ fn run_native_export_host_server_inner(image_path_text: &str, socket_path_text: 
 
     let idle_timeout = Duration::from_secs(120);
     let mut last_activity = Instant::now();
+    let mut host: Option<NativeExportHost> = None;
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 last_activity = Instant::now();
-                if let Err(message) = handle_native_export_host_client(&mut host, &mut stream) {
+                if host.is_none() {
+                    let started = Instant::now();
+                    trace_native_host(&format!("loading host image={image_path_text}"));
+                    match unsafe { NativeExportHost::from_image_path(image_path_text) } {
+                        Ok(loaded_host) => {
+                            trace_native_host(&format!(
+                                "loaded host image={} ms={}",
+                                image_path_text,
+                                started.elapsed().as_millis()
+                            ));
+                            host = Some(loaded_host);
+                        }
+                        Err(message) => {
+                            trace_native_host(&format!(
+                                "failed to load host image={} message={message}",
+                                image_path_text
+                            ));
+                            let _ = write_host_response(&mut stream, 1, message.as_bytes());
+                            break;
+                        }
+                    }
+                }
+                let Some(active_host) = host.as_mut() else {
+                    continue;
+                };
+                if let Err(message) = handle_native_export_host_client(active_host, &mut stream) {
                     trace_native_host(&format!("client error socket={} message={message}", socket_path.display()));
                 }
             }

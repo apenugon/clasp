@@ -33,6 +33,7 @@ record PreviousVerifierFeedback = {
 
 record AttemptStatus = {
   attempt : Int,
+  maxAttempts : Int,
   phase : Str,
   verdict : Str,
   completed : Bool,
@@ -117,10 +118,11 @@ attemptVerifierHandle : AttemptSpec -> Int -> TaskHandle
 attemptVerifierHandle spec attempt =
   taskHandle spec.root (attemptVerifierTaskId attempt) spec.actor
 
-attemptStatus : Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Bool -> AttemptStatus
-attemptStatus attempt phase verdict completed objective builderTask verifierTask final =
+attemptStatus : Int -> Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Bool -> AttemptStatus
+attemptStatus attempt maxAttempts phase verdict completed objective builderTask verifierTask final =
   AttemptStatus {
     attempt = attempt,
+    maxAttempts = maxAttempts,
     phase = phase,
     verdict = verdict,
     completed = completed,
@@ -135,6 +137,7 @@ attemptStatusForPhase spec attempt phase verdict completed final = {
   let ids = attemptTaskIds attempt in
   attemptStatus
     attempt
+    spec.maxAttempts
     phase
     verdict
     completed
@@ -146,7 +149,7 @@ attemptStatusForPhase spec attempt phase verdict completed final = {
 
 attemptInitialStatus : AttemptSpec -> AttemptStatus
 attemptInitialStatus spec =
-  attemptStatus 1 "needs-builder" "pending" false spec.objectiveId "" "" false
+  attemptStatus 1 spec.maxAttempts "needs-builder" "pending" false spec.objectiveId "" "" false
 
 attemptWriteStatus : AttemptSpec -> AttemptStatus -> Str
 attemptWriteStatus spec state = match writeFile spec.statusPath (encode state) {
@@ -260,16 +263,21 @@ attemptRetryDecision spec attempt reason = {
 attemptRetryDecisionFromStatus : AttemptSpec -> AttemptStatus -> AttemptRetryDecision
 attemptRetryDecisionFromStatus spec state = {
   let feedback = attemptPreviousVerifierFeedback spec in
+  let persistedMaxAttempts =
+    if state.maxAttempts == 0 then
+      spec.maxAttempts
+    else
+      state.maxAttempts in
   let shouldRetry =
     if state.final then
       false
     else if state.completed then
       false
     else
-      state.attempt != spec.maxAttempts in
+      state.attempt != persistedMaxAttempts in
   AttemptRetryDecision {
     attempt = state.attempt,
-    maxAttempts = spec.maxAttempts,
+    maxAttempts = persistedMaxAttempts,
     shouldRetry = shouldRetry,
     nextAttempt = if shouldRetry then attemptNextNumber state.attempt else state.attempt,
     terminal = if shouldRetry then false else true,
@@ -284,6 +292,7 @@ attemptRetryStatus spec decision = {
   let ids = attemptTaskIds decision.attempt in
   attemptStatus
     decision.nextAttempt
+    decision.maxAttempts
     "needs-builder"
     "retry"
     false
@@ -333,6 +342,7 @@ attemptStatusFromTerminalOutcome : AttemptSpec -> AttemptTerminalOutcome -> Atte
 attemptStatusFromTerminalOutcome spec outcome =
   attemptStatus
     outcome.attempt
+    spec.maxAttempts
     outcome.phase
     outcome.verdict
     outcome.completed

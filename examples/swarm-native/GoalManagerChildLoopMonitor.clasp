@@ -3,7 +3,6 @@ module GoalManagerChildLoopMonitor
 import GoalManagerMonitoredLoop
 import GoalManagerWatch
 import GoalManagerCounters
-import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -187,6 +186,22 @@ childLoopManagerRetryAvailable : Str -> Bool
 childLoopManagerRetryAvailable taskId =
   readChildLoopManagerRetries taskId < childLoopMaxManagerRetries
 
+childLoopFirstTextOrEmpty : [Str] -> Str
+childLoopFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
 heartbeatTaskLease : Str -> Str
 heartbeatTaskLease taskId =
   match heartbeat (taskHandleFor taskId) {
@@ -211,7 +226,7 @@ heartbeatTaskLeases taskIds = {
 childLoopMonitorSpecForTaskId : Str -> MonitoredLoopSpec
 childLoopMonitorSpecForTaskId taskId =
   monitoredLoopSpec
-    managerProjectRoot
+    "."
     (taskProcessStdoutPath taskId)
     (taskProcessStderrPath taskId)
     (taskProcessHeartbeatPath taskId)
@@ -223,7 +238,7 @@ childLoopMonitorSpecForTaskId taskId =
 
 awaitChildLoopOutcome : [Str] -> MonitoredLoopOutcome
 awaitChildLoopOutcome taskIds = {
-  let taskId = firstTextOrEmpty taskIds in
+  let taskId = childLoopFirstTextOrEmpty taskIds in
   let heartbeatError = heartbeatTaskLeases taskIds in
   let outcome = monitoredLoopAwait (childLoopMonitorSpecForTaskId taskId) in
   let traceError =

@@ -1,10 +1,22 @@
 module GoalManagerWatch
 
-import GoalManagerPrelude
-import GoalManagerConfig
 import GoalManagerTypes
-import Service
-import Swarm
+
+foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
+foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
+foreign sleepMsRaw : Int -> Result Str = "sleepMs"
+
+readWatchEnvInt : Str -> Int -> Int
+readWatchEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+watchChildLoopAwaitTimeoutMs : Int
+watchChildLoopAwaitTimeoutMs = readWatchEnvInt "CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON" 10000
 
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
@@ -23,10 +35,10 @@ readWatchedProcessPath path = match readFile path {
 
 awaitWatchedProcess : Str -> Int -> Result WatchedProcess
 awaitWatchedProcess heartbeatPath pollMs =
-  if childLoopAwaitTimeoutMs <= 0 then
+  if watchChildLoopAwaitTimeoutMs <= 0 then
     watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
   else
-    match awaitWatchedProcessTimeoutRaw heartbeatPath pollMs childLoopAwaitTimeoutMs {
+    match awaitWatchedProcessTimeoutRaw heartbeatPath pollMs watchChildLoopAwaitTimeoutMs {
       Ok raw -> Ok (decode WatchedProcess raw),
       Err message ->
         if message == "timeout" then

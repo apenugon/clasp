@@ -1,0 +1,16 @@
+module Main
+
+fixturePath : Str
+fixturePath = if textJoin "" argv == "" then "examples/native-list-dir/fixture" else pathJoin argv
+
+missingPath : Str
+missingPath = textConcat [fixturePath, "-missing"]
+
+renderListing : Str -> Str
+renderListing path = match listDir path {
+  Ok names -> textJoin "," names,
+  Err message -> textConcat ["ERR:", message]
+}
+
+main : Str
+main = textJoin "|" [renderListing fixturePath, renderListing missingPath]

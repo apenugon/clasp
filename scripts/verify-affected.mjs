@@ -251,11 +251,15 @@ const COMMANDS = {
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
+  monitoredStep: "bash scripts/test-monitored-step.sh",
+  monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
+  codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
   feedbackResume: "bash scripts/test-feedback-loop-resume.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
+  compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
   benchmarkTaskPrep: "bash benchmarks/test-task-prep.sh",
   affectedNodeCheck: "node --check scripts/verify-affected.mjs",
 };
@@ -329,6 +333,14 @@ function exampleVerifyCommandForFile(file) {
   }
   const scriptPath = `examples/${match[1]}/scripts/verify.sh`;
   return fileExists(scriptPath) ? `bash ${scriptPath}` : null;
+}
+
+function exampleVerifyScriptCommandForFile(file) {
+  const match = /^examples\/([^/]+)\/scripts\/verify\.sh$/.exec(file);
+  if (!match) {
+    return null;
+  }
+  return `bash examples/${match[1]}/scripts/verify.sh`;
 }
 
 function benchmarkTaskRepoMatch(file) {
@@ -644,6 +656,32 @@ function isVerificationScript(file) {
   );
 }
 
+function compilerSliceForFile(file) {
+  switch (file) {
+    case "examples/compiler-parser.clasp":
+      return "parser";
+    case "examples/compiler-checker.clasp":
+      return "checker";
+    case "examples/compiler-lower.clasp":
+      return "lower";
+    case "examples/compiler-emitter.clasp":
+      return "emitter";
+    case "src/Compiler/Checker.clasp":
+      return "checker";
+    case "src/Compiler/Lower.clasp":
+      return "lower";
+    case "src/Compiler/Emit/JavaScript.clasp":
+    case "src/Compiler/Emit/Native.clasp":
+    case "src/Compiler/Emit/NativeDecls.clasp":
+    case "src/Compiler/Emit/NativeJson.clasp":
+    case "src/Compiler/Emit/NativeMetadata.clasp":
+    case "src/Compiler/Emit/NativeSurface.clasp":
+      return "emitter";
+    default:
+      return "";
+  }
+}
+
 function routeChangedFiles(changedFiles, inputFallbackMode) {
   const selectedByCommand = new Map();
   const routingReasons = [];
@@ -655,6 +693,9 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
   for (const file of changedFiles) {
     let matched = false;
+    const isCompilerSliceVerificationScript =
+      file === "scripts/verify-compiler-slice.sh" || file === "scripts/test-verify-compiler-slice.sh";
+    const compilerSlice = compilerSliceForFile(file);
 
     if (file.startsWith("src/")) {
       matched = true;
@@ -663,11 +704,43 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "source-verify", COMMANDS.sourceVerify, "source/compiler path", file);
     }
 
+    if (compilerSlice) {
+      matched = true;
+      reason(file, "compiler-slice", `compiler ${compilerSlice} fixture uses focused check/run coverage`);
+      addSelected(
+        selectedByCommand,
+        `compiler-slice:${compilerSlice}`,
+        `bash scripts/verify-compiler-slice.sh ${compilerSlice}`,
+        "compiler slice path",
+        file,
+      );
+    }
+
     const exampleVerifyCommand = isClaspSourceFile(file) ? exampleVerifyCommandForFile(file) : null;
     if (exampleVerifyCommand) {
       matched = true;
       reason(file, "clasp-app-flow", "Clasp example app source uses its scenario verifier for source check, compile, and app-flow behavior");
       addSelected(selectedByCommand, `example-app:${exampleVerifyCommand}`, exampleVerifyCommand, "Clasp app-flow path", file);
+    }
+
+    const exampleVerifyScriptCommand = exampleVerifyScriptCommandForFile(file);
+    if (exampleVerifyScriptCommand) {
+      matched = true;
+      reason(file, "clasp-app-flow-script", "Clasp example verifier script uses shell syntax plus its scenario verifier");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "Clasp app-flow verifier shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        `example-app:${exampleVerifyScriptCommand}`,
+        exampleVerifyScriptCommand,
+        "Clasp app-flow verifier script",
+        file,
+      );
     }
 
     if (file.startsWith("runtime/")) {
@@ -707,7 +780,10 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/feedback-loop/")) {
       matched = true;
-      reason(file, "feedback-loop", "feedback-loop example path uses resume-loop regression coverage");
+      reason(file, "feedback-loop", "feedback-loop example path uses resume-loop, monitored workflow, and ordinary Codex loop regression coverage");
+      addSelected(selectedByCommand, "monitored-step", COMMANDS.monitoredStep, "feedback-loop path", file);
+      addSelected(selectedByCommand, "monitored-workflow", COMMANDS.monitoredWorkflow, "feedback-loop path", file);
+      addSelected(selectedByCommand, "codex-loop-program", COMMANDS.codexLoopProgram, "feedback-loop path", file);
       addSelected(selectedByCommand, "feedback-resume", COMMANDS.feedbackResume, "feedback-loop path", file);
     }
 
@@ -767,7 +843,65 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
     }
 
-    if (isVerificationScript(file)) {
+    if (file === "scripts/test-monitored-step.sh") {
+      matched = true;
+      reason(file, "monitored-step-harness", "monitored step harness uses shell syntax plus focused process primitive coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "monitored step shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "monitored-step", COMMANDS.monitoredStep, "monitored step harness", file);
+    }
+
+    if (file === "scripts/test-monitored-workflow.sh") {
+      matched = true;
+      reason(file, "monitored-workflow-harness", "monitored workflow harness uses shell syntax plus ordinary workflow coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "monitored workflow shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "monitored-workflow", COMMANDS.monitoredWorkflow, "monitored workflow harness", file);
+    }
+
+    if (file === "scripts/test-codex-loop-program.sh") {
+      matched = true;
+      reason(file, "codex-loop-program-harness", "ordinary Codex loop harness uses shell syntax plus direct Codex process coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "ordinary Codex loop shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "codex-loop-program", COMMANDS.codexLoopProgram, "ordinary Codex loop harness", file);
+    }
+
+    if (isCompilerSliceVerificationScript) {
+      matched = true;
+      reason(file, "compiler-slice-verification-script", "compiler slice verifier uses shell syntax plus focused fake-claspc smoke coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "compiler slice verification shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "compiler-slice-regression",
+        COMMANDS.compilerSliceRegression,
+        "compiler slice verifier regression",
+        file,
+      );
+    } else if (isVerificationScript(file)) {
       matched = true;
       reason(file, "verification-script", "verification script path uses syntax and regression coverage");
       if (file.endsWith(".sh")) {

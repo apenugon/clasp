@@ -514,11 +514,12 @@ continueAfterFailure attempt report = {
     if decision.terminal then
       finalizeWithReport attempt "fail" false report
     else
-      let stateError = writeLoopState (attemptRetryStatus loopSpec decision) in
+      let retryState = attemptRetryStatus loopSpec decision in
+      let stateError = writeLoopState retryState in
       if stateError != "" then
         textConcat ["state-error:", stateError]
       else
-        runAttempt decision.nextAttempt
+        runAttempt retryState
   }
 }
 
@@ -639,19 +640,26 @@ runBuilderAttempt attempt = {
   }
 }
 
-runAttempt : Int -> Str
-runAttempt attempt =
-  if attempt > maxAttempts then
-    finalizeWithReport attempt "fail" false (syntheticFailureReport "attempt limit reached" "No verifier pass report was produced before the configured attempt limit.")
+attemptLimitForState : AttemptStatus -> Int
+attemptLimitForState state =
+  if state.maxAttempts == 0 then
+    maxAttempts
   else
-    runBuilderAttempt attempt
+    state.maxAttempts
+
+runAttempt : AttemptStatus -> Str
+runAttempt state =
+  if state.attempt > attemptLimitForState state then
+    finalizeWithReport state.attempt "fail" false (syntheticFailureReport "attempt limit reached" "No verifier pass report was produced before the configured attempt limit.")
+  else
+    runBuilderAttempt state.attempt
 
 resumeLoop : AttemptStatus -> Str
 resumeLoop state =
   if state.final then
     encode (statusView state)
   else
-    runAttempt state.attempt
+    runAttempt state
 
 main : Str
 main =
