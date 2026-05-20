@@ -1,0 +1,98 @@
+module Main
+
+import Host
+
+record HostScenarioReport = {
+  cwd : Str,
+  parentEnv : Str,
+  fileText : Str,
+  writeBack : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  parentChildEnv : Str
+}
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "host-runtime-state" else pathJoin argv
+
+inputPath : Str
+inputPath = pathJoin [stateRoot, "input.txt"]
+
+outputPath : Str
+outputPath = pathJoin [stateRoot, "output.txt"]
+
+childCommand : [Str]
+childCommand = [
+  "/bin/sh",
+  "-c",
+  "IFS= read -r file_text < input.txt; printf $CLASP_CHILD_MESSAGE; printf ':'; printf ${CLASP_HOST_RUNTIME_SCENARIO_ENV:-missing}; printf ':'; printf $file_text; printf err-$CLASP_CHILD_MESSAGE >&2"
+]
+
+readEnvText : Str -> Str
+readEnvText name = match envVar name {
+  Ok value -> value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+readFileText : Str -> Str
+readFileText path = match readFile path {
+  Ok value -> value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+errorReport : Str -> HostScenarioReport
+errorReport message =
+  HostScenarioReport {
+    cwd = "",
+    parentEnv = readEnvText "CLASP_HOST_RUNTIME_SCENARIO_ENV",
+    fileText = readFileText inputPath,
+    writeBack = readFileText outputPath,
+    exitCode = 1,
+    stdout = "",
+    stderr = message,
+    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE"
+  }
+
+successReport : Str -> ProcessResult -> HostScenarioReport
+successReport cwdText process =
+  HostScenarioReport {
+    cwd = cwdText,
+    parentEnv = readEnvText "CLASP_HOST_RUNTIME_SCENARIO_ENV",
+    fileText = readFileText inputPath,
+    writeBack = readFileText outputPath,
+    exitCode = process.exitCode,
+    stdout = process.stdout,
+    stderr = process.stderr,
+    parentChildEnv = readEnvText "CLASP_CHILD_MESSAGE"
+  }
+
+runScenarioWithCwd : Str -> Str
+runScenarioWithCwd cwdText =
+  match mkdirAll stateRoot {
+    Err message ->
+      encode (errorReport message),
+    Ok created ->
+      match writeFile inputPath "file-text" {
+        Err message ->
+          encode (errorReport message),
+        Ok written ->
+          match runProcess (makeProcessSpec stateRoot ["CLASP_CHILD_MESSAGE=child-env"] childCommand) {
+            Err message ->
+              encode (errorReport message),
+            Ok process ->
+              match writeFile outputPath process.stdout {
+                Err message ->
+                  encode (errorReport message),
+                Ok outputWritten ->
+                  encode (successReport cwdText process)
+              }
+          }
+      }
+  }
+
+main : Str
+main = match currentWorkingDirectory {
+  Ok cwdText -> runScenarioWithCwd cwdText,
+  Err message -> encode (errorReport message)
+}

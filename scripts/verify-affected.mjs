@@ -254,6 +254,7 @@ const COMMANDS = {
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
+  hostRuntime: "bash scripts/test-host-runtime.sh",
   runtimeSliceProcess: "bash scripts/verify-runtime-slice.sh process",
   runtimeSliceWorkflow: "bash scripts/verify-runtime-slice.sh workflow",
   runtimeSliceCodexLoop: "bash scripts/verify-runtime-slice.sh codex-loop",
@@ -280,6 +281,15 @@ const plannerReportDecodeFiles = new Set([
   "examples/swarm-native/GoalManagerReportIO.clasp",
   "examples/swarm-native/PlannerReportDecodeHarness.clasp",
   "scripts/test-goal-manager-planner-report-decode.sh",
+]);
+const ignoredChangedFiles = new Set([
+  ".workspace-ready",
+  ".clasp-manager-workspace-ready",
+  ".clasp-manager-workspace-manifest.json",
+]);
+const hostRuntimeDocFiles = new Set([
+  "docs/autonomous-swarm-build-plan.md",
+  "docs/clasp-spec-v0.md",
 ]);
 
 function fileExists(relativePath) {
@@ -795,6 +805,18 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "feedback-resume", COMMANDS.feedbackResume, "feedback-loop path", file);
     }
 
+    if (file.startsWith("examples/host-runtime/")) {
+      matched = true;
+      reason(file, "host-runtime", "host runtime example path uses focused ordinary-program process and file IO coverage");
+      addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime path", file);
+    }
+
+    if (hostRuntimeDocFiles.has(file)) {
+      matched = true;
+      reason(file, "host-runtime-docs", "host runtime documentation changes use focused ordinary host API coverage");
+      addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime docs", file);
+    }
+
     const benchmarkMatch = benchmarkTaskRepoMatch(file);
     if (benchmarkMatch) {
       matched = true;
@@ -888,6 +910,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "runtime-slice:codex-loop", COMMANDS.runtimeSliceCodexLoop, "ordinary Codex loop harness", file);
+    }
+
+    if (file === "scripts/test-host-runtime.sh") {
+      matched = true;
+      reason(file, "host-runtime-harness", "host runtime harness uses shell syntax plus focused ordinary host API coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "host runtime shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime harness", file);
     }
 
     if (file === "scripts/test-swarm-native-managed-loop.sh") {
@@ -1089,7 +1124,7 @@ function main() {
     inputFallbackMode = gitFallback.inputFallbackMode;
   }
 
-  const changedFiles = uniqueNormalized(rawChangedFiles);
+  const changedFiles = uniqueNormalized(rawChangedFiles).filter((file) => !ignoredChangedFiles.has(file));
   const semanticContexts = collectSemanticContexts(changedFiles);
   const routePlan = routeChangedFiles(changedFiles, inputFallbackMode);
   const planExplanations = args.planOnly ? buildPlanExplanations(changedFiles, routePlan, semanticContexts) : [];

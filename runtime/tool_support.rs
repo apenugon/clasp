@@ -54,6 +54,7 @@ const NATIVE_RUNTIME_ONLY_SYMBOLS: &[&str] = &[
     "argv",
     "timeUnixMs",
     "envVar",
+    "currentWorkingDirectory",
     "writeFile",
     "appendFile",
     "mkdirAll",
@@ -62,6 +63,8 @@ const NATIVE_RUNTIME_ONLY_SYMBOLS: &[&str] = &[
     "pathJoin",
     "pathDirname",
     "pathBasename",
+    "runProcessJson",
+    "runProcessTimeoutJson",
 ];
 
 #[derive(Clone)]

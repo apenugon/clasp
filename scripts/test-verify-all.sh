@@ -49,6 +49,7 @@ cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monit
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
+cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
@@ -111,11 +112,14 @@ grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F '"firstFailedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -552,6 +556,8 @@ function assert(condition, message) {
 }
 assert(report.finalVerdict === "passed", "fallback report should pass");
 assert(report.exitStatus === 0, "fallback report exit status should be zero");
+assert(report.firstFailedCommand === null, "fallback success should not record a failed command");
+assert(report.firstFailedExitStatus === null, "fallback success should not record a failed exit status");
 assert(report.mode === "fallback", `unexpected fallback mode: ${report.mode}`);
 assert(report.usedFallback === true, "fallback mode should be marked");
 assert(report.usedNested === false, "fallback mode should not be nested");
@@ -609,6 +615,10 @@ assert(report.schemaVersion === 1, "report schema version should be stable");
 assert(report.label === "verify-all", "report should preserve the verify label");
 assert(report.finalVerdict === "passed", "success report should pass");
 assert(report.exitStatus === 0, "success exit status should be zero");
+assert(report.firstFailedPhase === null, "success should not record a failed phase");
+assert(report.firstFailedGroup === null, "success should not record a failed group");
+assert(report.firstFailedCommand === null, "success should not record a failed command");
+assert(report.firstFailedExitStatus === null, "success should not record a failed exit status");
 assert(report.mode === "normal", `unexpected success mode: ${report.mode}`);
 assert(report.usedFallback === false, "success should not use fallback");
 assert(report.usedNested === false, "success should not use nested verification");
@@ -646,6 +656,7 @@ fi
 
 [[ "$(< "$report_failure_before")" == "before-failure" ]]
 [[ ! -f "$report_failure_after" ]]
+grep -F 'verify-all: sequential command failed (exit 1): false' "$test_root/report-failure.stderr" >/dev/null
 node - "$report_failure" <<'NODE'
 const fs = require("fs");
 const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -658,6 +669,10 @@ function assert(condition, message) {
 assert(report.finalVerdict === "failed", "failure report should fail");
 assert(report.exitStatus !== 0, "failure report exit status should be non-zero");
 assert(report.mode === "normal", `unexpected failure mode: ${report.mode}`);
+assert(report.firstFailedPhase === "sequential", `failure phase: ${report.firstFailedPhase}`);
+assert(report.firstFailedGroup === "sequential", `failure group: ${report.firstFailedGroup}`);
+assert(report.firstFailedCommand === "false", `failure command: ${report.firstFailedCommand}`);
+assert(report.firstFailedExitStatus !== 0, "failure exit status should be non-zero");
 assert(report.commandCount === 2 && report.commands.length === 2, "failure report should stop after the failing command");
 assert(report.commands[0].exitStatus === 0, "first failure scenario command should pass");
 const failed = report.commands.find((command) => command.command === "false");

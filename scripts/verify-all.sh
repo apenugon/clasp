@@ -22,6 +22,10 @@ verify_report_mode="normal"
 verify_report_used_fallback=0
 verify_report_used_nested=0
 verify_report_output_reset=0
+verify_report_first_failed_phase=""
+verify_report_first_failed_group=""
+verify_report_first_failed_command=""
+verify_report_first_failed_exit_status=""
 declare -a verify_report_commands=()
 if ! [[ "$verify_lock_timeout_secs" =~ ^[0-9]+$ ]]; then
   verify_lock_timeout_secs=0
@@ -40,6 +44,7 @@ bash scripts/test-monitored-step.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
 bash scripts/test-js-process-runtime.sh
+bash scripts/test-host-runtime.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
 bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-native-runtime.sh
@@ -142,6 +147,14 @@ json_string() {
   printf '"%s"' "$(json_escape "$1")"
 }
 
+json_nullable_string() {
+  if [[ -z "$1" ]]; then
+    printf 'null'
+  else
+    json_string "$1"
+  fi
+}
+
 verify_report_bool() {
   if [[ "$1" == "1" ]]; then
     printf 'true'
@@ -223,6 +236,13 @@ verify_report_record_command() {
   entry+=',"elapsedMs":'"$elapsed_ms"
   entry+='}'
   verify_report_commands+=("$entry")
+
+  if (( exit_status != 0 )) && [[ -z "$verify_report_first_failed_command" ]]; then
+    verify_report_first_failed_phase="$phase"
+    verify_report_first_failed_group="$group"
+    verify_report_first_failed_command="$command"
+    verify_report_first_failed_exit_status="$exit_status"
+  fi
 }
 
 verify_report_write() {
@@ -274,6 +294,14 @@ verify_report_write() {
     printf '  "elapsedMs": %s,\n' "$elapsed_ms"
     printf '  "exitStatus": %s,\n' "$exit_status"
     printf '  "finalVerdict": %s,\n' "$(json_string "$verdict")"
+    printf '  "firstFailedPhase": %s,\n' "$(json_nullable_string "$verify_report_first_failed_phase")"
+    printf '  "firstFailedGroup": %s,\n' "$(json_nullable_string "$verify_report_first_failed_group")"
+    printf '  "firstFailedCommand": %s,\n' "$(json_nullable_string "$verify_report_first_failed_command")"
+    if [[ -n "$verify_report_first_failed_exit_status" ]]; then
+      printf '  "firstFailedExitStatus": %s,\n' "$verify_report_first_failed_exit_status"
+    else
+      printf '  "firstFailedExitStatus": null,\n'
+    fi
     printf '  "commandCount": %s,\n' "$command_count"
     printf '  "commands": [\n'
     for ((index = 0; index < command_count; index += 1)); do
@@ -405,10 +433,19 @@ run_command_block() {
   local phase="${2:-sequential}"
   local group="${3:-sequential}"
   local command=""
+  local command_status=0
 
   while IFS= read -r command || [[ -n "$command" ]]; do
     [[ -z "$command" ]] && continue
-    run_timed_project_command "$phase" "$group" "$command"
+    if run_timed_project_command "$phase" "$group" "$command"; then
+      command_status=0
+    else
+      command_status=$?
+    fi
+    if (( command_status != 0 )); then
+      printf '%s: %s command failed (exit %s): %s\n' "$verify_label" "$phase" "$command_status" "$command" >&2
+      return "$command_status"
+    fi
   done <<< "$commands"
 }
 
@@ -486,7 +523,7 @@ run_parallel_commands() {
     fi
 
     if (( wait_status != 0 )); then
-      printf '%s: parallel command failed: %s\n' "$verify_label" "$finished_command" >&2
+      printf '%s: parallel command failed (exit %s): %s\n' "$verify_label" "$wait_status" "$finished_command" >&2
       if [[ -n "$finished_log_path" && -f "$finished_log_path" ]]; then
         cat "$finished_log_path" >&2
       fi

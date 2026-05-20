@@ -192,7 +192,7 @@ fullVerifyCommand : Str
 fullVerifyCommand = readEnvText "CLASP_LOOP_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
 
 focusedVerifierTimeoutMs : Int
-focusedVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FOCUSED_VERIFIER_TIMEOUT_MS_JSON" 480000
+focusedVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FOCUSED_VERIFIER_TIMEOUT_MS_JSON" 0
 
 fullVerifierTimeoutMs : Int
 fullVerifierTimeoutMs = readEnvInt "CLASP_LOOP_FULL_VERIFIER_TIMEOUT_MS_JSON" 0

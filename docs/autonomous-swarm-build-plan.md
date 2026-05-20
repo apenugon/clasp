@@ -165,14 +165,18 @@ The implemented native primitives now include:
 
 - `timeUnixMs : Int`
 - `envVar : Str -> Result Str`
+- `currentWorkingDirectory : Result Str`
 - `readFile : Str -> Result Str`
+- `writeFile : Str -> Str -> Result Str`
 - `appendFile : Str -> Str -> Result Str`
 - `mkdirAll : Str -> Result Str`
+- `runProcessJson : Str -> [Str] -> [Str] -> Result Str`
+- `runProcessTimeoutJson : Str -> Int -> [Str] -> [Str] -> Result Str`
 - SQLite-backed task/event state in the native launcher
 - native artifact capture for tool and verifier runs
 - native mergegate decisions over stored verifier runs
 
-These are available through the self-hosted native compiler/runtime path and are exercised by the native example at [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp).
+These are available through the self-hosted native compiler/runtime path and are exercised by the native examples at [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp) and [`examples/host-runtime/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/host-runtime/Main.clasp).
 
 That example proves:
 

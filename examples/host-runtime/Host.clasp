@@ -1,0 +1,39 @@
+module Host
+
+foreign currentWorkingDirectoryRaw : Result Str = "currentWorkingDirectory"
+foreign runProcessRaw : Str -> [Str] -> [Str] -> Result Str = "runProcessJson"
+foreign runProcessTimeoutRaw : Str -> Int -> [Str] -> [Str] -> Result Str = "runProcessTimeoutJson"
+
+record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+record TimedProcessResult = { exitCode : Int, stdout : Str, stderr : Str, timedOut : Bool, error : Str }
+record ProcessSpec = { cwd : Str, env : [Str], argv : [Str] }
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
+
+makeProcessSpec : Str -> [Str] -> [Str] -> ProcessSpec
+makeProcessSpec cwd env argv = ProcessSpec { cwd = cwd, env = env, argv = argv }
+
+currentWorkingDirectory : Result Str
+currentWorkingDirectory = currentWorkingDirectoryRaw
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+timedProcessResult : Result Str -> Result TimedProcessResult
+timedProcessResult value = match value {
+  Ok raw -> Ok (decode TimedProcessResult raw),
+  Err message -> timedProcessResultError message
+}
+
+runProcess : ProcessSpec -> Result ProcessResult
+runProcess spec = processResult (runProcessRaw spec.cwd spec.env spec.argv)
+
+runProcessTimeout : ProcessSpec -> Int -> Result TimedProcessResult
+runProcessTimeout spec timeoutMs = timedProcessResult (runProcessTimeoutRaw spec.cwd timeoutMs spec.env spec.argv)

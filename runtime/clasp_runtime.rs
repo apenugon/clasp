@@ -3094,6 +3094,9 @@ fn interpret_runtime_binding(
         ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
         ("timeUnixMs", 0) => unsafe { clasp_rt_time_unix_ms() },
         ("envVar", 1) => unsafe { clasp_rt_env_var(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("currentWorkingDirectory", 0) => unsafe {
+            clasp_rt_current_working_directory() as *mut ClaspRtHeader
+        },
         ("pathJoin", 1) => unsafe {
             list_like_string_items(args[0])
                 .map(|parts| build_runtime_string(&join_string_bytes(&parts, b"/")) as *mut ClaspRtHeader)
@@ -3145,6 +3148,14 @@ fn interpret_runtime_binding(
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
         ("runCommandTimeoutJson", 3) => unsafe {
             clasp_rt_run_command_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2])
+                as *mut ClaspRtHeader
+        },
+        ("runProcessJson", 3) => unsafe {
+            clasp_rt_run_process_json(args[0] as *mut ClaspRtString, args[1], args[2])
+                as *mut ClaspRtHeader
+        },
+        ("runProcessTimeoutJson", 4) => unsafe {
+            clasp_rt_run_process_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2], args[3])
                 as *mut ClaspRtHeader
         },
         ("spawnCommandJson", 6) => unsafe {
@@ -3304,6 +3315,9 @@ fn interpret_builtin_runtime_binding(
         ("argv", 0) => unsafe { clasp_rt_argv() as *mut ClaspRtHeader },
         ("timeUnixMs", 0) => unsafe { clasp_rt_time_unix_ms() },
         ("envVar", 1) => unsafe { clasp_rt_env_var(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("currentWorkingDirectory", 0) => unsafe {
+            clasp_rt_current_working_directory() as *mut ClaspRtHeader
+        },
         ("pathJoin", 1) => unsafe { clasp_rt_path_join(args[0] as *mut ClaspRtStringList) as *mut ClaspRtHeader },
         ("pathBasename", 1) => unsafe { clasp_rt_path_basename(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3351,6 +3365,14 @@ fn interpret_builtin_runtime_binding(
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
         ("runCommandTimeoutJson", 3) => unsafe {
             clasp_rt_run_command_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2])
+                as *mut ClaspRtHeader
+        },
+        ("runProcessJson", 3) => unsafe {
+            clasp_rt_run_process_json(args[0] as *mut ClaspRtString, args[1], args[2])
+                as *mut ClaspRtHeader
+        },
+        ("runProcessTimeoutJson", 4) => unsafe {
+            clasp_rt_run_process_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2], args[3])
                 as *mut ClaspRtHeader
         },
         ("spawnCommandJson", 6) => unsafe {
@@ -3484,6 +3506,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "argv"
             | "timeUnixMs"
             | "envVar"
+            | "currentWorkingDirectory"
             | "pathJoin"
             | "pathBasename"
             | "pathDirname"
@@ -3524,6 +3547,8 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmArtifactsJson"
             | "runCommandJson"
             | "runCommandTimeoutJson"
+            | "runProcessJson"
+            | "runProcessTimeoutJson"
             | "spawnCommandJson"
             | "watchCommandJson"
             | "reconcileWatchedProcessJson"
@@ -9673,6 +9698,17 @@ pub unsafe extern "C" fn clasp_rt_env_var(name: *mut ClaspRtString) -> *mut Clas
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_current_working_directory() -> *mut ClaspRtResultString {
+    match env::current_dir() {
+        Ok(path) => {
+            let path_text = path.to_string_lossy().into_owned();
+            clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes()))
+        }
+        Err(_) => clasp_rt_result_err_string(build_runtime_string(b"io_error")),
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut ClaspRtResultString {
     let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
     let mut file = match File::open(&path_string) {
@@ -10281,23 +10317,75 @@ fn render_run_command_timeout_payload(
     payload
 }
 
+unsafe fn clasp_rt_process_argv_arg(command: *mut ClaspRtHeader) -> Result<Vec<String>, String> {
+    let command_values = clasp_rt_string_list_arg(command).map_err(|_| "invalid_command".to_owned())?;
+    if command_values.is_empty() {
+        return Err("missing_command".to_owned());
+    }
+    Ok(command_values)
+}
+
+fn parse_process_env_assignment(assignment: &str) -> Result<(String, String), String> {
+    let Some((name, value)) = assignment.split_once('=') else {
+        return Err("invalid_env".to_owned());
+    };
+    if name.is_empty() || name.contains('\0') || value.contains('\0') {
+        return Err("invalid_env".to_owned());
+    }
+    Ok((name.to_owned(), value.to_owned()))
+}
+
+unsafe fn clasp_rt_process_env_arg(env_values: *mut ClaspRtHeader) -> Result<Vec<(String, String)>, String> {
+    let raw_values = clasp_rt_string_list_arg(env_values).map_err(|_| "invalid_env".to_owned())?;
+    raw_values
+        .iter()
+        .map(|value| parse_process_env_assignment(value))
+        .collect()
+}
+
+fn apply_process_env(command: &mut ProcessCommand, env_values: &[(String, String)]) {
+    command.env_clear();
+    for (name, value) in env_values {
+        command.env(name, value);
+    }
+}
+
+fn run_process_command_output(
+    cwd: &str,
+    env_values: &[(String, String)],
+    command_values: &[String],
+) -> std::io::Result<std::process::Output> {
+    let mut command = ProcessCommand::new(&command_values[0]);
+    command.args(&command_values[1..]).current_dir(cwd);
+    apply_process_env(&mut command, env_values);
+    command.output()
+}
+
+fn spawn_process_command(
+    cwd: &str,
+    env_values: &[(String, String)],
+    command_values: &[String],
+) -> std::io::Result<std::process::Child> {
+    let mut command = ProcessCommand::new(&command_values[0]);
+    command
+        .args(&command_values[1..])
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_process_env(&mut command, env_values);
+    command.spawn()
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn clasp_rt_run_command_json(
     cwd: *mut ClaspRtString,
     command: *mut ClaspRtHeader,
 ) -> *mut ClaspRtResultString {
     let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
-    let Some(command_items) = list_like_string_items(command) else {
-        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    let command_values = match clasp_rt_process_argv_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
     };
-    if command_items.is_empty() {
-        return clasp_rt_result_err_string(build_runtime_string(b"missing_command"));
-    }
-
-    let command_values: Vec<String> = command_items
-        .iter()
-        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
-        .collect();
 
     let render_payload = |exit_code: i32, stdout: &[u8], stderr: &[u8]| {
         let payload = render_run_command_payload(exit_code, stdout, stderr);
@@ -10351,17 +10439,10 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
         Ok(value) => value.max(0) as u64,
         Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
     };
-    let Some(command_items) = list_like_string_items(command) else {
-        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    let command_values = match clasp_rt_process_argv_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
     };
-    if command_items.is_empty() {
-        return clasp_rt_result_err_string(build_runtime_string(b"missing_command"));
-    }
-
-    let command_values: Vec<String> = command_items
-        .iter()
-        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
-        .collect();
 
     let render_payload = |exit_code: i32, stdout: &[u8], stderr: &[u8], timed_out: bool, error: &str| {
         let payload = render_run_command_timeout_payload(exit_code, stdout, stderr, timed_out, error);
@@ -10447,6 +10528,126 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
                     match child.wait_with_output() {
                         Ok(output) => {
                             return render_payload(124, &output.stdout, &output.stderr, true, "timeout");
+                        }
+                        Err(err) => {
+                            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => {
+                return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+            }
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_run_process_json(
+    cwd: *mut ClaspRtString,
+    env_values: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let env_value = match clasp_rt_process_env_arg(env_values) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let command_values = match clasp_rt_process_argv_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let output = match run_process_command_output(&cwd_string, &env_value, &command_values) {
+        Ok(output) => output,
+        Err(err) => {
+            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+        }
+    };
+    let payload = render_run_command_payload(
+        output.status.code().unwrap_or(-1),
+        &output.stdout,
+        &output.stderr,
+    );
+    clasp_rt_result_ok_string(build_runtime_string(&payload))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_run_process_timeout_json(
+    cwd: *mut ClaspRtString,
+    timeout_ms: *mut ClaspRtHeader,
+    env_values: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let timeout_ms_value = match clasp_rt_int_arg(timeout_ms) {
+        Ok(value) => value.max(0) as u64,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let env_value = match clasp_rt_process_env_arg(env_values) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let command_values = match clasp_rt_process_argv_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+
+    if timeout_ms_value == 0 {
+        let output = match run_process_command_output(&cwd_string, &env_value, &command_values) {
+            Ok(output) => output,
+            Err(err) => {
+                return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+            }
+        };
+        let payload = render_run_command_timeout_payload(
+            output.status.code().unwrap_or(-1),
+            &output.stdout,
+            &output.stderr,
+            false,
+            "",
+        );
+        return clasp_rt_result_ok_string(build_runtime_string(&payload));
+    }
+
+    let mut child = match spawn_process_command(&cwd_string, &env_value, &command_values) {
+        Ok(child) => child,
+        Err(err) => {
+            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+        }
+    };
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => match child.wait_with_output() {
+                Ok(output) => {
+                    let payload = render_run_command_timeout_payload(
+                        output.status.code().unwrap_or(-1),
+                        &output.stdout,
+                        &output.stderr,
+                        false,
+                        "",
+                    );
+                    return clasp_rt_result_ok_string(build_runtime_string(&payload));
+                }
+                Err(err) => {
+                    return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+                }
+            },
+            Ok(None) => {
+                if started.elapsed() >= Duration::from_millis(timeout_ms_value) {
+                    let _ = child.kill();
+                    match child.wait_with_output() {
+                        Ok(output) => {
+                            let payload = render_run_command_timeout_payload(
+                                124,
+                                &output.stdout,
+                                &output.stderr,
+                                true,
+                                "timeout",
+                            );
+                            return clasp_rt_result_ok_string(build_runtime_string(&payload));
                         }
                         Err(err) => {
                             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
@@ -11000,6 +11201,145 @@ mod tests {
             release_header(null_mut(), command);
             release_header(null_mut(), result as *mut ClaspRtHeader);
             let _ = std::fs::remove_file(script_path);
+        }
+    }
+
+    #[test]
+    fn current_working_directory_reports_process_cwd() {
+        unsafe {
+            let result = clasp_rt_current_working_directory();
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let expected = std::env::current_dir()
+                .expect("expected current working directory")
+                .to_string_lossy()
+                .into_owned();
+            assert_eq!(payload, expected);
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "currentWorkingDirectoryRaw".to_owned(),
+                runtime_name: "currentWorkingDirectory".to_owned(),
+                binding_type: "Result Str".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &[]);
+            assert!(!binding_result.is_null());
+            assert_eq!((*binding_result).layout_id, CLASP_RT_LAYOUT_RESULT_STRING);
+            assert!((*(binding_result as *mut ClaspRtResultString)).is_ok);
+
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            release_header(null_mut(), binding_result);
+        }
+    }
+
+    #[test]
+    fn run_process_json_passes_explicit_env_and_cwd() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir().join(format!(
+                "clasp-run-process-json-{}",
+                unique_test_suffix()
+            ));
+            std::fs::create_dir_all(&cwd_dir).expect("expected run process cwd");
+            std::fs::write(cwd_dir.join("input.txt"), "file-text")
+                .expect("expected run process input write");
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let env_values = build_runtime_list_value(vec![
+                build_runtime_string(b"CLASP_CHILD_VALUE=child-env") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"/bin/sh") as *mut ClaspRtHeader,
+                build_runtime_string(b"-c") as *mut ClaspRtHeader,
+                build_runtime_string(
+                    b"IFS= read -r file_text < input.txt; printf $CLASP_CHILD_VALUE; printf ':'; printf ${CLASP_PARENT_SHOULD_NOT_LEAK:-missing}; printf ':'; printf $file_text; printf err-$CLASP_CHILD_VALUE >&2",
+                ) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_process_json(cwd, env_values, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(0));
+            assert_eq!(parsed["stdout"].as_str(), Some("child-env:missing:file-text"));
+            assert_eq!(parsed["stderr"].as_str(), Some("err-child-env"));
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "runProcessRaw".to_owned(),
+                runtime_name: "runProcessJson".to_owned(),
+                binding_type: "Str -> [Str] -> [Str] -> Result Str".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &[cwd as *mut ClaspRtHeader, env_values, command]);
+            assert!(!binding_result.is_null());
+            assert_eq!((*binding_result).layout_id, CLASP_RT_LAYOUT_RESULT_STRING);
+            assert!((*(binding_result as *mut ClaspRtResultString)).is_ok);
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), env_values);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+            release_header(null_mut(), binding_result);
+            let _ = std::fs::remove_dir_all(cwd_dir);
+        }
+    }
+
+    #[test]
+    fn run_process_json_rejects_malformed_env_entries() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let env_values = build_runtime_list_value(vec![
+                build_runtime_string(b"CLASP_CHILD_VALUE") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"sh") as *mut ClaspRtHeader,
+                build_runtime_string(b"-c") as *mut ClaspRtHeader,
+                build_runtime_string(b"printf should-not-run") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_process_json(cwd, env_values, command);
+            assert!(!(*result).is_ok);
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes((*result).value)),
+                "invalid_env"
+            );
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), env_values);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+        }
+    }
+
+    #[test]
+    fn run_process_timeout_json_marks_timeout() {
+        unsafe {
+            let cwd_dir = std::env::temp_dir();
+            let cwd_text = cwd_dir.display().to_string();
+            let cwd = build_runtime_string(cwd_text.as_bytes());
+            let timeout_ms = build_runtime_int(20) as *mut ClaspRtHeader;
+            let env_values = build_runtime_list_value(vec![]) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(b"/bin/sh") as *mut ClaspRtHeader,
+                build_runtime_string(b"-c") as *mut ClaspRtHeader,
+                build_runtime_string(b"while :; do :; done") as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let result = clasp_rt_run_process_timeout_json(cwd, timeout_ms, env_values, command);
+            assert!((*result).is_ok);
+
+            let payload = String::from_utf8_lossy(string_bytes((*result).value)).into_owned();
+            let parsed: serde_json::Value = serde_json::from_str(&payload).expect("expected valid JSON payload");
+            assert_eq!(parsed["exitCode"].as_i64(), Some(124));
+            assert_eq!(parsed["timedOut"].as_bool(), Some(true));
+            assert_eq!(parsed["error"].as_str(), Some("timeout"));
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), timeout_ms);
+            release_header(null_mut(), env_values);
+            release_header(null_mut(), command);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
         }
     }
 

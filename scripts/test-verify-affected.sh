@@ -243,6 +243,19 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known ordinary Codex loop harness should not use verify-fast fallback");
     assert(logHas("scripts/verify-runtime-slice.sh codex-loop"), "fake ordinary Codex loop slice command should execute");
     break;
+  case "host-runtime":
+    assert(report.changedFiles.includes("examples/host-runtime/Main.clasp"), "host runtime source should be present");
+    assert(report.changedFiles.includes("examples/host-runtime/Host.clasp"), "host runtime wrapper should be present");
+    assert(report.changedFiles.includes("scripts/test-host-runtime.sh"), "host runtime harness should be present");
+    assert(report.changedFiles.includes("docs/clasp-spec-v0.md"), "host runtime spec doc should be present");
+    assert(report.changedFiles.includes("docs/autonomous-swarm-build-plan.md"), "host runtime build-plan doc should be present");
+    assert(!report.changedFiles.includes(".workspace-ready"), "workspace sentinel should be ignored");
+    assert(hasCommand("bash -n 'scripts/test-host-runtime.sh'"), "host runtime harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-host-runtime.sh"), "host runtime route should run focused host API coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-host-runtime.sh").length === 1, "host runtime command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known host runtime inputs should not use verify-fast fallback");
+    assert(logHas("scripts/test-host-runtime.sh"), "fake host runtime command should execute");
+    break;
   case "source-benchmark-mixed":
     assert(report.changedFiles.includes("src/Compiler/SemanticArtifacts.clasp"), "source context artifact file should be present");
     assert(report.changedFiles.includes("benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"), "benchmark app source should be present");
@@ -386,6 +399,18 @@ codex_loop_program_script_log="$test_root/codex-loop-program-script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$codex_loop_program_script_log" \
   run_verify_affected --changed-file scripts/test-codex-loop-program.sh > "$codex_loop_program_script_report"
 assert_report "$codex_loop_program_script_report" "$codex_loop_program_script_log" codex-loop-program-script
+
+host_runtime_report="$test_root/host-runtime-report.json"
+host_runtime_log="$test_root/host-runtime.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$host_runtime_log" \
+  run_verify_affected \
+    --changed-file examples/host-runtime/Main.clasp \
+    --changed-file examples/host-runtime/Host.clasp \
+    --changed-file scripts/test-host-runtime.sh \
+    --changed-file docs/clasp-spec-v0.md \
+    --changed-file docs/autonomous-swarm-build-plan.md \
+    --changed-file .workspace-ready > "$host_runtime_report"
+assert_report "$host_runtime_report" "$host_runtime_log" host-runtime
 
 source_benchmark_report="$test_root/source-benchmark-report.json"
 source_benchmark_log="$test_root/source-benchmark.log"

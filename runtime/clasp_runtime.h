@@ -296,9 +296,21 @@ bool clasp_rt_file_exists(ClaspRtString *path);
 ClaspRtHeader *clasp_rt_list_dir(ClaspRtString *path);
 ClaspRtHeader *clasp_rt_time_unix_ms(void);
 ClaspRtResultString *clasp_rt_env_var(ClaspRtString *name);
+ClaspRtResultString *clasp_rt_current_working_directory(void);
 ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path);
 ClaspRtResultString *clasp_rt_write_file(ClaspRtString *path, ClaspRtString *contents);
 ClaspRtResultString *clasp_rt_append_file(ClaspRtString *path, ClaspRtString *contents);
 ClaspRtResultString *clasp_rt_mkdir_all(ClaspRtString *path);
+ClaspRtResultString *clasp_rt_run_process_json(
+  ClaspRtString *cwd,
+  ClaspRtHeader *env_values,
+  ClaspRtHeader *command
+);
+ClaspRtResultString *clasp_rt_run_process_timeout_json(
+  ClaspRtString *cwd,
+  ClaspRtHeader *timeout_ms,
+  ClaspRtHeader *env_values,
+  ClaspRtHeader *command
+);
 
 #endif
