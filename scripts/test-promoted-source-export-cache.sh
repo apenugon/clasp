@@ -16,7 +16,36 @@ test_root="$(mktemp -d "$tmp_root/test-promoted-source-export-cache.XXXXXX")"
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh")"
 
 node --check "$project_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+node --check "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
 node "$project_root/scripts/generate-promoted-source-export-cache.mjs" --check >/dev/null
+
+portable_root="$test_root/portable/.clasp-task-workspaces/task"
+mkdir -p "$portable_root/scripts" "$portable_root/src"
+cp "$project_root/scripts/check-promoted-native-image-exports.mjs" "$portable_root/scripts/check-promoted-native-image-exports.mjs"
+cp "$project_root/src/Main.clasp" "$portable_root/src/Main.clasp"
+cp "$project_root/src/CompilerMain.clasp" "$portable_root/src/CompilerMain.clasp"
+cp "$project_root/src/stage1.compiler.source-export-cache-v1.json" "$portable_root/src/stage1.compiler.source-export-cache-v1.json"
+portable_check_output="$(node "$portable_root/scripts/check-promoted-native-image-exports.mjs")"
+case "$portable_check_output" in
+  *"portable source-export fallback"*)
+    ;;
+  *)
+    printf 'expected portable source-export fallback, got: %s\n' "$portable_check_output" >&2
+    exit 1
+    ;;
+esac
+
+strict_root="$test_root/portable/strict"
+mkdir -p "$strict_root/scripts" "$strict_root/src"
+cp "$project_root/scripts/check-promoted-native-image-exports.mjs" "$strict_root/scripts/check-promoted-native-image-exports.mjs"
+cp "$project_root/src/Main.clasp" "$strict_root/src/Main.clasp"
+cp "$project_root/src/CompilerMain.clasp" "$strict_root/src/CompilerMain.clasp"
+cp "$project_root/src/stage1.compiler.source-export-cache-v1.json" "$strict_root/src/stage1.compiler.source-export-cache-v1.json"
+if node "$strict_root/scripts/check-promoted-native-image-exports.mjs" >"$test_root/strict-check.out" 2>"$test_root/strict-check.err"; then
+  printf 'strict promoted image check unexpectedly passed without native images\n' >&2
+  exit 1
+fi
+grep -F 'missing promoted compiler images:' "$test_root/strict-check.err" >/dev/null
 
 cache_root="$test_root/cache"
 check_output="$test_root/checker.check.json"
