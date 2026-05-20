@@ -7230,9 +7230,20 @@ managerServiceConfigArgs =
 managerServiceCommandArgs : [Str]
 managerServiceCommandArgs =
   if currentExecutablePath != "" then
-    append
-      (append ["env"] managerServiceConfigArgs)
-      [currentExecutablePath, stateRootPath]
+    if pathBasename currentExecutablePath != "claspc" then
+      append
+        (append ["env"] managerServiceConfigArgs)
+        [currentExecutablePath, stateRootPath]
+    else
+      append
+        (append ["env"] managerServiceConfigArgs)
+        [
+          resolvedManagerClaspcBin,
+          "run",
+          resolvedManagerProgramPath,
+          "--",
+          stateRootPath
+        ]
   else
     append
       (append ["env"] managerServiceConfigArgs)

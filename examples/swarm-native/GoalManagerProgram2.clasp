@@ -3859,13 +3859,25 @@ serviceStatusOutput =
 managerServiceCommandArgs : [Str]
 managerServiceCommandArgs =
   if currentExecutablePath != "" then
-    [
-      "env",
-      textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
-      textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
-      currentExecutablePath,
-      stateRootPath
-    ]
+    if pathBasename currentExecutablePath != "claspc" then
+      [
+        "env",
+        textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
+        textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
+        currentExecutablePath,
+        stateRootPath
+      ]
+    else
+      [
+        "env",
+        textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
+        textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
+        managerClaspcBin,
+        "run",
+        resolvedManagerProgramPath,
+        "--",
+        stateRootPath
+      ]
   else
     [
       "env",
