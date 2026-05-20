@@ -15,6 +15,8 @@ unset CLASP_VERIFY_USE_CURRENT_SHELL
 unset CLASP_VERIFY_LOCK_TIMEOUT_SECS
 unset CLASP_VERIFY_ON_LOCK_TIMEOUT
 unset CLASP_VERIFY_REPORT_JSON
+unset CLASP_CLASPC
+unset CLASPC_BIN
 
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
@@ -32,6 +34,7 @@ mkdir -p "$test_root/bin" "$test_root/scripts" "$test_root/src/scripts" "$test_r
 cp "$project_root/scripts/verify-all.sh" "$test_root/scripts/verify-all.sh"
 cp "$project_root/scripts/verify-fast.sh" "$test_root/scripts/verify-fast.sh"
 cp "$project_root/scripts/verify-selfhost.sh" "$test_root/scripts/verify-selfhost.sh"
+cp "$project_root/scripts/resolve-claspc.sh" "$test_root/scripts/resolve-claspc.sh"
 cp "$project_root/scripts/verify-compiler-slice.sh" "$test_root/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/verify-affected.sh" "$test_root/scripts/verify-affected.sh"
 cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affected.mjs"
@@ -58,6 +61,11 @@ printf 'module Main\n\nimport Service\n\nmain : Str\nmain = service\n' > "$test_
 printf 'module Service\nservice : Str\nservice = "service"\n' > "$test_root/examples/swarm-native/Service.clasp"
 printf 'module Swarm\nswarm : Str\nswarm = "swarm"\n' > "$test_root/examples/swarm-native/Swarm.clasp"
 printf '[package]\nname = "fake-runtime"\nversion = "0.0.0"\n' > "$test_root/runtime/Cargo.toml"
+cat > "$test_root/bin/fake-claspc" <<'EOF'
+#!/usr/bin/env bash
+printf 'fake-claspc\n'
+EOF
+chmod +x "$test_root/bin/fake-claspc"
 
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -95,6 +103,9 @@ grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager
 grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-goal-manager-child-loop-monitor.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'resolved_claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'export CLASP_CLASPC="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'export CLASPC_BIN="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -468,6 +479,20 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 grep -F 'verify-all: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
 rm -f "$fallback_capture" "$stderr_capture"
+verify_fast_resolve_count="$test_root/verify-fast-resolve-count.txt"
+cat > "$test_root/scripts/resolve-claspc.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+count_path="$verify_fast_resolve_count"
+count=0
+if [[ -f "\$count_path" ]]; then
+  count="\$(cat "\$count_path")"
+fi
+count=\$((count + 1))
+printf '%s' "\$count" >"\$count_path"
+printf '%s\n' "$test_root/bin/fake-claspc"
+EOF
+chmod +x "$test_root/scripts/resolve-claspc.sh"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
@@ -477,6 +502,7 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
+[[ "$(< "$verify_fast_resolve_count")" == "1" ]]
 grep -F 'verify-fast: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
 rm -f "$fallback_capture" "$stderr_capture"
