@@ -1,12 +1,17 @@
 module Process
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
 
 record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+record TimedProcessResult = { exitCode : Int, stdout : Str, stderr : Str, timedOut : Bool, error : Str }
 record CommandSpec = { cwd : Str, command : [Str] }
 
 processResultError : Str -> Result ProcessResult
 processResultError message = Err message
+
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
 
 commandSpec : Str -> [Str] -> CommandSpec
 commandSpec cwd command = CommandSpec { cwd = cwd, command = command }
@@ -17,5 +22,14 @@ processResult value = match value {
   Err message -> processResultError message
 }
 
+timedProcessResult : Result Str -> Result TimedProcessResult
+timedProcessResult value = match value {
+  Ok raw -> Ok (decode TimedProcessResult raw),
+  Err message -> timedProcessResultError message
+}
+
 run : CommandSpec -> Result ProcessResult
 run spec = processResult (runCommandRaw spec.cwd spec.command)
+
+runTimeout : CommandSpec -> Int -> Result TimedProcessResult
+runTimeout spec timeoutMs = timedProcessResult (runCommandTimeoutRaw spec.cwd timeoutMs spec.command)

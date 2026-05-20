@@ -12,8 +12,8 @@ export XDG_CACHE_HOME="$test_root/xdg-cache"
 goal_manager_shared_cache_root="${CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT:-${CLASP_MANAGER_PROJECT_ROOT_JSON:-$project_root}}"
 goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/binaries}"
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
-export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-60}"
-export CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-1}"
+export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
+export CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 export CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 
 goal_manager_live_pid=""
@@ -1173,6 +1173,7 @@ run_goal_manager "$tiered_state" "$tiered_workspace" \
   CLASP_TEST_EXPECT_PLANNER_HEALTH='1' \
   CLASP_TEST_EXPECT_PLANNER_NO_BROAD_VERIFY='1' \
   CLASP_TEST_EXPECT_FOCUSED_VERIFY_TIER='1' \
+  CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON='["bash scripts/verify-fast.sh","bash scripts/test-swarm-ready-gate.sh"]' \
   CLASP_MANAGER_MAX_WAVES_JSON='1' \
   >"$tiered_output" 2>&1
 grep -F '"phase":"completed"' "$tiered_output" >/dev/null

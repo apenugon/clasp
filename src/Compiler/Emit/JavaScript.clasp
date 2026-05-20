@@ -23,7 +23,10 @@ hasReturnInExprs exprs = {
 }
 
 jsBuiltinPreludeName : Str -> Bool
-jsBuiltinPreludeName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "not" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "swarmBootstrapJson" then true else if name == "swarmLeaseJson" then true else if name == "swarmCompleteJson" then true else if name == "swarmStatusJson" then true else if name == "swarmSummaryJson" then true else if name == "swarmReadyJson" then true else if name == "swarmManagerNextJson" then true else if name == "swarmObjectiveCreateJson" then true else if name == "swarmObjectiveStatusJson" then true else if name == "swarmTaskCreateJson" then true else if name == "swarmPolicySetJson" then true else if name == "swarmToolRunJson" then true else if name == "swarmVerifierRunJson" then true else if name == "swarmApproveJson" then true else if name == "swarmMergegateDecideJson" then true else if name == "swarmRunsJson" then true else if name == "swarmArtifactsJson" then true else if name == "runCommandJson" then true else if name == "handoffCommandJson" then true else if name == "upgradeCommandJson" then true else if name == "superviseCommandJson" then true else false
+jsBuiltinPreludeName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "not" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "swarmBootstrapJson" then true else if name == "swarmLeaseJson" then true else if name == "swarmCompleteJson" then true else if name == "swarmStatusJson" then true else if name == "swarmSummaryJson" then true else if name == "swarmReadyJson" then true else if name == "swarmManagerNextJson" then true else if name == "swarmObjectiveCreateJson" then true else if name == "swarmObjectiveStatusJson" then true else if name == "swarmTaskCreateJson" then true else if name == "swarmPolicySetJson" then true else if name == "swarmToolRunJson" then true else if name == "swarmVerifierRunJson" then true else if name == "swarmApproveJson" then true else if name == "swarmMergegateDecideJson" then true else if name == "swarmRunsJson" then true else if name == "swarmArtifactsJson" then true else if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else if name == "handoffCommandJson" then true else if name == "upgradeCommandJson" then true else if name == "superviseCommandJson" then true else false
+
+jsNodeProcessBuiltinPreludeName : Str -> Bool
+jsNodeProcessBuiltinPreludeName name = if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else false
 
 jsSwarmDeadlineBuiltinPreludeName : Str -> Bool
 jsSwarmDeadlineBuiltinPreludeName name =
@@ -131,6 +134,110 @@ exprNeedsBuiltinPrelude expr = match expr {
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
   LowerGreaterThanOrEqual left right ->
     if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right
+}
+
+exprsNeedNodeProcessPrelude : [LowerExprText] -> Bool
+exprsNeedNodeProcessPrelude exprs = {
+  for expr in exprs {
+    if exprNeedsNodeProcessPrelude expr then return true else false
+  };
+  false
+}
+
+recordFieldsNeedNodeProcessPrelude : [LowerRecordFieldText] -> Bool
+recordFieldsNeedNodeProcessPrelude fields = {
+  for field in fields {
+    match field {
+      LowerRecordFieldText name value ->
+        if exprNeedsNodeProcessPrelude value then return true else false
+    }
+  };
+  false
+}
+
+branchesNeedNodeProcessPrelude : [LowerMatchBranchText] -> Bool
+branchesNeedNodeProcessPrelude branches = {
+  for branch in branches {
+    match branch {
+      LowerMatchBranchText constructorName binders body ->
+        if exprNeedsNodeProcessPrelude body then return true else false
+    }
+  };
+  false
+}
+
+exprNeedsNodeProcessPrelude : LowerExprText -> Bool
+exprNeedsNodeProcessPrelude expr = match expr {
+  LowerName name ->
+    false,
+  LowerLiteral value ->
+    false,
+  LowerInt value ->
+    false,
+  LowerBool value ->
+    false,
+  LowerArray values ->
+    exprsNeedNodeProcessPrelude values,
+  LowerListAppend left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerListPrepend value values ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude values,
+  LowerListReverse values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerLength value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerListMap callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFilter callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFind callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListAny callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListAll callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFold callee initial values ->
+    if exprNeedsNodeProcessPrelude initial then true else exprNeedsNodeProcessPrelude values,
+  LowerViewAppend left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerEncode value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerDecode targetType value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerInvoke callee args ->
+    if jsNodeProcessBuiltinPreludeName callee then true else exprsNeedNodeProcessPrelude args,
+  LowerConstructor constructorName args ->
+    exprsNeedNodeProcessPrelude args,
+  LowerMatch subject branches ->
+    if exprNeedsNodeProcessPrelude subject then true else branchesNeedNodeProcessPrelude branches,
+  LowerRecord recordName fields ->
+    recordFieldsNeedNodeProcessPrelude fields,
+  LowerFieldAccess recordName subject fieldName ->
+    exprNeedsNodeProcessPrelude subject,
+  LowerLet binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerMutableLet binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerAssign binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerFor binder iterable loopBody body ->
+    if exprNeedsNodeProcessPrelude iterable then true else if exprNeedsNodeProcessPrelude loopBody then true else exprNeedsNodeProcessPrelude body,
+  LowerReturn value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerIf condition thenBranch elseBranch ->
+    if exprNeedsNodeProcessPrelude condition then true else if exprNeedsNodeProcessPrelude thenBranch then true else exprNeedsNodeProcessPrelude elseBranch,
+  LowerEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerNotEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerLessThan left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerLessThanOrEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerGreaterThan left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerGreaterThanOrEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right
 }
 
 hasReturnInRecordFields : [LowerRecordFieldText] -> Bool
@@ -384,6 +491,66 @@ moduleNeedsBuiltinPrelude decls = {
   false
 }
 
+declNeedsNodeProcessPrelude : LowerDeclText -> Bool
+declNeedsNodeProcessPrelude decl = match decl {
+  LowerConst name body ->
+    exprNeedsNodeProcessPrelude body,
+  LowerFn name params body ->
+    exprNeedsNodeProcessPrelude body
+}
+
+moduleNeedsNodeProcessPrelude : [LowerDeclText] -> Bool
+moduleNeedsNodeProcessPrelude decls = {
+  for decl in decls {
+    if declNeedsNodeProcessPrelude decl then return true else false
+  };
+  false
+}
+
+foreignDeclNeedsBuiltinPrelude : HostedForeignDeclAst -> Bool
+foreignDeclNeedsBuiltinPrelude foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    false,
+  HostedForeignRuntime ->
+    jsBuiltinPreludeName (foreignDeclRuntimeName foreignDecl)
+}
+
+foreignDeclsNeedBuiltinPrelude : [HostedForeignDeclAst] -> Bool
+foreignDeclsNeedBuiltinPrelude foreignDecls = {
+  for foreignDecl in foreignDecls {
+    if foreignDeclNeedsBuiltinPrelude foreignDecl then return true else false
+  };
+  false
+}
+
+moduleNeedsBuiltinPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool
+moduleNeedsBuiltinPreludeWithForeigns decls foreignDecls =
+  if moduleNeedsBuiltinPrelude decls then true else foreignDeclsNeedBuiltinPrelude foreignDecls
+
+foreignDeclNeedsNodeProcessPrelude : HostedForeignDeclAst -> Bool
+foreignDeclNeedsNodeProcessPrelude foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    false,
+  HostedForeignRuntime ->
+    jsNodeProcessBuiltinPreludeName (foreignDeclRuntimeName foreignDecl)
+}
+
+foreignDeclsNeedNodeProcessPrelude : [HostedForeignDeclAst] -> Bool
+foreignDeclsNeedNodeProcessPrelude foreignDecls = {
+  for foreignDecl in foreignDecls {
+    if foreignDeclNeedsNodeProcessPrelude foreignDecl then return true else false
+  };
+  false
+}
+
+moduleNeedsNodeProcessPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool
+moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls =
+  if moduleNeedsNodeProcessPrelude decls then true else foreignDeclsNeedNodeProcessPrelude foreignDecls
+
+emitNodeProcessPrelude : [LowerDeclText] -> [HostedForeignDeclAst] -> [Str]
+emitNodeProcessPrelude decls foreignDecls =
+  if moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls then ["import { spawnSync as $claspNodeSpawnSync } from \"node:child_process\";"] else emptyRenderedTexts
+
 builtinPreludeLines : [Str]
 builtinPreludeLines =
   [
@@ -412,6 +579,65 @@ builtinPreludeLines =
     "    throw new Error(`Missing Clasp runtime binding: ${name}`);",
     "  }",
     "  return runtime[name];",
+    "}",
+    "function $claspOptionalHostRuntime(name) {",
+    "  const runtime = globalThis.__claspRuntime;",
+    "  const binding = runtime && typeof runtime === \"object\" ? runtime[name] : null;",
+    "  return typeof binding === \"function\" ? binding : null;",
+    "}",
+    "function $claspResultOk(value) {",
+    "  return [\"Ok\", value];",
+    "}",
+    "function $claspResultErr(message) {",
+    "  return [\"Err\", String(message)];",
+    "}",
+    "function $claspNormalizeCommand(value) {",
+    "  if (!Array.isArray(value)) {",
+    "    throw new Error(\"command expected a list of strings\");",
+    "  }",
+    "  return value.map((part, index) => {",
+    "    if (typeof part !== \"string\") {",
+    "      throw new Error(`command[${index}] expected a string`);",
+    "    }",
+    "    return part;",
+    "  });",
+    "}",
+    "function $claspRunCommandJsonNode(cwd, command, timeoutMs, includeTimeoutFields = false) {",
+    "  if (typeof $claspNodeSpawnSync !== \"function\") {",
+    "    return $claspResultErr(\"node_child_process_unavailable\");",
+    "  }",
+    "  if (typeof cwd !== \"string\") {",
+    "    return $claspResultErr(\"cwd expected a string\");",
+    "  }",
+    "  let commandValues;",
+    "  try {",
+    "    commandValues = $claspNormalizeCommand(command);",
+    "  } catch (error) {",
+    "    return $claspResultErr(error instanceof Error ? error.message : String(error));",
+    "  }",
+    "  if (commandValues.length === 0) {",
+    "    return $claspResultErr(\"missing_command\");",
+    "  }",
+    "  const normalizedTimeout = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0;",
+    "  const options = { cwd: $claspNormalizePath(cwd), encoding: \"utf8\", windowsHide: true, maxBuffer: 1024 * 1024 * 100 };",
+    "  if (normalizedTimeout > 0) {",
+    "    options.timeout = normalizedTimeout;",
+    "  }",
+    "  const result = $claspNodeSpawnSync(commandValues[0], commandValues.slice(1), options);",
+    "  const stdout = typeof result.stdout === \"string\" ? result.stdout : \"\";",
+    "  const stderr = typeof result.stderr === \"string\" ? result.stderr : \"\";",
+    "  if (result.error) {",
+    "    const code = result.error && typeof result.error === \"object\" ? result.error.code : null;",
+    "    if (code === \"ETIMEDOUT\") {",
+    "      return $claspResultOk(JSON.stringify({ exitCode: 124, stdout, stderr, timedOut: true, error: \"timeout\" }));",
+    "    }",
+    "    return $claspResultErr(result.error instanceof Error ? result.error.message : String(result.error));",
+    "  }",
+    "  const exitCode = Number.isInteger(result.status) ? result.status : -1;",
+    "  if (includeTimeoutFields) {",
+    "    return $claspResultOk(JSON.stringify({ exitCode, stdout, stderr, timedOut: false, error: \"\" }));",
+    "  }",
+    "  return $claspResultOk(JSON.stringify({ exitCode, stdout, stderr }));",
     "}",
     "const $claspBuiltinRuntime = Object.freeze({",
     "  textConcat(parts) {",
@@ -545,6 +771,14 @@ builtinPreludeLines =
     "    const trimmed = normalized.endsWith(\"/\") && normalized.length > 1 ? normalized.slice(0, -1) : normalized;",
     "    const index = trimmed.lastIndexOf(\"/\");",
     "    return index < 0 ? trimmed : trimmed.slice(index + 1);",
+    "  },",
+    "  runCommandJson(cwd, command) {",
+    "    const hostBinding = $claspOptionalHostRuntime(\"runCommandJson\");",
+    "    return hostBinding ? hostBinding(cwd, command) : $claspRunCommandJsonNode(cwd, command, 0, false);",
+    "  },",
+    "  runCommandTimeoutJson(cwd, timeoutMs, command) {",
+    "    const hostBinding = $claspOptionalHostRuntime(\"runCommandTimeoutJson\");",
+    "    return hostBinding ? hostBinding(cwd, timeoutMs, command) : $claspRunCommandJsonNode(cwd, command, timeoutMs, true);",
     "  }",
     "});",
     "function textConcat($0) { return $claspBuiltinRuntime.textConcat($0); }",
@@ -585,14 +819,15 @@ builtinPreludeLines =
     "function swarmMergegateDecideJson($0, $1, $2, $3, $4) { return $claspHostRuntime(\"swarmMergegateDecideJson\")($0, $1, $2, $3, $4); }",
     "function swarmRunsJson($0, $1) { return $claspHostRuntime(\"swarmRunsJson\")($0, $1); }",
     "function swarmArtifactsJson($0, $1) { return $claspHostRuntime(\"swarmArtifactsJson\")($0, $1); }",
-    "function runCommandJson($0, $1) { return $claspHostRuntime(\"runCommandJson\")($0, $1); }",
+    "function runCommandJson($0, $1) { return $claspBuiltinRuntime.runCommandJson($0, $1); }",
+    "function runCommandTimeoutJson($0, $1, $2) { return $claspBuiltinRuntime.runCommandTimeoutJson($0, $1, $2); }",
     "function handoffCommandJson($0, $1, $2, $3, $4, $5, $6, $7, $8, $9) { return $claspHostRuntime(\"handoffCommandJson\")($0, $1, $2, $3, $4, $5, $6, $7, $8, $9); }",
     "function upgradeCommandJson($0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10) { return $claspHostRuntime(\"upgradeCommandJson\")($0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10); }",
     "function superviseCommandJson($0, $1, $2, $3, $4, $5, $6, $7, $8, $9) { return $claspHostRuntime(\"superviseCommandJson\")($0, $1, $2, $3, $4, $5, $6, $7, $8, $9); }"
   ]
 
-emitBuiltinPrelude : [LowerDeclText] -> [Str]
-emitBuiltinPrelude decls = if moduleNeedsBuiltinPrelude decls then builtinPreludeLines else emptyRenderedTexts
+emitBuiltinPrelude : [LowerDeclText] -> [HostedForeignDeclAst] -> [Str]
+emitBuiltinPrelude decls foreignDecls = if moduleNeedsBuiltinPreludeWithForeigns decls foreignDecls then builtinPreludeLines else emptyRenderedTexts
 
 defaultForeignParamNames : [Str]
 defaultForeignParamNames = ["arg0", "arg1", "arg2", "arg3", "arg4", "arg5", "arg6", "arg7", "arg8", "arg9", "arg10", "arg11"]
@@ -786,7 +1021,7 @@ emitPackageBindingEntries foreignDecls = {
 }
 
 emitHostBindingPrelude : [HostedForeignDeclAst] -> [Str]
-emitHostBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["function $claspRuntime(name) {", "  const runtime = globalThis.__claspRuntime;", "  if (!runtime || !(name in runtime)) {", "    throw new Error(`Missing Clasp runtime binding: ${name}`);", "  }", "  return runtime[name];", "}", "function $claspHostBinding(name) {", "  const binding = $claspHostBindingMap[name];", "  if (!binding) {", "    throw new Error(`Missing Clasp host binding manifest: ${name}`);", "  }", "  return binding;", "}", "function $claspCallHostBinding(name, args) {", "  const binding = $claspHostBinding(name);", "  const runtime = $claspRuntime(binding.runtimeName);", "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));", "  return binding.returns.fromHost(runtime(...hostArgs));", "}", "function $claspAdaptHostBinding(binding, implementation) {", "  return (...args) => {", "    const preparedArgs = binding.params.map((param, index) => {", "      const path = `arguments[${index}]`;", "      return param.toHost(param.fromHost(args[index], path), path);", "    });", "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");", "  };", "}"] else emptyRenderedTexts
+emitHostBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["function $claspRuntime(name) {", "  const runtime = globalThis.__claspRuntime;", "  const binding = runtime && typeof runtime === \"object\" ? runtime[name] : null;", "  if (typeof binding === \"function\") {", "    return binding;", "  }", "  const builtin = typeof $claspBuiltinRuntime !== \"undefined\" ? $claspBuiltinRuntime[name] : null;", "  if (typeof builtin === \"function\") {", "    return builtin;", "  }", "  throw new Error(`Missing Clasp runtime binding: ${name}`);", "}", "function $claspHostBinding(name) {", "  const binding = $claspHostBindingMap[name];", "  if (!binding) {", "    throw new Error(`Missing Clasp host binding manifest: ${name}`);", "  }", "  return binding;", "}", "function $claspCallHostBinding(name, args) {", "  const binding = $claspHostBinding(name);", "  const runtime = $claspRuntime(binding.runtimeName);", "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));", "  return binding.returns.fromHost(runtime(...hostArgs));", "}", "function $claspAdaptHostBinding(binding, implementation) {", "  return (...args) => {", "    const preparedArgs = binding.params.map((param, index) => {", "      const path = `arguments[${index}]`;", "      return param.toHost(param.fromHost(args[index], path), path);", "    });", "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");", "  };", "}"] else emptyRenderedTexts
 
 emitHostBindingExports : [HostedForeignDeclAst] -> [Str]
 emitHostBindingExports foreignDecls = if hasForeignDecls foreignDecls then ["export const __claspHostBindings = ["] else emptyRenderedTexts
@@ -1134,7 +1369,8 @@ emitFrontendModule modl decls = {
   let mut rendered = ["// Generated by compiler-selfhost"];
   let foreignDecls = moduleForeignDeclarations modl;
   rendered = append rendered (emitPackageForeignImports foreignDecls);
-  rendered = append rendered (emitBuiltinPrelude decls);
+  rendered = append rendered (emitNodeProcessPrelude decls foreignDecls);
+  rendered = append rendered (emitBuiltinPrelude decls foreignDecls);
   rendered = append rendered emitSelfHostedRuntimePrelude;
   rendered = append rendered (emitHostBindingPrelude foreignDecls);
   rendered = append rendered (emitHostBindingExports foreignDecls);

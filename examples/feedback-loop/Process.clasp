@@ -1,6 +1,7 @@
 module Process
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
@@ -10,6 +11,8 @@ foreign handoffCommandRaw : Str -> Str -> Str -> Str -> Int -> Str -> Str -> Int
 foreign upgradeCommandRaw : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str = "upgradeCommandJson"
 
 record ProcessResult = { exitCode : Int, stdout : Str, stderr : Str }
+
+record TimedProcessResult = { exitCode : Int, stdout : Str, stderr : Str, timedOut : Bool, error : Str }
 
 record WatchedProcess = {
   pid : Int,
@@ -99,6 +102,9 @@ processResultError message = Err message
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
 
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
+
 monitoredStepError : Str -> Result MonitoredStepResult
 monitoredStepError message = Err message
 
@@ -156,6 +162,12 @@ processResult value = match value {
   Err message -> processResultError message
 }
 
+timedProcessResult : Result Str -> Result TimedProcessResult
+timedProcessResult value = match value {
+  Ok raw -> Ok (decode TimedProcessResult raw),
+  Err message -> timedProcessResultError message
+}
+
 watchedProcessResult : Result Str -> Result WatchedProcess
 watchedProcessResult value = match value {
   Ok raw -> Ok (decode WatchedProcess raw),
@@ -208,6 +220,9 @@ monitoredStepResult process =
 
 run : CommandSpec -> Result ProcessResult
 run spec = processResult (runCommandRaw spec.cwd spec.command)
+
+runTimeout : CommandSpec -> Int -> Result TimedProcessResult
+runTimeout spec timeoutMs = timedProcessResult (runCommandTimeoutRaw spec.cwd timeoutMs spec.command)
 
 spawn : WatchedCommandSpec -> Result WatchedProcess
 spawn spec =

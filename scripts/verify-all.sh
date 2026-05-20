@@ -39,6 +39,7 @@ bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
+bash scripts/test-js-process-runtime.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
 bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-native-runtime.sh
@@ -48,6 +49,7 @@ bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
+bash scripts/test-verify-runtime-slice.sh
 bash examples/lead-app-ts/scripts/verify.sh
 bash benchmarks/test-task-prep.sh
 bash benchmarks/test-persistence-benchmarks.sh
@@ -66,6 +68,7 @@ fallback_verify_commands=$'
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
+bash scripts/test-verify-runtime-slice.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-task-manifest.sh
 '

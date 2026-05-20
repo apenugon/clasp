@@ -254,12 +254,17 @@ const COMMANDS = {
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
+  runtimeSliceProcess: "bash scripts/verify-runtime-slice.sh process",
+  runtimeSliceWorkflow: "bash scripts/verify-runtime-slice.sh workflow",
+  runtimeSliceCodexLoop: "bash scripts/verify-runtime-slice.sh codex-loop",
+  runtimeSliceManagedLoop: "bash scripts/verify-runtime-slice.sh managed-loop",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
   feedbackResume: "bash scripts/test-feedback-loop-resume.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
   compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
+  runtimeSliceRegression: "bash scripts/test-verify-runtime-slice.sh",
   benchmarkTaskPrep: "bash benchmarks/test-task-prep.sh",
   affectedNodeCheck: "node --check scripts/verify-affected.mjs",
 };
@@ -695,6 +700,8 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     let matched = false;
     const isCompilerSliceVerificationScript =
       file === "scripts/verify-compiler-slice.sh" || file === "scripts/test-verify-compiler-slice.sh";
+    const isRuntimeSliceVerificationScript =
+      file === "scripts/verify-runtime-slice.sh" || file === "scripts/test-verify-runtime-slice.sh";
     const compilerSlice = compilerSliceForFile(file);
 
     if (file.startsWith("src/")) {
@@ -752,9 +759,10 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/swarm-native/")) {
       matched = true;
-      reason(file, "swarm-native", "native swarm example path uses native claspc and ready-gate coverage");
+      reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, and managed-loop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
+      addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
     }
 
     if (plannerReportDecodeFiles.has(file)) {
@@ -780,10 +788,10 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/feedback-loop/")) {
       matched = true;
-      reason(file, "feedback-loop", "feedback-loop example path uses resume-loop, monitored workflow, and ordinary Codex loop regression coverage");
-      addSelected(selectedByCommand, "monitored-step", COMMANDS.monitoredStep, "feedback-loop path", file);
-      addSelected(selectedByCommand, "monitored-workflow", COMMANDS.monitoredWorkflow, "feedback-loop path", file);
-      addSelected(selectedByCommand, "codex-loop-program", COMMANDS.codexLoopProgram, "feedback-loop path", file);
+      reason(file, "feedback-loop", "feedback-loop example path uses runtime slices for process, workflow, Codex loop, and resume regression coverage");
+      addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "feedback-loop path", file);
+      addSelected(selectedByCommand, "runtime-slice:workflow", COMMANDS.runtimeSliceWorkflow, "feedback-loop path", file);
+      addSelected(selectedByCommand, "runtime-slice:codex-loop", COMMANDS.runtimeSliceCodexLoop, "feedback-loop path", file);
       addSelected(selectedByCommand, "feedback-resume", COMMANDS.feedbackResume, "feedback-loop path", file);
     }
 
@@ -853,7 +861,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "monitored step shell syntax",
         file,
       );
-      addSelected(selectedByCommand, "monitored-step", COMMANDS.monitoredStep, "monitored step harness", file);
+      addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "monitored step harness", file);
     }
 
     if (file === "scripts/test-monitored-workflow.sh") {
@@ -866,7 +874,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "monitored workflow shell syntax",
         file,
       );
-      addSelected(selectedByCommand, "monitored-workflow", COMMANDS.monitoredWorkflow, "monitored workflow harness", file);
+      addSelected(selectedByCommand, "runtime-slice:workflow", COMMANDS.runtimeSliceWorkflow, "monitored workflow harness", file);
     }
 
     if (file === "scripts/test-codex-loop-program.sh") {
@@ -879,10 +887,42 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "ordinary Codex loop shell syntax",
         file,
       );
-      addSelected(selectedByCommand, "codex-loop-program", COMMANDS.codexLoopProgram, "ordinary Codex loop harness", file);
+      addSelected(selectedByCommand, "runtime-slice:codex-loop", COMMANDS.runtimeSliceCodexLoop, "ordinary Codex loop harness", file);
     }
 
-    if (isCompilerSliceVerificationScript) {
+    if (file === "scripts/test-swarm-native-managed-loop.sh") {
+      matched = true;
+      reason(file, "managed-loop-harness", "managed-loop harness uses shell syntax plus focused native control-plane coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "managed loop shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "managed loop harness", file);
+    }
+
+    if (isRuntimeSliceVerificationScript) {
+      matched = true;
+      reason(file, "runtime-slice-verification-script", "runtime slice verifier uses shell syntax plus focused fake-harness smoke coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "runtime slice verification shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "runtime-slice-regression",
+        COMMANDS.runtimeSliceRegression,
+        "runtime slice verifier regression",
+        file,
+      );
+    } else if (isCompilerSliceVerificationScript) {
       matched = true;
       reason(file, "compiler-slice-verification-script", "compiler slice verifier uses shell syntax plus focused fake-claspc smoke coverage");
       if (file.endsWith(".sh")) {

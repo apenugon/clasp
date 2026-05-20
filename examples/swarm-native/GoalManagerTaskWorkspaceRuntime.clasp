@@ -192,7 +192,7 @@ createTaskWorkspaceSnapshot taskId = {
   if removed.exitCode != 0 then
     textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
   else {
-      let created =
+    let created =
       match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceActualRoot taskId] {
         Ok result -> result,
         Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
@@ -219,7 +219,7 @@ createTaskWorkspaceSnapshot taskId = {
       if copied.exitCode != 0 then
         textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
       else {
-          let baselineCreated =
+        let baselineCreated =
           match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceBaselineActualRoot taskId] {
             Ok result -> result,
             Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
@@ -252,27 +252,27 @@ createTaskWorkspaceSnapshot taskId = {
               if gitError != "" then
                 textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
               else {
-              let linkParentCreated =
-                match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
-                  Ok result -> result,
-                  Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-                } in
-              if linkParentCreated.exitCode != 0 then
-                textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
-              else
-                let linked =
-                  match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                let linkParentCreated =
+                  match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
                     Ok result -> result,
                     Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
                   } in
-                if linked.exitCode != 0 then
-                  textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                if linkParentCreated.exitCode != 0 then
+                  textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
                 else
-                  match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-                    Ok written -> "",
-                    Err message ->
-                      textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
-                  }
+                  let linked =
+                    match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                      Ok result -> result,
+                      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                    } in
+                  if linked.exitCode != 0 then
+                    textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                  else
+                    match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                      Ok written -> "",
+                      Err message ->
+                        textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                    }
               }
             }
           }

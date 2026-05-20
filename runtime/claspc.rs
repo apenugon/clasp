@@ -6437,6 +6437,124 @@ fn augment_context_dependency_graph_output(output_bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
+fn bundle_declares_node_process_runtime_foreign(bundle: &str) -> bool {
+    bundle.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("foreign ")
+            && (trimmed.contains("\"runCommandJson\"") || trimmed.contains("\"runCommandTimeoutJson\""))
+    })
+}
+
+fn node_process_runtime_prelude() -> &'static str {
+    r#"import { spawnSync as $claspNodeSpawnSync } from "node:child_process";
+
+function $claspNodeProcessResultOk(value) {
+  return ["Ok", value];
+}
+
+function $claspNodeProcessResultErr(message) {
+  return ["Err", String(message)];
+}
+
+function $claspNodeProcessNormalizePath(value) {
+  if (typeof value !== "string") {
+    throw new Error("cwd expected a string");
+  }
+  const trimmed = value.replace(/\\+/g, "/");
+  const collapsed = trimmed.replace(/\/+/g, "/");
+  return collapsed === "" ? "." : collapsed;
+}
+
+function $claspNodeProcessNormalizeCommand(value) {
+  if (!Array.isArray(value)) {
+    throw new Error("command expected a list of strings");
+  }
+  return value.map((part, index) => {
+    if (typeof part !== "string") {
+      throw new Error(`command[${index}] expected a string`);
+    }
+    return part;
+  });
+}
+
+function $claspNodeProcessRunCommandJson(cwd, command, timeoutMs, includeTimeoutFields = false) {
+  if (typeof cwd !== "string") {
+    return $claspNodeProcessResultErr("cwd expected a string");
+  }
+  let commandValues;
+  try {
+    commandValues = $claspNodeProcessNormalizeCommand(command);
+  } catch (error) {
+    return $claspNodeProcessResultErr(error instanceof Error ? error.message : String(error));
+  }
+  if (commandValues.length === 0) {
+    return $claspNodeProcessResultErr("missing_command");
+  }
+  const normalizedTimeout = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0;
+  const options = {
+    cwd: $claspNodeProcessNormalizePath(cwd),
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 1024 * 1024 * 100
+  };
+  if (normalizedTimeout > 0) {
+    options.timeout = normalizedTimeout;
+  }
+  const result = $claspNodeSpawnSync(commandValues[0], commandValues.slice(1), options);
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  if (result.error) {
+    const code = result.error && typeof result.error === "object" ? result.error.code : null;
+    if (code === "ETIMEDOUT") {
+      return $claspNodeProcessResultOk(JSON.stringify({ exitCode: 124, stdout, stderr, timedOut: true, error: "timeout" }));
+    }
+    return $claspNodeProcessResultErr(result.error instanceof Error ? result.error.message : String(result.error));
+  }
+  const exitCode = Number.isInteger(result.status) ? result.status : -1;
+  if (includeTimeoutFields) {
+    return $claspNodeProcessResultOk(JSON.stringify({ exitCode, stdout, stderr, timedOut: false, error: "" }));
+  }
+  return $claspNodeProcessResultOk(JSON.stringify({ exitCode, stdout, stderr }));
+}
+
+const $claspNodeProcessRuntimeBindings = Object.freeze({
+  runCommandJson(cwd, command) {
+    return $claspNodeProcessRunCommandJson(cwd, command, 0, false);
+  },
+  runCommandTimeoutJson(cwd, timeoutMs, command) {
+    return $claspNodeProcessRunCommandJson(cwd, command, timeoutMs, true);
+  }
+});
+
+{
+  const existingRuntime = globalThis.__claspRuntime;
+  if (existingRuntime && typeof existingRuntime === "object") {
+    globalThis.__claspRuntime = Object.freeze({ ...$claspNodeProcessRuntimeBindings, ...existingRuntime });
+  } else {
+    globalThis.__claspRuntime = $claspNodeProcessRuntimeBindings;
+  }
+}
+
+"#
+}
+
+fn augment_compiled_js_process_runtime(output_bytes: Vec<u8>, bundle: &str) -> Vec<u8> {
+    if !bundle_declares_node_process_runtime_foreign(bundle) {
+        return output_bytes;
+    }
+    let output_text = match String::from_utf8(output_bytes) {
+        Ok(output_text) => output_text,
+        Err(error) => return error.into_bytes(),
+    };
+    if output_text.contains("node:child_process") || output_text.contains("$claspNodeProcessRuntimeBindings") {
+        return output_text.into_bytes();
+    }
+    let mut augmented = String::with_capacity(node_process_runtime_prelude().len() + output_text.len());
+    augmented.push_str(node_process_runtime_prelude());
+    augmented.push_str(&output_text);
+    augmented.into_bytes()
+}
+
 fn run_build(
     options: &CliOptions,
     embedded_path: &Path,
@@ -6457,6 +6575,11 @@ fn run_build(
     };
     let output_bytes = if matches!(options.command, Command::Context) {
         augment_context_dependency_graph_output(output_bytes)
+    } else {
+        output_bytes
+    };
+    let output_bytes = if matches!(options.command, Command::Compile) && target_name == "frontend-js" {
+        augment_compiled_js_process_runtime(output_bytes, &bundle_build.bundle)
     } else {
         output_bytes
     };

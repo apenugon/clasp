@@ -34,6 +34,19 @@ readEnvTextList name fallback = match envVar name {
   Err message -> fallback
 }
 
+readEnvCommandTextSetting : Str -> Str -> Str
+readEnvCommandTextSetting name fallback = match envVar name {
+  Ok raw ->
+    if raw == "" then
+      fallback
+    else
+      match textPrefix raw "[" {
+        Ok arrayTail -> textJoin "\n" (decode [Str] raw),
+        Err notArray -> decode Str raw
+      },
+  Err message -> fallback
+}
+
 readEnvBool : Str -> Bool -> Bool
 readEnvBool name fallback = match envVar name {
   Ok raw -> if raw == "" then fallback else decode Bool raw,
@@ -213,7 +226,7 @@ managerXdgCacheMaxMb = readEnvInt "CLASP_MANAGER_XDG_CACHE_MAX_MB_JSON" 1024
 
 childFocusedVerifyCommands : Str
 childFocusedVerifyCommands =
-  readEnvText
+  readEnvCommandTextSetting
     "CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON"
     ""
 

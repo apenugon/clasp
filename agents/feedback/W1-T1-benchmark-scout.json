@@ -1,0 +1,86 @@
+{
+  "task_id": "W1-T1",
+  "role": "benchmark-scout",
+  "summary": "The current benchmark entry point is the Node harness in benchmarks/run-benchmark.mjs, while the strongest ordinary Clasp execution evidence is already through native claspc run scenarios. The smallest benchmark-facing gaps are not broad compiler redesigns; they are standardizing the ordinary-program workflow as a benchmark task, avoiding shell-only wrappers in examples used as evidence, and keeping process/runtime results structured and durable from Clasp code.",
+  "current_benchmark_entry_point": {
+    "runner": "benchmarks/run-benchmark.mjs",
+    "commands": ["list", "prepare", "verify", "run", "summarize", "freeze", "package"],
+    "wrappers": ["benchmarks/run-codex-series.sh", "benchmarks/run-claude-series.sh", "benchmarks/run-codex-harness.sh", "benchmarks/run-claude-harness.sh"],
+    "default_clasp_checkpoint": "benchmarks/tasks/clasp-legal-assistant-appbench/task.json",
+    "orchestration_relevant_tasks": [
+      "benchmarks/tasks/clasp-control-plane/task.json",
+      "benchmarks/tasks/clasp-durable-workflow/task.json",
+      "benchmarks/tasks/clasp-legal-assistant-appbench/task.json",
+      "benchmarks/tasks/clasp-workflow-correctness/task.json"
+    ]
+  },
+  "ordinary_clasp_execution_path": {
+    "cli": "runtime/claspc.rs implements claspc run <entry.clasp> -- <args...>",
+    "behavior": "claspc run builds or reuses a cached native backend binary, passes args after -- to the program, and executes the binary directly. The program owns durable state through runtime file/process/swarm builtins.",
+    "scenario_evidence": [
+      "examples/feedback-loop/CodexLoopDemo.clasp invokes codex exec directly from Clasp and persists codex-loop-status.json plus step artifacts.",
+      "examples/feedback-loop/MonitoredWorkflowDemo.clasp runs direct executable command arrays, captures stdout/stderr/exit status, logs events, and persists workflow-status.json.",
+      "examples/swarm-native/Swarm.clasp exposes the native swarm substrate to ordinary Clasp programs without requiring external claspc swarm subprocesses.",
+      "benchmarks/tasks/clasp-legal-assistant-appbench/repo/scripts/verify.sh verifies repeated ordinary claspc run commands against durable app state."
+    ]
+  },
+  "benchmark_facing_gaps": [
+    "The publication harness is still Node/shell-first. That is acceptable for benchmark orchestration, but the first ordinary-agent-loop benchmark should make the Clasp program itself the workflow owner under claspc run rather than treating Clasp as code generated for a wrapper.",
+    "Some orchestration evidence still uses bash -c inside command arrays for fixture convenience. For the no-shell-wrapper claim, use direct executables or a fake codex binary as scripts/test-codex-loop-program.sh does.",
+    "The process and swarm APIs are available through foreign/builtin surfaces and example modules, but there is not yet a single small stdlib-like Process/Swarm API package that benchmark task repos can import without copying local wrappers.",
+    "The native durable substrate is ahead of the JavaScript emitter. Do not expand backend-native work into JavaScript parity unless the benchmark scenario truly compiles to a frontend/Node target.",
+    "Dict/map state remains a language ergonomics gap. Current state-heavy code works around this with records plus lists and linear scans; empty lists, polymorphic collections, record update, and destructuring have working examples."
+  ],
+  "recommended_acceptance_checks": [
+    "Ordinary Codex loop: timeout 180 bash scripts/test-codex-loop-program.sh. It should prove no bash string in CodexLoopDemo.clasp, direct codex exec invocation, persisted final status, event log, prompts, stdout, stderr, heartbeat, and final-message artifacts.",
+    "Monitored workflow: timeout 180 bash scripts/test-monitored-workflow.sh. It should prove direct executable command arrays, structured stdout/stderr/exit capture, failure handling, event logging, heartbeat artifacts, and durable final status.",
+    "Native control substrate from Clasp: timeout 180 bash scripts/test-swarm-native-managed-loop.sh. It should prove ordinary Clasp can create objectives/tasks/DAGs, set merge policies, run builder/verifier commands, record artifacts, approve, decide mergegates, and persist report state.",
+    "Benchmark task entry: add or target a benchmark task whose verify command runs claspc run on an ordinary Clasp workflow program and asserts final state artifacts, not just compiled JS or an external shell workflow.",
+    "Ergonomics smoke: run claspc check/run for examples/polymorphism/Main.clasp and examples/record-ergonomics/Main.clasp when state-heavy orchestration code changes; treat Dict/map support as a follow-up only if the next benchmark actually needs keyed lookup."
+  ],
+  "files_inspected": [
+    "AGENTS.md",
+    "README.md",
+    "benchmarks/README.md",
+    "benchmarks/run-benchmark.mjs",
+    "benchmarks/run-backend-benchmarks.mjs",
+    "benchmarks/run-codex-series.sh",
+    "benchmarks/run-codex-harness.sh",
+    "benchmarks/tasks/clasp-control-plane/task.json",
+    "benchmarks/tasks/clasp-control-plane/prompt.md",
+    "benchmarks/tasks/clasp-control-plane/repo/scripts/verify.sh",
+    "benchmarks/tasks/clasp-durable-workflow/task.json",
+    "benchmarks/tasks/clasp-durable-workflow/prompt.md",
+    "benchmarks/tasks/clasp-durable-workflow/repo/scripts/verify.sh",
+    "benchmarks/tasks/clasp-legal-assistant-appbench/task.json",
+    "benchmarks/tasks/clasp-legal-assistant-appbench/prompt.md",
+    "benchmarks/tasks/clasp-legal-assistant-appbench/repo/scripts/verify.sh",
+    "runtime/claspc.rs",
+    "runtime/swarm.rs",
+    "runtime/tool_support.rs",
+    "examples/feedback-loop/Process.clasp",
+    "examples/feedback-loop/CodexLoopDemo.clasp",
+    "examples/feedback-loop/MonitoredWorkflowDemo.clasp",
+    "examples/swarm-native/Swarm.clasp",
+    "examples/swarm-native/ManagedLoop.clasp",
+    "examples/swarm-native/ManagedLoopHarness.clasp",
+    "examples/polymorphism/Main.clasp",
+    "examples/record-ergonomics/Main.clasp",
+    "scripts/test-codex-loop-program.sh",
+    "scripts/test-monitored-workflow.sh",
+    "scripts/test-swarm-native-managed-loop.sh",
+    "scripts/verify-fast.sh",
+    "scripts/verify-compiler-slice.sh"
+  ],
+  "commands_run": [
+    "timeout 30 node benchmarks/run-benchmark.mjs list",
+    "timeout 180 bash scripts/test-monitored-workflow.sh",
+    "timeout 180 bash scripts/test-codex-loop-program.sh",
+    "timeout 180 bash scripts/test-swarm-native-managed-loop.sh"
+  ],
+  "residual_risks": [
+    "I did not run bash scripts/verify-all.sh per task instruction.",
+    "The scout did not add a new benchmark task; W1-T3 is the natural implementation branch for the ordinary-program loop benchmark.",
+    "Dict/map support remains unclosed as a language feature, but current benchmark-facing orchestration examples do not require it to prove the ordinary-program loop path."
+  ]
+}

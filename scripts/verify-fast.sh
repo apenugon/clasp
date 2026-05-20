@@ -10,24 +10,23 @@ bash scripts/test-native-runtime.sh
 '
 fast_sequential_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
+bash scripts/verify-runtime-slice.sh process workflow codex-loop
 bash examples/agent-task-scenario/scripts/verify.sh
-bash scripts/test-monitored-step.sh
-bash scripts/test-monitored-workflow.sh
-bash scripts/test-codex-loop-program.sh
+bash scripts/test-js-process-runtime.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
+bash scripts/test-verify-runtime-slice.sh
 '
 fallback_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
+bash scripts/verify-runtime-slice.sh process workflow codex-loop
 bash scripts/test-native-claspc-diagnostics.sh
 bash examples/agent-task-scenario/scripts/verify.sh
-bash scripts/test-monitored-step.sh
-bash scripts/test-monitored-workflow.sh
-bash scripts/test-codex-loop-program.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
+bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-task-manifest.sh
 '
 

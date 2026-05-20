@@ -1,0 +1,32 @@
+{
+  "task_id": "W1-T4",
+  "role": "iteration-worker",
+  "summary": "Added a focused runtime slice verifier to pair with the existing compiler slice verifier. Future workers can now run one bounded command for ordinary process, monitored workflow, direct Codex loop, or native managed-loop coverage instead of remembering separate scenario script names.",
+  "focused_commands": {
+    "runtime_process": "timeout 180 bash scripts/verify-runtime-slice.sh process",
+    "runtime_workflow": "timeout 180 bash scripts/verify-runtime-slice.sh workflow",
+    "runtime_codex_loop": "timeout 180 bash scripts/verify-runtime-slice.sh codex-loop",
+    "runtime_managed_loop": "timeout 240 bash scripts/verify-runtime-slice.sh managed-loop",
+    "runtime_default": "timeout 180 bash scripts/verify-runtime-slice.sh",
+    "runtime_all": "timeout 720 bash scripts/verify-runtime-slice.sh all",
+    "compiler_slice": "timeout 120 bash scripts/verify-compiler-slice.sh checker"
+  },
+  "routing_notes": [
+    "scripts/verify-fast.sh now uses bash scripts/verify-runtime-slice.sh process workflow codex-loop for the ordinary runtime scenarios.",
+    "scripts/verify-affected.sh selects runtime slice commands for examples/feedback-loop changes and the managed-loop slice for examples/swarm-native changes.",
+    "scripts/test-verify-runtime-slice.sh is a fake-harness smoke test for the selector itself and is included in verify-fast and verify-all."
+  ],
+  "commands_run": [
+    "bash -n scripts/verify-runtime-slice.sh scripts/test-verify-runtime-slice.sh scripts/verify-fast.sh scripts/verify-all.sh scripts/test-verify-affected.sh scripts/test-verify-all.sh",
+    "node --check scripts/verify-affected.mjs",
+    "timeout 60 bash scripts/test-verify-runtime-slice.sh",
+    "timeout 180 bash scripts/test-verify-affected.sh",
+    "timeout 180 bash scripts/test-verify-all.sh",
+    "timeout 180 bash scripts/verify-runtime-slice.sh process"
+  ],
+  "residual_risks": [
+    "Did not run bash scripts/verify-all.sh per W1-T4 task instruction.",
+    "The runtime slice helper delegates to existing scenario scripts; it does not reduce the cost of the underlying managed-loop scenario when that slice is selected.",
+    "verify-fast still prints the existing Nix fallback and parallel-wait diagnostic under the local sandbox path; this task did not address that pre-existing ambiguity."
+  ]
+}

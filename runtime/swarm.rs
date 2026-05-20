@@ -1470,7 +1470,7 @@ fn require_completion_lease_owner(
     connection: &Connection,
     task_id: &str,
     actor: &str,
-    at_ms: i64,
+    _at_ms: i64,
 ) -> Result<(SwarmTaskState, Option<SwarmTaskSpecRecord>), String> {
     let Some(task) = load_task_state(connection, task_id)? else {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1485,12 +1485,6 @@ fn require_completion_lease_owner(
         return Err(format!(
             "swarm task `{task_id}` cannot complete: lease ownership is not valid for status `{}`",
             task.status
-        ));
-    }
-    if task.status != "completed" && lease_ownership_is_expired(&task, spec.as_ref(), at_ms) {
-        return Err(format!(
-            "swarm task `{task_id}` cannot complete: lease held by `{}` expired",
-            task.lease_actor
         ));
     }
     if task.lease_actor.as_str() != actor {

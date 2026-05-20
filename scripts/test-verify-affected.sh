@@ -28,6 +28,8 @@ cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affe
 cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
 cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
+cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
+cp "$project_root/scripts/test-verify-runtime-slice.sh" "$project_copy/scripts/test-verify-runtime-slice.sh"
 touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
 touch "$project_copy/examples/lead-app/scripts/verify.sh"
 touch "$project_copy/examples/agent-task-scenario/Main.clasp"
@@ -165,9 +167,10 @@ switch (scenario) {
     assert(hasCommand("bash scripts/test-native-runtime.sh"), "runtime route should run native runtime coverage");
     assert(hasCommand("bash scripts/test-native-claspc.sh"), "runtime/swarm route should run native claspc coverage");
     assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm route should run ready-gate coverage");
-    assert(hasCommand("bash scripts/test-monitored-step.sh"), "feedback-loop route should run monitored step coverage");
-    assert(hasCommand("bash scripts/test-monitored-workflow.sh"), "feedback-loop route should run monitored workflow coverage");
-    assert(hasCommand("bash scripts/test-codex-loop-program.sh"), "feedback-loop route should run ordinary Codex loop coverage");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh process"), "feedback-loop route should run process runtime slice coverage");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh workflow"), "feedback-loop route should run workflow runtime slice coverage");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "feedback-loop route should run ordinary Codex runtime slice coverage");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "swarm route should run managed-loop runtime slice coverage");
     assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop route should run resume coverage");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
@@ -196,6 +199,16 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known compiler slice scripts should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-compiler-slice.sh"), "fake compiler slice smoke command should execute");
     break;
+  case "runtime-slice-script":
+    assert(report.changedFiles.includes("scripts/verify-runtime-slice.sh"), "runtime slice verifier should be present");
+    assert(report.changedFiles.includes("scripts/test-verify-runtime-slice.sh"), "runtime slice smoke test should be present");
+    assert(hasCommand("bash -n 'scripts/verify-runtime-slice.sh'"), "runtime slice verifier should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/test-verify-runtime-slice.sh'"), "runtime slice smoke should run shell syntax check");
+    assert(hasCommand("bash scripts/test-verify-runtime-slice.sh"), "runtime slice script changes should run focused smoke");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-verify-runtime-slice.sh").length === 1, "runtime slice smoke should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known runtime slice scripts should not use verify-fast fallback");
+    assert(logHas("scripts/test-verify-runtime-slice.sh"), "fake runtime slice smoke command should execute");
+    break;
   case "compiler-slice-fixture":
     assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");
     assert(report.changedFiles.includes("examples/compiler-lower.clasp"), "compiler lower fixture should be present");
@@ -217,18 +230,18 @@ switch (scenario) {
   case "monitored-workflow-script":
     assert(report.changedFiles.includes("scripts/test-monitored-workflow.sh"), "monitored workflow harness should be present");
     assert(hasCommand("bash -n 'scripts/test-monitored-workflow.sh'"), "monitored workflow harness should run shell syntax check");
-    assert(hasCommand("bash scripts/test-monitored-workflow.sh"), "monitored workflow harness should run focused coverage");
-    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-monitored-workflow.sh").length === 1, "monitored workflow harness should be deduplicated");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh workflow"), "monitored workflow harness should run focused runtime slice coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh workflow").length === 1, "monitored workflow runtime slice should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known monitored workflow harness should not use verify-fast fallback");
-    assert(logHas("scripts/test-monitored-workflow.sh"), "fake monitored workflow command should execute");
+    assert(logHas("scripts/verify-runtime-slice.sh workflow"), "fake monitored workflow slice command should execute");
     break;
   case "codex-loop-program-script":
     assert(report.changedFiles.includes("scripts/test-codex-loop-program.sh"), "ordinary Codex loop harness should be present");
     assert(hasCommand("bash -n 'scripts/test-codex-loop-program.sh'"), "ordinary Codex loop harness should run shell syntax check");
-    assert(hasCommand("bash scripts/test-codex-loop-program.sh"), "ordinary Codex loop harness should run focused coverage");
-    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-codex-loop-program.sh").length === 1, "ordinary Codex loop harness should be deduplicated");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "ordinary Codex loop harness should run focused runtime slice coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh codex-loop").length === 1, "ordinary Codex runtime slice should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known ordinary Codex loop harness should not use verify-fast fallback");
-    assert(logHas("scripts/test-codex-loop-program.sh"), "fake ordinary Codex loop command should execute");
+    assert(logHas("scripts/verify-runtime-slice.sh codex-loop"), "fake ordinary Codex loop slice command should execute");
     break;
   case "source-benchmark-mixed":
     assert(report.changedFiles.includes("src/Compiler/SemanticArtifacts.clasp"), "source context artifact file should be present");
@@ -345,6 +358,14 @@ CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_fixture_log" \
     --changed-file examples/compiler-checker.clasp \
     --changed-file examples/compiler-lower.clasp > "$compiler_slice_fixture_report"
 assert_report "$compiler_slice_fixture_report" "$compiler_slice_fixture_log" compiler-slice-fixture
+
+runtime_slice_script_report="$test_root/runtime-slice-script-report.json"
+runtime_slice_script_log="$test_root/runtime-slice-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$runtime_slice_script_log" \
+  run_verify_affected \
+    --changed-file scripts/verify-runtime-slice.sh \
+    --changed-file scripts/test-verify-runtime-slice.sh > "$runtime_slice_script_report"
+assert_report "$runtime_slice_script_report" "$runtime_slice_script_log" runtime-slice-script
 
 agent_task_scenario_report="$test_root/agent-task-scenario-report.json"
 agent_task_scenario_log="$test_root/agent-task-scenario.log"
