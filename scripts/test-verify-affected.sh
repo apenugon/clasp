@@ -43,6 +43,7 @@ touch "$project_copy/examples/safe-workspace/Workspace.clasp"
 touch "$project_copy/examples/safe-subprocess/Main.clasp"
 touch "$project_copy/examples/safe-subprocess/Process.clasp"
 touch "$project_copy/examples/agent-loop-scenario/Main.clasp"
+touch "$project_copy/examples/agent-loop-scenario/AgentRuntime.clasp"
 touch "$project_copy/examples/agent-loop-scenario/Workspace.clasp"
 touch "$project_copy/examples/agent-loop-scenario/Process.clasp"
 touch "$project_copy/examples/agent-loop-scenario/scripts/verify.sh"
@@ -171,10 +172,13 @@ switch (scenario) {
     assert(report.changedFiles.includes("src/Compiler/Checker.clasp"), "source file should be normalized");
     assert(hasCommand("bash scripts/test-selfhost.sh"), "source route should run selfhost coverage");
     assert(hasCommand("bash src/scripts/verify.sh"), "source route should run hosted source verification");
+    assert(hasCommand("bash scripts/verify-compiler-slice.sh --check-only checker"), "compiler implementation route should run cheaper check-only compiler slice coverage");
+    assert(!report.selectedCommands.some((command) => command.command === "bash scripts/verify-compiler-slice.sh checker"), "compiler implementation route should not run duplicate compiler fixture execution");
     assert(!hasCommand("benchmarks/"), "source route should avoid broad benchmark commands");
     assert(report.usedVerifyFastFallback === false, "known source input should not use verify-fast fallback");
     assert(logHas("scripts/test-selfhost.sh"), "fake selfhost command should execute");
     assert(logHas("src/scripts/verify.sh"), "fake source verify command should execute");
+    assert(logHas("scripts/verify-compiler-slice.sh --check-only checker"), "fake check-only compiler slice command should execute");
     break;
   case "mixed-swarm-runtime":
     assert(report.inputSources.filter((source) => source.kind === "files-from").length === 2, "repeated files-from sources should be recorded");
@@ -260,6 +264,7 @@ switch (scenario) {
     break;
   case "agent-loop-scenario":
     assert(report.changedFiles.includes("examples/agent-loop-scenario/Main.clasp"), "agent loop scenario source should be present");
+    assert(report.changedFiles.includes("examples/agent-loop-scenario/AgentRuntime.clasp"), "agent loop runtime helpers should be present");
     assert(report.changedFiles.includes("examples/agent-loop-scenario/Workspace.clasp"), "agent loop workspace wrapper should be present");
     assert(report.changedFiles.includes("examples/agent-loop-scenario/Process.clasp"), "agent loop process wrapper should be present");
     assert(report.changedFiles.includes("examples/agent-loop-scenario/scripts/verify.sh"), "agent loop verifier should be present");
@@ -479,6 +484,7 @@ agent_loop_scenario_log="$test_root/agent-loop-scenario.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$agent_loop_scenario_log" \
   run_verify_affected \
     --changed-file examples/agent-loop-scenario/Main.clasp \
+    --changed-file examples/agent-loop-scenario/AgentRuntime.clasp \
     --changed-file examples/agent-loop-scenario/Workspace.clasp \
     --changed-file examples/agent-loop-scenario/Process.clasp \
     --changed-file examples/agent-loop-scenario/scripts/verify.sh > "$agent_loop_scenario_report"

@@ -101,6 +101,7 @@ const expectedLabels = [
   "safe-subprocess-verifier-execution",
   "structured-diagnostics-feedback",
   "ordinary-agent-loop-scenario",
+  "native-control-substrate",
 ];
 
 assert(report.schemaVersion === 1, "readiness schema version should be stable");
@@ -119,13 +120,14 @@ assert(report.readinessSignals.every((signal) => signal.status === "pass"), "all
 for (const signal of ["safeWorkspaceOperations", "subprocessVerifierExecution", "structuredDiagnostics", "ordinaryProgramAgentLoop"]) {
   assert(report.readinessSignalSummary[signal] === "pass", `missing pass summary for ${signal}`);
 }
+assert(report.readinessSignalSummary.durableNativeControlPlane === "pass", "missing pass summary for durable native control plane");
 
 const capabilityByName = new Map(report.capabilitySignals.map((signal) => [signal.name, signal]));
 assert(capabilityByName.get("ordinary_program_execution")?.status === "pass", "ordinary_program_execution should pass");
 assert(capabilityByName.get("clasp_native_control_api")?.status === "pass", "clasp_native_control_api should pass");
 assert(capabilityByName.get("orchestration_viability")?.status === "pass", "orchestration_viability should pass");
 assert(capabilityByName.get("verification_gate")?.status === "pass", "verification_gate should pass");
-assert(capabilityByName.get("durable_native_substrate")?.status === "partial", "durable_native_substrate should be explicitly partial in this bounded probe");
+assert(capabilityByName.get("durable_native_substrate")?.status === "pass", "durable_native_substrate should pass with the native control substrate probe");
 
 assert(documented.schemaVersion === 1, "documented readiness probe schema version should be stable");
 assert(documented.kind === "clasp-agent-readiness-probe", `unexpected documented kind: ${documented.kind}`);
@@ -134,4 +136,8 @@ assert(documented.expectedCommandLabels.length === expectedLabels.length, "docum
 assert(JSON.stringify(documented.expectedCommandLabels) === JSON.stringify(expectedLabels), "documented command labels should match the fixture");
 assert(documented.requiredSignals.every((signal) => report.readinessSignalSummary[signal] === "pass"), "documented required signals should be present in checkpoint output");
 assert(documented.validationCommand.includes("--agent-readiness"), "documented validation command should use agent-readiness mode");
+assert(
+  documented.capabilityCoverage.find((capability) => capability.name === "durable_native_substrate")?.expectedStatusWhenCommandsPass === "pass",
+  "documented durable substrate capability should now pass when commands pass",
+);
 EOF

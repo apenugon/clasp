@@ -38,10 +38,11 @@ export CLASP_VERIFY_PARALLEL_COMMANDS="${CLASP_VERIFY_PARALLEL_COMMANDS-$fast_pa
 export CLASP_VERIFY_SEQUENTIAL_COMMANDS="${CLASP_VERIFY_SEQUENTIAL_COMMANDS-$fast_sequential_verify_commands}"
 export CLASP_VERIFY_FALLBACK_COMMANDS="${CLASP_VERIFY_FALLBACK_COMMANDS-$fallback_verify_commands}"
 
-if [[ -z "${CLASP_CLASPC:-}" && -z "${CLASPC_BIN:-}" ]]; then
-  resolved_claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
-  export CLASP_CLASPC="$resolved_claspc_bin"
-  export CLASPC_BIN="$resolved_claspc_bin"
-fi
+resolved_claspc_bin="$(
+  env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
+    "$project_root/scripts/resolve-claspc.sh"
+)"
+export CLASP_CLASPC="$resolved_claspc_bin"
+export CLASPC_BIN="$resolved_claspc_bin"
 
 exec bash "$project_root/scripts/verify-all.sh"

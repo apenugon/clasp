@@ -308,6 +308,11 @@ ClaspRtResultString *clasp_rt_workspace_write_file(
   ClaspRtString *relative,
   ClaspRtString *contents
 );
+ClaspRtResultString *clasp_rt_workspace_append_file(
+  ClaspRtString *root,
+  ClaspRtString *relative,
+  ClaspRtString *contents
+);
 ClaspRtResultString *clasp_rt_workspace_mkdir_all(ClaspRtString *root, ClaspRtString *relative);
 ClaspRtHeader *clasp_rt_workspace_list_dir(ClaspRtString *root, ClaspRtString *relative);
 ClaspRtResultString *clasp_rt_run_process_json(
@@ -327,5 +332,6 @@ ClaspRtResultString *clasp_rt_run_workspace_command_timeout_json(
   ClaspRtHeader *timeout_ms,
   ClaspRtHeader *command
 );
+ClaspRtResultString *clasp_rt_cancel_watched_process_json(ClaspRtString *heartbeat_path);
 
 #endif

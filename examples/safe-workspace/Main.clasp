@@ -6,7 +6,9 @@ record SafeWorkspaceReport = {
   normalizedPath : Str,
   mkdirResult : Str,
   writeResult : Str,
+  appendResult : Str,
   readText : Str,
+  appendedText : Str,
   nestedListing : Str,
   rootListing : Str,
   parentEscape : Str,
@@ -82,7 +84,10 @@ scenarioReport = {
   let normalized = resultText (workspacePath workspaceRoot "nested/result.txt");
   let madeLogs = resultText (workspaceMkdirAll workspaceRoot "logs");
   let written = resultText (workspaceWriteText workspaceRoot "nested/result.txt" "workspace-text");
+  let firstAppend = resultText (workspaceAppendText workspaceRoot "logs/events.jsonl" "event-one\n");
+  let secondAppend = resultText (workspaceAppendText workspaceRoot "logs/events.jsonl" "event-two\n");
   let readBack = resultText (workspaceReadText workspaceRoot "nested/result.txt");
+  let appendedBack = resultText (workspaceReadText workspaceRoot "logs/events.jsonl");
   let nestedNames = resultListText (workspaceListDir workspaceRoot "nested");
   let rootNames = resultListText (workspaceListDir workspaceRoot ".");
   let parentEscape = resultText (workspaceWriteText workspaceRoot "../outside.txt" "leaked");
@@ -92,7 +97,9 @@ scenarioReport = {
     normalizedPath = normalized,
     mkdirResult = madeLogs,
     writeResult = written,
+    appendResult = secondAppend,
     readText = readBack,
+    appendedText = appendedBack,
     nestedListing = nestedNames,
     rootListing = rootNames,
     parentEscape = parentEscape,

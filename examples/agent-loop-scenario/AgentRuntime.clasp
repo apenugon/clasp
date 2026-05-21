@@ -1,0 +1,64 @@
+module AgentRuntime
+
+import Workspace
+
+record AgentEvent = {
+  kind : Str,
+  role : Str,
+  status : Str,
+  detail : Str
+}
+
+agentEvent : Str -> Str -> Str -> Str -> AgentEvent
+agentEvent kind role status detail =
+  AgentEvent {
+    kind = kind,
+    role = role,
+    status = status,
+    detail = detail
+  }
+
+agentEventLine : AgentEvent -> Str
+agentEventLine value = textConcat [encode value, "\n"]
+
+agentEventLogText : [AgentEvent] -> Str
+agentEventLogText events = {
+  let mut rendered = "";
+  for value in events {
+    rendered = textConcat [rendered, agentEventLine value];
+    rendered
+  };
+  rendered
+}
+
+agentReadTextOrEmpty : Str -> Str -> Str
+agentReadTextOrEmpty root relative =
+  match workspaceReadText root relative {
+    Ok value -> value,
+    Err message -> ""
+  }
+
+agentWriteTextStatus : Str -> Str -> Str -> Str
+agentWriteTextStatus root relative value =
+  match workspaceWriteText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-write-error:", message]
+  }
+
+agentAppendTextStatus : Str -> Str -> Str -> Str
+agentAppendTextStatus root relative value =
+  match workspaceAppendText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-append-error:", message]
+  }
+
+agentAppendEvent : Str -> Str -> AgentEvent -> Str
+agentAppendEvent root relative value =
+  agentAppendTextStatus root relative (agentEventLine value)
+
+agentEnsureDirStatus : Str -> Str -> Str
+agentEnsureDirStatus root relative =
+  match workspaceMkdirAll root relative {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-mkdir-error:", message]
+  }

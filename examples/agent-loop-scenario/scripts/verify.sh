@@ -91,8 +91,10 @@ if grep -F '"bash"' "$demo_path" >/dev/null; then
   fail "agent loop scenario should invoke direct executables, not shell wrappers"
 fi
 
-grep -F 'workspaceReadText' "$demo_path" >/dev/null
-grep -F 'workspaceWriteText' "$demo_path" >/dev/null
+grep -F 'agentReadTextOrEmpty' "$demo_path" >/dev/null
+grep -F 'agentWriteTextStatus' "$demo_path" >/dev/null
+grep -F 'agentAppendEvent' "$demo_path" >/dev/null
+grep -F 'workspaceAppendText' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
 grep -F 'run (commandSpec workspaceRoot "."' "$demo_path" >/dev/null
 grep -F '"exec"' "$demo_path" >/dev/null
 grep -F '"--output-last-message"' "$demo_path" >/dev/null

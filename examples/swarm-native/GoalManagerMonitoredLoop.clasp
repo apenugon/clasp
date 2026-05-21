@@ -99,6 +99,8 @@ monitoredLoopClassifyProcess spec process =
     if process.completed then
       if process.exitCode == 0 then
         monitoredLoopOutcomeFor spec "completed-pass" "" process
+      else if process.exitCode == 124 then
+        monitoredLoopOutcomeFor spec "timeout" "timeout" process
       else
         monitoredLoopOutcomeFor spec "completed-fail" "" process
     else
@@ -106,6 +108,8 @@ monitoredLoopClassifyProcess spec process =
   else if process.completed then
     if process.exitCode == 0 then
       monitoredLoopOutcomeFor spec "completed-pass" "" process
+    else if process.exitCode == 124 then
+      monitoredLoopOutcomeFor spec "timeout" "timeout" process
     else
       monitoredLoopOutcomeFor spec "completed-fail" "" process
   else
@@ -184,16 +188,11 @@ monitoredLoopAwait spec =
           Ok process -> monitoredLoopClassifyProcess spec process,
           Err message ->
             if message == "timeout" then
-              match reconcileWatchedProcess spec.heartbeatPath {
+              match cancelWatchedProcess spec.heartbeatPath {
                 Ok process ->
-                  if process.completed then
-                    monitoredLoopClassifyProcess spec process
-                  else if process.running then
-                    monitoredLoopOutcomeFor spec "timeout" "timeout" process
-                  else
-                    monitoredLoopMalformedHeartbeat spec "heartbeat did not resolve to running or completed",
-                Err reconcileMessage ->
-                  monitoredLoopMalformedHeartbeat spec reconcileMessage
+                  monitoredLoopOutcomeFor spec "timeout" "timeout" process,
+                Err cancelMessage ->
+                  monitoredLoopMalformedHeartbeat spec cancelMessage
               }
             else if fileExists spec.heartbeatPath then
               monitoredLoopMalformedHeartbeat spec message

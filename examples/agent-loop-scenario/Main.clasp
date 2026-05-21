@@ -1,14 +1,7 @@
 module Main
 
+import AgentRuntime
 import Process
-import Workspace
-
-record AgentLoopEvent = {
-  kind : Str,
-  role : Str,
-  status : Str,
-  detail : Str
-}
 
 record AgentLoopStep = {
   role : Str,
@@ -36,7 +29,7 @@ record AgentLoopReport = {
   outputText : Str,
   builder : AgentLoopStep,
   verifier : AgentLoopStep,
-  events : [AgentLoopEvent],
+  events : [AgentEvent],
   summary : Str
 }
 
@@ -109,49 +102,6 @@ codexBinary = {
 
 textIncludes : Str -> Str -> Bool
 textIncludes value needle = length (textSplit value needle) > 1
-
-workspaceReadOrEmpty : Str -> Str
-workspaceReadOrEmpty relative =
-  match workspaceReadText workspaceRoot relative {
-    Ok value -> value,
-    Err message -> ""
-  }
-
-workspaceWriteStatus : Str -> Str -> Str
-workspaceWriteStatus relative value =
-  match workspaceWriteText workspaceRoot relative value {
-    Ok path -> "",
-    Err message -> textConcat ["workspace-write-error:", message]
-  }
-
-workspaceEnsureDir : Str -> Str
-workspaceEnsureDir relative =
-  match workspaceMkdirAll workspaceRoot relative {
-    Ok path -> "",
-    Err message -> textConcat ["workspace-mkdir-error:", message]
-  }
-
-event : Str -> Str -> Str -> Str -> AgentLoopEvent
-event kind role status detail =
-  AgentLoopEvent {
-    kind = kind,
-    role = role,
-    status = status,
-    detail = detail
-  }
-
-eventLine : AgentLoopEvent -> Str
-eventLine value = textConcat [encode value, "\n"]
-
-eventLogText : [AgentLoopEvent] -> Str
-eventLogText events = {
-  let mut rendered = "";
-  for value in events {
-    rendered = textConcat [rendered, eventLine value];
-    rendered
-  };
-  rendered
-}
 
 builderPrompt : Str -> Str
 builderPrompt inputText =
@@ -231,11 +181,11 @@ verifierProcessOk result =
 runBuilder : Str -> AgentLoopStep
 runBuilder inputText = {
   let prompt = builderPrompt inputText;
-  let wrotePrompt = workspaceWriteStatus builderPromptPath prompt;
+  let wrotePrompt = agentWriteTextStatus workspaceRoot builderPromptPath prompt;
   if wrotePrompt == "" then
     match run (commandSpec workspaceRoot "." 5000 (codexExecCommand prompt)) {
       Ok result -> {
-        let finalText = workspaceReadOrEmpty builderFinalPath;
+        let finalText = agentReadTextOrEmpty workspaceRoot builderFinalPath;
         processStepFromResult "builder" result finalText (builderProcessOk result finalText)
       },
       Err message -> processStepFromError "builder" message
@@ -257,7 +207,7 @@ writeOutputText inputText builderFinal =
 runVerifier : Str -> Str -> AgentLoopStep
 runVerifier inputText builderFinal = {
   let outputText = writeOutputText inputText builderFinal;
-  let wroteOutput = workspaceWriteStatus outputPath outputText;
+  let wroteOutput = agentWriteTextStatus workspaceRoot outputPath outputText;
   if wroteOutput == "" then
     match run (commandSpec workspaceRoot "." 5000 verifierCommand) {
       Ok result ->
@@ -291,18 +241,9 @@ loopSummary builder verifier =
     loopFinalStatus builder verifier
   ]
 
-scenarioEvents : AgentLoopStep -> AgentLoopStep -> [AgentLoopEvent]
-scenarioEvents builder verifier = [
-  event "loop-started" loopId "running" inputPath,
-  event "step-completed" builder.role builder.status builderFinalPath,
-  event "step-completed" verifier.role verifier.status outputPath,
-  event "loop-completed" loopId (loopFinalStatus builder verifier) statusPath
-]
-
-agentLoopReport : Str -> AgentLoopStep -> AgentLoopStep -> AgentLoopReport
-agentLoopReport inputText builder verifier = {
-  let outputText = workspaceReadOrEmpty outputPath;
-  let events = scenarioEvents builder verifier;
+agentLoopReport : Str -> AgentLoopStep -> AgentLoopStep -> [AgentEvent] -> AgentLoopReport
+agentLoopReport inputText builder verifier events = {
+  let outputText = agentReadTextOrEmpty workspaceRoot outputPath;
   AgentLoopReport {
     loopId = loopId,
     finalStatus = loopFinalStatus builder verifier,
@@ -325,23 +266,30 @@ agentLoopReport inputText builder verifier = {
 
 persistAgentLoopReport : AgentLoopReport -> Str
 persistAgentLoopReport report = {
-  let wroteEvents = workspaceWriteStatus eventLogPath (eventLogText report.events);
-  let wroteStatus = workspaceWriteStatus statusPath (encode report);
+  let wroteStatus = agentWriteTextStatus workspaceRoot statusPath (encode report);
   encode report
 }
 
 runLoop : Str
 runLoop = {
-  let madeArtifacts = workspaceEnsureDir "artifacts";
-  let madeSource = workspaceEnsureDir "src";
-  let inputText = workspaceReadOrEmpty inputPath;
+  let madeArtifacts = agentEnsureDirStatus workspaceRoot "artifacts";
+  let madeSource = agentEnsureDirStatus workspaceRoot "src";
+  let inputText = agentReadTextOrEmpty workspaceRoot inputPath;
+  let loopStarted = agentEvent "loop-started" loopId "running" inputPath;
+  let wroteLoopStarted = agentAppendEvent workspaceRoot eventLogPath loopStarted;
   let builder = runBuilder inputText;
+  let builderCompleted = agentEvent "step-completed" builder.role builder.status builderFinalPath;
+  let wroteBuilderCompleted = agentAppendEvent workspaceRoot eventLogPath builderCompleted;
   let verifier =
     if builder.ok then
       runVerifier inputText builder.finalText
     else
       processStepFromError "verifier" "builder did not complete";
-  persistAgentLoopReport (agentLoopReport inputText builder verifier)
+  let verifierCompleted = agentEvent "step-completed" verifier.role verifier.status outputPath;
+  let wroteVerifierCompleted = agentAppendEvent workspaceRoot eventLogPath verifierCompleted;
+  let loopCompleted = agentEvent "loop-completed" loopId (loopFinalStatus builder verifier) statusPath;
+  let wroteLoopCompleted = agentAppendEvent workspaceRoot eventLogPath loopCompleted;
+  persistAgentLoopReport (agentLoopReport inputText builder verifier [loopStarted, builderCompleted, verifierCompleted, loopCompleted])
 }
 
 main : Str

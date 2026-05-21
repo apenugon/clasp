@@ -56,7 +56,9 @@ function startsWith(value, prefix, label) {
 assert(report.normalizedPath.endsWith(path.join("nested", "result.txt")), "normalized path should stay below workspace root");
 assert(report.mkdirResult.endsWith(path.join("logs")), "mkdirAll should return the created workspace path");
 assert(report.writeResult.endsWith(path.join("nested", "result.txt")), "writeFile should return the written workspace path");
+assert(report.appendResult.endsWith(path.join("logs", "events.jsonl")), "appendFile should return the appended workspace path");
 assert(report.readText === "workspace-text", "read-back text should match");
+assert(report.appendedText === "event-one\nevent-two\n", "appendFile should preserve ordered JSONL-style appends");
 assert(report.nestedListing === "result.txt", "nested listing should expose the written file");
 assert(report.rootListing.split(",").includes("logs"), "root listing should include logs");
 assert(report.rootListing.split(",").includes("nested"), "root listing should include nested");
@@ -69,6 +71,10 @@ startsWith(report.missingRead, "ERR:workspace_missing", "missing read");
 assert(
   fs.readFileSync(path.join(workspaceRoot, "nested", "result.txt"), "utf8") === "workspace-text",
   "workspace write should persist inside the root",
+);
+assert(
+  fs.readFileSync(path.join(workspaceRoot, "logs", "events.jsonl"), "utf8") === "event-one\nevent-two\n",
+  "workspace append should persist inside the root",
 );
 assert(fs.readFileSync(outsidePath, "utf8") === "outside-secret", "absolute-path write attempt should not touch outside file");
 NODE

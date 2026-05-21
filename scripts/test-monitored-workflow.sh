@@ -31,7 +31,10 @@ cleanup() {
 
 trap cleanup EXIT
 
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+claspc_bin="$(
+  env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
+    "$project_root/scripts/resolve-claspc.sh"
+)"
 demo_path="$project_root/examples/feedback-loop/MonitoredWorkflowDemo.clasp"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
@@ -95,6 +98,12 @@ assert(plan.stdout === "plan-ok", "plan stdout should be captured");
 assert(verify.stdout === "verify-output", "verify stdout should be captured");
 assert(verify.stderr === "verifier failed intentionally", "verify stderr should be captured");
 assert(handler.stdout === "failure-recorded", "handler stdout should be captured");
+assert(Array.isArray(plan.command) && plan.command[0] === "node", "plan command should be durable");
+assert(Array.isArray(verify.command) && verify.command[0] === "node", "verify command should be durable");
+assert(plan.startedAtMs > 0 && plan.endedAtMs >= plan.startedAtMs, "plan timing should be captured");
+assert(verify.startedAtMs > 0 && verify.endedAtMs >= verify.startedAtMs, "verify timing should be captured");
+assert(handler.durationMs >= 0, "handler duration should be captured");
+assert(plan.error === "", "passing plan should not set an error");
 
 assert(readText("plan.stdout.log") === "plan-ok", "plan stdout artifact should persist");
 assert(readText("verify.stdout.log") === "verify-output", "verify stdout artifact should persist");
@@ -104,10 +113,15 @@ assert(readText("failure-handler.stdout.log") === "failure-recorded", "handler s
 const verifyHeartbeat = JSON.parse(readText("verify.heartbeat.json"));
 assert(verifyHeartbeat.completed === true, "verify heartbeat should be final");
 assert(verifyHeartbeat.exitCode === 17, "verify heartbeat should preserve exit status");
+assert(verifyHeartbeat.status === "completed-fail", "verify heartbeat should project status");
+assert(Array.isArray(verifyHeartbeat.command) && verifyHeartbeat.command[0] === "node", "verify heartbeat should preserve command");
+assert(verifyHeartbeat.startedAtMs > 0 && verifyHeartbeat.endedAtMs >= verifyHeartbeat.startedAtMs, "verify heartbeat should preserve timing");
 
 for (const id of ["plan", "verify", "failure-handler"]) {
   const status = JSON.parse(readText(`${id}.status.json`));
   assert(status.stepId === id, `${id} status artifact should be readable`);
+  assert(Array.isArray(status.command) && status.command.length >= 3, `${id} status should persist command`);
+  assert(status.startedAtMs > 0 && status.endedAtMs >= status.startedAtMs, `${id} status should persist timing`);
 }
 
 assert(events.filter((event) => event.kind === "step-started").length === 3, "each step should log start");

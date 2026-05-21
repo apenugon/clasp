@@ -11,13 +11,15 @@
     "safe-workspace-operations",
     "safe-subprocess-verifier-execution",
     "structured-diagnostics-feedback",
-    "ordinary-agent-loop-scenario"
+    "ordinary-agent-loop-scenario",
+    "native-control-substrate"
   ],
   "requiredSignals": [
     "safeWorkspaceOperations",
     "subprocessVerifierExecution",
     "structuredDiagnostics",
-    "ordinaryProgramAgentLoop"
+    "ordinaryProgramAgentLoop",
+    "durableNativeControlPlane"
   ],
   "benchmarkRelevantSignals": [
     {
@@ -56,6 +58,16 @@
       "expectedEvidence": "claspc run executes a Clasp builder/verifier loop that invokes Codex directly, writes durable status/events/artifacts, and runs a verifier command.",
       "capabilities": [
         "ordinary_program_execution",
+        "clasp_native_control_api",
+        "orchestration_viability",
+        "verification_gate"
+      ]
+    },
+    {
+      "name": "durableNativeControlPlane",
+      "commandLabel": "native-control-substrate",
+      "expectedEvidence": "Ordinary Clasp code creates objectives/tasks/DAG edges, acquires leases, records tool and verifier runs/artifacts, grants approvals, decides merge policies, and persists projected status.",
+      "capabilities": [
         "durable_native_substrate",
         "clasp_native_control_api",
         "orchestration_viability",
@@ -71,18 +83,18 @@
     },
     {
       "name": "durable_native_substrate",
-      "expectedStatusWhenCommandsPass": "partial",
-      "scope": "status, event, and artifact persistence only; DAG edges, leases, approvals, and merge policy state are outside this bounded probe"
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "SQLite-backed objectives, task DAGs, leases, tool/verifier run records, artifacts, approvals, merge policy state, and projected status from ordinary Clasp code"
     },
     {
       "name": "clasp_native_control_api",
       "expectedStatusWhenCommandsPass": "pass",
-      "scope": "ordinary Clasp workspace and subprocess APIs used without compiler-level swarm commands"
+      "scope": "ordinary Clasp workspace, subprocess, and native swarm APIs used without compiler-level swarm commands"
     },
     {
       "name": "orchestration_viability",
       "expectedStatusWhenCommandsPass": "pass",
-      "scope": "combined file, process, diagnostic, and builder/verifier-loop readiness"
+      "scope": "combined file, process, diagnostic, builder/verifier-loop, and native control-plane readiness"
     },
     {
       "name": "ergonomics",

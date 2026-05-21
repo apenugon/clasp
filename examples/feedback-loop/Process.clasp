@@ -5,6 +5,7 @@ foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTi
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
+foreign cancelWatchedProcessRaw : Str -> Result Str = "cancelWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
 foreign handoffCommandRaw : Str -> Str -> Str -> Str -> Int -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "handoffCommandJson"
@@ -25,17 +26,40 @@ record WatchedProcess = {
   updatedAtMs : Int
 }
 
+record WatchedProcessDetails = {
+  pid : Int,
+  status : Str,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  timedOut : Bool,
+  error : Str,
+  command : [Str],
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
 record MonitoredStepResult = {
   status : Str,
   exitCode : Int,
   stdout : Str,
   stderr : Str,
+  command : [Str],
   stdoutPath : Str,
   stderrPath : Str,
   heartbeatPath : Str,
   running : Bool,
   completed : Bool,
   timedOut : Bool,
+  error : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
   updatedAtMs : Int
 }
 
@@ -101,6 +125,9 @@ processResultError message = Err message
 
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
+
+watchedProcessDetailsError : Str -> Result WatchedProcessDetails
+watchedProcessDetailsError message = Err message
 
 timedProcessResultError : Str -> Result TimedProcessResult
 timedProcessResultError message = Err message
@@ -174,6 +201,12 @@ watchedProcessResult value = match value {
   Err message -> watchedProcessError message
 }
 
+watchedProcessDetailsResult : Result Str -> Result WatchedProcessDetails
+watchedProcessDetailsResult value = match value {
+  Ok raw -> Ok (decode WatchedProcessDetails raw),
+  Err message -> watchedProcessDetailsError message
+}
+
 upgradeTransactionResult : Result Str -> Result UpgradeTransaction
 upgradeTransactionResult value = match value {
   Ok raw -> Ok (decode UpgradeTransaction raw),
@@ -186,9 +219,13 @@ processReadTextOrEmpty path = match readFile path {
   Err message -> ""
 }
 
-watchedProcessStatus : WatchedProcess -> Str
+watchedProcessStatus : WatchedProcessDetails -> Str
 watchedProcessStatus process =
-  if process.completed then
+  if process.timedOut then
+    "timeout"
+  else if process.status != "" then
+    process.status
+  else if process.completed then
     if process.exitCode == 0 then
       "completed-pass"
     else
@@ -198,25 +235,30 @@ watchedProcessStatus process =
   else
     "stopped"
 
-monitoredStepResultWithStatus : WatchedProcess -> Str -> Int -> Bool -> MonitoredStepResult
+monitoredStepResultWithStatus : WatchedProcessDetails -> Str -> Int -> Bool -> MonitoredStepResult
 monitoredStepResultWithStatus process status exitCode timedOut =
   MonitoredStepResult {
     status = status,
     exitCode = exitCode,
     stdout = processReadTextOrEmpty process.stdoutPath,
     stderr = processReadTextOrEmpty process.stderrPath,
+    command = process.command,
     stdoutPath = process.stdoutPath,
     stderrPath = process.stderrPath,
     heartbeatPath = process.heartbeatPath,
     running = process.running,
     completed = process.completed,
     timedOut = timedOut,
+    error = if timedOut then "timeout" else process.error,
+    startedAtMs = process.startedAtMs,
+    endedAtMs = process.endedAtMs,
+    durationMs = process.durationMs,
     updatedAtMs = process.updatedAtMs
   }
 
-monitoredStepResult : WatchedProcess -> MonitoredStepResult
+monitoredStepResult : WatchedProcessDetails -> MonitoredStepResult
 monitoredStepResult process =
-  monitoredStepResultWithStatus process (watchedProcessStatus process) process.exitCode false
+  monitoredStepResultWithStatus process (watchedProcessStatus process) process.exitCode process.timedOut
 
 run : CommandSpec -> Result ProcessResult
 run spec = processResult (runCommandRaw spec.cwd spec.command)
@@ -227,6 +269,18 @@ runTimeout spec timeoutMs = timedProcessResult (runCommandTimeoutRaw spec.cwd ti
 spawn : WatchedCommandSpec -> Result WatchedProcess
 spawn spec =
   watchedProcessResult (
+    spawnCommandRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command
+  )
+
+spawnDetails : WatchedCommandSpec -> Result WatchedProcessDetails
+spawnDetails spec =
+  watchedProcessDetailsResult (
     spawnCommandRaw
       spec.cwd
       spec.stdoutPath
@@ -248,8 +302,20 @@ watch spec =
       spec.command
   )
 
+watchDetails : WatchedCommandSpec -> Result WatchedProcessDetails
+watchDetails spec =
+  watchedProcessDetailsResult (
+    watchCommandRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      spec.command
+  )
+
 runMonitored : WatchedCommandSpec -> Result MonitoredStepResult
-runMonitored spec = match watch spec {
+runMonitored spec = match watchDetails spec {
   Ok process -> Ok (monitoredStepResult process),
   Err message -> monitoredStepError message
 }
@@ -259,16 +325,16 @@ runMonitoredTimeout spec timeoutMs =
   if timeoutMs < 1 then
     runMonitored spec
   else
-    match spawn spec {
+    match spawnDetails spec {
       Err message ->
         monitoredStepError message,
       Ok initial ->
-        match awaitTimeout spec.heartbeatPath spec.watchPollMs timeoutMs {
+        match awaitTimeoutDetails spec.heartbeatPath spec.watchPollMs timeoutMs {
           Ok process ->
             Ok (monitoredStepResult process),
           Err message ->
             if message == "timeout" then
-              match reconcile spec.heartbeatPath {
+              match cancelDetails spec.heartbeatPath {
                 Ok process ->
                   Ok (monitoredStepResultWithStatus process "timeout" 124 true),
                 Err reconcileMessage ->
@@ -282,13 +348,27 @@ runMonitoredTimeout spec timeoutMs =
 reconcile : Str -> Result WatchedProcess
 reconcile heartbeatPath = watchedProcessResult (reconcileWatchedProcessRaw heartbeatPath)
 
+cancel : Str -> Result WatchedProcess
+cancel heartbeatPath = watchedProcessResult (cancelWatchedProcessRaw heartbeatPath)
+
+cancelDetails : Str -> Result WatchedProcessDetails
+cancelDetails heartbeatPath = watchedProcessDetailsResult (cancelWatchedProcessRaw heartbeatPath)
+
 await : Str -> Int -> Result WatchedProcess
 await heartbeatPath watchPollMs =
   watchedProcessResult (awaitWatchedProcessRaw heartbeatPath watchPollMs)
 
+awaitDetails : Str -> Int -> Result WatchedProcessDetails
+awaitDetails heartbeatPath watchPollMs =
+  watchedProcessDetailsResult (awaitWatchedProcessRaw heartbeatPath watchPollMs)
+
 awaitTimeout : Str -> Int -> Int -> Result WatchedProcess
 awaitTimeout heartbeatPath watchPollMs timeoutMs =
   watchedProcessResult (awaitWatchedProcessTimeoutRaw heartbeatPath watchPollMs timeoutMs)
+
+awaitTimeoutDetails : Str -> Int -> Int -> Result WatchedProcessDetails
+awaitTimeoutDetails heartbeatPath watchPollMs timeoutMs =
+  watchedProcessDetailsResult (awaitWatchedProcessTimeoutRaw heartbeatPath watchPollMs timeoutMs)
 
 handoff : HandoffCommandSpec -> Result WatchedProcess
 handoff spec =

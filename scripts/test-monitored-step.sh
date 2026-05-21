@@ -31,7 +31,10 @@ cleanup() {
 
 trap cleanup EXIT
 
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+claspc_bin="$(
+  env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
+    "$project_root/scripts/resolve-claspc.sh"
+)"
 demo_path="$project_root/examples/feedback-loop/MonitoredStepDemo.clasp"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
@@ -52,5 +55,24 @@ grep -F '"completed":true' "$state_root/step.heartbeat.json" >/dev/null
 grep -F '"exitCode":3' "$state_root/step.heartbeat.json" >/dev/null
 grep -Fx 'monitored-step-out' "$state_root/step.stdout.log" >/dev/null
 grep -Fx 'monitored-step-err' "$state_root/step.stderr.log" >/dev/null
+
+node - "$output_path" "$state_root/step.heartbeat.json" <<'NODE'
+const fs = require("node:fs");
+const output = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const heartbeat = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+assert(output.status === "completed-fail", `unexpected output status ${output.status}`);
+assert(Array.isArray(output.command) && output.command[0] === "node", "output should include command");
+assert(output.startedAtMs > 0 && output.endedAtMs >= output.startedAtMs, "output should include timing");
+assert(output.durationMs >= 0, "output should include duration");
+assert(output.error === "", "non-timeout failure should not set timeout error");
+assert(heartbeat.status === "completed-fail", `unexpected heartbeat status ${heartbeat.status}`);
+assert(Array.isArray(heartbeat.command) && heartbeat.command[0] === "node", "heartbeat should include command");
+assert(heartbeat.startedAtMs > 0 && heartbeat.endedAtMs >= heartbeat.startedAtMs, "heartbeat should include timing");
+NODE
 
 printf 'monitored-step-ok\n'

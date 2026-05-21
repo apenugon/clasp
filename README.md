@@ -196,6 +196,7 @@ claspc check examples/lead-app/Main.clasp --compiler=bootstrap
 claspc check examples/compiler-selfhost/Main.clasp --json --compiler=bootstrap
 
 bash scripts/verify-compiler-slice.sh all
+bash scripts/verify-compiler-slice.sh --check-only checker
 bash scripts/verify-runtime-slice.sh workflow codex-loop
 claspc context examples/lead-app/Main.clasp --compiler=bootstrap
 claspc native examples/lead-app/Main.clasp -o dist/lead-app.native.ir --compiler=bootstrap

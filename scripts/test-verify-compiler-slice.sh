@@ -89,8 +89,27 @@ chmod +x "$test_root/bin/fake-claspc"
 
 CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --help |
   grep -F 'usage: scripts/verify-compiler-slice.sh' >/dev/null
+CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --help |
+  grep -F -- '--check-only' >/dev/null
 CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --list |
   grep -F 'lower' >/dev/null
+
+check_only_log="$test_root/check-only.log"
+CLASP_PROJECT_ROOT="$project_copy" \
+  CLASP_CLASPC="$test_root/bin/fake-claspc" \
+  CLASP_TEST_FAKE_CLASPC_LOG="$check_only_log" \
+  "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --check-only checker |
+  grep -F 'verify-compiler-slice: ok (checker, check-only)' >/dev/null
+
+grep -F -- '--json check examples/compiler-checker.clasp' "$check_only_log" >/dev/null
+if grep -F -- 'run examples/compiler-checker.clasp' "$check_only_log" >/dev/null; then
+  printf 'check-only focused verifier should not run compiler fixture\n' >&2
+  exit 1
+fi
+if grep -F 'compiler-parser.clasp' "$check_only_log" >/dev/null; then
+  printf 'check-only checker verifier should not run parser fixture\n' >&2
+  exit 1
+fi
 
 checker_log="$test_root/checker.log"
 CLASP_PROJECT_ROOT="$project_copy" \

@@ -1,0 +1,191 @@
+{
+  "task_id": "wave1-baseline-fast-iteration-map",
+  "role": "explorer",
+  "summary": "Fast iteration already has useful narrow gates, but the common latency pressure is still cold native backend work and duplicated check/run verifier work. The best next implementation slice should keep full verification unchanged and make one narrow fast path cheaper or more selectable.",
+  "current_verifier_commands": {
+    "full_gate": {
+      "command": "bash scripts/verify-all.sh",
+      "entry_points": [
+        "scripts/verify-all.sh:33 full_parallel_verify_commands",
+        "scripts/verify-all.sh:37 full_sequential_verify_commands",
+        "scripts/verify-all.sh:580 run_verify_commands"
+      ],
+      "notes": [
+        "Runs two parallel setup checks, then a long sequential chain that includes selfhost, source-run cache, native/runtime/swarm/monitoring scenarios, verify harness tests, example verifiers, and benchmark tests.",
+        "Supports CLASP_VERIFY_REPORT_JSON timing reports, CLASP_VERIFY_PARALLEL_COMMANDS, CLASP_VERIFY_SEQUENTIAL_COMMANDS, CLASP_VERIFY_FALLBACK_COMMANDS, and nested fallback behavior."
+      ]
+    },
+    "fast_gate": {
+      "command": "bash scripts/verify-fast.sh",
+      "entry_points": [
+        "scripts/verify-fast.sh:5 fast_parallel_verify_commands",
+        "scripts/verify-fast.sh:13 fast_sequential_verify_commands",
+        "scripts/verify-fast.sh:36 CLASP_VERIFY_LABEL",
+        "scripts/verify-fast.sh:47 exec bash scripts/verify-all.sh"
+      ],
+      "notes": [
+        "Wraps verify-all with a shorter command set but still includes selfhost, source-run cache, native claspc/runtime, compiler slices, runtime slices, and verifier harness regressions."
+      ]
+    },
+    "affected_gate": {
+      "command": "bash scripts/verify-affected.sh --changed-file <path>",
+      "entry_points": [
+        "scripts/verify-affected.mjs:247 COMMANDS",
+        "scripts/verify-affected.mjs:725 routeChangedFiles",
+        "scripts/verify-affected.mjs:744 source/compiler routing",
+        "scripts/verify-affected.mjs:859 benchmark checkpoint routing"
+      ],
+      "notes": [
+        "Good first worker gate because it selects existing targeted scripts from changed files and avoids the full verify-all surface for checkpoint/report and many example/runtime changes."
+      ]
+    },
+    "compiler_slice_gate": {
+      "command": "bash scripts/verify-compiler-slice.sh checker",
+      "entry_points": [
+        "scripts/verify-compiler-slice.sh:127 run_slice",
+        "scripts/verify-compiler-slice.sh:141 check step",
+        "scripts/verify-compiler-slice.sh:147 run step"
+      ],
+      "notes": [
+        "Each selected slice performs both claspc --json check and claspc run for the same fixture, then asserts output shape."
+      ]
+    },
+    "benchmark_checkpoint": {
+      "command": "node scripts/benchmark-checkpoint.mjs --output <path>",
+      "entry_points": [
+        "scripts/benchmark-checkpoint.mjs:210 defaultCommandPlan",
+        "scripts/benchmark-checkpoint.mjs:497 buildBottlenecks",
+        "scripts/test-benchmark-checkpoint.sh:16 fixture/schema regression"
+      ],
+      "notes": [
+        "Live mode records source-run cold/warm, compiler-slice-checker, and native-incremental-body-change with explicit timeout wrappers. Fixture mode is the cheap regression path."
+      ]
+    },
+    "selfhost_native_verify": {
+      "command": "CLASP_NATIVE_VERIFY_MODE=fast bash src/scripts/verify.sh",
+      "entry_points": [
+        "src/scripts/verify.sh:421 run_verify",
+        "src/scripts/verify.sh:451 fast fixture setup",
+        "src/scripts/verify.sh:469 full promoted/rebuilt comparison"
+      ],
+      "notes": [
+        "Fast mode now checks a small fixture through the promoted compiler image; full mode remains the expensive promoted-vs-rebuilt comparison path."
+      ]
+    }
+  },
+  "observed_bottlenecks": [
+    {
+      "rank": 1,
+      "area": "cold claspc run startup",
+      "evidence": [
+        "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json recorded source-run-cold=16463ms and source-run-warm=214ms.",
+        "The cold trace shows bundle miss, run-binary build, native-image miss, build-plan miss, decl-module misses, and decl-module summary-plan work.",
+        "runtime/claspc.rs:7218 starts a run-binary fast path before bundle building; runtime/claspc.rs:7378 builds the cached backend binary when that path misses."
+      ],
+      "why_it_matters": "Ordinary Clasp agent-loop verifier paths rely on claspc run. Cold cache behavior dominates first-run manager iteration while warm cache behavior is already cheap."
+    },
+    {
+      "rank": 2,
+      "area": "duplicated compiler fixture check/run work",
+      "evidence": [
+        "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json recorded compiler-slice-checker=18855ms.",
+        "scripts/verify-compiler-slice.sh:141 runs claspc --json check and scripts/verify-compiler-slice.sh:147 then runs claspc run for the same fixture.",
+        "verify-fast includes bash scripts/verify-compiler-slice.sh all, so this duplicated work is in the common fast verifier path."
+      ],
+      "why_it_matters": "The compiler slice verifier is valuable, but check-plus-run for every slice is costly when a worker only needs syntax/checker feedback or changed one compiler area."
+    },
+    {
+      "rank": 3,
+      "area": "native incremental cold path",
+      "evidence": [
+        "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json recorded nativeImageCold=28.79s and checkCold=15.01s inside native-incremental-body-change.",
+        "runtime/claspc.rs:2409 load_cached_or_execute_native_image_build_plan and runtime/claspc.rs:2696 execute_parallel_module_decl_section_export are the key build-plan and decl-module cache paths.",
+        "runtime/claspc.rs:6373 module summary caching is already strong for warm and promoted-cache cases; edited large modules still fall back to semantic work."
+      ],
+      "why_it_matters": "This is a real bottleneck, but it is larger and riskier than the first two targets because it touches cache correctness across native image and checker summaries."
+    }
+  ],
+  "bounded_implementation_targets": [
+    {
+      "target": "Add a cheaper compiler-slice mode and route only changed compiler areas to it.",
+      "files_and_functions": [
+        "scripts/verify-compiler-slice.sh:127 run_slice",
+        "scripts/verify-compiler-slice.sh:156 argument parsing",
+        "scripts/verify-fast.sh:13 fast_sequential_verify_commands",
+        "scripts/verify-affected.mjs:699 compilerSliceForFile",
+        "scripts/verify-affected.mjs:725 routeChangedFiles",
+        "scripts/test-verify-compiler-slice.sh",
+        "scripts/test-verify-affected.sh",
+        "scripts/test-verify-all.sh"
+      ],
+      "shape": "Keep the existing default check-plus-run behavior. Add an explicit check-only or selected-slice fast mode for pre-full worker feedback, then have verify-affected select the smallest relevant slice for src/Compiler/* edits before verify-fast/full integration.",
+      "smallest_verification_commands": [
+        "bash -n scripts/verify-compiler-slice.sh scripts/verify-fast.sh scripts/test-verify-compiler-slice.sh scripts/test-verify-affected.sh scripts/test-verify-all.sh",
+        "node --check scripts/verify-affected.mjs",
+        "timeout 120 bash scripts/test-verify-compiler-slice.sh",
+        "timeout 180 bash scripts/test-verify-affected.sh",
+        "timeout 120 bash scripts/verify-compiler-slice.sh checker"
+      ]
+    },
+    {
+      "target": "Make the source-run cold/warm cache probe expose the next actionable miss instead of only pass/fail.",
+      "files_and_functions": [
+        "runtime/claspc.rs:4477 run_binary_cache_path",
+        "runtime/claspc.rs:4484 run_binary_project_cache_path",
+        "runtime/claspc.rs:4500 cached_project_run_binary_path",
+        "runtime/claspc.rs:7218 run_main pre-bundle Run fast path",
+        "runtime/claspc.rs:7378 run_main Run build path",
+        "scripts/test-source-run-cache.sh",
+        "scripts/benchmark-checkpoint.mjs:210 defaultCommandPlan",
+        "scripts/benchmark-checkpoint.mjs:497 buildBottlenecks"
+      ],
+      "shape": "Do not change run semantics. Add a bounded cache trace assertion or checkpoint field that separates bundle miss, run-binary miss, native-image miss, build-plan miss, and decl-module miss for source-run-cold so the next cache optimization can be measured without rerunning verify-all.",
+      "smallest_verification_commands": [
+        "node --check scripts/benchmark-checkpoint.mjs",
+        "timeout 120 bash scripts/test-source-run-cache.sh",
+        "timeout 180 bash scripts/test-benchmark-checkpoint.sh",
+        "timeout 180 node scripts/benchmark-checkpoint.mjs --no-native-incremental --source-run-timeout 60 --compiler-slice-timeout 90 --output /tmp/clasp-fast-iteration-checkpoint.json"
+      ]
+    }
+  ],
+  "smallest_pre_full_worker_commands": [
+    "timeout 120 bash scripts/test-source-run-cache.sh",
+    "timeout 120 bash scripts/verify-compiler-slice.sh checker",
+    "timeout 180 bash scripts/test-verify-affected.sh",
+    "timeout 180 bash scripts/test-benchmark-checkpoint.sh",
+    "timeout 240 bash scripts/test-native-incremental-guard.sh",
+    "CLASP_VERIFY_REPORT_JSON=/tmp/verify-fast-report.json timeout 300 bash scripts/verify-fast.sh"
+  ],
+  "commands_to_avoid_in_inner_loop": [
+    "bash scripts/verify-all.sh",
+    "Unbounded claspc check or claspc run on src/Main.clasp",
+    "Live node scripts/benchmark-checkpoint.mjs with native incremental enabled unless the cache path itself changed"
+  ],
+  "files_inspected": [
+    "AGENTS.md",
+    "scripts/verify-all.sh",
+    "scripts/verify-fast.sh",
+    "scripts/verify-affected.mjs",
+    "scripts/verify-compiler-slice.sh",
+    "scripts/benchmark-checkpoint.mjs",
+    "scripts/test-benchmark-checkpoint.sh",
+    "scripts/test-source-run-cache.sh",
+    "scripts/test-native-incremental-guard.sh",
+    "scripts/measure-native-incremental.sh",
+    "src/scripts/verify.sh",
+    "scripts/test-selfhost.sh",
+    "runtime/claspc.rs",
+    "docs/iteration-speed-loop-evidence.md",
+    "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json"
+  ],
+  "commands_run": [
+    "node -e \"const fs=require('fs'); for (const p of ['agents/feedback/wave1-baseline-fast-iteration-map.json','/home/akul_medexfinance_com/clasp/.clasp-loops/state/best-language-swarm-live-20260521041702/mailbox.json']) JSON.parse(fs.readFileSync(p,'utf8')); console.log('json ok')\"",
+    "timeout 180 bash scripts/test-benchmark-checkpoint.sh",
+    "timeout 180 bash scripts/test-verify-affected.sh"
+  ],
+  "residual_risks": [
+    "This explorer slice intentionally did not implement the fast-verifier change.",
+    "Existing worktree changes from an earlier attempt remain present in scripts/benchmark-checkpoint.mjs, scripts/test-benchmark-checkpoint.sh, and benchmarks/checkpoints/2026-05-21-wave1-agent-readiness-probe.json; this report does not depend on reverting them.",
+    "The 2026-05-20 bottleneck checkpoint was captured in a sibling workspace, so exact timings should be treated as directional rather than as a fresh measurement for every host."
+  ]
+}

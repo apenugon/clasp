@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 timeout_secs="${CLASP_RUNTIME_SLICE_TIMEOUT_SECS:-180}"
 
 usage() {
@@ -21,7 +21,7 @@ Slices:
 
 Environment:
   CLASP_RUNTIME_SLICE_TIMEOUT_SECS  Per-slice harness timeout in seconds (default: 180).
-  CLASP_CLASPC or CLASPC_BIN        Optional explicit claspc binary forwarded to harnesses.
+  CLASP_CLASPC and CLASPC_BIN       Resolved from this checkout and forwarded to harnesses.
 
 Examples:
   bash scripts/verify-runtime-slice.sh process
@@ -43,6 +43,17 @@ parse_positive_timeout() {
   if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || (( timeout_secs < 1 )); then
     fail "CLASP_RUNTIME_SLICE_TIMEOUT_SECS must be a positive integer"
   fi
+}
+
+resolve_checkout_claspc() {
+  local resolved_claspc_bin=""
+
+  resolved_claspc_bin="$(
+    env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
+      "$project_root/scripts/resolve-claspc.sh"
+  )"
+  export CLASP_CLASPC="$resolved_claspc_bin"
+  export CLASPC_BIN="$resolved_claspc_bin"
 }
 
 scripts_for_slice() {
@@ -116,6 +127,7 @@ if [[ "${#slices[@]}" == "0" ]]; then
 fi
 
 parse_positive_timeout
+resolve_checkout_claspc
 
 for slice in "${slices[@]}"; do
   run_slice "$slice"

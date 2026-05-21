@@ -251,10 +251,12 @@ const COMMANDS = {
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
+  monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   hostRuntime: "bash scripts/test-host-runtime.sh",
+  agentLoopScenario: "bash examples/agent-loop-scenario/scripts/verify.sh",
   safeWorkspace: "bash scripts/test-safe-workspace.sh",
   safeSubprocess: "bash scripts/test-safe-subprocess.sh",
   runtimeSliceProcess: "bash scripts/verify-runtime-slice.sh process",
@@ -722,6 +724,20 @@ function compilerSliceForFile(file) {
   }
 }
 
+function compilerSliceCommandForFile(file, slice) {
+  if (file.startsWith("src/Compiler/")) {
+    return `bash scripts/verify-compiler-slice.sh --check-only ${slice}`;
+  }
+  return `bash scripts/verify-compiler-slice.sh ${slice}`;
+}
+
+function compilerSliceDetailForFile(file, slice) {
+  if (file.startsWith("src/Compiler/")) {
+    return `compiler ${slice} implementation uses focused check-only coverage; source verification keeps broader compiler execution coverage`;
+  }
+  return `compiler ${slice} fixture uses focused check/run coverage`;
+}
+
 function routeChangedFiles(changedFiles, inputFallbackMode) {
   const selectedByCommand = new Map();
   const routingReasons = [];
@@ -750,11 +766,11 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (compilerSlice) {
       matched = true;
-      reason(file, "compiler-slice", `compiler ${compilerSlice} fixture uses focused check/run coverage`);
+      reason(file, "compiler-slice", compilerSliceDetailForFile(file, compilerSlice));
       addSelected(
         selectedByCommand,
-        `compiler-slice:${compilerSlice}`,
-        `bash scripts/verify-compiler-slice.sh ${compilerSlice}`,
+        `compiler-slice:${compilerSlice}${file.startsWith("src/Compiler/") ? ":check-only" : ""}`,
+        compilerSliceCommandForFile(file, compilerSlice),
         "compiler slice path",
         file,
       );
@@ -799,6 +815,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, and managed-loop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
+      addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
     }
 
@@ -836,6 +853,21 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       matched = true;
       reason(file, "host-runtime", "host runtime example path uses focused ordinary-program process and file IO coverage");
       addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime path", file);
+    }
+
+    if (file.startsWith("examples/agent-loop-scenario/")) {
+      matched = true;
+      reason(file, "agent-loop-scenario", "ordinary agent-loop scenario path uses focused safe workspace, subprocess, and durable status coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "agent-loop scenario shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "agent-loop-scenario", COMMANDS.agentLoopScenario, "agent-loop scenario path", file);
     }
 
     if (file.startsWith("examples/safe-workspace/")) {
@@ -987,6 +1019,20 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "monitored step harness", file);
+    }
+
+    if (file === "scripts/test-monitored-loop.sh") {
+      matched = true;
+      reason(file, "monitored-loop-harness", "monitored loop harness uses shell syntax plus timeout/cancel coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "monitored loop shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "monitored loop harness", file);
+      addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "monitored loop harness", file);
     }
 
     if (file === "scripts/test-monitored-workflow.sh") {

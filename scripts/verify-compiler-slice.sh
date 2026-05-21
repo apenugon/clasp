@@ -3,12 +3,13 @@ set -euo pipefail
 
 project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 timeout_secs="${CLASP_COMPILER_SLICE_TIMEOUT_SECS:-60}"
+check_only=0
 tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 test_root=""
 
 usage() {
   cat <<'EOF'
-usage: scripts/verify-compiler-slice.sh [--list] [parser|checker|lower|emitter|all ...]
+usage: scripts/verify-compiler-slice.sh [--list] [--check-only] [parser|checker|lower|emitter|all ...]
 
 Runs a focused compiler-fixture verifier for fast local feedback before the
 broader verify-all path. Each selected slice runs:
@@ -16,12 +17,16 @@ broader verify-all path. Each selected slice runs:
   - claspc run examples/compiler-<slice>.clasp
   - JSON assertions over the expected fixture output
 
+Use --check-only for the cheaper syntax/type/summary gate when run-output
+coverage is provided elsewhere in the current verification plan.
+
 Environment:
   CLASP_COMPILER_SLICE_TIMEOUT_SECS  Per-claspc-command timeout in seconds (default: 60).
   CLASP_CLASPC or CLASPC_BIN         Optional explicit claspc binary.
 
 Examples:
   bash scripts/verify-compiler-slice.sh checker
+  bash scripts/verify-compiler-slice.sh --check-only checker
   bash scripts/verify-compiler-slice.sh parser lower emitter
   CLASP_COMPILER_SLICE_TIMEOUT_SECS=30 bash scripts/verify-compiler-slice.sh all
 EOF
@@ -50,17 +55,15 @@ cleanup() {
   rm -rf "${test_root:-}"
 }
 
-assert_fixture_output() {
+assert_fixture_check_output() {
   local slice="$1"
   local check_output="$2"
-  local run_output="$3"
 
-  node - "$slice" "$check_output" "$run_output" <<'NODE'
+  node - "$slice" "$check_output" <<'NODE'
 const fs = require("node:fs");
 
-const [slice, checkPath, runPath] = process.argv.slice(2);
+const [slice, checkPath] = process.argv.slice(2);
 const check = JSON.parse(fs.readFileSync(checkPath, "utf8"));
-const output = JSON.parse(fs.readFileSync(runPath, "utf8"));
 
 function assert(condition, message) {
   if (!condition) {
@@ -77,25 +80,60 @@ switch (slice) {
       String(check.summary || "").includes("parseModuleSummary : Str -> ParserState"),
       "check summary should include parseModuleSummary",
     );
-    assert(output.moduleName === "Compiler.Parser", `unexpected moduleName ${output.moduleName}`);
-    assert(output.imports === "|Compiler.Loader|Compiler.Renderers", "parser imports summary changed");
-    assert(output.signatures === "|parseModule : Str -> Str|main : Str", "parser signature summary changed");
-    assert(output.declarations === "|parseModule source|main", "parser declaration summary changed");
     break;
   case "checker":
     assert(
       String(check.summary || "").includes("snapshot : CheckSnapshot"),
       "check summary should include checker snapshot",
     );
-    assert(output.roster === "ok:[Str]", "checker roster inference changed");
-    assert(output.matrix === "ok:[[Int]]", "checker matrix inference changed");
-    assert(output.mixed === "error:expected Str but found Int", "checker mismatch diagnostic changed");
     break;
   case "lower":
     assert(
       String(check.summary || "").includes("lowerExpr : CheckedExprText -> LowerExprText"),
       "check summary should include lowerExpr",
     );
+    break;
+  case "emitter":
+    assert(
+      String(check.summary || "").includes("emitModule : [LowerDeclText] -> Str"),
+      "check summary should include emitModule",
+    );
+    break;
+  default:
+    throw new Error(`unknown slice ${slice}`);
+}
+NODE
+}
+
+assert_fixture_run_output() {
+  local slice="$1"
+  local run_output="$2"
+
+  node - "$slice" "$run_output" <<'NODE'
+const fs = require("node:fs");
+
+const [slice, runPath] = process.argv.slice(2);
+const output = JSON.parse(fs.readFileSync(runPath, "utf8"));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(`${slice}: ${message}`);
+  }
+}
+
+switch (slice) {
+  case "parser":
+    assert(output.moduleName === "Compiler.Parser", `unexpected moduleName ${output.moduleName}`);
+    assert(output.imports === "|Compiler.Loader|Compiler.Renderers", "parser imports summary changed");
+    assert(output.signatures === "|parseModule : Str -> Str|main : Str", "parser signature summary changed");
+    assert(output.declarations === "|parseModule source|main", "parser declaration summary changed");
+    break;
+  case "checker":
+    assert(output.roster === "ok:[Str]", "checker roster inference changed");
+    assert(output.matrix === "ok:[[Int]]", "checker matrix inference changed");
+    assert(output.mixed === "error:expected Str but found Int", "checker mismatch diagnostic changed");
+    break;
+  case "lower":
     assert(output.listExpr === "list:[literal:Ada, literal:Grace]", "lower list expression changed");
     assert(
       output.letExpr === "let names = list:[literal:Ada, literal:Grace] in call renderNames(name:names)",
@@ -104,10 +142,6 @@ switch (slice) {
     assert(output.callExpr === "call score(int:7, name:weight)", "lower call expression changed");
     break;
   case "emitter":
-    assert(
-      String(check.summary || "").includes("emitModule : [LowerDeclText] -> Str"),
-      "check summary should include emitModule",
-    );
     assert(output.arrayLiteral === "[\"Ada\", \"Grace\", \"Linus\"]", "emitter array literal changed");
     assert(
       String(output.moduleText || "").includes("export const names = [\"Ada\", \"Grace\", \"Linus\"];"),
@@ -143,14 +177,18 @@ run_slice() {
     cd "$project_root"
     timeout "$timeout_secs" "$claspc_bin" --json check "$entry" >"$check_output"
   )
+  assert_fixture_check_output "$slice" "$check_output"
+
+  if [[ "$check_only" == "1" ]]; then
+    return 0
+  fi
 
   printf 'verify-compiler-slice: %s run\n' "$slice"
   (
     cd "$project_root"
     timeout "$timeout_secs" "$claspc_bin" run "$entry" >"$run_output"
   )
-
-  assert_fixture_output "$slice" "$check_output" "$run_output"
+  assert_fixture_run_output "$slice" "$run_output"
 }
 
 slices=()
@@ -163,6 +201,9 @@ while [[ $# -gt 0 ]]; do
     --list)
       list_slices
       exit 0
+      ;;
+    --check-only)
+      check_only=1
       ;;
     all)
       slices=(parser checker lower emitter)
@@ -192,4 +233,8 @@ for slice in "${slices[@]}"; do
   run_slice "$slice"
 done
 
-printf 'verify-compiler-slice: ok (%s)\n' "${slices[*]}"
+if [[ "$check_only" == "1" ]]; then
+  printf 'verify-compiler-slice: ok (%s, check-only)\n' "${slices[*]}"
+else
+  printf 'verify-compiler-slice: ok (%s)\n' "${slices[*]}"
+fi

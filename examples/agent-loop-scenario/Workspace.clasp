@@ -3,6 +3,7 @@ module Workspace
 foreign workspacePathRaw : Str -> Str -> Result Str = "workspacePath"
 foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
 foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
 foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
 foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
 
@@ -14,6 +15,9 @@ workspaceReadText root relative = workspaceReadFileRaw root relative
 
 workspaceWriteText : Str -> Str -> Str -> Result Str
 workspaceWriteText root relative contents = workspaceWriteFileRaw root relative contents
+
+workspaceAppendText : Str -> Str -> Str -> Result Str
+workspaceAppendText root relative contents = workspaceAppendFileRaw root relative contents
 
 workspaceMkdirAll : Str -> Str -> Result Str
 workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative

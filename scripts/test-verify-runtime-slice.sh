@@ -15,9 +15,25 @@ trap cleanup EXIT
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-verify-runtime-slice.XXXXXX")"
 project_copy="$test_root/project"
-mkdir -p "$project_copy/scripts" "$project_copy/examples/agent-loop-scenario/scripts"
+mkdir -p "$project_copy/scripts" "$project_copy/examples/agent-loop-scenario/scripts" "$test_root/bin"
 
 cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
+
+cat > "$test_root/bin/fake-claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'fake-claspc\n'
+EOF
+chmod +x "$test_root/bin/fake-claspc"
+
+resolve_log="$test_root/resolve-claspc.log"
+cat > "$project_copy/scripts/resolve-claspc.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'root=%s CLASP_CLASPC=%s CLASPC_BIN=%s\n' "\${CLASP_PROJECT_ROOT:-}" "\${CLASP_CLASPC:-}" "\${CLASPC_BIN:-}" >> "$resolve_log"
+printf '%s\n' "$test_root/bin/fake-claspc"
+EOF
+chmod +x "$project_copy/scripts/resolve-claspc.sh"
 
 make_fake_harness() {
   local script_path="$1"
@@ -56,10 +72,24 @@ CLASP_PROJECT_ROOT="$project_copy" \
   grep -F 'verify-runtime-slice: ok (workflow)' >/dev/null
 
 grep -F 'scripts/test-monitored-workflow.sh timeout=7' "$workflow_log" >/dev/null
+grep -F "root=$project_copy CLASP_CLASPC= CLASPC_BIN=" "$resolve_log" >/dev/null
 if grep -F 'test-codex-loop-program.sh' "$workflow_log" >/dev/null; then
   printf 'workflow-only runtime slice should not run the Codex loop fixture\n' >&2
   exit 1
 fi
+
+stale_log="$test_root/stale-env.log"
+stale_project="$test_root/stale-project"
+mkdir -p "$stale_project"
+CLASP_PROJECT_ROOT="$stale_project" \
+  CLASP_CLASPC="$test_root/bin/stale-claspc" \
+  CLASPC_BIN="$test_root/bin/stale-claspc" \
+  CLASP_TEST_RUNTIME_SLICE_LOG="$stale_log" \
+  "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" workflow |
+  grep -F 'verify-runtime-slice: ok (workflow)' >/dev/null
+
+grep -F 'scripts/test-monitored-workflow.sh' "$stale_log" >/dev/null
+grep -F "root=$project_copy CLASP_CLASPC= CLASPC_BIN=" "$resolve_log" >/dev/null
 
 all_log="$test_root/all.log"
 CLASP_PROJECT_ROOT="$project_copy" \

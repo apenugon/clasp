@@ -332,6 +332,10 @@ function defaultAgentReadinessCommandPlan(options, tmpDir) {
       "bash",
       "examples/agent-loop-scenario/scripts/verify.sh",
     ], { env: baseEnv }),
+    commandRecord("native-control-substrate", "durable-native-control-plane", timeoutSeconds, [
+      "bash",
+      "scripts/test-swarm-native-managed-loop.sh",
+    ], { env: baseEnv }),
   ];
 }
 
@@ -358,6 +362,11 @@ function fixtureAgentReadinessCommandPlan(options) {
       "node",
       "-e",
       print("agent-loop-scenario-ok"),
+    ]),
+    commandRecord("native-control-substrate", "durable-native-control-plane", timeoutSeconds, [
+      "node",
+      "-e",
+      print("swarm-native-managed-loop-ok"),
     ]),
   ];
 }
@@ -391,6 +400,13 @@ const readinessSignalDefinitions = [
     benchmarkRelevance:
       "A Clasp program invokes Codex directly, writes durable artifacts/status/events, runs a verifier command, and returns a structured report.",
   },
+  {
+    name: "durableNativeControlPlane",
+    commandLabel: "native-control-substrate",
+    category: "durable-native-control-plane",
+    benchmarkRelevance:
+      "Ordinary Clasp code drives the native SQLite-backed objective/task DAG, leases, tool/verifier runs, artifacts, approvals, merge policy, and projected status.",
+  },
 ];
 
 const capabilitySignalDefinitions = [
@@ -402,10 +418,10 @@ const capabilitySignalDefinitions = [
   },
   {
     name: "durable_native_substrate",
-    commandLabels: ["ordinary-agent-loop-scenario"],
-    statusWhenPassed: "partial",
+    commandLabels: ["native-control-substrate"],
+    statusWhenPassed: "pass",
     coverage:
-      "The probe covers durable status, event, and artifact persistence; DAG edges, leases, approvals, and merge-policy state remain outside this bounded checkpoint.",
+      "The probe covers SQLite-backed objectives, task DAG edges, projected status, leases, tool/verifier runs, artifacts, approvals, and merge-policy state from ordinary Clasp code.",
   },
   {
     name: "clasp_native_control_api",
@@ -413,9 +429,10 @@ const capabilitySignalDefinitions = [
       "safe-workspace-operations",
       "safe-subprocess-verifier-execution",
       "ordinary-agent-loop-scenario",
+      "native-control-substrate",
     ],
     statusWhenPassed: "pass",
-    coverage: "Ordinary Clasp code reaches workspace and subprocess orchestration APIs without compiler swarm commands.",
+    coverage: "Ordinary Clasp code reaches workspace, subprocess, and native swarm orchestration APIs without compiler swarm commands.",
   },
   {
     name: "orchestration_viability",
@@ -424,10 +441,11 @@ const capabilitySignalDefinitions = [
       "safe-subprocess-verifier-execution",
       "structured-diagnostics-feedback",
       "ordinary-agent-loop-scenario",
+      "native-control-substrate",
     ],
     statusWhenPassed: "pass",
     coverage:
-      "The combined probe checks file access, process execution, diagnostics, and a realistic builder/verifier loop fixture.",
+      "The combined probe checks file access, process execution, diagnostics, a realistic builder/verifier loop fixture, and native control-plane state.",
   },
   {
     name: "ergonomics",
@@ -446,6 +464,7 @@ const capabilitySignalDefinitions = [
       "safe-subprocess-verifier-execution",
       "structured-diagnostics-feedback",
       "ordinary-agent-loop-scenario",
+      "native-control-substrate",
     ],
     statusWhenPassed: "pass",
     coverage:

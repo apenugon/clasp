@@ -3123,6 +3123,7 @@ fn interpret_runtime_binding(
         ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceAppendFile", 3) => unsafe { clasp_rt_workspace_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3207,6 +3208,9 @@ fn interpret_runtime_binding(
         },
         ("reconcileWatchedProcessJson", 1) => unsafe {
             clasp_rt_reconcile_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
+        },
+        ("cancelWatchedProcessJson", 1) => unsafe {
+            clasp_rt_cancel_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
         },
         ("awaitWatchedProcessJson", 2) => unsafe {
             clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
@@ -3353,6 +3357,7 @@ fn interpret_builtin_runtime_binding(
         ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceAppendFile", 3) => unsafe { clasp_rt_workspace_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3437,6 +3442,9 @@ fn interpret_builtin_runtime_binding(
         },
         ("reconcileWatchedProcessJson", 1) => unsafe {
             clasp_rt_reconcile_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
+        },
+        ("cancelWatchedProcessJson", 1) => unsafe {
+            clasp_rt_cancel_watched_process_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader
         },
         ("awaitWatchedProcessJson", 2) => unsafe {
             clasp_rt_await_watched_process_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader
@@ -3555,6 +3563,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "workspacePath"
             | "workspaceReadFile"
             | "workspaceWriteFile"
+            | "workspaceAppendFile"
             | "workspaceMkdirAll"
             | "workspaceListDir"
             | "swarmBootstrapJson"
@@ -3598,6 +3607,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "spawnCommandJson"
             | "watchCommandJson"
             | "reconcileWatchedProcessJson"
+            | "cancelWatchedProcessJson"
             | "awaitWatchedProcessJson"
             | "awaitWatchedProcessTimeoutJson"
             | "handoffCommandJson"
@@ -7564,16 +7574,46 @@ fn watched_process_status_json(
     stdout_path: &str,
     stderr_path: &str,
     heartbeat_path: &str,
+    command: &[String],
+    started_at_ms: i64,
+    timed_out: bool,
+    error: &str,
 ) -> String {
+    let updated_at_ms = runtime_time_unix_ms();
+    let ended_at_ms = if completed { updated_at_ms } else { 0 };
+    let duration_ms = if started_at_ms > 0 {
+        updated_at_ms.saturating_sub(started_at_ms)
+    } else {
+        0
+    };
+    let status = if timed_out {
+        "timeout"
+    } else if completed && exit_code == 0 {
+        "completed-pass"
+    } else if completed {
+        "completed-fail"
+    } else if running {
+        "running"
+    } else {
+        "stopped"
+    };
+
     serde_json::json!({
         "pid": pid as i64,
+        "status": status,
         "running": running,
         "completed": completed,
         "exitCode": exit_code,
+        "timedOut": timed_out,
+        "error": error,
+        "command": command,
         "stdoutPath": stdout_path,
         "stderrPath": stderr_path,
         "heartbeatPath": heartbeat_path,
-        "updatedAtMs": runtime_time_unix_ms(),
+        "startedAtMs": started_at_ms,
+        "endedAtMs": ended_at_ms,
+        "durationMs": duration_ms,
+        "updatedAtMs": updated_at_ms,
     })
     .to_string()
 }
@@ -7599,6 +7639,7 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
         return Err("missing_watch_command".to_owned());
     }
 
+    let started_at_ms = runtime_time_unix_ms();
     let stdout_file = create_truncated_output_file(stdout_path)?;
     let stderr_file = create_truncated_output_file(stderr_path)?;
     let resolved_program = resolve_process_program(&watched_command[0], cwd);
@@ -7624,6 +7665,10 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
                     stdout_path,
                     stderr_path,
                     heartbeat_path,
+                    watched_command,
+                    started_at_ms,
+                    false,
+                    "",
                 );
                 write_watched_process_heartbeat(heartbeat_path, &payload)?;
                 return Ok((exit_code, payload));
@@ -7637,6 +7682,10 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
                     stdout_path,
                     stderr_path,
                     heartbeat_path,
+                    watched_command,
+                    started_at_ms,
+                    false,
+                    "",
                 );
                 write_watched_process_heartbeat(heartbeat_path, &payload)?;
                 thread::sleep(Duration::from_millis(poll_ms));
@@ -7665,24 +7714,81 @@ json_escape() {
   printf '%s' "$value"
 }
 
+json_command_array() {
+  local first=true
+  local value
+  printf '['
+  for value in "$@"; do
+    if [ "$first" = true ]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '"%s"' "$(json_escape "$value")"
+  done
+  printf ']'
+}
+
 now_ms() {
   date +%s%3N 2>/dev/null || printf '0'
 }
+
+started_at_ms="$(now_ms)"
+command_json="$(json_command_array "$@")"
+cancel_path="${heartbeat_path}.cancel"
 
 write_heartbeat() {
   local running="$1"
   local completed="$2"
   local exit_code="$3"
+  local now
+  local ended_at_ms
+  local duration_ms
+  local status
+  local timed_out=false
+  local error=""
   local tmp_path="${heartbeat_path}.tmp.${BASHPID}"
-  printf '{"pid":%s,"running":%s,"completed":%s,"exitCode":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","updatedAtMs":%s}' \
+  now="$(now_ms)"
+  ended_at_ms=0
+  if [ "$completed" = true ]; then
+    ended_at_ms="$now"
+  fi
+  duration_ms=$((now - started_at_ms))
+  if [ "$duration_ms" -lt 0 ]; then
+    duration_ms=0
+  fi
+  if [ -f "$cancel_path" ]; then
+    timed_out=true
+    error="timeout"
+    status="timeout"
+    if [ "$completed" = true ]; then
+      exit_code=124
+    fi
+  elif [ "$completed" = true ] && [ "$exit_code" -eq 0 ]; then
+    status="completed-pass"
+  elif [ "$completed" = true ]; then
+    status="completed-fail"
+  elif [ "$running" = true ]; then
+    status="running"
+  else
+    status="stopped"
+  fi
+  printf '{"pid":%s,"status":"%s","running":%s,"completed":%s,"exitCode":%s,"timedOut":%s,"error":"%s","command":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","startedAtMs":%s,"endedAtMs":%s,"durationMs":%s,"updatedAtMs":%s}' \
     "$child_pid" \
+    "$status" \
     "$running" \
     "$completed" \
     "$exit_code" \
+    "$timed_out" \
+    "$error" \
+    "$command_json" \
     "$(json_escape "$stdout_path")" \
     "$(json_escape "$stderr_path")" \
     "$(json_escape "$heartbeat_path")" \
-    "$(now_ms)" >"$tmp_path" && mv "$tmp_path" "$heartbeat_path"
+    "$started_at_ms" \
+    "$ended_at_ms" \
+    "$duration_ms" \
+    "$now" >"$tmp_path" && mv "$tmp_path" "$heartbeat_path"
 }
 
 mkdir -p "$(dirname "$stdout_path")" "$(dirname "$stderr_path")" "$(dirname "$heartbeat_path")" || exit 125
@@ -7770,6 +7876,10 @@ fn spawn_watched_process_monitor_json(
         stdout_path,
         stderr_path,
         heartbeat_path,
+        watched_command,
+        runtime_time_unix_ms(),
+        false,
+        "",
     );
     write_watched_process_heartbeat(heartbeat_path, &fallback)?;
     Ok(fallback)
@@ -7827,6 +7937,94 @@ fn watched_process_exists(pid: u32) -> bool {
     state != "Z" && state != "X"
 }
 
+fn terminate_watched_process_pid(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    unsafe {
+        let pid_value = pid as c_int;
+        let _ = kill(pid_value, SIGTERM);
+        thread::sleep(Duration::from_millis(50));
+        let _ = kill(pid_value, SIGKILL);
+    }
+}
+
+fn mark_watched_process_timeout(payload: &mut serde_json::Value) {
+    let now = runtime_time_unix_ms();
+    let started_at_ms = payload
+        .get("startedAtMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(now);
+    if payload.get("command").is_none() {
+        payload["command"] = serde_json::Value::Array(Vec::new());
+    }
+    payload["status"] = serde_json::Value::String("timeout".to_owned());
+    payload["running"] = serde_json::Value::Bool(false);
+    payload["completed"] = serde_json::Value::Bool(true);
+    payload["exitCode"] = serde_json::Value::Number(serde_json::Number::from(124));
+    payload["timedOut"] = serde_json::Value::Bool(true);
+    payload["error"] = serde_json::Value::String("timeout".to_owned());
+    payload["startedAtMs"] = serde_json::Value::Number(serde_json::Number::from(started_at_ms));
+    payload["endedAtMs"] = serde_json::Value::Number(serde_json::Number::from(now));
+    payload["durationMs"] =
+        serde_json::Value::Number(serde_json::Number::from(now.saturating_sub(started_at_ms)));
+    payload["updatedAtMs"] = serde_json::Value::Number(serde_json::Number::from(now));
+}
+
+fn cancel_watched_process_json(heartbeat_path: &str) -> Result<String, String> {
+    let (_, mut payload) = read_watched_process_payload(heartbeat_path)?;
+    let running = payload
+        .get("running")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let completed = payload
+        .get("completed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if completed || !running {
+        return Ok(payload.to_string());
+    }
+
+    let cancel_path = format!("{heartbeat_path}.cancel");
+    write_file_atomic(&cancel_path, b"timeout")?;
+
+    let pid = payload
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+        .max(0) as u32;
+    terminate_watched_process_pid(pid);
+
+    for _ in 0..40 {
+        thread::sleep(Duration::from_millis(25));
+        if let Ok((_, mut latest)) = read_watched_process_payload(heartbeat_path) {
+            let latest_completed = latest
+                .get("completed")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let latest_timed_out = latest
+                .get("timedOut")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            if latest_completed && latest_timed_out {
+                return Ok(latest.to_string());
+            }
+            if latest_completed {
+                mark_watched_process_timeout(&mut latest);
+                let updated = latest.to_string();
+                write_watched_process_heartbeat(heartbeat_path, &updated)?;
+                return Ok(updated);
+            }
+        }
+    }
+
+    mark_watched_process_timeout(&mut payload);
+    let updated = payload.to_string();
+    write_watched_process_heartbeat(heartbeat_path, &updated)?;
+    Ok(updated)
+}
+
 fn reconcile_watched_process_json(heartbeat_path: &str) -> Result<String, String> {
     let heartbeat_text = fs::read_to_string(heartbeat_path).map_err(|err| err.to_string())?;
     let mut payload: serde_json::Value =
@@ -7853,10 +8051,25 @@ fn reconcile_watched_process_json(heartbeat_path: &str) -> Result<String, String
         return Ok(payload.to_string());
     }
 
+    let now = runtime_time_unix_ms();
+    let started_at_ms = payload
+        .get("startedAtMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(now);
+    if payload.get("command").is_none() {
+        payload["command"] = serde_json::Value::Array(Vec::new());
+    }
     payload["running"] = serde_json::Value::Bool(false);
     payload["completed"] = serde_json::Value::Bool(true);
     payload["exitCode"] = serde_json::Value::Number(serde_json::Number::from(-1));
-    payload["updatedAtMs"] = serde_json::Value::Number(serde_json::Number::from(runtime_time_unix_ms()));
+    payload["status"] = serde_json::Value::String("completed-fail".to_owned());
+    payload["timedOut"] = serde_json::Value::Bool(false);
+    payload["error"] = serde_json::Value::String("stale_process".to_owned());
+    payload["startedAtMs"] = serde_json::Value::Number(serde_json::Number::from(started_at_ms));
+    payload["endedAtMs"] = serde_json::Value::Number(serde_json::Number::from(now));
+    payload["durationMs"] =
+        serde_json::Value::Number(serde_json::Number::from(now.saturating_sub(started_at_ms)));
+    payload["updatedAtMs"] = serde_json::Value::Number(serde_json::Number::from(now));
 
     let updated = payload.to_string();
     write_watched_process_heartbeat(heartbeat_path, &updated)?;
@@ -10060,6 +10273,47 @@ pub unsafe extern "C" fn clasp_rt_workspace_write_file(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_append_file(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+    contents: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let path = match prepare_workspace_write_path(&root_string, &relative_string) {
+        Ok(path) => path,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let mut file = match OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(file) => file,
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to open workspace file `{}` for append: {err}",
+                path.display()
+            );
+            return clasp_rt_result_err_string(build_runtime_string(message.as_bytes()));
+        }
+    };
+
+    match file
+        .write_all(string_bytes(contents))
+        .and_then(|_| file.sync_all())
+    {
+        Ok(_) => {
+            let path_text = display_path(&path);
+            clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes()))
+        }
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to append workspace file `{}`: {err}",
+                path.display()
+            );
+            clasp_rt_result_err_string(build_runtime_string(message.as_bytes()))
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_workspace_mkdir_all(
     root: *mut ClaspRtString,
     relative: *mut ClaspRtString,
@@ -11310,6 +11564,17 @@ pub unsafe extern "C" fn clasp_rt_reconcile_watched_process_json(
 ) -> *mut ClaspRtResultString {
     let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
     match reconcile_watched_process_json(&heartbeat_path_string) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_cancel_watched_process_json(
+    heartbeat_path: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    match cancel_watched_process_json(&heartbeat_path_string) {
         Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
         Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
     }
@@ -12630,6 +12895,79 @@ mod tests {
     }
 
     #[test]
+    fn cancel_watched_process_json_marks_timeout_and_stops_process() {
+        unsafe {
+            let temp_root = std::env::temp_dir().join(format!(
+                "clasp-cancel-watch-timeout-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&temp_root).expect("expected cancel temp root");
+            let script_path = temp_root.join("loop.sh");
+            let stdout_path = temp_root.join("stdout.log");
+            let stderr_path = temp_root.join("stderr.log");
+            let heartbeat_path = temp_root.join("heartbeat.json");
+            std::fs::write(&script_path, b"#!/bin/sh\nprintf started\nwhile :; do sleep 1; done\n")
+                .expect("expected cancel test script write");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected cancel test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions).expect("expected cancel test script permissions");
+
+            let cwd = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let spawned = clasp_rt_spawn_command_json(cwd, stdout_rt, stderr_rt, heartbeat_rt, poll_ms, command);
+            assert!((*spawned).is_ok);
+            let spawned_payload = String::from_utf8_lossy(string_bytes((*spawned).value)).into_owned();
+            let spawned_json: serde_json::Value =
+                serde_json::from_str(&spawned_payload).expect("expected valid spawned heartbeat");
+            let child_pid = spawned_json["pid"].as_i64().expect("expected child pid") as u32;
+            assert!(watched_process_exists(child_pid), "expected watched process to be alive before cancel");
+
+            let cancelled = clasp_rt_cancel_watched_process_json(heartbeat_rt);
+            assert!((*cancelled).is_ok);
+            let cancelled_payload = String::from_utf8_lossy(string_bytes((*cancelled).value)).into_owned();
+            let cancelled_json: serde_json::Value =
+                serde_json::from_str(&cancelled_payload).expect("expected valid cancelled heartbeat");
+            assert_eq!(cancelled_json["status"].as_str(), Some("timeout"));
+            assert_eq!(cancelled_json["completed"].as_bool(), Some(true));
+            assert_eq!(cancelled_json["running"].as_bool(), Some(false));
+            assert_eq!(cancelled_json["exitCode"].as_i64(), Some(124));
+            assert_eq!(cancelled_json["timedOut"].as_bool(), Some(true));
+            assert_eq!(cancelled_json["error"].as_str(), Some("timeout"));
+            assert_eq!(cancelled_json["command"][0].as_str(), Some(script_path.to_string_lossy().as_ref()));
+            assert!(cancelled_json["startedAtMs"].as_i64().unwrap_or_default() > 0);
+            assert!(
+                cancelled_json["endedAtMs"].as_i64().unwrap_or_default()
+                    >= cancelled_json["startedAtMs"].as_i64().unwrap_or_default()
+            );
+
+            thread::sleep(Duration::from_millis(100));
+            assert!(
+                !watched_process_exists(child_pid),
+                "expected watched process to stop after cancel"
+            );
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), spawned as *mut ClaspRtHeader);
+            release_header(null_mut(), cancelled as *mut ClaspRtHeader);
+            let _ = std::fs::remove_dir_all(temp_root);
+        }
+    }
+
+    #[test]
     fn handoff_command_json_waits_for_successor_ready_marker() {
         unsafe {
             let temp_root = std::env::temp_dir().join(format!(
@@ -13068,6 +13406,9 @@ mod tests {
             let root = build_runtime_string(root_text.as_bytes());
             let nested_path = build_runtime_string(b"nested/result.txt");
             let nested_dir = build_runtime_string(b"nested");
+            let append_path = build_runtime_string(b"logs/events.jsonl");
+            let first_event = build_runtime_string(b"event-one\n");
+            let second_event = build_runtime_string(b"event-two\n");
             let contents = build_runtime_string(b"workspace-text");
 
             let write_result = clasp_rt_workspace_write_file(root, nested_path, contents);
@@ -13080,6 +13421,30 @@ mod tests {
             let read_result = clasp_rt_workspace_read_file(root, nested_path);
             assert!((*read_result).is_ok, "expected workspace read to succeed");
             assert_eq!(result_string_text(read_result), "workspace-text");
+
+            let first_append = clasp_rt_workspace_append_file(root, append_path, first_event);
+            assert!((*first_append).is_ok, "expected first workspace append to succeed");
+            let second_append = clasp_rt_workspace_append_file(root, append_path, second_event);
+            assert!((*second_append).is_ok, "expected second workspace append to succeed");
+            let appended_read = clasp_rt_workspace_read_file(root, append_path);
+            assert!((*appended_read).is_ok, "expected appended log to be readable");
+            assert_eq!(result_string_text(appended_read), "event-one\nevent-two\n");
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "workspaceAppendText".to_owned(),
+                runtime_name: "workspaceAppendFile".to_owned(),
+                binding_type: "Str -> Str -> Str -> Result Str".to_owned(),
+            };
+            let third_event = build_runtime_string(b"event-three\n");
+            let binding_result = interpret_runtime_binding(
+                &binding,
+                &[root as *mut ClaspRtHeader, append_path as *mut ClaspRtHeader, third_event as *mut ClaspRtHeader],
+            );
+            assert!(!binding_result.is_null(), "expected workspace append runtime binding");
+            assert_eq!((*binding_result).layout_id, CLASP_RT_LAYOUT_RESULT_STRING);
+            assert!((*(binding_result as *mut ClaspRtResultString)).is_ok);
+            let appended_again = clasp_rt_workspace_read_file(root, append_path);
+            assert_eq!(result_string_text(appended_again), "event-one\nevent-two\nevent-three\n");
 
             let list_result = clasp_rt_workspace_list_dir(root, nested_dir);
             assert_eq!(variant_tag_text(list_result), Some("Ok".to_owned()));
@@ -13110,9 +13475,18 @@ mod tests {
             release_header(null_mut(), root as *mut ClaspRtHeader);
             release_header(null_mut(), nested_path as *mut ClaspRtHeader);
             release_header(null_mut(), nested_dir as *mut ClaspRtHeader);
+            release_header(null_mut(), append_path as *mut ClaspRtHeader);
+            release_header(null_mut(), first_event as *mut ClaspRtHeader);
+            release_header(null_mut(), second_event as *mut ClaspRtHeader);
+            release_header(null_mut(), third_event as *mut ClaspRtHeader);
             release_header(null_mut(), contents as *mut ClaspRtHeader);
             release_header(null_mut(), write_result as *mut ClaspRtHeader);
             release_header(null_mut(), read_result as *mut ClaspRtHeader);
+            release_header(null_mut(), first_append as *mut ClaspRtHeader);
+            release_header(null_mut(), second_append as *mut ClaspRtHeader);
+            release_header(null_mut(), appended_read as *mut ClaspRtHeader);
+            release_header(null_mut(), binding_result);
+            release_header(null_mut(), appended_again as *mut ClaspRtHeader);
             release_header(null_mut(), list_result);
             release_header(null_mut(), parent_escape as *mut ClaspRtHeader);
             release_header(null_mut(), escape_result as *mut ClaspRtHeader);

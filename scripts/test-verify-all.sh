@@ -113,7 +113,7 @@ grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-goal-manager-ch
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'CLASP_VERIFY_SEQUENTIAL_COMMANDS' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F '[claspc-cache] run-binary fast hit path=' "$test_root/scripts/test-source-run-cache.sh" >/dev/null
-grep -F 'resolved_claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'export CLASP_CLASPC="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'export CLASPC_BIN="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -140,10 +140,12 @@ grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'usage: scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
+grep -F -- '--check-only' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'CLASP_COMPILER_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'parser checker lower emitter' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'examples/compiler-checker.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'examples/compiler-lower.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
+grep -F 'verify-compiler-slice: ok (checker, check-only)' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'usage: scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_RUNTIME_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'process workflow codex-loop agent-loop workspace managed-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
@@ -163,6 +165,7 @@ grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affect
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/verify-compiler-slice.sh --check-only' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
@@ -519,6 +522,8 @@ grep -F 'verify-all: falling back to sandbox verification because Nix is unavail
 
 rm -f "$fallback_capture" "$stderr_capture"
 verify_fast_resolve_count="$test_root/verify-fast-resolve-count.txt"
+verify_fast_claspc_capture="$test_root/verify-fast-claspc.txt"
+verify_fast_claspc_bin_capture="$test_root/verify-fast-claspc-bin.txt"
 cat > "$test_root/scripts/resolve-claspc.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -532,16 +537,21 @@ printf '%s' "\$count" >"\$count_path"
 printf '%s\n' "$test_root/bin/fake-claspc"
 EOF
 chmod +x "$test_root/scripts/resolve-claspc.sh"
+verify_fast_fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_CLASPC" > '"$verify_fast_claspc_capture"$'\nprintf %s "$CLASPC_BIN" > '"$verify_fast_claspc_bin_capture"
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
+CLASP_CLASPC="$test_root/bin/stale-claspc" \
+CLASPC_BIN="$test_root/bin/stale-claspc" \
 CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
-CLASP_VERIFY_FALLBACK_COMMANDS="$fallback_commands" \
+CLASP_VERIFY_FALLBACK_COMMANDS="$verify_fast_fallback_commands" \
 CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-fast.sh" >/dev/null 2>"$stderr_capture"
 
 [[ "$(< "$fallback_capture")" == "fallback-ok" ]]
 [[ "$(< "$verify_fast_resolve_count")" == "1" ]]
+[[ "$(< "$verify_fast_claspc_capture")" == "$test_root/bin/fake-claspc" ]]
+[[ "$(< "$verify_fast_claspc_bin_capture")" == "$test_root/bin/fake-claspc" ]]
 grep -F 'verify-fast: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
 
 rm -f "$fallback_capture" "$stderr_capture"
