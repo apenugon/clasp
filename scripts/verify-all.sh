@@ -39,8 +39,10 @@ bash scripts/test-selfhost.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-native-claspc.sh
+bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-native-managed-loop.sh
+bash scripts/test-swarm-native-feedback-loop.sh
 bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
 bash scripts/test-monitored-run-log.sh
@@ -49,6 +51,8 @@ bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
+bash scripts/test-js-emitter-determinism.sh
+bash examples/browser-counter/scripts/verify.sh
 bash scripts/test-host-runtime.sh
 bash scripts/test-safe-workspace.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
@@ -56,9 +60,11 @@ bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh
+bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
+bash scripts/test-js-emitter-determinism.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash examples/lead-app-ts/scripts/verify.sh
@@ -81,6 +87,8 @@ bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-record-update-parity.sh
+bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-task-manifest.sh

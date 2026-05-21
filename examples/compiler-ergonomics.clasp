@@ -1,0 +1,110 @@
+module Main
+
+record Box a = {
+  value : a
+}
+
+record AgentTask = {
+  taskId : Str,
+  status : Str,
+  priority : Int,
+  blockers : [Str]
+}
+
+record AgentState = {
+  selected : AgentTask,
+  queue : [AgentTask],
+  statuses : Dict Str Str
+}
+
+record ErgonomicsSnapshot = {
+  selectedId : Str,
+  selectedStatus : Str,
+  statusLookup : Str,
+  queueCount : Int,
+  blockerCount : Int,
+  boxValue : Str,
+  summary : Str
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyTasks : [AgentTask]
+emptyTasks = []
+
+emptyBoxes : [Box Str]
+emptyBoxes = []
+
+emptyStatuses : Dict Str Str
+emptyStatuses = dictEmpty
+
+emptyTask : AgentTask
+emptyTask =
+  AgentTask {
+    taskId = "",
+    status = "missing",
+    priority = 0,
+    blockers = emptyTexts
+  }
+
+emptyState : AgentState
+emptyState =
+  AgentState {
+    selected = emptyTask,
+    queue = emptyTasks,
+    statuses = emptyStatuses
+  }
+
+statusBox : Str -> Box Str
+statusBox value = Box { value = value }
+
+readBox : Box Str -> Str
+readBox box = box.value
+
+lookupStatus : Str -> Dict Str Str -> Str
+lookupStatus taskId statuses = match dictGet taskId statuses {
+  Ok value -> value,
+  Err message -> message
+}
+
+selectTask : AgentState -> AgentTask -> AgentState
+selectTask state task = {
+  let running =
+    with task {
+      status = "running",
+      blockers = emptyTexts
+    };
+  with state {
+    selected = running,
+    queue = append state.queue [running],
+    statuses = dictSet running.taskId running.status state.statuses
+  }
+}
+
+seedTask : AgentTask
+seedTask =
+  AgentTask {
+    taskId = "repair",
+    status = "queued",
+    priority = 7,
+    blockers = ["needs-review"]
+  }
+
+snapshot : ErgonomicsSnapshot
+snapshot = {
+  let state = selectTask emptyState seedTask;
+  let { taskId, status, blockers } = state.selected in
+  ErgonomicsSnapshot {
+    selectedId = taskId,
+    selectedStatus = status,
+    statusLookup = lookupStatus taskId state.statuses,
+    queueCount = length state.queue,
+    blockerCount = length blockers,
+    boxValue = readBox (statusBox status),
+    summary = textJoin ":" [taskId, status, lookupStatus taskId state.statuses, if length blockers == 0 then "unblocked" else "blocked"]
+  }
+}
+
+main : Str
+main = encode snapshot

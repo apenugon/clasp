@@ -41,6 +41,41 @@ build_local_debug_bin() {
     return 0
   fi
 
+  local store_cargo=""
+  local store_rustc=""
+  local store_cc=""
+  for candidate in /nix/store/*-cargo-*/bin/cargo; do
+    if [[ -x "$candidate" ]]; then
+      store_cargo="$candidate"
+      break
+    fi
+  done
+  for candidate in /nix/store/*-rustc-*/bin/rustc; do
+    if [[ -x "$candidate" ]]; then
+      store_rustc="$candidate"
+      break
+    fi
+  done
+  for candidate in /nix/store/*-gcc-wrapper-*/bin/cc; do
+    if [[ -x "$candidate" ]]; then
+      store_cc="$candidate"
+      break
+    fi
+  done
+  if [[ -n "$store_cargo" && -n "$store_rustc" ]]; then
+    (
+      cd "$project_root"
+      export CARGO_TARGET_DIR="$project_root/runtime/target"
+      if [[ -n "$store_cc" ]]; then
+        export PATH="$(dirname "$store_cargo"):$(dirname "$store_rustc"):$(dirname "$store_cc"):$PATH"
+      else
+        export PATH="$(dirname "$store_cargo"):$(dirname "$store_rustc"):$PATH"
+      fi
+      cargo build --quiet --manifest-path runtime/Cargo.toml --bin claspc
+    ) >&2
+    return 0
+  fi
+
   if [[ "$nix_reentry" == "1" ]]; then
     return 1
   fi

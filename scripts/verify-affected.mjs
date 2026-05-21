@@ -248,6 +248,7 @@ const COMMANDS = {
   verifyFast: "bash scripts/verify-fast.sh",
   selfhost: "bash scripts/test-selfhost.sh",
   sourceVerify: "bash src/scripts/verify.sh",
+  nativeDiagnostics: "bash scripts/test-native-claspc-diagnostics.sh",
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
@@ -265,12 +266,15 @@ const COMMANDS = {
   runtimeSliceCodexLoop: "bash scripts/verify-runtime-slice.sh codex-loop",
   runtimeSliceWorkspace: "bash scripts/verify-runtime-slice.sh workspace",
   runtimeSliceManagedLoop: "bash scripts/verify-runtime-slice.sh managed-loop",
+  runtimeSliceSwarmFeedbackLoop: "bash scripts/verify-runtime-slice.sh swarm-feedback-loop",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
   feedbackResume: "bash scripts/test-feedback-loop-resume.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
   compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
+  jsEmitterDeterminism: "bash scripts/test-js-emitter-determinism.sh",
+  recordUpdateParity: "bash scripts/test-record-update-parity.sh",
   runtimeSliceRegression: "bash scripts/test-verify-runtime-slice.sh",
   promotedSourceExportCacheRegression: "bash scripts/test-promoted-source-export-cache.sh",
   promotedSourceExportCacheNodeCheck: "node --check scripts/generate-promoted-source-export-cache.mjs",
@@ -409,6 +413,10 @@ function isPromotedSourceExportCacheFile(file) {
     file === "src/stage1.goal-manager.native.image.json" ||
     file === "src/stage1.task-workspace-runtime-harness.native.image.json"
   );
+}
+
+function isAgentFeedbackJsonFile(file) {
+  return /^agents\/feedback\/[^/]+\.json$/.test(file);
 }
 
 function contextArtifactCandidatesForFile(file) {
@@ -709,6 +717,8 @@ function compilerSliceForFile(file) {
       return "lower";
     case "examples/compiler-emitter.clasp":
       return "emitter";
+    case "examples/compiler-ergonomics.clasp":
+      return "ergonomics";
     case "src/Compiler/Checker.clasp":
       return "checker";
     case "src/Compiler/Lower.clasp":
@@ -754,6 +764,8 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "scripts/verify-compiler-slice.sh" || file === "scripts/test-verify-compiler-slice.sh";
     const isRuntimeSliceVerificationScript =
       file === "scripts/verify-runtime-slice.sh" || file === "scripts/test-verify-runtime-slice.sh";
+    const isJsEmitterDeterminismPath =
+      file === "src/Compiler/Emit/JavaScript.clasp" || file === "scripts/test-js-emitter-determinism.sh";
     const compilerSlice = compilerSliceForFile(file);
     const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
     const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
@@ -777,10 +789,35 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
-    const exampleVerifyCommand = isClaspSourceFile(file) ? exampleVerifyCommandForFile(file) : null;
+    if (isJsEmitterDeterminismPath) {
+      matched = true;
+      reason(
+        file,
+        "js-emitter-determinism",
+        "JavaScript emitter determinism paths use a focused stable snapshot and Dict projection guard",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "JavaScript emitter determinism shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "js-emitter-determinism",
+        COMMANDS.jsEmitterDeterminism,
+        "JavaScript emitter deterministic snapshot guard",
+        file,
+      );
+    }
+
+    const exampleVerifyCommand = exampleVerifyCommandForFile(file);
     if (exampleVerifyCommand) {
       matched = true;
-      reason(file, "clasp-app-flow", "Clasp example app source uses its scenario verifier for source check, compile, and app-flow behavior");
+      reason(file, "clasp-app-flow", "Clasp example app file uses its scenario verifier for source check, compile, and app-flow behavior");
       addSelected(selectedByCommand, `example-app:${exampleVerifyCommand}`, exampleVerifyCommand, "Clasp app-flow path", file);
     }
 
@@ -811,13 +848,52 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "runtime path", file);
     }
 
+    if (file === "scripts/test-native-claspc-diagnostics.sh") {
+      matched = true;
+      reason(file, "native-diagnostics-harness", "native diagnostics harness uses shell syntax plus focused compiler diagnostics coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "native diagnostics shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "native-diagnostics",
+        COMMANDS.nativeDiagnostics,
+        "native diagnostics harness",
+        file,
+      );
+    }
+
+    if (file === "scripts/test-record-update-parity.sh") {
+      matched = true;
+      reason(file, "record-update-parity-harness", "record update parity harness uses shell syntax plus focused frontend/native/runtime coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "record update parity shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "record-update-parity",
+        COMMANDS.recordUpdateParity,
+        "record update parity harness",
+        file,
+      );
+    }
+
     if (file.startsWith("examples/swarm-native/")) {
       matched = true;
-      reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, and managed-loop coverage");
+      reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
+      addSelected(selectedByCommand, "runtime-slice:swarm-feedback-loop", COMMANDS.runtimeSliceSwarmFeedbackLoop, "swarm native path", file);
     }
 
     if (plannerReportDecodeFiles.has(file)) {
@@ -949,6 +1025,18 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "promoted-source-export-cache-regression",
         COMMANDS.promotedSourceExportCacheRegression,
         "promoted source-export cache regression",
+        file,
+      );
+    }
+
+    if (isAgentFeedbackJsonFile(file)) {
+      matched = true;
+      reason(file, "agent-feedback", "agent feedback artifact uses focused JSON parse coverage");
+      addSelected(
+        selectedByCommand,
+        `agent-feedback-json:${file}`,
+        `node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync(process.argv[1],"utf8"));' ${shellQuote(file)}`,
+        "agent feedback JSON parse",
         file,
       );
     }
@@ -1125,6 +1213,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "managed loop harness", file);
+    }
+
+    if (file === "scripts/test-swarm-native-feedback-loop.sh") {
+      matched = true;
+      reason(file, "swarm-feedback-loop-harness", "FeedbackLoop harness uses shell syntax plus focused ordinary-program native swarm coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm feedback-loop shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "runtime-slice:swarm-feedback-loop", COMMANDS.runtimeSliceSwarmFeedbackLoop, "swarm feedback-loop harness", file);
     }
 
     if (isRuntimeSliceVerificationScript) {

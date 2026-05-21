@@ -15,14 +15,16 @@ trap cleanup EXIT
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/verify-affected.XXXXXX")"
 project_copy="$test_root/project"
-mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler" \
+mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler/Emit" \
   "$project_copy/runtime" "$project_copy/examples/swarm-native" "$project_copy/examples/feedback-loop" \
   "$project_copy/examples/safe-workspace" \
   "$project_copy/examples/safe-subprocess" \
   "$project_copy/examples/agent-loop-scenario/scripts" \
+  "$project_copy/examples/agent-metadata/scripts" \
   "$project_copy/examples/agent-task-scenario/scripts" \
   "$project_copy/examples/lead-app/Shared" "$project_copy/examples/lead-app/scripts" \
   "$project_copy/examples/lead-app/benchmark-prep" \
+  "$project_copy/agents/feedback" \
   "$project_copy/benchmarks/checkpoints" \
   "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared" \
   "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts" \
@@ -34,10 +36,13 @@ cp "$project_root/scripts/benchmark-checkpoint.mjs" "$project_copy/scripts/bench
 cp "$project_root/scripts/test-benchmark-checkpoint.sh" "$project_copy/scripts/test-benchmark-checkpoint.sh"
 cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$project_copy/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$project_copy/scripts/test-promoted-source-export-cache.sh"
+cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$project_copy/scripts/test-native-claspc-diagnostics.sh"
+cp "$project_root/scripts/test-record-update-parity.sh" "$project_copy/scripts/test-record-update-parity.sh"
 cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$project_copy/scripts/test-verify-runtime-slice.sh"
+cp "$project_root/scripts/test-js-emitter-determinism.sh" "$project_copy/scripts/test-js-emitter-determinism.sh"
 touch "$project_copy/examples/safe-workspace/Main.clasp"
 touch "$project_copy/examples/safe-workspace/Workspace.clasp"
 touch "$project_copy/examples/safe-subprocess/Main.clasp"
@@ -47,12 +52,16 @@ touch "$project_copy/examples/agent-loop-scenario/AgentRuntime.clasp"
 touch "$project_copy/examples/agent-loop-scenario/Workspace.clasp"
 touch "$project_copy/examples/agent-loop-scenario/Process.clasp"
 touch "$project_copy/examples/agent-loop-scenario/scripts/verify.sh"
+touch "$project_copy/examples/agent-metadata/Main.clasp"
+touch "$project_copy/examples/agent-metadata/scripts/verify.sh"
 touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
 touch "$project_copy/examples/lead-app/scripts/verify.sh"
 touch "$project_copy/examples/agent-task-scenario/Main.clasp"
 touch "$project_copy/examples/agent-task-scenario/scripts/verify.sh"
+touch "$project_copy/scripts/test-swarm-native-feedback-loop.sh"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"
+printf '{"taskId":"test","summary":"ok"}\n' > "$project_copy/agents/feedback/test-feedback.json"
 printf '{"schemaVersion":1,"kind":"clasp-baseline-bottleneck-checkpoint","finalStatus":"ok"}\n' \
   > "$project_copy/benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json"
 cat > "$project_copy/benchmarks/tasks/clasp-lead-segment/task.json" <<'JSON'
@@ -193,6 +202,7 @@ switch (scenario) {
     assert(hasCommand("bash scripts/verify-runtime-slice.sh workflow"), "feedback-loop route should run workflow runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "feedback-loop route should run ordinary Codex runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "swarm route should run managed-loop runtime slice coverage");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "swarm route should run FeedbackLoop runtime slice coverage");
     assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop route should run resume coverage");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
@@ -211,6 +221,20 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
     break;
+  case "native-diagnostics-script":
+    assert(report.changedFiles.includes("scripts/test-native-claspc-diagnostics.sh"), "native diagnostics harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-native-claspc-diagnostics.sh'"), "native diagnostics harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-native-claspc-diagnostics.sh"), "native diagnostics harness should run focused diagnostics coverage");
+    assert(report.usedVerifyFastFallback === false, "known native diagnostics harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-native-claspc-diagnostics.sh"), "fake native diagnostics command should execute");
+    break;
+  case "record-update-parity-script":
+    assert(report.changedFiles.includes("scripts/test-record-update-parity.sh"), "record update parity harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-record-update-parity.sh'"), "record update parity harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-record-update-parity.sh"), "record update parity harness should run focused parity coverage");
+    assert(report.usedVerifyFastFallback === false, "known record update parity harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-record-update-parity.sh"), "fake record update parity command should execute");
+    break;
   case "compiler-slice-script":
     assert(report.changedFiles.includes("scripts/verify-compiler-slice.sh"), "compiler slice verifier should be present");
     assert(report.changedFiles.includes("scripts/test-verify-compiler-slice.sh"), "compiler slice smoke test should be present");
@@ -220,6 +244,17 @@ switch (scenario) {
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-verify-compiler-slice.sh").length === 1, "compiler slice smoke should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known compiler slice scripts should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-compiler-slice.sh"), "fake compiler slice smoke command should execute");
+    break;
+  case "js-emitter-determinism":
+    assert(report.changedFiles.includes("src/Compiler/Emit/JavaScript.clasp"), "JavaScript emitter source should be present");
+    assert(report.changedFiles.includes("scripts/test-js-emitter-determinism.sh"), "JavaScript emitter determinism guard should be present");
+    assert(hasCommand("bash scripts/test-selfhost.sh"), "JavaScript emitter source route should run selfhost coverage");
+    assert(hasCommand("bash src/scripts/verify.sh"), "JavaScript emitter source route should run hosted source verification");
+    assert(hasCommand("bash scripts/verify-compiler-slice.sh --check-only emitter"), "JavaScript emitter source route should run focused emitter check");
+    assert(hasCommand("bash -n 'scripts/test-js-emitter-determinism.sh'"), "JavaScript emitter determinism guard should run shell syntax check");
+    assert(hasCommand("bash scripts/test-js-emitter-determinism.sh"), "JavaScript emitter source route should run deterministic snapshot guard");
+    assert(report.usedVerifyFastFallback === false, "known JavaScript emitter determinism paths should not use verify-fast fallback");
+    assert(logHas("scripts/test-js-emitter-determinism.sh"), "fake JavaScript emitter determinism guard should execute");
     break;
   case "promoted-source-export-cache":
     assert(report.changedFiles.includes("scripts/generate-promoted-source-export-cache.mjs"), "promoted source export generator should be present");
@@ -244,14 +279,31 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known runtime slice scripts should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-runtime-slice.sh"), "fake runtime slice smoke command should execute");
     break;
+  case "swarm-feedback-loop-script":
+    assert(report.changedFiles.includes("scripts/test-swarm-native-feedback-loop.sh"), "swarm feedback-loop script should be present");
+    assert(hasCommand("bash -n 'scripts/test-swarm-native-feedback-loop.sh'"), "swarm feedback-loop script should run shell syntax check");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "swarm feedback-loop script should run focused runtime slice");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh swarm-feedback-loop").length === 1, "swarm feedback-loop slice should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known swarm feedback-loop script should not use verify-fast fallback");
+    assert(logHas("scripts/test-swarm-native-feedback-loop.sh"), "fake swarm feedback-loop shell syntax should execute");
+    assert(logHas("scripts/verify-runtime-slice.sh swarm-feedback-loop"), "fake swarm feedback-loop runtime slice should execute");
+    break;
   case "compiler-slice-fixture":
     assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");
     assert(report.changedFiles.includes("examples/compiler-lower.clasp"), "compiler lower fixture should be present");
+    assert(report.changedFiles.includes("examples/compiler-ergonomics.clasp"), "compiler ergonomics fixture should be present");
     assert(hasCommand("bash scripts/verify-compiler-slice.sh checker"), "checker fixture should run focused compiler slice verifier");
     assert(hasCommand("bash scripts/verify-compiler-slice.sh lower"), "lower fixture should run focused compiler slice verifier");
+    assert(hasCommand("bash scripts/verify-compiler-slice.sh ergonomics"), "ergonomics fixture should run focused compiler slice verifier");
     assert(report.usedVerifyFastFallback === false, "known compiler fixture should not use verify-fast fallback");
     assert(logHas("scripts/verify-compiler-slice.sh checker"), "fake compiler slice verifier command should execute");
     assert(logHas("scripts/verify-compiler-slice.sh lower"), "fake lower slice verifier command should execute");
+    assert(logHas("scripts/verify-compiler-slice.sh ergonomics"), "fake ergonomics slice verifier command should execute");
+    break;
+  case "agent-feedback":
+    assert(report.changedFiles.includes("agents/feedback/test-feedback.json"), "agent feedback artifact should be present");
+    assert(hasCommand("node -e 'const fs=require(\"node:fs\"); JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));' 'agents/feedback/test-feedback.json'"), "agent feedback route should parse JSON");
+    assert(report.usedVerifyFastFallback === false, "known agent feedback artifact should not use verify-fast fallback");
     break;
   case "agent-task-scenario":
     assert(report.changedFiles.includes("examples/agent-task-scenario/Main.clasp"), "agent task scenario source should be present");
@@ -261,6 +313,15 @@ switch (scenario) {
     assert(report.selectedCommands.filter((command) => command.command === "bash examples/agent-task-scenario/scripts/verify.sh").length === 1, "agent task scenario verifier should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known agent task scenario inputs should not use verify-fast fallback");
     assert(logHas("examples/agent-task-scenario/scripts/verify.sh"), "fake agent task scenario verifier command should execute");
+    break;
+  case "agent-metadata":
+    assert(report.changedFiles.includes("examples/agent-metadata/Main.clasp"), "agent metadata source should be present");
+    assert(report.changedFiles.includes("examples/agent-metadata/scripts/verify.sh"), "agent metadata verifier should be present");
+    assert(hasCommand("bash examples/agent-metadata/scripts/verify.sh"), "agent metadata should run its scenario verifier");
+    assert(hasCommand("bash -n 'examples/agent-metadata/scripts/verify.sh'"), "agent metadata verifier should run shell syntax check");
+    assert(report.selectedCommands.filter((command) => command.command === "bash examples/agent-metadata/scripts/verify.sh").length === 1, "agent metadata verifier should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known agent metadata inputs should not use verify-fast fallback");
+    assert(logHas("examples/agent-metadata/scripts/verify.sh"), "fake agent metadata verifier command should execute");
     break;
   case "agent-loop-scenario":
     assert(report.changedFiles.includes("examples/agent-loop-scenario/Main.clasp"), "agent loop scenario source should be present");
@@ -444,6 +505,18 @@ CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
   run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
 assert_report "$script_report" "$script_log" verification-script
 
+native_diagnostics_report="$test_root/native-diagnostics-report.json"
+native_diagnostics_log="$test_root/native-diagnostics.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$native_diagnostics_log" \
+  run_verify_affected --changed-file scripts/test-native-claspc-diagnostics.sh > "$native_diagnostics_report"
+assert_report "$native_diagnostics_report" "$native_diagnostics_log" native-diagnostics-script
+
+record_update_parity_report="$test_root/record-update-parity-report.json"
+record_update_parity_log="$test_root/record-update-parity.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$record_update_parity_log" \
+  run_verify_affected --changed-file scripts/test-record-update-parity.sh > "$record_update_parity_report"
+assert_report "$record_update_parity_report" "$record_update_parity_log" record-update-parity-script
+
 compiler_slice_script_report="$test_root/compiler-slice-script-report.json"
 compiler_slice_script_log="$test_root/compiler-slice-script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_script_log" \
@@ -457,8 +530,24 @@ compiler_slice_fixture_log="$test_root/compiler-slice-fixture.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$compiler_slice_fixture_log" \
   run_verify_affected \
     --changed-file examples/compiler-checker.clasp \
-    --changed-file examples/compiler-lower.clasp > "$compiler_slice_fixture_report"
+    --changed-file examples/compiler-lower.clasp \
+    --changed-file examples/compiler-ergonomics.clasp > "$compiler_slice_fixture_report"
 assert_report "$compiler_slice_fixture_report" "$compiler_slice_fixture_log" compiler-slice-fixture
+
+js_emitter_determinism_report="$test_root/js-emitter-determinism-report.json"
+js_emitter_determinism_log="$test_root/js-emitter-determinism.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$js_emitter_determinism_log" \
+  run_verify_affected \
+    --changed-file src/Compiler/Emit/JavaScript.clasp \
+    --changed-file scripts/test-js-emitter-determinism.sh > "$js_emitter_determinism_report"
+assert_report "$js_emitter_determinism_report" "$js_emitter_determinism_log" js-emitter-determinism
+
+agent_feedback_report="$test_root/agent-feedback-report.json"
+agent_feedback_log="$test_root/agent-feedback.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$agent_feedback_log" \
+  run_verify_affected \
+    --changed-file agents/feedback/test-feedback.json > "$agent_feedback_report"
+assert_report "$agent_feedback_report" "$agent_feedback_log" agent-feedback
 
 promoted_source_export_report="$test_root/promoted-source-export-report.json"
 promoted_source_export_log="$test_root/promoted-source-export.log"
@@ -479,6 +568,13 @@ CLASP_TEST_FAKE_COMMAND_LOG="$runtime_slice_script_log" \
     --changed-file scripts/test-verify-runtime-slice.sh > "$runtime_slice_script_report"
 assert_report "$runtime_slice_script_report" "$runtime_slice_script_log" runtime-slice-script
 
+swarm_feedback_loop_script_report="$test_root/swarm-feedback-loop-script-report.json"
+swarm_feedback_loop_script_log="$test_root/swarm-feedback-loop-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$swarm_feedback_loop_script_log" \
+  run_verify_affected \
+    --changed-file scripts/test-swarm-native-feedback-loop.sh > "$swarm_feedback_loop_script_report"
+assert_report "$swarm_feedback_loop_script_report" "$swarm_feedback_loop_script_log" swarm-feedback-loop-script
+
 agent_task_scenario_report="$test_root/agent-task-scenario-report.json"
 agent_task_scenario_log="$test_root/agent-task-scenario.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$agent_task_scenario_log" \
@@ -486,6 +582,14 @@ CLASP_TEST_FAKE_COMMAND_LOG="$agent_task_scenario_log" \
     --changed-file examples/agent-task-scenario/Main.clasp \
     --changed-file examples/agent-task-scenario/scripts/verify.sh > "$agent_task_scenario_report"
 assert_report "$agent_task_scenario_report" "$agent_task_scenario_log" agent-task-scenario
+
+agent_metadata_report="$test_root/agent-metadata-report.json"
+agent_metadata_log="$test_root/agent-metadata.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$agent_metadata_log" \
+  run_verify_affected \
+    --changed-file examples/agent-metadata/Main.clasp \
+    --changed-file examples/agent-metadata/scripts/verify.sh > "$agent_metadata_report"
+assert_report "$agent_metadata_report" "$agent_metadata_log" agent-metadata
 
 agent_loop_scenario_report="$test_root/agent-loop-scenario-report.json"
 agent_loop_scenario_log="$test_root/agent-loop-scenario.log"

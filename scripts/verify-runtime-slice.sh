@@ -6,7 +6,7 @@ timeout_secs="${CLASP_RUNTIME_SLICE_TIMEOUT_SECS:-180}"
 
 usage() {
   cat <<'EOF'
-usage: scripts/verify-runtime-slice.sh [--list] [process|workflow|codex-loop|agent-loop|workspace|managed-loop|all ...]
+usage: scripts/verify-runtime-slice.sh [--list] [process|workflow|codex-loop|agent-loop|workspace|managed-loop|swarm-feedback-loop|all ...]
 
 Runs focused runtime and orchestration scenario verifiers for fast local
 feedback before the broader verify-all path.
@@ -19,6 +19,8 @@ Slices:
   agent-loop    Ordinary Clasp builder/verifier loop using safe workspace and subprocess APIs.
   workspace     Root-bounded workspace file API from ordinary Clasp code.
   managed-loop  Native control-plane managed builder/verifier loop.
+  swarm-feedback-loop
+                Ordinary Clasp FeedbackLoop.clasp driving Codex and the native swarm substrate.
 
 Environment:
   CLASP_RUNTIME_SLICE_TIMEOUT_SECS  Per-slice harness timeout in seconds (default: 180).
@@ -32,7 +34,7 @@ EOF
 }
 
 list_slices() {
-  printf '%s\n' process workflow codex-loop agent-loop workspace managed-loop
+  printf '%s\n' process workflow codex-loop agent-loop workspace managed-loop swarm-feedback-loop
 }
 
 fail() {
@@ -79,6 +81,9 @@ scripts_for_slice() {
     managed-loop)
       printf '%s\n' "scripts/test-swarm-native-managed-loop.sh"
       ;;
+    swarm-feedback-loop)
+      printf '%s\n' "scripts/test-swarm-native-feedback-loop.sh"
+      ;;
     *)
       fail "unknown runtime slice: $1"
       ;;
@@ -112,9 +117,9 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     all)
-      slices=(process workflow codex-loop agent-loop workspace managed-loop)
+      slices=(process workflow codex-loop agent-loop workspace managed-loop swarm-feedback-loop)
       ;;
-    process|workflow|codex-loop|agent-loop|workspace|managed-loop)
+    process|workflow|codex-loop|agent-loop|workspace|managed-loop|swarm-feedback-loop)
       slices+=("$1")
       ;;
     *)

@@ -199,6 +199,7 @@ bash scripts/verify-compiler-slice.sh all
 bash scripts/verify-compiler-slice.sh --check-only checker
 bash scripts/verify-runtime-slice.sh workflow codex-loop
 claspc context examples/lead-app/Main.clasp --compiler=bootstrap
+claspc semantic examples/lead-app/Main.clasp -o dist/lead-app.semantic.json
 claspc native examples/lead-app/Main.clasp -o dist/lead-app.native.ir --compiler=bootstrap
 bash scripts/test-native-runtime.sh
 ```

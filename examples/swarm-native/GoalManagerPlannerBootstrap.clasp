@@ -363,4 +363,4 @@ childLoopCommand : PlannerTaskSpec -> SwarmCommand
 childLoopCommand spec = commandSpec managerProjectRoot (childLoopCommandArgs spec)
 
 taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
-taskLaunchRecordCommand spec = commandSpec managerProjectRoot ["bash", "-lc", textConcat ["echo launch > ", taskWorkspaceAliasPath spec.taskId]]
+taskLaunchRecordCommand spec = commandSpec managerProjectRoot ["bash", "-c", textConcat ["echo launch > ", taskWorkspaceAliasPath spec.taskId]]

@@ -176,7 +176,7 @@ ensureTaskWorkspace taskId =
         let copied =
           match runCommand "." [
             "bash",
-            "-lc",
+            "-c",
             textConcat [
               "tar -cf - ",
               workspaceCloneExcludeFlags,

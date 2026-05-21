@@ -196,10 +196,10 @@ repairRef : TaskHandle
 repairRef = taskHandle stateRoot repairTaskId actorName
 
 plannerCommand : SwarmCommand
-plannerCommand = commandSpec workspaceCwd ["bash", "-lc", "printf planner-ok"]
+plannerCommand = commandSpec workspaceCwd ["bash", "-c", "printf planner-ok"]
 
 builderCommand : SwarmCommand
-builderCommand = commandSpec workspaceCwd ["bash", "-lc", "printf builder-ok"]
+builderCommand = commandSpec workspaceCwd ["bash", "-c", "printf builder-ok"]
 
 smokeVerifierName : Str
 smokeVerifierName = "native-smoke"
@@ -208,10 +208,10 @@ regressionVerifierName : Str
 regressionVerifierName = "native-regression"
 
 smokeVerifierCommand : SwarmCommand
-smokeVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-ok"]
+smokeVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf verifier-ok"]
 
 regressionVerifierCommand : SwarmCommand
-regressionVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf regression-ok"]
+regressionVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf regression-ok"]
 
 repairVerificationPlan : VerificationPlan
 repairVerificationPlan =
@@ -236,7 +236,7 @@ failedToolRef : TaskHandle
 failedToolRef = taskHandle stateRoot failedToolTaskId actorName
 
 failedToolCommand : SwarmCommand
-failedToolCommand = commandSpec workspaceCwd ["bash", "-lc", "printf failed-tool-out; printf failed-tool-err >&2; exit 7"]
+failedToolCommand = commandSpec workspaceCwd ["bash", "-c", "printf failed-tool-out; printf failed-tool-err >&2; exit 7"]
 
 failedVerifierObjectiveId : Str
 failedVerifierObjectiveId = "failure-verifier"
@@ -257,10 +257,10 @@ failedVerifierRef : TaskHandle
 failedVerifierRef = taskHandle stateRoot failedVerifierTaskId actorName
 
 verifierSetupCommand : SwarmCommand
-verifierSetupCommand = commandSpec workspaceCwd ["bash", "-lc", "printf verifier-setup-ok"]
+verifierSetupCommand = commandSpec workspaceCwd ["bash", "-c", "printf verifier-setup-ok"]
 
 failedVerifierCommand : SwarmCommand
-failedVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf failed-verifier-out; printf failed-verifier-err >&2; exit 3"]
+failedVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf failed-verifier-out; printf failed-verifier-err >&2; exit 3"]
 
 failedPlanObjectiveId : Str
 failedPlanObjectiveId = "failure-plan"
@@ -284,10 +284,10 @@ failedPlanRef : TaskHandle
 failedPlanRef = taskHandle stateRoot failedPlanTaskId actorName
 
 failedPlanPassingVerifierCommand : SwarmCommand
-failedPlanPassingVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf plan-pass-ok"]
+failedPlanPassingVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf plan-pass-ok"]
 
 failedPlanFailingVerifierCommand : SwarmCommand
-failedPlanFailingVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf plan-fail-out; printf plan-fail-err >&2; exit 4"]
+failedPlanFailingVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf plan-fail-out; printf plan-fail-err >&2; exit 4"]
 
 failedVerificationPlan : VerificationPlan
 failedVerificationPlan =
@@ -315,7 +315,7 @@ timedOutToolRef : TaskHandle
 timedOutToolRef = taskHandle stateRoot timedOutToolTaskId actorName
 
 timedOutToolCommand : SwarmCommand
-timedOutToolCommand = commandSpec workspaceCwd ["bash", "-lc", "printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]
+timedOutToolCommand = commandSpec workspaceCwd ["bash", "-c", "printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]
 
 timedOutPlanObjectiveId : Str
 timedOutPlanObjectiveId = "timeout-plan"
@@ -336,7 +336,7 @@ timedOutPlanRef : TaskHandle
 timedOutPlanRef = taskHandle stateRoot timedOutPlanTaskId actorName
 
 timedOutVerifierCommand : SwarmCommand
-timedOutVerifierCommand = commandSpec workspaceCwd ["bash", "-lc", "printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]
+timedOutVerifierCommand = commandSpec workspaceCwd ["bash", "-c", "printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]
 
 timedOutVerificationPlan : VerificationPlan
 timedOutVerificationPlan =

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "kind": "clasp-wave1-enabled-benchmark-checkpoint",
+  "generatedAt": "2026-05-21T07:43:48.000Z",
+  "wave": "wave1",
+  "taskId": "wave1-benchmark-checkpoint",
+  "fullBenchmarkRun": false,
+  "purpose": "First bounded checkpoint for the enabled Wave 1 benchmark target without running the broad benchmark harness.",
+  "enabledBenchmarkTarget": {
+    "name": "ordinary Clasp agent readiness loop",
+    "scope": [
+      "ordinary-program builder/verifier loop via claspc run",
+      "direct Codex invocation from Clasp",
+      "durable runtime status, events, run records, and artifacts",
+      "native control-plane substrate for objectives, task DAGs, leases, approvals, merge policy, tool and verifier records"
+    ],
+    "checkpointCommand": "node scripts/benchmark-checkpoint.mjs --agent-readiness --output benchmarks/checkpoints/<agent-readiness-checkpoint>.json",
+    "fixtureCommand": "node scripts/benchmark-checkpoint.mjs --fixture --agent-readiness --output /tmp/agent-readiness-checkpoint.json"
+  },
+  "comparisonArtifacts": [
+    "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json",
+    "benchmarks/checkpoints/2026-05-21-wave1-agent-readiness-probe.json",
+    "benchmarks/checkpoints/2026-05-21-wave1-agent-readiness-live.json"
+  ],
+  "expectedReadinessCommandLabels": [
+    "safe-workspace-operations",
+    "safe-subprocess-verifier-execution",
+    "structured-diagnostics-feedback",
+    "ordinary-agent-loop-scenario",
+    "native-control-substrate"
+  ],
+  "machineReadableComparisonKeys": [
+    "finalStatus",
+    "commandSummary.*.durationMs",
+    "readinessSignalSummary.*",
+    "capabilitySignals.*.status",
+    "iterationSpeedRecommendation.area",
+    "iterationSpeedRecommendation.relatedCommands"
+  ],
+  "iterationSpeedBottleneck": {
+    "rank": 1,
+    "area": "source-run-startup",
+    "evidenceArtifact": "benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json",
+    "evidence": "source-run-cold 16463ms versus source-run-warm 214ms",
+    "ownerHint": "wave1-fast-iteration-slice",
+    "actionableSlice": "Reduce cold `claspc run` startup on the native-image-to-binary path while preserving warm run-binary cache hits.",
+    "relatedCommands": [
+      "source-run-cold",
+      "source-run-warm"
+    ],
+    "focusedValidation": [
+      "node scripts/benchmark-checkpoint.mjs --fixture",
+      "bash scripts/test-source-run-cache.sh",
+      "node scripts/benchmark-checkpoint.mjs --no-native-incremental --output benchmarks/checkpoints/<checkpoint>.json"
+    ]
+  },
+  "nonGoals": [
+    "not a full benchmark run",
+    "not a JavaScript emitter parity target",
+    "not a broad harness redesign"
+  ]
+}

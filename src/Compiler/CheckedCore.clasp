@@ -260,12 +260,87 @@ checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl
 }
 
 checkedCoreCallArtifact : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> Str -> [HostedExprAst] -> CheckedCoreExprBuildResult
-checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext resultType callee args = match checkedCoreExprList typeDecls recordDecls env localEnv fnContext args {
-  CheckedCoreExprListBuilt argArtifacts ->
-    CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) argArtifacts),
-  CheckedCoreExprListBuildError message ->
-    CheckedCoreExprBuildError message
-}
+checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext resultType callee args =
+  if callee == recordUpdateBuiltinName then {
+    let subjectExpr = firstHostedExpr args;
+    let overrideExpr = firstHostedExpr (remainingHostedExprs args);
+    let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+    if expressionSummary subjectExpr == "" then {
+      CheckedCoreExprBuildError "Record update expects 2 arguments."
+    } else if expressionSummary overrideExpr == "" then {
+      CheckedCoreExprBuildError "Record update expects 2 arguments."
+    } else if expressionSummary extraExpr == "" then {
+      match overrideExpr {
+        HostedRecord recordName fields ->
+          if recordName == recordUpdatePlaceholderName then {
+            match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subjectExpr {
+              CheckedCoreExprBuildError message ->
+                CheckedCoreExprBuildError message,
+              CheckedCoreExprBuilt subjectArtifact ->
+                match checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields {
+                  CheckedCoreRecordFieldListBuilt fieldArtifacts ->
+                    CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) [subjectArtifact, CheckedCoreRecordArtifact resultType recordUpdatePlaceholderName fieldArtifacts]),
+                  CheckedCoreRecordFieldListBuildError message ->
+                    CheckedCoreExprBuildError message
+                }
+            }
+          } else {
+            CheckedCoreExprBuildError "Record update expects override fields."
+          },
+        HostedName name ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedString value ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedInt value ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedBool value ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedList values ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedCall nestedCallee nestedArgs ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedConstructor constructorName values ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedMatch subject branches ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedFieldAccess subject fieldName ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedLet binder value body ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedMutableLet binder value body ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedAssign binder value body ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedFor binder iterable loopBody body ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedReturn value ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedIf condition thenBranch elseBranch ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedEqual left right ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedNotEqual left right ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedLessThan left right ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedLessThanOrEqual left right ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedGreaterThan left right ->
+          CheckedCoreExprBuildError "Record update expects override fields.",
+        HostedGreaterThanOrEqual left right ->
+          CheckedCoreExprBuildError "Record update expects override fields."
+      }
+    } else {
+      CheckedCoreExprBuildError "Record update expects 2 arguments."
+    }
+  } else {
+    match checkedCoreExprList typeDecls recordDecls env localEnv fnContext args {
+      CheckedCoreExprListBuilt argArtifacts ->
+        CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) argArtifacts),
+      CheckedCoreExprListBuildError message ->
+        CheckedCoreExprBuildError message
+    }
+  }
 
 checkedCoreExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> CheckedCoreExprBuildResult
 checkedCoreExpr typeDecls recordDecls env localEnv fnContext expr = match inferExpr typeDecls recordDecls env localEnv fnContext expr {

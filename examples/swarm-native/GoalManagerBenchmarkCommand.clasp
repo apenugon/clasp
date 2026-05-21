@@ -24,7 +24,7 @@ readBenchmarkSignalStdout wave =
   if fileExists stdoutPath then
     match runCommand "." [
       "bash",
-      "-lc",
+      "-c",
       "grep -F '\"suite\"' \"$1\" | tail -n 1",
       "benchmark-signal",
       stdoutPath

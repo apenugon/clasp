@@ -401,6 +401,7 @@ imported_cli_default_air="$imported_cli_project_dir/Main.air.json"
 imported_cli_default_context="$imported_cli_project_dir/Main.context.json"
 lead_app_air_output="$test_root/lead-app.air.json"
 lead_app_context_output="$test_root/lead-app.context.json"
+lead_app_semantic_output="$test_root/lead-app.semantic.json"
 shared_cache_first_image="$test_root/shared-cache-first.native.image.json"
 shared_cache_second_image="$test_root/shared-cache-second.native.image.json"
 shared_cache_trace_log="$test_root/shared-cache-trace.log"
@@ -1042,6 +1043,68 @@ for (const expectedForeign of ["foreign:storeLead", "foreign:mockLeadSummaryMode
   if (!sharedDependencyNode.affectedForeignBoundaries?.includes(expectedForeign)) {
     throw new Error(`dependencyGraph imported module affectedForeignBoundaries missing ${expectedForeign}`);
   }
+}
+EOF
+
+lead_app_semantic_report="$("$claspc_bin" --json semantic "$project_root/examples/lead-app/Main.clasp" -o "$lead_app_semantic_output")"
+printf '%s\n' "$lead_app_semantic_report" | grep -F '"status":"ok"' >/dev/null
+printf '%s\n' "$lead_app_semantic_report" | grep -F '"command":"semantic"' >/dev/null
+printf '%s\n' "$lead_app_semantic_report" | grep -F '"target":"semantic-summary"' >/dev/null
+printf '%s\n' "$lead_app_semantic_report" | grep -F "\"output\":\"$lead_app_semantic_output\"" >/dev/null
+node - "$lead_app_semantic_output" <<'EOF'
+const fs = require("node:fs");
+
+const summary = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (summary.format !== "clasp-semantic-summary-v1" || summary.schemaVersion !== 1) {
+  throw new Error(`unexpected semantic summary format: ${summary.format}`);
+}
+if (summary.status !== "ok" || !Array.isArray(summary.diagnostics) || summary.diagnostics.length !== 0) {
+  throw new Error("semantic summary should report a clean checked artifact");
+}
+const mainModule = summary.modules?.find((entry) => entry.module === "Main");
+const sharedModule = summary.modules?.find((entry) => entry.module === "Shared.Lead");
+if (!mainModule?.file?.endsWith("examples/lead-app/Main.clasp")) {
+  throw new Error(`semantic summary missing Main file identity: ${mainModule?.file}`);
+}
+if (!sharedModule?.file?.endsWith("examples/lead-app/Shared/Lead.clasp")) {
+  throw new Error(`semantic summary missing Shared.Lead file identity: ${sharedModule?.file}`);
+}
+if (!mainModule.imports?.includes("Shared.Lead")) {
+  throw new Error("semantic summary missing Main -> Shared.Lead import");
+}
+const leadIntake = summary.definitions?.find((entry) => entry.id === "schema:LeadIntake");
+if (leadIntake?.kind !== "schema" || leadIntake.module !== "Shared.Lead") {
+  throw new Error("semantic summary missing LeadIntake schema ownership");
+}
+const company = leadIntake.fields?.find((field) => field.id === "schema-field:LeadIntake:company");
+if (company?.name !== "company" || company?.type !== "Str") {
+  throw new Error("semantic summary missing typed LeadIntake.company field");
+}
+const createRoute = summary.definitions?.find((entry) => entry.id === "route:createLeadRecordRoute");
+if (createRoute?.requestSchemaId !== "schema:LeadIntake" || createRoute?.responseSchemaId !== "schema:LeadRecord") {
+  throw new Error("semantic summary route request/response schema links are incomplete");
+}
+if (!createRoute.references?.some((edge) => edge.kind === "request-schema" && edge.to === "schema:LeadIntake")) {
+  throw new Error("semantic summary route references missing request schema edge");
+}
+const importEdge = summary.dependencies?.imports?.some(
+  (edge) => edge.from === "source:Main" && edge.to === "source:Shared.Lead",
+);
+if (!importEdge) {
+  throw new Error("semantic summary dependency imports missing Main -> Shared.Lead");
+}
+const sharedAffectsRoute = summary.dependencies?.affects?.some(
+  (edge) => edge.from === "source:Shared.Lead" && edge.to === "route:createLeadRecordRoute",
+);
+if (!sharedAffectsRoute) {
+  throw new Error("semantic summary dependency graph cannot answer imported schema route impact");
+}
+const leadIntakeImpact = summary.editPlanning?.impactIndex?.find((entry) => entry.sourceId === "schema:LeadIntake");
+if (!leadIntakeImpact?.affectedSurfaces?.includes("route:createLeadRecordRoute")) {
+  throw new Error("semantic summary impact index cannot plan a LeadIntake edit");
+}
+if (!summary.editPlanning?.verificationGuidance?.scenarioCommands?.includes("bash examples/lead-app/scripts/verify.sh")) {
+  throw new Error("semantic summary missing scenario verification guidance");
 }
 EOF
 

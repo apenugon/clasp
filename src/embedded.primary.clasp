@@ -2851,12 +2851,19 @@ inferRecordFieldValue typeDecls recordDecls env localEnv fnContext recordDecl fi
     }
   }
 }
-findUnknownRecordLiteralField : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
-findUnknownRecordLiteralField recordDecl fields = {
+findRecordLiteralFieldValidationFailure : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFieldValidationFailure recordDecl fields = {
+  let mut seenFields = [];
   for exprField in fields {
-    match lookupRecordField (recordDeclFields recordDecl) (recordExprFieldName exprField) {
-      FoundRecordField fieldDecl -> "",
-      MissingRecordField missingField -> return missingField
+    let fieldName = recordExprFieldName exprField;
+    if containsText seenFields fieldName then {
+      return textConcat ["Record literal for `", recordDeclName recordDecl, "` repeats field `", fieldName, "`."]
+    } else {
+      seenFields = appendCheckerRenderedText seenFields fieldName;
+      match lookupRecordField (recordDeclFields recordDecl) fieldName {
+        FoundRecordField fieldDecl -> "",
+        MissingRecordField missingField -> return textConcat ["Record literal for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."]
+      }
     }
   };
   ""
@@ -2875,12 +2882,12 @@ inferRecordExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] 
 inferRecordExpr typeDecls recordDecls env localEnv fnContext recordName fields = match lookupRecordDecl recordDecls recordName {
   MissingRecord missing -> InferExprError (textConcat ["Unknown record `", missing, "`."]),
   FoundRecord recordDecl -> {
-    let unknownField = findUnknownRecordLiteralField recordDecl fields;
-    if unknownField == "" then {
+    let fieldValidationFailure = findRecordLiteralFieldValidationFailure recordDecl fields;
+    if fieldValidationFailure == "" then {
       let failure = findRecordLiteralFailure typeDecls recordDecls env localEnv fnContext recordDecl fields;
       if failure == "" then InferredExpr (TNamed recordName) else InferExprError failure
     } else {
-      InferExprError (textConcat ["Record literal for `", recordName, "` includes unknown field `", unknownField, "`."])
+      InferExprError fieldValidationFailure
     }
   }
 }
@@ -3115,6 +3122,49 @@ collectForeignBindings modl = {
   };
   bindings
 }
+jsInteropIdentifierLowercaseCharIsSafe : Str -> Bool
+jsInteropIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+jsInteropIdentifierDigitCharIsSafe : Str -> Bool
+jsInteropIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+jsInteropIdentifierStartCharIsSafe : Str -> Bool
+jsInteropIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsInteropIdentifierLowercaseCharIsSafe char
+jsInteropIdentifierPartCharIsSafe : Str -> Bool
+jsInteropIdentifierPartCharIsSafe char = if jsInteropIdentifierStartCharIsSafe char then true else jsInteropIdentifierDigitCharIsSafe char
+jsInteropIdentifierIsSafe : Str -> Bool
+jsInteropIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsInteropIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsInteropIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+foreignInteropValidationError : HostedForeignDeclAst -> Str
+foreignInteropValidationError foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath -> if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then {
+    if jsInteropIdentifierIsSafe (foreignDeclRuntimeName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign import runtime name `", foreignDeclRuntimeName foreignDecl, "` must be a safe JavaScript identifier."]
+  } else textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."],
+  HostedForeignRuntime -> if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."]
+}
+moduleForeignInteropValidationError : HostedModuleAst -> Str
+moduleForeignInteropValidationError modl = {
+  for foreignDecl in moduleForeignDeclarations modl {
+    let message = foreignInteropValidationError foreignDecl;
+    if message == "" then "" else return message
+  };
+  ""
+}
 collectConstructorBindings : [HostedTypeDeclAst] -> [TypeBinding]
 collectConstructorBindings typeDecls = {
   let mut bindings = [];
@@ -3168,12 +3218,15 @@ baseEnv : [TypeBinding]
 baseEnv = [TypeBinding "String" stringBuiltinType, TypeBinding "textConcat" textConcatBuiltinType, TypeBinding "textJoin" textJoinBuiltinType, TypeBinding "textSplit" textSplitBuiltinType, TypeBinding "textChars" textCharsBuiltinType, TypeBinding "textFingerprint64Hex" textFingerprint64HexBuiltinType, TypeBinding "textPrefix" textPrefixBuiltinType, TypeBinding "textSplitFirst" textSplitFirstBuiltinType, TypeBinding "pathJoin" pathJoinBuiltinType, TypeBinding "pathDirname" pathDirnameBuiltinType, TypeBinding "pathBasename" pathBasenameBuiltinType, TypeBinding "fileExists" fileExistsBuiltinType, TypeBinding "readFile" readFileBuiltinType]
 inferModuleBindings : HostedModuleAst -> InferModuleResult
 inferModuleBindings modl = {
-  let typeDecls = effectiveModuleTypeDecls modl;
-  let recordDecls = moduleRecordDeclarations modl;
-  let initialEnv = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (collectAnnotatedBindings modl)));
-  let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls initialEnv (moduleDeclarations modl);
-  let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);
-  if failure == "" then InferredModule resolvedEnv else InferModuleError failure
+  let foreignInteropError = moduleForeignInteropValidationError modl;
+  if foreignInteropError == "" then {
+    let typeDecls = effectiveModuleTypeDecls modl;
+    let recordDecls = moduleRecordDeclarations modl;
+    let initialEnv = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (collectAnnotatedBindings modl)));
+    let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls initialEnv (moduleDeclarations modl);
+    let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);
+    if failure == "" then InferredModule resolvedEnv else InferModuleError failure
+  } else InferModuleError foreignInteropError
 }
 renderDeclSummary : [TypeBinding] -> HostedDeclAst -> Str
 renderDeclSummary env decl = match lookupTypeBinding env (declName decl) {
@@ -3376,9 +3429,57 @@ checkedCoreMatchBranchList typeDecls recordDecls env localEnv fnContext typeDecl
   state
 }
 checkedCoreCallArtifact : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> Str -> [HostedExprAst] -> CheckedCoreExprBuildResult
-checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext resultType callee args = match checkedCoreExprList typeDecls recordDecls env localEnv fnContext args {
-  CheckedCoreExprListBuilt argArtifacts -> CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) argArtifacts),
-  CheckedCoreExprListBuildError message -> CheckedCoreExprBuildError message
+checkedCoreCallArtifact typeDecls recordDecls env localEnv fnContext resultType callee args = if callee == recordUpdateBuiltinName then {
+  let subjectExpr = firstHostedExpr args;
+  let overrideExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary subjectExpr == "" then {
+    CheckedCoreExprBuildError "Record update expects 2 arguments."
+  } else if expressionSummary overrideExpr == "" then {
+    CheckedCoreExprBuildError "Record update expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match overrideExpr {
+      HostedRecord recordName fields -> if recordName == recordUpdatePlaceholderName then {
+        match checkedCoreExpr typeDecls recordDecls env localEnv fnContext subjectExpr {
+          CheckedCoreExprBuildError message -> CheckedCoreExprBuildError message,
+          CheckedCoreExprBuilt subjectArtifact -> match checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields {
+            CheckedCoreRecordFieldListBuilt fieldArtifacts -> CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) [subjectArtifact, CheckedCoreRecordArtifact resultType recordUpdatePlaceholderName fieldArtifacts]),
+            CheckedCoreRecordFieldListBuildError message -> CheckedCoreExprBuildError message
+          }
+        }
+      } else {
+        CheckedCoreExprBuildError "Record update expects override fields."
+      },
+      HostedName name -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedString value -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedInt value -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedBool value -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedList values -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedCall nestedCallee nestedArgs -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedConstructor constructorName values -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedMatch subject branches -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedFieldAccess subject fieldName -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedLet binder value body -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedMutableLet binder value body -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedAssign binder value body -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedFor binder iterable loopBody body -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedReturn value -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedIf condition thenBranch elseBranch -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedEqual left right -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedNotEqual left right -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedLessThan left right -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedLessThanOrEqual left right -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedGreaterThan left right -> CheckedCoreExprBuildError "Record update expects override fields.",
+      HostedGreaterThanOrEqual left right -> CheckedCoreExprBuildError "Record update expects override fields."
+    }
+  } else {
+    CheckedCoreExprBuildError "Record update expects 2 arguments."
+  }
+} else {
+  match checkedCoreExprList typeDecls recordDecls env localEnv fnContext args {
+    CheckedCoreExprListBuilt argArtifacts -> CheckedCoreExprBuilt (CheckedCoreCallArtifact resultType callee (checkedCoreNameType env localEnv callee) argArtifacts),
+    CheckedCoreExprListBuildError message -> CheckedCoreExprBuildError message
+  }
 }
 checkedCoreExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> CheckedCoreExprBuildResult
 checkedCoreExpr typeDecls recordDecls env localEnv fnContext expr = match inferExpr typeDecls recordDecls env localEnv fnContext expr {
@@ -4104,7 +4205,7 @@ emitExpr expr = match expr {
   LowerBool value -> if value then "true" else "false",
   LowerArray values -> textConcat ["[", textJoin ", " (emitExprs values), "]"],
   LowerListAppend left right -> textConcat ["(", emitExpr left, ").concat(", emitExpr right, ")"],
-  LowerEncode value -> textConcat ["JSON.stringify(", emitExpr value, ")"],
+  LowerEncode value -> textConcat ["$claspStableStringify(", emitExpr value, ")"],
   LowerIf condition thenBranch elseBranch -> textJoin "\n" ["(() => {", textConcat ["  if (", emitExpr condition, ") {"], textConcat ["    return ", emitExpr thenBranch, ";"], "  }", textConcat ["  return ", emitExpr elseBranch, ";"], "})()"],
   LowerEqual left right -> textConcat ["(", emitExpr left, " === ", emitExpr right, ")"],
   LowerNotEqual left right -> textConcat ["(", emitExpr left, " !== ", emitExpr right, ")"],
@@ -4180,8 +4281,38 @@ emitForeignReturnType typ = match typ {
   HostedTypeName name -> typ,
   HostedTypeList itemType -> typ
 }
+jsIdentifierLowercaseCharIsSafe : Str -> Bool
+jsIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+jsIdentifierDigitCharIsSafe : Str -> Bool
+jsIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+jsIdentifierStartCharIsSafe : Str -> Bool
+jsIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsIdentifierLowercaseCharIsSafe char
+jsIdentifierPartCharIsSafe : Str -> Bool
+jsIdentifierPartCharIsSafe char = if jsIdentifierStartCharIsSafe char then true else jsIdentifierDigitCharIsSafe char
+jsIdentifierIsSafe : Str -> Bool
+jsIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+emitJsIdentifier : Str -> Str
+emitJsIdentifier value = if jsIdentifierIsSafe value then value else "$claspInvalidForeignIdentifier"
 packageBindingIdentifier : HostedForeignDeclAst -> Str
-packageBindingIdentifier foreignDecl = textConcat ["$claspPackageBinding_", foreignDeclName foreignDecl]
+packageBindingIdentifier foreignDecl = emitJsIdentifier (textConcat ["$claspPackageBinding_", foreignDeclName foreignDecl])
 emitHostedPackageImportKind : HostedPackageImportKindAst -> Str
 emitHostedPackageImportKind kind = match kind {
   HostedPackageImportNpm -> "npm",
@@ -4189,16 +4320,16 @@ emitHostedPackageImportKind kind = match kind {
 }
 emitForeignSourceLiteral : HostedForeignDeclAst -> Str
 emitForeignSourceLiteral foreignDecl = match foreignDeclSource foreignDecl {
-  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["{ kind: \"", emitHostedPackageImportKind kind, "\", specifier: \"", specifier, "\" }"],
+  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["{ kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, " }"],
   HostedForeignRuntime -> "null"
 }
 emitForeignDeclarationLiteral : HostedForeignDeclAst -> Str
 emitForeignDeclarationLiteral foreignDecl = match foreignDeclSource foreignDecl {
-  HostedForeignPackageImport kind specifier declarationPath -> if foreignDeclSignature foreignDecl == "" then textConcat ["{ path: \"", declarationPath, "\", signature: null }"] else textConcat ["{ path: \"", declarationPath, "\", signature: \"", foreignDeclSignature foreignDecl, "\" }"],
+  HostedForeignPackageImport kind specifier declarationPath -> if foreignDeclSignature foreignDecl == "" then textConcat ["{ path: ", emitJsString declarationPath, ", signature: null }"] else textConcat ["{ path: ", emitJsString declarationPath, ", signature: ", emitJsString (foreignDeclSignature foreignDecl), " }"],
   HostedForeignRuntime -> "null"
 }
 emitIdentityHostCodec : HostedTypeAst -> Str -> Str
-emitIdentityHostCodec typ mode = if mode == "from" then textConcat ["{ type: \"", renderHostedType typ, "\", fromHost(value, path = \"value\") { return value; }, toHost(value, path = \"value\") { return value; } }"] else textConcat ["{ type: \"", renderHostedType typ, "\", fromHost(value, path = \"result\") { return value; }, toHost(value, path = \"result\") { return value; } }"]
+emitIdentityHostCodec typ mode = if mode == "from" then textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"value\") { return value; }, toHost(value, path = \"value\") { return value; } }"] else textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"result\") { return value; }, toHost(value, path = \"result\") { return value; } }"]
 emitForeignParamCodecsFromType : HostedTypeAst -> [Str]
 emitForeignParamCodecsFromType typ = match typ {
   HostedTypeFunction input result -> append [emitIdentityHostCodec input "from"] (emitForeignParamCodecsFromType result),
@@ -4227,7 +4358,7 @@ hasRuntimeForeignDecl foreignDecls = {
 }
 emitPackageForeignImport : HostedForeignDeclAst -> Str
 emitPackageForeignImport foreignDecl = match foreignDeclSource foreignDecl {
-  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["import { ", foreignDeclRuntimeName foreignDecl, " as ", packageBindingIdentifier foreignDecl, " } from \"", specifier, "\";"],
+  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["import { ", emitJsIdentifier (foreignDeclRuntimeName foreignDecl), " as ", packageBindingIdentifier foreignDecl, " } from ", emitJsString specifier, ";"],
   HostedForeignRuntime -> ""
 }
 emitPackageForeignImports : [HostedForeignDeclAst] -> [Str]
@@ -4245,7 +4376,7 @@ emitPackageForeignImports foreignDecls = {
   rendered
 }
 emitHostBindingEntry : HostedForeignDeclAst -> Str
-emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: \"", foreignDeclName foreignDecl, "\","], textConcat ["    runtimeName: \"", foreignDeclRuntimeName foreignDecl, "\","], textConcat ["    source: ", emitForeignSourceLiteral foreignDecl, ","], textConcat ["    declaration: ", emitForeignDeclarationLiteral foreignDecl, ","], textConcat ["    params: [", textJoin ", " (emitForeignParamCodecsFromType (foreignDeclTypeAst foreignDecl)), "],"], textConcat ["    returns: ", emitIdentityHostCodec (emitForeignReturnType (foreignDeclTypeAst foreignDecl)) "result"], "  },"]
+emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: ", emitJsString (foreignDeclName foreignDecl), ","], textConcat ["    runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ","], textConcat ["    source: ", emitForeignSourceLiteral foreignDecl, ","], textConcat ["    declaration: ", emitForeignDeclarationLiteral foreignDecl, ","], textConcat ["    params: [", textJoin ", " (emitForeignParamCodecsFromType (foreignDeclTypeAst foreignDecl)), "],"], textConcat ["    returns: ", emitIdentityHostCodec (emitForeignReturnType (foreignDeclTypeAst foreignDecl)) "result"], "  },"]
 emitHostBindingEntries : [HostedForeignDeclAst] -> [Str]
 emitHostBindingEntries foreignDecls = {
   let mut rendered = [];
@@ -4257,7 +4388,7 @@ emitHostBindingEntries foreignDecls = {
 }
 emitPackageImportEntry : HostedForeignDeclAst -> Str
 emitPackageImportEntry foreignDecl = match foreignDeclSource foreignDecl {
-  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["  { name: \"", foreignDeclName foreignDecl, "\", runtimeName: \"", foreignDeclRuntimeName foreignDecl, "\", kind: \"", emitHostedPackageImportKind kind, "\", specifier: \"", specifier, "\", declaration: ", emitForeignDeclarationLiteral foreignDecl, " },"],
+  HostedForeignPackageImport kind specifier declarationPath -> textConcat ["  { name: ", emitJsString (foreignDeclName foreignDecl), ", runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ", kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, ", declaration: ", emitForeignDeclarationLiteral foreignDecl, " },"],
   HostedForeignRuntime -> ""
 }
 emitPackageImportEntries : [HostedForeignDeclAst] -> [Str]
@@ -4276,7 +4407,7 @@ emitPackageImportEntries foreignDecls = {
 }
 emitPackageBindingEntry : HostedForeignDeclAst -> [Str]
 emitPackageBindingEntry foreignDecl = match foreignDeclSource foreignDecl {
-  HostedForeignPackageImport kind specifier declarationPath -> [textConcat ["  \"", foreignDeclName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  \"", foreignDeclRuntimeName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","]],
+  HostedForeignPackageImport kind specifier declarationPath -> [textConcat ["  ", emitJsString (foreignDeclName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  ", emitJsString (foreignDeclRuntimeName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","]],
   HostedForeignRuntime -> []
 }
 emitPackageBindingEntries : [HostedForeignDeclAst] -> [Str]
@@ -4303,7 +4434,7 @@ emitForeignBindings foreignDecls = {
   let mut rendered = [];
   for foreignDecl in foreignDecls {
     let params = emitForeignParams foreignDecl;
-    let bindingLine = if firstText params == "" then textConcat ["export const ", foreignDeclName foreignDecl, " = () => $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", []);"] else textConcat ["export function ", foreignDeclName foreignDecl, "(", textJoin ", " params, ") { return $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", [", textJoin ", " params, "]); }"];
+    let bindingLine = if firstText params == "" then textConcat ["export const ", emitJsIdentifier (foreignDeclName foreignDecl), " = () => $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", []);"] else textConcat ["export function ", emitJsIdentifier (foreignDeclName foreignDecl), "(", textJoin ", " params, ") { return $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", [", textJoin ", " params, "]); }"];
     rendered = appendJsRenderedText rendered bindingLine;
     rendered
   };
@@ -4448,7 +4579,7 @@ emitRecordSchema decl = {
   let schemaName = recordDeclName decl;
   let schemaConstName = textConcat ["$claspSchema_", schemaName];
   let header = [textConcat ["const ", schemaConstName, " = Object.freeze({"], "  kind: \"clasp-schema-contract\",", "  version: 1,", textConcat ["  name: ", emitJsString schemaName, ","], textConcat ["  schema: Object.freeze({ kind: \"record\", name: ", emitJsString schemaName, ", fields: Object.freeze([", textJoin ", " (emitSchemaFieldNames (recordDeclFields decl)), "]) }),"], "  seed: null,", "  fromHost(value, path = \"value\") {", "    const objectValue = $claspExpectObject(value, path);", "    return Object.freeze({"];
-  let footer = ["    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return JSON.stringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return Object.freeze({ kind: \"clasp-schema-stream\", schema: this, initial }); }", "});", ""];
+  let footer = ["    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return $claspStableStringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return Object.freeze({ kind: \"clasp-schema-stream\", schema: this, initial }); }", "});", ""];
   append header (append (emitSchemaFieldLines (recordDeclFields decl)) footer)
 }
 emitSchemas : [HostedRecordDeclAst] -> [Str]
@@ -4477,7 +4608,7 @@ emitExportsRegistry modl = {
 }
 emitSelfHostedRuntimePrelude : [Str]
 emitSelfHostedRuntimePrelude = {
-  let core = ["function $claspSnapshotValue(value) {", "  if (typeof globalThis.structuredClone === \"function\") {", "    return globalThis.structuredClone(value);", "  }", "  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}"];
+  let core = ["function $claspSnapshotValue(value) {", "  if (value === null || typeof value !== \"object\") {", "    return value;", "  }", "  if (Array.isArray(value)) {", "    return Object.freeze(value.map((item) => $claspSnapshotValue(item)));", "  }", "  const entries = Object.keys(value).sort().map((key) => [key, $claspSnapshotValue(value[key])]);", "  return Object.freeze(Object.fromEntries(entries));", "}", "", "function $claspStableStringify(value) {", "  return JSON.stringify($claspSnapshotValue(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}"];
   let prompts = ["", "function $claspPromptMessage(role, content) {", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([Object.freeze({", "      role: $claspExpectString(role, \"prompt.role\"),", "      content: $claspExpectString(content, \"prompt.content\")", "    })])", "  });", "}", "", "function $claspExpectPrompt(value, path = \"value\") {", "  const objectValue = $claspExpectObject(value, path);", "  if (objectValue.$kind !== \"prompt\") {", "    throw new Error(`${path} expected a Prompt value`);", "  }", "  const messages = $claspExpectArray(objectValue.messages, `${path}.messages`).map((message, index) => {", "    const messagePath = `${path}.messages[${index}]`;", "    const messageObject = $claspExpectObject(message, messagePath);", "    return Object.freeze({", "      role: $claspExpectString(messageObject.role, `${messagePath}.role`),", "      content: $claspExpectString(messageObject.content, `${messagePath}.content`)", "    });", "  });", "  return Object.freeze({ $kind: \"prompt\", messages: Object.freeze(messages) });", "}", "", "function systemPrompt(content) { return $claspPromptMessage(\"system\", content); }", "function assistantPrompt(content) { return $claspPromptMessage(\"assistant\", content); }", "function userPrompt(content) { return $claspPromptMessage(\"user\", content); }", "", "function appendPrompt(left, right) {", "  const leftPrompt = $claspExpectPrompt(left, \"left\");", "  const rightPrompt = $claspExpectPrompt(right, \"right\");", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([...leftPrompt.messages, ...rightPrompt.messages].map((message) => Object.freeze({ role: message.role, content: message.content })))", "  });", "}", "", "function promptText(value) {", "  const prompt = $claspExpectPrompt(value, \"value\");", "  return prompt.messages.map((message) => `${message.role}: ${message.content}`).join(\"\\n\\n\");", "}"];
   let traces = ["", "function $claspCreateTraceCollector(seed = []) {", "  const entries = Array.isArray(seed) ? seed.map((entry) => $claspSnapshotValue(entry)) : [];", "  return Object.freeze({", "    kind: \"clasp-trace-collector\",", "    version: 1,", "    record(entry) {", "      const snapshot = $claspSnapshotValue(entry);", "      entries.push(snapshot);", "      return snapshot;", "    },", "    entries() {", "      return $claspSnapshotValue(entries);", "    },", "    clear() {", "      entries.length = 0;", "      return this.entries();", "    }", "  });", "}", "", "function $claspMaybeRecordTrace(options = null, kind, name, action) {", "  const collector = options && typeof options === \"object\" && options.collector && typeof options.collector.record === \"function\"", "    ? options.collector", "    : null;", "  if (collector) {", "    collector.record(Object.freeze({ kind, name, action, status: \"ok\" }));", "  }", "}"];
   let policies = ["", "function $claspPolicyAllows(kind, target, entries) {", "  if (!Array.isArray(entries)) {", "    return false;", "  }", "  if (kind === \"file\") {", "    return entries.some((entry) => typeof entry === \"string\" && typeof target === \"string\" && (target === entry || target.startsWith(entry + \"/\")));", "  }", "  return entries.some((entry) => entry === target);", "}", "", "function $claspCreatePolicyRuntime(config) {", "  const permissions = Object.freeze({", "    file: Object.freeze(Array.isArray(config.file) ? config.file : []),", "    network: Object.freeze(Array.isArray(config.network) ? config.network : []),", "    process: Object.freeze(Array.isArray(config.process) ? config.process : []),", "    secret: Object.freeze(Array.isArray(config.secret) ? config.secret : [])", "  });", "  return Object.freeze({", "    name: config.name,", "    id: config.id,", "    allowedClassifications: Object.freeze(Array.isArray(config.allowedClassifications) ? config.allowedClassifications : []),", "    permissions,", "    allows(kind, target) { return $claspPolicyAllows(kind, target, permissions[kind] ?? []); },", "    allowsFile(target) { return this.allows(\"file\", target); },", "    allowsNetwork(target) { return this.allows(\"network\", target); },", "    allowsProcess(target) { return this.allows(\"process\", target); },", "    allowsSecret(target) { return this.allows(\"secret\", target); },", "    decide(kind, target, context = null) {", "      return Object.freeze({", "        kind,", "        target,", "        allowed: this.allows(kind, target),", "        actor: context && context.actor && typeof context.actor.id === \"string\" ? context.actor.id : null", "      });", "    },", "    decideFile(target, context = null) { return this.decide(\"file\", target, context); },", "    decideNetwork(target, context = null) { return this.decide(\"network\", target, context); },", "    decideProcess(target, context = null) { return this.decide(\"process\", target, context); },", "    decideSecret(target, context = null) { return this.decide(\"secret\", target, context); },", "    assertFile(target, context = null) { const decision = this.decideFile(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies file access to ${String(target)}`); } return decision; },", "    assertNetwork(target, context = null) { const decision = this.decideNetwork(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies network access to ${String(target)}`); } return decision; },", "    assertProcess(target, context = null) { const decision = this.decideProcess(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies process access to ${String(target)}`); } return decision; },", "    assertSecret(target, context = null) { const decision = this.decideSecret(target, context); if (!decision.allowed) { throw new Error(`Policy ${this.name} denies secret access to ${String(target)}`); } return decision; }", "  });", "}", "", "function $claspResolveGuideInstructions(guideName, guideMap, seen = []) {", "  if (typeof guideName !== \"string\" || guideName === \"\") {", "    return Object.freeze({});", "  }", "  if (seen.includes(guideName)) {", "    return Object.freeze({});", "  }", "  const guide = guideMap[guideName] ?? null;", "  if (!guide) {", "    return Object.freeze({});", "  }", "  const parentEntries = typeof guide.extends === \"string\" && guide.extends !== \"\"", "    ? $claspResolveGuideInstructions(guide.extends, guideMap, [...seen, guideName])", "    : {};", "  return Object.freeze({ ...parentEntries, ...(guide.entries ?? {}) });", "}", ""];
@@ -4637,10 +4768,12 @@ emitNativeMatchBranches branches = {
   };
   rendered
 }
+emitNativeStringLiteral : Str -> Str
+emitNativeStringLiteral value = textConcat ["string(", encode value, ")"]
 emitNativeExpr : LowerExprText -> Str
 emitNativeExpr expr = match expr {
   LowerName name -> textConcat ["local(", name, ")"],
-  LowerLiteral value -> textConcat ["string(\"", value, "\")"],
+  LowerLiteral value -> emitNativeStringLiteral value,
   LowerInt value -> textConcat ["int(", value, ")"],
   LowerBool value -> textConcat ["bool(", if value then "true" else "false", ")"],
   LowerArray values -> textConcat ["list([", textJoin ", " (emitNativeExprs values), "])"],
@@ -5178,8 +5311,10 @@ emitBuiltinRuntimeBindingText : Str -> Str
 emitBuiltinRuntimeBindingText name = if name == "textConcat" then "textConcat{runtime=textConcat, symbol=clasp_rt_text_concat, type=[Str] -> Str}" else if name == "textJoin" then "textJoin{runtime=textJoin, symbol=clasp_rt_text_join, type=Str -> [Str] -> Str}" else if name == "textSplit" then "textSplit{runtime=textSplit, symbol=clasp_rt_text_split, type=Str -> Str -> [Str]}" else if name == "textChars" then "textChars{runtime=textChars, symbol=clasp_rt_text_chars, type=Str -> [Str]}" else if name == "textFingerprint64Hex" then "textFingerprint64Hex{runtime=textFingerprint64Hex, symbol=clasp_rt_text_fingerprint64_hex, type=Str -> Str}" else if name == "textPrefix" then "textPrefix{runtime=textPrefix, symbol=clasp_rt_text_prefix, type=Str -> Str -> Result Str}" else if name == "textSplitFirst" then "textSplitFirst{runtime=textSplitFirst, symbol=clasp_rt_text_split_first, type=Str -> Str -> Result Str}" else if name == "dictEmpty" then "dictEmpty{runtime=dictEmpty, symbol=clasp_rt_dict_empty, type=Dict Str a}" else if name == "dictSet" then "dictSet{runtime=dictSet, symbol=clasp_rt_dict_set, type=Str -> a -> Dict Str a -> Dict Str a}" else if name == "dictGet" then "dictGet{runtime=dictGet, symbol=clasp_rt_dict_get, type=Str -> Dict Str a -> Result a}" else if name == "dictHas" then "dictHas{runtime=dictHas, symbol=clasp_rt_dict_has, type=Str -> Dict Str a -> Bool}" else if name == "dictRemove" then "dictRemove{runtime=dictRemove, symbol=clasp_rt_dict_remove, type=Str -> Dict Str a -> Dict Str a}" else if name == "dictKeys" then "dictKeys{runtime=dictKeys, symbol=clasp_rt_dict_keys, type=Dict Str a -> [Str]}" else if name == "dictValues" then "dictValues{runtime=dictValues, symbol=clasp_rt_dict_values, type=Dict Str a -> [a]}" else if name == "text" then "text{runtime=viewText, symbol=clasp_rt_view_text, type=Str -> View}" else if name == "element" then "element{runtime=viewElement, symbol=clasp_rt_view_element, type=Str -> View -> View}" else if name == "styled" then "styled{runtime=viewStyled, symbol=clasp_rt_view_styled, type=Str -> View -> View}" else if name == "link" then "link{runtime=viewLink, symbol=clasp_rt_view_link, type=Str -> View -> View}" else if name == "form" then "form{runtime=viewForm, symbol=clasp_rt_view_form, type=Str -> Str -> View -> View}" else if name == "input" then "input{runtime=viewInput, symbol=clasp_rt_view_input, type=Str -> Str -> Str -> View}" else if name == "submit" then "submit{runtime=viewSubmit, symbol=clasp_rt_view_submit, type=Str -> View}" else if name == "systemPrompt" then "systemPrompt{runtime=systemPrompt, symbol=clasp_rt_system_prompt, type=Str -> Prompt}" else if name == "assistantPrompt" then "assistantPrompt{runtime=assistantPrompt, symbol=clasp_rt_assistant_prompt, type=Str -> Prompt}" else if name == "userPrompt" then "userPrompt{runtime=userPrompt, symbol=clasp_rt_user_prompt, type=Str -> Prompt}" else if name == "appendPrompt" then "appendPrompt{runtime=appendPrompt, symbol=clasp_rt_append_prompt, type=Prompt -> Prompt -> Prompt}" else if name == "promptText" then "promptText{runtime=promptText, symbol=clasp_rt_prompt_text, type=Prompt -> Str}" else if name == "page" then "page{runtime=page, symbol=clasp_rt_page, type=Str -> View -> Page}" else if name == "redirect" then "redirect{runtime=redirect, symbol=clasp_rt_redirect, type=Str -> Redirect}" else if name == "principal" then "principal{runtime=principal, symbol=clasp_rt_principal, type=Str -> Principal}" else if name == "tenant" then "tenant{runtime=tenant, symbol=clasp_rt_tenant, type=Str -> Tenant}" else if name == "resourceIdentity" then "resourceIdentity{runtime=resourceIdentity, symbol=clasp_rt_resource_identity, type=Str -> Str -> ResourceIdentity}" else if name == "authSession" then "authSession{runtime=authSession, symbol=clasp_rt_auth_session, type=Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession}" else if name == "argv" then "argv{runtime=argv, symbol=clasp_rt_argv, type=[Str]}" else if name == "timeUnixMs" then "timeUnixMs{runtime=timeUnixMs, symbol=clasp_rt_time_unix_ms, type=Int}" else if name == "envVar" then "envVar{runtime=envVar, symbol=clasp_rt_env_var, type=Str -> Result Str}" else if name == "pathJoin" then "pathJoin{runtime=pathJoin, symbol=clasp_rt_path_join, type=[Str] -> Str}" else if name == "pathDirname" then "pathDirname{runtime=pathDirname, symbol=clasp_rt_path_dirname, type=Str -> Str}" else if name == "pathBasename" then "pathBasename{runtime=pathBasename, symbol=clasp_rt_path_basename, type=Str -> Str}" else if name == "fileExists" then "fileExists{runtime=fileExists, symbol=clasp_rt_file_exists, type=Str -> Bool}" else if name == "readFile" then "readFile{runtime=readFile, symbol=clasp_rt_read_file, type=Str -> Result Str}" else if name == "writeFile" then "writeFile{runtime=writeFile, symbol=clasp_rt_write_file, type=Str -> Str -> Result Str}" else if name == "appendFile" then "appendFile{runtime=appendFile, symbol=clasp_rt_append_file, type=Str -> Str -> Result Str}" else if name == "mkdirAll" then "mkdirAll{runtime=mkdirAll, symbol=clasp_rt_mkdir_all, type=Str -> Result Str}" else ""
 emitNativeRuntimeBindingImage : HostedForeignDeclAst -> Str
 emitNativeRuntimeBindingImage foreignDecl = emitRuntimeBindingImage (foreignDeclName foreignDecl) (foreignDeclRuntimeName foreignDecl) (renderHostedType (foreignDeclTypeAst foreignDecl))
+emitNativeMetadataField : Str -> Str -> Str
+emitNativeMetadataField name value = textConcat [name, "=", encode value]
 emitNativeRuntimeBindingText : HostedForeignDeclAst -> Str
-emitNativeRuntimeBindingText foreignDecl = textConcat [foreignDeclName foreignDecl, "{runtime=", foreignDeclRuntimeName foreignDecl, ", symbol=", nativeRuntimeBindingSymbol (foreignDeclRuntimeName foreignDecl), ", type=", renderHostedType (foreignDeclTypeAst foreignDecl), "}"]
+emitNativeRuntimeBindingText foreignDecl = textConcat ["runtimeBinding{", emitNativeMetadataField "name" (foreignDeclName foreignDecl), ", ", emitNativeMetadataField "runtime" (foreignDeclRuntimeName foreignDecl), ", ", emitNativeMetadataField "symbol" (nativeRuntimeBindingSymbol (foreignDeclRuntimeName foreignDecl)), ", ", emitNativeMetadataField "type" (renderHostedType (foreignDeclTypeAst foreignDecl)), "}"]
 emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
 emitNativeBuiltinRuntimeBindingImages bindingNames = {
   let mut rendered = [];
@@ -6183,8 +6318,21 @@ checkSourceText : Str -> Str
 checkSourceText source = renderModuleSummary (sourceModule source)
 explainSourceText : Str -> Str
 explainSourceText source = renderModuleSummary (sourceModule source)
+compileSummaryIsError : Str -> Bool
+compileSummaryIsError summary = match textPrefix summary "In `" {
+  Ok tail -> true,
+  Err missing -> match textPrefix summary "ERROR:" {
+    Ok tail -> true,
+    Err missingPrefix -> false
+  }
+}
+compileCheckedModuleText : HostedModuleAst -> [LowerDeclText] -> Str
+compileCheckedModuleText modl decls = {
+  let summary = renderModuleSummary modl;
+  if compileSummaryIsError summary then textConcat ["ERROR:", summary] else emitModule modl decls
+}
 compileSourceText : Str -> Str
-compileSourceText source = emitModule (sourceModule source) (sourceLoweredDecls source)
+compileSourceText source = compileCheckedModuleText (sourceModule source) (sourceLoweredDecls source)
 nativeSourceText : Str -> Str
 nativeSourceText source = emitNativeModule (sourceModule source) (sourceLoweredDecls source)
 nativeImageSourceText : Str -> Str
@@ -6214,8 +6362,8 @@ explainProjectText : Str -> Str
 explainProjectText bundle = checkProjectText bundle
 compileProjectText : Str -> Str
 compileProjectText bundle = match resolveProjectBundle bundle {
-  HostedProjectBundleOk modl -> emitModule modl (lowerModule modl),
-  HostedProjectBundleError message -> textConcat ["// compiler-selfhost project error: ", message]
+  HostedProjectBundleOk modl -> compileCheckedModuleText modl (lowerModule modl),
+  HostedProjectBundleError message -> textConcat ["ERROR:", message]
 }
 nativeProjectText : Str -> Str
 nativeProjectText bundle = match resolveProjectBundle bundle {

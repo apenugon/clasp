@@ -314,7 +314,7 @@ runPlanner = {
                   managerProjectRoot
                   [
                     "bash",
-                    "-lc",
+                    "-c",
                     textJoin "\n" [
                       "prompt_path=\"$1\"",
                       "shift",

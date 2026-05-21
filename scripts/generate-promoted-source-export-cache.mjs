@@ -16,6 +16,11 @@ const defaultSources = [
 const projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n";
 const defaultNativeImageEntries = [
   {
+    source: "examples/hello.clasp",
+    exportName: "nativeImageSourceText",
+    outputPath: "src/stage1.hello.native.image.json",
+  },
+  {
     source: "examples/swarm-native/GoalManager.clasp",
     exportName: "nativeImageProjectText",
     outputPath: "src/stage1.goal-manager.native.image.json",

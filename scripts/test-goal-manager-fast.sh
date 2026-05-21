@@ -907,6 +907,7 @@ run_task_workspace_harness() {
 
   env \
     XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
+    CLASP_PROJECT_ROOT="$project_root" \
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
     CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON="\"$task_workspace_base\"" \
     CLASP_TASK_WORKSPACE_HARNESS_TASK_ID_JSON="\"$task_id\"" \
@@ -1311,6 +1312,22 @@ test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.cla
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/.clasp-task-baselines/stale-baseline/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/runtime/target/debug/sentinel.txt"
 test ! -e "$snapshot_exclude_workspace/.clasp-task-baselines/benchmark-gap/runtime/target/debug/sentinel.txt"
+for promoted_artifact in \
+  src/stage1.native.image.json \
+  src/stage1.compiler.native.image.json \
+  src/embedded.native.image.json \
+  src/embedded.compiler.native.image.json \
+  src/stage1.native.native.image.json \
+  src/stage1.hello.native.image.json \
+  src/stage1.goal-manager.native.image.json \
+  src/stage1.task-workspace-runtime-harness.native.image.json \
+  src/stage1.compiler.source-export-cache-v1.json \
+  src/stage1.compiler.module-summary-cache-v2.json
+do
+  test -f "$snapshot_exclude_workspace/$promoted_artifact"
+  test -f "$snapshot_exclude_workspace/.clasp-task-workspaces/benchmark-gap/$promoted_artifact"
+  test -f "$snapshot_exclude_workspace/.clasp-task-baselines/benchmark-gap/$promoted_artifact"
+done
 
 trace_case "task-workspace-stale-symlink-recovery"
 stale_symlink_state="$test_root_abs/stale-symlink-state"

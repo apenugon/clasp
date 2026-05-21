@@ -1,0 +1,35 @@
+{
+  "taskId": "wave-3-W3-T01",
+  "role": "compiler-inspector",
+  "selectedAffordance": "state-heavy record ergonomics for orchestration code",
+  "currentBehavior": [
+    "Record update syntax is parsed as `with subject { field = value }` through the parser's record-update path.",
+    "Record destructuring is parsed through `let { field, other } = value in ...` by expanding to field-access let bindings.",
+    "Dict state is available through compiler-known builtins such as `dictEmpty`, `dictSet`, `dictGet`, and `dictKeys`.",
+    "Contextual empty lists and generic records already have checker support and are used by orchestration examples."
+  ],
+  "gapClosedThisAttempt": "Added a focused compiler-slice fixture and affected-verifier route so record update, record destructuring, Dict state, contextual empty lists, and polymorphic records are covered by a cheap `claspc check` plus `claspc run` scenario instead of only by larger native harnesses.",
+  "exactFiles": [
+    "examples/compiler-ergonomics.clasp",
+    "scripts/verify-compiler-slice.sh",
+    "scripts/test-verify-compiler-slice.sh",
+    "scripts/verify-affected.mjs",
+    "scripts/test-verify-affected.sh",
+    "scripts/test-verify-all.sh",
+    "examples/README.md",
+    "agents/feedback/W3-T01-compiler-inspector.json"
+  ],
+  "expectedTests": [
+    "bash -n scripts/verify-compiler-slice.sh scripts/test-verify-compiler-slice.sh scripts/test-verify-affected.sh scripts/test-verify-all.sh",
+    "node --check scripts/verify-affected.mjs",
+    "timeout 120 bash scripts/test-verify-compiler-slice.sh",
+    "timeout 120 bash scripts/test-verify-affected.sh",
+    "timeout 120 bash scripts/test-verify-all.sh",
+    "timeout 120 bash scripts/verify-compiler-slice.sh ergonomics"
+  ],
+  "riskNotes": [
+    "This slice closes discoverable scenario coverage, not a new compiler semantic.",
+    "The deprecated bootstrap compiler source tree is absent in this checkout, so bootstrap parity could not be inspected or changed.",
+    "Full `bash scripts/verify-all.sh` remains an integration/signoff responsibility because this task forbids running it."
+  ]
+}

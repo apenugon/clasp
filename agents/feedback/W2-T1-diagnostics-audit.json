@@ -1,0 +1,46 @@
+{
+  "task_id": "wave-2-W2-T1-diagnostics-audit",
+  "role": "compiler-explorer-builder",
+  "summary": "Selected and implemented a bounded checker diagnostic improvement for the native self-hosted compiler path: record literal missing-field failures now become structured diagnostics instead of falling through as generic checker text.",
+  "diagnostic_paths_inspected": {
+    "self_hosted": [
+      "src/Compiler/Checker.clasp emits `Record literal for ... is missing field ...` checker messages.",
+      "src/Compiler/Driver/Frontend.clasp exposes checker summaries through `checkSourceText` and project check exports.",
+      "runtime/claspc.rs classifies selected self-hosted checker text into machine-readable native diagnostics."
+    ],
+    "bootstrap": [
+      "test/Main.hs still asserts bootstrap-style diagnostic codes such as `E_RECORD_MISSING_FIELDS`.",
+      "clasp-compiler.cabal still references `deprecated/bootstrap/src`, but that source tree is absent in this checkout, so implementation work targeted the live native/self-hosted path."
+    ],
+    "tests": [
+      "scripts/test-native-claspc-diagnostics.sh is the focused scenario-level gate for native parser/checker diagnostics.",
+      "test/Main.hs contains richer Haskell diagnostic assertions, but the referenced bootstrap library sources are not present in this workspace."
+    ]
+  },
+  "bounded_improvement": {
+    "behavior": "When checking `User { name = \"Ada\" }` against `record User = { name : Str, active : Bool }`, `claspc --json check` now emits `E_RECORD_MISSING_FIELDS` with phase `checker`, context `main`, target `User`, expected `active`, actual `missing field`, and a primary span at the record literal use.",
+    "files_changed": [
+      "runtime/claspc.rs",
+      "scripts/test-native-claspc-diagnostics.sh"
+    ],
+    "expected_human_output": "Pretty diagnostics include `CLASP_DIAGNOSTIC phase=checker code=E_RECORD_MISSING_FIELDS ... context=\"main\" target=\"User\" expected=\"active\" actual=\"missing field\"` before the checker message.",
+    "expected_json_output": "JSON diagnostics include code, phase, message, context, target, expected, actual, file, line, column, and primarySpan for the missing record field."
+  },
+  "verification_commands": [
+    "bash -n scripts/test-native-claspc-diagnostics.sh",
+    "timeout 240 env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT=\"$PWD\" bash scripts/test-native-claspc-diagnostics.sh",
+    "git diff --check"
+  ],
+  "commands_not_run": [
+    "bash scripts/verify-all.sh was intentionally not run per task instruction.",
+    "rustfmt --check runtime/claspc.rs and cargo test were attempted but unavailable because rustfmt/cargo are not installed directly on PATH."
+  ],
+  "follow_ups": [
+    "If the bootstrap Haskell source tree is restored in this checkout, mirror the native record-missing-field assertions in `test/Main.hs` for parity.",
+    "Consider the same structured treatment for `Record literal ... includes unknown field ...` and `Record update ... includes unknown field ...` as a separate small diagnostic slice."
+  ],
+  "residual_risks": [
+    "The diagnostic classifier still derives structure from checker message text; a future typed diagnostic value from `src/Compiler/Checker.clasp` would be more robust.",
+    "The absent `deprecated/bootstrap/src` tree prevents direct bootstrap diagnostic source inspection in this task workspace."
+  ]
+}

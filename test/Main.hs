@@ -4601,6 +4601,27 @@ compileTests =
             assertBool "expected constructor function" ("export function Busy" `T.isInfixOf` emitted)
             assertBool "expected nullary constructor" ("export const Idle" `T.isInfixOf` emitted)
             assertBool "expected switch for match" ("switch ($match" `T.isInfixOf` emitted)
+    , testCase "compiles an agent-generated workflow program through the JavaScript pipeline" $
+        case compileSource "agent-workflow" agentGeneratedWorkflowSource of
+          Left err ->
+            assertFailure ("expected agent workflow compile to succeed:\n" <> T.unpack (renderDiagnosticBundle err))
+          Right emitted -> do
+            assertBool "expected generated record export" ("export const artifact = { path: \"src/Main.clasp\", passed: false };" `T.isInfixOf` emitted)
+            assertBool "expected generated status function" ("export function chooseStatus(item)" `T.isInfixOf` emitted)
+            assertBool "expected generated match lowering" ("if (__match[0] === \"NeedsChanges\")" `T.isInfixOf` emitted)
+            let compiledPath = "dist/agent-generated-workflow.mjs"
+            createDirectoryIfMissing True (takeDirectory compiledPath)
+            TIO.writeFile compiledPath emitted
+            absoluteCompiledPath <- makeAbsolute compiledPath
+            runtimeOutput <- runNodeScript $
+              T.pack . unlines $
+                [ "import * as compiledModule from " <> show ("file://" <> absoluteCompiledPath) <> ";"
+                , "console.log(JSON.stringify({ main: compiledModule.main, direct: compiledModule.renderStatus(compiledModule.chooseStatus(compiledModule.artifact)) }));"
+                ]
+            assertEqual
+              "expected agent workflow runtime output"
+              "{\"main\":\"needs-changes:src/Main.clasp\",\"direct\":\"needs-changes:src/Main.clasp\"}"
+              runtimeOutput
     , testCase "compile emits compiler-known Result constructors and evaluates matches" $
         case compileSource "result" builtinResultSource of
           Left err ->
@@ -9286,6 +9307,37 @@ helloSource =
     , "id v = v"
     , ""
     , "main = id hello"
+    ]
+
+agentGeneratedWorkflowSource :: Text
+agentGeneratedWorkflowSource =
+  T.unlines
+    [ "module Main"
+    , ""
+    , "type ReviewStatus = Ready | NeedsChanges Str"
+    , ""
+    , "record Artifact = {"
+    , "  path : Str,"
+    , "  passed : Bool"
+    , "}"
+    , ""
+    , "artifact : Artifact"
+    , "artifact = Artifact {"
+    , "  path = \"src/Main.clasp\","
+    , "  passed = false"
+    , "}"
+    , ""
+    , "chooseStatus : Artifact -> ReviewStatus"
+    , "chooseStatus item = if item.passed then Ready else NeedsChanges item.path"
+    , ""
+    , "renderStatus : ReviewStatus -> Str"
+    , "renderStatus status = match status {"
+    , "  Ready -> \"ready\","
+    , "  NeedsChanges path -> textJoin \":\" [\"needs-changes\", path]"
+    , "}"
+    , ""
+    , "main : Str"
+    , "main = renderStatus (chooseStatus artifact)"
     ]
 
 shadowedDeclRenameSource :: Text

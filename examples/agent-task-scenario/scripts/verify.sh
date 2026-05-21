@@ -27,17 +27,20 @@ trap cleanup EXIT
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 check_output="$test_root/check.json"
 run_output="$test_root/run.json"
+compiled_js="$test_root/Main.mjs"
 
 (
   cd "$project_root"
   timeout "$timeout_secs" "$claspc_bin" --json check examples/agent-task-scenario/Main.clasp >"$check_output"
   timeout "$timeout_secs" "$claspc_bin" run examples/agent-task-scenario/Main.clasp >"$run_output"
+  timeout "$timeout_secs" "$claspc_bin" compile examples/agent-task-scenario/Main.clasp -o "$compiled_js" >/dev/null
 )
 
-node - "$check_output" "$run_output" <<'NODE'
+node - "$check_output" "$run_output" "$compiled_js" <<'NODE'
 const fs = require("node:fs");
+const { pathToFileURL } = require("node:url");
 
-const [checkPath, runPath] = process.argv.slice(2);
+const [checkPath, runPath, compiledPath] = process.argv.slice(2);
 const check = JSON.parse(fs.readFileSync(checkPath, "utf8"));
 const report = JSON.parse(fs.readFileSync(runPath, "utf8"));
 
@@ -45,6 +48,24 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function stableSnapshot(value) {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stableSnapshot(item));
+  }
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableSnapshot(value[key])]),
+  );
+}
+
+function stable(value) {
+  return JSON.stringify(stableSnapshot(value));
 }
 
 assert(check.status === "ok", `expected check status ok, got ${check.status}`);
@@ -62,6 +83,17 @@ assert(
   report.summary === "fixture:Add compact agent fixture:7:run-focused-verifier",
   `unexpected summary ${report.summary}`,
 );
+
+(async () => {
+  const compiled = await import(pathToFileURL(compiledPath).href);
+  const compiledReport = JSON.parse(compiled.main);
+  assert(typeof compiled.selectNextTask === "function", "compiled JS should export selectNextTask");
+  assert(typeof compiled.scenarioReport === "function", "compiled JS should export scenarioReport");
+  assert(stable(compiledReport) === stable(report), "compiled JS main should match claspc run report");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 NODE
 
 printf 'agent-task-scenario: ok\n'

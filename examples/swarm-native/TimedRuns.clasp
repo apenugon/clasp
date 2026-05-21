@@ -57,7 +57,7 @@ timeoutCommand : SwarmCommand
 timeoutCommand =
   commandSpec workspaceCwd [
     "bash",
-    "-lc",
+    "-c",
     "printf timed-out; printf timed-err >&2; tail -f \"$1\" >&1 2>&2 & wait",
     "bash",
     holdPath

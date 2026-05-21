@@ -14,7 +14,7 @@ plannerPromptPathForWave wave =
 codexCommand : Str -> Str -> Str -> [Str]
 codexCommand schemaPath reportPath promptPath = [
   "bash",
-  "-lc",
+  "-c",
   textJoin "\n" [
     "prompt_path=\"$1\"",
     "shift",

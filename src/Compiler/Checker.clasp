@@ -1401,6 +1401,51 @@ hasDeclParams decl = {
   false
 }
 
+textInList : [Str] -> Str -> Bool
+textInList values target = {
+  for value in values {
+    if value == target then return true else false
+  };
+  false
+}
+
+metadataDeclarationShapeError : HostedDeclAst -> Str
+metadataDeclarationShapeError decl =
+  if declIsMetadataName decl then
+    if declIsMetadataDeclaration decl then
+      ""
+    else
+      "Reserved declaration `metadata` must use `metadata <key> = \"value\"` with exactly one key and a string literal value."
+  else
+    ""
+
+validateMetadataDeclarationList : [HostedDeclAst] -> [Str] -> Str
+validateMetadataDeclarationList decls seenKeys = {
+  let mut keys = seenKeys;
+  for decl in decls {
+    if declIsMetadataName decl then {
+      let shapeError = metadataDeclarationShapeError decl;
+      if shapeError == "" then {
+        let key = metadataDeclKey decl;
+        if textInList keys key then {
+          return textConcat ["Duplicate metadata key `", key, "`."]
+        } else {
+          keys = prepend key keys;
+          keys
+        }
+      } else {
+        return shapeError
+      }
+    } else {
+      keys
+    }
+  };
+  ""
+}
+
+validateModuleMetadataDeclarations : HostedModuleAst -> Str
+validateModuleMetadataDeclarations modl = validateMetadataDeclarationList (moduleDeclarations modl) emptyRenderedTexts
+
 inferAppendBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
 inferAppendBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
   let left = firstHostedExpr args;
@@ -2371,14 +2416,21 @@ inferRecordFieldValue typeDecls recordDecls env localEnv fnContext recordDecl fi
   }
 }
 
-findUnknownRecordLiteralField : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
-findUnknownRecordLiteralField recordDecl fields = {
+findRecordLiteralFieldValidationFailure : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFieldValidationFailure recordDecl fields = {
+  let mut seenFields = emptyRenderedTexts;
   for exprField in fields {
-    match lookupRecordField (recordDeclFields recordDecl) (recordExprFieldName exprField) {
-      FoundRecordField fieldDecl ->
-        "",
-      MissingRecordField missingField ->
-        return missingField
+    let fieldName = recordExprFieldName exprField;
+    if containsText seenFields fieldName then {
+      return textConcat ["Record literal for `", recordDeclName recordDecl, "` repeats field `", fieldName, "`."]
+    } else {
+      seenFields = appendCheckerRenderedText seenFields fieldName;
+      match lookupRecordField (recordDeclFields recordDecl) fieldName {
+        FoundRecordField fieldDecl ->
+          "",
+        MissingRecordField missingField ->
+          return textConcat ["Record literal for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."]
+      }
     }
   };
   ""
@@ -2402,8 +2454,8 @@ inferRecordExpr typeDecls recordDecls env localEnv fnContext recordName fields =
   MissingRecord missing ->
     InferExprError (textConcat ["Unknown record `", missing, "`."]),
   FoundRecord recordDecl -> {
-    let unknownField = findUnknownRecordLiteralField recordDecl fields;
-    if unknownField == "" then {
+    let fieldValidationFailure = findRecordLiteralFieldValidationFailure recordDecl fields;
+    if fieldValidationFailure == "" then {
       match inferRecordLiteralSubstitutions typeDecls recordDecls env localEnv fnContext recordDecl fields {
         RecordSubstitutionOk substitutions ->
           InferredExpr (applyTypeSubstitutions (recordDeclResultType recordDecl) substitutions),
@@ -2411,32 +2463,38 @@ inferRecordExpr typeDecls recordDecls env localEnv fnContext recordName fields =
           InferExprError message
       }
     } else {
-      InferExprError (textConcat ["Record literal for `", recordName, "` includes unknown field `", unknownField, "`."])
+      InferExprError fieldValidationFailure
     }
   }
 }
 
 findRecordUpdateFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> [TypeSubstitution] -> Str
 findRecordUpdateFailure typeDecls recordDecls env localEnv fnContext recordDecl fields substitutions = {
+  let mut seenFields = emptyRenderedTexts;
   for exprField in fields {
     let fieldName = recordExprFieldName exprField;
-    match lookupRecordField (recordDeclFields recordDecl) fieldName {
-      MissingRecordField missingField ->
-        return textConcat ["Record update for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."],
-      FoundRecordField fieldDecl ->
-        match inferExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue exprField) {
-          InferExprError message ->
-            return message,
-          InferredExpr actualType -> {
-            let expectedType = applyTypeSubstitutions (typeFromHostedTypeAst (recordFieldDeclType fieldDecl)) substitutions;
-            match unifyTypes expectedType actualType emptyTypeSubstitutions {
-              UnifiedTypes next ->
-                "",
-              TypeUnifyError ->
-                return typeMismatchMessage fieldName expectedType actualType
+    if containsText seenFields fieldName then {
+      return textConcat ["Record update for `", recordDeclName recordDecl, "` repeats field `", fieldName, "`."]
+    } else {
+      seenFields = appendCheckerRenderedText seenFields fieldName;
+      match lookupRecordField (recordDeclFields recordDecl) fieldName {
+        MissingRecordField missingField ->
+          return textConcat ["Record update for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."],
+        FoundRecordField fieldDecl ->
+          match inferExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue exprField) {
+            InferExprError message ->
+              return message,
+            InferredExpr actualType -> {
+              let expectedType = applyTypeSubstitutions (typeFromHostedTypeAst (recordFieldDeclType fieldDecl)) substitutions;
+              match unifyTypes expectedType actualType emptyTypeSubstitutions {
+                UnifiedTypes next ->
+                  "",
+                TypeUnifyError ->
+                  return typeMismatchMessage fieldName expectedType actualType
+              }
             }
           }
-        }
+      }
     }
   };
   ""
@@ -2971,7 +3029,9 @@ runInferModulePass typeDecls recordDecls env decls = {
   let mut nextEnv = env;
   let mut progress = false;
   for decl in decls {
-    nextEnv = if hasAnnotationAst (declAnnotation decl) then {
+    nextEnv = if declIsMetadataDeclaration decl then {
+      nextEnv
+    } else if hasAnnotationAst (declAnnotation decl) then {
       nextEnv
     } else {
       match inferDecl typeDecls recordDecls nextEnv decl {
@@ -3003,11 +3063,15 @@ resolveInferModuleBindings typeDecls recordDecls env decls = {
 findInferModuleFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> Str
 findInferModuleFailure typeDecls recordDecls env decls = {
   for decl in decls {
-    match inferDecl typeDecls recordDecls env decl {
-      InferredDecl binding ->
-        "",
-      InferDeclError message ->
-        return textConcat ["In `", declName decl, "`: ", message]
+    if declIsMetadataDeclaration decl then {
+      ""
+    } else {
+      match inferDecl typeDecls recordDecls env decl {
+        InferredDecl binding ->
+          "",
+        InferDeclError message ->
+          return textConcat ["In `", declName decl, "`: ", message]
+      }
     }
   };
   ""
@@ -3027,7 +3091,9 @@ moduleDeclarationsFullyAnnotated : HostedModuleAst -> Bool
 moduleDeclarationsFullyAnnotated modl = {
   let mut fullyAnnotated = true;
   for decl in moduleDeclarations modl {
-    if hasAnnotationAst (declAnnotation decl) then {
+    if declIsMetadataDeclaration decl then {
+      fullyAnnotated
+    } else if hasAnnotationAst (declAnnotation decl) then {
       fullyAnnotated
     } else {
       fullyAnnotated = false;
@@ -3045,6 +3111,60 @@ collectForeignBindings modl = {
     bindings
   };
   bindings
+}
+
+jsInteropIdentifierLowercaseCharIsSafe : Str -> Bool
+jsInteropIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+
+jsInteropIdentifierDigitCharIsSafe : Str -> Bool
+jsInteropIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+
+jsInteropIdentifierStartCharIsSafe : Str -> Bool
+jsInteropIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsInteropIdentifierLowercaseCharIsSafe char
+
+jsInteropIdentifierPartCharIsSafe : Str -> Bool
+jsInteropIdentifierPartCharIsSafe char = if jsInteropIdentifierStartCharIsSafe char then true else jsInteropIdentifierDigitCharIsSafe char
+
+jsInteropIdentifierIsSafe : Str -> Bool
+jsInteropIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsInteropIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsInteropIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+
+foreignInteropValidationError : HostedForeignDeclAst -> Str
+foreignInteropValidationError foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then {
+      if jsInteropIdentifierIsSafe (foreignDeclRuntimeName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign import runtime name `", foreignDeclRuntimeName foreignDecl, "` must be a safe JavaScript identifier."]
+    } else {
+      textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."]
+    },
+  HostedForeignRuntime ->
+    if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."]
+}
+
+moduleForeignInteropValidationError : HostedModuleAst -> Str
+moduleForeignInteropValidationError modl = {
+  for foreignDecl in moduleForeignDeclarations modl {
+    let message = foreignInteropValidationError foreignDecl;
+    if message == "" then "" else return message
+  };
+  ""
 }
 
 collectConstructorBindings : [HostedTypeDeclAst] -> [TypeBinding]
@@ -3710,20 +3830,34 @@ inferModuleBindings modl = inferModuleBindingsWithImportedBindings emptyTypeBind
 
 inferModuleBindingsWithImportedBindings : [TypeBinding] -> HostedModuleAst -> InferModuleResult
 inferModuleBindingsWithImportedBindings importedBindings modl = {
-  let typeDecls = effectiveModuleTypeDecls modl;
-  let recordDecls = effectiveModuleRecordDecls modl;
-  let initialEnv = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (append (collectAnnotatedBindings modl) importedBindings)));
-  let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls initialEnv (moduleDeclarations modl);
-  let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);
-  if failure == "" then InferredModule resolvedEnv else InferModuleError failure
+  let foreignInteropError = moduleForeignInteropValidationError modl;
+  if foreignInteropError == "" then {
+    let metadataError = validateModuleMetadataDeclarations modl;
+    if metadataError == "" then {
+      let typeDecls = effectiveModuleTypeDecls modl;
+      let recordDecls = effectiveModuleRecordDecls modl;
+      let initialEnv = append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (append (collectAnnotatedBindings modl) importedBindings)));
+      let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls initialEnv (moduleDeclarations modl);
+      let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);
+      if failure == "" then InferredModule resolvedEnv else InferModuleError failure
+    } else {
+      InferModuleError metadataError
+    }
+  } else {
+    InferModuleError foreignInteropError
+  }
 }
 
 renderModuleSummaryFromEnv : [TypeBinding] -> HostedModuleAst -> Str
 renderModuleSummaryFromEnv env modl = {
   let mut summaries = emptyRenderedTexts;
   for decl in moduleDeclarations modl {
-    summaries = appendCheckerRenderedText summaries (renderDeclSummary env decl);
-    summaries
+    if declIsMetadataDeclaration decl then {
+      summaries
+    } else {
+      summaries = appendCheckerRenderedText summaries (renderDeclSummary env decl);
+      summaries
+    }
   };
   textJoin "\n" summaries
 }

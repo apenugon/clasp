@@ -72,10 +72,17 @@ reconcilePlannedTasks report wave objectiveTasks = {
           retryChildLoopMissingReport spec childReport
         else
           recordPlannedTaskFailure spec childReport in
+      let mailboxShouldWrite =
+        if taskStatus == "completed" then
+          false
+        else if taskStatus == "failed" then
+          childReport.verdict == "pass"
+        else
+          true in
       let mailboxWriteError =
         if taskError != "" then
           ""
-        else if taskStatusIsTerminal taskStatus then
+        else if mailboxShouldWrite == false then
           ""
         else
           appendMailboxMessages (taskMailboxMessagesForCompletedSpec wave spec childReport) in

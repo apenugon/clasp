@@ -52,6 +52,9 @@ if [[ "$json_mode" == "1" && "$command" == "check" ]]; then
     examples/compiler-emitter.clasp)
       printf '{"status":"ok","implementation":"clasp-native","summary":"emitModule : [LowerDeclText] -> Str"}\n'
       ;;
+    examples/compiler-ergonomics.clasp)
+      printf '{"status":"ok","implementation":"clasp-native","summary":"snapshot : ErgonomicsSnapshot"}\n'
+      ;;
     *)
       printf 'unexpected check entry: %s\n' "$entry" >&2
       exit 1
@@ -74,6 +77,9 @@ if [[ "$json_mode" == "0" && "$command" == "run" ]]; then
     examples/compiler-emitter.clasp)
       printf '{"arrayLiteral":"[\\"Ada\\", \\"Grace\\", \\"Linus\\"]","moduleText":"export const names = [\\"Ada\\", \\"Grace\\", \\"Linus\\"];\\nexport function renderNames(names) { return JSON.stringify(names); }"}\n'
       ;;
+    examples/compiler-ergonomics.clasp)
+      printf '{"selectedId":"repair","selectedStatus":"running","statusLookup":"running","queueCount":1,"blockerCount":0,"boxValue":"running","summary":"repair:running:running:unblocked"}\n'
+      ;;
     *)
       printf 'unexpected run entry: %s\n' "$entry" >&2
       exit 1
@@ -93,6 +99,8 @@ CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-com
   grep -F -- '--check-only' >/dev/null
 CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --list |
   grep -F 'lower' >/dev/null
+CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" --list |
+  grep -F 'ergonomics' >/dev/null
 
 check_only_log="$test_root/check-only.log"
 CLASP_PROJECT_ROOT="$project_copy" \
@@ -131,13 +139,23 @@ CLASP_PROJECT_ROOT="$project_copy" \
   CLASP_TEST_FAKE_CLASPC_LOG="$all_log" \
   CLASP_COMPILER_SLICE_TIMEOUT_SECS=3 \
   "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" all |
-  grep -F 'verify-compiler-slice: ok (parser checker lower emitter)' >/dev/null
+  grep -F 'verify-compiler-slice: ok (parser checker lower emitter ergonomics)' >/dev/null
+ergonomics_log="$test_root/ergonomics.log"
+CLASP_PROJECT_ROOT="$project_copy" \
+  CLASP_CLASPC="$test_root/bin/fake-claspc" \
+  CLASP_TEST_FAKE_CLASPC_LOG="$ergonomics_log" \
+  "$bash_bin" "$project_copy/scripts/verify-compiler-slice.sh" ergonomics |
+  grep -F 'verify-compiler-slice: ok (ergonomics)' >/dev/null
 
 grep -F -- '--json check examples/compiler-parser.clasp' "$all_log" >/dev/null
 grep -F -- '--json check examples/compiler-checker.clasp' "$all_log" >/dev/null
 grep -F -- '--json check examples/compiler-lower.clasp' "$all_log" >/dev/null
 grep -F -- '--json check examples/compiler-emitter.clasp' "$all_log" >/dev/null
+grep -F -- '--json check examples/compiler-ergonomics.clasp' "$all_log" >/dev/null
 grep -F -- 'run examples/compiler-parser.clasp' "$all_log" >/dev/null
 grep -F -- 'run examples/compiler-checker.clasp' "$all_log" >/dev/null
 grep -F -- 'run examples/compiler-lower.clasp' "$all_log" >/dev/null
 grep -F -- 'run examples/compiler-emitter.clasp' "$all_log" >/dev/null
+grep -F -- 'run examples/compiler-ergonomics.clasp' "$all_log" >/dev/null
+grep -F -- '--json check examples/compiler-ergonomics.clasp' "$ergonomics_log" >/dev/null
+grep -F -- 'run examples/compiler-ergonomics.clasp' "$ergonomics_log" >/dev/null

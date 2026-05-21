@@ -412,7 +412,7 @@ taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
 taskLaunchRecordCommand spec =
   commandSpec "." [
     "bash",
-    "-lc",
+    "-c",
     textConcat ["printf launched-child-loop:", spec.taskId]
   ]
 

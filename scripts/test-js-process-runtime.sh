@@ -13,7 +13,16 @@ fi
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-js-process-runtime.XXXXXX")"
 program_module="$test_root/process-runtime.mjs"
+foreign_safety_module="$test_root/foreign-interop-safety.mjs"
 compiled_process_module="$test_root/compiled-process.mjs"
+safe_package_module="$test_root/safe-package-foreign.clasp"
+compiled_safe_package_module="$test_root/safe-package-foreign.mjs"
+unsafe_runtime_module="$test_root/unsafe-runtime-foreign.clasp"
+unsafe_runtime_module_output="$test_root/unsafe-runtime-foreign.mjs"
+unsafe_runtime_check_output="$test_root/unsafe-runtime-check.out"
+unsafe_runtime_compile_output="$test_root/unsafe-runtime-compile.out"
+unsafe_name_module="$test_root/unsafe-name-foreign.clasp"
+unsafe_name_check_output="$test_root/unsafe-name-check.out"
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
@@ -25,18 +34,21 @@ cleanup() {
 
 trap cleanup EXIT
 
-timeout "$timeout_secs" node --input-type=module - "$project_root" "$program_module" <<'NODE'
+timeout "$timeout_secs" node --input-type=module - "$project_root" "$program_module" "$foreign_safety_module" <<'NODE'
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
-const [projectRoot, programPath] = process.argv.slice(2);
+const [projectRoot, programPath, foreignSafetyPath] = process.argv.slice(2);
 const emitterPath = path.join(projectRoot, "src/Compiler/Emit/JavaScript.clasp");
 const checkerPath = path.join(projectRoot, "src/Compiler/Checker.clasp");
+const frontendDriverPath = path.join(projectRoot, "src/Compiler/Driver/Frontend.clasp");
 const nativeEmitterPath = path.join(projectRoot, "src/Compiler/Emit/Native.clasp");
 const runtimePath = path.join(projectRoot, "runtime/clasp_runtime.rs");
 const emitterSource = fs.readFileSync(emitterPath, "utf8");
 const checkerSource = fs.readFileSync(checkerPath, "utf8");
+const frontendDriverSource = fs.readFileSync(frontendDriverPath, "utf8");
 const nativeEmitterSource = fs.readFileSync(nativeEmitterPath, "utf8");
 const runtimeSource = fs.readFileSync(runtimePath, "utf8");
 
@@ -124,6 +136,40 @@ assert(
     runtimeSource.includes('("runCommandTimeoutJson", 3)'),
   "native runtime should implement and dispatch runCommandTimeoutJson",
 );
+assert(
+  emitterSource.includes("jsIdentifierIsSafe : Str -> Bool") &&
+    emitterSource.includes("emitJsIdentifier : Str -> Str") &&
+    emitterSource.includes("emitJsIdentifier (foreignDeclRuntimeName foreignDecl)") &&
+    emitterSource.includes("emitJsString specifier") &&
+    emitterSource.includes("emitJsString (foreignDeclSignature foreignDecl)"),
+  "JS emitter should validate package-import identifiers and encode foreign metadata strings",
+);
+assert(
+  emitterSource.includes("emitHostBindingEntry foreignDecl =") &&
+    emitterSource.includes("emitJsString (foreignDeclName foreignDecl)") &&
+    emitterSource.includes("emitJsString (foreignDeclRuntimeName foreignDecl)") &&
+    emitterSource.includes("emitPackageBindingEntry foreignDecl ="),
+  "JS host binding manifests should encode foreign names and package binding keys",
+);
+assert(
+  checkerSource.includes("moduleForeignInteropValidationError : HostedModuleAst -> Str") &&
+    checkerSource.includes("Package foreign import runtime name") &&
+    checkerSource.includes("must be a safe JavaScript identifier"),
+  "checker should reject unsafe JavaScript foreign/package import identifiers",
+);
+assert(
+  frontendDriverSource.includes("frontendDriverCompileCheckedModuleText : HostedModuleAst -> [LowerDeclText] -> Str") &&
+    frontendDriverSource.includes('textConcat ["ERROR:", summary]') &&
+    frontendDriverSource.includes('textConcat ["ERROR:", message]'),
+  "frontend compile driver should fail closed on checker and project errors",
+);
+assert(
+  nativeEmitterSource.includes("emitNativeStringLiteral : Str -> Str") &&
+    nativeEmitterSource.includes('textConcat ["string(", encode value, ")"]') &&
+    nativeEmitterSource.includes("emitNativeMetadataField : Str -> Str -> Str") &&
+    nativeEmitterSource.includes("runtimeBinding{"),
+  "native text emitter should encode string literals and custom runtime binding metadata",
+);
 
 const builtinPrelude = extractClaspStringList(emitterSource, "builtinPreludeLines").join("\n");
 assert(builtinPrelude.includes("function runCommandJson"), "builtin prelude should include runCommandJson");
@@ -135,6 +181,47 @@ assert(
   builtinPrelude.includes("$claspRunCommandJsonNode"),
   "builtin prelude should include the Node process fallback",
 );
+
+const foreignName = "safeForeign";
+const foreignRuntimeName = "safeRuntime";
+const foreignSpecifier = "local-\"pkg\nname";
+const foreignDeclarationPath = "./decls/\"lead\nindex.d.ts";
+const foreignSignature = "export declare function safeRuntime(value: string): string;\n// \"quoted\"";
+const safePackageBinding = "$claspPackageBinding_safeForeign";
+const encodedInteropModule = [
+  `import { ${foreignRuntimeName} as ${safePackageBinding} } from ${JSON.stringify(foreignSpecifier)};`,
+  "const $claspIdentityCodec = Object.freeze({ fromHost(value) { return value; }, toHost(value) { return value; } });",
+  "export const __claspHostBindings = [",
+  "  {",
+  `    name: ${JSON.stringify(foreignName)},`,
+  `    runtimeName: ${JSON.stringify(foreignRuntimeName)},`,
+  `    source: { kind: "npm", specifier: ${JSON.stringify(foreignSpecifier)} },`,
+  `    declaration: { path: ${JSON.stringify(foreignDeclarationPath)}, signature: ${JSON.stringify(foreignSignature)} },`,
+  "    params: [$claspIdentityCodec],",
+  "    returns: $claspIdentityCodec",
+  "  },",
+  "];",
+  "export const __claspPackageImports = [",
+  `  { name: ${JSON.stringify(foreignName)}, runtimeName: ${JSON.stringify(foreignRuntimeName)}, kind: "npm", specifier: ${JSON.stringify(foreignSpecifier)}, declaration: { path: ${JSON.stringify(foreignDeclarationPath)}, signature: ${JSON.stringify(foreignSignature)} } },`,
+  "];",
+  "const __claspPackageBindings = Object.freeze({",
+  `  ${JSON.stringify(foreignName)}: ${safePackageBinding},`,
+  `  ${JSON.stringify(foreignRuntimeName)}: ${safePackageBinding},`,
+  "});",
+  `export function ${foreignName}(arg0) { return arg0; }`,
+  "",
+].join("\n");
+fs.writeFileSync(foreignSafetyPath, encodedInteropModule);
+const safetyCheck = spawnSync(process.execPath, ["--check", foreignSafetyPath], { encoding: "utf8" });
+assert(
+  safetyCheck.status === 0,
+  `encoded foreign interop module should pass node --check:\n${safetyCheck.stderr}\n${safetyCheck.stdout}`,
+);
+assert(encodedInteropModule.includes(JSON.stringify(foreignSpecifier)), "foreign package specifier should be JSON encoded");
+assert(encodedInteropModule.includes(JSON.stringify(foreignDeclarationPath)), "foreign declaration path should be JSON encoded");
+assert(encodedInteropModule.includes(JSON.stringify(foreignSignature)), "foreign declaration signature should be JSON encoded");
+assert(!encodedInteropModule.includes(`specifier: "${foreignSpecifier}"`), "foreign specifier must not be emitted raw");
+assert(!encodedInteropModule.includes(`signature: "${foreignSignature}"`), "foreign signature must not be emitted raw");
 
 const emittedModule = [
   'import { spawnSync as $claspNodeSpawnSync } from "node:child_process";',
@@ -191,7 +278,66 @@ assert(timeout.timedOut === true, "timeout run should set timedOut");
 assert(timeout.error === "timeout", `unexpected timeout error ${JSON.stringify(timeout.error)}`);
 NODE
 
-claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh")"
+claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"
+
+mkdir -p "$test_root/node_modules/local-upper"
+printf 'export declare function upperCase(value: string): string;\n' >"$test_root/node_modules/local-upper/index.d.ts"
+
+cat >"$safe_package_module" <<'CLASP'
+module Main
+
+foreign upperCase : Str -> Str = "upperCase" from npm "local-upper" declaration "./node_modules/local-upper/index.d.ts"
+
+main : Str
+main = upperCase "lead"
+CLASP
+
+timeout "$timeout_secs" "$claspc_bin" --json compile "$safe_package_module" -o "$compiled_safe_package_module" >/dev/null
+timeout "$timeout_secs" node --check "$compiled_safe_package_module" >/dev/null
+grep -F 'import { upperCase as $claspPackageBinding_upperCase } from "local-upper";' "$compiled_safe_package_module" >/dev/null
+grep -F 'name: "upperCase"' "$compiled_safe_package_module" >/dev/null
+grep -F 'runtimeName: "upperCase"' "$compiled_safe_package_module" >/dev/null
+grep -F 'specifier: "local-upper"' "$compiled_safe_package_module" >/dev/null
+
+cat >"$unsafe_runtime_module" <<'CLASP'
+module Main
+
+foreign upperCase : Str -> Str = "bad-runtime" from npm "local-upper" declaration "./node_modules/local-upper/index.d.ts"
+
+main : Str
+main = "lead"
+CLASP
+
+if timeout "$timeout_secs" "$claspc_bin" --json check "$unsafe_runtime_module" >"$unsafe_runtime_check_output" 2>&1; then
+  printf 'unsafe package foreign runtime name unexpectedly passed check\n' >&2
+  exit 1
+fi
+grep -F 'Package foreign import runtime name `bad-runtime` must be a safe JavaScript identifier' "$unsafe_runtime_check_output" >/dev/null
+
+if timeout "$timeout_secs" "$claspc_bin" --json compile "$unsafe_runtime_module" -o "$unsafe_runtime_module_output" >"$unsafe_runtime_compile_output" 2>&1; then
+  printf 'unsafe package foreign runtime name unexpectedly compiled\n' >&2
+  exit 1
+fi
+grep -F 'Package foreign import runtime name `bad-runtime` must be a safe JavaScript identifier' "$unsafe_runtime_compile_output" >/dev/null
+if [[ -e "$unsafe_runtime_module_output" ]]; then
+  printf 'unsafe package foreign compile wrote a target module: %s\n' "$unsafe_runtime_module_output" >&2
+  exit 1
+fi
+
+cat >"$unsafe_name_module" <<'CLASP'
+module Main
+
+foreign bad-name : Str -> Str = "badName"
+
+main : Str
+main = "lead"
+CLASP
+
+if timeout "$timeout_secs" "$claspc_bin" --json check "$unsafe_name_module" >"$unsafe_name_check_output" 2>&1; then
+  printf 'unsafe foreign declaration name unexpectedly passed check\n' >&2
+  exit 1
+fi
+grep -F 'Foreign declaration name `bad-name` must be a safe JavaScript identifier' "$unsafe_name_check_output" >/dev/null
 
 timeout "$timeout_secs" "$claspc_bin" --json compile "$project_root/examples/legal-assistant-appbench/Process.clasp" -o "$compiled_process_module" >/dev/null
 

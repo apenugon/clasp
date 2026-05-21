@@ -135,7 +135,7 @@ validateTaskWorkspaceSnapshot : Str -> Str
 validateTaskWorkspaceSnapshot taskId =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     taskWorkspaceManifestValidationScript,
     "validate-task-workspace",
     taskWorkspaceRoot taskId,
@@ -203,7 +203,7 @@ createTaskWorkspaceSnapshot taskId = {
       let copied =
         match runCommand "." [
           "bash",
-          "-lc",
+          "-c",
           textConcat [
             "tar -cf - ",
             workspaceCloneExcludeFlags,
@@ -219,60 +219,65 @@ createTaskWorkspaceSnapshot taskId = {
       if copied.exitCode != 0 then
         textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
       else {
-        let baselineCreated =
-          match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceBaselineActualRoot taskId] {
-            Ok result -> result,
-            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-          } in
-        if baselineCreated.exitCode != 0 then
-          textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", baselineCreated.stderr]
+        let artifactError = repairPromotedNativeWorkspaceArtifacts resolvedWorkspaceRoot (resolvedTaskWorkspaceActualRoot taskId) in
+        if artifactError != "" then
+          textConcat ["task workspace artifact repair failed: ", taskId, ": ", artifactError]
         else {
-          let baselineCopied =
-            match runCommand "." [
-              "bash",
-              "-lc",
-              textConcat [
-                "tar -cf - -C ",
-                resolvedTaskWorkspaceActualRoot taskId,
-                " . | tar -xf - -C ",
-                resolvedTaskWorkspaceBaselineActualRoot taskId
-              ]
-            ] {
+          let baselineCreated =
+            match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceBaselineActualRoot taskId] {
               Ok result -> result,
               Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
             } in
-          if baselineCopied.exitCode != 0 then
-            textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", baselineCopied.stderr]
+          if baselineCreated.exitCode != 0 then
+            textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", baselineCreated.stderr]
           else {
-            let manifestError = writeTaskWorkspaceManifests taskId timeUnixMs in
-            if manifestError != "" then
-              manifestError
+            let baselineCopied =
+              match runCommand "." [
+                "bash",
+                "-c",
+                textConcat [
+                  "tar -cf - -C ",
+                  resolvedTaskWorkspaceActualRoot taskId,
+                  " . | tar -xf - -C ",
+                  resolvedTaskWorkspaceBaselineActualRoot taskId
+                ]
+              ] {
+                Ok result -> result,
+                Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+              } in
+            if baselineCopied.exitCode != 0 then
+              textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", baselineCopied.stderr]
             else {
-              let gitError = initializeWorkspaceGitRepo (resolvedTaskWorkspaceActualRoot taskId) in
-              if gitError != "" then
-                textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+              let manifestError = writeTaskWorkspaceManifests taskId timeUnixMs in
+              if manifestError != "" then
+                manifestError
               else {
-                let linkParentCreated =
-                  match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
-                    Ok result -> result,
-                    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-                  } in
-                if linkParentCreated.exitCode != 0 then
-                  textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
-                else
-                  let linked =
-                    match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                let gitError = initializeWorkspaceGitRepo (resolvedTaskWorkspaceActualRoot taskId) in
+                if gitError != "" then
+                  textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+                else {
+                  let linkParentCreated =
+                    match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
                       Ok result -> result,
                       Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
                     } in
-                  if linked.exitCode != 0 then
-                    textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                  if linkParentCreated.exitCode != 0 then
+                    textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
                   else
-                    match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-                      Ok written -> "",
-                      Err message ->
-                        textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
-                    }
+                    let linked =
+                      match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                        Ok result -> result,
+                        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                      } in
+                    if linked.exitCode != 0 then
+                      textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                    else
+                      match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                        Ok written -> "",
+                        Err message ->
+                          textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                      }
+                }
               }
             }
           }
@@ -479,7 +484,7 @@ writeTaskWorkspaceRecoverableDiff : Str -> Str -> Str
 writeTaskWorkspaceRecoverableDiff taskId message =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     taskWorkspaceRecoverableDiffScript,
     "write-task-workspace-recoverable-diff",
     resolvedTaskWorkspaceActualRoot taskId,
@@ -517,7 +522,7 @@ promoteVerifiedTaskWorkspace spec = {
   } else
     match runCommand "." [
       "bash",
-      "-lc",
+      "-c",
       taskWorkspacePromotionScript,
       "promote-task-workspace",
       resolvedTaskWorkspaceActualRoot spec.taskId,

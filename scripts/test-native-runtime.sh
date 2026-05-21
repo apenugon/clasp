@@ -101,6 +101,8 @@ route_project_dir="$test_root/route-project"
 route_project_path="$route_project_dir/Main.clasp"
 route_ir_path="$test_root/route.native.ir"
 route_image_path="${route_ir_path%.*}.image.json"
+runtime_binding_path="$test_root/runtime-binding.clasp"
+runtime_binding_image_path="$test_root/runtime-binding.native.image.json"
 
 mkdir -p "$project_entry_dir"
 cat >"$project_entry_path" <<'EOF'
@@ -135,6 +137,13 @@ main : Str
 main = "ok"
 EOF
 
+cat >"$runtime_binding_path" <<'EOF'
+module Main
+
+main : Str
+main = textJoin ":" ["a", "b"]
+EOF
+
 (
   cd "$project_root"
   "$claspc_bin" native examples/durable-workflow/Main.clasp -o "$ir_path" --json >/dev/null
@@ -145,6 +154,7 @@ EOF
   "$claspc_bin" native-image examples/durable-workflow/Main.clasp -o "$hosted_durable_image_path" --json >/dev/null
   "$claspc_bin" native "$route_project_path" -o "$route_ir_path" --json >/dev/null
   "$claspc_bin" native-image "$route_project_path" -o "$route_image_path" --json >/dev/null
+  "$claspc_bin" native-image "$runtime_binding_path" -o "$runtime_binding_image_path" --json >/dev/null
 )
 
 CLASP_PROJECT_ROOT="$project_root" \
@@ -164,8 +174,9 @@ CLASP_PROJECT_ROOT="$project_root" \
 [[ -f "$hosted_durable_image_path" ]]
 [[ -f "$route_ir_path" ]]
 [[ -f "$route_image_path" ]]
+[[ -f "$runtime_binding_image_path" ]]
 
-"$node_bin" - "$image_path" "$migrating_upgrade_path" "$incompatible_upgrade_path" "$hello_image_path" "$hello_structured_image_path" "$parser_image_path" "$parser_structured_image_path" "$hosted_image_path" "$hosted_structured_image_path" <<'NODE'
+"$node_bin" - "$image_path" "$migrating_upgrade_path" "$incompatible_upgrade_path" "$hello_image_path" "$hello_structured_image_path" "$parser_image_path" "$parser_structured_image_path" "$hosted_image_path" "$hosted_structured_image_path" "$runtime_binding_image_path" <<'NODE'
 const fs = require("fs");
 
 const [
@@ -178,6 +189,7 @@ const [
   parserStructuredOutputPath,
   hostedSourcePath,
   hostedStructuredOutputPath,
+  runtimeBindingImagePath,
 ] = process.argv.slice(2);
 
 const writeJson = (outputPath, payload) => {
@@ -195,6 +207,17 @@ writeJson(migratingOutputPath, migratingPayload);
 const incompatiblePayload = structuredClone(migratingPayload);
 incompatiblePayload.compatibility.acceptedPreviousFingerprints = ["native-compat:incompatible"];
 writeJson(incompatibleOutputPath, incompatiblePayload);
+
+const runtimeBindingNames = (image) => (image.runtime?.bindings ?? []).map((binding) => binding.name);
+const helloBindingNames = runtimeBindingNames(JSON.parse(fs.readFileSync(helloSourcePath, "utf8")));
+if (helloBindingNames.length !== 0) {
+  throw new Error(`hello native image should not declare unused runtime bindings: ${helloBindingNames.join(",")}`);
+}
+
+const textJoinBindingNames = runtimeBindingNames(JSON.parse(fs.readFileSync(runtimeBindingImagePath, "utf8")));
+if (JSON.stringify(textJoinBindingNames) !== JSON.stringify(["textJoin"])) {
+  throw new Error(`textJoin native image runtime bindings were ${JSON.stringify(textJoinBindingNames)}`);
+}
 
 for (const [inputPath, outputPath] of [
   [helloSourcePath, helloStructuredOutputPath],
@@ -367,8 +390,22 @@ grep -F '"main"' "$test_root/hosted-tool-hello.core.json" >/dev/null
 
 CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" nativeImageSourceText "$project_root/examples/hello.clasp" "$test_root/hosted-tool-hello.native.image.json"
 grep -F 'clasp-native-image-v1' "$test_root/hosted-tool-hello.native.image.json" >/dev/null
-grep -F '"module": "Main"' "$test_root/hosted-tool-hello.native.image.json" >/dev/null
-grep -F '"name": "main"' "$test_root/hosted-tool-hello.native.image.json" >/dev/null
+"$node_bin" - "$test_root/hosted-tool-hello.native.image.json" <<'NODE'
+const fs = require("fs");
+const [imagePath] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(imagePath, "utf8"));
+if (payload.module !== "Main") {
+  throw new Error(`hosted native image module was ${payload.module}`);
+}
+const declNames = (payload.decls ?? []).map((decl) => decl.name);
+if (!declNames.includes("main")) {
+  throw new Error(`hosted native image decls did not include main: ${declNames.join(",")}`);
+}
+const bindingNames = (payload.runtime?.bindings ?? []).map((binding) => binding.name);
+if (bindingNames.length !== 0) {
+  throw new Error(`hosted native image should not declare unused runtime bindings: ${bindingNames.join(",")}`);
+}
+NODE
 
 CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" checkProjectText "--project-entry=$project_entry_path" "$test_root/hosted-tool-project.check"
 grep -F "helper : Str -> Str" "$test_root/hosted-tool-project.check" >/dev/null
@@ -380,8 +417,17 @@ grep -F 'export const main = helper("hello");' "$test_root/hosted-tool-project.m
 
 CLASP_PROJECT_ROOT="$project_root" bash "$project_root/src/scripts/run-native-tool.sh" "$hosted_image_path" nativeImageProjectText "--project-entry=$project_entry_path" "$test_root/hosted-tool-project.native.image.json"
 grep -F 'clasp-native-image-v1' "$test_root/hosted-tool-project.native.image.json" >/dev/null
-grep -F '"name": "helper"' "$test_root/hosted-tool-project.native.image.json" >/dev/null
-grep -F '"name": "main"' "$test_root/hosted-tool-project.native.image.json" >/dev/null
+"$node_bin" - "$test_root/hosted-tool-project.native.image.json" <<'NODE'
+const fs = require("fs");
+const [imagePath] = process.argv.slice(2);
+const payload = JSON.parse(fs.readFileSync(imagePath, "utf8"));
+const declNames = (payload.decls ?? []).map((decl) => decl.name);
+for (const expected of ["helper", "main"]) {
+  if (!declNames.includes(expected)) {
+    throw new Error(`hosted project native image decls did not include ${expected}: ${declNames.join(",")}`);
+  }
+}
+NODE
 
 printf '%s\n' '{"format":"broken"}' >"$invalid_image_path"
 if "$harness_path" "$invalid_image_path" >/dev/null 2>&1; then

@@ -52,6 +52,8 @@ check_output="$test_root/checker.check.json"
 check_log="$test_root/checker.check.log"
 goal_manager_binary="$test_root/swarm-goal-manager"
 goal_manager_log="$test_root/goal-manager.compile.log"
+hello_run_log="$test_root/hello.run.log"
+hello_run_output="$test_root/hello.run.out"
 task_workspace_harness_image="$test_root/task-workspace-runtime-harness.native.image.json"
 task_workspace_harness_log="$test_root/task-workspace-runtime-harness.native-image.log"
 timeout_secs="${CLASP_PROMOTED_SOURCE_EXPORT_TIMEOUT_SECS:-60}"
@@ -78,6 +80,20 @@ if (!entry) {
 }
 if (check.summary !== entry.output) {
   throw new Error("promoted compiler-checker summary changed");
+}
+const helloEntry = cache.entries.find((candidate) => candidate.source === "examples/hello.clasp");
+if (!helloEntry) {
+  throw new Error("missing promoted hello native image entry");
+}
+if (helloEntry.exportName !== "nativeImageSourceText") {
+  throw new Error("hello promoted entry should seed nativeImageSourceText");
+}
+if (helloEntry.outputPath !== "src/stage1.hello.native.image.json") {
+  throw new Error("hello promoted entry should use the native source image output path");
+}
+const helloImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.hello.native.image.json"), "utf8"));
+if (helloImage.format !== "clasp-native-image-v1" || helloImage.module !== "Main") {
+  throw new Error("hello promoted native image has an unexpected shape");
 }
 const goalManagerEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/GoalManager.clasp");
 if (!goalManagerEntry) {
@@ -111,6 +127,25 @@ NODE
 grep -F '[claspc-cache] source-export promoted hit export=checkSourceText key=' "$check_log" >/dev/null
 if grep -F '[claspc-cache] source-export miss export=checkSourceText' "$check_log" >/dev/null; then
   printf 'compiler-checker check should use the promoted source-export cache before reporting a miss\n' >&2
+  exit 1
+fi
+
+(
+  cd "$project_root"
+  timeout "$timeout_secs" env XDG_CACHE_HOME="$test_root/hello-run-cache" CLASP_PROJECT_ROOT="$project_root" CLASP_NATIVE_TRACE_CACHE=1 \
+    "$claspc_bin" run examples/hello.clasp \
+    >"$hello_run_output" 2>"$hello_run_log"
+)
+
+grep -Fx 'Hello from Clasp' "$hello_run_output" >/dev/null
+grep -F '[claspc-cache] run-binary single-source image export=nativeImageSourceText' "$hello_run_log" >/dev/null
+grep -F '[claspc-cache] source-export promoted hit export=nativeImageSourceText key=' "$hello_run_log" >/dev/null
+if grep -F '[claspc-cache] source-export miss export=nativeImageSourceText' "$hello_run_log" >/dev/null; then
+  printf 'hello source run should use the promoted nativeImageSourceText cache before reporting a miss\n' >&2
+  exit 1
+fi
+if grep -E '\[claspc-cache\] (build-plan|decl-module) ' "$hello_run_log" >/dev/null; then
+  printf 'hello source run should not invoke granular native-image planning when promoted source-export is available\n' >&2
   exit 1
 fi
 

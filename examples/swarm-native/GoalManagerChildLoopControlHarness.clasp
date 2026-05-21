@@ -117,7 +117,7 @@ spawnRunning =
       (watchStderrPath "lease")
       (watchHeartbeatPath "lease")
       10
-      ["bash", "-lc", "sleep 0.25"])
+      ["bash", "-c", "sleep 0.25"])
 
 awaitTimeoutStatus : Str
 awaitTimeoutStatus =
@@ -142,7 +142,7 @@ watchPassStatus =
       (watchStderrPath "watch-pass")
       (watchHeartbeatPath "watch-pass")
       10
-      ["bash", "-lc", "exit 0"]) {
+      ["bash", "-c", "exit 0"]) {
     Ok process -> watchedStatus process,
     Err message -> textConcat ["error:", message]
   }

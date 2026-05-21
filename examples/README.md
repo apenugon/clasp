@@ -19,7 +19,9 @@ This directory has two kinds of examples:
 - [compiler-parser.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-parser.clasp): self-hosting parser helpers for module headers plus simple list literal summaries expressed in Clasp
 - [compiler-checker.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-checker.clasp): self-hosting checker-style list inference and homogeneous-list validation helpers expressed in Clasp
 - [compiler-emitter.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-emitter.clasp): self-hosting emitter-style list literal and module rendering helpers expressed in Clasp
+- [compiler-ergonomics.clasp](/home/akul/DevProjects/synthspeak/examples/compiler-ergonomics.clasp): state-heavy orchestration ergonomics covering record update, record destructuring, Dict state, contextual empty lists, and generic records
 - [project/Main.clasp](/home/akul/DevProjects/synthspeak/examples/project/Main.clasp): multi-module imports
+- [browser-counter/Main.clasp](/home/akul/DevProjects/synthspeak/examples/browser-counter/Main.clasp): a frontend-JS starter that renders a single-file interactive browser app from ordinary Clasp source
 
 ## Richer Examples
 
@@ -82,6 +84,12 @@ Verify the support-console example on the native backend path:
 
 ```sh
 bash examples/support-console/scripts/verify.sh
+```
+
+Build and prove the frontend-JS browser starter:
+
+```sh
+bash examples/browser-counter/scripts/verify.sh
 ```
 
 Verify the release-gate example on the native backend path:

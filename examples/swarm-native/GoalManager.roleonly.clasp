@@ -1223,7 +1223,7 @@ ensureTaskWorkspace taskId =
         let copied =
           match runCommand "." [
             "bash",
-            "-lc",
+            "-c",
             textConcat [
               "tar -cf - ",
               workspaceCloneExcludeFlags,
@@ -2595,7 +2595,7 @@ taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
 taskLaunchRecordCommand spec =
   commandSpec "." [
     "bash",
-    "-lc",
+    "-c",
     textConcat ["printf launched-child-loop:", spec.taskId]
   ]
 

@@ -1,0 +1,76 @@
+{
+  "task_id": "wave-2-W2-T7-runtime-interop-audit",
+  "role": "compiler-explorer-builder",
+  "summary": "Selected one bounded runtime interop safety improvement: escape and validate foreign interop names and metadata before JavaScript source emission and native text IR emission.",
+  "interop_paths_inspected": {
+    "javascript": [
+      "src/Compiler/Emit/JavaScript.clasp:381-386 uses `encode` for normal string literals.",
+      "src/Compiler/Emit/JavaScript.clasp:874-1043 emits foreign/package interop code and manifests by raw concatenation of `foreignDeclName`, `foreignDeclRuntimeName`, package specifier, declaration path, and signature.",
+      "src/Compiler/Ast.clasp:1410-1441 parses quoted foreign strings and unescapes `\\\"`, `\\n`, `\\r`, and `\\t`, so the emitter must re-escape those values when embedding them in JavaScript."
+    ],
+    "native": [
+      "src/Compiler/Emit/Native.clasp:64-69 renders native text IR string literals as `string(\"... \")` by raw concatenation.",
+      "src/Compiler/Emit/Native.clasp:623-629 emits JSON runtime binding metadata safely via `jsonFieldText`, but native text runtime binding metadata still concatenates foreign names and runtime names directly.",
+      "src/Compiler/Emit/NativeJson.clasp:61-153 already emits lowered native expressions as JSON with `jsonFieldText` and is the safer reference path for string-bearing data."
+    ],
+    "bootstrap": [
+      "clasp-compiler.cabal references `deprecated/bootstrap/src`, but that directory is absent in this checkout.",
+      "If the bootstrap Haskell source tree is restored, mirror the same foreign interop escaping and identifier validation in `deprecated/bootstrap/src/Clasp/Emit/JavaScript.hs` and any native/bootstrap emitter that serializes foreign metadata."
+    ],
+    "tests": [
+      "scripts/test-js-process-runtime.sh already performs focused JavaScript emitter/runtime interop checks and is the best place for a fast regression fixture.",
+      "scripts/test-native-claspc.sh already covers native runtime bindings and should receive a small native-image regression when implementation touches native text/image emission.",
+      "test/Main.hs references bootstrap compiler APIs, but the corresponding bootstrap source tree is not present in this workspace."
+    ]
+  },
+  "bounded_improvement": {
+    "title": "Foreign interop emission must fail closed for unsafe identifiers and must encode every string-valued metadata field.",
+    "risk": "AI-generated or user-provided `foreign` declarations can currently place parsed quoted text directly into emitted JavaScript source, import declarations, manifest object literals, package binding maps, and native text IR. Ordinary `LowerLiteral` JavaScript strings are safe because they use `encode`; the foreign/package interop path does not consistently use that escaping boundary.",
+    "exact_files_to_change": [
+      "src/Compiler/Emit/JavaScript.clasp: add small helpers around `emitJsString` for JS string literal fields and use them in `emitForeignSourceLiteral`, `emitForeignDeclarationLiteral`, `emitHostBindingEntry`, `emitPackageImportEntry`, `emitPackageBindingEntry`, and `emitForeignBindings`.",
+      "src/Compiler/Emit/JavaScript.clasp: add a `jsIdentifierIsSafe`/`emitJsIdentifier` gate for values emitted in identifier position, especially `foreignDeclRuntimeName` in `emitPackageForeignImport` and `foreignDeclName` in `packageBindingIdentifier` and exported foreign wrappers.",
+      "src/Compiler/Checker.clasp or src/Compiler/Ast.clasp: surface a compile/check diagnostic for package foreign declarations whose imported runtime name is not a safe JavaScript import binding identifier. Prefer checker diagnostics if the implementation can report them without widening the parser.",
+      "src/Compiler/Emit/Native.clasp: either escape native text IR string payloads with a dedicated `emitNativeStringLiteral` helper or route string-bearing native consumption through the existing JSON image path; at minimum cover `LowerLiteral` and `emitNativeRuntimeBindingText`.",
+      "src/embedded.primary.clasp and promoted native/source cache artifacts: regenerate only if the self-hosted compiler promotion flow requires it after source changes."
+    ],
+    "expected_behavior": [
+      "Valid existing foreign declarations with normal identifiers and package specifiers keep the same runtime behavior.",
+      "Quoted package specifiers, declaration paths, signatures, foreign names, and runtime names that appear in JS string/object positions are emitted using JSON-compatible string escaping.",
+      "Package-import runtime names that would be emitted in JavaScript identifier/import-binding position are rejected before emission with a deterministic diagnostic instead of producing malformed or injected JavaScript.",
+      "Native JSON images remain semantically unchanged, while native text IR no longer lets string contents or foreign runtime names introduce native IR delimiters."
+    ]
+  },
+  "expected_tests": [
+    "Update scripts/test-js-process-runtime.sh or add scripts/test-js-foreign-interop-safety.sh with a generated Clasp fixture containing a package foreign declaration whose specifier/declaration/signature include escaped quotes and newline characters; compile to JS and assert the emitted module remains syntactically valid with `node --check` and contains encoded literals rather than raw payload text.",
+    "Add a negative JS/package foreign fixture with an unsafe imported runtime name such as a name containing a quote, brace, comma, or semicolon; `claspc --json check` or `claspc --json compile` should fail with the new deterministic diagnostic and should not write a malformed JS module.",
+    "Update scripts/test-native-claspc.sh with a native-image compile fixture for a runtime foreign declaration whose runtime name includes quote/newline-like data if such names stay allowed for runtime-map interop; parse the emitted native image JSON and assert the binding string round-trips without corrupting adjacent fields.",
+    "If `deprecated/bootstrap/src` is restored, add matching Haskell tests in test/Main.hs for bootstrap JS emission of escaped foreign package metadata and unsafe package import name rejection."
+  ],
+  "compatibility_notes": [
+    "This is a fail-closed trust-boundary change for package imports: valid JavaScript import binding names remain compatible, while names that cannot be represented safely as import bindings become diagnostics.",
+    "Runtime foreign declarations that are resolved through `globalThis.__claspRuntime` can continue supporting broader string runtime names if emitted only through encoded manifest strings and map lookups.",
+    "Using `encode`/JSON-style string emission should preserve visible output for normal ASCII package names and paths except for harmless escape normalization.",
+    "Native JSON image consumers should not see schema changes; native text IR consumers may see escaped string spelling but should receive the same decoded values after parsing."
+  ],
+  "verification_commands_for_implementation": [
+    "bash -n scripts/test-js-process-runtime.sh scripts/test-js-foreign-interop-safety.sh",
+    "timeout 120 env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT=\"$PWD\" bash scripts/test-js-process-runtime.sh",
+    "timeout 180 env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT=\"$PWD\" bash scripts/test-native-claspc.sh",
+    "git diff --check"
+  ],
+  "commands_run_in_audit": [
+    "Read AGENTS.md and task-wave-2-W2-T7-runtime-interop-audit.md.",
+    "Inspected src/Compiler/Emit/JavaScript.clasp, src/Compiler/Emit/Native.clasp, src/Compiler/Emit/NativeJson.clasp, src/Compiler/Ast.clasp, clasp-compiler.cabal, test/Main.hs, and scripts/test-js-process-runtime.sh.",
+    "rg/sed/nl static inspection of foreign, package import, runtime binding, and native emission surfaces.",
+    "git diff --check."
+  ],
+  "commands_not_run": [
+    "bash scripts/verify-all.sh was intentionally not run per explicit task instruction.",
+    "Broad claspc check/run harnesses were not run because this audit did not implement behavior changes."
+  ],
+  "residual_risks": [
+    "The absent deprecated/bootstrap source tree prevents direct bootstrap emitter inspection in this workspace.",
+    "The follow-up implementation must decide whether unsafe foreign interop diagnostics belong in parser/checker or as an emitter error path exposed by the CLI.",
+    "Native text IR escaping depends on the runtime/native parser expectations; prefer a fixture that parses the resulting native image rather than a string-only grep."
+  ]
+}

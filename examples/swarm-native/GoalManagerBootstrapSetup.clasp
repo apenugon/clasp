@@ -132,7 +132,7 @@ createManagerWorkspaceSnapshot = {
   let copied =
     match runCommand "." [
       "bash",
-      "-lc",
+      "-c",
       managerWorkspaceSnapshotScript,
       "materialize-manager-workspace",
       managerProjectRoot,
@@ -144,21 +144,26 @@ createManagerWorkspaceSnapshot = {
   if copied.exitCode != 0 then
     textConcat ["workspace-root-error:", copied.stderr]
   else {
-    let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
-      Ok written -> "",
-      Err message -> message
-    } in
-    if manifestError != "" then
-      textConcat ["workspace-manifest-error:", manifestError]
+    let artifactError = repairPromotedNativeWorkspaceArtifacts managerProjectRoot resolvedWorkspaceRoot in
+    if artifactError != "" then
+      textConcat ["workspace-artifact-error:", artifactError]
     else {
-      let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
-      if gitError != "" then
-        textConcat ["workspace-git-init-error:", gitError]
-      else
-        match writeFile managerWorkspaceReadyPath "ready" {
-          Ok written -> "",
-          Err message -> textConcat ["workspace-ready-error:", message]
-        }
+      let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
+        Ok written -> "",
+        Err message -> message
+      } in
+      if manifestError != "" then
+        textConcat ["workspace-manifest-error:", manifestError]
+      else {
+        let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+        if gitError != "" then
+          textConcat ["workspace-git-init-error:", gitError]
+        else
+          match writeFile managerWorkspaceReadyPath "ready" {
+            Ok written -> "",
+            Err message -> textConcat ["workspace-ready-error:", message]
+          }
+      }
     }
   }
 }

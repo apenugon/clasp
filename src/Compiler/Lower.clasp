@@ -858,8 +858,12 @@ lowerModule modl = {
   let env = lowerModuleEnv modl typeDecls;
   let mut lowered = emptyLowerDecls;
   for decl in moduleDeclarations modl {
-    lowered = appendLowerDecl lowered (lowerDecl typeDecls recordDecls env decl);
-    lowered
+    if declIsMetadataDeclaration decl then {
+      lowered
+    } else {
+      lowered = appendLowerDecl lowered (lowerDecl typeDecls recordDecls env decl);
+      lowered
+    }
   };
   lowered
 }

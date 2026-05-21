@@ -413,7 +413,7 @@ emitExpr expr = match expr {
   LowerViewAppend left right ->
     textConcat ["Object.freeze({ $kind: \"append\", left: ", emitExpr left, ", right: ", emitExpr right, " })"],
   LowerEncode value ->
-    textConcat ["JSON.stringify(", emitExpr value, ")"],
+    textConcat ["$claspStableStringify(", emitExpr value, ")"],
   LowerDecode targetType value ->
     textConcat ["JSON.parse(", emitExpr value, ")"],
   LowerIf condition thenBranch elseBranch ->
@@ -709,7 +709,7 @@ builtinPreludeLines =
     "      throw new Error(`key expected a string`);",
     "    }",
     "    const objectValue = $claspExpectObject(dict, \"dict\");",
-    "    return Object.freeze({ ...objectValue, [key]: $claspSnapshotValue(value) });",
+    "    return $claspSnapshotValue({ ...objectValue, [key]: value });",
     "  },",
     "  dictGet(key, dict) {",
     "    if (typeof key !== \"string\") {",
@@ -734,13 +734,14 @@ builtinPreludeLines =
     "    const objectValue = $claspExpectObject(dict, \"dict\");",
     "    const next = { ...objectValue };",
     "    delete next[key];",
-    "    return Object.freeze(next);",
+    "    return $claspSnapshotValue(next);",
     "  },",
     "  dictKeys(dict) {",
-    "    return Object.freeze(Object.keys($claspExpectObject(dict, \"dict\")));",
+    "    return Object.freeze(Object.keys($claspExpectObject(dict, \"dict\")).sort());",
     "  },",
     "  dictValues(dict) {",
-    "    return Object.freeze(Object.values($claspExpectObject(dict, \"dict\")).map((value) => $claspSnapshotValue(value)));",
+    "    const objectValue = $claspExpectObject(dict, \"dict\");",
+    "    return Object.freeze(Object.keys(objectValue).sort().map((key) => $claspSnapshotValue(objectValue[key])));",
     "  },",
     "  pathJoin(parts) {",
     "    const normalized = $claspNormalizePathSegments(parts, \"parts\")",
@@ -871,8 +872,44 @@ emitForeignReturnType typ = match typ {
     typ
 }
 
+jsIdentifierLowercaseCharIsSafe : Str -> Bool
+jsIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+
+jsIdentifierDigitCharIsSafe : Str -> Bool
+jsIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+
+jsIdentifierStartCharIsSafe : Str -> Bool
+jsIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsIdentifierLowercaseCharIsSafe char
+
+jsIdentifierPartCharIsSafe : Str -> Bool
+jsIdentifierPartCharIsSafe char = if jsIdentifierStartCharIsSafe char then true else jsIdentifierDigitCharIsSafe char
+
+jsIdentifierIsSafe : Str -> Bool
+jsIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+
+emitJsIdentifier : Str -> Str
+emitJsIdentifier value = if jsIdentifierIsSafe value then value else "$claspInvalidForeignIdentifier"
+
 packageBindingIdentifier : HostedForeignDeclAst -> Str
-packageBindingIdentifier foreignDecl = textConcat ["$claspPackageBinding_", foreignDeclName foreignDecl]
+packageBindingIdentifier foreignDecl = emitJsIdentifier (textConcat ["$claspPackageBinding_", foreignDeclName foreignDecl])
 
 emitHostedPackageImportKind : HostedPackageImportKindAst -> Str
 emitHostedPackageImportKind kind = match kind {
@@ -885,7 +922,7 @@ emitHostedPackageImportKind kind = match kind {
 emitForeignSourceLiteral : HostedForeignDeclAst -> Str
 emitForeignSourceLiteral foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
-    textConcat ["{ kind: \"", emitHostedPackageImportKind kind, "\", specifier: \"", specifier, "\" }"],
+    textConcat ["{ kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, " }"],
   HostedForeignRuntime ->
     "null"
 }
@@ -893,13 +930,13 @@ emitForeignSourceLiteral foreignDecl = match foreignDeclSource foreignDecl {
 emitForeignDeclarationLiteral : HostedForeignDeclAst -> Str
 emitForeignDeclarationLiteral foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
-    if foreignDeclSignature foreignDecl == "" then textConcat ["{ path: \"", declarationPath, "\", signature: null }"] else textConcat ["{ path: \"", declarationPath, "\", signature: \"", foreignDeclSignature foreignDecl, "\" }"],
+    if foreignDeclSignature foreignDecl == "" then textConcat ["{ path: ", emitJsString declarationPath, ", signature: null }"] else textConcat ["{ path: ", emitJsString declarationPath, ", signature: ", emitJsString (foreignDeclSignature foreignDecl), " }"],
   HostedForeignRuntime ->
     "null"
 }
 
 emitIdentityHostCodec : HostedTypeAst -> Str -> Str
-emitIdentityHostCodec typ mode = if mode == "from" then textConcat ["{ type: \"", renderHostedType typ, "\", fromHost(value, path = \"value\") { return value; }, toHost(value, path = \"value\") { return value; } }"] else textConcat ["{ type: \"", renderHostedType typ, "\", fromHost(value, path = \"result\") { return value; }, toHost(value, path = \"result\") { return value; } }"]
+emitIdentityHostCodec typ mode = if mode == "from" then textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"value\") { return value; }, toHost(value, path = \"value\") { return value; } }"] else textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"result\") { return value; }, toHost(value, path = \"result\") { return value; } }"]
 
 emitForeignParamCodecsFromType : HostedTypeAst -> [Str]
 emitForeignParamCodecsFromType typ = match typ {
@@ -944,7 +981,7 @@ hasRuntimeForeignDecl foreignDecls = {
 emitPackageForeignImport : HostedForeignDeclAst -> Str
 emitPackageForeignImport foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
-    textConcat ["import { ", foreignDeclRuntimeName foreignDecl, " as ", packageBindingIdentifier foreignDecl, " } from \"", specifier, "\";"],
+    textConcat ["import { ", emitJsIdentifier (foreignDeclRuntimeName foreignDecl), " as ", packageBindingIdentifier foreignDecl, " } from ", emitJsString specifier, ";"],
   HostedForeignRuntime ->
     ""
 }
@@ -966,7 +1003,7 @@ emitPackageForeignImports foreignDecls = {
 }
 
 emitHostBindingEntry : HostedForeignDeclAst -> Str
-emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: \"", foreignDeclName foreignDecl, "\","], textConcat ["    runtimeName: \"", foreignDeclRuntimeName foreignDecl, "\","], textConcat ["    source: ", emitForeignSourceLiteral foreignDecl, ","], textConcat ["    declaration: ", emitForeignDeclarationLiteral foreignDecl, ","], textConcat ["    params: [", textJoin ", " (emitForeignParamCodecsFromType (foreignDeclTypeAst foreignDecl)), "],"], textConcat ["    returns: ", emitIdentityHostCodec (emitForeignReturnType (foreignDeclTypeAst foreignDecl)) "result"], "  },"]
+emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: ", emitJsString (foreignDeclName foreignDecl), ","], textConcat ["    runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ","], textConcat ["    source: ", emitForeignSourceLiteral foreignDecl, ","], textConcat ["    declaration: ", emitForeignDeclarationLiteral foreignDecl, ","], textConcat ["    params: [", textJoin ", " (emitForeignParamCodecsFromType (foreignDeclTypeAst foreignDecl)), "],"], textConcat ["    returns: ", emitIdentityHostCodec (emitForeignReturnType (foreignDeclTypeAst foreignDecl)) "result"], "  },"]
 
 emitHostBindingEntries : [HostedForeignDeclAst] -> [Str]
 emitHostBindingEntries foreignDecls = {
@@ -981,7 +1018,7 @@ emitHostBindingEntries foreignDecls = {
 emitPackageImportEntry : HostedForeignDeclAst -> Str
 emitPackageImportEntry foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
-    textConcat ["  { name: \"", foreignDeclName foreignDecl, "\", runtimeName: \"", foreignDeclRuntimeName foreignDecl, "\", kind: \"", emitHostedPackageImportKind kind, "\", specifier: \"", specifier, "\", declaration: ", emitForeignDeclarationLiteral foreignDecl, " },"],
+    textConcat ["  { name: ", emitJsString (foreignDeclName foreignDecl), ", runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ", kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, ", declaration: ", emitForeignDeclarationLiteral foreignDecl, " },"],
   HostedForeignRuntime ->
     ""
 }
@@ -1005,7 +1042,7 @@ emitPackageImportEntries foreignDecls = {
 emitPackageBindingEntry : HostedForeignDeclAst -> [Str]
 emitPackageBindingEntry foreignDecl = match foreignDeclSource foreignDecl {
   HostedForeignPackageImport kind specifier declarationPath ->
-    [textConcat ["  \"", foreignDeclName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  \"", foreignDeclRuntimeName foreignDecl, "\": ", packageBindingIdentifier foreignDecl, ","]],
+    [textConcat ["  ", emitJsString (foreignDeclName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  ", emitJsString (foreignDeclRuntimeName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","]],
   HostedForeignRuntime ->
     emptyRenderedTexts
 }
@@ -1040,7 +1077,7 @@ emitForeignBindings foreignDecls = {
   let mut rendered = emptyRenderedTexts;
   for foreignDecl in foreignDecls {
     let params = emitForeignParams foreignDecl;
-    let bindingLine = if firstText params == "" then textConcat ["export const ", foreignDeclName foreignDecl, " = () => $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", []);"] else textConcat ["export function ", foreignDeclName foreignDecl, "(", textJoin ", " params, ") { return $claspCallHostBinding(\"", foreignDeclName foreignDecl, "\", [", textJoin ", " params, "]); }"];
+    let bindingLine = if firstText params == "" then textConcat ["export const ", emitJsIdentifier (foreignDeclName foreignDecl), " = () => $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", []);"] else textConcat ["export function ", emitJsIdentifier (foreignDeclName foreignDecl), "(", textJoin ", " params, ") { return $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", [", textJoin ", " params, "]); }"];
     rendered = appendJsRenderedText rendered bindingLine;
     rendered
   };
@@ -1052,6 +1089,25 @@ emitJsString value = encode value
 
 emitOptionalJsString : Str -> Str
 emitOptionalJsString value = if value == "" then "null" else emitJsString value
+
+lowerDeclHasOneParamText : [Str] -> Bool
+lowerDeclHasOneParamText params = if firstText params == "" then false else firstText (remainingTexts params) == ""
+
+lowerDeclIsMetadata : LowerDeclText -> Bool
+lowerDeclIsMetadata decl = match decl {
+  LowerConst name body ->
+    false,
+  LowerFn name params body ->
+    if name == "metadata" then lowerDeclHasOneParamText params else false
+}
+
+hasMetadataDeclarations : [HostedDeclAst] -> Bool
+hasMetadataDeclarations decls = {
+  for decl in decls {
+    if declIsMetadataDeclaration decl then return true else false
+  };
+  false
+}
 
 hasGuideDeclarations : [HostedGuideDeclAst] -> Bool
 hasGuideDeclarations decls = {
@@ -1124,6 +1180,20 @@ hasMergeGateDeclarations decls = {
   };
   false
 }
+
+emitMetadata : [HostedDeclAst] -> [Str]
+emitMetadata declarations = if hasMetadataDeclarations declarations then {
+  let mut rendered = ["export const __claspMetadata = Object.freeze(["];
+  for metadataDecl in declarations {
+    if declIsMetadataDeclaration metadataDecl then {
+      rendered = append rendered ["  Object.freeze({", textConcat ["    key: ", emitJsString (metadataDeclKey metadataDecl), ","], textConcat ["    value: ", emitJsString (metadataDeclStringValue metadataDecl)], "  }),"];
+      rendered
+    } else {
+      rendered
+    }
+  };
+  append rendered ["]);", "const $claspMetadataMap = Object.freeze(Object.fromEntries(__claspMetadata.map((entry) => [entry.key, entry.value])));", ""]
+} else emptyRenderedTexts
 
 renderGuideEntryObjectLines : [HostedGuideEntryAst] -> [Str]
 renderGuideEntryObjectLines entries = {
@@ -1211,7 +1281,7 @@ emitRecordSchema decl = {
   let schemaName = recordDeclName decl;
   let schemaConstName = textConcat ["$claspSchema_", schemaName];
   let header = [textConcat ["const ", schemaConstName, " = {"], "  kind: \"clasp-schema-contract\",", "  version: 1,", textConcat ["  name: ", emitJsString schemaName, ","], textConcat ["  schema: Object.freeze({ kind: \"record\", name: ", emitJsString schemaName, ", fields: Object.freeze([", textJoin ", " (emitSchemaFieldNames (recordDeclFields decl)), "]) }),"], "  seed: null,", "  fromHost(value, path = \"value\") {", "    const objectValue = $claspExpectObject(value, path);", "    return Object.freeze({"];
-  let footer = [ "    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return JSON.stringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return $claspCreateSchemaStream(this, initial); }", "};", "" ];
+  let footer = [ "    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return $claspStableStringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return $claspCreateSchemaStream(this, initial); }", "};", "" ];
   append header (append (emitSchemaFieldLines (recordDeclFields decl)) footer)
 }
 
@@ -1234,16 +1304,21 @@ emitSchemas recordDecls = {
 emitExportsRegistry : HostedModuleAst -> [Str]
 emitExportsRegistry modl = {
   let mut entries = emptyRenderedTexts;
-  for exportName in declNames modl {
-    entries = appendRenderedText entries (textConcat [exportName, ": ", exportName]);
-    entries
+  for decl in moduleDeclarations modl {
+    if declIsMetadataDeclaration decl then {
+      entries
+    } else {
+      let exportName = declName decl;
+      entries = appendRenderedText entries (textConcat [exportName, ": ", exportName]);
+      entries
+    }
   };
   [textConcat ["const __claspExports = Object.freeze({ ", textJoin ", " entries, " });"], ""]
 }
 
 emitSelfHostedRuntimePrelude : [Str]
 emitSelfHostedRuntimePrelude = {
-  let core = [ "function $claspSnapshotValue(value) {", "  if (typeof globalThis.structuredClone === \"function\") {", "    return globalThis.structuredClone(value);", "  }", "  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}", "", "const $claspBinaryMagic = Object.freeze([67, 76, 66, 49]);", "const $claspTextEncoder = typeof TextEncoder === \"undefined\" ? null : new TextEncoder();", "const $claspTextDecoder = typeof TextDecoder === \"undefined\" ? null : new TextDecoder();", "", "function $claspEncodeUtf8Text(value) {", "  if ($claspTextEncoder === null) {", "    throw new Error(\"This runtime does not provide TextEncoder for binary Clasp codecs\");", "  }", "  return $claspTextEncoder.encode($claspExpectString(value, \"value\"));", "}", "", "function $claspDecodeUtf8Text(bytes, path = \"value\") {", "  if ($claspTextDecoder === null) {", "    throw new Error(\"This runtime does not provide TextDecoder for binary Clasp codecs\");", "  }", "  return $claspTextDecoder.decode($claspNormalizeBinaryBytes(bytes, path));", "}", "", "function $claspNormalizeBinaryBytes(value, path = \"value\") {", "  if (value instanceof Uint8Array) {", "    return value;", "  }", "  if (value instanceof ArrayBuffer) {", "    return new Uint8Array(value);", "  }", "  if (ArrayBuffer.isView(value)) {", "    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);", "  }", "  throw new Error(`${path} expected binary bytes`);", "}", "", "function $claspWriteUint32(target, offset, value) {", "  new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, true);", "}", "", "function $claspReadUint32(source, offset, path = \"value\") {", "  if (offset + 4 > source.byteLength) {", "    throw new Error(`${path} truncated binary payload`);", "  }", "  return new DataView(source.buffer, source.byteOffset, source.byteLength).getUint32(offset, true);", "}", "", "function $claspFrameBinaryPayload(payload) {", "  const bytes = $claspNormalizeBinaryBytes(payload, \"payload\");", "  const frame = new Uint8Array(4 + bytes.byteLength);", "  $claspWriteUint32(frame, 0, bytes.byteLength);", "  frame.set(bytes, 4);", "  return frame;", "}", "", "function $claspUnframeBinaryPayload(frame, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(frame, path);", "  const expectedLength = $claspReadUint32(bytes, 0, path);", "  const payload = bytes.slice(4);", "  if (payload.byteLength !== expectedLength) {", "    throw new Error(`${path} expected ${expectedLength} framed bytes but received ${payload.byteLength}`);", "  }", "  return payload;", "}", "", "function $claspEncodeSchemaBinaryPayload(schemaContract, value) {", "  const normalizedValue = schemaContract.toHost(schemaContract.fromHost(value, \"value\"), \"value\");", "  const fingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  const fingerprintBytes = $claspEncodeUtf8Text(fingerprint);", "  const payloadBytes = $claspEncodeUtf8Text(JSON.stringify(normalizedValue));", "  const buffer = new Uint8Array(12 + fingerprintBytes.byteLength + payloadBytes.byteLength);", "  buffer.set($claspBinaryMagic, 0);", "  $claspWriteUint32(buffer, 4, fingerprintBytes.byteLength);", "  $claspWriteUint32(buffer, 8, payloadBytes.byteLength);", "  buffer.set(fingerprintBytes, 12);", "  buffer.set(payloadBytes, 12 + fingerprintBytes.byteLength);", "  return buffer;", "}", "", "function $claspDecodeSchemaBinaryPayload(schemaContract, payload, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(payload, path);", "  if (bytes.byteLength < 12) {", "    throw new Error(`${path} expected a Clasp binary payload`);", "  }", "  for (let index = 0; index < $claspBinaryMagic.length; index += 1) {", "    if (bytes[index] !== $claspBinaryMagic[index]) {", "      throw new Error(`${path} expected a Clasp binary payload`);", "    }", "  }", "  const fingerprintLength = $claspReadUint32(bytes, 4, path);", "  const payloadLength = $claspReadUint32(bytes, 8, path);", "  const payloadOffset = 12 + fingerprintLength;", "  if (payloadOffset + payloadLength !== bytes.byteLength) {", "    throw new Error(`${path} has an invalid Clasp binary payload length`);", "  }", "  const fingerprint = $claspDecodeUtf8Text(bytes.slice(12, payloadOffset), `${path}.fingerprint`);", "  const expectedFingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  if (fingerprint !== expectedFingerprint) {", "    throw new Error(`${path} expected schema fingerprint ${expectedFingerprint} but received ${fingerprint}`);", "  }", "  const payloadText = $claspDecodeUtf8Text(bytes.slice(payloadOffset), `${path}.payload`);", "  return schemaContract.toHost(schemaContract.fromHost(JSON.parse(payloadText), path), path);", "}", "", "function $claspCreateSchemaBinaryCodec(schemaContract) {", "  return Object.freeze({", "    type: schemaContract.type ?? schemaContract.name ?? null,", "    schemaFingerprint: String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\"),", "    framing: \"length_prefixed\",", "    encode(value) { return $claspEncodeSchemaBinaryPayload(schemaContract, value); },", "    decode(bytes, path = \"value\") { return $claspDecodeSchemaBinaryPayload(schemaContract, bytes, path); },", "    frame(value) { return $claspFrameBinaryPayload(this.encode(value)); },", "    unframe(frame, path = \"value\") { return this.decode($claspUnframeBinaryPayload(frame, path), path); }", "  });", "}", "", "function $claspCreateSchemaStream(contract, initial = null) {", "  return Object.freeze({ kind: \"clasp-schema-stream\", schema: contract, initial });", "}" ];
+  let core = [ "function $claspSnapshotValue(value) {", "  if (value === null || typeof value !== \"object\") {", "    return value;", "  }", "  if (Array.isArray(value)) {", "    return Object.freeze(value.map((item) => $claspSnapshotValue(item)));", "  }", "  const entries = Object.keys(value).sort().map((key) => [key, $claspSnapshotValue(value[key])]);", "  return Object.freeze(Object.fromEntries(entries));", "}", "", "function $claspStableStringify(value) {", "  return JSON.stringify($claspSnapshotValue(value));", "}", "", "function $claspExpectObject(value, path = \"value\") {", "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {", "    throw new Error(`${path} expected an object`);", "  }", "  return value;", "}", "", "function $claspExpectArray(value, path = \"value\") {", "  if (!Array.isArray(value)) {", "    throw new Error(`${path} expected an array`);", "  }", "  return value;", "}", "", "function $claspExpectString(value, path = \"value\") {", "  if (typeof value !== \"string\") {", "    throw new Error(`${path} expected a string`);", "  }", "  return value;", "}", "", "function $claspExpectInt(value, path = \"value\") {", "  if (!Number.isInteger(value)) {", "    throw new Error(`${path} expected an integer`);", "  }", "  return value;", "}", "", "function $claspExpectBool(value, path = \"value\") {", "  if (typeof value !== \"boolean\") {", "    throw new Error(`${path} expected a boolean`);", "  }", "  return value;", "}", "", "const $claspBinaryMagic = Object.freeze([67, 76, 66, 49]);", "const $claspTextEncoder = typeof TextEncoder === \"undefined\" ? null : new TextEncoder();", "const $claspTextDecoder = typeof TextDecoder === \"undefined\" ? null : new TextDecoder();", "", "function $claspEncodeUtf8Text(value) {", "  if ($claspTextEncoder === null) {", "    throw new Error(\"This runtime does not provide TextEncoder for binary Clasp codecs\");", "  }", "  return $claspTextEncoder.encode($claspExpectString(value, \"value\"));", "}", "", "function $claspDecodeUtf8Text(bytes, path = \"value\") {", "  if ($claspTextDecoder === null) {", "    throw new Error(\"This runtime does not provide TextDecoder for binary Clasp codecs\");", "  }", "  return $claspTextDecoder.decode($claspNormalizeBinaryBytes(bytes, path));", "}", "", "function $claspNormalizeBinaryBytes(value, path = \"value\") {", "  if (value instanceof Uint8Array) {", "    return value;", "  }", "  if (value instanceof ArrayBuffer) {", "    return new Uint8Array(value);", "  }", "  if (ArrayBuffer.isView(value)) {", "    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);", "  }", "  throw new Error(`${path} expected binary bytes`);", "}", "", "function $claspWriteUint32(target, offset, value) {", "  new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, true);", "}", "", "function $claspReadUint32(source, offset, path = \"value\") {", "  if (offset + 4 > source.byteLength) {", "    throw new Error(`${path} truncated binary payload`);", "  }", "  return new DataView(source.buffer, source.byteOffset, source.byteLength).getUint32(offset, true);", "}", "", "function $claspFrameBinaryPayload(payload) {", "  const bytes = $claspNormalizeBinaryBytes(payload, \"payload\");", "  const frame = new Uint8Array(4 + bytes.byteLength);", "  $claspWriteUint32(frame, 0, bytes.byteLength);", "  frame.set(bytes, 4);", "  return frame;", "}", "", "function $claspUnframeBinaryPayload(frame, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(frame, path);", "  const expectedLength = $claspReadUint32(bytes, 0, path);", "  const payload = bytes.slice(4);", "  if (payload.byteLength !== expectedLength) {", "    throw new Error(`${path} expected ${expectedLength} framed bytes but received ${payload.byteLength}`);", "  }", "  return payload;", "}", "", "function $claspEncodeSchemaBinaryPayload(schemaContract, value) {", "  const normalizedValue = schemaContract.toHost(schemaContract.fromHost(value, \"value\"), \"value\");", "  const fingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  const fingerprintBytes = $claspEncodeUtf8Text(fingerprint);", "  const payloadBytes = $claspEncodeUtf8Text($claspStableStringify(normalizedValue));", "  const buffer = new Uint8Array(12 + fingerprintBytes.byteLength + payloadBytes.byteLength);", "  buffer.set($claspBinaryMagic, 0);", "  $claspWriteUint32(buffer, 4, fingerprintBytes.byteLength);", "  $claspWriteUint32(buffer, 8, payloadBytes.byteLength);", "  buffer.set(fingerprintBytes, 12);", "  buffer.set(payloadBytes, 12 + fingerprintBytes.byteLength);", "  return buffer;", "}", "", "function $claspDecodeSchemaBinaryPayload(schemaContract, payload, path = \"value\") {", "  const bytes = $claspNormalizeBinaryBytes(payload, path);", "  if (bytes.byteLength < 12) {", "    throw new Error(`${path} expected a Clasp binary payload`);", "  }", "  for (let index = 0; index < $claspBinaryMagic.length; index += 1) {", "    if (bytes[index] !== $claspBinaryMagic[index]) {", "      throw new Error(`${path} expected a Clasp binary payload`);", "    }", "  }", "  const fingerprintLength = $claspReadUint32(bytes, 4, path);", "  const payloadLength = $claspReadUint32(bytes, 8, path);", "  const payloadOffset = 12 + fingerprintLength;", "  if (payloadOffset + payloadLength !== bytes.byteLength) {", "    throw new Error(`${path} has an invalid Clasp binary payload length`);", "  }", "  const fingerprint = $claspDecodeUtf8Text(bytes.slice(12, payloadOffset), `${path}.fingerprint`);", "  const expectedFingerprint = String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\");", "  if (fingerprint !== expectedFingerprint) {", "    throw new Error(`${path} expected schema fingerprint ${expectedFingerprint} but received ${fingerprint}`);", "  }", "  const payloadText = $claspDecodeUtf8Text(bytes.slice(payloadOffset), `${path}.payload`);", "  return schemaContract.toHost(schemaContract.fromHost(JSON.parse(payloadText), path), path);", "}", "", "function $claspCreateSchemaBinaryCodec(schemaContract) {", "  return Object.freeze({", "    type: schemaContract.type ?? schemaContract.name ?? null,", "    schemaFingerprint: String(schemaContract.schema?.schemaFingerprint ?? schemaContract.type ?? schemaContract.name ?? \"value\"),", "    framing: \"length_prefixed\",", "    encode(value) { return $claspEncodeSchemaBinaryPayload(schemaContract, value); },", "    decode(bytes, path = \"value\") { return $claspDecodeSchemaBinaryPayload(schemaContract, bytes, path); },", "    frame(value) { return $claspFrameBinaryPayload(this.encode(value)); },", "    unframe(frame, path = \"value\") { return this.decode($claspUnframeBinaryPayload(frame, path), path); }", "  });", "}", "", "function $claspCreateSchemaStream(contract, initial = null) {", "  return Object.freeze({ kind: \"clasp-schema-stream\", schema: contract, initial });", "}" ];
   let prompts = [ "", "function $claspPromptMessage(role, content) {", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([Object.freeze({", "      role: $claspExpectString(role, \"prompt.role\"),", "      content: $claspExpectString(content, \"prompt.content\")", "    })])", "  });", "}", "", "function $claspExpectPrompt(value, path = \"value\") {", "  const objectValue = $claspExpectObject(value, path);", "  if (objectValue.$kind !== \"prompt\") {", "    throw new Error(`${path} expected a Prompt value`);", "  }", "  const messages = $claspExpectArray(objectValue.messages, `${path}.messages`).map((message, index) => {", "    const messagePath = `${path}.messages[${index}]`;", "    const messageObject = $claspExpectObject(message, messagePath);", "    return Object.freeze({", "      role: $claspExpectString(messageObject.role, `${messagePath}.role`),", "      content: $claspExpectString(messageObject.content, `${messagePath}.content`)", "    });", "  });", "  return Object.freeze({ $kind: \"prompt\", messages: Object.freeze(messages) });", "}", "", "function systemPrompt(content) { return $claspPromptMessage(\"system\", content); }", "function assistantPrompt(content) { return $claspPromptMessage(\"assistant\", content); }", "function userPrompt(content) { return $claspPromptMessage(\"user\", content); }", "", "function appendPrompt(left, right) {", "  const leftPrompt = $claspExpectPrompt(left, \"left\");", "  const rightPrompt = $claspExpectPrompt(right, \"right\");", "  return Object.freeze({", "    $kind: \"prompt\",", "    messages: Object.freeze([...leftPrompt.messages, ...rightPrompt.messages].map((message) => Object.freeze({ role: message.role, content: message.content })))", "  });", "}", "", "function promptText(value) {", "  const prompt = $claspExpectPrompt(value, \"value\");", "  return prompt.messages.map((message) => `${message.role}: ${message.content}`).join(\"\\n\\n\");", "}" ];
   let traces = [ "", "function $claspCreateTraceCollector(seed = []) {", "  const entries = Array.isArray(seed) ? seed.map((entry) => $claspSnapshotValue(entry)) : [];", "  return Object.freeze({", "    kind: \"clasp-trace-collector\",", "    version: 1,", "    record(entry) {", "      const snapshot = $claspSnapshotValue(entry);", "      entries.push(snapshot);", "      return snapshot;", "    },", "    entries() {", "      return $claspSnapshotValue(entries);", "    },", "    clear() {", "      entries.length = 0;", "      return this.entries();", "    }", "  });", "}", "", "function $claspMaybeRecordTrace(options = null, kind, name, action) {", "  const collector = options && typeof options === \"object\" && options.collector && typeof options.collector.record === \"function\"", "    ? options.collector", "    : null;", "  if (collector) {", "    collector.record(Object.freeze({ kind, name, action, status: \"ok\" }));", "  }", "}" ];
   append core (append prompts traces)
@@ -1342,27 +1417,37 @@ emitMergeGates mergeGates = if hasMergeGateDeclarations mergeGates then {
 } else emptyRenderedTexts
 
 emitFrontendModuleBindings : HostedModuleAst -> [Str]
-emitFrontendModuleBindings modl =
-  [
+emitFrontendModuleBindings modl = {
+  let moduleMetadataLines = if hasMetadataDeclarations (moduleDeclarations modl) then [
+    "  metadata: __claspMetadata,",
+    "  metadataByKey: $claspMetadataMap,"
+  ] else emptyRenderedTexts;
+  let bindingsMetadataLines = if hasMetadataDeclarations (moduleDeclarations modl) then [
+    "  metadata: __claspMetadata,"
+  ] else emptyRenderedTexts;
+  append [
     "export const __claspTraceCollector = Object.freeze({",
     "  version: 1,",
     "  create(seed = []) { return $claspCreateTraceCollector(seed); }",
     "});",
     "",
     "export const __claspModule = Object.freeze({",
-    textConcat ["  name: ", emitJsString (moduleNameOf modl), ","],
+    textConcat ["  name: ", emitJsString (moduleNameOf modl), ","]
+  ] (append moduleMetadataLines [
     "  version: 1",
     "});",
     "",
     "export const __claspBindings = Object.freeze({",
     "  kind: \"clasp-generated-bindings\",",
     "  version: 1,",
-    "  module: __claspModule,",
+    "  module: __claspModule,"
+  ] (append bindingsMetadataLines [
     "  schemas: __claspSchemas,",
     "  traces: __claspTraceCollector",
     "});",
     ""
-  ]
+  ]))
+}
 
 emitFrontendModule : HostedModuleAst -> [LowerDeclText] -> Str
 emitFrontendModule modl decls = {
@@ -1383,11 +1468,16 @@ emitFrontendModule modl decls = {
   rendered = append rendered (emitEarlyReturnPrelude decls);
   rendered = append rendered (emitForeignBindings (moduleForeignDeclarations modl));
   for decl in decls {
-    rendered = appendJsRenderedText rendered (emitDecl decl);
-    rendered
+    if lowerDeclIsMetadata decl then {
+      rendered
+    } else {
+      rendered = appendJsRenderedText rendered (emitDecl decl);
+      rendered
+    }
   };
   rendered = append rendered (emitExportsRegistry modl);
   rendered = append rendered (emitSchemas (moduleRecordDeclarations modl));
+  rendered = append rendered (emitMetadata (moduleDeclarations modl));
   rendered = append rendered (emitFrontendModuleBindings modl);
   textJoin "\n" rendered
 }

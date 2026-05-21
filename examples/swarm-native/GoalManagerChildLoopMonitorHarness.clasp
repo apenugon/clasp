@@ -134,7 +134,7 @@ spawnLeaseChild taskId =
       childLoopAwaitTimeoutMs
       0
       2
-      ["bash", "-lc", "sleep 0.25"])
+      ["bash", "-c", "sleep 0.25"])
 
 taskHeartbeatSeen : Str -> Bool
 taskHeartbeatSeen taskId =

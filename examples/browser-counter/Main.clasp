@@ -1,0 +1,79 @@
+module Main
+
+record BrowserCounterApp = {
+  title : Str,
+  heading : Str,
+  subheading : Str,
+  initialCount : Int,
+  incrementLabel : Str
+}
+
+replaceText : Str -> Str -> Str -> Str
+replaceText value needle replacement = textJoin replacement (textSplit value needle)
+
+escapeHtml : Str -> Str
+escapeHtml value = replaceText (replaceText (replaceText (replaceText value "&" "&amp;") "<" "&lt;") ">" "&gt;") "\"" "&quot;"
+
+renderCounterScript : Int -> Str
+renderCounterScript initialCount =
+  textJoin "\n" [
+    textConcat ["const state = { count: ", encode initialCount, " };"],
+    "const count = document.getElementById(\"count\");",
+    "const increment = document.getElementById(\"increment\");",
+    "function render() {",
+    "  count.textContent = String(state.count);",
+    "}",
+    "increment.addEventListener(\"click\", () => {",
+    "  state.count += 1;",
+    "  render();",
+    "});",
+    "render();"
+  ]
+
+renderCounterApp : BrowserCounterApp -> Str
+renderCounterApp app =
+  textJoin "\n" [
+    "<!doctype html>",
+    "<html lang=\"en\">",
+    "<head>",
+    "  <meta charset=\"utf-8\">",
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    textConcat ["  <title>", escapeHtml app.title, "</title>"],
+    "  <style>",
+    "    body { margin: 0; font-family: system-ui, sans-serif; background: #f7f3ea; color: #151515; }",
+    "    main { min-height: 100vh; display: grid; place-items: center; padding: 2rem; }",
+    "    section { width: min(32rem, 100%); border: 1px solid #d8d0bf; background: #ffffff; padding: 2rem; }",
+    "    h1 { margin: 0 0 0.75rem; font-size: 2rem; }",
+    "    p { margin: 0 0 1.5rem; color: #48433a; }",
+    "    strong { display: block; margin: 0 0 1rem; font-size: 4rem; line-height: 1; }",
+    "    button { border: 0; background: #166534; color: white; padding: 0.75rem 1rem; font: inherit; cursor: pointer; }",
+    "    button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }",
+    "  </style>",
+    "</head>",
+    "<body>",
+    "  <main>",
+    "    <section aria-labelledby=\"app-title\">",
+    textConcat ["      <h1 id=\"app-title\">", escapeHtml app.heading, "</h1>"],
+    textConcat ["      <p>", escapeHtml app.subheading, "</p>"],
+    textConcat ["      <strong id=\"count\">", encode app.initialCount, "</strong>"],
+    textConcat ["      <button id=\"increment\" type=\"button\">", escapeHtml app.incrementLabel, "</button>"],
+    "    </section>",
+    "  </main>",
+    "  <script type=\"module\">",
+    renderCounterScript app.initialCount,
+    "  </script>",
+    "</body>",
+    "</html>"
+  ]
+
+starterApp : BrowserCounterApp
+starterApp = BrowserCounterApp {
+  title = "Clasp browser counter",
+  heading = "Clasp browser counter",
+  subheading = "A frontend-JS starter app emitted from ordinary Clasp source.",
+  initialCount = 0,
+  incrementLabel = "Add one"
+}
+
+main : Str
+main = renderCounterApp starterApp

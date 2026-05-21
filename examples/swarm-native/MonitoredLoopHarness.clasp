@@ -106,15 +106,15 @@ runHarness = {
     let retryOutcome = monitoredLoopReconcile (specFor "retry-exhausted" 0 0 100 emptyTexts) in
     let malformedOutcome = monitoredLoopReconcile (specFor "malformed" 0 2 100 emptyTexts) in
     let unresolvedOutcome = monitoredLoopReconcile (specFor "unresolved" 0 2 100 emptyTexts) in
-    let runningSpec = specFor "running" 0 2 50 ["bash", "-lc", "sleep 0.25"] in
+    let runningSpec = specFor "running" 0 2 50 ["bash", "-c", "sleep 0.25"] in
     let runningOutcome = monitoredLoopSpawn runningSpec in
     let timeoutOutcome = monitoredLoopAwait runningSpec in
     let completedAfterTimeoutOutcome =
-      monitoredLoopAwait (specFor "running" 0 2 1000 ["bash", "-lc", "sleep 0.25"]) in
-    let watchOutcome = monitoredLoopWatch (specFor "watch-pass" 0 2 100 ["bash", "-lc", "exit 0"]) in
+      monitoredLoopAwait (specFor "running" 0 2 1000 ["bash", "-c", "sleep 0.25"]) in
+    let watchOutcome = monitoredLoopWatch (specFor "watch-pass" 0 2 100 ["bash", "-c", "exit 0"]) in
     let resumeExistingOutcome = monitoredLoopLaunchOrResume (specFor "completed-pass" 0 2 100 emptyTexts) in
     let launchOrResumeNewOutcome =
-      monitoredLoopLaunchOrResume (specFor "launch-or-resume-new" 0 2 50 ["bash", "-lc", "sleep 0.25"]) in
+      monitoredLoopLaunchOrResume (specFor "launch-or-resume-new" 0 2 50 ["bash", "-c", "sleep 0.25"]) in
     textJoin "\n" [
       statusLine "running" runningOutcome,
       statusLine "completed-pass" passOutcome,

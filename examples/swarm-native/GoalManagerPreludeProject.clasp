@@ -64,7 +64,7 @@ canonicalizePath value =
   if value == "" then
     ""
   else
-    match runCommand "." ["bash", "-lc", canonicalizePathScript, "canonicalize-path", value] {
+    match runCommand "." ["bash", "-c", canonicalizePathScript, "canonicalize-path", value] {
       Ok process ->
         if process.exitCode == 0 then
           firstTextOrEmpty (textSplit process.stdout "\n")

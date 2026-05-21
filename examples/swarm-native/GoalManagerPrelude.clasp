@@ -258,6 +258,60 @@ processResult value = match value {
 runCommand : Str -> [Str] -> Result ProcessResult
 runCommand cwd command = processResult (runCommandRaw cwd command)
 
+promotedNativeWorkspaceArtifactRepairScript : Str
+promotedNativeWorkspaceArtifactRepairScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "dst=\"$2\"",
+  "if [ ! -f \"$src/runtime/claspc.rs\" ]; then",
+  "  exit 0",
+  "fi",
+  "required_artifacts=(",
+  "  src/stage1.native.image.json",
+  "  src/stage1.compiler.native.image.json",
+  "  src/embedded.native.image.json",
+  "  src/embedded.compiler.native.image.json",
+  "  src/stage1.native.native.image.json",
+  "  src/stage1.hello.native.image.json",
+  "  src/stage1.goal-manager.native.image.json",
+  "  src/stage1.task-workspace-runtime-harness.native.image.json",
+  "  src/stage1.compiler.source-export-cache-v1.json",
+  "  src/stage1.compiler.module-summary-cache-v2.json",
+  ")",
+  "for rel in \"${required_artifacts[@]}\"; do",
+  "  if [ ! -f \"$src/$rel\" ]; then",
+  "    printf 'missing required promoted native artifact in source workspace: %s\n' \"$rel\" >&2",
+  "    exit 3",
+  "  fi",
+  "  mkdir -p \"$dst/$(dirname -- \"$rel\")\"",
+  "  cp -p \"$src/$rel\" \"$dst/$rel\"",
+  "  if [ ! -f \"$dst/$rel\" ]; then",
+  "    printf 'failed to materialize required promoted native artifact: %s\n' \"$rel\" >&2",
+  "    exit 3",
+  "  fi",
+  "done"
+]
+
+repairPromotedNativeWorkspaceArtifacts : Str -> Str -> Str
+repairPromotedNativeWorkspaceArtifacts sourceRoot destinationRoot =
+  match runCommand "." [
+    "bash",
+    "-c",
+    promotedNativeWorkspaceArtifactRepairScript,
+    "repair-promoted-native-artifacts",
+    sourceRoot,
+    destinationRoot
+  ] {
+    Err message -> message,
+    Ok result ->
+      if result.exitCode == 0 then
+        ""
+      else if result.stderr != "" then
+        result.stderr
+      else
+        result.stdout
+  }
+
 workspaceGitInitScript : Str
 workspaceGitInitScript = textJoin "\n" [
   "set -euo pipefail",
@@ -283,7 +337,7 @@ workspaceGitInitScript = textJoin "\n" [
 
 initializeWorkspaceGitRepo : Str -> Str
 initializeWorkspaceGitRepo root =
-  match runCommand "." ["bash", "-lc", workspaceGitInitScript, "init-workspace-git", root] {
+  match runCommand "." ["bash", "-c", workspaceGitInitScript, "init-workspace-git", root] {
     Err message ->
       message,
     Ok process ->

@@ -41,6 +41,7 @@ cp "$project_root/scripts/verify-affected.sh" "$test_root/scripts/verify-affecte
 cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affected.mjs"
 cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$test_root/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
+cp "$project_root/scripts/test-js-emitter-determinism.sh" "$test_root/scripts/test-js-emitter-determinism.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$test_root/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test-verify-runtime-slice.sh"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
@@ -48,6 +49,7 @@ cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
 cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
+cp "$project_root/scripts/test-record-update-parity.sh" "$test_root/scripts/test-record-update-parity.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
 cp "$project_root/scripts/test-monitored-run-log.sh" "$test_root/scripts/test-monitored-run-log.sh"
@@ -59,6 +61,7 @@ cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
+cp "$project_root/scripts/test-swarm-native-feedback-loop.sh" "$test_root/scripts/test-swarm-native-feedback-loop.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
 cp "$project_root/scripts/ensure-goal-manager-binary.sh" "$test_root/scripts/ensure-goal-manager-binary.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
@@ -83,11 +86,33 @@ grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh all' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+node - "$test_root/scripts/verify-fast.sh" <<'NODE'
+const fs = require("fs");
+const script = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+  const match = script.match(new RegExp(`${name}=\\$'([\\s\\S]*?)'`));
+  if (!match) {
+    throw new Error(`missing ${name}`);
+  }
+  return match[1];
+}
+const parallelCommands = extract("fast_parallel_verify_commands");
+const sequentialCommands = extract("fast_sequential_verify_commands");
+if (parallelCommands.includes("bash scripts/test-native-claspc.sh")) {
+  throw new Error("fast native claspc harness should not run in the parallel batch");
+}
+if (!sequentialCommands.includes("bash scripts/test-native-claspc.sh")) {
+  throw new Error("fast native claspc harness should run after the parallel batch");
+}
+NODE
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
@@ -121,23 +146,28 @@ grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"firstFailedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -145,31 +175,38 @@ grep -F 'usage: scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-com
 grep -F -- '--check-only' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'CLASP_COMPILER_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'parser checker lower emitter' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
+grep -F 'ergonomics' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'examples/compiler-checker.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'examples/compiler-lower.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
+grep -F 'examples/compiler-ergonomics.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'verify-compiler-slice: ok (checker, check-only)' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'usage: scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_RUNTIME_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
-grep -F 'process workflow codex-loop agent-loop workspace managed-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
+grep -F 'process workflow codex-loop agent-loop workspace managed-loop swarm-feedback-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-monitored-run-log.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'verificationFallbackMode' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'usedVerifyFastFallback' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-fast.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/verify-runtime-slice.sh swarm-feedback-loop' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh --check-only' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
@@ -180,6 +217,8 @@ grep -F 'source-export promoted hit export=checkSourceText' "$test_root/scripts/
 grep -F 'source-export promoted hit export=nativeImageProjectText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-no-git' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'compiler-slice-fixture' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'js-emitter-determinism' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'record-update-parity-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'runtime-slice-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null

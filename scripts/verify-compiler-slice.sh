@@ -9,7 +9,7 @@ test_root=""
 
 usage() {
   cat <<'EOF'
-usage: scripts/verify-compiler-slice.sh [--list] [--check-only] [parser|checker|lower|emitter|all ...]
+usage: scripts/verify-compiler-slice.sh [--list] [--check-only] [parser|checker|lower|emitter|ergonomics|all ...]
 
 Runs a focused compiler-fixture verifier for fast local feedback before the
 broader verify-all path. Each selected slice runs:
@@ -28,12 +28,13 @@ Examples:
   bash scripts/verify-compiler-slice.sh checker
   bash scripts/verify-compiler-slice.sh --check-only checker
   bash scripts/verify-compiler-slice.sh parser lower emitter
+  bash scripts/verify-compiler-slice.sh ergonomics
   CLASP_COMPILER_SLICE_TIMEOUT_SECS=30 bash scripts/verify-compiler-slice.sh all
 EOF
 }
 
 list_slices() {
-  printf '%s\n' parser checker lower emitter
+  printf '%s\n' parser checker lower emitter ergonomics
 }
 
 fail() {
@@ -99,6 +100,12 @@ switch (slice) {
       "check summary should include emitModule",
     );
     break;
+  case "ergonomics":
+    assert(
+      String(check.summary || "").includes("snapshot : ErgonomicsSnapshot"),
+      "check summary should include ergonomics snapshot",
+    );
+    break;
   default:
     throw new Error(`unknown slice ${slice}`);
 }
@@ -152,6 +159,15 @@ switch (slice) {
       "emitter module text missing function output",
     );
     break;
+  case "ergonomics":
+    assert(output.selectedId === "repair", `unexpected selectedId ${output.selectedId}`);
+    assert(output.selectedStatus === "running", `unexpected selectedStatus ${output.selectedStatus}`);
+    assert(output.statusLookup === "running", `unexpected statusLookup ${output.statusLookup}`);
+    assert(output.queueCount === 1, `unexpected queueCount ${output.queueCount}`);
+    assert(output.blockerCount === 0, `unexpected blockerCount ${output.blockerCount}`);
+    assert(output.boxValue === "running", `unexpected boxValue ${output.boxValue}`);
+    assert(output.summary === "repair:running:running:unblocked", `unexpected summary ${output.summary}`);
+    break;
   default:
     throw new Error(`unknown slice ${slice}`);
 }
@@ -165,7 +181,7 @@ run_slice() {
   local run_output="$test_root/${slice}.run.json"
 
   case "$slice" in
-    parser|checker|lower|emitter)
+    parser|checker|lower|emitter|ergonomics)
       ;;
     *)
       fail "unknown compiler slice: $slice"
@@ -206,9 +222,9 @@ while [[ $# -gt 0 ]]; do
       check_only=1
       ;;
     all)
-      slices=(parser checker lower emitter)
+      slices=(parser checker lower emitter ergonomics)
       ;;
-    parser|checker|lower|emitter)
+    parser|checker|lower|emitter|ergonomics)
       slices+=("$1")
       ;;
     *)
@@ -219,7 +235,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${#slices[@]}" == "0" ]]; then
-  slices=(parser checker lower emitter)
+  slices=(parser checker lower emitter ergonomics)
 fi
 
 parse_positive_timeout

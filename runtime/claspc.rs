@@ -38,6 +38,7 @@ enum Command {
     Explain,
     Air,
     Context,
+    Semantic,
     Compile,
     Run,
     Native,
@@ -52,9 +53,15 @@ struct CliOptions {
     program_args: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModuleMetadataEntry {
+    key: String,
+    value: String,
+}
+
 fn usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] <check|explain|air|context|compile|run|native|native-image> <entry.clasp> [-o output] [-- args...]"
+        "usage: {program} [--json] <check|explain|air|context|semantic|compile|run|native|native-image> <entry.clasp> [-o output] [-- args...]"
     );
     std::process::exit(2);
 }
@@ -68,6 +75,10 @@ fn exec_image_usage(program: &str) -> ! {
 
 fn json_string(value: &str) -> String {
     format!("{value:?}")
+}
+
+fn metadata_declaration_shape_error() -> &'static str {
+    "Reserved declaration `metadata` must use `metadata <key> = \"value\"` with exactly one key and a string literal value."
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +99,7 @@ struct CompilerDiagnostic {
     expected: Option<String>,
     actual: Option<String>,
     candidates: Vec<String>,
+    fix_hints: Vec<String>,
 }
 
 fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
@@ -102,6 +114,10 @@ fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
     fields.insert(
         "candidates".to_owned(),
         serde_json::json!(&diagnostic.candidates),
+    );
+    fields.insert(
+        "fixHints".to_owned(),
+        serde_json::json!(&diagnostic.fix_hints),
     );
 
     match &diagnostic.primary_location {
@@ -142,21 +158,6 @@ fn json_optional_string(value: &Option<String>) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
-fn render_diagnostic_detail_field(name: &str, value: &Option<String>) -> String {
-    value
-        .as_ref()
-        .map(|text| format!(" {name}={}", json_string(text)))
-        .unwrap_or_default()
-}
-
-fn render_diagnostic_candidates_field(candidates: &[String]) -> String {
-    if candidates.is_empty() {
-        String::new()
-    } else {
-        format!(" candidates={}", json_string(&candidates.join(",")))
-    }
-}
-
 fn print_json_diagnostic_error(diagnostic: &CompilerDiagnostic) {
     println!(
         "{}",
@@ -169,43 +170,11 @@ fn print_json_diagnostic_error(diagnostic: &CompilerDiagnostic) {
     );
 }
 
-fn render_pretty_diagnostic(diagnostic: &CompilerDiagnostic) -> String {
-    match &diagnostic.primary_location {
-        Some(location) => format!(
-            "CLASP_DIAGNOSTIC phase={} code={} file={} line={} column={} message={}\n{}",
-            diagnostic.phase,
-            diagnostic.code,
-            json_string(&location.file),
-            location.line,
-            location.column,
-            json_string(&diagnostic.message)
-                + &render_diagnostic_detail_field("context", &diagnostic.context)
-                + &render_diagnostic_detail_field("target", &diagnostic.target)
-                + &render_diagnostic_detail_field("expected", &diagnostic.expected)
-                + &render_diagnostic_detail_field("actual", &diagnostic.actual)
-                + &render_diagnostic_candidates_field(&diagnostic.candidates),
-            diagnostic.message,
-        ),
-        None => format!(
-            "CLASP_DIAGNOSTIC phase={} code={} file=null line=null column=null message={}\n{}",
-            diagnostic.phase,
-            diagnostic.code,
-            json_string(&diagnostic.message)
-                + &render_diagnostic_detail_field("context", &diagnostic.context)
-                + &render_diagnostic_detail_field("target", &diagnostic.target)
-                + &render_diagnostic_detail_field("expected", &diagnostic.expected)
-                + &render_diagnostic_detail_field("actual", &diagnostic.actual)
-                + &render_diagnostic_candidates_field(&diagnostic.candidates),
-            diagnostic.message,
-        ),
-    }
-}
-
 fn fail_diagnostic(diagnostic: &CompilerDiagnostic, json: bool) -> ExitCode {
     if json {
         print_json_diagnostic_error(diagnostic);
     } else {
-        eprintln!("{}", render_pretty_diagnostic(diagnostic));
+        eprintln!("{}", diagnostic.message);
     }
     ExitCode::from(1)
 }
@@ -529,6 +498,12 @@ fn checker_diagnostic_code(message: &str) -> Option<&'static str> {
         Some("E_UNKNOWN_TYPE")
     } else if detail.starts_with("Expected a value annotation for `") {
         Some("E_CANNOT_INFER")
+    } else if record_literal_missing_field(message).is_some() {
+        Some("E_RECORD_MISSING_FIELDS")
+    } else if record_literal_unknown_field(message).is_some() {
+        Some("E_RECORD_UNKNOWN_FIELD")
+    } else if record_duplicate_field(message).is_some() {
+        Some("E_RECORD_DUPLICATE_FIELD")
     } else if detail.starts_with("Non-exhaustive match for `") {
         Some("E_NON_EXHAUSTIVE_MATCH")
     } else if detail == "Match expression needs at least one branch." {
@@ -550,6 +525,35 @@ fn type_mismatch_expected_found(message: &str) -> Option<(&str, &str)> {
     let after_expected_marker = &after_prefix[start..];
     let (expected, found) = after_expected_marker.split_once(", found ")?;
     Some((expected.trim(), found.trim().strip_suffix('.')?.trim()))
+}
+
+fn record_literal_missing_field(message: &str) -> Option<(&str, &str)> {
+    let detail = diagnostic_detail(message);
+    let after_prefix = detail.strip_prefix("Record literal for `")?;
+    let (record_name, after_record) = after_prefix.split_once("` is missing field `")?;
+    let missing_field = after_record.strip_suffix("`.")?;
+    Some((record_name, missing_field))
+}
+
+fn record_literal_unknown_field(message: &str) -> Option<(&str, &str)> {
+    let detail = diagnostic_detail(message);
+    let after_prefix = detail.strip_prefix("Record literal for `")?;
+    let (record_name, after_record) = after_prefix.split_once("` includes unknown field `")?;
+    let unknown_field = after_record.strip_suffix("`.")?;
+    Some((record_name, unknown_field))
+}
+
+fn record_duplicate_field(message: &str) -> Option<(&str, &str)> {
+    let detail = diagnostic_detail(message);
+    if let Some(after_prefix) = detail.strip_prefix("Record literal for `") {
+        let (record_name, after_record) = after_prefix.split_once("` repeats field `")?;
+        let duplicate_field = after_record.strip_suffix("`.")?;
+        return Some((record_name, duplicate_field));
+    }
+    let after_prefix = detail.strip_prefix("Record update for `")?;
+    let (record_name, after_record) = after_prefix.split_once("` repeats field `")?;
+    let duplicate_field = after_record.strip_suffix("`.")?;
+    Some((record_name, duplicate_field))
 }
 
 fn normalize_instantiated_generic_type_text(text: &str) -> (String, bool) {
@@ -676,6 +680,8 @@ fn diagnostic_target_text(message: &str) -> Option<String> {
         .or_else(|| first_backticked_after(detail, "Unknown constructor `"))
         .or_else(|| first_backticked_after(detail, "Unknown type `"))
         .or_else(|| first_backticked_after(detail, "Expected a value annotation for `"))
+        .or_else(|| first_backticked_after(detail, "Record literal for `"))
+        .or_else(|| first_backticked_after(detail, "Record update for `"))
 }
 
 fn checker_diagnostic_location(
@@ -983,6 +989,63 @@ fn append_unknown_reference_candidate_hint(message: &str, candidates: &[String])
     }
 }
 
+fn unknown_reference_fix_hints(
+    code: &str,
+    target: Option<&str>,
+    candidates: &[String],
+) -> Vec<String> {
+    if !matches!(code, "E_UNBOUND_NAME" | "E_UNBOUND_CONSTRUCTOR") {
+        return Vec::new();
+    }
+    let Some(target) = target else {
+        return Vec::new();
+    };
+
+    match (code, target, candidates) {
+        ("E_UNBOUND_NAME", "True", _) => vec![
+            "Use lowercase `true` for the Boolean literal, or define/import `True` if it is an intentional value name.".to_owned(),
+        ],
+        ("E_UNBOUND_NAME", "False", _) => vec![
+            "Use lowercase `false` for the Boolean literal, or define/import `False` if it is an intentional value name.".to_owned(),
+        ],
+        ("E_UNBOUND_CONSTRUCTOR", "True", _) => vec![
+            "Use lowercase `true` for the Boolean literal, or declare/import constructor `True` only if this is a data constructor.".to_owned(),
+        ],
+        ("E_UNBOUND_CONSTRUCTOR", "False", _) => vec![
+            "Use lowercase `false` for the Boolean literal, or declare/import constructor `False` only if this is a data constructor.".to_owned(),
+        ],
+        ("E_UNBOUND_NAME", _, [candidate]) => vec![format!(
+            "Rename the reference to `{candidate}`, or define/import `{target}` if this spelling is intentional."
+        )],
+        ("E_UNBOUND_CONSTRUCTOR", _, [candidate]) => vec![format!(
+            "Rename the constructor reference to `{candidate}`, or declare/import constructor `{target}` if this spelling is intentional."
+        )],
+        ("E_UNBOUND_NAME", _, candidates) if !candidates.is_empty() => vec![format!(
+            "Rename the reference to one of: {}, or define/import `{target}` if this spelling is intentional.",
+            candidates
+                .iter()
+                .map(|candidate| format!("`{candidate}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )],
+        ("E_UNBOUND_CONSTRUCTOR", _, candidates) if !candidates.is_empty() => vec![format!(
+            "Rename the constructor reference to one of: {}, or declare/import constructor `{target}` if this spelling is intentional.",
+            candidates
+                .iter()
+                .map(|candidate| format!("`{candidate}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )],
+        ("E_UNBOUND_NAME", _, _) => vec![format!(
+            "Define or import `{target}`, or correct the spelling of the reference."
+        )],
+        ("E_UNBOUND_CONSTRUCTOR", _, _) => vec![format!(
+            "Declare or import constructor `{target}`, or correct the spelling of the constructor reference."
+        )],
+        _ => Vec::new(),
+    }
+}
+
 fn structured_check_diagnostic_from_summary(
     summary: &str,
     bundle_build: &ProjectBundleBuild,
@@ -996,9 +1059,34 @@ fn structured_check_diagnostic_from_summary(
     let target = diagnostic_target_text(raw_message);
     let (expected, actual) = type_mismatch_expected_found(raw_message)
         .map(|(expected, actual)| (Some(expected.to_owned()), Some(actual.to_owned())))
+        .or_else(|| {
+            record_literal_missing_field(raw_message).map(|(_, missing_field)| {
+                (
+                    Some(missing_field.to_owned()),
+                    Some("missing field".to_owned()),
+                )
+            })
+        })
+        .or_else(|| {
+            record_literal_unknown_field(raw_message).map(|(_, unknown_field)| {
+                (
+                    Some("declared field".to_owned()),
+                    Some(unknown_field.to_owned()),
+                )
+            })
+        })
+        .or_else(|| {
+            record_duplicate_field(raw_message).map(|(_, duplicate_field)| {
+                (
+                    Some("unique field".to_owned()),
+                    Some(duplicate_field.to_owned()),
+                )
+            })
+        })
         .unwrap_or((None, None));
     let candidates = unknown_reference_candidates(raw_message, code, bundle_build);
     let message = append_unknown_reference_candidate_hint(raw_message, &candidates);
+    let fix_hints = unknown_reference_fix_hints(code, target.as_deref(), &candidates);
     Some(CompilerDiagnostic {
         phase: "checker",
         code,
@@ -1009,6 +1097,7 @@ fn structured_check_diagnostic_from_summary(
         expected,
         actual,
         candidates,
+        fix_hints,
     })
 }
 
@@ -1067,15 +1156,380 @@ fn empty_rhs_parse_diagnostic_for_source(file: &str, source: &str) -> Option<Com
                 expected: Some("expression".to_owned()),
                 actual: Some("end of line".to_owned()),
                 candidates: Vec::new(),
+                fix_hints: Vec::new(),
             });
         }
     }
     None
 }
 
+fn is_interface_decl_line(trimmed: &str) -> bool {
+    matches!(
+        trimmed.split_whitespace().next(),
+        Some(
+            "agent"
+                | "domain"
+                | "experiment"
+                | "feedback"
+                | "foreign"
+                | "goal"
+                | "guide"
+                | "hook"
+                | "import"
+                | "mergegate"
+                | "metric"
+                | "module"
+                | "policy"
+                | "projection"
+                | "record"
+                | "role"
+                | "rollout"
+                | "route"
+                | "supervisor"
+                | "tool"
+                | "toolserver"
+                | "type"
+                | "verifier"
+                | "workflow"
+        )
+    )
+}
+
+fn record_literal_type_before_brace(line: &str, brace_byte_index: usize) -> bool {
+    record_literal_name_before_brace(line, brace_byte_index).is_some()
+}
+
+fn record_literal_name_before_brace(line: &str, brace_byte_index: usize) -> Option<String> {
+    let before_brace = line[..brace_byte_index].trim_end();
+    let token = before_brace
+        .rsplit(|ch: char| ch.is_whitespace() || matches!(ch, '(' | '[' | ',' | '='))
+        .find(|part| !part.is_empty())?;
+    if token
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_uppercase())
+        .unwrap_or(false)
+    {
+        Some(token.to_owned())
+    } else {
+        None
+    }
+}
+
+fn looks_like_record_field_name(text: &str) -> bool {
+    let name = text.trim();
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_lowercase() || first == '_') && chars.all(is_identifier_char)
+}
+
+fn record_field_separator_parse_diagnostic_for_source(
+    file: &str,
+    source: &str,
+) -> Option<CompilerDiagnostic> {
+    let mut record_literal_depth = 0usize;
+
+    for (index, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        let skip_literal_start = is_interface_decl_line(trimmed);
+        let mut seen_definition_equals = record_literal_depth > 0;
+        let mut field_start_byte = 0usize;
+        let mut field_has_equals = false;
+        let mut in_string = false;
+        let mut escape_next = false;
+
+        for (byte_index, ch) in line.char_indices() {
+            if in_string {
+                if escape_next {
+                    escape_next = false;
+                } else if ch == '\\' {
+                    escape_next = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+
+            if record_literal_depth == 0 && !skip_literal_start && ch == '=' {
+                seen_definition_equals = true;
+                continue;
+            }
+
+            if ch == '{' {
+                if record_literal_depth > 0
+                    || (seen_definition_equals
+                        && !skip_literal_start
+                        && record_literal_type_before_brace(line, byte_index))
+                {
+                    record_literal_depth += 1;
+                    field_start_byte = byte_index + ch.len_utf8();
+                    field_has_equals = false;
+                }
+                continue;
+            }
+
+            if record_literal_depth == 0 {
+                continue;
+            }
+
+            if ch == '}' {
+                record_literal_depth = record_literal_depth.saturating_sub(1);
+                field_start_byte = byte_index + ch.len_utf8();
+                field_has_equals = false;
+                continue;
+            }
+
+            if ch == ',' {
+                field_start_byte = byte_index + ch.len_utf8();
+                field_has_equals = false;
+                continue;
+            }
+
+            if ch == '=' {
+                field_has_equals = true;
+                continue;
+            }
+
+            if ch == ':' && !field_has_equals {
+                let field_name = line[field_start_byte..byte_index].trim();
+                if looks_like_record_field_name(field_name) {
+                    return Some(CompilerDiagnostic {
+                        phase: "parser",
+                        code: "E_PARSE_RECORD_FIELD_SEPARATOR",
+                        message: format!(
+                            "Record literal field `{field_name}` uses `:`. Use `{field_name} = <expression>` inside record literals."
+                        ),
+                        primary_location: Some(DiagnosticLocation {
+                            file: file.to_owned(),
+                            line: index + 1,
+                            column: line[..byte_index].chars().count() + 1,
+                        }),
+                        context: None,
+                        target: Some(field_name.to_owned()),
+                        expected: Some("field = expression".to_owned()),
+                        actual: Some("field: expression".to_owned()),
+                        candidates: Vec::new(),
+                        fix_hints: Vec::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+struct RecordLiteralFieldFrame {
+    subject: String,
+    is_update: bool,
+    seen_fields: HashSet<String>,
+    start_line: usize,
+    start_column: usize,
+    field_start_line: usize,
+    field_start_byte: usize,
+    field_has_equals: bool,
+}
+
+fn record_update_start_before_brace(line: &str, brace_byte_index: usize) -> Option<usize> {
+    let before_brace = &line[..brace_byte_index];
+    let mut token_start = None::<usize>;
+
+    for (byte_index, ch) in before_brace.char_indices() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            if token_start.is_none() {
+                token_start = Some(byte_index);
+            }
+            continue;
+        }
+
+        if let Some(start) = token_start.take() {
+            if &before_brace[start..byte_index] == "with" {
+                return Some(start);
+            }
+        }
+    }
+
+    if let Some(start) = token_start {
+        if &before_brace[start..] == "with" {
+            return Some(start);
+        }
+    }
+
+    None
+}
+
+fn duplicate_record_field_diagnostic(
+    file: &str,
+    frame: &RecordLiteralFieldFrame,
+    field_name: &str,
+) -> CompilerDiagnostic {
+    let message = if frame.is_update {
+        format!("Record update repeats field `{field_name}`.")
+    } else {
+        format!(
+            "Record literal for `{}` repeats field `{field_name}`.",
+            frame.subject
+        )
+    };
+
+    CompilerDiagnostic {
+        phase: "checker",
+        code: "E_RECORD_DUPLICATE_FIELD",
+        message,
+        primary_location: Some(DiagnosticLocation {
+            file: file.to_owned(),
+            line: frame.start_line,
+            column: frame.start_column,
+        }),
+        context: None,
+        target: Some(frame.subject.clone()),
+        expected: Some("unique field".to_owned()),
+        actual: Some(field_name.to_owned()),
+        candidates: Vec::new(),
+        fix_hints: Vec::new(),
+    }
+}
+
+fn record_duplicate_field_diagnostic_for_source(
+    file: &str,
+    source: &str,
+) -> Option<CompilerDiagnostic> {
+    let mut frames = Vec::<RecordLiteralFieldFrame>::new();
+
+    for (index, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        let skip_literal_start = is_interface_decl_line(trimmed);
+        let mut in_string = false;
+        let mut escape_next = false;
+
+        let current_line = index + 1;
+
+        if let Some(frame) = frames.last_mut() {
+            if !frame.field_has_equals && frame.field_start_line != current_line {
+                frame.field_start_byte = 0;
+                frame.field_start_line = current_line;
+                frame.field_has_equals = false;
+            }
+        }
+
+        for (byte_index, ch) in line.char_indices() {
+            if in_string {
+                if escape_next {
+                    escape_next = false;
+                } else if ch == '\\' {
+                    escape_next = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+
+            if ch == '{' {
+                if !skip_literal_start {
+                    if let Some(record_name) = record_literal_name_before_brace(line, byte_index) {
+                        let start_byte = line[..byte_index]
+                            .rfind(|ch: char| {
+                                ch.is_whitespace() || matches!(ch, '(' | '[' | ',' | '=')
+                            })
+                            .map(|start| start + 1)
+                            .unwrap_or(0);
+                        frames.push(RecordLiteralFieldFrame {
+                            subject: record_name,
+                            is_update: false,
+                            seen_fields: HashSet::new(),
+                            start_line: current_line,
+                            start_column: line[..start_byte].chars().count() + 1,
+                            field_start_line: current_line,
+                            field_start_byte: byte_index + ch.len_utf8(),
+                            field_has_equals: false,
+                        });
+                    } else if let Some(start_byte) =
+                        record_update_start_before_brace(line, byte_index)
+                    {
+                        frames.push(RecordLiteralFieldFrame {
+                            subject: "record update".to_owned(),
+                            is_update: true,
+                            seen_fields: HashSet::new(),
+                            start_line: current_line,
+                            start_column: line[..start_byte].chars().count() + 1,
+                            field_start_line: current_line,
+                            field_start_byte: byte_index + ch.len_utf8(),
+                            field_has_equals: false,
+                        });
+                    }
+                }
+                continue;
+            }
+
+            if frames.is_empty() {
+                continue;
+            };
+
+            if ch == '}' {
+                frames.pop();
+                if let Some(parent) = frames.last_mut() {
+                    parent.field_start_line = current_line;
+                    parent.field_start_byte = byte_index + ch.len_utf8();
+                    parent.field_has_equals = false;
+                }
+                continue;
+            }
+
+            let Some(frame) = frames.last_mut() else {
+                continue;
+            };
+
+            if ch == ',' {
+                frame.field_start_line = current_line;
+                frame.field_start_byte = byte_index + ch.len_utf8();
+                frame.field_has_equals = false;
+                continue;
+            }
+
+            if ch == '=' && !frame.field_has_equals {
+                let field_start_byte = if frame.field_start_line == current_line
+                    && frame.field_start_byte <= byte_index
+                {
+                    frame.field_start_byte
+                } else {
+                    0
+                };
+                let field_name = line[field_start_byte..byte_index].trim();
+                if looks_like_record_field_name(field_name) {
+                    if frame.seen_fields.contains(field_name) {
+                        return Some(duplicate_record_field_diagnostic(file, frame, field_name));
+                    }
+                    frame.seen_fields.insert(field_name.to_owned());
+                }
+                frame.field_has_equals = true;
+            }
+        }
+    }
+
+    None
+}
+
 fn parse_diagnostic_from_bundle(bundle_build: &ProjectBundleBuild) -> Option<CompilerDiagnostic> {
     for (file, source) in bundle_source_entries(bundle_build) {
         if let Some(diagnostic) = empty_rhs_parse_diagnostic_for_source(&file, source) {
+            return Some(diagnostic);
+        }
+        if let Some(diagnostic) = record_field_separator_parse_diagnostic_for_source(&file, source) {
+            return Some(diagnostic);
+        }
+        if let Some(diagnostic) = record_duplicate_field_diagnostic_for_source(&file, source) {
             return Some(diagnostic);
         }
     }
@@ -1125,6 +1579,7 @@ fn structured_diagnostic_from_message(
             expected: Some("module <Name>".to_owned()),
             actual: None,
             candidates: Vec::new(),
+            fix_hints: Vec::new(),
         });
     }
     bundle_build.and_then(|build| structured_check_diagnostic_from_summary(&enhanced, build))
@@ -1175,6 +1630,7 @@ fn parse_command(name: &str) -> Option<Command> {
         "explain" => Some(Command::Explain),
         "air" => Some(Command::Air),
         "context" => Some(Command::Context),
+        "semantic" => Some(Command::Semantic),
         "compile" => Some(Command::Compile),
         "run" => Some(Command::Run),
         "native" => Some(Command::Native),
@@ -1230,7 +1686,7 @@ fn parse_cli(args: &[String]) -> Result<CliOptions, String> {
 
     let Some(command) = parse_command(&positionals[0]) else {
         return Err(format!(
-            "unsupported command `{}`; native `claspc` currently supports check, explain, air, context, compile, run, native, and native-image",
+            "unsupported command `{}`; native `claspc` currently supports check, explain, air, context, semantic, compile, run, native, and native-image",
             positionals[0]
         ));
     };
@@ -3294,19 +3750,98 @@ fn assemble_native_image_text(sections: &NativeImageSections) -> String {
     )
 }
 
+fn native_image_decl_section_has_structured_bodies(value: &serde_json::Value) -> bool {
+    value
+        .as_array()
+        .map(|decls| decls.iter().any(|decl| decl.get("body").is_some()))
+        .unwrap_or(false)
+}
+
+fn collect_native_image_runtime_refs(value: &serde_json::Value, refs: &mut HashSet<String>) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_native_image_runtime_refs(value, refs);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            if fields.get("kind").and_then(serde_json::Value::as_str) == Some("local") {
+                if let Some(name) = fields.get("name").and_then(serde_json::Value::as_str) {
+                    refs.insert(name.to_owned());
+                }
+            }
+            for value in fields.values() {
+                collect_native_image_runtime_refs(value, refs);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn harden_native_image_runtime_bindings(output: Vec<u8>) -> Vec<u8> {
+    let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(&output) else {
+        return output;
+    };
+    if payload.get("format").and_then(serde_json::Value::as_str) != Some("clasp-native-image-v1") {
+        return output;
+    }
+
+    let Some(decls) = payload.get("decls") else {
+        return output;
+    };
+    if !native_image_decl_section_has_structured_bodies(decls) {
+        return output;
+    }
+
+    let mut runtime_refs = HashSet::new();
+    collect_native_image_runtime_refs(decls, &mut runtime_refs);
+
+    let Some(bindings) = payload
+        .get_mut("runtime")
+        .and_then(|runtime| runtime.get_mut("bindings"))
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return output;
+    };
+
+    let original_binding_count = bindings.len();
+    bindings.retain(|binding| {
+        binding
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|name| runtime_refs.contains(name))
+            .unwrap_or(false)
+    });
+    if bindings.len() == original_binding_count {
+        return output;
+    }
+
+    match serde_json::to_vec(&payload) {
+        Ok(mut hardened) => {
+            hardened.push(b'\n');
+            hardened
+        }
+        Err(_) => output,
+    }
+}
+
 fn execute_parallel_native_image_export(image_path: &str, bundle_build: &ProjectBundleBuild) -> Result<Vec<u8>, String> {
     if let Some(cached) = read_cached_native_image(image_path, &bundle_build.bundle) {
-        return Ok(cached);
+        let image_bytes = harden_native_image_runtime_bindings(cached);
+        write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+        return Ok(image_bytes);
     }
     if let Some(cached) = read_cached_source_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle) {
-        write_cached_native_image(image_path, &bundle_build.bundle, &cached);
-        return Ok(cached);
+        let image_bytes = harden_native_image_runtime_bindings(cached);
+        write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+        return Ok(image_bytes);
     }
 
     if let Some(threshold) = monolithic_bundle_bytes_threshold() {
         if bundle_build.bundle.len() >= threshold {
-            let image_bytes =
-                execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle)?.into_bytes();
+            let image_bytes = harden_native_image_runtime_bindings(
+                execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle)?.into_bytes(),
+            );
             write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
             return Ok(image_bytes);
         }
@@ -3391,27 +3926,53 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
         decls,
     };
 
-    let image_bytes = assemble_native_image_text(&sections).into_bytes();
+    let image_bytes = harden_native_image_runtime_bindings(assemble_native_image_text(&sections).into_bytes());
     write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
     Ok(image_bytes)
+}
+
+fn execute_source_run_native_image_export(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Result<Vec<u8>, String> {
+    if bundle_build_is_single_source_module(bundle_build) {
+        let export_name = source_export_name_for_project_export(NATIVE_IMAGE_MONOLITHIC_EXPORT)
+            .unwrap_or(NATIVE_IMAGE_MONOLITHIC_EXPORT);
+        trace_native_cache(&format!("run-binary single-source image export={export_name}"));
+        if let Some(cached) = read_cached_source_export(image_path, export_name, &bundle_build.bundle) {
+            let image_bytes = harden_native_image_runtime_bindings(cached);
+            write_cached_source_export(image_path, export_name, &bundle_build.bundle, &image_bytes);
+            return Ok(image_bytes);
+        }
+        let output = unsafe {
+            execute_native_export_from_image_path(image_path, export_name, Some(&bundle_build.bundle))
+        }?;
+        let image_bytes = harden_native_image_runtime_bindings(output);
+        write_cached_source_export(image_path, export_name, &bundle_build.bundle, &image_bytes);
+        Ok(image_bytes)
+    } else {
+        execute_parallel_native_image_export(image_path, bundle_build)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         collect_project_module_postorder, conservative_module_interface_fingerprint, count_decl_names,
-        empty_rhs_parse_diagnostic_for_source, form_body_to_json, merge_json_arrays,
-        native_image_cache_dir, parse_cli,
+        empty_rhs_parse_diagnostic_for_source, form_body_to_json, harden_native_image_runtime_bindings, merge_json_arrays,
+        json_value_string, json_value_string_array, native_image_cache_dir, parse_cli,
+        record_field_separator_parse_diagnostic_for_source,
         embedded_final_status_path, final_status_output_bytes,
         native_image_decl_module_cache_context_fingerprint, native_route_error_diagnostic_headers,
         native_route_error_http_response, native_route_info_from_image,
         plan_incremental_project_summary, read_cached_native_image, replace_extension,
+        semantic_summary_output,
         split_decl_name_chunks, write_cached_native_image, Command,
         NativeImageDeclModuleEntry, NativeImageDeclModulePlan, ProjectBundleBuild, ProjectBundleModule,
         PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_test_root(name: &str) -> PathBuf {
@@ -3420,6 +3981,105 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    fn native_image_binding_names(output: Vec<u8>) -> Vec<String> {
+        let payload: serde_json::Value =
+            serde_json::from_slice(&output).expect("hardened native image should be valid json");
+        payload
+            .pointer("/runtime/bindings")
+            .and_then(serde_json::Value::as_array)
+            .expect("native image runtime bindings should be an array")
+            .iter()
+            .filter_map(|binding| binding.get("name").and_then(serde_json::Value::as_str))
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn harden_native_image_runtime_bindings_keeps_only_referenced_bindings() {
+        let image = serde_json::json!({
+            "format": "clasp-native-image-v1",
+            "runtime": {
+                "bindings": [
+                    {"name": "textJoin", "runtime": "textJoin"},
+                    {"name": "runCommandJson", "runtime": "runCommandJson"},
+                    {"name": "writeFile", "runtime": "writeFile"}
+                ]
+            },
+            "decls": [
+                {
+                    "kind": "global",
+                    "name": "main",
+                    "body": {
+                        "kind": "call",
+                        "callee": {"kind": "local", "name": "textJoin"},
+                        "args": [
+                            {"kind": "string", "value": ":"},
+                            {"kind": "list", "items": []}
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let hardened = harden_native_image_runtime_bindings(serde_json::to_vec(&image).unwrap());
+
+        assert_eq!(native_image_binding_names(hardened), vec!["textJoin"]);
+    }
+
+    #[test]
+    fn harden_native_image_runtime_bindings_keeps_referenced_foreign_alias() {
+        let image = serde_json::json!({
+            "format": "clasp-native-image-v1",
+            "runtime": {
+                "bindings": [
+                    {"name": "runCommandRaw", "runtime": "runCommandJson"},
+                    {"name": "runCommandJson", "runtime": "runCommandJson"}
+                ]
+            },
+            "decls": [
+                {
+                    "kind": "global",
+                    "name": "main",
+                    "body": {
+                        "kind": "call",
+                        "callee": {"kind": "local", "name": "runCommandRaw"},
+                        "args": [
+                            {"kind": "string", "value": "."},
+                            {"kind": "list", "items": []}
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let hardened = harden_native_image_runtime_bindings(serde_json::to_vec(&image).unwrap());
+
+        assert_eq!(native_image_binding_names(hardened), vec!["runCommandRaw"]);
+    }
+
+    #[test]
+    fn harden_native_image_runtime_bindings_leaves_unstructured_images_unchanged() {
+        let image = serde_json::json!({
+            "format": "clasp-native-image-v1",
+            "runtime": {
+                "bindings": [
+                    {"name": "textJoin", "runtime": "textJoin"},
+                    {"name": "writeFile", "runtime": "writeFile"}
+                ]
+            },
+            "decls": [
+                {
+                    "kind": "global",
+                    "name": "main",
+                    "bodyText": "call(local(textJoin), [])"
+                }
+            ]
+        });
+        let bytes = serde_json::to_vec(&image).unwrap();
+
+        assert_eq!(harden_native_image_runtime_bindings(bytes.clone()), bytes);
     }
 
     #[test]
@@ -3450,6 +4110,49 @@ main =
 "#;
         assert_eq!(
             empty_rhs_parse_diagnostic_for_source("/tmp/Main.clasp", source),
+            None
+        );
+    }
+
+    #[test]
+    fn record_field_separator_parser_diagnostic_reports_colon_field_separator() {
+        let source = r#"module Main
+
+record User = { name : Str }
+
+main = User { name: "Ada" }
+"#;
+        let diagnostic = record_field_separator_parse_diagnostic_for_source("/tmp/Main.clasp", source)
+            .expect("expected record field separator diagnostic");
+        assert_eq!(diagnostic.phase, "parser");
+        assert_eq!(diagnostic.code, "E_PARSE_RECORD_FIELD_SEPARATOR");
+        assert_eq!(diagnostic.target.as_deref(), Some("name"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("field = expression"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("field: expression"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((5, 19))
+        );
+        assert!(
+            diagnostic
+                .message
+                .contains("Use `name = <expression>` inside record literals.")
+        );
+    }
+
+    #[test]
+    fn record_field_separator_parser_diagnostic_ignores_record_declarations() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main = User { name = "Ada", active = true }
+"#;
+        assert_eq!(
+            record_field_separator_parse_diagnostic_for_source("/tmp/Main.clasp", source),
             None
         );
     }
@@ -3491,6 +4194,240 @@ main =
         assert_eq!(
             diagnostic.actual.as_deref(),
             Some("inst.aae962142451c7fc.a -> inst.aae962142451c7fc.a")
+        );
+    }
+
+    #[test]
+    fn checker_record_missing_field_diagnostic_names_record_and_field() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main = User { name = "Ada" }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `main`: Record literal for `User` is missing field `active`.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected record missing-field diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_MISSING_FIELDS");
+        assert_eq!(diagnostic.context.as_deref(), Some("main"));
+        assert_eq!(diagnostic.target.as_deref(), Some("User"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("active"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("missing field"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((5, 8))
+        );
+    }
+
+    #[test]
+    fn checker_record_unknown_field_diagnostic_names_record_and_field() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main = User { name = "Ada", enabled = true, active = true }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `main`: Record literal for `User` includes unknown field `enabled`.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected record unknown-field diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_UNKNOWN_FIELD");
+        assert_eq!(diagnostic.context.as_deref(), Some("main"));
+        assert_eq!(diagnostic.target.as_deref(), Some("User"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("declared field"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("enabled"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((5, 8))
+        );
+    }
+
+    #[test]
+    fn checker_record_duplicate_field_diagnostic_names_record_and_field() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main = User { name = "Ada", name = "Grace", active = true }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `main`: Record literal for `User` repeats field `name`.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected record duplicate-field diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_DUPLICATE_FIELD");
+        assert_eq!(diagnostic.context.as_deref(), Some("main"));
+        assert_eq!(diagnostic.target.as_deref(), Some("User"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("unique field"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("name"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((5, 8))
+        );
+    }
+
+    #[test]
+    fn parser_preflight_record_duplicate_field_diagnostic_points_at_literal() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main = User { name = "Ada", name = "Grace", active = true }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let diagnostic = super::parse_diagnostic_from_bundle(&build)
+            .expect("expected record duplicate-field preflight diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_DUPLICATE_FIELD");
+        assert_eq!(diagnostic.target.as_deref(), Some("User"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("unique field"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("name"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((5, 13))
+        );
+    }
+
+    #[test]
+    fn parser_preflight_record_multiline_literal_is_accepted() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main =
+  User {
+    name = "Ada",
+    active = true
+  }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        assert!(super::parse_diagnostic_from_bundle(&build).is_none());
+    }
+
+    #[test]
+    fn parser_preflight_record_multiline_duplicate_field_diagnostic_points_at_literal() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+main =
+  User {
+    name = "Ada",
+    name = "Grace",
+    active = true
+  }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let diagnostic = super::parse_diagnostic_from_bundle(&build)
+            .expect("expected multiline record duplicate-field preflight diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_DUPLICATE_FIELD");
+        assert_eq!(diagnostic.target.as_deref(), Some("User"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("unique field"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("name"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((6, 8))
+        );
+    }
+
+    #[test]
+    fn parser_preflight_record_update_duplicate_field_diagnostic_points_at_update() {
+        let source = r#"module Main
+
+record User = { name : Str, active : Bool }
+
+seed = User { name = "Ada", active = true }
+main = with seed { name = "Grace", name = "Ada" }
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let diagnostic = super::parse_diagnostic_from_bundle(&build)
+            .expect("expected record update duplicate-field preflight diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_RECORD_DUPLICATE_FIELD");
+        assert_eq!(diagnostic.target.as_deref(), Some("record update"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("unique field"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("name"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((6, 8))
         );
     }
 
@@ -3547,6 +4484,23 @@ main =
         assert!(matches!(context_options.command, Command::Context));
         assert_eq!(context_options.input_path, PathBuf::from("src/Main.clasp"));
         assert_eq!(context_options.output_path, None);
+
+        let semantic_args = vec![
+            "claspc".to_owned(),
+            "--json".to_owned(),
+            "semantic".to_owned(),
+            "src/Main.clasp".to_owned(),
+            "-o".to_owned(),
+            "build/Main.semantic.json".to_owned(),
+        ];
+        let semantic_options = parse_cli(&semantic_args).expect("semantic options");
+        assert!(semantic_options.json);
+        assert!(matches!(semantic_options.command, Command::Semantic));
+        assert_eq!(semantic_options.input_path, PathBuf::from("src/Main.clasp"));
+        assert_eq!(
+            semantic_options.output_path,
+            Some(PathBuf::from("build/Main.semantic.json"))
+        );
     }
 
     #[test]
@@ -3559,6 +4513,230 @@ main =
             replace_extension(&PathBuf::from("src/Main.clasp"), "context.json"),
             PathBuf::from("src/Main.context.json")
         );
+        assert_eq!(
+            replace_extension(&PathBuf::from("src/Main.clasp"), "semantic.json"),
+            PathBuf::from("src/Main.semantic.json")
+        );
+    }
+
+    #[test]
+    fn semantic_summary_compacts_context_for_edit_planning() {
+        let context = serde_json::json!({
+            "format": "clasp-context-v1",
+            "module": "Main",
+            "projectIdentity": {
+                "entryModule": "Main",
+                "entryModuleId": "module:Main",
+            },
+            "sourceModules": [
+                {
+                    "sourceId": "source:Main",
+                    "moduleId": "module:Main",
+                    "moduleName": "Main",
+                    "role": "entry",
+                    "sourceFingerprint": "aaaaaaaaaaaaaaaa",
+                    "imports": ["Shared.Lead"],
+                    "schemas": [],
+                    "routes": ["route:createLeadRoute"],
+                    "declarations": ["decl:createLead"],
+                    "foreignBoundaries": [],
+                },
+                {
+                    "sourceId": "source:Shared.Lead",
+                    "moduleId": "module:Shared.Lead",
+                    "moduleName": "Shared.Lead",
+                    "role": "import",
+                    "sourceFingerprint": "bbbbbbbbbbbbbbbb",
+                    "imports": [],
+                    "schemas": ["schema:LeadIntake"],
+                    "routes": [],
+                    "declarations": [],
+                    "foreignBoundaries": [],
+                },
+            ],
+            "surfaceIndex": {
+                "schemas": [
+                    {
+                        "id": "schema:LeadIntake",
+                        "name": "LeadIntake",
+                        "kind": "record",
+                        "params": [],
+                        "fields": [
+                            {
+                                "id": "schema-field:LeadIntake:company",
+                                "name": "company",
+                                "type": "Str",
+                                "classification": "public",
+                            },
+                        ],
+                        "affectedSurfaces": ["schema:LeadIntake", "route:createLeadRoute"],
+                    },
+                ],
+                "types": [],
+                "routes": [
+                    {
+                        "id": "route:createLeadRoute",
+                        "name": "createLeadRoute",
+                        "identity": "route:createLeadRoute",
+                        "method": "POST",
+                        "path": "/leads",
+                        "requestType": "LeadIntake",
+                        "responseType": "LeadRecord",
+                        "responseKind": "json",
+                        "handler": "createLead",
+                        "requestSchemaId": "schema:LeadIntake",
+                        "responseSchemaId": "schema:LeadRecord",
+                        "handlerId": "decl:createLead",
+                        "affectedSurfaces": ["route:createLeadRoute", "schema:LeadIntake", "decl:createLead"],
+                        "verificationGuidance": {
+                            "scenarioCommands": ["bash examples/lead-app/scripts/verify.sh"],
+                        },
+                    },
+                ],
+            },
+            "impactIndex": {
+                "schemas": [
+                    {
+                        "sourceId": "schema:LeadIntake",
+                        "sourceKind": "schema",
+                        "name": "LeadIntake",
+                        "affectedSurfaces": ["schema:LeadIntake", "route:createLeadRoute"],
+                        "relevantVerifiers": [],
+                        "relevantMergeGates": [],
+                    },
+                ],
+            },
+            "verificationGuidance": {
+                "focusedCommands": ["bash scripts/verify-affected.sh --changed-file <source.clasp>"],
+                "scenarioCommands": ["bash examples/lead-app/scripts/verify.sh"],
+            },
+            "nodes": [
+                { "id": "module:Main", "kind": "module", "name": "Main" },
+                { "id": "module:Shared.Lead", "kind": "module", "name": "Shared.Lead" },
+                { "id": "decl:createLead", "kind": "decl", "name": "createLead", "annotation": "LeadIntake -> LeadRecord", "params": ["lead"], "body": "call storeLead" },
+            ],
+            "edges": [
+                { "from": "module:Main", "to": "route:createLeadRoute", "kind": "declares" },
+                { "from": "module:Main", "to": "decl:createLead", "kind": "declares" },
+                { "from": "module:Main", "to": "schema:LeadIntake", "kind": "declares" },
+                { "from": "route:createLeadRoute", "to": "schema:LeadIntake", "kind": "request-schema" },
+                { "from": "route:createLeadRoute", "to": "decl:createLead", "kind": "handler" },
+            ],
+            "dependencyGraph": {
+                "format": "clasp-dependency-graph-v1",
+                "nodes": [
+                    {
+                        "id": "source:Main",
+                        "moduleId": "module:Main",
+                        "moduleName": "Main",
+                        "role": "entry",
+                        "imports": ["Shared.Lead"],
+                        "declaredSurfaces": ["route:createLeadRoute", "decl:createLead"],
+                        "affectedSurfaces": ["route:createLeadRoute", "schema:LeadIntake"],
+                        "affectedRoutes": ["route:createLeadRoute"],
+                        "affectedSchemas": ["schema:LeadIntake"],
+                        "affectedForeignBoundaries": [],
+                    },
+                    {
+                        "id": "source:Shared.Lead",
+                        "moduleId": "module:Shared.Lead",
+                        "moduleName": "Shared.Lead",
+                        "role": "import",
+                        "imports": [],
+                        "declaredSurfaces": ["schema:LeadIntake"],
+                        "affectedSurfaces": ["schema:LeadIntake", "route:createLeadRoute"],
+                        "affectedRoutes": ["route:createLeadRoute"],
+                        "affectedSchemas": ["schema:LeadIntake"],
+                        "affectedForeignBoundaries": [],
+                    },
+                ],
+                "edges": [
+                    { "from": "source:Main", "to": "source:Shared.Lead", "kind": "imports" },
+                    { "from": "source:Shared.Lead", "to": "route:createLeadRoute", "kind": "affects" },
+                ],
+            },
+        });
+        let build = ProjectBundleBuild {
+            bundle: String::new(),
+            modules: vec![
+                ProjectBundleModule {
+                    canonical_path: "/repo/Main.clasp".to_owned(),
+                    module_name: "Main".to_owned(),
+                    source_fingerprint: "aaaaaaaaaaaaaaaa".to_owned(),
+                    import_module_names: vec!["Shared.Lead".to_owned()],
+                },
+                ProjectBundleModule {
+                    canonical_path: "/repo/Shared/Lead.clasp".to_owned(),
+                    module_name: "Shared.Lead".to_owned(),
+                    source_fingerprint: "bbbbbbbbbbbbbbbb".to_owned(),
+                    import_module_names: Vec::new(),
+                },
+            ],
+        };
+        let output = semantic_summary_output(
+            serde_json::to_vec(&context).expect("context json"),
+            Path::new("/repo/Main.clasp"),
+            &build,
+        )
+        .expect("semantic summary");
+        let summary: serde_json::Value = serde_json::from_slice(&output).expect("summary json");
+        assert_eq!(
+            summary.get("format").and_then(serde_json::Value::as_str),
+            Some("clasp-semantic-summary-v1")
+        );
+        assert_eq!(
+            summary.get("status").and_then(serde_json::Value::as_str),
+            Some("ok")
+        );
+        let shared_module = summary
+            .get("modules")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|modules| {
+                modules
+                    .iter()
+                    .find(|module| json_value_string(module, "module") == "Shared.Lead")
+            })
+            .expect("shared module");
+        assert_eq!(
+            shared_module.get("file").and_then(serde_json::Value::as_str),
+            Some("/repo/Shared/Lead.clasp")
+        );
+        assert!(
+            json_value_string_array(shared_module, "affectedRoutes")
+                .contains(&"route:createLeadRoute".to_owned())
+        );
+        let definitions = summary
+            .get("definitions")
+            .and_then(serde_json::Value::as_array)
+            .expect("definitions");
+        assert!(definitions
+            .iter()
+            .all(|definition| !json_value_string(definition, "id").starts_with("module:")));
+        let lead_intake = definitions
+            .iter()
+            .find(|definition| json_value_string(definition, "id") == "schema:LeadIntake")
+            .expect("LeadIntake definition");
+        assert_eq!(json_value_string(lead_intake, "module"), "Shared.Lead");
+        assert_eq!(
+            json_value_string(lead_intake, "typeSummary"),
+            "record LeadIntake { company:Str }"
+        );
+        let route = definitions
+            .iter()
+            .find(|definition| json_value_string(definition, "id") == "route:createLeadRoute")
+            .expect("route definition");
+        assert_eq!(
+            json_value_string(route, "typeSummary"),
+            "POST /leads LeadIntake -> LeadRecord"
+        );
+        let imports = summary
+            .pointer("/dependencies/imports")
+            .and_then(serde_json::Value::as_array)
+            .expect("imports");
+        assert!(imports.iter().any(|edge| {
+            json_value_string(edge, "from") == "source:Main"
+                && json_value_string(edge, "to") == "source:Shared.Lead"
+        }));
     }
 
     #[test]
@@ -3621,6 +4799,11 @@ main = renderNmae "Ada"
         assert_eq!(diagnostic.context.as_deref(), Some("main"));
         assert_eq!(diagnostic.target.as_deref(), Some("renderNmae"));
         assert_eq!(diagnostic.candidates, vec!["renderName".to_owned()]);
+        let expected_fix_hints = vec![
+            "Rename the reference to `renderName`, or define/import `renderNmae` if this spelling is intentional."
+                .to_owned(),
+        ];
+        assert_eq!(diagnostic.fix_hints, expected_fix_hints);
         assert!(diagnostic.message.contains("Did you mean `renderName`?"));
         assert_eq!(
             diagnostic
@@ -3651,6 +4834,11 @@ main = textJoim "," ["a", "b"]
         let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
             .expect("expected unknown-name diagnostic");
         assert_eq!(diagnostic.candidates, vec!["textJoin".to_owned()]);
+        let expected_fix_hints = vec![
+            "Rename the reference to `textJoin`, or define/import `textJoim` if this spelling is intentional."
+                .to_owned(),
+        ];
+        assert_eq!(diagnostic.fix_hints, expected_fix_hints);
         assert!(diagnostic.message.contains("Did you mean `textJoin`?"));
     }
 
@@ -6525,6 +7713,17 @@ fn run_embedded_image(image_text: &str, args: &[String]) -> ExitCode {
 
 fn run_check(options: &CliOptions, embedded_path: &Path, bundle_build: &ProjectBundleBuild) -> ExitCode {
     let embedded_path_text = embedded_path.to_string_lossy();
+    let metadata = match parse_bundle_metadata_declarations(&bundle_build.bundle) {
+        Ok(metadata) => metadata,
+        Err(message) => {
+            return fail_compiler_message(
+                &message,
+                &options.input_path,
+                Some(bundle_build),
+                options.json,
+            )
+        }
+    };
     let summary = match execute_incremental_project_summary(&embedded_path_text, bundle_build) {
         Ok(summary) => summary,
         Err(message) if should_fallback_to_monolithic_decls(&message) => {
@@ -6557,6 +7756,7 @@ fn run_check(options: &CliOptions, embedded_path: &Path, bundle_build: &ProjectB
         }
     };
     let summary = enhance_compiler_diagnostic_text(&summary);
+    let summary = strip_metadata_summary_lines(&summary, &metadata);
     if let Some(diagnostic) = structured_check_diagnostic_from_summary(&summary, bundle_build) {
         return fail_diagnostic(&diagnostic, options.json);
     }
@@ -6596,6 +7796,10 @@ fn source_export_name_for_project_export(export_name: &str) -> Option<&'static s
     }
 }
 
+fn export_name_is_native_image(export_name: &str) -> bool {
+    matches!(export_name, "nativeImageProjectText" | "nativeImageSourceText")
+}
+
 fn execute_source_or_project_export(
     embedded_path_text: &str,
     bundle_build: &ProjectBundleBuild,
@@ -6607,10 +7811,20 @@ fn execute_source_or_project_export(
         project_export_name
     };
     if let Some(cached) = read_cached_source_export(embedded_path_text, export_name, &bundle_build.bundle) {
+        if export_name_is_native_image(project_export_name) || export_name_is_native_image(export_name) {
+            let image_bytes = harden_native_image_runtime_bindings(cached);
+            write_cached_source_export(embedded_path_text, export_name, &bundle_build.bundle, &image_bytes);
+            return Ok(image_bytes);
+        }
         return Ok(cached);
     }
     let output =
         unsafe { execute_native_export_from_image_path(embedded_path_text, export_name, Some(&bundle_build.bundle)) }?;
+    let output = if export_name_is_native_image(project_export_name) || export_name_is_native_image(export_name) {
+        harden_native_image_runtime_bindings(output)
+    } else {
+        output
+    };
     write_cached_source_export(embedded_path_text, export_name, &bundle_build.bundle, &output);
     Ok(output)
 }
@@ -7114,6 +8328,631 @@ fn augment_context_dependency_graph_output(output_bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
+fn json_value_array(value: &serde_json::Value, field: &str) -> Vec<serde_json::Value> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn json_value_object(value: &serde_json::Value, field: &str) -> serde_json::Value {
+    match value.get(field) {
+        Some(candidate) if candidate.is_object() => candidate.clone(),
+        _ => serde_json::Value::Object(serde_json::Map::new()),
+    }
+}
+
+fn insert_semantic_declaring_surfaces(
+    modules: &mut HashMap<String, String>,
+    module_name: &str,
+    surfaces: Vec<String>,
+) {
+    if module_name.is_empty() {
+        return;
+    }
+    for surface in surfaces {
+        if !surface.is_empty() {
+            modules.entry(surface).or_insert_with(|| module_name.to_owned());
+        }
+    }
+}
+
+fn insert_semantic_declaring_surface_array(
+    modules: &mut HashMap<String, String>,
+    module_name: &str,
+    source: &serde_json::Value,
+    field: &str,
+) {
+    insert_semantic_declaring_surfaces(
+        modules,
+        module_name,
+        json_value_string_array(source, field),
+    );
+}
+
+fn context_declaring_modules(graph: &serde_json::Value) -> HashMap<String, String> {
+    let mut modules = HashMap::new();
+    if let Some(nodes) = graph
+        .pointer("/dependencyGraph/nodes")
+        .and_then(serde_json::Value::as_array)
+    {
+        for node in nodes {
+            let module_name = json_value_string(node, "moduleName");
+            insert_semantic_declaring_surface_array(
+                &mut modules,
+                &module_name,
+                node,
+                "declaredSurfaces",
+            );
+        }
+    }
+    if let Some(source_modules) = graph
+        .get("sourceModules")
+        .and_then(serde_json::Value::as_array)
+    {
+        for source_module in source_modules {
+            let module_name = json_value_string(source_module, "moduleName");
+            for field in ["schemas", "routes", "declarations", "foreignBoundaries"] {
+                insert_semantic_declaring_surface_array(
+                    &mut modules,
+                    &module_name,
+                    source_module,
+                    field,
+                );
+            }
+        }
+    }
+    if let Some(edges) = graph.get("edges").and_then(serde_json::Value::as_array) {
+        for edge in edges {
+            if json_value_string(edge, "kind") != "declares" {
+                continue;
+            }
+            let from = json_value_string(edge, "from");
+            let to = json_value_string(edge, "to");
+            let Some(module_name) = from.strip_prefix("module:") else {
+                continue;
+            };
+            if !to.is_empty() {
+                modules.entry(to).or_insert_with(|| module_name.to_owned());
+            }
+        }
+    }
+    modules
+}
+
+fn project_file_by_module(bundle_build: &ProjectBundleBuild) -> HashMap<String, String> {
+    bundle_build
+        .modules
+        .iter()
+        .map(|module| (module.module_name.clone(), module.canonical_path.clone()))
+        .collect()
+}
+
+fn project_fingerprint_by_module(bundle_build: &ProjectBundleBuild) -> HashMap<String, String> {
+    bundle_build
+        .modules
+        .iter()
+        .map(|module| (module.module_name.clone(), module.source_fingerprint.clone()))
+        .collect()
+}
+
+fn semantic_definition_module(
+    id: &str,
+    declaring_modules: &HashMap<String, String>,
+    graph: &serde_json::Value,
+) -> String {
+    declaring_modules
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| {
+            graph
+                .get("module")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        })
+}
+
+fn semantic_definition_file(
+    module_name: &str,
+    file_by_module: &HashMap<String, String>,
+) -> serde_json::Value {
+    file_by_module
+        .get(module_name)
+        .map(|path| serde_json::json!(path))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn semantic_field_type_summary(fields: &[serde_json::Value]) -> String {
+    fields
+        .iter()
+        .map(|field| {
+            let name = json_value_string(field, "name");
+            let typ = json_value_string(field, "type");
+            if typ.is_empty() {
+                name
+            } else {
+                format!("{name}:{typ}")
+            }
+        })
+        .filter(|entry| !entry.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn semantic_schema_type_summary(schema: &serde_json::Value) -> String {
+    let fields = json_value_array(schema, "fields");
+    format!(
+        "record {} {{ {} }}",
+        json_value_string(schema, "name"),
+        semantic_field_type_summary(&fields)
+    )
+}
+
+fn semantic_type_type_summary(typ: &serde_json::Value) -> String {
+    let constructors = json_value_string_array(typ, "wireConstructorNames");
+    if constructors.is_empty() {
+        format!("type {}", json_value_string(typ, "name"))
+    } else {
+        format!(
+            "type {} = {}",
+            json_value_string(typ, "name"),
+            constructors.join(" | ")
+        )
+    }
+}
+
+fn semantic_route_type_summary(route: &serde_json::Value) -> String {
+    format!(
+        "{} {} {} -> {}",
+        json_value_string(route, "method"),
+        json_value_string(route, "path"),
+        json_value_string(route, "requestType"),
+        json_value_string(route, "responseType")
+    )
+}
+
+fn semantic_tool_type_summary(tool: &serde_json::Value) -> String {
+    format!(
+        "{} -> {}",
+        json_value_string(tool, "requestType"),
+        json_value_string(tool, "responseType")
+    )
+}
+
+fn semantic_definition_base(
+    id: String,
+    kind: &str,
+    name: String,
+    type_summary: String,
+    graph: &serde_json::Value,
+    declaring_modules: &HashMap<String, String>,
+    file_by_module: &HashMap<String, String>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let module_name = semantic_definition_module(&id, declaring_modules, graph);
+    let mut fields = serde_json::Map::new();
+    fields.insert("id".to_owned(), serde_json::json!(id));
+    fields.insert("kind".to_owned(), serde_json::json!(kind));
+    fields.insert("name".to_owned(), serde_json::json!(name));
+    fields.insert("module".to_owned(), serde_json::json!(module_name));
+    fields.insert(
+        "file".to_owned(),
+        semantic_definition_file(&module_name, file_by_module),
+    );
+    fields.insert("typeSummary".to_owned(), serde_json::json!(type_summary));
+    fields
+}
+
+fn push_semantic_definition(
+    definitions: &mut Vec<serde_json::Value>,
+    seen: &mut HashSet<String>,
+    fields: serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(id) = fields.get("id").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if seen.insert(id.to_owned()) {
+        definitions.push(serde_json::Value::Object(fields));
+    }
+}
+
+fn context_edge_references(graph: &serde_json::Value) -> Vec<serde_json::Value> {
+    graph
+        .get("edges")
+        .and_then(serde_json::Value::as_array)
+        .map(|edges| {
+            edges
+                .iter()
+                .filter(|edge| json_value_string(edge, "kind") != "declares")
+                .map(|edge| {
+                    serde_json::json!({
+                        "from": json_value_string(edge, "from"),
+                        "to": json_value_string(edge, "to"),
+                        "kind": json_value_string(edge, "kind"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn semantic_definition_references(
+    id: &str,
+    references: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    references
+        .iter()
+        .filter(|edge| {
+            json_value_string(edge, "from") == id || json_value_string(edge, "to") == id
+        })
+        .cloned()
+        .collect()
+}
+
+fn semantic_node_kind_is_top_level(kind: &str) -> bool {
+    matches!(
+        kind,
+        "decl"
+            | "foreign"
+            | "guide"
+            | "policy"
+            | "projection"
+            | "agentRole"
+            | "agent"
+            | "workflow"
+            | "hook"
+            | "toolServer"
+            | "tool"
+            | "verifier"
+            | "mergeGate"
+    )
+}
+
+fn semantic_string_or(default_value: String, fallback: String) -> String {
+    if default_value.is_empty() {
+        fallback
+    } else {
+        default_value
+    }
+}
+
+fn context_dependency_edges(graph: &serde_json::Value, kind: &str) -> Vec<serde_json::Value> {
+    graph
+        .pointer("/dependencyGraph/edges")
+        .and_then(serde_json::Value::as_array)
+        .map(|edges| {
+            edges
+                .iter()
+                .filter(|edge| json_value_string(edge, "kind") == kind)
+                .map(|edge| {
+                    serde_json::json!({
+                        "from": json_value_string(edge, "from"),
+                        "to": json_value_string(edge, "to"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn context_impact_entries(graph: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut entries = Vec::new();
+    if let Some(index) = graph.get("impactIndex").and_then(serde_json::Value::as_object) {
+        for (kind, values) in index {
+            if let Some(values) = values.as_array() {
+                for value in values {
+                    let mut entry = value.clone();
+                    if let Some(object) = entry.as_object_mut() {
+                        object.insert("index".to_owned(), serde_json::json!(kind));
+                    }
+                    entries.push(entry);
+                }
+            }
+        }
+    }
+    entries
+}
+
+fn semantic_summary_modules(
+    graph: &serde_json::Value,
+    bundle_build: &ProjectBundleBuild,
+) -> Vec<serde_json::Value> {
+    let file_by_module = project_file_by_module(bundle_build);
+    let fingerprint_by_module = project_fingerprint_by_module(bundle_build);
+    graph
+        .get("sourceModules")
+        .and_then(serde_json::Value::as_array)
+        .map(|modules| {
+            modules
+                .iter()
+                .map(|module| {
+                    let module_name = json_value_string(module, "moduleName");
+                    let dependency_node = graph
+                        .pointer("/dependencyGraph/nodes")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|nodes| {
+                            nodes
+                                .iter()
+                                .find(|node| json_value_string(node, "moduleName") == module_name)
+                        });
+                    serde_json::json!({
+                        "module": module_name,
+                        "moduleId": json_value_string(module, "moduleId"),
+                        "sourceId": json_value_string(module, "sourceId"),
+                        "role": json_value_string(module, "role"),
+                        "file": file_by_module.get(&module_name).cloned(),
+                        "sourceFingerprint": semantic_string_or(
+                            json_value_string(module, "sourceFingerprint"),
+                            fingerprint_by_module.get(&module_name).cloned().unwrap_or_default(),
+                        ),
+                        "imports": json_value_string_array(module, "imports"),
+                        "declaredSurfaces": dependency_node
+                            .map(|node| json_value_string_array(node, "declaredSurfaces"))
+                            .unwrap_or_default(),
+                        "affectedSurfaces": dependency_node
+                            .map(|node| json_value_string_array(node, "affectedSurfaces"))
+                            .unwrap_or_default(),
+                        "affectedRoutes": dependency_node
+                            .map(|node| json_value_string_array(node, "affectedRoutes"))
+                            .unwrap_or_default(),
+                        "affectedSchemas": dependency_node
+                            .map(|node| json_value_string_array(node, "affectedSchemas"))
+                            .unwrap_or_default(),
+                        "affectedForeignBoundaries": dependency_node
+                            .map(|node| json_value_string_array(node, "affectedForeignBoundaries"))
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn context_semantic_definitions(
+    graph: &serde_json::Value,
+    bundle_build: &ProjectBundleBuild,
+    references: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let declaring_modules = context_declaring_modules(graph);
+    let file_by_module = project_file_by_module(bundle_build);
+    let mut definitions = Vec::new();
+    let mut seen = HashSet::new();
+
+    for schema in graph
+        .pointer("/surfaceIndex/schemas")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = json_value_string(schema, "id");
+        let mut fields = semantic_definition_base(
+            id.clone(),
+            "schema",
+            json_value_string(schema, "name"),
+            semantic_schema_type_summary(schema),
+            graph,
+            &declaring_modules,
+            &file_by_module,
+        );
+        fields.insert(
+            "params".to_owned(),
+            serde_json::Value::Array(json_value_array(schema, "params")),
+        );
+        fields.insert(
+            "fields".to_owned(),
+            serde_json::Value::Array(json_value_array(schema, "fields")),
+        );
+        fields.insert(
+            "affectedSurfaces".to_owned(),
+            serde_json::json!(json_value_string_array(schema, "affectedSurfaces")),
+        );
+        fields.insert(
+            "references".to_owned(),
+            serde_json::Value::Array(semantic_definition_references(&id, references)),
+        );
+        push_semantic_definition(&mut definitions, &mut seen, fields);
+    }
+
+    for typ in graph
+        .pointer("/surfaceIndex/types")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = json_value_string(typ, "id");
+        let mut fields = semantic_definition_base(
+            id.clone(),
+            "type",
+            json_value_string(typ, "name"),
+            semantic_type_type_summary(typ),
+            graph,
+            &declaring_modules,
+            &file_by_module,
+        );
+        fields.insert(
+            "params".to_owned(),
+            serde_json::Value::Array(json_value_array(typ, "params")),
+        );
+        fields.insert(
+            "constructors".to_owned(),
+            serde_json::Value::Array(json_value_array(typ, "constructors")),
+        );
+        fields.insert(
+            "affectedSurfaces".to_owned(),
+            serde_json::json!(json_value_string_array(typ, "affectedSurfaces")),
+        );
+        fields.insert(
+            "references".to_owned(),
+            serde_json::Value::Array(semantic_definition_references(&id, references)),
+        );
+        push_semantic_definition(&mut definitions, &mut seen, fields);
+    }
+
+    for route in graph
+        .pointer("/surfaceIndex/routes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = json_value_string(route, "id");
+        let mut fields = semantic_definition_base(
+            id.clone(),
+            "route",
+            json_value_string(route, "name"),
+            semantic_route_type_summary(route),
+            graph,
+            &declaring_modules,
+            &file_by_module,
+        );
+        for field_name in [
+            "identity",
+            "method",
+            "path",
+            "requestType",
+            "responseType",
+            "responseKind",
+            "handler",
+            "requestSchemaId",
+            "responseSchemaId",
+            "handlerId",
+        ] {
+            fields.insert(
+                field_name.to_owned(),
+                serde_json::json!(json_value_string(route, field_name)),
+            );
+        }
+        fields.insert(
+            "affectedSurfaces".to_owned(),
+            serde_json::json!(json_value_string_array(route, "affectedSurfaces")),
+        );
+        fields.insert(
+            "verificationGuidance".to_owned(),
+            json_value_object(route, "verificationGuidance"),
+        );
+        fields.insert(
+            "references".to_owned(),
+            serde_json::Value::Array(semantic_definition_references(&id, references)),
+        );
+        push_semantic_definition(&mut definitions, &mut seen, fields);
+    }
+
+    for node in graph
+        .get("nodes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let kind = json_value_string(node, "kind");
+        let id = json_value_string(node, "id");
+        if id.is_empty() || seen.contains(&id) || !semantic_node_kind_is_top_level(&kind) {
+            continue;
+        }
+        let name = json_value_string(node, "name");
+        let type_summary = match kind.as_str() {
+            "decl" => json_value_string(node, "annotation"),
+            "foreign" => json_value_string(node, "type"),
+            "workflow" => json_value_string(node, "stateType"),
+            "tool" => semantic_tool_type_summary(node),
+            _ => String::new(),
+        };
+        if name.is_empty() && type_summary.is_empty() {
+            continue;
+        }
+        let mut fields = semantic_definition_base(
+            id.clone(),
+            &kind,
+            name,
+            type_summary,
+            graph,
+            &declaring_modules,
+            &file_by_module,
+        );
+        for field_name in [
+            "params",
+            "body",
+            "runtimeName",
+            "stateType",
+            "server",
+            "operation",
+            "requestType",
+            "responseType",
+            "identity",
+            "event",
+        ] {
+            if let Some(value) = node.get(field_name) {
+                fields.insert(field_name.to_owned(), value.clone());
+            }
+        }
+        fields.insert(
+            "references".to_owned(),
+            serde_json::Value::Array(semantic_definition_references(&id, references)),
+        );
+        push_semantic_definition(&mut definitions, &mut seen, fields);
+    }
+
+    definitions
+}
+
+fn semantic_summary_output(
+    output_bytes: Vec<u8>,
+    input_path: &Path,
+    bundle_build: &ProjectBundleBuild,
+) -> Result<Vec<u8>, String> {
+    let graph = serde_json::from_slice::<serde_json::Value>(&output_bytes)
+        .map_err(|err| format!("failed to parse context artifact for semantic summary: {err}"))?;
+    if graph.get("format").and_then(serde_json::Value::as_str) != Some("clasp-context-v1") {
+        return Err("semantic summary expected a clasp-context-v1 artifact".to_owned());
+    }
+
+    let error = graph.get("error").and_then(serde_json::Value::as_str);
+    let status = if error.is_some() { "error" } else { "ok" };
+    let diagnostics = error
+        .map(|message| {
+            vec![serde_json::json!({
+                "phase": "context",
+                "code": "E_SEMANTIC_CONTEXT",
+                "message": message,
+            })]
+        })
+        .unwrap_or_default();
+    let references = context_edge_references(&graph);
+    let summary = serde_json::json!({
+        "format": "clasp-semantic-summary-v1",
+        "schemaVersion": 1,
+        "status": status,
+        "input": input_path.display().to_string(),
+        "entryModule": graph.pointer("/projectIdentity/entryModule")
+            .or_else(|| graph.get("module"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+        "generatedFrom": {
+            "format": "clasp-context-v1",
+            "module": graph.get("module").and_then(serde_json::Value::as_str).unwrap_or(""),
+        },
+        "diagnostics": diagnostics,
+        "modules": semantic_summary_modules(&graph, bundle_build),
+        "definitions": context_semantic_definitions(&graph, bundle_build, &references),
+        "references": references,
+        "dependencies": {
+            "format": "clasp-dependency-graph-v1",
+            "imports": context_dependency_edges(&graph, "imports"),
+            "affects": context_dependency_edges(&graph, "affects"),
+        },
+        "editPlanning": {
+            "impactIndex": context_impact_entries(&graph),
+            "verificationGuidance": json_value_object(&graph, "verificationGuidance"),
+        },
+    });
+
+    serde_json::to_vec(&summary)
+        .map(|mut bytes| {
+            bytes.push(b'\n');
+            bytes
+        })
+        .map_err(|err| format!("failed to render semantic summary: {err}"))
+}
+
 fn bundle_declares_node_process_runtime_foreign(bundle: &str) -> bool {
     bundle.lines().any(|line| {
         let trimmed = line.trim();
@@ -7232,6 +9071,199 @@ fn augment_compiled_js_process_runtime(output_bytes: Vec<u8>, bundle: &str) -> V
     augmented.into_bytes()
 }
 
+fn parse_clasp_string_literal(raw: &str) -> Option<String> {
+    serde_json::from_str::<String>(raw).ok()
+}
+
+fn parse_bundle_metadata_declarations(bundle: &str) -> Result<Vec<ModuleMetadataEntry>, String> {
+    let mut entries = Vec::new();
+    let mut seen_keys = HashSet::new();
+    for module_source in bundle.split(PROJECT_BUNDLE_SEPARATOR) {
+        for raw_line in module_source.lines() {
+            if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
+                continue;
+            }
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut words = line.split_whitespace();
+            if words.next() != Some("metadata") {
+                continue;
+            }
+            let rest = line
+                .strip_prefix("metadata")
+                .unwrap_or("")
+                .trim_start();
+            let Some((key_text, value_text)) = rest.split_once(" = ") else {
+                return Err(metadata_declaration_shape_error().to_owned());
+            };
+            let mut key_words = key_text.split_whitespace();
+            let Some(key) = key_words.next() else {
+                return Err(metadata_declaration_shape_error().to_owned());
+            };
+            if key_words.next().is_some() {
+                return Err(metadata_declaration_shape_error().to_owned());
+            }
+            let Some(value) = parse_clasp_string_literal(value_text.trim()) else {
+                return Err(metadata_declaration_shape_error().to_owned());
+            };
+            if !seen_keys.insert(key.to_owned()) {
+                return Err(format!("Duplicate metadata key `{key}`."));
+            }
+            entries.push(ModuleMetadataEntry {
+                key: key.to_owned(),
+                value,
+            });
+        }
+    }
+    Ok(entries)
+}
+
+fn strip_metadata_summary_lines(summary: &str, metadata: &[ModuleMetadataEntry]) -> String {
+    if metadata.is_empty() {
+        return summary.to_owned();
+    }
+    summary
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("metadata : "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn clean_metadata_export_registry_line(line: &str) -> Option<String> {
+    let prefix = "const __claspExports = Object.freeze({ ";
+    let suffix = " });";
+    let body = line.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    let entries = body
+        .split(", ")
+        .filter(|entry| {
+            let entry = entry.trim_start();
+            !entry.starts_with("\"metadata\": ") && !entry.starts_with("metadata: ")
+        })
+        .collect::<Vec<_>>();
+    Some(format!("{prefix}{}{suffix}", entries.join(", ")))
+}
+
+fn remove_stale_compiled_metadata_declarations(output_text: &str) -> String {
+    let mut lines = Vec::new();
+    for line in output_text.lines() {
+        if line.starts_with("function ") && line.contains("_m_e_t_a_d_a_t_a_(") {
+            continue;
+        }
+        if line.starts_with("export function metadata(") {
+            continue;
+        }
+        if line.starts_with("export { ") && line.contains(" as metadata };") {
+            continue;
+        }
+        if line.starts_with("const __claspExports = Object.freeze({ ") {
+            if let Some(cleaned) = clean_metadata_export_registry_line(line) {
+                lines.push(cleaned);
+                continue;
+            }
+        }
+        lines.push(line.to_owned());
+    }
+    lines.join("\n")
+}
+
+fn render_compiled_metadata_block(metadata: &[ModuleMetadataEntry]) -> String {
+    let mut rendered = String::from("export const __claspMetadata = Object.freeze([\n");
+    for entry in metadata {
+        rendered.push_str("  Object.freeze({\n");
+        rendered.push_str(&format!("    key: {},\n", json_string(&entry.key)));
+        rendered.push_str(&format!("    value: {}\n", json_string(&entry.value)));
+        rendered.push_str("  }),\n");
+    }
+    rendered.push_str("]);\n");
+    rendered.push_str(
+        "const $claspMetadataMap = Object.freeze(Object.fromEntries(__claspMetadata.map((entry) => [entry.key, entry.value])));\n\n",
+    );
+    rendered
+}
+
+fn insert_compiled_metadata_block(output_text: String, metadata: &[ModuleMetadataEntry]) -> String {
+    let block = render_compiled_metadata_block(metadata);
+    let marker = "export const __claspTraceCollector = Object.freeze({";
+    if let Some(index) = output_text.find(marker) {
+        let mut next = output_text;
+        next.insert_str(index, &block);
+        next
+    } else {
+        format!("{output_text}\n{block}")
+    }
+}
+
+fn insert_compiled_module_metadata_bindings(mut output_text: String) -> String {
+    let module_marker = "export const __claspModule = Object.freeze({";
+    if let Some(start) = output_text.find(module_marker) {
+        if let Some(version_offset) = output_text[start..].find("\n  version: 1") {
+            let index = start + version_offset;
+            output_text.insert_str(
+                index,
+                "\n  metadata: __claspMetadata,\n  metadataByKey: $claspMetadataMap,",
+            );
+        }
+    }
+    output_text.replace(
+        "  module: __claspModule,\n  schemas: __claspSchemas,",
+        "  module: __claspModule,\n  metadata: __claspMetadata,\n  schemas: __claspSchemas,",
+    )
+}
+
+fn augment_compiled_js_metadata(
+    output_bytes: Vec<u8>,
+    metadata: &[ModuleMetadataEntry],
+) -> Vec<u8> {
+    if metadata.is_empty() {
+        return strip_empty_compiled_js_metadata(output_bytes);
+    }
+    let output_text = match String::from_utf8(output_bytes) {
+        Ok(output_text) => output_text,
+        Err(error) => return error.into_bytes(),
+    };
+    if output_text.contains("export const __claspMetadata")
+        && !output_text.contains("export const __claspMetadata = Object.freeze([]);")
+    {
+        return output_text.into_bytes();
+    }
+    let stripped_output = strip_empty_compiled_js_metadata(output_text.into_bytes());
+    let output_text = match String::from_utf8(stripped_output) {
+        Ok(output_text) => output_text,
+        Err(error) => return error.into_bytes(),
+    };
+    let without_decls = remove_stale_compiled_metadata_declarations(&output_text);
+    let with_metadata = insert_compiled_metadata_block(without_decls, metadata);
+    insert_compiled_module_metadata_bindings(with_metadata).into_bytes()
+}
+
+fn strip_empty_compiled_js_metadata(output_bytes: Vec<u8>) -> Vec<u8> {
+    let output_text = match String::from_utf8(output_bytes) {
+        Ok(output_text) => output_text,
+        Err(error) => return error.into_bytes(),
+    };
+    if !output_text.contains("export const __claspMetadata = Object.freeze([]);") {
+        return output_text.into_bytes();
+    }
+    let had_trailing_newline = output_text.ends_with('\n');
+    let mut stripped = output_text
+        .lines()
+        .filter(|line| {
+            *line != "export const __claspMetadata = Object.freeze([]);"
+                && *line != "const $claspMetadataMap = Object.freeze({});"
+                && *line != "  metadata: __claspMetadata,"
+                && *line != "  metadataByKey: $claspMetadataMap,"
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if had_trailing_newline {
+        stripped.push('\n');
+    }
+    stripped.into_bytes()
+}
+
 fn run_build(
     options: &CliOptions,
     embedded_path: &Path,
@@ -7240,6 +9272,21 @@ fn run_build(
     default_extension: &str,
     target_name: &str,
 ) -> ExitCode {
+    let metadata = if matches!(options.command, Command::Compile) && target_name == "frontend-js" {
+        match parse_bundle_metadata_declarations(&bundle_build.bundle) {
+            Ok(metadata) => metadata,
+            Err(message) => {
+                return fail_compiler_message(
+                    &message,
+                    &options.input_path,
+                    Some(bundle_build),
+                    options.json,
+                )
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let embedded_path_text = embedded_path.to_string_lossy();
     let result = if export_name == "nativeImageProjectText" {
         execute_parallel_native_image_export(&embedded_path_text, bundle_build)
@@ -7250,13 +9297,37 @@ fn run_build(
         Ok(output_bytes) => output_bytes,
         Err(message) => return fail(&message, options.json),
     };
-    let output_bytes = if matches!(options.command, Command::Context) {
+    let output_bytes = if matches!(options.command, Command::Context | Command::Semantic) {
         augment_context_dependency_graph_output(output_bytes)
     } else {
         output_bytes
     };
+    let output_bytes = if matches!(options.command, Command::Semantic) {
+        match semantic_summary_output(output_bytes, &options.input_path, bundle_build) {
+            Ok(output_bytes) => output_bytes,
+            Err(message) => return fail(&message, options.json),
+        }
+    } else {
+        output_bytes
+    };
+    if let Some(message) = std::str::from_utf8(&output_bytes)
+        .ok()
+        .and_then(|output| output.strip_prefix("ERROR:"))
+    {
+        return fail_compiler_message(
+            message,
+            &options.input_path,
+            Some(bundle_build),
+            options.json,
+        );
+    }
     let output_bytes = if matches!(options.command, Command::Compile) && target_name == "frontend-js" {
         augment_compiled_js_process_runtime(output_bytes, &bundle_build.bundle)
+    } else {
+        output_bytes
+    };
+    let output_bytes = if matches!(options.command, Command::Compile) && target_name == "frontend-js" {
+        augment_compiled_js_metadata(output_bytes, &metadata)
     } else {
         output_bytes
     };
@@ -7281,6 +9352,7 @@ fn run_build(
                 Command::Explain => "explain",
                 Command::Air => "air",
                 Command::Context => "context",
+                Command::Semantic => "semantic",
             }),
             json_string(&options.input_path.display().to_string()),
             json_string(target_name),
@@ -7335,6 +9407,13 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     if let Some(bundle) = cacheable_bundle {
         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
             let output_path = Path::new(args.last().expect("missing output path"));
+            let cached = if export_name_is_native_image(export_name) || export_name_is_native_image(remapped_export_name) {
+                let image_bytes = harden_native_image_runtime_bindings(cached);
+                write_cached_source_export(image_path, remapped_export_name, bundle, &image_bytes);
+                image_bytes
+            } else {
+                cached
+            };
             let cached = enhance_compiler_diagnostic_output_bytes(remapped_export_name, cached);
             let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
                 augment_context_dependency_graph_output(cached)
@@ -7385,7 +9464,14 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                         if let Some(cached) =
                             read_cached_source_export(image_path, remapped_export_name, &bundle_build.bundle)
                         {
-                            Ok(cached)
+                            let image_bytes = harden_native_image_runtime_bindings(cached);
+                            write_cached_source_export(
+                                image_path,
+                                remapped_export_name,
+                                &bundle_build.bundle,
+                                &image_bytes,
+                            );
+                            Ok(image_bytes)
                         } else {
                             match if bundle_build_is_single_source_module(&bundle_build) {
                                 execute_native_export_from_image_path(
@@ -7397,6 +9483,7 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                                 execute_parallel_native_image_export(image_path, &bundle_build)
                             } {
                                 Ok(output_bytes) => {
+                                    let output_bytes = harden_native_image_runtime_bindings(output_bytes);
                                     write_cached_source_export(
                                         image_path,
                                         remapped_export_name,
@@ -7414,7 +9501,9 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                 None => match source_text.as_deref() {
                     Some(bundle) => {
                         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
-                            Ok(cached)
+                            let image_bytes = harden_native_image_runtime_bindings(cached);
+                            write_cached_source_export(image_path, remapped_export_name, bundle, &image_bytes);
+                            Ok(image_bytes)
                         } else {
                             match execute_native_export_from_image_path(
                                 image_path,
@@ -7422,6 +9511,7 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                                 Some(bundle),
                             ) {
                                 Ok(output_bytes) => {
+                                    let output_bytes = harden_native_image_runtime_bindings(output_bytes);
                                     write_cached_source_export(
                                         image_path,
                                         remapped_export_name,
@@ -7434,12 +9524,20 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                             }
                         }
                     }
-                    None => execute_native_export_from_image_path(image_path, remapped_export_name, None),
+                    None => execute_native_export_from_image_path(image_path, remapped_export_name, None)
+                        .map(harden_native_image_runtime_bindings),
                 },
             }
         } else {
             match execute_native_export_from_image_path(image_path, remapped_export_name, source_text.as_deref()) {
                 Ok(output_bytes) => {
+                    let output_bytes =
+                        if export_name_is_native_image(export_name) || export_name_is_native_image(remapped_export_name)
+                        {
+                            harden_native_image_runtime_bindings(output_bytes)
+                        } else {
+                            output_bytes
+                        };
                     if let Some(bundle) = cacheable_bundle {
                         write_cached_source_export(image_path, remapped_export_name, bundle, &output_bytes);
                     }
@@ -7455,6 +9553,11 @@ fn run_exec_image(args: &[String]) -> ExitCode {
             eprintln!("{}", enhance_compiler_diagnostic_text(&message));
             return ExitCode::from(1);
         }
+    };
+    let output_bytes = if export_name_is_native_image(export_name) || export_name_is_native_image(remapped_export_name) {
+        harden_native_image_runtime_bindings(output_bytes)
+    } else {
+        output_bytes
     };
     let output_bytes = enhance_compiler_diagnostic_output_bytes(remapped_export_name, output_bytes);
     let output_bytes = if export_name == "contextProjectText" || export_name == "contextSourceText" {
@@ -7612,6 +9715,17 @@ fn run_main(args: Vec<String>) -> ExitCode {
     match options.command {
         Command::Check => {
             if bundle_build_is_single_source_module(&bundle_build) {
+                let metadata = match parse_bundle_metadata_declarations(&bundle_build.bundle) {
+                    Ok(metadata) => metadata,
+                    Err(message) => {
+                        return fail_compiler_message(
+                            &message,
+                            &options.input_path,
+                            Some(&bundle_build),
+                            options.json,
+                        )
+                    }
+                };
                 let embedded_path_text = embedded_path.to_string_lossy();
                 let result = execute_source_or_project_export(&embedded_path_text, &bundle_build, "checkProjectText");
                 let summary = match result {
@@ -7626,6 +9740,7 @@ fn run_main(args: Vec<String>) -> ExitCode {
                     }
                 };
                 let summary = enhance_compiler_diagnostic_text(&summary);
+                let summary = strip_metadata_summary_lines(&summary, &metadata);
                 if let Some(diagnostic) = structured_check_diagnostic_from_summary(&summary, &bundle_build) {
                     return fail_diagnostic(&diagnostic, options.json);
                 }
@@ -7660,6 +9775,14 @@ fn run_main(args: Vec<String>) -> ExitCode {
             "contextProjectText",
             "context.json",
             "context",
+        ),
+        Command::Semantic => run_build(
+            &options,
+            &embedded_path,
+            &bundle_build,
+            "contextProjectText",
+            "semantic.json",
+            "semantic-summary",
         ),
         Command::Compile => {
             let explicit_output_requests_frontend_js = options
@@ -7749,7 +9872,11 @@ fn run_main(args: Vec<String>) -> ExitCode {
                 let should_build = options.output_path.is_some() || !output_path.is_file();
                 if should_build {
                     let embedded_path_text = embedded_path.to_string_lossy();
-                    let output_bytes = match execute_parallel_native_image_export(&embedded_path_text, &bundle_build) {
+                    let output_bytes = match if options.output_path.is_none() {
+                        execute_source_run_native_image_export(&embedded_path_text, &bundle_build)
+                    } else {
+                        execute_parallel_native_image_export(&embedded_path_text, &bundle_build)
+                    } {
                         Ok(output_bytes) => output_bytes,
                         Err(message) => return fail(&message, false),
                     };

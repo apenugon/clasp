@@ -53,6 +53,20 @@ assert(Array.isArray(report.bottlenecks), "bottlenecks should be present");
 assert(report.bottlenecks.length >= 1 && report.bottlenecks.length <= 2, "checkpoint should report one or two bottlenecks");
 assert(report.bottlenecks[0].rank === 1, "bottlenecks should be ranked");
 assert(report.bottlenecks.every((entry) => Array.isArray(entry.relatedCommands)), "bottlenecks should cite commands");
+assert(report.iterationSpeedRecommendation?.area === "source-run-startup", "checkpoint should name the narrow Wave 1 bottleneck");
+assert(report.iterationSpeedRecommendation?.ownerHint === "wave1-fast-iteration-slice", "checkpoint should hand off to the iteration worker");
+assert(
+  report.iterationSpeedRecommendation?.actionableSlice.includes("cold `claspc run` startup"),
+  "checkpoint recommendation should be actionable",
+);
+assert(
+  JSON.stringify(report.iterationSpeedRecommendation?.relatedCommands) === JSON.stringify(["source-run-cold", "source-run-warm"]),
+  "checkpoint recommendation should cite source-run commands",
+);
+assert(
+  report.iterationSpeedRecommendation?.validationCommands.some((command) => command.includes("benchmark-checkpoint.mjs --fixture")),
+  "checkpoint recommendation should include focused fixture validation",
+);
 EOF
 
 node "$project_root/scripts/benchmark-checkpoint.mjs" \
@@ -140,5 +154,58 @@ assert(documented.validationCommand.includes("--agent-readiness"), "documented v
 assert(
   documented.capabilityCoverage.find((capability) => capability.name === "durable_native_substrate")?.expectedStatusWhenCommandsPass === "pass",
   "documented durable substrate capability should now pass when commands pass",
+);
+EOF
+
+node - "$project_root/benchmarks/checkpoints/2026-05-21-wave1-benchmark-checkpoint.json" <<'EOF'
+const fs = require("node:fs");
+
+const checkpoint = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+const expectedLabels = [
+  "safe-workspace-operations",
+  "safe-subprocess-verifier-execution",
+  "structured-diagnostics-feedback",
+  "ordinary-agent-loop-scenario",
+  "native-control-substrate",
+];
+
+assert(checkpoint.schemaVersion === 1, "wave checkpoint schema version should be stable");
+assert(checkpoint.kind === "clasp-wave1-enabled-benchmark-checkpoint", `unexpected kind ${checkpoint.kind}`);
+assert(checkpoint.taskId === "wave1-benchmark-checkpoint", "checkpoint should identify this task");
+assert(checkpoint.fullBenchmarkRun === false, "checkpoint should not claim a full benchmark run");
+assert(checkpoint.enabledBenchmarkTarget?.name === "ordinary Clasp agent readiness loop", "enabled target changed");
+assert(
+  checkpoint.enabledBenchmarkTarget?.checkpointCommand.includes("--agent-readiness"),
+  "enabled target should use the readiness checkpoint mode",
+);
+assert(
+  JSON.stringify(checkpoint.expectedReadinessCommandLabels) === JSON.stringify(expectedLabels),
+  "readiness command labels changed",
+);
+assert(
+  checkpoint.comparisonArtifacts.includes("benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json"),
+  "baseline bottleneck artifact should be cited",
+);
+assert(checkpoint.iterationSpeedBottleneck?.rank === 1, "bottleneck should be ranked");
+assert(checkpoint.iterationSpeedBottleneck?.area === "source-run-startup", "wrong bottleneck area");
+assert(checkpoint.iterationSpeedBottleneck?.ownerHint === "wave1-fast-iteration-slice", "wrong owner hint");
+assert(
+  checkpoint.iterationSpeedBottleneck?.actionableSlice.includes("native-image-to-binary"),
+  "bottleneck should include an actionable implementation target",
+);
+assert(
+  JSON.stringify(checkpoint.iterationSpeedBottleneck?.relatedCommands) === JSON.stringify(["source-run-cold", "source-run-warm"]),
+  "bottleneck should cite source-run command labels",
+);
+assert(
+  checkpoint.iterationSpeedBottleneck?.focusedValidation.some((command) => command === "bash scripts/test-source-run-cache.sh"),
+  "bottleneck should include focused source-run validation",
 );
 EOF

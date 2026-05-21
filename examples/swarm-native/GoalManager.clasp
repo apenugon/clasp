@@ -422,6 +422,12 @@ currentExecutablePath = readEnvText "CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON" ""
 managerXdgCacheHome : Str
 managerXdgCacheHome = readEnvText "CLASP_MANAGER_XDG_CACHE_HOME_JSON" (pathJoin [stateRootPath, "manager-xdg-cache"])
 
+taskWorkspaceBaseRoot : Str
+taskWorkspaceBaseRoot =
+  readEnvText
+    "CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON"
+    (pathJoin ["/tmp", textConcat ["clasp-goal-manager-workspaces-", textFingerprint64Hex stateRootPath]])
+
 childLoopProgramPath : Str
 childLoopProgramPath = readEnvText "CLASP_MANAGER_CHILD_LOOP_JSON" "examples/feedback-loop/Main.clasp"
 
@@ -566,6 +572,9 @@ taskFailureLogTailBytes = readEnvInt "CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_
 
 retainFailedTaskWorkspaces : Bool
 retainFailedTaskWorkspaces = readEnvBool "CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON" false
+
+taskPromotionHeartbeatEnabled : Bool
+taskPromotionHeartbeatEnabled = readEnvBool "CLASP_MANAGER_TASK_PROMOTION_HEARTBEAT_JSON" true
 
 mailboxLimit : Int
 mailboxLimit = 6
@@ -828,7 +837,7 @@ taskReportStateRoot : Str -> Str
 taskReportStateRoot taskId = pathJoin [stateRootPath, textConcat ["loop-", taskId]]
 
 taskWorkspaceRoot : Str -> Str
-taskWorkspaceRoot taskId = pathJoin [stateRootPath, textConcat ["workspace-", taskId]]
+taskWorkspaceRoot taskId = pathJoin [taskWorkspaceBaseRoot, textConcat ["workspace-", taskId]]
 
 taskWorkspaceActualRoot : Str -> Str
 taskWorkspaceActualRoot taskId =
@@ -1126,6 +1135,60 @@ processResult value = match value {
 runCommand : Str -> [Str] -> Result ProcessResult
 runCommand cwd command = processResult (runCommandRaw cwd command)
 
+promotedNativeWorkspaceArtifactRepairScript : Str
+promotedNativeWorkspaceArtifactRepairScript = textJoin "\n" [
+  "set -euo pipefail",
+  "src=\"$1\"",
+  "dst=\"$2\"",
+  "if [ ! -f \"$src/runtime/claspc.rs\" ]; then",
+  "  exit 0",
+  "fi",
+  "required_artifacts=(",
+  "  src/stage1.native.image.json",
+  "  src/stage1.compiler.native.image.json",
+  "  src/embedded.native.image.json",
+  "  src/embedded.compiler.native.image.json",
+  "  src/stage1.native.native.image.json",
+  "  src/stage1.hello.native.image.json",
+  "  src/stage1.goal-manager.native.image.json",
+  "  src/stage1.task-workspace-runtime-harness.native.image.json",
+  "  src/stage1.compiler.source-export-cache-v1.json",
+  "  src/stage1.compiler.module-summary-cache-v2.json",
+  ")",
+  "for rel in \"${required_artifacts[@]}\"; do",
+  "  if [ ! -f \"$src/$rel\" ]; then",
+  "    printf 'missing required promoted native artifact in source workspace: %s\n' \"$rel\" >&2",
+  "    exit 3",
+  "  fi",
+  "  mkdir -p \"$dst/$(dirname -- \"$rel\")\"",
+  "  cp -p \"$src/$rel\" \"$dst/$rel\"",
+  "  if [ ! -f \"$dst/$rel\" ]; then",
+  "    printf 'failed to materialize required promoted native artifact: %s\n' \"$rel\" >&2",
+  "    exit 3",
+  "  fi",
+  "done"
+]
+
+repairPromotedNativeWorkspaceArtifacts : Str -> Str -> Str
+repairPromotedNativeWorkspaceArtifacts sourceRoot destinationRoot =
+  match runCommand "." [
+    "bash",
+    "-c",
+    promotedNativeWorkspaceArtifactRepairScript,
+    "repair-promoted-native-artifacts",
+    sourceRoot,
+    destinationRoot
+  ] {
+    Err message -> message,
+    Ok result ->
+      if result.exitCode == 0 then
+        ""
+      else if result.stderr != "" then
+        result.stderr
+      else
+        result.stdout
+  }
+
 workspaceGitInitScript : Str
 workspaceGitInitScript = textJoin "\n" [
   "set -euo pipefail",
@@ -1151,7 +1214,7 @@ workspaceGitInitScript = textJoin "\n" [
 
 initializeWorkspaceGitRepo : Str -> Str
 initializeWorkspaceGitRepo root =
-  match runCommand "." ["bash", "-lc", workspaceGitInitScript, "init-workspace-git", root] {
+  match runCommand "." ["bash", "-c", workspaceGitInitScript, "init-workspace-git", root] {
     Err message ->
       message,
     Ok process ->
@@ -1646,7 +1709,7 @@ canonicalizePath value =
   if value == "" then
     ""
   else
-    match runCommand "." ["bash", "-lc", canonicalizePathScript, "canonicalize-path", value] {
+    match runCommand "." ["bash", "-c", canonicalizePathScript, "canonicalize-path", value] {
       Ok process ->
         if process.exitCode == 0 then
           firstTextOrEmpty (textSplit process.stdout "\n")
@@ -2564,7 +2627,7 @@ cachePruneCandidate : Str -> Str -> Result Str
 cachePruneCandidate root keepName =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     textJoin "\n" [
       "find \"$1\" -mindepth 1 -maxdepth 1 ! -name \"$2\" -printf '%T@ %p\\n' | sort -n | while IFS= read -r row; do",
       "  path=\"${row#* }\"",
@@ -2645,7 +2708,7 @@ childLoopNamedCacheUsedMb : Str -> Result Int
 childLoopNamedCacheUsedMb cacheName =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     textJoin "\n" [
       "state_root=\"$1\"",
       "cache_name=\"$2\"",
@@ -2670,7 +2733,7 @@ childLoopNamedCachePruneCandidate : Str -> Result Str
 childLoopNamedCachePruneCandidate cacheName =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     textJoin "\n" [
       "state_root=\"$1\"",
       "cache_name=\"$2\"",
@@ -2852,7 +2915,7 @@ ensureTaskWorkspace taskId = {
             let copied =
               match runCommand "." [
                 "bash",
-                "-lc",
+                "-c",
                 textConcat [
                   "tar -cf - ",
                   workspaceCloneExcludeFlags,
@@ -2868,47 +2931,61 @@ ensureTaskWorkspace taskId = {
             if copied.exitCode != 0 then
               textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
             else {
-              let createdBaseline =
-                match runCommand "." ["mkdir", "-p", taskWorkspaceBaselineActualRoot taskId] {
-                  Ok result -> result,
-                  Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-                } in
-              if createdBaseline.exitCode != 0 then
-                textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", createdBaseline.stderr]
+              let artifactError = repairPromotedNativeWorkspaceArtifacts resolvedWorkspaceRoot (taskWorkspaceActualRoot taskId) in
+              if artifactError != "" then
+                textConcat ["task workspace artifact repair failed: ", taskId, ": ", artifactError]
               else {
-                let copiedBaseline =
-                  match runCommand "." [
-                    "bash",
-                    "-lc",
-                    textConcat [
-                      "tar -cf - -C ",
-                      taskWorkspaceActualRoot taskId,
-                      " . | tar -xf - -C ",
-                      taskWorkspaceBaselineActualRoot taskId
-                    ]
-                  ] {
+                let createdBaseline =
+                  match runCommand "." ["mkdir", "-p", taskWorkspaceBaselineActualRoot taskId] {
                     Ok result -> result,
                     Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
                   } in
-                if copiedBaseline.exitCode != 0 then
-                  textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", copiedBaseline.stderr]
+                if createdBaseline.exitCode != 0 then
+                  textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", createdBaseline.stderr]
                 else {
-                  let gitError = initializeWorkspaceGitRepo (taskWorkspaceActualRoot taskId) in
-                  if gitError != "" then
-                    textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
-                  else {
-                  let linked =
-                    match runCommand "." ["ln", "-s", taskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                  let copiedBaseline =
+                    match runCommand "." [
+                      "bash",
+                      "-c",
+                      textConcat [
+                        "tar -cf - -C ",
+                        taskWorkspaceActualRoot taskId,
+                        " . | tar -xf - -C ",
+                        taskWorkspaceBaselineActualRoot taskId
+                      ]
+                    ] {
                       Ok result -> result,
                       Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
                     } in
-                  if linked.exitCode != 0 then
-                    textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
-                  else
-                    match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-                      Ok written -> pruneTaskWorkspaceCaches taskId,
-                      Err message ->
-                        textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                  if copiedBaseline.exitCode != 0 then
+                    textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", copiedBaseline.stderr]
+                  else {
+                    let gitError = initializeWorkspaceGitRepo (taskWorkspaceActualRoot taskId) in
+                    if gitError != "" then
+                      textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+                    else {
+                      let linkParentCreated =
+                        match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
+                          Ok result -> result,
+                          Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                        } in
+                      if linkParentCreated.exitCode != 0 then
+                        textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
+                      else {
+                        let linked =
+                          match runCommand "." ["ln", "-s", taskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                            Ok result -> result,
+                            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                          } in
+                        if linked.exitCode != 0 then
+                          textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                        else
+                          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                            Ok written -> pruneTaskWorkspaceCaches taskId,
+                            Err message ->
+                              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                          }
+                      }
                     }
                   }
                 }
@@ -3167,7 +3244,7 @@ writeTaskPromotionDiff : PlannerTaskSpec -> Str
 writeTaskPromotionDiff spec =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     taskPromotionDiffScript,
     "write-task-promotion-diff",
     taskWorkspaceActualRoot spec.taskId,
@@ -3187,7 +3264,7 @@ promoteVerifiedTaskWorkspace : PlannerTaskSpec -> Str
 promoteVerifiedTaskWorkspace spec =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     taskWorkspacePromotionScript,
     "promote-task-workspace",
     taskWorkspaceActualRoot spec.taskId,
@@ -3524,7 +3601,7 @@ readBenchmarkSignalStdout wave =
   if fileExists stdoutPath then
     match runCommand "." [
       "bash",
-      "-lc",
+      "-c",
       "grep -F '\"suite\"' \"$1\" | tail -n 1",
       "benchmark-signal",
       stdoutPath
@@ -4886,7 +4963,7 @@ createManagerWorkspaceSnapshot = {
   let copied =
     match runCommand "." [
       "bash",
-      "-lc",
+      "-c",
       managerWorkspaceSnapshotScript,
       "materialize-manager-workspace",
       managerProjectRoot,
@@ -4898,21 +4975,26 @@ createManagerWorkspaceSnapshot = {
   if copied.exitCode != 0 then
     textConcat ["workspace-root-error:", copied.stderr]
   else {
-    let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
-      Ok written -> "",
-      Err message -> message
-    } in
-    if manifestError != "" then
-      textConcat ["workspace-manifest-error:", manifestError]
+    let artifactError = repairPromotedNativeWorkspaceArtifacts managerProjectRoot resolvedWorkspaceRoot in
+    if artifactError != "" then
+      textConcat ["workspace-artifact-error:", artifactError]
     else {
-      let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
-      if gitError != "" then
-        textConcat ["workspace-git-init-error:", gitError]
-      else
-        match writeFile managerWorkspaceReadyPath "ready" {
-          Ok written -> "",
-          Err message -> textConcat ["workspace-ready-error:", message]
-        }
+      let manifestError = match writeFile managerWorkspaceManifestPath (managerWorkspaceManifestText timeUnixMs) {
+        Ok written -> "",
+        Err message -> message
+      } in
+      if manifestError != "" then
+        textConcat ["workspace-manifest-error:", manifestError]
+      else {
+        let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+        if gitError != "" then
+          textConcat ["workspace-git-init-error:", gitError]
+        else
+          match writeFile managerWorkspaceReadyPath "ready" {
+            Ok written -> "",
+            Err message -> textConcat ["workspace-ready-error:", message]
+          }
+      }
     }
   }
 }
@@ -5041,7 +5123,7 @@ ensureManagerReady =
 codexCommand : Str -> Str -> Str -> [Str]
 codexCommand schemaPath reportPath promptPath = [
   "bash",
-  "-lc",
+  "-c",
   textJoin "\n" [
     "prompt_path=\"$1\"",
     "shift",
@@ -5372,7 +5454,7 @@ taskLaunchRecordCommand : PlannerTaskSpec -> SwarmCommand
 taskLaunchRecordCommand spec =
   commandSpec "." [
     "bash",
-    "-lc",
+    "-c",
     textConcat ["printf launched-child-loop:", spec.taskId]
   ]
 
@@ -6385,7 +6467,7 @@ ensurePromotionFailureArtifacts : PlannerTaskSpec -> Str -> Str
 ensurePromotionFailureArtifacts spec message =
   match runCommand "." [
     "bash",
-    "-lc",
+    "-c",
     textJoin "\n" [
       "set -euo pipefail",
       "src=\"$1\"",
@@ -7027,10 +7109,17 @@ executeReadyTasks report wave benchmarkRuns = {
               retryChildLoopMissingReport spec childReport
             else
               recordPlannedTaskFailure spec childReport in
+          let mailboxShouldWrite =
+            if taskStatus == "completed" then
+              false
+            else if taskStatus == "failed" then
+              childReport.verdict == "pass"
+            else
+              true in
           let mailboxWriteError =
             if taskError != "" then
               ""
-            else if taskStatusIsTerminal taskStatus then
+            else if mailboxShouldWrite == false then
               ""
             else
               appendMailboxMessages (taskMailboxMessagesForCompletedSpec wave spec childReport) in

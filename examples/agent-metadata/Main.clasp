@@ -1,0 +1,8 @@
+module Main
+
+metadata task = "wave-4-W4-T5"
+metadata role = "builder"
+metadata capability = "deterministic-agent-metadata"
+
+main : Str
+main = "metadata-ready"

@@ -55,6 +55,7 @@ make_fake_harness scripts/test-codex-loop-program.sh
 make_fake_harness examples/agent-loop-scenario/scripts/verify.sh
 make_fake_harness scripts/test-safe-workspace.sh
 make_fake_harness scripts/test-swarm-native-managed-loop.sh
+make_fake_harness scripts/test-swarm-native-feedback-loop.sh
 
 CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" --help |
   grep -F 'usage: scripts/verify-runtime-slice.sh' >/dev/null
@@ -64,6 +65,8 @@ CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-run
   grep -F 'agent-loop' >/dev/null
 CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" --list |
   grep -F 'workspace' >/dev/null
+CLASP_PROJECT_ROOT="$project_copy" "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" --list |
+  grep -F 'swarm-feedback-loop' >/dev/null
 
 workflow_log="$test_root/workflow.log"
 CLASP_PROJECT_ROOT="$project_copy" \
@@ -96,7 +99,7 @@ all_log="$test_root/all.log"
 CLASP_PROJECT_ROOT="$project_copy" \
   CLASP_TEST_RUNTIME_SLICE_LOG="$all_log" \
   "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" all |
-  grep -F 'verify-runtime-slice: ok (process workflow codex-loop agent-loop workspace managed-loop)' >/dev/null
+  grep -F 'verify-runtime-slice: ok (process workflow codex-loop agent-loop workspace managed-loop swarm-feedback-loop)' >/dev/null
 
 grep -F 'scripts/test-monitored-step.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-monitored-run-log.sh' "$all_log" >/dev/null
@@ -106,6 +109,15 @@ grep -F 'scripts/test-codex-loop-program.sh' "$all_log" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-safe-workspace.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$all_log" >/dev/null
+grep -F 'scripts/test-swarm-native-feedback-loop.sh' "$all_log" >/dev/null
+
+swarm_feedback_loop_log="$test_root/swarm-feedback-loop.log"
+CLASP_PROJECT_ROOT="$project_copy" \
+  CLASP_TEST_RUNTIME_SLICE_LOG="$swarm_feedback_loop_log" \
+  "$bash_bin" "$project_copy/scripts/verify-runtime-slice.sh" swarm-feedback-loop |
+  grep -F 'verify-runtime-slice: ok (swarm-feedback-loop)' >/dev/null
+
+grep -F 'scripts/test-swarm-native-feedback-loop.sh' "$swarm_feedback_loop_log" >/dev/null
 
 default_log="$test_root/default.log"
 CLASP_PROJECT_ROOT="$project_copy" \
@@ -122,6 +134,10 @@ grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$default_log" >/dev/nu
 grep -F 'scripts/test-safe-workspace.sh' "$default_log" >/dev/null
 if grep -F 'test-swarm-native-managed-loop.sh' "$default_log" >/dev/null; then
   printf 'default runtime slice should stay below the managed-loop control-plane scenario\n' >&2
+  exit 1
+fi
+if grep -F 'test-swarm-native-feedback-loop.sh' "$default_log" >/dev/null; then
+  printf 'default runtime slice should stay below the native feedback-loop scenario\n' >&2
   exit 1
 fi
 

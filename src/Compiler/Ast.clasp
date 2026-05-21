@@ -754,6 +754,121 @@ declBody decl = match decl {
     body
 }
 
+declHasExactlyOneParam : HostedDeclAst -> Bool
+declHasExactlyOneParam decl = if firstText (declParams decl) == "" then false else firstText (remainingTexts (declParams decl)) == ""
+
+declBodyIsStringLiteral : HostedDeclAst -> Bool
+declBodyIsStringLiteral decl = match declBody decl {
+  HostedName name ->
+    false,
+  HostedString value ->
+    true,
+  HostedInt value ->
+    false,
+  HostedBool value ->
+    false,
+  HostedList values ->
+    false,
+  HostedCall callee args ->
+    false,
+  HostedConstructor constructorName args ->
+    false,
+  HostedMatch subject branches ->
+    false,
+  HostedRecord recordName fields ->
+    false,
+  HostedFieldAccess subject fieldName ->
+    false,
+  HostedLet binder value body ->
+    false,
+  HostedMutableLet binder value body ->
+    false,
+  HostedAssign binder value body ->
+    false,
+  HostedFor binder iterable loopBody body ->
+    false,
+  HostedReturn value ->
+    false,
+  HostedIf condition thenBranch elseBranch ->
+    false,
+  HostedEqual left right ->
+    false,
+  HostedNotEqual left right ->
+    false,
+  HostedLessThan left right ->
+    false,
+  HostedLessThanOrEqual left right ->
+    false,
+  HostedGreaterThan left right ->
+    false,
+  HostedGreaterThanOrEqual left right ->
+    false
+}
+
+declIsMetadataName : HostedDeclAst -> Bool
+declIsMetadataName decl = declName decl == "metadata"
+
+declIsMetadataDeclaration : HostedDeclAst -> Bool
+declIsMetadataDeclaration decl =
+  if declIsMetadataName decl then
+    if declHasExactlyOneParam decl then
+      if hasAnnotationAst (declAnnotation decl) then false else declBodyIsStringLiteral decl
+    else
+      false
+  else
+    false
+
+metadataDeclKey : HostedDeclAst -> Str
+metadataDeclKey decl = firstText (declParams decl)
+
+metadataDeclStringValue : HostedDeclAst -> Str
+metadataDeclStringValue decl = match declBody decl {
+  HostedName name ->
+    "",
+  HostedString value ->
+    value,
+  HostedInt value ->
+    "",
+  HostedBool value ->
+    "",
+  HostedList values ->
+    "",
+  HostedCall callee args ->
+    "",
+  HostedConstructor constructorName args ->
+    "",
+  HostedMatch subject branches ->
+    "",
+  HostedRecord recordName fields ->
+    "",
+  HostedFieldAccess subject fieldName ->
+    "",
+  HostedLet binder value body ->
+    "",
+  HostedMutableLet binder value body ->
+    "",
+  HostedAssign binder value body ->
+    "",
+  HostedFor binder iterable loopBody body ->
+    "",
+  HostedReturn value ->
+    "",
+  HostedIf condition thenBranch elseBranch ->
+    "",
+  HostedEqual left right ->
+    "",
+  HostedNotEqual left right ->
+    "",
+  HostedLessThan left right ->
+    "",
+  HostedLessThanOrEqual left right ->
+    "",
+  HostedGreaterThan left right ->
+    "",
+  HostedGreaterThanOrEqual left right ->
+    ""
+}
+
 hostedRecordFieldExprAst : Str -> HostedExprAst -> HostedRecordFieldExprAst
 hostedRecordFieldExprAst name value = HostedRecordFieldExprAst name value
 

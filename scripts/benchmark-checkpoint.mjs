@@ -550,6 +550,43 @@ function buildBottlenecks(records, nativeIncrementalReport) {
   return bottlenecks.slice(0, 2).map((entry, index) => ({ rank: index + 1, ...entry }));
 }
 
+function buildIterationSpeedRecommendation(bottlenecks) {
+  const primary = bottlenecks[0] || null;
+  if (!primary) {
+    return {
+      area: "none",
+      rank: null,
+      evidence: "no passing checkpoint commands were available",
+      ownerHint: "wave1-fast-iteration-slice",
+      actionableSlice:
+        "Re-run the bounded checkpoint with passing commands before selecting an iteration-speed implementation target.",
+      validationCommands: [
+        "node scripts/benchmark-checkpoint.mjs --fixture",
+        "node scripts/benchmark-checkpoint.mjs --no-native-incremental --output benchmarks/checkpoints/<checkpoint>.json",
+      ],
+      relatedCommands: [],
+    };
+  }
+
+  const sourceRunAction =
+    "Reduce cold `claspc run` startup on the native-image-to-binary path while preserving warm run-binary cache hits.";
+  const defaultAction =
+    "Improve the top bounded checkpoint bottleneck first, then compare the same command labels against this checkpoint.";
+
+  return {
+    area: primary.area,
+    rank: primary.rank,
+    evidence: primary.evidence,
+    ownerHint: "wave1-fast-iteration-slice",
+    actionableSlice: primary.area === "source-run-startup" ? sourceRunAction : defaultAction,
+    validationCommands: [
+      "node scripts/benchmark-checkpoint.mjs --fixture",
+      "node scripts/benchmark-checkpoint.mjs --no-native-incremental --output benchmarks/checkpoints/<checkpoint>.json",
+    ],
+    relatedCommands: primary.relatedCommands,
+  };
+}
+
 function recordStatus(record) {
   if (!record) return "missing";
   if (record.timedOut) return "timeout";
@@ -667,6 +704,7 @@ async function main() {
     const nativeSpec = plan.find((spec) => spec.label === "native-incremental-body-change");
     const nativeIncrementalReport = nativeSpec?.reportPath ? await readJsonIfExists(nativeSpec.reportPath) : null;
     const failed = records.filter((record) => record.exitStatus !== 0);
+    const bottlenecks = buildBottlenecks(records, nativeIncrementalReport);
     const report = {
       schemaVersion: 1,
       kind: "clasp-baseline-bottleneck-checkpoint",
@@ -678,7 +716,8 @@ async function main() {
       commandSummary: commandSummary(records),
       commands: records,
       nativeIncrementalReport,
-      bottlenecks: buildBottlenecks(records, nativeIncrementalReport),
+      bottlenecks,
+      iterationSpeedRecommendation: buildIterationSpeedRecommendation(bottlenecks),
       finalStatus: failed.length === 0 ? "ok" : "failed",
       failedCommands: failed.map((record) => record.label),
     };

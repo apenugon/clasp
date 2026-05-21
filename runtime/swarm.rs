@@ -1228,6 +1228,45 @@ fn task_run_count(connection: &Connection, task_id: &str) -> Result<i64, String>
         .map_err(|err| format!("failed to count swarm runs for task `{task_id}`: {err}"))
 }
 
+fn widen_retry_run_budget(connection: &Connection, task_id: &str, updated_at_ms: i64) -> Result<(), String> {
+    let Some(spec) = load_task_spec(connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    let run_count = task_run_count(connection, task_id)?;
+    if spec.max_runs > 0 && run_count >= spec.max_runs {
+        let next_max_runs = run_count + 1;
+        connection
+            .execute(
+                "
+                UPDATE swarm_task_specs
+                SET max_runs = ?2,
+                    updated_at_ms = ?3
+                WHERE task_id = ?1
+                ",
+                params![task_id, next_max_runs, updated_at_ms],
+            )
+            .map_err(|err| format!("failed to widen retry run budget for swarm task `{task_id}`: {err}"))?;
+    }
+    if let Some(objective) = load_objective(connection, &spec.objective_id)? {
+        let objective_runs = objective_run_count(connection, &objective.objective_id)?;
+        if objective.max_runs > 0 && objective_runs >= objective.max_runs {
+            let next_max_runs = objective_runs + 1;
+            connection
+                .execute(
+                    "
+                    UPDATE swarm_objectives
+                    SET max_runs = ?2,
+                        updated_at_ms = ?3
+                    WHERE objective_id = ?1
+                    ",
+                    params![objective.objective_id, next_max_runs, updated_at_ms],
+                )
+                .map_err(|err| format!("failed to widen retry run budget for swarm objective `{}`: {err}", spec.objective_id))?;
+        }
+    }
+    Ok(())
+}
+
 fn insert_task_spec(
     connection: &mut Connection,
     objective_id: &str,
@@ -1480,6 +1519,9 @@ fn require_completion_lease_owner(
         return Err(format!(
             "swarm task `{task_id}` cannot complete: no lease owner is recorded"
         ));
+    }
+    if task.status == "failed" && actor == "manager" && task.lease_actor.as_str() == actor {
+        return Ok((task, spec));
     }
     if task.status != "leased" && task.status != "active" && task.status != "completed" {
         return Err(format!(
@@ -3940,6 +3982,7 @@ fn execute_event_command(
         let _ = require_recorded_lease_owner(&connection, task_id, actor, "fail")?;
     } else if kind == "task_requeued" {
         require_manager_actor(&connection, task_id, actor, "requeue")?;
+        widen_retry_run_budget(&connection, task_id, at_ms)?;
     } else if kind == "task_stopped" {
         require_manager_actor(&connection, task_id, actor, "stop")?;
     } else if kind == "task_resumed" {
@@ -5230,6 +5273,175 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM swarm_approvals WHERE task_id = 'repair'", [], |row| row.get(0))
             .expect("count approvals");
         assert_eq!(approval_count, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn manager_can_complete_failed_task_with_recorded_pass_without_retry_budget() {
+        let root = unique_root("complete-failed");
+        let root_text = root.to_string_lossy().to_string();
+
+        let objective = run_swarm_json_command(&vec![
+            "objective".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "--max-tasks".to_owned(),
+            "4".to_owned(),
+            "--max-runs".to_owned(),
+            "4".to_owned(),
+        ])
+        .expect("objective create");
+        assert_eq!(objective.0, 0);
+
+        let task = run_swarm_json_command(&vec![
+            "task".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "artifact".to_owned(),
+            "--max-runs".to_owned(),
+            "1".to_owned(),
+        ])
+        .expect("task create");
+        assert_eq!(task.0, 0);
+
+        let dependent = run_swarm_json_command(&vec![
+            "task".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "integration".to_owned(),
+            "--max-runs".to_owned(),
+            "1".to_owned(),
+            "--depends-on".to_owned(),
+            "artifact".to_owned(),
+        ])
+        .expect("dependent task create");
+        assert_eq!(dependent.0, 0);
+
+        let lease = run_swarm_json_command(&vec!["lease".to_owned(), root_text.clone(), "artifact".to_owned()])
+            .expect("lease");
+        assert_eq!(lease.0, 0);
+
+        let run = run_swarm_json_command(&vec![
+            "tool".to_owned(),
+            root_text.clone(),
+            "artifact".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "true".to_owned(),
+        ])
+        .expect("tool run");
+        assert_eq!(run.0, 0);
+
+        let failed = run_swarm_json_command(&vec!["fail".to_owned(), root_text.clone(), "artifact".to_owned()])
+            .expect("fail");
+        assert_eq!(failed.0, 0);
+
+        let ready_before = run_swarm_json_command(&vec![
+            "ready".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+        ])
+        .expect("ready before");
+        assert_eq!(ready_before.0, 0);
+        assert!(!ready_before.1.contains("\"taskId\":\"integration\""));
+
+        let completed = run_swarm_json_command(&vec!["complete".to_owned(), root_text.clone(), "artifact".to_owned()])
+            .expect("complete failed artifact");
+        assert_eq!(completed.0, 0);
+        assert!(completed.1.contains("\"status\":\"completed\""));
+
+        let ready_after = run_swarm_json_command(&vec![
+            "ready".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+        ])
+        .expect("ready after");
+        assert_eq!(ready_after.0, 0);
+        assert!(ready_after.1.contains("\"taskId\":\"integration\""));
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'artifact'", [], |row| row.get(0))
+            .expect("count artifact runs");
+        assert_eq!(run_count, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn retry_widens_exhausted_task_and_objective_run_budgets() {
+        let root = unique_root("retry-budget");
+        let root_text = root.to_string_lossy().to_string();
+
+        let objective = run_swarm_json_command(&vec![
+            "objective".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "--max-runs".to_owned(),
+            "1".to_owned(),
+        ])
+        .expect("objective create");
+        assert_eq!(objective.0, 0);
+
+        let task = run_swarm_json_command(&vec![
+            "task".to_owned(),
+            "create".to_owned(),
+            root_text.clone(),
+            "loop".to_owned(),
+            "repair".to_owned(),
+            "--max-runs".to_owned(),
+            "1".to_owned(),
+        ])
+        .expect("task create");
+        assert_eq!(task.0, 0);
+
+        let lease = run_swarm_json_command(&vec!["lease".to_owned(), root_text.clone(), "repair".to_owned()])
+            .expect("lease");
+        assert_eq!(lease.0, 0);
+
+        let run = run_swarm_json_command(&vec![
+            "tool".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "true".to_owned(),
+        ])
+        .expect("tool run");
+        assert_eq!(run.0, 0);
+
+        let failed = run_swarm_json_command(&vec!["fail".to_owned(), root_text.clone(), "repair".to_owned()])
+            .expect("fail");
+        assert_eq!(failed.0, 0);
+
+        let retry = run_swarm_json_command(&vec!["retry".to_owned(), root_text.clone(), "repair".to_owned()])
+            .expect("retry");
+        assert_eq!(retry.0, 0);
+        assert!(retry.1.contains("\"status\":\"queued\""));
+        assert!(retry.1.contains("\"ready\":true"));
+
+        let second_lease = run_swarm_json_command(&vec!["lease".to_owned(), root_text.clone(), "repair".to_owned()])
+            .expect("second lease");
+        assert_eq!(second_lease.0, 0);
+
+        let paths = runtime_paths(&root);
+        let connection = Connection::open(paths.db_path).expect("open sqlite db");
+        let task_max_runs: i64 = connection
+            .query_row("SELECT max_runs FROM swarm_task_specs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("task max runs");
+        let objective_max_runs: i64 = connection
+            .query_row("SELECT max_runs FROM swarm_objectives WHERE objective_id = 'loop'", [], |row| row.get(0))
+            .expect("objective max runs");
+        assert_eq!(task_max_runs, 2);
+        assert_eq!(objective_max_runs, 2);
 
         let _ = fs::remove_dir_all(root);
     }

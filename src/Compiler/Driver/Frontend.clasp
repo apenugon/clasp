@@ -25,8 +25,27 @@ frontendDriverCheckSourceText source = renderModuleSummary (sourceModule source)
 frontendDriverExplainSourceText : Str -> Str
 frontendDriverExplainSourceText source = renderModuleSummary (sourceModule source)
 
+frontendDriverSummaryIsError : Str -> Bool
+frontendDriverSummaryIsError summary = match textPrefix summary "In `" {
+  Ok tail ->
+    true,
+  Err missing ->
+    match textPrefix summary "ERROR:" {
+      Ok tail ->
+        true,
+      Err missingPrefix ->
+        false
+    }
+}
+
+frontendDriverCompileCheckedModuleText : HostedModuleAst -> [LowerDeclText] -> Str
+frontendDriverCompileCheckedModuleText modl decls = {
+  let summary = renderModuleSummary modl;
+  if frontendDriverSummaryIsError summary then textConcat ["ERROR:", summary] else emitFrontendModule modl decls
+}
+
 frontendDriverCompileSourceText : Str -> Str
-frontendDriverCompileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else emitFrontendModule (sourceModule source) (frontendDriverSourceLoweredDecls source)
+frontendDriverCompileSourceText source = if sourceDeclaresBackendSurface source then frontendOnlyCompileError else frontendDriverCompileCheckedModuleText (sourceModule source) (frontendDriverSourceLoweredDecls source)
 
 frontendDriverAirSourceText : Str -> Str
 frontendDriverAirSourceText source = renderAirSourceText source
@@ -68,11 +87,11 @@ frontendDriverContextProjectText : Str -> Str
 frontendDriverContextProjectText bundle = renderContextProjectText bundle
 
 frontendDriverCompileProjectText : Str -> Str
-frontendDriverCompileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else if frontendDriverProjectBundleIsSingleSourceModule bundle then emitFrontendModule (frontendDriverProjectBundleSourceModule bundle) (lowerModule (frontendDriverProjectBundleSourceModule bundle)) else match resolveProjectBundle bundle {
+frontendDriverCompileProjectText bundle = if sourceDeclaresBackendSurface bundle then frontendOnlyCompileError else if frontendDriverProjectBundleIsSingleSourceModule bundle then frontendDriverCompileCheckedModuleText (frontendDriverProjectBundleSourceModule bundle) (lowerModule (frontendDriverProjectBundleSourceModule bundle)) else match resolveProjectBundle bundle {
   HostedProjectBundleOk modl ->
-    emitFrontendModule modl (lowerModule modl),
+    frontendDriverCompileCheckedModuleText modl (lowerModule modl),
   HostedProjectBundleError message ->
-    textConcat ["// compiler-selfhost project error: ", message]
+    textConcat ["ERROR:", message]
 }
 
 frontendDriverCheckCoreProjectText : Str -> Str

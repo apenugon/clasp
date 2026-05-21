@@ -33,6 +33,12 @@ first_output="$(
   CLASP_NATIVE_TRACE_CACHE=1 timeout 180 "$claspc_bin" run "$entry_path" 2>"$first_log"
 )"
 printf '%s\n' "$first_output" | grep -Fx 'source-run-cache-v1' >/dev/null
+grep -F '[claspc-cache] run-binary single-source image export=nativeImageSourceText' "$first_log" >/dev/null
+grep -F '[claspc-cache] source-export miss export=nativeImageSourceText' "$first_log" >/dev/null
+if grep -E '\[claspc-cache\] (build-plan|decl-module) ' "$first_log" >/dev/null; then
+  printf 'single-source cold run should bypass granular native-image planning\n' >&2
+  exit 1
+fi
 
 second_output="$(
   CLASP_NATIVE_TRACE_CACHE=1 timeout 60 "$claspc_bin" run "$entry_path" 2>"$second_log"
@@ -51,8 +57,13 @@ third_output="$(
   CLASP_NATIVE_TRACE_CACHE=1 timeout 180 "$claspc_bin" run "$entry_path" 2>"$third_log"
 )"
 printf '%s\n' "$third_output" | grep -Fx 'source-run-cache-v2' >/dev/null
+grep -F '[claspc-cache] run-binary single-source image export=nativeImageSourceText' "$third_log" >/dev/null
 if grep -F '[claspc-cache] run-binary fast hit path=' "$third_log" >/dev/null; then
   printf 'source-run cache reused a stale backend binary after source change\n' >&2
+  exit 1
+fi
+if grep -E '\[claspc-cache\] (build-plan|decl-module) ' "$third_log" >/dev/null; then
+  printf 'single-source changed run should bypass granular native-image planning\n' >&2
   exit 1
 fi
 

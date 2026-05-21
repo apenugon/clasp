@@ -9,6 +9,30 @@ record AgentEvent = {
   detail : Str
 }
 
+record AgentHandoffTask = {
+  taskId : Str,
+  role : Str,
+  status : Str,
+  inputPath : Str,
+  outputPath : Str,
+  resultPath : Str,
+  detail : Str,
+  updatedAtMs : Int
+}
+
+record AgentHandoffSnapshot = {
+  workflowId : Str,
+  status : Str,
+  currentTaskId : Str,
+  snapshotPath : Str,
+  eventLogPath : Str,
+  tasks : [AgentHandoffTask],
+  completedTaskIds : [Str],
+  updatedAtMs : Int
+}
+
+type AgentHandoffClaim = AgentHandoffClaimed AgentHandoffSnapshot AgentHandoffTask | AgentHandoffDrained AgentHandoffSnapshot
+
 agentEvent : Str -> Str -> Str -> Str -> AgentEvent
 agentEvent kind role status detail =
   AgentEvent {
@@ -61,4 +85,171 @@ agentEnsureDirStatus root relative =
   match workspaceMkdirAll root relative {
     Ok path -> "",
     Err message -> textConcat ["workspace-mkdir-error:", message]
+  }
+
+emptyAgentHandoffTasks : [AgentHandoffTask]
+emptyAgentHandoffTasks = []
+
+emptyAgentTaskIds : [Str]
+emptyAgentTaskIds = []
+
+agentHandoffTask : Str -> Str -> Str -> Str -> Str -> AgentHandoffTask
+agentHandoffTask taskId role inputPath outputPath resultPath =
+  AgentHandoffTask {
+    taskId = taskId,
+    role = role,
+    status = "pending",
+    inputPath = inputPath,
+    outputPath = outputPath,
+    resultPath = resultPath,
+    detail = "",
+    updatedAtMs = timeUnixMs
+  }
+
+emptyAgentHandoffTask : AgentHandoffTask
+emptyAgentHandoffTask =
+  AgentHandoffTask {
+    taskId = "",
+    role = "",
+    status = "none",
+    inputPath = "",
+    outputPath = "",
+    resultPath = "",
+    detail = "",
+    updatedAtMs = 0
+  }
+
+agentHandoffHasStatus : [AgentHandoffTask] -> Str -> Bool
+agentHandoffHasStatus tasks status =
+  {
+    let mut found = false;
+    for task in tasks {
+      found =
+        if found then
+          true
+        else
+          task.status == status;
+      found
+    };
+    found
+  }
+
+agentHandoffProjectedStatus : [AgentHandoffTask] -> Str
+agentHandoffProjectedStatus tasks =
+  if agentHandoffHasStatus tasks "completed-fail" then
+    "failed"
+  else if agentHandoffHasStatus tasks "runtime-error" then
+    "failed"
+  else if agentHandoffHasStatus tasks "running" then
+    "running"
+  else if agentHandoffHasStatus tasks "pending" then
+    "pending"
+  else
+    "completed"
+
+agentHandoffSnapshot : Str -> Str -> Str -> [AgentHandoffTask] -> AgentHandoffSnapshot
+agentHandoffSnapshot workflowId snapshotPath eventLogPath tasks =
+  AgentHandoffSnapshot {
+    workflowId = workflowId,
+    status = agentHandoffProjectedStatus tasks,
+    currentTaskId = "",
+    snapshotPath = snapshotPath,
+    eventLogPath = eventLogPath,
+    tasks = tasks,
+    completedTaskIds = emptyAgentTaskIds,
+    updatedAtMs = timeUnixMs
+  }
+
+agentHandoffPersist : Str -> AgentHandoffSnapshot -> Str
+agentHandoffPersist root snapshot =
+  agentWriteTextStatus root snapshot.snapshotPath (encode snapshot)
+
+agentHandoffLoad : Str -> Str -> AgentHandoffSnapshot -> AgentHandoffSnapshot
+agentHandoffLoad root snapshotPath fallback =
+  match workspaceReadText root snapshotPath {
+    Ok raw -> decode AgentHandoffSnapshot raw,
+    Err message -> fallback
+  }
+
+agentHandoffAppendEvent : Str -> AgentHandoffSnapshot -> Str -> Str -> Str -> Str -> Str
+agentHandoffAppendEvent root snapshot kind role status detail =
+  agentAppendEvent root snapshot.eventLogPath (agentEvent kind role status detail)
+
+agentHandoffTaskWithStatus : AgentHandoffTask -> Str -> Str -> AgentHandoffTask
+agentHandoffTaskWithStatus task status detail =
+  with task {
+    status = status,
+    detail = detail,
+    updatedAtMs = timeUnixMs
+  }
+
+agentHandoffClaimNext : AgentHandoffSnapshot -> AgentHandoffClaim
+agentHandoffClaimNext snapshot =
+  {
+    let mut claimed = emptyAgentHandoffTask;
+    let mut claimedFound = false;
+    let mut updatedTasks = emptyAgentHandoffTasks;
+    for task in snapshot.tasks {
+      if claimedFound then {
+        updatedTasks = append updatedTasks [task];
+        updatedTasks
+      } else if task.status == "pending" then {
+        let running = agentHandoffTaskWithStatus task "running" "claimed";
+        claimed = running;
+        claimedFound = true;
+        updatedTasks = append updatedTasks [running];
+        updatedTasks
+      } else {
+        updatedTasks = append updatedTasks [task];
+        updatedTasks
+      }
+    };
+    let nextSnapshot =
+      AgentHandoffSnapshot {
+        workflowId = snapshot.workflowId,
+        status = agentHandoffProjectedStatus updatedTasks,
+        currentTaskId =
+          if claimedFound then
+            claimed.taskId
+          else
+            "",
+        snapshotPath = snapshot.snapshotPath,
+        eventLogPath = snapshot.eventLogPath,
+        tasks = updatedTasks,
+        completedTaskIds = snapshot.completedTaskIds,
+        updatedAtMs = timeUnixMs
+      };
+    if claimedFound then
+      AgentHandoffClaimed nextSnapshot claimed
+    else
+      AgentHandoffDrained nextSnapshot
+  }
+
+agentHandoffCompleteTask : AgentHandoffSnapshot -> Str -> Str -> Str -> AgentHandoffSnapshot
+agentHandoffCompleteTask snapshot taskId status detail =
+  {
+    let mut updatedTasks = emptyAgentHandoffTasks;
+    for task in snapshot.tasks {
+      updatedTasks =
+        if task.taskId == taskId then
+          append updatedTasks [agentHandoffTaskWithStatus task status detail]
+        else
+          append updatedTasks [task];
+      updatedTasks
+    };
+    let completedTaskIds =
+      if status == "completed-pass" then
+        append snapshot.completedTaskIds [taskId]
+      else
+        snapshot.completedTaskIds;
+    AgentHandoffSnapshot {
+      workflowId = snapshot.workflowId,
+      status = agentHandoffProjectedStatus updatedTasks,
+      currentTaskId = "",
+      snapshotPath = snapshot.snapshotPath,
+      eventLogPath = snapshot.eventLogPath,
+      tasks = updatedTasks,
+      completedTaskIds = completedTaskIds,
+      updatedAtMs = timeUnixMs
+    }
   }

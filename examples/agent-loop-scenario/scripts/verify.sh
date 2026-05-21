@@ -20,6 +20,8 @@ test_root="$(mktemp -d "$tmp_root/agent-loop-scenario.XXXXXX")"
 workspace_root="$test_root/workspace"
 fake_codex="$test_root/codex"
 run_output="$test_root/run.json"
+handoff_output="$test_root/handoff-run.json"
+handoff_workspace="$test_root/handoff-workspace"
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
@@ -32,6 +34,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$workspace_root/src" "$workspace_root/artifacts"
+mkdir -p "$handoff_workspace"
 printf 'alpha task input\n' > "$workspace_root/src/input.txt"
 
 cat > "$fake_codex" <<'EOF'
@@ -86,6 +89,7 @@ claspc_bin="$(
     "$project_root/scripts/resolve-claspc.sh"
 )"
 demo_path="$project_root/examples/agent-loop-scenario/Main.clasp"
+handoff_demo_path="$project_root/examples/agent-loop-scenario/HandoffDemo.clasp"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
   fail "agent loop scenario should invoke direct executables, not shell wrappers"
@@ -108,6 +112,12 @@ grep -F 'workspaceWriteText record.root record.statusPath' "$project_root/exampl
 grep -F 'workspaceAppendText commandSpecValue.root spec.eventLogPath' "$project_root/examples/agent-loop-scenario/Process.clasp" >/dev/null
 grep -F '"exec"' "$demo_path" >/dev/null
 grep -F '"--output-last-message"' "$demo_path" >/dev/null
+grep -F 'record AgentHandoffSnapshot' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'type AgentHandoffClaim' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'agentHandoffPersist' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'agentHandoffLoad' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'agentHandoffCompleteTask' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'runVerifierStep restoredForVerifier' "$handoff_demo_path" >/dev/null
 
 (
   cd "$project_root"
@@ -217,6 +227,76 @@ for (const id of ["builder-codex", "verifier-check"]) {
 }
 assert(runEvents.some((event) => event.runId === "builder-codex" && event.status === "completed-pass"), "builder run completion event missing");
 assert(runEvents.some((event) => event.runId === "verifier-check" && event.status === "completed-pass"), "verifier run completion event missing");
+NODE
+
+(
+  cd "$project_root"
+  timeout "$timeout_secs" "$claspc_bin" --json check "$handoff_demo_path" | grep -F '"status":"ok"' >/dev/null
+  timeout "$timeout_secs" "$claspc_bin" run "$handoff_demo_path" -- "$handoff_workspace" >"$handoff_output"
+)
+
+node - "$handoff_output" "$handoff_workspace" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [outputPath, workspaceRoot] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+const snapshot = JSON.parse(fs.readFileSync(path.join(workspaceRoot, "handoff/workflow-snapshot.json"), "utf8"));
+const events = fs
+  .readFileSync(path.join(workspaceRoot, "handoff/workflow-events.jsonl"), "utf8")
+  .trim()
+  .split(/\n/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const builderResult = JSON.parse(fs.readFileSync(path.join(workspaceRoot, "artifacts/builder-result.json"), "utf8"));
+const verifierResult = JSON.parse(fs.readFileSync(path.join(workspaceRoot, "artifacts/verifier-result.json"), "utf8"));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function readText(relativePath) {
+  return fs.readFileSync(path.join(workspaceRoot, relativePath), "utf8");
+}
+
+assert(report.workflowId === "ordinary-clasp-agent-handoff", "handoff workflow id changed");
+assert(report.finalStatus === "completed", `unexpected handoff final status ${report.finalStatus}`);
+assert(report.restoredAfterBuilder === true, "verifier should resume from a persisted builder snapshot");
+assert(report.resumedTaskId === "handoff-verifier", "verifier should claim the second task after resume");
+assert(JSON.stringify(report.completedTaskIds) === JSON.stringify(["handoff-builder", "handoff-verifier"]), "completed task ids changed");
+assert(JSON.stringify(report.tasks) === JSON.stringify(snapshot.tasks), "reported tasks should match durable snapshot");
+assert(JSON.stringify(report.completedTaskIds) === JSON.stringify(snapshot.completedTaskIds), "reported completed ids should match durable snapshot");
+assert(snapshot.status === "completed", "durable snapshot should project completed status");
+assert(snapshot.currentTaskId === "", "durable snapshot should not leave a claimed task active");
+assert(snapshot.snapshotPath === "handoff/workflow-snapshot.json", "snapshot path should be durable");
+assert(snapshot.eventLogPath === "handoff/workflow-events.jsonl", "event log path should be durable");
+
+const builderTask = snapshot.tasks.find((task) => task.taskId === "handoff-builder");
+const verifierTask = snapshot.tasks.find((task) => task.taskId === "handoff-verifier");
+assert(builderTask && verifierTask, "snapshot should contain both handoff tasks");
+assert(builderTask.status === "completed-pass", "builder task should complete");
+assert(verifierTask.status === "completed-pass", "verifier task should complete");
+assert(builderTask.detail === "artifacts/builder-note.txt", "builder detail should point at artifact");
+assert(verifierTask.detail === "artifacts/verifier-note.txt", "verifier detail should point at artifact");
+assert(builderTask.updatedAtMs > 0 && verifierTask.updatedAtMs >= builderTask.updatedAtMs, "task timestamps should be projected");
+
+assert(readText("inputs/task.txt") === "handoff input from planner\n", "planner input should persist");
+assert(report.builderOutput.includes("handoff input from planner"), "builder artifact should include planner input");
+assert(report.verifierOutput.includes(report.builderOutput), "verifier artifact should consume builder artifact after resume");
+assert(readText("artifacts/builder-note.txt") === report.builderOutput, "builder artifact path should be readable");
+assert(readText("artifacts/verifier-note.txt") === report.verifierOutput, "verifier artifact path should be readable");
+
+assert(builderResult.kind === "task-result" && builderResult.role === "builder", "builder result should be structured");
+assert(verifierResult.kind === "task-result" && verifierResult.role === "verifier", "verifier result should be structured");
+assert(builderResult.status === "completed-pass", "builder result status should pass");
+assert(verifierResult.status === "completed-pass", "verifier result status should pass");
+
+assert(events.length === 6, "handoff event log should contain create, claim, complete, and close events");
+assert(events[0].kind === "handoff-created" && events[0].role === "planner", "planner creation event missing");
+assert(events.filter((event) => event.kind === "task-claimed").map((event) => event.role).join(",") === "builder,verifier", "claim event order should show handoff");
+assert(events.filter((event) => event.kind === "task-completed").length === 2, "task completion events missing");
+assert(events.some((event) => event.kind === "handoff-completed" && event.status === "completed"), "handoff completion event missing");
+assert(report.summary === "workflow=ordinary-clasp-agent-handoff status=completed resumed=handoff-verifier", "handoff summary changed");
 NODE
 
 printf 'agent-loop-scenario-ok\n'
