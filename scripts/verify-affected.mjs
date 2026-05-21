@@ -253,6 +253,7 @@ const COMMANDS = {
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
+  monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   hostRuntime: "bash scripts/test-host-runtime.sh",
@@ -1019,6 +1020,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "monitored step harness", file);
+    }
+
+    if (file === "scripts/test-monitored-run-log.sh") {
+      matched = true;
+      reason(file, "monitored-run-log-harness", "monitored run-log harness uses shell syntax plus focused durable process log coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "monitored run-log shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "monitored run-log harness", file);
     }
 
     if (file === "scripts/test-monitored-loop.sh") {

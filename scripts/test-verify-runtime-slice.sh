@@ -48,6 +48,7 @@ EOF
 }
 
 make_fake_harness scripts/test-monitored-step.sh
+make_fake_harness scripts/test-monitored-run-log.sh
 make_fake_harness scripts/test-safe-subprocess.sh
 make_fake_harness scripts/test-monitored-workflow.sh
 make_fake_harness scripts/test-codex-loop-program.sh
@@ -98,6 +99,7 @@ CLASP_PROJECT_ROOT="$project_copy" \
   grep -F 'verify-runtime-slice: ok (process workflow codex-loop agent-loop workspace managed-loop)' >/dev/null
 
 grep -F 'scripts/test-monitored-step.sh' "$all_log" >/dev/null
+grep -F 'scripts/test-monitored-run-log.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-codex-loop-program.sh' "$all_log" >/dev/null
@@ -112,6 +114,7 @@ CLASP_PROJECT_ROOT="$project_copy" \
   grep -F 'verify-runtime-slice: ok (process workflow codex-loop agent-loop workspace)' >/dev/null
 
 grep -F 'scripts/test-monitored-step.sh' "$default_log" >/dev/null
+grep -F 'scripts/test-monitored-run-log.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-codex-loop-program.sh' "$default_log" >/dev/null

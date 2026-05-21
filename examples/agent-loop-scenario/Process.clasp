@@ -1,5 +1,7 @@
 module Process
 
+import Workspace
+
 foreign runWorkspaceCommandTimeoutRaw : Str -> Str -> Int -> [Str] -> Result Str = "runWorkspaceCommandTimeoutJson"
 
 record ProcessResult = {
@@ -17,8 +19,44 @@ record CommandSpec = {
   command : [Str]
 }
 
+record MonitoredCommandSpec = {
+  runId : Str,
+  role : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  commandSpec : CommandSpec
+}
+
+record MonitoredProcessEvent = {
+  kind : Str,
+  runId : Str,
+  role : Str,
+  status : Str,
+  detail : Str
+}
+
+record MonitoredProcessRecord = {
+  runId : Str,
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str,
+  command : [Str],
+  root : Str,
+  cwd : Str,
+  timeoutMs : Int,
+  statusPath : Str,
+  eventLogPath : Str
+}
+
 processResultError : Str -> Result ProcessResult
 processResultError message = Err message
+
+monitoredProcessRecordError : Str -> Result MonitoredProcessRecord
+monitoredProcessRecordError message = Err message
 
 commandSpec : Str -> Str -> Int -> [Str] -> CommandSpec
 commandSpec root cwd timeoutMs command =
@@ -27,6 +65,16 @@ commandSpec root cwd timeoutMs command =
     cwd = cwd,
     timeoutMs = timeoutMs,
     command = command
+  }
+
+monitoredCommandSpec : Str -> Str -> Str -> Str -> CommandSpec -> MonitoredCommandSpec
+monitoredCommandSpec runId role statusPath eventLogPath commandSpecValue =
+  MonitoredCommandSpec {
+    runId = runId,
+    role = role,
+    statusPath = statusPath,
+    eventLogPath = eventLogPath,
+    commandSpec = commandSpecValue
   }
 
 processResult : Result Str -> Result ProcessResult
@@ -44,3 +92,103 @@ run spec =
       spec.timeoutMs
       spec.command
   )
+
+monitoredProcessStatus : ProcessResult -> Str
+monitoredProcessStatus result =
+  if result.timedOut then
+    "timeout"
+  else if result.exitCode == 0 then
+    "completed-pass"
+  else
+    "completed-fail"
+
+monitoredProcessEvent : MonitoredCommandSpec -> Str -> Str -> Str -> MonitoredProcessEvent
+monitoredProcessEvent spec kind status detail =
+  MonitoredProcessEvent {
+    kind = kind,
+    runId = spec.runId,
+    role = spec.role,
+    status = status,
+    detail = detail
+  }
+
+appendMonitoredProcessEvent : MonitoredCommandSpec -> Str -> Str -> Str -> Str
+appendMonitoredProcessEvent spec kind status detail = {
+  let commandSpecValue = spec.commandSpec;
+  match workspaceAppendText commandSpecValue.root spec.eventLogPath (textConcat [encode (monitoredProcessEvent spec kind status detail), "\n"]) {
+    Ok path -> "",
+    Err message -> message
+  }
+}
+
+monitoredProcessRecordFromResult : MonitoredCommandSpec -> ProcessResult -> MonitoredProcessRecord
+monitoredProcessRecordFromResult spec result = {
+  let commandSpecValue = spec.commandSpec;
+  MonitoredProcessRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = monitoredProcessStatus result,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    timedOut = result.timedOut,
+    error = result.error,
+    command = commandSpecValue.command,
+    root = commandSpecValue.root,
+    cwd = commandSpecValue.cwd,
+    timeoutMs = commandSpecValue.timeoutMs,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath
+  }
+}
+
+monitoredProcessRecordFromError : MonitoredCommandSpec -> Str -> MonitoredProcessRecord
+monitoredProcessRecordFromError spec message = {
+  let commandSpecValue = spec.commandSpec;
+  MonitoredProcessRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    timedOut = false,
+    error = message,
+    command = commandSpecValue.command,
+    root = commandSpecValue.root,
+    cwd = commandSpecValue.cwd,
+    timeoutMs = commandSpecValue.timeoutMs,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath
+  }
+}
+
+persistMonitoredProcessRecord : MonitoredProcessRecord -> Result MonitoredProcessRecord
+persistMonitoredProcessRecord record =
+  match workspaceWriteText record.root record.statusPath (encode record) {
+    Ok path -> Ok record,
+    Err message -> monitoredProcessRecordError message
+  }
+
+finishMonitoredProcessRun : MonitoredCommandSpec -> Result ProcessResult -> Result MonitoredProcessRecord
+finishMonitoredProcessRun spec processResultValue = {
+  let record = match processResultValue {
+    Ok result -> monitoredProcessRecordFromResult spec result,
+    Err message -> monitoredProcessRecordFromError spec message
+  };
+  match persistMonitoredProcessRecord record {
+    Err message -> monitoredProcessRecordError message,
+    Ok persisted -> {
+      let kind = if persisted.status == "runtime-error" then "run-error" else "run-completed";
+      let detail = textConcat ["exit=", encode persisted.exitCode];
+      let closed = appendMonitoredProcessEvent spec kind persisted.status detail;
+      Ok persisted
+    }
+  }
+}
+
+runMonitoredLogged : MonitoredCommandSpec -> Result MonitoredProcessRecord
+runMonitoredLogged spec = {
+  let opened = appendMonitoredProcessEvent spec "run-started" "running" "command started";
+  finishMonitoredProcessRun spec (run spec.commandSpec)
+}

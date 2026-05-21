@@ -1030,6 +1030,71 @@ unknownConstructorMessage missing =
   else
     textConcat ["Unknown constructor `", missing, "`. Declare or import a constructor named `", missing, "`, or fix the spelling of the constructor reference."]
 
+compilerBuiltinDiagnosticName : Str -> Bool
+compilerBuiltinDiagnosticName name = match lookupTypeBinding baseEnv name {
+  FoundType bindingType ->
+    true,
+  MissingType missing ->
+    if name == resultOkConstructorName then true else if name == resultErrConstructorName then true else if name == optionSomeConstructorName then true else if name == optionNoneConstructorName then true else false
+}
+
+appendDiagnosticCandidateName : [Str] -> Str -> [Str]
+appendDiagnosticCandidateName names name =
+  if name == "" then names else if compilerBuiltinDiagnosticName name then names else if containsText names name then names else appendCheckerRenderedText names name
+
+diagnosticCandidateNamesFromBindings : [TypeBinding] -> [Str]
+diagnosticCandidateNamesFromBindings bindings = {
+  let mut names = emptyRenderedTexts;
+  for binding in bindings {
+    names = appendDiagnosticCandidateName names (bindingNameText binding);
+    names
+  };
+  names
+}
+
+firstFiveDiagnosticNames : [Str] -> [Str]
+firstFiveDiagnosticNames names = {
+  let first = firstText names;
+  if first == "" then emptyRenderedTexts else {
+    let afterFirst = remainingTexts names;
+    let second = firstText afterFirst;
+    if second == "" then [first] else {
+      let afterSecond = remainingTexts afterFirst;
+      let third = firstText afterSecond;
+      if third == "" then [first, second] else {
+        let afterThird = remainingTexts afterSecond;
+        let fourth = firstText afterThird;
+        if fourth == "" then [first, second, third] else {
+          let afterFourth = remainingTexts afterThird;
+          let fifth = firstText afterFourth;
+          if fifth == "" then [first, second, third, fourth] else [first, second, third, fourth, fifth]
+        }
+      }
+    }
+  }
+}
+
+renderDiagnosticCandidateNames : [Str] -> Str
+renderDiagnosticCandidateNames names = {
+  let mut rendered = emptyRenderedTexts;
+  for name in names {
+    rendered = appendCheckerRenderedText rendered (textConcat ["`", name, "`"]);
+    rendered
+  };
+  textJoin ", " rendered
+}
+
+unknownNameScopeHint : [TypeBinding] -> [TypeBinding] -> Str
+unknownNameScopeHint localEnv env = {
+  let localNames = diagnosticCandidateNamesFromBindings localEnv;
+  let availableNames = firstFiveDiagnosticNames (appendUniqueTextList localNames (diagnosticCandidateNamesFromBindings env));
+  if firstText availableNames == "" then "" else textConcat [" In scope here: ", renderDiagnosticCandidateNames availableNames, "."]
+}
+
+unknownNameMessageInScope : Str -> [TypeBinding] -> [TypeBinding] -> Str
+unknownNameMessageInScope missing localEnv env =
+  if missing == "True" then unknownNameMessage missing else if missing == "False" then unknownNameMessage missing else textConcat [unknownNameMessage missing, unknownNameScopeHint localEnv env]
+
 lookupTypeBinding : [TypeBinding] -> Str -> LookupResult
 lookupTypeBinding env targetName = {
   for binding in env {
@@ -1538,7 +1603,7 @@ inferMapBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (unknownNameMessage missing),
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
           FoundType functionType ->
             match functionType {
               TFunction inputType resultType ->
@@ -1652,7 +1717,7 @@ inferFilterBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (unknownNameMessage missing),
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
           FoundType functionType ->
             match functionType {
               TFunction inputType resultType ->
@@ -1819,7 +1884,7 @@ inferFoldBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
       HostedName functionName ->
         match lookupTypeBindingLayers localEnv env functionName {
           MissingType missing ->
-            BuiltinCallError (unknownNameMessage missing),
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
           FoundType functionType ->
             match inferExpr typeDecls recordDecls env localEnv fnContext initialExpr {
               InferExprError message ->
@@ -2066,7 +2131,7 @@ inferExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
           FoundType calleeType ->
             applyCallType typeDecls recordDecls env localEnv fnContext callee calleeType args,
           MissingType missing ->
-            InferExprError (unknownNameMessage missing)
+            InferExprError (unknownNameMessageInScope missing localEnv env)
         }
     },
   HostedConstructor constructorName args ->
@@ -2106,7 +2171,7 @@ inferExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
       FoundType bindingType ->
         InferredExpr bindingType,
       MissingType missing ->
-        InferExprError (unknownNameMessage missing)
+        InferExprError (unknownNameMessageInScope missing localEnv env)
     }
 }
 
@@ -2121,7 +2186,7 @@ inferLetExpr typeDecls recordDecls env localEnv fnContext binder value body = ma
 inferAssignExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
 inferAssignExpr typeDecls recordDecls env localEnv fnContext binder value body = match lookupTypeBinding localEnv binder {
   MissingType missing ->
-    InferExprError (unknownNameMessage missing),
+    InferExprError (unknownNameMessageInScope missing localEnv env),
   FoundType binderType ->
     match inferExprAgainst typeDecls recordDecls env localEnv fnContext binderType value {
       InferExprError message ->

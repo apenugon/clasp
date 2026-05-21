@@ -43,6 +43,7 @@ bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-native-managed-loop.sh
 bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
+bash scripts/test-monitored-run-log.sh
 bash scripts/test-safe-subprocess.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh

@@ -74,6 +74,46 @@ record WatchedCommandSpec = {
   command : [Str]
 }
 
+record MonitoredRunSpec = {
+  runId : Str,
+  role : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  watched : WatchedCommandSpec
+}
+
+record MonitoredRunEvent = {
+  kind : Str,
+  runId : Str,
+  role : Str,
+  status : Str,
+  detail : Str,
+  atMs : Int
+}
+
+record MonitoredRunRecord = {
+  runId : Str,
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  command : [Str],
+  statusPath : Str,
+  eventLogPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  running : Bool,
+  completed : Bool,
+  timedOut : Bool,
+  error : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
 record HandoffCommandSpec = {
   cwd : Str,
   stdoutPath : Str,
@@ -135,6 +175,9 @@ timedProcessResultError message = Err message
 monitoredStepError : Str -> Result MonitoredStepResult
 monitoredStepError message = Err message
 
+monitoredRunRecordError : Str -> Result MonitoredRunRecord
+monitoredRunRecordError message = Err message
+
 upgradeTransactionError : Str -> Result UpgradeTransaction
 upgradeTransactionError message = Err message
 
@@ -150,6 +193,16 @@ watchedCommandSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs command =
     heartbeatPath = heartbeatPath,
     watchPollMs = watchPollMs,
     command = command
+  }
+
+monitoredRunSpec : Str -> Str -> Str -> Str -> WatchedCommandSpec -> MonitoredRunSpec
+monitoredRunSpec runId role statusPath eventLogPath watched =
+  MonitoredRunSpec {
+    runId = runId,
+    role = role,
+    statusPath = statusPath,
+    eventLogPath = eventLogPath,
+    watched = watched
   }
 
 handoffCommandSpec : Str -> Str -> Str -> Str -> Int -> Str -> Str -> Int -> Int -> [Str] -> HandoffCommandSpec
@@ -259,6 +312,112 @@ monitoredStepResultWithStatus process status exitCode timedOut =
 monitoredStepResult : WatchedProcessDetails -> MonitoredStepResult
 monitoredStepResult process =
   monitoredStepResultWithStatus process (watchedProcessStatus process) process.exitCode process.timedOut
+
+monitoredRunEvent : MonitoredRunSpec -> Str -> Str -> Str -> MonitoredRunEvent
+monitoredRunEvent spec kind status detail =
+  MonitoredRunEvent {
+    kind = kind,
+    runId = spec.runId,
+    role = spec.role,
+    status = status,
+    detail = detail,
+    atMs = timeUnixMs
+  }
+
+appendMonitoredRunEvent : MonitoredRunSpec -> Str -> Str -> Str -> Str
+appendMonitoredRunEvent spec kind status detail =
+  match appendFile spec.eventLogPath (textConcat [encode (monitoredRunEvent spec kind status detail), "\n"]) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+monitoredRunRecordFromResult : MonitoredRunSpec -> MonitoredStepResult -> MonitoredRunRecord
+monitoredRunRecordFromResult spec result =
+  MonitoredRunRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = result.status,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    command = result.command,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath,
+    stdoutPath = result.stdoutPath,
+    stderrPath = result.stderrPath,
+    heartbeatPath = result.heartbeatPath,
+    running = result.running,
+    completed = result.completed,
+    timedOut = result.timedOut,
+    error = result.error,
+    startedAtMs = result.startedAtMs,
+    endedAtMs = result.endedAtMs,
+    durationMs = result.durationMs,
+    updatedAtMs = result.updatedAtMs
+  }
+
+monitoredRunRecordFromError : MonitoredRunSpec -> Str -> MonitoredRunRecord
+monitoredRunRecordFromError spec message =
+  MonitoredRunRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    command = spec.watched.command,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath,
+    stdoutPath = spec.watched.stdoutPath,
+    stderrPath = spec.watched.stderrPath,
+    heartbeatPath = spec.watched.heartbeatPath,
+    running = false,
+    completed = false,
+    timedOut = false,
+    error = message,
+    startedAtMs = 0,
+    endedAtMs = 0,
+    durationMs = 0,
+    updatedAtMs = timeUnixMs
+  }
+
+persistMonitoredRunRecord : MonitoredRunRecord -> Result MonitoredRunRecord
+persistMonitoredRunRecord record =
+  match writeFile record.statusPath (encode record) {
+    Ok written -> Ok record,
+    Err message -> monitoredRunRecordError message
+  }
+
+finishMonitoredRunLog : MonitoredRunSpec -> Result MonitoredStepResult -> Result MonitoredRunRecord
+finishMonitoredRunLog spec stepResult = {
+  let record = match stepResult {
+    Ok result -> monitoredRunRecordFromResult spec result,
+    Err message -> monitoredRunRecordFromError spec message
+  };
+  match persistMonitoredRunRecord record {
+    Err message -> monitoredRunRecordError message,
+    Ok persisted -> {
+      let kind = if persisted.status == "runtime-error" then "run-error" else "run-completed";
+      let detail = textConcat ["exit=", encode persisted.exitCode];
+      let closed = appendMonitoredRunEvent spec kind persisted.status detail;
+      Ok persisted
+    }
+  }
+}
+
+runMonitoredLogged : MonitoredRunSpec -> Result MonitoredRunRecord
+runMonitoredLogged spec = {
+  let opened = appendMonitoredRunEvent spec "run-started" "running" "command started";
+  let stepResult = runMonitored spec.watched;
+  finishMonitoredRunLog spec stepResult
+}
+
+runMonitoredLoggedTimeout : MonitoredRunSpec -> Int -> Result MonitoredRunRecord
+runMonitoredLoggedTimeout spec timeoutMs = {
+  let opened = appendMonitoredRunEvent spec "run-started" "running" "command started";
+  let stepResult = runMonitoredTimeout spec.watched timeoutMs;
+  finishMonitoredRunLog spec stepResult
+}
 
 run : CommandSpec -> Result ProcessResult
 run spec = processResult (runCommandRaw spec.cwd spec.command)

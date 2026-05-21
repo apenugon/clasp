@@ -50,6 +50,7 @@ cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-sou
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
+cp "$project_root/scripts/test-monitored-run-log.sh" "$test_root/scripts/test-monitored-run-log.sh"
 cp "$project_root/scripts/test-safe-subprocess.sh" "$test_root/scripts/test-safe-subprocess.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
@@ -127,6 +128,7 @@ grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -148,9 +150,11 @@ grep -F 'examples/compiler-lower.clasp' "$test_root/scripts/test-verify-compiler
 grep -F 'verify-compiler-slice: ok (checker, check-only)' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'usage: scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_RUNTIME_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'process workflow codex-loop agent-loop workspace managed-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-monitored-run-log.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
@@ -553,6 +557,47 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$verify_fast_claspc_capture")" == "$test_root/bin/fake-claspc" ]]
 [[ "$(< "$verify_fast_claspc_bin_capture")" == "$test_root/bin/fake-claspc" ]]
 grep -F 'verify-fast: falling back to sandbox verification because Nix is unavailable in this environment' "$stderr_capture" >/dev/null
+
+CLASP_PROJECT_ROOT="$test_root" "$bash_bin" "$test_root/scripts/verify-fast.sh" --help |
+  grep -F 'usage: scripts/verify-fast.sh' >/dev/null
+CLASP_PROJECT_ROOT="$test_root" "$bash_bin" "$test_root/scripts/verify-fast.sh" --help |
+  grep -F -- '--changed-file PATH' >/dev/null
+CLASP_PROJECT_ROOT="$test_root" "$bash_bin" "$test_root/scripts/verify-fast.sh" --help |
+  grep -F -- '--affected' >/dev/null
+
+verify_fast_report_arg="$test_root/verify-fast-report-arg.json"
+verify_fast_report_arg_capture="$test_root/verify-fast-report-arg.txt"
+rm -f "$verify_fast_report_arg" "$verify_fast_report_arg_capture" "$stderr_capture"
+PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_VERIFY_FALLBACK_COMMANDS=$'printf report-arg-ok > '"$verify_fast_report_arg_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-fast.sh" --report-json "$verify_fast_report_arg" >/dev/null 2>"$stderr_capture"
+
+[[ "$(< "$verify_fast_report_arg_capture")" == "report-arg-ok" ]]
+node - "$verify_fast_report_arg" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (report.label !== "verify-fast" || report.finalVerdict !== "passed" || report.mode !== "fallback") {
+  console.error(`unexpected verify-fast --report-json report: ${JSON.stringify(report)}`);
+  process.exit(1);
+}
+NODE
+
+verify_fast_affected_args="$test_root/verify-fast-affected-args.txt"
+cat > "$test_root/scripts/verify-affected.sh" <<EOF
+#!$bash_bin
+set -euo pipefail
+printf '%s\n' "\$*" > "$verify_fast_affected_args"
+EOF
+chmod +x "$test_root/scripts/verify-affected.sh"
+"$bash_bin" "$test_root/scripts/verify-fast.sh" \
+  --changed-file src/Compiler/Checker.clasp \
+  --report-json "$test_root/affected-report.json" \
+  --plan-only >/dev/null
+[[ "$(< "$verify_fast_affected_args")" == "--changed-file src/Compiler/Checker.clasp --report-json $test_root/affected-report.json --plan-only" ]]
 
 rm -f "$fallback_capture" "$stderr_capture"
 PATH="$test_root/bin:$PATH" \

@@ -282,6 +282,14 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known monitored workflow harness should not use verify-fast fallback");
     assert(logHas("scripts/verify-runtime-slice.sh workflow"), "fake monitored workflow slice command should execute");
     break;
+  case "monitored-run-log-script":
+    assert(report.changedFiles.includes("scripts/test-monitored-run-log.sh"), "monitored run-log harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-monitored-run-log.sh'"), "monitored run-log harness should run shell syntax check");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh process"), "monitored run-log harness should run focused process runtime slice coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh process").length === 1, "monitored run-log process slice should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known monitored run-log harness should not use verify-fast fallback");
+    assert(logHas("scripts/verify-runtime-slice.sh process"), "fake monitored run-log process slice command should execute");
+    break;
   case "codex-loop-program-script":
     assert(report.changedFiles.includes("scripts/test-codex-loop-program.sh"), "ordinary Codex loop harness should be present");
     assert(hasCommand("bash -n 'scripts/test-codex-loop-program.sh'"), "ordinary Codex loop harness should run shell syntax check");
@@ -495,6 +503,12 @@ monitored_workflow_script_log="$test_root/monitored-workflow-script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$monitored_workflow_script_log" \
   run_verify_affected --changed-file scripts/test-monitored-workflow.sh > "$monitored_workflow_script_report"
 assert_report "$monitored_workflow_script_report" "$monitored_workflow_script_log" monitored-workflow-script
+
+monitored_run_log_script_report="$test_root/monitored-run-log-script-report.json"
+monitored_run_log_script_log="$test_root/monitored-run-log-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$monitored_run_log_script_log" \
+  run_verify_affected --changed-file scripts/test-monitored-run-log.sh > "$monitored_run_log_script_report"
+assert_report "$monitored_run_log_script_report" "$monitored_run_log_script_log" monitored-run-log-script
 
 codex_loop_program_script_report="$test_root/codex-loop-program-script-report.json"
 codex_loop_program_script_log="$test_root/codex-loop-program-script.log"

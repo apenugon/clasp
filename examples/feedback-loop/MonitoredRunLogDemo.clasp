@@ -1,0 +1,134 @@
+module MonitoredRunLogDemo
+
+import Process
+
+record MonitoredRunLogReport = {
+  scenarioId : Str,
+  finalStatus : Str,
+  completed : Bool,
+  runCount : Int,
+  passStatus : Str,
+  failStatus : Str,
+  timeoutStatus : Str,
+  stateRoot : Str,
+  eventLogPath : Str,
+  passRun : MonitoredRunRecord,
+  failRun : MonitoredRunRecord,
+  timeoutRun : MonitoredRunRecord,
+  summary : Str
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-monitored-run-log-state"
+  else
+    pathJoin argv
+
+scenarioId : Str
+scenarioId = "ordinary-clasp-monitored-run-log"
+
+eventLogPath : Str
+eventLogPath = pathJoin [stateRoot, "monitored-runs.jsonl"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+runStatusPath : Str -> Str
+runStatusPath runId = pathJoin [stateRoot, textConcat [runId, ".run.json"]]
+
+runStdoutPath : Str -> Str
+runStdoutPath runId = pathJoin [stateRoot, textConcat [runId, ".stdout.log"]]
+
+runStderrPath : Str -> Str
+runStderrPath runId = pathJoin [stateRoot, textConcat [runId, ".stderr.log"]]
+
+runHeartbeatPath : Str -> Str
+runHeartbeatPath runId = pathJoin [stateRoot, textConcat [runId, ".heartbeat.json"]]
+
+directNodeCommand : Str -> [Str]
+directNodeCommand script = ["node", "-e", script]
+
+passCommand : [Str]
+passCommand =
+  directNodeCommand "process.stdout.write('pass-out'); process.stderr.write('pass-err');"
+
+failCommand : [Str]
+failCommand =
+  directNodeCommand "process.stdout.write('fail-out'); process.stderr.write('fail-err'); process.exit(5);"
+
+timeoutCommand : [Str]
+timeoutCommand =
+  directNodeCommand "process.stdout.write('timeout-start'); setInterval(() => {}, 1000);"
+
+runSpec : Str -> Str -> [Str] -> MonitoredRunSpec
+runSpec runId role command =
+  monitoredRunSpec
+    runId
+    role
+    (runStatusPath runId)
+    eventLogPath
+    (watchedCommandSpec "." (runStdoutPath runId) (runStderrPath runId) (runHeartbeatPath runId) watchPollMs command)
+
+fallbackRunRecord : MonitoredRunSpec -> Str -> MonitoredRunRecord
+fallbackRunRecord spec message = monitoredRunRecordFromError spec message
+
+runLogged : MonitoredRunSpec -> MonitoredRunRecord
+runLogged spec =
+  match runMonitoredLogged spec {
+    Ok record -> record,
+    Err message -> fallbackRunRecord spec message
+  }
+
+runLoggedTimeout : MonitoredRunSpec -> Int -> MonitoredRunRecord
+runLoggedTimeout spec timeoutMs =
+  match runMonitoredLoggedTimeout spec timeoutMs {
+    Ok record -> record,
+    Err message -> fallbackRunRecord spec message
+  }
+
+runReport : MonitoredRunRecord -> MonitoredRunRecord -> MonitoredRunRecord -> MonitoredRunLogReport
+runReport passRun failRun timeoutRun =
+  MonitoredRunLogReport {
+    scenarioId = scenarioId,
+    finalStatus =
+      if passRun.status == "completed-pass" then
+        if failRun.status == "completed-fail" then
+          if timeoutRun.status == "timeout" then
+            "completed"
+          else
+            "unexpected-timeout-status"
+        else
+          "unexpected-fail-status"
+      else
+        "unexpected-pass-status",
+    completed = true,
+    runCount = 3,
+    passStatus = passRun.status,
+    failStatus = failRun.status,
+    timeoutStatus = timeoutRun.status,
+    stateRoot = stateRoot,
+    eventLogPath = eventLogPath,
+    passRun = passRun,
+    failRun = failRun,
+    timeoutRun = timeoutRun,
+    summary = textConcat ["runs=3 final=", if timeoutRun.status == "timeout" then "completed" else "incomplete"]
+  }
+
+runScenario : Str
+runScenario = {
+  let passSpec = runSpec "pass" "builder" passCommand;
+  let failSpec = runSpec "fail" "verifier" failCommand;
+  let timeoutSpec = runSpec "timeout" "supervisor" timeoutCommand;
+  let passRun = runLogged passSpec;
+  let failRun = runLogged failSpec;
+  let timeoutRun = runLoggedTimeout timeoutSpec 80;
+  encode (runReport passRun failRun timeoutRun)
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runScenario
+  }

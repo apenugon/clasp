@@ -617,6 +617,7 @@ function agentReadinessReport(options, tmpDir, records) {
       "subprocess verifier execution",
       "structured diagnostics",
       "ordinary-program agent loop scenario",
+      "durable native control-plane substrate",
     ],
     commandSummary: commandSummary(records),
     commands: records,

@@ -16,11 +16,14 @@ claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-c
 
 parser_source="$test_root/parser-empty-expression.clasp"
 checker_source="$test_root/checker-type-mismatch.clasp"
+unknown_name_source="$test_root/checker-unknown-name.clasp"
 valid_multiline_source="$test_root/parser-valid-multiline-rhs.clasp"
 parser_json="$test_root/parser.json"
 parser_pretty="$test_root/parser.pretty"
 checker_json="$test_root/checker.json"
 checker_pretty="$test_root/checker.pretty"
+unknown_name_json="$test_root/checker-unknown-name.json"
+unknown_name_pretty="$test_root/checker-unknown-name.pretty"
 valid_multiline_json="$test_root/parser-valid-multiline-rhs.json"
 polymorphism_json="$test_root/polymorphism.json"
 
@@ -35,6 +38,16 @@ module Main
 
 main : Str
 main = 1
+EOF
+
+cat >"$unknown_name_source" <<'EOF'
+module Main
+
+renderName : Str -> Str
+renderName value = value
+
+main : Str
+main = renderNmae "Ada"
 EOF
 
 cat >"$valid_multiline_source" <<'EOF'
@@ -80,6 +93,14 @@ if [[ "$checker_json_status" == "0" ]]; then
   exit 1
 fi
 
+timeout 30 "$claspc_bin" --json check "$unknown_name_source" >"$unknown_name_json" 2>"$test_root/unknown-name.stderr" || unknown_name_json_status=$?
+unknown_name_json_status="${unknown_name_json_status:-0}"
+if [[ "$unknown_name_json_status" == "0" ]]; then
+  printf 'expected unknown-name json check to fail\n' >&2
+  cat "$unknown_name_json" >&2
+  exit 1
+fi
+
 timeout 30 "$claspc_bin" --json check "$valid_multiline_source" >"$valid_multiline_json" 2>"$test_root/valid-multiline.stderr" || valid_multiline_status=$?
 valid_multiline_status="${valid_multiline_status:-0}"
 if [[ "$valid_multiline_status" != "0" ]]; then
@@ -100,22 +121,26 @@ fi
 
 expect_failure "$parser_pretty" timeout 30 "$claspc_bin" check "$parser_source"
 expect_failure "$checker_pretty" timeout 30 "$claspc_bin" check "$checker_source"
+expect_failure "$unknown_name_pretty" timeout 30 "$claspc_bin" check "$unknown_name_source"
 
-node - "$parser_json" "$checker_json" "$valid_multiline_json" "$polymorphism_json" "$parser_source" "$checker_source" "$valid_multiline_source" "$project_root/examples/polymorphism/Main.clasp" <<'NODE'
+node - "$parser_json" "$checker_json" "$unknown_name_json" "$valid_multiline_json" "$polymorphism_json" "$parser_source" "$checker_source" "$unknown_name_source" "$valid_multiline_source" "$project_root/examples/polymorphism/Main.clasp" <<'NODE'
 const fs = require("node:fs");
 
 const [
   parserJsonPath,
   checkerJsonPath,
+  unknownNameJsonPath,
   validMultilineJsonPath,
   polymorphismJsonPath,
   parserSource,
   checkerSource,
+  unknownNameSource,
   validMultilineSource,
   polymorphismSource,
 ] = process.argv.slice(2);
 const parser = JSON.parse(fs.readFileSync(parserJsonPath, "utf8"));
 const checker = JSON.parse(fs.readFileSync(checkerJsonPath, "utf8"));
+const unknownName = JSON.parse(fs.readFileSync(unknownNameJsonPath, "utf8"));
 const validMultiline = JSON.parse(fs.readFileSync(validMultilineJsonPath, "utf8"));
 const polymorphism = JSON.parse(fs.readFileSync(polymorphismJsonPath, "utf8"));
 
@@ -162,6 +187,24 @@ assert(
   `checker message: ${checkerDiagnostic.message}`,
 );
 
+const unknownNameDiagnostic = firstDiagnostic(unknownName, "unknown-name");
+assert(unknownNameDiagnostic.phase === "checker", `unknown-name phase: ${unknownNameDiagnostic.phase}`);
+assert(unknownNameDiagnostic.code === "E_UNBOUND_NAME", `unknown-name code: ${unknownNameDiagnostic.code}`);
+assert(unknownNameDiagnostic.file === unknownNameSource, `unknown-name file: ${unknownNameDiagnostic.file}`);
+assert(unknownNameDiagnostic.line === 7, `unknown-name line: ${unknownNameDiagnostic.line}`);
+assert(unknownNameDiagnostic.column === 8, `unknown-name column: ${unknownNameDiagnostic.column}`);
+assert(unknownNameDiagnostic.context === "main", `unknown-name context: ${unknownNameDiagnostic.context}`);
+assert(unknownNameDiagnostic.target === "renderNmae", `unknown-name target: ${unknownNameDiagnostic.target}`);
+assert(Array.isArray(unknownNameDiagnostic.candidates), "unknown-name candidates should be an array");
+assert(
+  unknownNameDiagnostic.candidates.includes("renderName"),
+  `unknown-name candidates: ${JSON.stringify(unknownNameDiagnostic.candidates)}`,
+);
+assert(
+  unknownNameDiagnostic.message.includes("Did you mean `renderName`?"),
+  `unknown-name message: ${unknownNameDiagnostic.message}`,
+);
+
 assert(validMultiline.status === "ok", `valid multiline status: ${validMultiline.status}`);
 assert(validMultiline.input === validMultilineSource, `valid multiline input: ${validMultiline.input}`);
 assert(!Array.isArray(validMultiline.diagnostics), "valid multiline should not report diagnostics");
@@ -177,5 +220,10 @@ grep -F 'expected="expression" actual="end of line"' "$parser_pretty" >/dev/null
 grep -F 'CLASP_DIAGNOSTIC phase=checker code=E_TYPE_MISMATCH' "$checker_pretty" >/dev/null
 grep -F 'line=4 column=8' "$checker_pretty" >/dev/null
 grep -F 'context="main" target="1" expected="Str" actual="Int"' "$checker_pretty" >/dev/null
+grep -F 'CLASP_DIAGNOSTIC phase=checker code=E_UNBOUND_NAME' "$unknown_name_pretty" >/dev/null
+grep -F 'line=7 column=8' "$unknown_name_pretty" >/dev/null
+grep -F 'context="main" target="renderNmae"' "$unknown_name_pretty" >/dev/null
+grep -F 'candidates="renderName"' "$unknown_name_pretty" >/dev/null
+grep -F 'Did you mean `renderName`?' "$unknown_name_pretty" >/dev/null
 
 printf 'test-native-claspc-diagnostics: ok\n'

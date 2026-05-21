@@ -87,6 +87,7 @@ struct CompilerDiagnostic {
     target: Option<String>,
     expected: Option<String>,
     actual: Option<String>,
+    candidates: Vec<String>,
 }
 
 fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
@@ -98,6 +99,10 @@ fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
     fields.insert("target".to_owned(), json_optional_string(&diagnostic.target));
     fields.insert("expected".to_owned(), json_optional_string(&diagnostic.expected));
     fields.insert("actual".to_owned(), json_optional_string(&diagnostic.actual));
+    fields.insert(
+        "candidates".to_owned(),
+        serde_json::json!(&diagnostic.candidates),
+    );
 
     match &diagnostic.primary_location {
         Some(location) => {
@@ -144,6 +149,14 @@ fn render_diagnostic_detail_field(name: &str, value: &Option<String>) -> String 
         .unwrap_or_default()
 }
 
+fn render_diagnostic_candidates_field(candidates: &[String]) -> String {
+    if candidates.is_empty() {
+        String::new()
+    } else {
+        format!(" candidates={}", json_string(&candidates.join(",")))
+    }
+}
+
 fn print_json_diagnostic_error(diagnostic: &CompilerDiagnostic) {
     println!(
         "{}",
@@ -169,7 +182,8 @@ fn render_pretty_diagnostic(diagnostic: &CompilerDiagnostic) -> String {
                 + &render_diagnostic_detail_field("context", &diagnostic.context)
                 + &render_diagnostic_detail_field("target", &diagnostic.target)
                 + &render_diagnostic_detail_field("expected", &diagnostic.expected)
-                + &render_diagnostic_detail_field("actual", &diagnostic.actual),
+                + &render_diagnostic_detail_field("actual", &diagnostic.actual)
+                + &render_diagnostic_candidates_field(&diagnostic.candidates),
             diagnostic.message,
         ),
         None => format!(
@@ -180,7 +194,8 @@ fn render_pretty_diagnostic(diagnostic: &CompilerDiagnostic) -> String {
                 + &render_diagnostic_detail_field("context", &diagnostic.context)
                 + &render_diagnostic_detail_field("target", &diagnostic.target)
                 + &render_diagnostic_detail_field("expected", &diagnostic.expected)
-                + &render_diagnostic_detail_field("actual", &diagnostic.actual),
+                + &render_diagnostic_detail_field("actual", &diagnostic.actual)
+                + &render_diagnostic_candidates_field(&diagnostic.candidates),
             diagnostic.message,
         ),
     }
@@ -687,29 +702,313 @@ fn checker_diagnostic_location(
     None
 }
 
+fn push_unique_name(names: &mut Vec<String>, seen: &mut HashSet<String>, name: &str) {
+    if name.is_empty() {
+        return;
+    }
+    if seen.insert(name.to_owned()) {
+        names.push(name.to_owned());
+    }
+}
+
+fn is_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+fn first_identifier(text: &str) -> Option<&str> {
+    let trimmed = text.trim_start();
+    let mut end = 0;
+    for (index, ch) in trimmed.char_indices() {
+        if index == 0 && !(ch.is_ascii_alphabetic() || ch == '_') {
+            return None;
+        }
+        if is_identifier_char(ch) {
+            end = index + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        None
+    } else {
+        Some(&trimmed[..end])
+    }
+}
+
+fn is_reserved_source_candidate_name(name: &str) -> bool {
+    matches!(
+        name,
+        "module"
+            | "import"
+            | "type"
+            | "record"
+            | "foreign"
+            | "route"
+            | "hook"
+            | "tool"
+            | "toolServer"
+            | "workflow"
+            | "agent"
+            | "agentRole"
+            | "policy"
+            | "projection"
+            | "verifier"
+            | "mergeGate"
+    )
+}
+
+fn collect_type_constructor_candidate_names(
+    line: &str,
+    names: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    let Some((_, constructors)) = line.split_once('=') else {
+        return;
+    };
+    for constructor in constructors.split('|') {
+        if let Some(name) = first_identifier(constructor) {
+            push_unique_name(names, seen, name);
+        }
+    }
+}
+
+fn collect_context_param_candidate_names(
+    line: &str,
+    context_decl: &str,
+    names: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    let trimmed = line.trim_start();
+    let Some(after_name) = trimmed.strip_prefix(context_decl) else {
+        return;
+    };
+    if !after_name
+        .chars()
+        .next()
+        .map(|ch| ch.is_whitespace())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let before_equals = after_name.split('=').next().unwrap_or("");
+    if before_equals.contains(':') {
+        return;
+    }
+    for token in before_equals.split_whitespace() {
+        if let Some(name) = first_identifier(token) {
+            push_unique_name(names, seen, name);
+        }
+    }
+}
+
+fn collect_source_candidate_names(
+    source: &str,
+    context_decl: Option<&str>,
+    names: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("foreign ") {
+            if let Some(name) = first_identifier(rest) {
+                push_unique_name(names, seen, name);
+            }
+            continue;
+        }
+        if trimmed.starts_with("type ") {
+            collect_type_constructor_candidate_names(trimmed, names, seen);
+            continue;
+        }
+        if line.len() == trimmed.len() {
+            if let Some(name) = first_identifier(trimmed) {
+                if !is_reserved_source_candidate_name(name)
+                    && (trimmed.contains('=') || trimmed.contains(':'))
+                {
+                    push_unique_name(names, seen, name);
+                }
+            }
+        }
+        if let Some(context_decl) = context_decl {
+            collect_context_param_candidate_names(trimmed, context_decl, names, seen);
+        }
+    }
+}
+
+fn compiler_builtin_reference_names() -> &'static [&'static str] {
+    &[
+        "String",
+        "prepend",
+        "reverse",
+        "map",
+        "filter",
+        "find",
+        "any",
+        "all",
+        "fold",
+        "textConcat",
+        "textJoin",
+        "textSplit",
+        "textChars",
+        "textFingerprint64Hex",
+        "textPrefix",
+        "textSplitFirst",
+        "dictEmpty",
+        "dictSet",
+        "dictGet",
+        "dictHas",
+        "dictRemove",
+        "dictKeys",
+        "dictValues",
+        "Ok",
+        "Err",
+        "Some",
+        "None",
+        "argv",
+        "timeUnixMs",
+        "envVar",
+        "pathJoin",
+        "pathDirname",
+        "pathBasename",
+        "fileExists",
+        "readFile",
+        "listDir",
+        "runCommandJson",
+        "runCommandTimeoutJson",
+        "spawnCommandJson",
+        "watchCommandJson",
+        "awaitWatchedProcessJson",
+        "awaitWatchedProcessTimeoutJson",
+        "writeFile",
+        "appendFile",
+        "mkdirAll",
+    ]
+}
+
+fn collect_builtin_candidate_names(names: &mut Vec<String>, seen: &mut HashSet<String>) {
+    for name in compiler_builtin_reference_names() {
+        push_unique_name(names, seen, name);
+    }
+}
+
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    let right_chars: Vec<char> = right.chars().collect();
+    let mut previous: Vec<usize> = (0..=right_chars.len()).collect();
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        let mut current = Vec::with_capacity(right_chars.len() + 1);
+        current.push(left_index + 1);
+        for (right_index, right_char) in right_chars.iter().enumerate() {
+            let insertion = current[right_index] + 1;
+            let deletion = previous[right_index + 1] + 1;
+            let substitution = previous[right_index]
+                + if left_char == *right_char { 0 } else { 1 };
+            current.push(insertion.min(deletion).min(substitution));
+        }
+        previous = current;
+    }
+
+    previous[right_chars.len()]
+}
+
+fn candidate_distance_threshold(target: &str) -> usize {
+    let length = target.chars().count();
+    if length <= 5 {
+        1
+    } else if length <= 10 {
+        2
+    } else {
+        3
+    }
+}
+
+fn unknown_reference_candidates(
+    message: &str,
+    code: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Vec<String> {
+    if !matches!(code, "E_UNBOUND_NAME" | "E_UNBOUND_CONSTRUCTOR") {
+        return Vec::new();
+    }
+    let Some(target) = diagnostic_target_text(message) else {
+        return Vec::new();
+    };
+    if matches!(target.as_str(), "True" | "False") {
+        return Vec::new();
+    }
+
+    let mut names = Vec::new();
+    let mut seen = HashSet::new();
+    let context_decl = diagnostic_context_decl(message);
+    for (_, source) in bundle_source_entries(bundle_build) {
+        collect_source_candidate_names(source, context_decl.as_deref(), &mut names, &mut seen);
+    }
+    collect_builtin_candidate_names(&mut names, &mut seen);
+
+    let target_lower = target.to_ascii_lowercase();
+    let threshold = candidate_distance_threshold(&target_lower);
+    let mut scored = names
+        .into_iter()
+        .filter(|name| name != &target)
+        .filter_map(|name| {
+            let candidate_lower = name.to_ascii_lowercase();
+            let distance = levenshtein_distance(&target_lower, &candidate_lower);
+            if distance <= threshold {
+                Some((distance, name))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    scored
+        .into_iter()
+        .map(|(_, name)| name)
+        .take(5)
+        .collect()
+}
+
+fn append_unknown_reference_candidate_hint(message: &str, candidates: &[String]) -> String {
+    if candidates.is_empty() || message.contains(" Did you mean ") {
+        return message.to_owned();
+    }
+    let rendered = candidates
+        .iter()
+        .map(|candidate| format!("`{candidate}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if candidates.len() == 1 {
+        format!("{message} Did you mean {rendered}?")
+    } else {
+        format!("{message} Did you mean one of: {rendered}?")
+    }
+}
+
 fn structured_check_diagnostic_from_summary(
     summary: &str,
     bundle_build: &ProjectBundleBuild,
 ) -> Option<CompilerDiagnostic> {
-    let message = strip_compiler_error_prefix(summary);
-    if is_alpha_equivalent_instantiated_type_mismatch(message) {
+    let raw_message = strip_compiler_error_prefix(summary);
+    if is_alpha_equivalent_instantiated_type_mismatch(raw_message) {
         return None;
     }
-    let code = checker_diagnostic_code(message)?;
-    let context = diagnostic_context_decl(message);
-    let target = diagnostic_target_text(message);
-    let (expected, actual) = type_mismatch_expected_found(message)
+    let code = checker_diagnostic_code(raw_message)?;
+    let context = diagnostic_context_decl(raw_message);
+    let target = diagnostic_target_text(raw_message);
+    let (expected, actual) = type_mismatch_expected_found(raw_message)
         .map(|(expected, actual)| (Some(expected.to_owned()), Some(actual.to_owned())))
         .unwrap_or((None, None));
+    let candidates = unknown_reference_candidates(raw_message, code, bundle_build);
+    let message = append_unknown_reference_candidate_hint(raw_message, &candidates);
     Some(CompilerDiagnostic {
         phase: "checker",
         code,
-        message: message.to_owned(),
-        primary_location: checker_diagnostic_location(message, bundle_build),
+        message,
+        primary_location: checker_diagnostic_location(raw_message, bundle_build),
         context,
         target,
         expected,
         actual,
+        candidates,
     })
 }
 
@@ -767,6 +1066,7 @@ fn empty_rhs_parse_diagnostic_for_source(file: &str, source: &str) -> Option<Com
                 target: None,
                 expected: Some("expression".to_owned()),
                 actual: Some("end of line".to_owned()),
+                candidates: Vec::new(),
             });
         }
     }
@@ -824,6 +1124,7 @@ fn structured_diagnostic_from_message(
             target: Some("module header".to_owned()),
             expected: Some("module <Name>".to_owned()),
             actual: None,
+            candidates: Vec::new(),
         });
     }
     bundle_build.and_then(|build| structured_check_diagnostic_from_summary(&enhanced, build))
@@ -3291,6 +3592,66 @@ main =
             super::enhance_compiler_diagnostic_text(&constructor_enhanced),
             constructor_enhanced
         );
+    }
+
+    #[test]
+    fn checker_unknown_name_diagnostic_suggests_nearby_source_name() {
+        let source = r#"module Main
+
+renderName : Str -> Str
+renderName value = value
+
+main : Str
+main = renderNmae "Ada"
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `main`: Unknown name `renderNmae`. Define or import `renderNmae`, or fix the spelling of the reference.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected unknown-name diagnostic");
+        assert_eq!(diagnostic.phase, "checker");
+        assert_eq!(diagnostic.code, "E_UNBOUND_NAME");
+        assert_eq!(diagnostic.context.as_deref(), Some("main"));
+        assert_eq!(diagnostic.target.as_deref(), Some("renderNmae"));
+        assert_eq!(diagnostic.candidates, vec!["renderName".to_owned()]);
+        assert!(diagnostic.message.contains("Did you mean `renderName`?"));
+        assert_eq!(
+            diagnostic
+                .primary_location
+                .as_ref()
+                .map(|location| (location.line, location.column)),
+            Some((7, 8))
+        );
+    }
+
+    #[test]
+    fn checker_unknown_name_diagnostic_suggests_builtin_typo() {
+        let source = r#"module Main
+
+main : Str
+main = textJoim "," ["a", "b"]
+"#;
+        let build = ProjectBundleBuild {
+            bundle: source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "test".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let summary = "In `main`: Unknown name `textJoim`. Define or import `textJoim`, or fix the spelling of the reference.";
+        let diagnostic = super::structured_check_diagnostic_from_summary(summary, &build)
+            .expect("expected unknown-name diagnostic");
+        assert_eq!(diagnostic.candidates, vec!["textJoin".to_owned()]);
+        assert!(diagnostic.message.contains("Did you mean `textJoin`?"));
     }
 
     #[test]

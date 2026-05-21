@@ -13,6 +13,7 @@ feedback before the broader verify-all path.
 
 Slices:
   process       Process primitives: safe subprocess plus monitored stdout/stderr/exit artifacts.
+                Includes the monitored run-log helper that persists status JSON and JSONL events.
   workflow      Ordinary Clasp monitored workflow with durable status/events.
   codex-loop    Ordinary Clasp program invoking codex exec directly.
   agent-loop    Ordinary Clasp builder/verifier loop using safe workspace and subprocess APIs.
@@ -60,6 +61,7 @@ scripts_for_slice() {
   case "$1" in
     process)
       printf '%s\n' "scripts/test-monitored-step.sh"
+      printf '%s\n' "scripts/test-monitored-run-log.sh"
       printf '%s\n' "scripts/test-safe-subprocess.sh"
       ;;
     workflow)

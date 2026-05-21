@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "kind": "clasp-agent-readiness-checkpoint",
+  "generatedAt": "2026-05-21T06:10:10.893Z",
+  "projectRoot": "/home/akul_medexfinance_com/clasp/.clasp-loops/workspaces/best-language-swarm-live-20260521060323/.clasp-task-workspaces/wave1-benchmark-checkpoint-scout",
+  "mode": "live",
+  "fullBenchmarkRun": false,
+  "tmpDir": null,
+  "checkpointFocus": [
+    "safe workspace operations",
+    "subprocess verifier execution",
+    "structured diagnostics",
+    "ordinary-program agent loop scenario",
+    "durable native control-plane substrate"
+  ],
+  "commandSummary": {
+    "safe-workspace-operations": {
+      "category": "ordinary-program-workspace-safety",
+      "durationMs": 54639,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "safe-subprocess-verifier-execution": {
+      "category": "ordinary-program-subprocess-safety",
+      "durationMs": 19287,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "structured-diagnostics-feedback": {
+      "category": "machine-readable-diagnostics",
+      "durationMs": 1223,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "ordinary-agent-loop-scenario": {
+      "category": "ordinary-program-agent-loop",
+      "durationMs": 24666,
+      "exitStatus": 0,
+      "timedOut": false
+    },
+    "native-control-substrate": {
+      "category": "durable-native-control-plane",
+      "durationMs": 29572,
+      "exitStatus": 0,
+      "timedOut": false
+    }
+  },
+  "commands": [
+    {
+      "label": "safe-workspace-operations",
+      "category": "ordinary-program-workspace-safety",
+      "command": "timeout 75 bash scripts/test-safe-workspace.sh",
+      "timeoutSeconds": 75,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779343810895,
+      "endedAtMs": 1779343865534,
+      "durationMs": 54639,
+      "stdoutPreview": "safe-workspace-ok\n",
+      "stderrPreview": "warning: field `name` is never read\n   --> clasp_runtime.rs:458:5\n    |\n457 | struct ClaspRtNativeRuntimeBinding {\n    |        --------------------------- field in this struct\n458 |     name: String,\n    |     ^^^^\n    |\n    = note: `ClaspRtNativeRuntimeBinding` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis\n    = note: `#[warn(dead_code)]` on by default\n\nwarning: fields `name`, `response_type`, and `response_kind` are never read\n   --> clasp_runtime.rs:510:5\n    |\n509 | struct ClaspRtNativeRouteBoundary {\n    |        -------------------------- fields in this struct\n510 |     name: String,\n    |     ^^^^\n...\n514 |     response_type: String,\n    |     ^^^^^^^^^^^^^\n515 |     response_kind: String,\n    |     ^^^^^^^^^^^^^\n    |\n    = note: `ClaspRtNativeRouteBoundary` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis\n\nwarning: fields `task_id`, `created_at_ms`, and `updated_at_ms` are never read\n   --> swarm.rs:97:5\n    |\n96  | struct SwarmTaskSpecRecord {\n    |        ------------------- fields in this struct\n97  |     task_id: String,\n    |     ^^^^^^^\n...\n103 |     created_at_ms: i64,\n    |     ^^^^^^^^^^^^^\n104 |     updated_at_ms: i64,\n    |     ^^^^^^^^^^^^^\n\nwarning: function `swarm_usage` is never used\n   --> swarm.rs:199:4\n    |\n199 | fn swarm_usage(program: &str) -> ! {\n    |    ^^^^^^^^^^^\n\nwarning: function `task_json` is never used\n    --> swarm.rs:1764:4\n     |\n1764 | fn task_json(task: &SwarmTaskState) -> Value {\n     |    ^^^^^^^^^\n\nwarning: function `string_field` is never used\n    --> swarm.rs:3642:4\n     |\n3642 | fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {\n     |    ^^^^^^^^^^^^\n\nwarning: function `bool_field` is never used\n    --> swarm.rs:3646:4\n     |\n3646 | fn bool_field(value: &Value, key: &str) -> Option<bool> {\n     |    ^^^^^^^^^^\n\nwarning: function `i64_field` is never used\n    --> swarm.rs:3650:4\n     |\n3650 | fn i64_field(value: &Value, key: &str) -> Option<i64> {\n     |    ^^^^^^^^^\n\nwarning: function `format_event_line` is never used\n    --> swarm.rs:3667:4\n     |\n3667 | fn format_event_line(value: &Value) -> Option<String> {\n     |    ^^^^^^^^^^^^^^^^^\n\nwarning: function `format_task_text` is never used\n    --> swarm.rs:3676:4\n     |\n3676 | fn format_task_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^\n\nwarning: function `format_approval_text` is never used\n    --> swarm.rs:3731:4\n     |\n3731 | fn format_approval_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `format_run_text` is never used\n    --> swarm.rs:3744:4\n     |\n3744 | fn format_run_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^\n\nwarning: function `format_artifact_text` is never used\n    --> swarm.rs:3753:4\n     |\n3753 | fn format_artifact_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `format_objective_text` is never used\n    --> swarm.rs:3760:4\n     |\n3760 | fn format_objective_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `format_manager_next_text` is never used\n    --> swarm.rs:3769:4\n     |\n3769 | fn format_manager_next_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `format_objective_status_text` is never used\n    --> swarm.rs:3824:4\n     |\n3824 | fn format_objective_status_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `render_swarm_text` is never used\n    --> swarm.rs:3838:4\n     |\n3838 | fn render_swarm_text(value: &Value) -> String {\n     |    ^^^^^^^^^^^^^^^^^\n\nwarning: function `print_output` is never used\n    --> swarm.rs:3896:4\n     |\n3896 | fn print_output(value: &Value, json_mode: bool) {\n     |    ^^^^^^^^^^^^\n\nwarning: function `fail` is never used\n    --> swarm.rs:3904:4\n     |\n3904 | fn fail(message: &str, json_mode: bool) -> ExitCode {\n     |    ^^^^\n\nwarning: function `handle_e\n...<truncated 10813 chars>"
+    },
+    {
+      "label": "safe-subprocess-verifier-execution",
+      "category": "ordinary-program-subprocess-safety",
+      "command": "timeout 75 bash scripts/test-safe-subprocess.sh",
+      "timeoutSeconds": 75,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779343865534,
+      "endedAtMs": 1779343884822,
+      "durationMs": 19287,
+      "stdoutPreview": "safe-subprocess-ok\n",
+      "stderrPreview": ""
+    },
+    {
+      "label": "structured-diagnostics-feedback",
+      "category": "machine-readable-diagnostics",
+      "command": "timeout 75 bash scripts/test-native-claspc-diagnostics.sh",
+      "timeoutSeconds": 75,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779343884822,
+      "endedAtMs": 1779343886045,
+      "durationMs": 1223,
+      "stdoutPreview": "test-native-claspc-diagnostics: ok\n",
+      "stderrPreview": ""
+    },
+    {
+      "label": "ordinary-agent-loop-scenario",
+      "category": "ordinary-program-agent-loop",
+      "command": "timeout 75 bash examples/agent-loop-scenario/scripts/verify.sh",
+      "timeoutSeconds": 75,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779343886045,
+      "endedAtMs": 1779343910712,
+      "durationMs": 24666,
+      "stdoutPreview": "agent-loop-scenario-ok\n",
+      "stderrPreview": ""
+    },
+    {
+      "label": "native-control-substrate",
+      "category": "durable-native-control-plane",
+      "command": "timeout 75 bash scripts/test-swarm-native-managed-loop.sh",
+      "timeoutSeconds": 75,
+      "exitStatus": 0,
+      "signal": null,
+      "timedOut": false,
+      "startedAtMs": 1779343910712,
+      "endedAtMs": 1779343940284,
+      "durationMs": 29572,
+      "stdoutPreview": "",
+      "stderrPreview": ""
+    }
+  ],
+  "readinessSignals": [
+    {
+      "name": "safeWorkspaceOperations",
+      "category": "safe-workspace-operations",
+      "status": "pass",
+      "commandLabel": "safe-workspace-operations",
+      "durationMs": 54639,
+      "exitStatus": 0,
+      "timedOut": false,
+      "evidence": "safe-workspace-operations exitStatus=0 timedOut=false",
+      "benchmarkRelevance": "Ordinary Clasp programs can perform root-bounded reads, writes, directory creation, listing, and path-escape rejection."
+    },
+    {
+      "name": "subprocessVerifierExecution",
+      "category": "subprocess-verifier-execution",
+      "status": "pass",
+      "commandLabel": "safe-subprocess-verifier-execution",
+      "durationMs": 19287,
+      "exitStatus": 0,
+      "timedOut": false,
+      "evidence": "safe-subprocess-verifier-execution exitStatus=0 timedOut=false",
+      "benchmarkRelevance": "Ordinary Clasp programs can run verifier-style subprocesses with confined cwd, captured stdout/stderr, exit status, and timeout data."
+    },
+    {
+      "name": "structuredDiagnostics",
+      "category": "structured-diagnostics",
+      "status": "pass",
+      "commandLabel": "structured-diagnostics-feedback",
+      "durationMs": 1223,
+      "exitStatus": 0,
+      "timedOut": false,
+      "evidence": "structured-diagnostics-feedback exitStatus=0 timedOut=false",
+      "benchmarkRelevance": "Parser/checker failures expose stable machine-readable fields that benchmark verifiers and agent loops can assert."
+    },
+    {
+      "name": "ordinaryProgramAgentLoop",
+      "category": "ordinary-program-scenario",
+      "status": "pass",
+      "commandLabel": "ordinary-agent-loop-scenario",
+      "durationMs": 24666,
+      "exitStatus": 0,
+      "timedOut": false,
+      "evidence": "ordinary-agent-loop-scenario exitStatus=0 timedOut=false",
+      "benchmarkRelevance": "A Clasp program invokes Codex directly, writes durable artifacts/status/events, runs a verifier command, and returns a structured report."
+    },
+    {
+      "name": "durableNativeControlPlane",
+      "category": "durable-native-control-plane",
+      "status": "pass",
+      "commandLabel": "native-control-substrate",
+      "durationMs": 29572,
+      "exitStatus": 0,
+      "timedOut": false,
+      "evidence": "native-control-substrate exitStatus=0 timedOut=false",
+      "benchmarkRelevance": "Ordinary Clasp code drives the native SQLite-backed objective/task DAG, leases, tool/verifier runs, artifacts, approvals, merge policy, and projected status."
+    }
+  ],
+  "readinessSignalSummary": {
+    "safeWorkspaceOperations": "pass",
+    "subprocessVerifierExecution": "pass",
+    "structuredDiagnostics": "pass",
+    "ordinaryProgramAgentLoop": "pass",
+    "durableNativeControlPlane": "pass"
+  },
+  "capabilitySignals": [
+    {
+      "name": "ordinary_program_execution",
+      "status": "pass",
+      "coverage": "claspc run executes the ordinary Clasp builder/verifier loop scenario.",
+      "evidenceCommands": [
+        "ordinary-agent-loop-scenario"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "ordinary-agent-loop-scenario",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "name": "durable_native_substrate",
+      "status": "pass",
+      "coverage": "The probe covers SQLite-backed objectives, task DAG edges, projected status, leases, tool/verifier runs, artifacts, approvals, and merge-policy state from ordinary Clasp code.",
+      "evidenceCommands": [
+        "native-control-substrate"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "native-control-substrate",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "name": "clasp_native_control_api",
+      "status": "pass",
+      "coverage": "Ordinary Clasp code reaches workspace, subprocess, and native swarm orchestration APIs without compiler swarm commands.",
+      "evidenceCommands": [
+        "safe-workspace-operations",
+        "safe-subprocess-verifier-execution",
+        "ordinary-agent-loop-scenario",
+        "native-control-substrate"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "safe-workspace-operations",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "safe-subprocess-verifier-execution",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "ordinary-agent-loop-scenario",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "native-control-substrate",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "name": "orchestration_viability",
+      "status": "pass",
+      "coverage": "The combined probe checks file access, process execution, diagnostics, a realistic builder/verifier loop fixture, and native control-plane state.",
+      "evidenceCommands": [
+        "safe-workspace-operations",
+        "safe-subprocess-verifier-execution",
+        "structured-diagnostics-feedback",
+        "ordinary-agent-loop-scenario",
+        "native-control-substrate"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "safe-workspace-operations",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "safe-subprocess-verifier-execution",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "structured-diagnostics-feedback",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "ordinary-agent-loop-scenario",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "native-control-substrate",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "name": "ergonomics",
+      "status": "pass",
+      "coverage": "State-heavy orchestration examples remain expressible through small ordinary Clasp wrappers and stable failure data.",
+      "evidenceCommands": [
+        "safe-workspace-operations",
+        "safe-subprocess-verifier-execution",
+        "structured-diagnostics-feedback"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "safe-workspace-operations",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "safe-subprocess-verifier-execution",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "structured-diagnostics-feedback",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "name": "verification_gate",
+      "status": "pass",
+      "coverage": "Focused scenario-level checks exist for the benchmark-relevant ordinary-program loop and runtime/control-plane behavior.",
+      "evidenceCommands": [
+        "safe-workspace-operations",
+        "safe-subprocess-verifier-execution",
+        "structured-diagnostics-feedback",
+        "ordinary-agent-loop-scenario",
+        "native-control-substrate"
+      ],
+      "commandStatuses": [
+        {
+          "commandLabel": "safe-workspace-operations",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "safe-subprocess-verifier-execution",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "structured-diagnostics-feedback",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "ordinary-agent-loop-scenario",
+          "status": "pass"
+        },
+        {
+          "commandLabel": "native-control-substrate",
+          "status": "pass"
+        }
+      ]
+    }
+  ],
+  "finalStatus": "ok",
+  "failedCommands": []
+}

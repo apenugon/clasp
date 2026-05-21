@@ -85,6 +85,17 @@ The repository-wide minimum gate is:
 bash scripts/verify-all.sh
 ```
 
+For builder iteration before the final gate, use the documented fast entrypoint:
+
+```sh
+bash scripts/verify-fast.sh
+bash scripts/verify-fast.sh --changed-file src/Compiler/Checker.clasp
+```
+
+The changed-file form routes through affected-surface verification and falls
+back to the fast bundle when it cannot select a narrower plan. It is an inner
+loop convenience, not a replacement for the full gate above.
+
 Additional policy:
 
 - runtime, boundary, interop, workflow, control-plane, and app-surface tasks should add scenario-level or end-to-end verification, not only narrow unit regressions

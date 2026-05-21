@@ -111,7 +111,8 @@ assert(report.fullBenchmarkRun === false, "readiness checkpoint must not claim a
 assert(report.generatedAt === "2026-05-21T00:00:00.000Z", "readiness generatedAt should be controllable");
 assert(report.finalStatus === "ok", "readiness fixture should pass");
 assert(report.tmpDir === null, "readiness fixture should omit temporary directory unless kept");
-assert(Array.isArray(report.commands) && report.commands.length === expectedLabels.length, "expected four readiness commands");
+assert(report.checkpointFocus.includes("durable native control-plane substrate"), "readiness focus should include native control-plane probe");
+assert(Array.isArray(report.commands) && report.commands.length === expectedLabels.length, "expected readiness commands");
 assert(report.commands.every((command) => command.command.startsWith("timeout ")), "readiness commands should be timeout-wrapped");
 assert(JSON.stringify(report.commands.map((command) => command.label)) === JSON.stringify(expectedLabels), "readiness command labels changed");
 assert(report.commands.every((command) => command.exitStatus === 0), "readiness fixture commands should pass");

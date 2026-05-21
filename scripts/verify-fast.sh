@@ -2,6 +2,92 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+affected_mode=0
+affected_args=()
+verify_report_json_arg=""
+
+usage() {
+  cat <<'EOF'
+usage: scripts/verify-fast.sh [--help]
+       scripts/verify-fast.sh [--report-json PATH]
+       scripts/verify-fast.sh --affected [verify-affected options]
+       scripts/verify-fast.sh --changed-file PATH [--changed-file PATH ...] [verify-affected options]
+
+Runs the fast local verification bundle for agent iteration. This preserves
+scripts/verify-all.sh as the full final gate while skipping benchmark-wide and
+repo-wide probes that are not useful in the normal builder loop.
+
+When changed files are known, pass --changed-file, --files-from, or --affected
+to route through scripts/verify-affected.sh. That path selects the smallest
+focused verifier plan it can, falling back to this fast bundle for unknown or
+empty inputs.
+
+Forwarded affected-mode options:
+  --changed-file PATH
+  --files-from PATH
+  --report-json PATH
+  --plan-only
+
+Environment:
+  CLASP_VERIFY_REPORT_JSON      Write a timing/report JSON for the fast bundle.
+  CLASP_VERIFY_PARALLEL_JOBS    Override parallel job count used by verify-all.
+  CLASP_CLASPC or CLASPC_BIN    Ignored when resolving this checkout's claspc.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --affected)
+      affected_mode=1
+      shift
+      ;;
+    --changed-file|--files-from|--report-json)
+      if [[ $# -lt 2 ]]; then
+        printf 'verify-fast: %s requires a value\n' "$1" >&2
+        exit 2
+      fi
+      if [[ "$1" == "--report-json" ]]; then
+        verify_report_json_arg="$2"
+      else
+        affected_mode=1
+      fi
+      affected_args+=("$1" "$2")
+      shift 2
+      ;;
+    --changed-file=*|--files-from=*|--report-json=*)
+      if [[ "$1" == --report-json=* ]]; then
+        verify_report_json_arg="${1#--report-json=}"
+      else
+        affected_mode=1
+      fi
+      affected_args+=("$1")
+      shift
+      ;;
+    --plan-only)
+      affected_mode=1
+      affected_args+=("$1")
+      shift
+      ;;
+    *)
+      printf 'verify-fast: unknown argument: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$affected_mode" == "1" ]]; then
+  exec bash "$project_root/scripts/verify-affected.sh" "${affected_args[@]}"
+fi
+
+if [[ -n "$verify_report_json_arg" ]]; then
+  export CLASP_VERIFY_REPORT_JSON="$verify_report_json_arg"
+fi
+
 fast_parallel_verify_commands=$'
 bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-selfhost.sh
