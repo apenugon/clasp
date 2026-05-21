@@ -198,6 +198,21 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_SPEED_COMMANDS:-0}" == "1" ]]; then
   fi
 fi
 
+if [[ "${CLASP_TEST_EXPECT_DERIVED_VERIFY_HARNESS_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark verifier harness commands as diff-derived\n' >&2
+    exit 87
+  fi
+  if [[ "$prompt" != *"bash scripts/test-verify-all.sh"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
+    printf 'verifier prompt did not select verifier-harness checks from the diff\n' >&2
+    exit 88
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'verifier harness diff unexpectedly fell back to verify-fast\n' >&2
+    exit 89
+  fi
+fi
+
 if [[ "${CLASP_TEST_EXPECT_UNKNOWN_VERIFY_FAST:-0}" == "1" ]]; then
   if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
     printf 'verifier prompt did not mark unknown commands as diff-derived\n' >&2
@@ -588,6 +603,55 @@ grep -F 'bash scripts/test-native-incremental-guard.sh' "$derived_speed_state_ro
 grep -F 'node --check scripts/native-incremental-guard.mjs' "$derived_speed_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'bash scripts/verify-fast.sh' "$derived_speed_state_root/focused-verify-1.json" >/dev/null; then
   printf 'compiler speed focused diff unexpectedly selected verify-fast\n' >&2
+  exit 1
+fi
+
+derived_verify_state_root="$test_root_abs/loop-derived-verify-focused-state"
+derived_verify_workspace_root="$fixture_project/.clasp-task-workspaces/derived-verify-focused-task"
+derived_verify_baseline_root="$fixture_project/.clasp-task-baselines/derived-verify-focused-task"
+mkdir -p \
+  "$derived_verify_state_root" \
+  "$derived_verify_workspace_root/src/scripts" \
+  "$derived_verify_baseline_root/src/scripts"
+printf 'base verifier harness\n' >"$derived_verify_baseline_root/src/scripts/verify.sh"
+cp -a "$derived_verify_baseline_root/." "$derived_verify_workspace_root/"
+printf 'changed verifier harness\n' >"$derived_verify_workspace_root/src/scripts/verify.sh"
+cat >"$derived_verify_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$derived_verify_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed selfhost verifier harness","files_touched":["src/scripts/verify.sh"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive verifier harness checks","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$derived_verify_state_root/baseline.ready"
+
+derived_verify_output="$(
+  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$derived_verify_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_verify_baseline_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_DERIVED_VERIFY_HARNESS_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_verify_state_root"
+)"
+
+printf '%s\n' "$derived_verify_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$derived_verify_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$derived_verify_state_root/focused-verify-1.json" >/dev/null
+grep -F 'verification_harness' "$derived_verify_state_root/focused-verify-1.json" >/dev/null
+grep -F '"fallbackReason":""' "$derived_verify_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-verify-all.sh' "$derived_verify_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-swarm-ready-gate.sh' "$derived_verify_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'compiler_runtime_broad' "$derived_verify_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'verifier harness focused diff was misclassified as compiler runtime broad\n' >&2
+  exit 1
+fi
+if grep -F 'unknown_path' "$derived_verify_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'verifier harness focused diff was misclassified as unknown\n' >&2
+  exit 1
+fi
+if grep -F 'bash scripts/verify-fast.sh' "$derived_verify_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'verifier harness focused diff unexpectedly selected verify-fast\n' >&2
   exit 1
 fi
 

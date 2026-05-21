@@ -1340,7 +1340,9 @@ diffLinePathText line =
 
 diffPathTouchesBroadCompilerRuntime : Str -> Bool
 diffPathTouchesBroadCompilerRuntime pathText =
-  if textIncludes pathText "/src/" then
+  if textIncludes pathText "/src/scripts/verify.sh" then
+    false
+  else if textIncludes pathText "/src/" then
     true
   else
     textIncludes pathText "/runtime/"
@@ -1399,6 +1401,14 @@ diffPathTouchesVerifyHarness pathText =
   if textIncludes pathText "/scripts/verify-fast.sh" then
     true
   else if textIncludes pathText "/scripts/verify-all.sh" then
+    true
+  else if textIncludes pathText "/scripts/verify-affected.mjs" then
+    true
+  else if textIncludes pathText "/scripts/test-verify-affected.sh" then
+    true
+  else if textIncludes pathText "/scripts/test-selfhost-verify-mode-split.sh" then
+    true
+  else if textIncludes pathText "/src/scripts/verify.sh" then
     true
   else
     textIncludes pathText "/scripts/test-verify-all.sh"
@@ -1503,6 +1513,8 @@ classifyDiffLine state line = {
     state
   else if diffPathIsGeneratedRuntimeTarget pathText then
     state
+  else if diffPathTouchesVerifyHarness pathText then
+    markDiffVerifyHarness state
   else if diffPathTouchesBroadCompilerRuntime pathText then
     markDiffBroad state
   else if diffPathTouchesLoop pathText then
@@ -1513,8 +1525,6 @@ classifyDiffLine state line = {
     markDiffCompilerSpeed state
   else if diffPathTouchesControlPlane pathText then
     markDiffControlPlane state
-  else if diffPathTouchesVerifyHarness pathText then
-    markDiffVerifyHarness state
   else
     markDiffUnknown state
 }

@@ -221,6 +221,15 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known verification script should not use verify-fast fallback");
     assert(logHas("scripts/test-verify-affected.sh"), "fake affected regression command should execute");
     break;
+  case "selfhost-verify-script":
+    assert(report.changedFiles.includes("src/scripts/verify.sh"), "selfhost native verify script should be present");
+    assert(hasCommand("bash -n 'src/scripts/verify.sh'"), "selfhost native verify script should run shell syntax check");
+    assert(hasCommand("bash scripts/test-selfhost-verify-mode-split.sh"), "selfhost native verify script should run focused mode split regression");
+    assert(!hasCommand("bash scripts/test-selfhost.sh"), "selfhost native verify script should avoid broad selfhost routing");
+    assert(!hasCommand("bash src/scripts/verify.sh"), "selfhost native verify script should avoid recursive hosted source verification");
+    assert(report.usedVerifyFastFallback === false, "known selfhost native verify script should not use verify-fast fallback");
+    assert(logHas("scripts/test-selfhost-verify-mode-split.sh"), "fake selfhost verify mode split command should execute");
+    break;
   case "native-diagnostics-script":
     assert(report.changedFiles.includes("scripts/test-native-claspc-diagnostics.sh"), "native diagnostics harness should be present");
     assert(hasCommand("bash -n 'scripts/test-native-claspc-diagnostics.sh'"), "native diagnostics harness should run shell syntax check");
@@ -287,6 +296,14 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known swarm feedback-loop script should not use verify-fast fallback");
     assert(logHas("scripts/test-swarm-native-feedback-loop.sh"), "fake swarm feedback-loop shell syntax should execute");
     assert(logHas("scripts/verify-runtime-slice.sh swarm-feedback-loop"), "fake swarm feedback-loop runtime slice should execute");
+    break;
+  case "feedback-loop-resume-script":
+    assert(report.changedFiles.includes("scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should be present");
+    assert(hasCommand("bash -n 'scripts/test-feedback-loop-resume.sh'"), "feedback-loop resume script should run shell syntax check");
+    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should run focused resume coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-feedback-loop-resume.sh").length === 1, "feedback-loop resume command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known feedback-loop resume script should not use verify-fast fallback");
+    assert(logHas("scripts/test-feedback-loop-resume.sh"), "fake feedback-loop resume command should execute");
     break;
   case "compiler-slice-fixture":
     assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");
@@ -505,6 +522,12 @@ CLASP_TEST_FAKE_COMMAND_LOG="$script_log" \
   run_verify_affected --changed-file scripts/verify-affected.mjs > "$script_report"
 assert_report "$script_report" "$script_log" verification-script
 
+selfhost_verify_script_report="$test_root/selfhost-verify-script-report.json"
+selfhost_verify_script_log="$test_root/selfhost-verify-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$selfhost_verify_script_log" \
+  run_verify_affected --changed-file src/scripts/verify.sh > "$selfhost_verify_script_report"
+assert_report "$selfhost_verify_script_report" "$selfhost_verify_script_log" selfhost-verify-script
+
 native_diagnostics_report="$test_root/native-diagnostics-report.json"
 native_diagnostics_log="$test_root/native-diagnostics.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$native_diagnostics_log" \
@@ -574,6 +597,13 @@ CLASP_TEST_FAKE_COMMAND_LOG="$swarm_feedback_loop_script_log" \
   run_verify_affected \
     --changed-file scripts/test-swarm-native-feedback-loop.sh > "$swarm_feedback_loop_script_report"
 assert_report "$swarm_feedback_loop_script_report" "$swarm_feedback_loop_script_log" swarm-feedback-loop-script
+
+feedback_loop_resume_script_report="$test_root/feedback-loop-resume-script-report.json"
+feedback_loop_resume_script_log="$test_root/feedback-loop-resume-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$feedback_loop_resume_script_log" \
+  run_verify_affected \
+    --changed-file scripts/test-feedback-loop-resume.sh > "$feedback_loop_resume_script_report"
+assert_report "$feedback_loop_resume_script_report" "$feedback_loop_resume_script_log" feedback-loop-resume-script
 
 agent_task_scenario_report="$test_root/agent-task-scenario-report.json"
 agent_task_scenario_log="$test_root/agent-task-scenario.log"

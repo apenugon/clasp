@@ -221,6 +221,7 @@ grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-affected
 grep -F 'bash scripts/verify-runtime-slice.sh swarm-feedback-loop' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-selfhost-verify-mode-split.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
@@ -238,6 +239,8 @@ grep -F 'source-export promoted hit export=checkSourceText' "$test_root/scripts/
 grep -F 'source-export promoted hit export=nativeImageProjectText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-no-git' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'compiler-slice-fixture' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'selfhost-verify-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'feedback-loop-resume-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'js-emitter-determinism' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'record-update-parity-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'runtime-slice-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null

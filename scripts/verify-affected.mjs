@@ -273,6 +273,7 @@ const COMMANDS = {
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
   compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
+  selfhostVerifyModeSplit: "bash scripts/test-selfhost-verify-mode-split.sh",
   jsEmitterDeterminism: "bash scripts/test-js-emitter-determinism.sh",
   recordUpdateParity: "bash scripts/test-record-update-parity.sh",
   runtimeSliceRegression: "bash scripts/test-verify-runtime-slice.sh",
@@ -766,11 +767,12 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "scripts/verify-runtime-slice.sh" || file === "scripts/test-verify-runtime-slice.sh";
     const isJsEmitterDeterminismPath =
       file === "src/Compiler/Emit/JavaScript.clasp" || file === "scripts/test-js-emitter-determinism.sh";
+    const isSourceNativeVerifyScript = file === "src/scripts/verify.sh";
     const compilerSlice = compilerSliceForFile(file);
     const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
     const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
 
-    if (file.startsWith("src/") && !isPromotedSourceExportCache) {
+    if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
       reason(file, "source", "source/compiler path uses selfhost and hosted compiler verification");
       addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "source/compiler path", file);
@@ -1097,6 +1099,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
     }
 
+    if (file === "scripts/test-feedback-loop-resume.sh") {
+      matched = true;
+      reason(file, "feedback-loop-resume-harness", "feedback-loop resume harness uses shell syntax plus its focused resume coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "feedback-loop resume shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "feedback-resume", COMMANDS.feedbackResume, "feedback-loop resume harness", file);
+    }
+
     if (file === "scripts/test-monitored-step.sh") {
       matched = true;
       reason(file, "monitored-step-harness", "monitored step harness uses shell syntax plus focused process primitive coverage");
@@ -1264,6 +1279,27 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "compiler-slice-regression",
         COMMANDS.compilerSliceRegression,
         "compiler slice verifier regression",
+        file,
+      );
+    } else if (isSourceNativeVerifyScript) {
+      matched = true;
+      reason(
+        file,
+        "selfhost-native-verify-script",
+        "selfhost native verifier uses shell syntax plus focused fast/full mode split coverage",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "selfhost native verifier shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "selfhost-verify-mode-split",
+        COMMANDS.selfhostVerifyModeSplit,
+        "selfhost native verifier mode regression",
         file,
       );
     } else if (isVerificationScript(file)) {
